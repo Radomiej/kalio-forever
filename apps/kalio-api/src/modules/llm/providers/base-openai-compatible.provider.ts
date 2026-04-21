@@ -15,6 +15,11 @@ function resolveBaseUrl(provider: string, baseUrl?: string): string {
   return PROVIDER_BASE_URLS[provider] ?? 'https://api.openai.com/v1';
 }
 
+let _toolCallCounter = 0;
+function uniqueToolCallId(): string {
+  return `call_${Date.now()}_${++_toolCallCounter}`;
+}
+
 export class BaseOpenAICompatibleProvider implements ILLMProvider {
   protected readonly logger = new Logger(BaseOpenAICompatibleProvider.name);
   protected readonly providerName: string;
@@ -43,7 +48,23 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
   ): Promise<LLMToolCall[]> {
     const body = JSON.stringify({
       model: this.model,
-      messages,
+      messages: messages.map((m) => {
+        if (m.role === 'tool' && m.toolCallId) {
+          return { role: 'tool', content: m.content, tool_call_id: m.toolCallId };
+        }
+        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+          return {
+            role: 'assistant',
+            content: m.content || null,
+            tool_calls: m.toolCalls.map((tc) => ({
+              id: tc.id,
+              type: 'function',
+              function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+            })),
+          };
+        }
+        return m;
+      }),
       stream: true,
       tools: tools.length > 0
         ? tools.map((t) => ({
@@ -96,6 +117,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
         try {
           parsed = JSON.parse(data) as Record<string, unknown>;
         } catch {
+          this.logger.warn(`[${this.providerName}] Failed to parse SSE chunk: ${data.slice(0, 100)}`);
           continue;
         }
 
@@ -106,6 +128,12 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
         const content = delta['content'];
         if (typeof content === 'string' && content) {
           onChunk({ delta: content, done: false, sessionId, messageId });
+        }
+
+        // Thinking / reasoning tokens (DeepSeek R1 / MiMo style)
+        const reasoning = delta['reasoning_content'];
+        if (typeof reasoning === 'string' && reasoning) {
+          onChunk({ delta: reasoning, done: false, sessionId, messageId, thinking: true });
         }
 
         const rawToolCalls = delta['tool_calls'] as Array<Record<string, unknown>> | undefined;
@@ -130,7 +158,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       } catch {
         // leave empty
       }
-      toolCalls.push({ id: `call_${Date.now()}`, name: buf.name, args });
+      toolCalls.push({ id: uniqueToolCallId(), name: buf.name, args });
     }
 
     this.logger.debug(`[${this.providerName}] Streaming complete`, {

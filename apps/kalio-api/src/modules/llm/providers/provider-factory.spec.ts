@@ -41,18 +41,30 @@ describe('createLLMProvider', () => {
       expect(() => createLLMProvider(config)).toThrow(/Unknown LLM provider/);
     });
 
-    it('should throw error for custom provider if not explicitly supported', () => {
+    it('should throw error for truly unknown provider', () => {
       // Arrange
       const config: ProviderConfig = {
-        provider: 'custom',
+        provider: 'unknown-provider-xyz',
         apiKey: 'test-key',
         model: 'test-model',
         baseUrl: 'https://custom-api.com',
       };
 
       // Act & Assert
-      // BUG: Current implementation treats 'custom' as OpenAI-compatible without validation
-      // Expected: Should throw an error unless 'custom' is explicitly supported
+      // FIXED: Unknown providers now throw instead of silently falling through to OpenAI
+      expect(() => createLLMProvider(config)).toThrow(/Unknown LLM provider/);
+    });
+
+    it('custom provider requires baseUrl', () => {
+      // Arrange
+      const config: ProviderConfig = {
+        provider: 'custom',
+        apiKey: 'test-key',
+        model: 'test-model',
+        // no baseUrl
+      };
+
+      // Act & Assert
       expect(() => createLLMProvider(config)).toThrow(/Unknown LLM provider/);
     });
   });

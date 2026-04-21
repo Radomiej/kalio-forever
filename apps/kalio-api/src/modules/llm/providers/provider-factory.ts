@@ -5,6 +5,7 @@ import { CometAPIProvider } from './cometapi.provider';
 import { OpenAIProvider } from './openai.provider';
 import { OllamaProvider } from './ollama.provider';
 import { XiaomiMiMoProvider } from './xiaomimimo.provider';
+import { BaseOpenAICompatibleProvider } from './base-openai-compatible.provider';
 
 export interface ProviderConfig {
   provider: string;
@@ -35,8 +36,13 @@ export function createLLMProvider(config: ProviderConfig): ILLMProvider {
       return new OpenAIProvider(apiKey, model, baseUrl);
     case 'ollama':
       return new OllamaProvider(apiKey, model, baseUrl);
+    case 'custom':
+      // Custom provider: must provide a baseUrl (openai-compatible endpoint)
+      if (!baseUrl) throw new Error(`Unknown LLM provider: "${provider}" — custom requires a baseUrl`);
+      return new BaseOpenAICompatibleProvider('custom', apiKey, model, baseUrl);
+    case 'deepseek':
+      return new BaseOpenAICompatibleProvider('deepseek', apiKey, model, baseUrl ?? 'https://api.deepseek.com/v1');
     default:
-      // Custom provider = OpenAI-compatible endpoint
-      return new OpenAIProvider(apiKey, model, baseUrl);
+      throw new Error(`Unknown LLM provider: "${provider}". Supported: openai, openrouter, cometapi, xiaomimimo, ollama, deepseek, custom`);
   }
 }
