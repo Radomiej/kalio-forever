@@ -1,4 +1,6 @@
 import type { RAAppBlock, RAAppResult } from '@kalio/types';
+import { HtmlIframeRenderer } from './HtmlIframeRenderer';
+import { isHtmlString, findHtmlInData, injectEngineCDN } from './raappRendererUtils';
 
 interface RAAppRendererProps {
   block: RAAppBlock;
@@ -16,23 +18,32 @@ export function RAAppRenderer({ block, result }: RAAppRendererProps) {
     );
   }
 
+  const content = result?.renderedContent ?? block.content;
+
   if (block.type === 'html') {
-    const htmlContent = result?.renderedContent ?? block.content;
-    return (
-      <iframe
-        data-testid="raapp-iframe"
-        srcDoc={htmlContent}
-        className="w-full rounded border border-base-300"
-        style={{ minHeight: '200px' }}
-        sandbox="allow-scripts allow-same-origin"
-        title="RA-App"
-      />
-    );
+    const html = injectEngineCDN(content, (block as { engine?: string }).engine);
+    return <HtmlIframeRenderer html={html} title="RA-App" />;
+  }
+
+  // For json/gui blocks, try to sniff HTML out of the content
+  if (block.type === 'json' || block.type === 'gui') {
+    if (isHtmlString(content)) {
+      return <HtmlIframeRenderer html={content} title="RA-App" />;
+    }
+    try {
+      const parsed: unknown = typeof content === 'string' ? JSON.parse(content) : content;
+      const sniffed = findHtmlInData(parsed);
+      if (sniffed) {
+        return <HtmlIframeRenderer html={sniffed} title="RA-App" />;
+      }
+    } catch {
+      // not JSON — fall through
+    }
   }
 
   return (
-    <div data-testid="raapp-gui" className="rounded border border-base-300 p-3 text-xs">
-      {result?.renderedContent ?? block.content}
+    <div data-testid="raapp-gui" className="rounded border border-base-300 p-3 text-xs whitespace-pre-wrap font-mono">
+      {content}
     </div>
   );
 }
