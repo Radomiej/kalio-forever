@@ -11,6 +11,9 @@ import { FsListTool } from './tools/fs-list.tool';
 import { FsWriteTool } from './tools/fs-write.tool';
 import { KVWriteTool, KVReadTool, KVListTool, KVDeleteTool } from './tools/kv.tools';
 import { KVStoreService } from './kv-store.service';
+import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
+import { TerminalService } from './terminal.service';
+import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
 import { VFSModule } from '../vfs/vfs.module';
 import { LLMModule } from '../llm/llm.module';
 
@@ -22,6 +25,8 @@ import { LLMModule } from '../llm/llm.module';
     VFSWriteTool, VFSReadTool, VFSListTool, SubagentTool,
     FsReadTool, FsListTool, FsWriteTool,
     KVStoreService, KVWriteTool, KVReadTool, KVListTool, KVDeleteTool,
+    GrepSearchTool, FileSearchTool,
+    TerminalService, TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool,
   ],
   exports: [ToolRegistryService, ToolDispatchService],
 })
