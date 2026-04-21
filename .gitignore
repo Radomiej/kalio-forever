@@ -10,3 +10,6 @@ coverage/
 *.db-wal
 test-results/
 playwright-report/
+docs/audit/raw/
+docs/audit/*.json
+docs/audit/*.md
