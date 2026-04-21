@@ -38,7 +38,15 @@ export const useSessionStore = create<SessionState>((set) => ({
     })),
   finalizeChunk: (messageId) =>
     set((s) => {
+      const finalContent = s.streamingChunks[messageId] ?? '';
       const { [messageId]: _, ...rest } = s.streamingChunks;
-      return { streamingChunks: rest };
+      return {
+        streamingChunks: rest,
+        messages: s.messages.map((m) =>
+          m.id === messageId
+            ? { ...m, content: finalContent, streaming: false }
+            : m
+        ),
+      };
     }),
 }));
