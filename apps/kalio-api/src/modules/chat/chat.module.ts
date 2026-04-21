@@ -5,9 +5,10 @@ import { ChatController } from './chat.controller';
 import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
+import { CredentialsModule } from '../credentials/credentials.module';
 
 @Module({
-  imports: [LLMModule, PersonaModule, ToolModule],
+  imports: [LLMModule, PersonaModule, ToolModule, CredentialsModule],
   controllers: [ChatController],
   providers: [ChatGateway, ChatService],
 })

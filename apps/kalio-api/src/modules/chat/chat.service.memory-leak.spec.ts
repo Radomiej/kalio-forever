@@ -6,6 +6,7 @@ import { PersonaService } from '../persona/persona.service';
 import { ToolRegistryService } from '../tool/tool-registry.service';
 import { ToolDispatchService } from '../tool/tool-dispatch.service';
 import { DrizzleService } from '../../database/drizzle.service';
+import { CredentialsService } from '../credentials/credentials.service';
 import { Logger } from '@nestjs/common';
 
 // Regression test for: Memory Leak in waitForConfirmation
@@ -55,6 +56,13 @@ describe('ChatService - Memory Leak Integration (REGRESSION)', () => {
               update: vi.fn(),
               delete: vi.fn(),
             },
+          },
+        },
+        {
+          provide: CredentialsService,
+          useValue: {
+            getContextWindowSize: vi.fn().mockResolvedValue(32000),
+            getActiveProviderConfig: vi.fn().mockResolvedValue(null),
           },
         },
       ],

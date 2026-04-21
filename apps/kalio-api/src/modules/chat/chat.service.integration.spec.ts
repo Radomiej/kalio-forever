@@ -12,6 +12,7 @@ import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
 import { VFSModule } from '../vfs/vfs.module';
+import { CredentialsModule } from '../credentials/credentials.module';
 import { nanoid } from 'nanoid';
 import * as os from 'node:os';
 import { join } from 'node:path';
@@ -46,6 +47,7 @@ describe('ChatService - Integration Tests (REGRESSION)', () => {
         PersonaModule,
         ToolModule,
         VFSModule,
+        CredentialsModule,
       ],
       providers: [ChatService],
     }).compile();

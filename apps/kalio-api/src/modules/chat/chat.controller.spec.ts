@@ -6,6 +6,7 @@ import { LLMService } from '../llm/llm.service';
 import { PersonaService } from '../persona/persona.service';
 import { ToolRegistryService } from '../tool/tool-registry.service';
 import { ToolDispatchService } from '../tool/tool-dispatch.service';
+import { CredentialsService } from '../credentials/credentials.service';
 
 // Regression test for: Missing REST Controllers (Sessions, VFS)
 // Issue: Frontend calls /api/sessions and /api/vfs/* but controllers don't exist
@@ -54,6 +55,13 @@ describe('ChatService - Session Management (REGRESSION TEST)', () => {
           provide: ToolDispatchService,
           useValue: {
             dispatch: vi.fn(),
+          },
+        },
+        {
+          provide: CredentialsService,
+          useValue: {
+            getContextWindowSize: vi.fn().mockResolvedValue(32000),
+            getActiveProviderConfig: vi.fn().mockResolvedValue(null),
           },
         },
       ],

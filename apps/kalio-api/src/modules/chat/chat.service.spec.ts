@@ -6,6 +6,7 @@ import { PersonaService } from '../persona/persona.service';
 import { ToolRegistryService } from '../tool/tool-registry.service';
 import { ToolDispatchService } from '../tool/tool-dispatch.service';
 import { DrizzleService } from '../../database/drizzle.service';
+import { CredentialsService } from '../credentials/credentials.service';
 import { Logger } from '@nestjs/common';
 
 // Regression test for: Silent failure in resolveConfirmation
@@ -56,6 +57,13 @@ describe('ChatService', () => {
               update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }) }),
               delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
             },
+          },
+        },
+        {
+          provide: CredentialsService,
+          useValue: {
+            getContextWindowSize: vi.fn().mockResolvedValue(32000),
+            getActiveProviderConfig: vi.fn().mockResolvedValue(null),
           },
         },
       ],

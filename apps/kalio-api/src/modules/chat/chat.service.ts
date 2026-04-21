@@ -8,8 +8,10 @@ import { PersonaService } from '../persona/persona.service';
 import { ToolRegistryService } from '../tool/tool-registry.service';
 import { ToolDispatchService } from '../tool/tool-dispatch.service';
 import { DrizzleService } from '../../database/drizzle.service';
+import { CredentialsService } from '../credentials/credentials.service';
 import { sessions, messages } from '../../database/schema';
 import { eq } from 'drizzle-orm';
+import { trimToContextWindow } from './context-window';
 
 type ChatSendPayload = SocketEvents['chat:send'];
 
@@ -27,6 +29,7 @@ export class ChatService {
     private readonly toolRegistry: ToolRegistryService,
     private readonly toolDispatch: ToolDispatchService,
     private readonly drizzle: DrizzleService,
+    private readonly credentials: CredentialsService,
   ) {}
 
   async handleMessage(
@@ -100,6 +103,7 @@ export class ChatService {
       sessionId,
       role: 'assistant',
       content: assistantContent,
+      toolCalls: toolCalls.length > 0 ? toolCalls : null,
       createdAt: new Date(),
     });
     this.logger.log(`[chat:send] Assistant message persisted id=${assistantMsgId}`);
@@ -111,6 +115,41 @@ export class ChatService {
     for (const tc of toolCalls) {
       this.logger.log(`[tool] Executing tool="${tc.name}" args=${JSON.stringify(this.redactArgs(tc.args)).slice(0, 200)}`);
       await this.processToolCall(tc, sessionId, conversationId, server, client, personaConfig.availableSkills);
+    }
+
+    // After all tool calls complete, do follow-up LLM stream with tool results in history
+    if (toolCalls.length > 0) {
+      this.logger.log(`[chat:send] Starting follow-up LLM stream after ${toolCalls.length} tool(s)`);
+      const followUpHistory = await this.buildHistory(sessionId, personaConfig.systemPrompt);
+      const followUpMsgId = nanoid();
+      let followUpContent = '';
+      let followUpChunkCount = 0;
+      try {
+        const tools = this.toolRegistry.getToolsForSkills(personaConfig.availableSkills);
+        await this.llm.streamChat(
+          followUpHistory,
+          tools,
+          (chunk) => {
+            followUpChunkCount++;
+            if (!chunk.done) followUpContent += chunk.delta;
+            client.emit('chat:chunk', chunk);
+          },
+          sessionId,
+          followUpMsgId,
+        );
+        this.logger.log(`[chat:send] Follow-up LLM done: ${followUpChunkCount} chunks`);
+      } catch (err) {
+        this.logger.error('[chat:send] Follow-up LLM error', err);
+      }
+      await this.drizzle.db.insert(messages).values({
+        id: followUpMsgId,
+        sessionId,
+        role: 'assistant',
+        content: followUpContent,
+        createdAt: new Date(),
+      });
+      client.emit('chat:complete', { sessionId, messageId: followUpMsgId });
+      this.logger.log(`[chat:send] Follow-up chat:complete emitted messageId=${followUpMsgId}`);
     }
   }
 
@@ -155,6 +194,7 @@ export class ChatService {
       this.logger.log(`[HITL] Requesting confirmation for tool="${tc.name}" requestId=${requestId}`);
       const confirmReq: ToolConfirmationRequest = {
         requestId,
+        toolCallId: tc.id,
         sessionId,
         toolName: tc.name,
         args: tc.args,
@@ -230,11 +270,20 @@ export class ChatService {
     for (const row of rows) {
       if (row.role === 'tool_result') {
         history.push({ role: 'tool', content: row.content, toolCallId: row.toolCallId ?? undefined });
-      } else if (row.role === 'user' || row.role === 'assistant' || row.role === 'system') {
+      } else if (row.role === 'assistant') {
+        const msg: LLMMessage = { role: 'assistant', content: row.content };
+        if (row.toolCalls && row.toolCalls.length > 0) {
+          msg.toolCalls = row.toolCalls;
+        }
+        history.push(msg);
+      } else if (row.role === 'user' || row.role === 'system') {
         history.push({ role: row.role, content: row.content });
       }
     }
-    return history;
+
+    // Apply context window trimming
+    const maxTokens = await this.credentials.getContextWindowSize();
+    return trimToContextWindow(history, maxTokens);
   }
 
   async getSessions() {
