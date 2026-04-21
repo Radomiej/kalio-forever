@@ -177,6 +177,10 @@ export class ChatService {
     return history;
   }
 
+  async getSessions() {
+    return this.drizzle.db.select().from(sessions);
+  }
+
   async createSession(personaId: string, title?: string): Promise<string> {
     const id = nanoid();
     const now = new Date();
