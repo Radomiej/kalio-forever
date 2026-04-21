@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronDown, BrainCircuit } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
+import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
 import type { ChatMessage } from '@kalio/types';
 
 interface MessageBubbleProps {
@@ -70,12 +71,12 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           {isStreaming && !displayContent && !hasThinking ? (
             <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
           ) : displayContent ? (
-            <span data-testid="message-content" className="whitespace-pre-wrap leading-relaxed">
-              {displayContent}
+            <div data-testid="message-content">
+              <MarkdownViewer content={displayContent} />
               {isStreaming && (
                 <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-current" />
               )}
-            </span>
+            </div>
           ) : null}
         </div>
       </div>

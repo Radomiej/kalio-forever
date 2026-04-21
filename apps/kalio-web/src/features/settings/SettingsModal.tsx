@@ -24,7 +24,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       role="dialog" aria-modal="true" aria-label="Settings"
       data-testid="settings-modal"
     >
-      <div className="bg-base-100 rounded-xl shadow-2xl w-full max-w-4xl h-full max-h-[680px] flex flex-col overflow-hidden border border-sky-500/20">
+      <div className="bg-base-100 rounded-xl shadow-2xl w-full max-w-5xl h-full max-h-[800px] flex flex-col overflow-hidden border border-sky-500/20">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-base-300 shrink-0 bg-base-200/50">
@@ -43,7 +43,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         <div className="flex flex-1 overflow-hidden">
 
           {/* Sidebar Tabs */}
-          <div className="w-56 shrink-0 border-r border-base-300 bg-base-200/30 p-3 flex flex-col gap-1 overflow-y-auto">
+          <div className="w-64 shrink-0 border-r border-base-300 bg-base-200/30 p-4 flex flex-col gap-2 overflow-y-auto">
             {SETTINGS_BLOCKS.map((block) => (
               <button
                 key={block.id}
@@ -64,7 +64,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           {/* Panel */}
           <div className="flex-1 overflow-hidden relative">
             <div className="absolute inset-0 overflow-y-auto p-6">
-              <div className="max-w-2xl mx-auto bg-base-100 rounded-lg p-5 shadow-sm border border-base-200">
+              <div className="max-w-3xl mx-auto bg-base-100 rounded-lg p-6 shadow-sm border border-base-200">
                 {ActiveComponent && <ActiveComponent />}
               </div>
             </div>
