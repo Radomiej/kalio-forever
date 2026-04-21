@@ -66,7 +66,9 @@ export class ToolRegistryService {
   }
 
   getToolsForSkills(skills: string[]): ToolMeta[] {
-    if (skills.length === 0) return [];
+    // Empty skills list = all registered tools available (default-on behavior)
+    if (skills.length === 0) return this.getAllTools();
+    if (skills.includes('*')) return this.getAllTools();
     return this.getAllTools().filter((t) => skills.includes(t.name));
   }
 }
