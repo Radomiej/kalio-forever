@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { CredentialsService } from './credentials.service';
+import { createLLMProvider } from '../llm/providers/provider-factory';
 
 @Controller('credentials')
 export class CredentialsController {
@@ -54,5 +55,32 @@ export class CredentialsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async setContextWindow(@Body() body: { size: number }): Promise<void> {
     await this.credentialsService.setContextWindowSize(body.size);
+  }
+
+  // ─── Connection test ──────────────────────────────────────────────────────────
+
+  @Post('test')
+  async testConnection(
+    @Body() body: { provider: string; apiKey: string; model: string; baseUrl?: string },
+  ): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+    const start = Date.now();
+    try {
+      const llm = createLLMProvider({
+        provider: body.provider,
+        apiKey: body.apiKey,
+        model: body.model,
+        baseUrl: body.baseUrl,
+      });
+      await llm.streamChat(
+        [{ role: 'user', content: 'ping' }],
+        [],
+        () => { /* drain chunks */ },
+        'test-session',
+        'test-msg',
+      );
+      return { ok: true, latencyMs: Date.now() - start };
+    } catch (err) {
+      return { ok: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 }
