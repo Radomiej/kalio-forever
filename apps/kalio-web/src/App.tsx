@@ -54,6 +54,8 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { sessions } = useSessionStore();
+  // Use sessions for badge count
+  void sessions;
 
   // Initialize on app mount
   useEffect(() => {
