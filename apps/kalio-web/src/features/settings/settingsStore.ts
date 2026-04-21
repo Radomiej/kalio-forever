@@ -10,10 +10,14 @@ export type LLMProviderType =
   | 'cometapi'
   | 'openrouter'
   | 'ollama'
+  | 'xiaomimimo'
+  | 'deepseek'
   | 'custom';
 
 export interface LLMProvider {
   id: string;
+  /** Backend credential ID (set after successful POST to /api/credentials) */
+  backendId?: string;
   type: LLMProviderType;
   label: string;
   apiKey: string;
@@ -26,6 +30,8 @@ export const PROVIDER_DEFAULTS: Record<LLMProviderType, Pick<LLMProvider, 'label
   cometapi:    { label: 'CometAPI',    baseUrl: 'https://api.cometapi.com/v1' },
   openrouter:  { label: 'OpenRouter',  baseUrl: 'https://openrouter.ai/api/v1' },
   ollama:      { label: 'Ollama',      baseUrl: 'http://localhost:11434/v1' },
+  xiaomimimo:  { label: 'XiaomiMiMo', baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1' },
+  deepseek:    { label: 'DeepSeek',    baseUrl: 'https://api.deepseek.com/v1' },
   custom:      { label: 'Custom',      baseUrl: '' },
 };
 
@@ -34,17 +40,21 @@ export const DEFAULT_MODELS: Record<LLMProviderType, string> = {
   cometapi:   'gpt-4o-mini',
   openrouter: 'openai/gpt-4o-mini',
   ollama:     'llama3.2',
+  xiaomimimo: 'mimo-v2-omni',
+  deepseek:   'deepseek-reasoner',
   custom:     '',
 };
 
 interface SettingsState {
   providers: LLMProvider[];
   activeProviderId: string | null;
+  contextWindowSize: number;
   addProvider: (p: Omit<LLMProvider, 'id'>) => string;
-  updateProvider: (id: string, patch: Partial<Omit<LLMProvider, 'id'>>) => void;
+  updateProvider: (id: string, patch: Partial<Omit<LLMProvider, 'id' | 'backendId'> & Pick<LLMProvider, 'backendId'>>) => void;
   removeProvider: (id: string) => void;
   setActive: (id: string) => void;
   getActive: () => LLMProvider | undefined;
+  setContextWindowSize: (size: number) => void;
 }
 
 let _counter = 1;
@@ -55,6 +65,7 @@ export const useSettingsStore = create<SettingsState>()(
     (set, get) => ({
       providers: [],
       activeProviderId: null,
+      contextWindowSize: 32000,
 
       addProvider: (p) => {
         const id = newId();
@@ -88,6 +99,8 @@ export const useSettingsStore = create<SettingsState>()(
         const { providers, activeProviderId } = get();
         return providers.find((p) => p.id === activeProviderId);
       },
+
+      setContextWindowSize: (size) => set({ contextWindowSize: size }),
     }),
     { name: 'kalio-settings' },
   ),

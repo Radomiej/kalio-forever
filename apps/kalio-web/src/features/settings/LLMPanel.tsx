@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { Plus, Trash2, CheckCircle2, Circle } from 'lucide-react';
-import { nanoid } from 'nanoid';
+import { Plus, Trash2, CheckCircle2, Circle, Loader2, AlertCircle } from 'lucide-react';
 import {
   useSettingsStore,
   PROVIDER_DEFAULTS,
@@ -9,7 +8,33 @@ import {
   type LLMProvider,
 } from './settingsStore';
 
-const PROVIDER_TYPES: LLMProviderType[] = ['openai', 'cometapi', 'openrouter', 'ollama', 'custom'];
+const API = '/api';
+
+const PROVIDER_TYPES: LLMProviderType[] = ['openai', 'xiaomimimo', 'deepseek', 'cometapi', 'openrouter', 'ollama', 'custom'];
+
+async function apiPost(path: string, body: unknown) {
+  const res = await fetch(`${API}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+async function apiPut(path: string, body?: unknown) {
+  const res = await fetch(`${API}${path}`, {
+    method: 'PUT',
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+}
+
+async function apiDelete(path: string) {
+  const res = await fetch(`${API}${path}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+}
 
 function emptyForm(): Omit<LLMProvider, 'id'> {
   return {
@@ -22,11 +47,15 @@ function emptyForm(): Omit<LLMProvider, 'id'> {
 }
 
 export function LLMPanel() {
-  const { providers, activeProviderId, addProvider, updateProvider, removeProvider, setActive } =
-    useSettingsStore();
+  const {
+    providers, activeProviderId, contextWindowSize,
+    addProvider, updateProvider, removeProvider, setActive, setContextWindowSize,
+  } = useSettingsStore();
 
   const [showForm, setShowForm] = useState(providers.length === 0);
   const [form, setForm] = useState<Omit<LLMProvider, 'id'>>(emptyForm());
+  const [syncing, setSyncing] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const handleTypeChange = (type: LLMProviderType) => {
     setForm({
@@ -38,11 +67,80 @@ export function LLMPanel() {
     });
   };
 
-  const handleAdd = (e: React.FormEvent) => {
+  const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    addProvider(form);
+    setSyncError(null);
+    const localId = addProvider(form);
+    try {
+      setSyncing(localId);
+      const created = await apiPost('/credentials', {
+        name: form.label,
+        provider: form.type,
+        apiKey: form.apiKey,
+        baseUrl: form.baseUrl || undefined,
+        model: form.model || undefined,
+      }) as { id: string };
+      updateProvider(localId, { backendId: created.id });
+    } catch (err) {
+      setSyncError(`Backend sync failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSyncing(null);
+    }
     setForm(emptyForm());
     setShowForm(false);
+  };
+
+  const handleActivate = async (provider: LLMProvider) => {
+    setActive(provider.id);
+    let backendId = provider.backendId;
+    if (!backendId) {
+      try {
+        setSyncing(provider.id);
+        const created = await apiPost('/credentials', {
+          name: provider.label,
+          provider: provider.type,
+          apiKey: provider.apiKey,
+          baseUrl: provider.baseUrl || undefined,
+          model: provider.model || undefined,
+        }) as { id: string };
+        backendId = created.id;
+        updateProvider(provider.id, { backendId });
+      } catch (err) {
+        setSyncError(`Backend sync failed: ${err instanceof Error ? err.message : String(err)}`);
+        setSyncing(null);
+        return;
+      } finally {
+        setSyncing(null);
+      }
+    }
+    try {
+      setSyncing(provider.id);
+      await apiPut(`/credentials/active/${backendId}`);
+    } catch (err) {
+      setSyncError(`Failed to set active: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSyncing(null);
+    }
+  };
+
+  const handleRemove = async (provider: LLMProvider) => {
+    removeProvider(provider.id);
+    if (provider.backendId) {
+      try {
+        await apiDelete(`/credentials/${provider.backendId}`);
+      } catch {
+        // Non-fatal
+      }
+    }
+  };
+
+  const handleContextWindowChange = async (size: number) => {
+    setContextWindowSize(size);
+    try {
+      await apiPut('/credentials/settings/context-window', { size });
+    } catch {
+      // Non-fatal
+    }
   };
 
   return (
@@ -50,9 +148,17 @@ export function LLMPanel() {
       <div>
         <h2 className="text-base font-semibold mb-1">LLM Providers</h2>
         <p className="text-xs text-base-content/60">
-          Configure one or more API providers. The active provider is used for all chat sessions.
+          Configure one or more API providers. The active provider is saved to the database.
         </p>
       </div>
+
+      {syncError && (
+        <div className="alert alert-warning py-2 text-xs gap-2">
+          <AlertCircle size={14} />
+          {syncError}
+          <button className="btn btn-ghost btn-xs ml-auto" onClick={() => setSyncError(null)}>✕</button>
+        </div>
+      )}
 
       {/* Provider list */}
       {providers.length > 0 && (
@@ -62,9 +168,10 @@ export function LLMPanel() {
               key={p.id}
               provider={p}
               isActive={p.id === activeProviderId}
-              onActivate={() => setActive(p.id)}
+              isSyncing={syncing === p.id}
+              onActivate={() => void handleActivate(p)}
               onUpdate={(patch) => updateProvider(p.id, patch)}
-              onRemove={() => removeProvider(p.id)}
+              onRemove={() => void handleRemove(p)}
             />
           ))}
         </div>
@@ -78,7 +185,7 @@ export function LLMPanel() {
 
       {/* Add form */}
       {showForm ? (
-        <form className="flex flex-col gap-3 border border-base-300 rounded-lg p-4 bg-base-200/40" onSubmit={handleAdd} data-testid="add-provider-form">
+        <form className="flex flex-col gap-3 border border-base-300 rounded-lg p-4 bg-base-200/40" onSubmit={(e) => void handleAdd(e)} data-testid="add-provider-form">
           <h3 className="text-sm font-semibold">Add Provider</h3>
 
           <div className="flex gap-2 flex-wrap">
@@ -149,6 +256,33 @@ export function LLMPanel() {
           <Plus size={14} /> Add Provider
         </button>
       )}
+
+      {/* Context window */}
+      <div className="border-t border-base-300 pt-4">
+        <h3 className="text-sm font-semibold mb-1">Context Window</h3>
+        <p className="text-xs text-base-content/60 mb-3">
+          Oldest messages are trimmed automatically when history exceeds this limit.
+        </p>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-base-content/60">Max tokens</span>
+          <span className="badge badge-neutral font-mono text-xs" data-testid="context-window-value">
+            {(contextWindowSize / 1000).toFixed(0)}k
+          </span>
+        </div>
+        <input
+          type="range"
+          className="range range-sm range-primary w-full"
+          min={4000}
+          max={200000}
+          step={4000}
+          value={contextWindowSize}
+          onChange={(e) => void handleContextWindowChange(parseInt(e.target.value, 10))}
+          data-testid="context-window-slider"
+        />
+        <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
+          <span>4k</span><span>32k</span><span>128k</span><span>200k</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -156,12 +290,14 @@ export function LLMPanel() {
 function ProviderRow({
   provider,
   isActive,
+  isSyncing,
   onActivate,
   onUpdate,
   onRemove,
 }: {
   provider: LLMProvider;
   isActive: boolean;
+  isSyncing: boolean;
   onActivate: () => void;
   onUpdate: (patch: Partial<Omit<LLMProvider, 'id'>>) => void;
   onRemove: () => void;
@@ -183,16 +319,23 @@ function ProviderRow({
         <button
           className="text-base-content/50 hover:text-sky-400 transition-colors shrink-0"
           onClick={onActivate}
+          disabled={isSyncing}
           aria-label={isActive ? 'Active provider' : 'Set as active'}
           data-testid={`provider-activate-${provider.id}`}
         >
-          {isActive ? <CheckCircle2 size={16} className="text-sky-400" /> : <Circle size={16} />}
+          {isSyncing
+            ? <Loader2 size={16} className="animate-spin text-info" />
+            : isActive
+              ? <CheckCircle2 size={16} className="text-sky-400" />
+              : <Circle size={16} />
+          }
         </button>
 
         <div className="flex-1 min-w-0">
           <span className="text-sm font-medium">{provider.label}</span>
           <span className="ml-2 badge badge-xs badge-ghost">{provider.type}</span>
           {isActive && <span className="ml-2 badge badge-xs bg-sky-500/20 text-sky-400 border-none">active</span>}
+          {!provider.backendId && <span className="ml-2 badge badge-xs badge-warning border-none">local only</span>}
         </div>
 
         <span className="text-xs text-base-content/40 font-mono truncate max-w-28">{provider.model}</span>
