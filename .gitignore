@@ -13,3 +13,7 @@ playwright-report/
 docs/audit/raw/
 docs/audit/*.json
 docs/audit/*.md
+.playwright-mcp/
+*.tsbuildinfo
+*.log
+kalio-v2-*.png
