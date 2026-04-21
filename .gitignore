@@ -17,3 +17,4 @@ docs/audit/*.md
 *.tsbuildinfo
 *.log
 kalio-v2-*.png
+kalio-home.png
