@@ -14,6 +14,7 @@ export interface LLMMessage {
   content: string;
   toolCallId?: string;  // for role='tool' responses
   name?: string;        // for role='tool' — tool name
+  toolCalls?: LLMToolCall[];  // for role='assistant' with tool calls
 }
 
 export interface LLMStreamChunk {
@@ -21,6 +22,8 @@ export interface LLMStreamChunk {
   done: boolean;
   sessionId: ID;
   messageId: ID;
+  /** True when delta carries reasoning/thinking content (not final answer) */
+  thinking?: boolean;
 }
 
 export interface LLMToolCall {
@@ -131,6 +134,7 @@ export interface ToolResult {
 
 export interface ToolConfirmationRequest {
   requestId: string;          // unique per confirmation instance
+  toolCallId: string;         // the LLM tool call ID (matches ToolResult.callId)
   sessionId: ID;
   toolName: string;
   args: Record<string, unknown>;

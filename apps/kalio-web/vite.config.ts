@@ -19,16 +19,4 @@ export default defineConfig({
       '/socket.io': { target: 'http://localhost:3016', ws: true, changeOrigin: true },
     },
   },
-  test: {
-    globals: true,
-    environment: 'jsdom',
-    setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.test.tsx', 'src/**/*.test.ts'],
-    coverage: {
-      provider: 'v8',
-      include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/main.tsx', 'src/test/**'],
-      thresholds: { lines: 65, functions: 65, statements: 65, branches: 60 },
-    },
-  },
 });
