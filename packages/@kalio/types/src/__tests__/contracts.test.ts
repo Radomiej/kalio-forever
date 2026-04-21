@@ -158,13 +158,15 @@ describe('@kalio/types — P0-T01 contract shape', () => {
     expect(chunk.done).toBe(false);
   });
 
-  it('LLMConfig has model, apiKey, baseUrl', () => {
+  it('LLMConfig has provider, model, apiKey, baseUrl', () => {
     const config: LLMConfig = {
+      provider: 'openai',
       model: 'gpt-4o-mini',
       apiKey: 'sk-test',
       baseUrl: 'https://api.openai.com/v1',
     };
     expect(config.model).toBeDefined();
+    expect(config.provider).toBeDefined();
   });
 
   it('SocketEvents chat:send has required fields', () => {

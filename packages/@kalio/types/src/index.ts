@@ -30,12 +30,13 @@ export interface LLMToolCall {
 }
 
 export interface LLMConfig {
+  provider: LLMProviderType;
   model: string;
   apiKey: string;
   baseUrl: string;
 }
 
-export type LLMProviderType = 'openai-compatible' | 'mock';
+export type LLMProviderType = 'openai' | 'openrouter' | 'cometapi' | 'xiaomimimo' | 'ollama' | 'mock';
 
 // ─── Persona ──────────────────────────────────────────────────────────────────
 export interface Persona {
