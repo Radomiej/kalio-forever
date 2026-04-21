@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { ChatInterface } from './features/chat/ChatInterface';
 import { CanvasPanel } from './features/chat/CanvasPanel';
-import { SessionPanel } from './features/sessions/SessionPanel';
 import { ConversationPanel } from './features/sessions/ConversationPanel';
 import { ConversationManagerPanel } from './features/sessions/ConversationManagerPanel';
 import { PersonaPanel } from './features/persona/PersonaPanel';
@@ -54,7 +53,6 @@ export function App() {
   const [canvasOpen, setCanvasOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { tools, setTools } = useAgentStore();
   const { sessions } = useSessionStore();
 
   // Initialize on app mount
@@ -218,7 +216,9 @@ export function App() {
             }} />
           )}
           {tab === 'sessions' && vfsAppId && (
-            <VFSExplorer appId={vfsAppId} onClose={() => setVfsAppId(null)} />
+            <div className="p-4">
+              <VFSExplorer />
+            </div>
           )}
 
           {/* Active Agents tab */}
