@@ -16,7 +16,5 @@ docs/audit/*.md
 .playwright-mcp/
 *.tsbuildinfo
 *.log
-kalio-v2-*.png
-kalio-home.png
-kalio-new-session.png
+kalio-*.png
 .windsurf/
