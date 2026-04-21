@@ -119,7 +119,7 @@ export function ChatInterface() {
   };
 
   return (
-    <div data-testid="chat-interface" className="flex h-full flex-col">
+    <div data-testid="chat-interface" className="flex h-full flex-col bg-base-200 rounded-xl border border-base-300 overflow-hidden">
       {error && (
         <div data-testid="chat-error" className="alert alert-error m-2 py-2 text-sm">
           {error}
@@ -127,7 +127,7 @@ export function ChatInterface() {
         </div>
       )}
 
-      <div data-testid="message-list" className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div data-testid="message-list" className="flex-1 overflow-y-auto p-4 space-y-1">
         {messages.map((msg) => (
           <MessageBubble key={msg.id} message={msg} />
         ))}

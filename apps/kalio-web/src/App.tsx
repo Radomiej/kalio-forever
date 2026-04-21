@@ -106,7 +106,7 @@ export function App() {
       </aside>
 
       {/* ── Main chat ── */}
-      <main className="flex flex-1 flex-col overflow-hidden relative">
+      <main className="flex-1 overflow-hidden p-3 min-w-0">
         <ChatInterface />
       </main>
 
