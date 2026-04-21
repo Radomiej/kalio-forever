@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
 import { MCPService } from './mcp.service';
-import { MCPWatchdogService } from './mcp-watchdog.service';
+import { MCPController } from './mcp.controller';
 
 @Module({
-  providers: [MCPService, MCPWatchdogService],
+  controllers: [MCPController],
+  providers: [MCPService],
   exports: [MCPService],
 })
 export class MCPModule {}
