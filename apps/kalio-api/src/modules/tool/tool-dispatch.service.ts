@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { ToolCallRequest, ToolResult } from '@kalio/types';
 import { ToolRegistryService } from './tool-registry.service';
 import { VFSWriteTool } from './tools/vfs-write.tool';
+import { VFSReadTool } from './tools/vfs-read.tool';
+import { VFSListTool } from './tools/vfs-list.tool';
+import { SubagentTool } from './tools/subagent.tool';
 
 @Injectable()
 export class ToolDispatchService {
@@ -10,6 +13,9 @@ export class ToolDispatchService {
   constructor(
     private readonly registry: ToolRegistryService,
     private readonly vfsWriteTool: VFSWriteTool,
+    private readonly vfsReadTool: VFSReadTool,
+    private readonly vfsListTool: VFSListTool,
+    private readonly subagentTool: SubagentTool,
   ) {}
 
   async dispatch(request: ToolCallRequest): Promise<ToolResult> {
@@ -49,6 +55,9 @@ export class ToolDispatchService {
   private resolveTool(name: string): { execute(req: ToolCallRequest): Promise<unknown> } | null {
     const map: Record<string, { execute(req: ToolCallRequest): Promise<unknown> }> = {
       vfs_write: this.vfsWriteTool,
+      vfs_read: this.vfsReadTool,
+      vfs_list: this.vfsListTool,
+      run_subagent: this.subagentTool,
     };
     return map[name] ?? null;
   }

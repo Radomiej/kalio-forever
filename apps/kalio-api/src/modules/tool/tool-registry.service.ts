@@ -3,6 +3,9 @@ import { Reflector } from '@nestjs/core';
 import type { ToolMeta } from '@kalio/types';
 import { TOOL_METADATA } from '../../common/decorators/tool.decorator';
 import { VFSWriteTool } from './tools/vfs-write.tool';
+import { VFSReadTool } from './tools/vfs-read.tool';
+import { VFSListTool } from './tools/vfs-list.tool';
+import { SubagentTool } from './tools/subagent.tool';
 
 @Injectable()
 export class ToolRegistryService {
@@ -12,8 +15,11 @@ export class ToolRegistryService {
   constructor(
     private readonly reflector: Reflector,
     private readonly vfsWriteTool: VFSWriteTool,
+    private readonly vfsReadTool: VFSReadTool,
+    private readonly vfsListTool: VFSListTool,
+    private readonly subagentTool: SubagentTool,
   ) {
-    this.registerAll([vfsWriteTool]);
+    this.registerAll([vfsWriteTool, vfsReadTool, vfsListTool, subagentTool]);
   }
 
   private registerAll(tools: object[]): void {
