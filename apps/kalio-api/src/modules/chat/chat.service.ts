@@ -109,7 +109,7 @@ export class ChatService {
 
     // Process tool calls
     for (const tc of toolCalls) {
-      this.logger.log(`[tool] Executing tool="${tc.name}" args=${JSON.stringify(tc.args)}`);
+      this.logger.log(`[tool] Executing tool="${tc.name}" args=${JSON.stringify(this.redactArgs(tc.args)).slice(0, 200)}`);
       await this.processToolCall(tc, sessionId, conversationId, server, client, personaConfig.availableSkills);
     }
   }
@@ -184,14 +184,18 @@ export class ChatService {
     const resultContent = result.status === 'success'
       ? JSON.stringify(result.data)
       : result.errorMessage ?? result.errorCode ?? 'error';
-    await this.drizzle.db.insert(messages).values({
-      id: nanoid(),
-      sessionId,
-      role: 'tool_result',
-      content: resultContent,
-      toolCallId: tc.id,
-      createdAt: new Date(),
-    });
+    try {
+      await this.drizzle.db.insert(messages).values({
+        id: nanoid(),
+        sessionId,
+        role: 'tool_result',
+        content: resultContent,
+        toolCallId: tc.id,
+        createdAt: new Date(),
+      });
+    } catch (dbErr) {
+      this.logger.error('Failed to persist tool result', dbErr instanceof Error ? dbErr : new Error(String(dbErr)));
+    }
 
     client.emit('tool:result', result);
   }
@@ -206,6 +210,13 @@ export class ChatService {
       }, timeoutMs);
       this.pendingConfirmations.set(requestId, { resolve, timer });
     });
+  }
+
+  private redactArgs(args: Record<string, unknown>): Record<string, unknown> {
+    const sensitiveKeys = /api.?key|password|secret|token|auth/i;
+    return Object.fromEntries(
+      Object.entries(args).map(([k, v]) => [k, sensitiveKeys.test(k) ? '[REDACTED]' : v])
+    );
   }
 
   private async buildHistory(sessionId: string, systemPrompt: string): Promise<LLMMessage[]> {

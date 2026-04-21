@@ -121,10 +121,9 @@ describe('PersonaService - Race Condition in onApplicationBootstrap (REGRESSION 
       mockDb.select.mockReturnValue({ from: fromMock });
 
       // Current implementation: plain INSERT
-      const insertMock = vi.fn().mockReturnValue({
+      mockDb.insert.mockReturnValue({
         values: vi.fn().mockResolvedValue(undefined),
       });
-      mockDb.insert.mockReturnValue(insertMock);
 
       await service.onApplicationBootstrap();
 
