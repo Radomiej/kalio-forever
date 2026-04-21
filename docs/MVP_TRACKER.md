@@ -1,7 +1,7 @@
 # KALIO v2 — MVP Tracker
 
 > **Last updated:** 2026-04-21
-> **Overall:** Architecture 100% | AC Implementation 0% | Tests 0% (stubs only)
+> **Overall:** Architecture 100% | AC Implementation 0% | Unit Tests 92 passing | E2E Tests 0% (stubs only)
 
 ---
 
@@ -89,12 +89,13 @@ Status: architecture complete, ACs not verified.
 
 ### Testing and validation
 
-Status: test infrastructure ready, tests not implemented.
+Status: test infrastructure ready, unit tests passing, E2E tests not implemented.
 
 - [x] Vitest configured for unit tests
 - [x] Playwright configured for E2E tests
 - [x] MockLLMProvider for testing
 - [x] Test stubs for all 15 AC
+- [x] Unit tests passing: 92 tests (77 in kalio-api + 15 in @kalio/types)
 - [ ] Implement TDD for AC-01 (LLM streaming)
 - [ ] Implement TDD for AC-02 through AC-15
 - [ ] All 15 AC passing
@@ -120,15 +121,17 @@ Status: test infrastructure ready, tests not implemented.
 - E2E test stubs for all 15 AC created
 - Code audit scripts adapted from ra-kingdom-stack
 - Initial audit shows: 0 CRITICAL, 2 HIGH (circular deps in LLM), 2 MEDIUM (unused deps)
+- Fixed TypeScript error in @kalio/types test (missing 'provider' field in LLMConfig)
+- Unit tests now passing: 92 tests (77 in kalio-api + 15 in @kalio/types)
 
 ---
 
 ## Current Risks and Caveats
 
-- All 15 AC are marked as pending - tests are stubs only
+- All 15 AC are marked as pending - E2E tests are stubs only
 - Circular dependencies detected in LLM module (llm.service.ts → providers)
 - Unused dependencies in kalio-web (lucide-react, react-markdown)
-- No passing tests yet - cannot verify functionality
+- Unit tests passing (92 tests) but E2E tests not implemented - cannot verify end-to-end functionality
 - Architecture rules in AGENTS.md need to be enforced via ESLint
 
 ---
