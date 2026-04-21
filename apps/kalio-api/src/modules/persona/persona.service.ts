@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import type { Persona, PersonaKV, PersonaSessionConfig, CreatePersonaDto, UpdatePersonaDto } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
@@ -6,10 +6,27 @@ import { personas, personaKV } from '../../database/schema';
 import { eq } from 'drizzle-orm';
 
 @Injectable()
-export class PersonaService {
+export class PersonaService implements OnApplicationBootstrap {
   private readonly logger = new Logger(PersonaService.name);
 
   constructor(private readonly drizzle: DrizzleService) {}
+
+  async onApplicationBootstrap() {
+    const existing = await this.drizzle.db.select().from(personas).where(eq(personas.id, 'default')).then((r) => r[0]);
+    if (!existing) {
+      const now = new Date();
+      await this.drizzle.db.insert(personas).values({
+        id: 'default',
+        name: 'Default',
+        systemPrompt: 'You are a helpful AI assistant.',
+        model: '',
+        skills: [],
+        createdAt: now,
+        updatedAt: now,
+      });
+      this.logger.log('Seeded default persona');
+    }
+  }
 
   async findAll(): Promise<Persona[]> {
     const rows = await this.drizzle.db.select().from(personas);
