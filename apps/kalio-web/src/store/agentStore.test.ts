@@ -39,16 +39,17 @@ describe('agentStore - Tool Activity Status Mapping (REGRESSION TEST)', () => {
       status: 'success',
       data: { result: 'done' },
     };
-    
+
     store.updateToolActivity(callId, {
-      status: successResult.status === 'success' ? 'success' : 
+      status: successResult.status === 'success' ? 'success' :
              successResult.status === 'cancelled' ? 'cancelled' : 'error',
       finishedAt: Date.now(),
       result: successResult,
     });
 
-    // Assert
-    const activity = store.toolActivities.find((a) => a.callId === callId);
+    // Assert - check the store state after update
+    const updatedStore = useAgentStore.getState();
+    const activity = updatedStore.toolActivities.find((a) => a.callId === callId);
     expect(activity?.status).toBe('success');
   });
 
@@ -80,7 +81,8 @@ describe('agentStore - Tool Activity Status Mapping (REGRESSION TEST)', () => {
     });
 
     // Assert
-    const activity = store.toolActivities.find((a) => a.callId === callId);
+    const updatedStore = useAgentStore.getState();
+    const activity = updatedStore.toolActivities.find((a) => a.callId === callId);
     expect(activity?.status).toBe('cancelled');
   });
 
@@ -105,14 +107,15 @@ describe('agentStore - Tool Activity Status Mapping (REGRESSION TEST)', () => {
     };
     
     store.updateToolActivity(callId, {
-      status: errorResult.status === 'success' ? 'success' : 
+      status: errorResult.status === 'success' ? 'success' :
              errorResult.status === 'cancelled' ? 'cancelled' : 'error',
       finishedAt: Date.now(),
       result: errorResult,
     });
 
     // Assert
-    const activity = store.toolActivities.find((a) => a.callId === callId);
+    const updatedStore = useAgentStore.getState();
+    const activity = updatedStore.toolActivities.find((a) => a.callId === callId);
     expect(activity?.status).toBe('error');
   });
 
