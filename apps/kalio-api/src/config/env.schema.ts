@@ -1,7 +1,7 @@
 import Joi from 'joi';
 
 export const envSchema = Joi.object({
-  PORT:           Joi.number().default(3015),
+  PORT:           Joi.number().default(3016),
   NODE_ENV:       Joi.string().valid('development', 'test', 'production').default('development'),
   DATABASE_PATH:  Joi.string().required(),
   WORKSPACE_ROOT: Joi.string().required(),

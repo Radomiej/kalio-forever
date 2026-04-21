@@ -10,7 +10,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors({ origin: process.env['CORS_ORIGIN'] ?? '*' });
   app.setGlobalPrefix('api');
 
-  const port = parseInt(process.env['PORT'] ?? '3015', 10);
+  const port = parseInt(process.env['PORT'] ?? '3016', 10);
   await app.listen(port);
   logger.log(`kalio-api running on http://localhost:${port}`);
 }

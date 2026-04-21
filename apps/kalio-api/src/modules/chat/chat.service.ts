@@ -53,7 +53,7 @@ export class ChatService {
       sessionId,
       role: 'user',
       content,
-      createdAt: Date.now(),
+      createdAt: new Date(),
     });
 
     // Build history
@@ -179,12 +179,13 @@ export class ChatService {
 
   async createSession(personaId: string, title?: string): Promise<string> {
     const id = nanoid();
+    const now = new Date();
     await this.drizzle.db.insert(sessions).values({
       id,
       personaId,
       title: title ?? '',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
     });
     return id;
   }

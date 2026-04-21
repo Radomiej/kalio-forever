@@ -1,37 +1,29 @@
 # Kalio v2 — dev launcher
-# Uruchamia backend i frontend równolegle w osobnych terminalach.
+# Uruchamia backend i frontend w osobnych oknach PowerShell z live output.
+# Użycie: .\start-dev.ps1
 
-$ErrorActionPreference = 'Stop'
+$root  = $PSScriptRoot
+$api   = Join-Path $root "apps\kalio-api"
+$web   = Join-Path $root "apps\kalio-web"
+$nestBin = Join-Path $api "node_modules\.bin\nest.CMD"
 
-Write-Host "Starting Kalio v2 dev environment..." -ForegroundColor Cyan
-
-$apiJob = Start-Job -Name "kalio-api" -ScriptBlock {
-  Set-Location "c:\Projekty\kalio-forever\apps\kalio-api"
-  pnpm run dev
-}
-
-$webJob = Start-Job -Name "kalio-web" -ScriptBlock {
-  Set-Location "c:\Projekty\kalio-forever\apps\kalio-web"
-  pnpm run dev
-}
-
-Write-Host "  kalio-api  → http://localhost:3015" -ForegroundColor Green
-Write-Host "  kalio-web  → http://localhost:5187" -ForegroundColor Green
 Write-Host ""
-Write-Host "Press Ctrl+C to stop all processes." -ForegroundColor Yellow
+Write-Host "╔══════════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║          Kalio v2 — dev environment          ║" -ForegroundColor Cyan
+Write-Host "╠══════════════════════════════════════════════╣" -ForegroundColor Cyan
+Write-Host "║  kalio-api  →  http://localhost:3016         ║" -ForegroundColor Green
+Write-Host "║  kalio-web  →  http://localhost:5188         ║" -ForegroundColor Green
+Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host ""
 
-try {
-  while ($true) {
-    Start-Sleep -Seconds 2
-    $apiJob, $webJob | ForEach-Object {
-      if ($_.State -eq 'Failed') {
-        Write-Host "Job $($_.Name) failed:" -ForegroundColor Red
-        Receive-Job $_ -ErrorAction SilentlyContinue
-      }
-    }
-  }
-} finally {
-  Stop-Job $apiJob, $webJob -ErrorAction SilentlyContinue
-  Remove-Job $apiJob, $webJob -ErrorAction SilentlyContinue
-  Write-Host "Dev environment stopped." -ForegroundColor Cyan
-}
+# ── Start API in new window ────────────────────────────────────────────────────
+$apiCmd = "Set-Location '$api'; Write-Host 'kalio-api starting...' -ForegroundColor Cyan; & '$nestBin' start --watch"
+Start-Process pwsh -ArgumentList "-NoExit", "-Command", $apiCmd -WindowStyle Normal
+
+# ── Start Web in new window ────────────────────────────────────────────────────
+$webCmd = "Set-Location '$web'; Write-Host 'kalio-web starting...' -ForegroundColor Cyan; pnpm run dev"
+Start-Process pwsh -ArgumentList "-NoExit", "-Command", $webCmd -WindowStyle Normal
+
+Write-Host "Both servers starting in separate windows." -ForegroundColor Yellow
+Write-Host "Close those windows or press Ctrl+C here to stop." -ForegroundColor Yellow
+Write-Host ""

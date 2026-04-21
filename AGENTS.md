@@ -16,8 +16,8 @@ The frontend is intentionally thin: it renders state, emits events, never calls 
 
 ```
 apps/
-  kalio-api/          ← NestJS fat backend          (port 3015)
-  kalio-web/          ← React thin frontend          (port 5187)
+  kalio-api/          ← NestJS fat backend          (port 3016)
+  kalio-web/          ← React thin frontend          (port 5188)
   e2e/                ← Playwright E2E tests
 packages/
   @kalio/types        ← ONLY source of truth for all contracts
@@ -193,7 +193,7 @@ Tools marked `@Tool({ requiresConfirmation: true })` trigger the HITL flow:
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `PORT` | No | `3015` | Backend port |
+| `PORT` | No | `3016` | Backend port |
 | `NODE_ENV` | No | `development` | `test` makes LLM vars optional (uses MockProvider) |
 | `DATABASE_PATH` | Yes | `./data/kalio.db` | SQLite file path |
 | `WORKSPACE_ROOT` | Yes | `./data/workspaces` | Root for VFS per conversation |

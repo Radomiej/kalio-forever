@@ -23,7 +23,7 @@ export class PersonaService {
   }
 
   async create(dto: CreatePersonaDto): Promise<Persona> {
-    const now = Date.now();
+    const now = new Date();
     const id = nanoid();
     await this.drizzle.db.insert(personas).values({ id, ...dto, createdAt: now, updatedAt: now });
     return this.findOne(id);
@@ -33,7 +33,7 @@ export class PersonaService {
     await this.findOne(id);
     await this.drizzle.db
       .update(personas)
-      .set({ ...dto, updatedAt: Date.now() })
+      .set({ ...dto, updatedAt: new Date() })
       .where(eq(personas.id, id));
     return this.findOne(id);
   }
@@ -67,14 +67,15 @@ export class PersonaService {
       .where(eq(personaKV.personaId, personaId))
       .then((rows) => rows.find((r) => r.key === key));
 
-    const now = Date.now();
+    const now = new Date();
+    const nowMs = now.getTime();
     if (existing) {
       await this.drizzle.db.update(personaKV).set({ value, updatedAt: now }).where(eq(personaKV.id, existing.id));
-      return { id: existing.id, personaId, key, value, updatedAt: now };
+      return { id: existing.id, personaId, key, value, updatedAt: nowMs };
     }
     const id = nanoid();
     await this.drizzle.db.insert(personaKV).values({ id, personaId, key, value, updatedAt: now });
-    return { id, personaId, key, value, updatedAt: now };
+    return { id, personaId, key, value, updatedAt: nowMs };
   }
 
   private mapRow(row: { id: string; name: string; systemPrompt: string; model: string; skills: string[] | null; createdAt: number | Date; updatedAt: number | Date }): Persona {

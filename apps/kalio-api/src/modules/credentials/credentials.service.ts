@@ -16,23 +16,29 @@ export class CredentialsService {
     return rows.map(({ apiKey: _omit, ...rest }) => ({
       ...rest,
       createdAt: rest.createdAt instanceof Date ? rest.createdAt.getTime() : rest.createdAt,
+      baseUrl: rest.baseUrl ?? undefined,
+      model: rest.model ?? undefined,
     }));
   }
 
   async create(dto: CreateCredentialDto): Promise<Credential> {
     const id = nanoid();
-    const now = Date.now();
     await this.drizzle.db.insert(credentials).values({
       id,
       name: dto.name,
       provider: dto.provider,
       apiKey: dto.apiKey,
-      baseUrl: dto.baseUrl,
-      model: dto.model,
-      createdAt: now,
+      baseUrl: dto.baseUrl ?? null,
+      model: dto.model ?? null,
+      createdAt: new Date(),
     });
     const { apiKey: _omit, ...row } = (await this.drizzle.db.select().from(credentials).where(eq(credentials.id, id)).then((r) => r[0]))!;
-    return { ...row, createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : row.createdAt };
+    return {
+      ...row,
+      createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : row.createdAt,
+      baseUrl: row.baseUrl ?? undefined,
+      model: row.model ?? undefined,
+    };
   }
 
   async remove(id: string): Promise<void> {

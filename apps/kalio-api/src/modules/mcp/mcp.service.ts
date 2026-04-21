@@ -25,11 +25,11 @@ export class MCPService implements OnModuleDestroy {
 
   async addServer(name: string, url: string): Promise<MCPServer> {
     const id = nanoid();
-    const now = Date.now();
+    const now = new Date();
     await this.drizzle.db.insert(mcpServers).values({ id, name, url, status: 'connecting', createdAt: now });
     this.logger.log(`MCP server added: ${name} @ ${url}`);
     // TODO: connect & discover tools (Phase 8)
-    return { id, name, url, status: 'connecting', createdAt: now };
+    return { id, name, url, status: 'connecting', createdAt: now.getTime() };
   }
 
   async removeServer(id: string): Promise<void> {
