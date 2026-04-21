@@ -14,7 +14,7 @@ describe('agentStore - Tool Activity Status Mapping (REGRESSION TEST)', () => {
     useAgentStore.setState({
       toolActivities: [],
       isStreaming: false,
-      streamingMessageId: null,
+      streamingMessageId: undefined,
       pendingConfirmation: null,
       availableTools: [],
     });

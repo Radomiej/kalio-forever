@@ -23,7 +23,6 @@ import { AuditLogPanel } from './features/audit/AuditLogPanel';
 import { AgentLoopPanel } from './features/agentLoop/AgentLoopPanel';
 import { LandingPage } from './features/landing/LandingPage';
 import { BackendStatusBadge } from './components/ui/BackendStatusBadge';
-import { useAgentStore } from './store/agentStore';
 import { useSessionStore } from './store/sessionStore';
 import { backendHealth } from './services/backendHealth';
 
