@@ -45,45 +45,32 @@ describe('PersonaService', () => {
       const value = 'secret-value';
 
       // Setup mocks to simulate DB responses
-      const mockWhereChain = {
-        where: vi.fn().mockReturnValue({
-          then: vi.fn().mockResolvedValue([
-            { id: 'kv-1', personaId, key: 'other_key', value: 'other_value' },
-            { id: 'kv-2', personaId, key, value: 'old_value' }, // target key
-            { id: 'kv-3', personaId, key: 'another_key', value: 'another_value' },
-          ]),
-        }),
-      };
-
-      mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue(mockWhereChain),
-      });
+      const kvData = [
+        { id: 'kv-1', personaId, key: 'other_key', value: 'other_value' },
+        { id: 'kv-2', personaId, key, value: 'old_value' }, // target key
+        { id: 'kv-3', personaId, key: 'another_key', value: 'another_value' },
+      ];
+      const personaData = [{ id: personaId, name: 'Test', systemPrompt: 'P', model: 'gpt-4', skills: [], createdAt: Date.now(), updatedAt: Date.now() }];
+      const fromMock = vi.fn()
+        .mockReturnValueOnce({ where: vi.fn().mockResolvedValue(personaData) })
+        .mockReturnValueOnce({ where: vi.fn().mockResolvedValue(kvData) });
+      mockDb.select.mockReturnValue({ from: fromMock });
 
       // Act
       await service.setKV(personaId, key, value);
 
       // Assert - Current implementation retrieves ALL KV rows for persona
       // Then filters client-side with .find()
-      // Inefficient: should filter by key in SQL WHERE clause
-
       expect(mockDb.select).toHaveBeenCalled();
-      expect(mockWhereChain.where).toHaveBeenCalled();
-
-      // The regression: currently fetches all KV rows for personaId
-      // then does: rows.find((r) => r.key === key) on client side
-      // Should be: WHERE persona_id = X AND key = Y
+      expect(fromMock).toHaveBeenCalled();
     });
 
     it('should throw NotFoundException when persona does not exist', async () => {
       // Arrange
-      const mockWhereChain = {
-        where: vi.fn().mockReturnValue({
-          then: vi.fn().mockResolvedValue([]), // No persona found
-        }),
-      };
-
       mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue(mockWhereChain),
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
       });
 
       // Act & Assert
@@ -94,14 +81,10 @@ describe('PersonaService', () => {
   describe('getSessionConfig', () => {
     it('should return null when persona not found', async () => {
       // Arrange
-      const mockWhereChain = {
-        where: vi.fn().mockReturnValue({
-          then: vi.fn().mockResolvedValue([]),
-        }),
-      };
-
       mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue(mockWhereChain),
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
       });
 
       // Act
@@ -129,18 +112,11 @@ describe('PersonaService', () => {
         { id: 'kv-2', personaId, key: 'endpoint', value: 'https://api.example.com', updatedAt: Date.now() },
       ];
 
-      let callCount = 0;
-      mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            then: vi.fn().mockImplementation(() => {
-              callCount++;
-              if (callCount === 1) return Promise.resolve([personaRow]);
-              return Promise.resolve(kvRows);
-            }),
-          }),
-        }),
-      });
+      const fromMock = vi.fn()
+        .mockReturnValueOnce({ where: vi.fn().mockResolvedValue([personaRow]) })
+        .mockReturnValueOnce({ where: vi.fn().mockResolvedValue(kvRows) });
+
+      mockDb.select.mockReturnValue({ from: fromMock });
 
       // Act
       const result = await service.getSessionConfig(personaId);
@@ -200,9 +176,7 @@ describe('PersonaService', () => {
     it('findOne should throw NotFoundException for non-existent persona', async () => {
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            then: vi.fn().mockResolvedValue([]),
-          }),
+          where: vi.fn().mockResolvedValue([]),
         }),
       });
 
@@ -223,9 +197,7 @@ describe('PersonaService', () => {
 
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            then: vi.fn().mockResolvedValue([existingPersona]),
-          }),
+          where: vi.fn().mockResolvedValue([existingPersona]),
         }),
       });
 
