@@ -1,9 +1,10 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { drizzle, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import * as schema from './schema';
 
 @Injectable()
@@ -21,6 +22,16 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
     this.sqlite.pragma('journal_mode = WAL');
     this.sqlite.pragma('foreign_keys = ON');
     this.db = drizzle(this.sqlite, { schema });
+
+    // Run migrations from the migrations folder (idempotent)
+    const migrationsFolder = resolve(__dirname, 'migrations');
+    try {
+      migrate(this.db, { migrationsFolder });
+      this.logger.log(`Migrations applied from ${migrationsFolder}`);
+    } catch (err) {
+      this.logger.warn(`Migration warning (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     this.logger.log(`Database connected: ${dbPath}`);
   }
 

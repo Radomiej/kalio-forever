@@ -63,6 +63,14 @@ export const mcpServers = sqliteTable('mcp_servers', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
+// ─── app_settings ──────────────────────────────────────────────────────────────
+// Global key-value store for app-wide settings (e.g. active LLM credential)
+export const appSettings = sqliteTable('app_settings', {
+  key:       text('key').primaryKey(),
+  value:     text('value').notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
 // ─── Type inference helpers ───────────────────────────────────────────────────
 export type PersonaRow      = typeof personas.$inferSelect;
 export type SessionRow      = typeof sessions.$inferSelect;
@@ -70,6 +78,7 @@ export type MessageRow      = typeof messages.$inferSelect;
 export type PersonaKVRow    = typeof personaKV.$inferSelect;
 export type CredentialRow   = typeof credentials.$inferSelect;
 export type MCPServerRow    = typeof mcpServers.$inferSelect;
+export type AppSettingRow   = typeof appSettings.$inferSelect;
 
 export type InsertPersona    = typeof personas.$inferInsert;
 export type InsertSession    = typeof sessions.$inferInsert;
