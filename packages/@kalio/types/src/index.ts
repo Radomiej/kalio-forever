@@ -413,4 +413,55 @@ export interface SocketEvents {
   // Sessions — server → client
   'session:created': ChatSession;
   'session:updated': Pick<ChatSession, 'id' | 'title' | 'updatedAt'>;
+
+  // Memory — client → server
+  'memory:ingest': { text: string; personaId: ID; metadata?: Record<string, string> };
+  'memory:ingestConversation': { messages: Array<{ role: string; content: string }>; personaId: ID };
+  'memory:search': { query: string; personaId: ID; limit?: number; mode?: MemorySearchMode };
+
+  // Memory — server → client
+  'memory:ingested': { ids: string[]; count: number };
+  'memory:results': { results: MemorySearchResult[]; mode: MemorySearchMode };
+}
+
+// ─── Memory (Hybrid: Vector + BM25) ─────────────────────────────────────────
+export type MemorySearchMode = 'vector' | 'fts' | 'hybrid';
+
+export interface MemoryIngestResult {
+  ids: string[];
+  count: number;
+}
+
+export interface MemorySearchResult {
+  id: string;
+  content: string;
+  score: number;
+  metadata: Record<string, string>;
+  createdAt: number;
+}
+
+export interface MemoryIngestRequest {
+  text: string;
+  personaId: ID;
+  metadata?: Record<string, string>;
+}
+
+export interface MemoryConversationIngestRequest {
+  messages: Array<{ role: string; content: string }>;
+  personaId: ID;
+}
+
+export interface MemorySearchRequest {
+  query: string;
+  personaId: ID;
+  limit?: number;
+  mode?: MemorySearchMode;
+}
+
+export interface EmbeddingStatus {
+  provider: 'openai-compatible' | 'ollama';
+  model: string;
+  dimensions: number;
+  baseUrlMasked: string;
+  configured: boolean;
 }
