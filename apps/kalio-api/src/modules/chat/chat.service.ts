@@ -308,6 +308,18 @@ export class ChatService {
     return rows[0] ?? null;
   }
 
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.drizzle.db.delete(messages).where(eq(messages.sessionId, sessionId));
+    await this.drizzle.db.delete(sessions).where(eq(sessions.id, sessionId));
+  }
+
+  async renameSession(sessionId: string, title: string): Promise<void> {
+    await this.drizzle.db
+      .update(sessions)
+      .set({ title, updatedAt: new Date() })
+      .where(eq(sessions.id, sessionId));
+  }
+
   async getMessages(sessionId: string): Promise<ChatMessage[]> {
     const rows = await this.drizzle.db
       .select()

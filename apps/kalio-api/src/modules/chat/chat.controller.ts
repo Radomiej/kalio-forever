@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, NotFoundException, HttpCode, HttpStatus } from '@nestjs/common';
 import type { ChatSession, CreateSessionDto, ChatMessage } from '@kalio/types';
 import { ChatService } from './chat.service';
 
@@ -35,5 +35,28 @@ export class ChatController {
   @Get(':id/messages')
   async getMessages(@Param('id') id: string): Promise<ChatMessage[]> {
     return this.chatService.getMessages(id);
+  }
+
+  @Patch(':id')
+  async rename(
+    @Param('id') id: string,
+    @Body() body: { title: string },
+  ): Promise<ChatSession> {
+    await this.chatService.renameSession(id, body.title);
+    const session = await this.chatService.getSession(id);
+    if (!session) throw new NotFoundException('Session not found');
+    return {
+      id: session.id,
+      personaId: session.personaId,
+      title: session.title ?? '',
+      createdAt: session.createdAt instanceof Date ? session.createdAt.getTime() : session.createdAt,
+      updatedAt: session.updatedAt instanceof Date ? session.updatedAt.getTime() : session.updatedAt,
+    };
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(@Param('id') id: string): Promise<void> {
+    return this.chatService.deleteSession(id);
   }
 }
