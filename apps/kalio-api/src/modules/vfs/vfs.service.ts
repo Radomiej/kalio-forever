@@ -8,7 +8,7 @@ import {
   statSync,
   existsSync,
 } from 'node:fs';
-import { join, resolve, normalize, basename } from 'node:path';
+import { join, resolve, normalize, basename, sep } from 'node:path';
 import type { VFSWriteRequest, VFSReadResult, VFSListResult, VFSFile } from '@kalio/types';
 
 const PATH_TRAVERSAL_ERROR = 'PATH_TRAVERSAL_DENIED';
@@ -70,9 +70,16 @@ export class VFSService {
 
   private resolveSafe(conversationId: string, filePath: string): string {
     const base = this.conversationDir(conversationId);
-    const resolved = resolve(base, normalize(filePath));
+    // Decode URL-encoded characters to catch encoded traversal attempts like ..%2f
+    let decodedPath: string;
+    try {
+      decodedPath = decodeURIComponent(filePath);
+    } catch {
+      decodedPath = filePath;
+    }
+    const resolved = resolve(base, normalize(decodedPath));
 
-    if (!resolved.startsWith(resolve(base) + '/') && resolved !== resolve(base)) {
+    if (!resolved.startsWith(resolve(base) + sep) && resolved !== resolve(base)) {
       const err = new Error(`${PATH_TRAVERSAL_ERROR}: "${filePath}" escapes conversation sandbox`);
       (err as NodeJS.ErrnoException).code = PATH_TRAVERSAL_ERROR;
       throw err;
