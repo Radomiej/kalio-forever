@@ -11,6 +11,9 @@ import { ToolDispatchService } from '../tool/tool-dispatch.service';
 // Issue: Frontend calls /api/sessions and /api/vfs/* but controllers don't exist
 // This test verifies that ChatService has the required methods for session management
 
+// Regression test for: Type mismatch in ChatController Date handling
+// Issue: Controller checks instanceof Date, but Drizzle with mode: 'timestamp_ms' returns numbers
+
 describe('ChatService - Session Management (REGRESSION TEST)', () => {
   let service: ChatService;
   let drizzleService: DrizzleService;
