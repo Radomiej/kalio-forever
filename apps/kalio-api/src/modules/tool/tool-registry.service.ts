@@ -6,6 +6,10 @@ import { VFSWriteTool } from './tools/vfs-write.tool';
 import { VFSReadTool } from './tools/vfs-read.tool';
 import { VFSListTool } from './tools/vfs-list.tool';
 import { SubagentTool } from './tools/subagent.tool';
+import { FsReadTool } from './tools/fs-read.tool';
+import { FsListTool } from './tools/fs-list.tool';
+import { FsWriteTool } from './tools/fs-write.tool';
+import { KVWriteTool, KVReadTool, KVListTool, KVDeleteTool } from './tools/kv.tools';
 
 @Injectable()
 export class ToolRegistryService {
@@ -18,8 +22,19 @@ export class ToolRegistryService {
     private readonly vfsReadTool: VFSReadTool,
     private readonly vfsListTool: VFSListTool,
     private readonly subagentTool: SubagentTool,
+    private readonly fsReadTool: FsReadTool,
+    private readonly fsListTool: FsListTool,
+    private readonly fsWriteTool: FsWriteTool,
+    private readonly kvWriteTool: KVWriteTool,
+    private readonly kvReadTool: KVReadTool,
+    private readonly kvListTool: KVListTool,
+    private readonly kvDeleteTool: KVDeleteTool,
   ) {
-    this.registerAll([vfsWriteTool, vfsReadTool, vfsListTool, subagentTool]);
+    this.registerAll([
+      vfsWriteTool, vfsReadTool, vfsListTool, subagentTool,
+      fsReadTool, fsListTool, fsWriteTool,
+      kvWriteTool, kvReadTool, kvListTool, kvDeleteTool,
+    ]);
   }
 
   private registerAll(tools: object[]): void {

@@ -6,13 +6,23 @@ import { VFSWriteTool } from './tools/vfs-write.tool';
 import { VFSReadTool } from './tools/vfs-read.tool';
 import { VFSListTool } from './tools/vfs-list.tool';
 import { SubagentTool } from './tools/subagent.tool';
+import { FsReadTool } from './tools/fs-read.tool';
+import { FsListTool } from './tools/fs-list.tool';
+import { FsWriteTool } from './tools/fs-write.tool';
+import { KVWriteTool, KVReadTool, KVListTool, KVDeleteTool } from './tools/kv.tools';
+import { KVStoreService } from './kv-store.service';
 import { VFSModule } from '../vfs/vfs.module';
 import { LLMModule } from '../llm/llm.module';
 
 @Module({
   imports: [VFSModule, LLMModule],
   controllers: [ToolController],
-  providers: [ToolRegistryService, ToolDispatchService, VFSWriteTool, VFSReadTool, VFSListTool, SubagentTool],
+  providers: [
+    ToolRegistryService, ToolDispatchService,
+    VFSWriteTool, VFSReadTool, VFSListTool, SubagentTool,
+    FsReadTool, FsListTool, FsWriteTool,
+    KVStoreService, KVWriteTool, KVReadTool, KVListTool, KVDeleteTool,
+  ],
   exports: [ToolRegistryService, ToolDispatchService],
 })
 export class ToolModule {}
