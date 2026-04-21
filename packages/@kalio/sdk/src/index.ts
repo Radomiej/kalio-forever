@@ -5,7 +5,6 @@ import type {
   ToolConfirmationRequest,
   ToolResult,
   ChatSession,
-  ID,
 } from '@kalio/types';
 
 export type ChunkHandler = (chunk: LLMStreamChunk) => void;
