@@ -62,16 +62,7 @@ export function ChatInterface() {
     };
     addMessage(userMsg);
 
-    const streamingId = nanoid();
-    setStreaming(true, streamingId);
-    addMessage({
-      id: streamingId,
-      sessionId: activeSessionId,
-      role: 'assistant',
-      content: '',
-      streaming: true,
-      createdAt: Date.now(),
-    });
+    setStreaming(true);
 
     eventBus.sendMessage({
       sessionId: activeSessionId,

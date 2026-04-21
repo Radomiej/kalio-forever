@@ -30,12 +30,28 @@ export const useSessionStore = create<SessionState>((set) => ({
   addMessage: (message) =>
     set((s) => ({ messages: [...s.messages, message] })),
   appendChunk: (messageId, delta) =>
-    set((s) => ({
-      streamingChunks: {
-        ...s.streamingChunks,
-        [messageId]: (s.streamingChunks[messageId] ?? '') + delta,
-      },
-    })),
+    set((s) => {
+      const accumulated = (s.streamingChunks[messageId] ?? '') + delta;
+      // If no message exists for this messageId yet, create a streaming placeholder
+      const msgExists = s.messages.some((m) => m.id === messageId);
+      const newMessages = msgExists
+        ? s.messages
+        : [
+            ...s.messages,
+            {
+              id: messageId,
+              sessionId: s.activeSessionId ?? '',
+              role: 'assistant' as const,
+              content: '',
+              streaming: true,
+              createdAt: Date.now(),
+            },
+          ];
+      return {
+        streamingChunks: { ...s.streamingChunks, [messageId]: accumulated },
+        messages: newMessages,
+      };
+    }),
   finalizeChunk: (messageId) =>
     set((s) => {
       const finalContent = s.streamingChunks[messageId] ?? '';
