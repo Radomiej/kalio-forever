@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Trash2, CheckCircle2, Circle, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, CheckCircle2, Circle, Loader2, AlertCircle, KeyRound, Zap } from 'lucide-react';
 import {
   useSettingsStore,
   PROVIDER_DEFAULTS,
@@ -304,10 +304,39 @@ function ProviderRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [local, setLocal] = useState({ apiKey: provider.apiKey, baseUrl: provider.baseUrl, model: provider.model });
+  const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
+  const [testError, setTestError] = useState<string | null>(null);
 
   const handleSave = () => {
     onUpdate(local);
     setEditing(false);
+  };
+
+  const handleTest = async () => {
+    setTestState('testing');
+    setTestError(null);
+    try {
+      const res = await fetch('/api/credentials/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: provider.type,
+          apiKey: provider.apiKey,
+          model: provider.model,
+          baseUrl: provider.baseUrl || undefined,
+        }),
+      });
+      const data = (await res.json()) as { ok: boolean; latencyMs: number; error?: string };
+      if (data.ok) {
+        setTestState('ok');
+      } else {
+        setTestState('error');
+        setTestError(data.error ?? 'Connection failed');
+      }
+    } catch (e) {
+      setTestState('error');
+      setTestError(e instanceof Error ? e.message : 'Network error');
+    }
   };
 
   return (
@@ -339,6 +368,34 @@ function ProviderRow({
         </div>
 
         <span className="text-xs text-base-content/40 font-mono truncate max-w-28">{provider.model}</span>
+
+        {/* API key set indicator */}
+        {provider.apiKey && !editing && (
+          <span title="API key is set" className="text-success shrink-0">
+            <KeyRound size={12} />
+          </span>
+        )}
+
+        {/* Test connection button */}
+        {provider.backendId && !editing && (
+          <button
+            className={`btn btn-ghost btn-xs gap-1 shrink-0 ${
+              testState === 'ok' ? 'text-success' : testState === 'error' ? 'text-error' : 'text-base-content/40 hover:text-sky-400'
+            }`}
+            onClick={() => void handleTest()}
+            disabled={testState === 'testing'}
+            title={testState === 'error' ? testError ?? 'Test failed' : 'Test connection'}
+          >
+            {testState === 'testing'
+              ? <Loader2 size={12} className="animate-spin" />
+              : testState === 'ok'
+                ? <CheckCircle2 size={12} />
+                : testState === 'error'
+                  ? <AlertCircle size={12} />
+                  : <Zap size={12} />
+            }
+          </button>
+        )}
 
         <button
           className="btn btn-ghost btn-xs text-base-content/40 hover:text-sky-400"
@@ -374,6 +431,9 @@ function ProviderRow({
           </label>
           <button className="btn btn-primary btn-xs self-end" onClick={handleSave}>Save</button>
         </div>
+      )}
+      {testState === 'error' && testError && !editing && (
+        <p className="text-xs text-error/80 mt-1 px-1">{testError}</p>
       )}
     </div>
   );
