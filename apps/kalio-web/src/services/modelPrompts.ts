@@ -50,6 +50,6 @@ Plain text is allowed only when: (a) answering without tools, (b) summarizing re
 
 export const DEFAULT_SYSTEM_PROMPT = CORE_OS_PROMPT_LARGE;
 
-export function getToolCallingPrompt(_model: string): string {
+export function getToolCallingPrompt(_model = 'gpt-4'): string {
   return TOOL_CALLING_PROMPT;
 }

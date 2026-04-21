@@ -8,10 +8,13 @@ import { MessageBubble } from './MessageBubble';
 import { ToolActivityRow } from './ToolActivityRow';
 import { ChatInput } from './ChatInput';
 import { ConfirmationDialog } from './ConfirmationDialog';
+import { TokenBadge } from './TokenBadge';
+import { ContextStats } from './ContextStats';
+import { useContextUsage } from './hooks/useContextUsage';
 import type { ChatMessage } from '@kalio/types';
 
 export function ChatInterface() {
-  const { messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk } = useSessionStore();
+  const { messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages, updateSession } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
   const contextWindow = useSettingsStore((s) => s.getEffectiveContextWindow());
@@ -26,7 +29,11 @@ export function ChatInterface() {
     clearToolActivities,
   } = useAgentStore();
   const [error, setError] = useState<string | null>(null);
+  const [showContextStats, setShowContextStats] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Context usage monitoring
+  const { tokenCount, needsCompact, compactMessages } = useContextUsage();
 
   useEffect(() => {
     if (!eventBus.connected) eventBus.connect();
@@ -89,6 +96,14 @@ export function ChatInterface() {
     setError(null);
     clearToolActivities();
 
+    // Auto-generate title from first message if session still has default title
+    const { sessions, updateSession } = useSessionStore.getState();
+    const session = sessions.find((s) => s.id === activeSessionId);
+    if (session && session.title === 'New Chat' && messages.length === 0) {
+      const generatedTitle = content.slice(0, 50).trim() + (content.length > 50 ? '…' : '');
+      void updateSession(activeSessionId, { title: generatedTitle });
+    }
+
     const userMsg: ChatMessage = {
       id: nanoid(),
       sessionId: activeSessionId,
@@ -122,6 +137,13 @@ export function ChatInterface() {
     setPendingConfirmation(null);
   };
 
+  const handleCompactNow = () => {
+    if (!activeSessionId) return;
+    const compacted = compactMessages(messages, 'auto-trim');
+    setMessages(compacted);
+    setShowContextStats(false);
+  };
+
   return (
     <div data-testid="chat-interface" className="flex h-full flex-col bg-base-200 rounded-xl border border-base-300 overflow-hidden">
       {error && (
@@ -135,6 +157,16 @@ export function ChatInterface() {
       {activeSession && (
         <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
           <span className="text-sm font-medium truncate flex-1">{activeSession.title}</span>
+          <div className="relative shrink-0">
+            <TokenBadge tokenCount={tokenCount} onClick={() => setShowContextStats((v) => !v)} />
+            {showContextStats && (
+              <ContextStats
+                tokenCount={tokenCount}
+                onCompactNow={needsCompact ? handleCompactNow : undefined}
+                onClose={() => setShowContextStats(false)}
+              />
+            )}
+          </div>
           {activeModel && (
             <span className="text-[10px] font-mono text-base-content/35 shrink-0 truncate max-w-[9rem]" title={`${activeModel} · ctx ${(contextWindow / 1000).toFixed(0)}k`}>
               {activeModel} · {(contextWindow / 1000).toFixed(0)}k

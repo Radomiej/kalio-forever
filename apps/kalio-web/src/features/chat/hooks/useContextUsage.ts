@@ -40,7 +40,7 @@ export interface ContextUsageResult {
 
 export function useContextUsage(): ContextUsageResult {
   const tools = useAgentStore((s: any) => s.tools);
-  const { activeSessionId, sessions, messages } = useSessionStore();
+  const { activeSessionId, messages } = useSessionStore();
   const contextLimit = 32000; // Default context window
 
   const tokenCount = useMemo(() => {
