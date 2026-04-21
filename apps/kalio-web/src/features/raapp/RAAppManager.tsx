@@ -1,4 +1,8 @@
 export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId: string) => void; onRunWithAgent: () => void }) {
+  // Placeholder for future implementation
+  void onOpenVFS;
+  void onRunWithAgent;
+  
   return (
     <div className="p-4">
       <h2 className="text-lg font-semibold mb-4">RA-Apps</h2>

@@ -15,7 +15,7 @@ export interface ToolActivity {
 
 interface AgentState {
   isStreaming: boolean;
-  streamingMessageId: string | null;
+  streamingMessageId: string | undefined;
   pendingConfirmation: ToolConfirmationRequest | null;
   availableTools: ToolMeta[];
   tools: ToolMeta[];
@@ -33,13 +33,13 @@ interface AgentState {
 
 export const useAgentStore = create<AgentState>((set) => ({
   isStreaming: false,
-  streamingMessageId: null,
+  streamingMessageId: undefined,
   pendingConfirmation: null,
   availableTools: [],
   tools: [],
   toolActivities: [],
 
-  setStreaming: (streaming, messageId = null) =>
+  setStreaming: (streaming, messageId = undefined) =>
     set({ isStreaming: streaming, streamingMessageId: messageId }),
   setPendingConfirmation: (req) => set({ pendingConfirmation: req }),
   setAvailableTools: (tools) => set({ availableTools: tools }),
