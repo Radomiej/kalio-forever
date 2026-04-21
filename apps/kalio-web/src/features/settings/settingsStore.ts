@@ -45,16 +45,30 @@ export const DEFAULT_MODELS: Record<LLMProviderType, string> = {
   custom:     '',
 };
 
+export interface BackendLLMConfig {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  contextWindowSize: number;
+}
+
 interface SettingsState {
   providers: LLMProvider[];
   activeProviderId: string | null;
   contextWindowSize: number;
+  /** Config fetched from /api/llm/config — reflects what backend is actually using */
+  backendConfig: BackendLLMConfig | null;
   addProvider: (p: Omit<LLMProvider, 'id'>) => string;
   updateProvider: (id: string, patch: Partial<Omit<LLMProvider, 'id' | 'backendId'> & Pick<LLMProvider, 'backendId'>>) => void;
   removeProvider: (id: string) => void;
   setActive: (id: string) => void;
   getActive: () => LLMProvider | undefined;
   setContextWindowSize: (size: number) => void;
+  setBackendConfig: (cfg: BackendLLMConfig) => void;
+  /** Returns active local provider model, or backend model, or '' */
+  getEffectiveModel: () => string;
+  /** Returns effective context window (local > backend > default) */
+  getEffectiveContextWindow: () => number;
 }
 
 let _counter = 1;
@@ -66,6 +80,7 @@ export const useSettingsStore = create<SettingsState>()(
       providers: [],
       activeProviderId: null,
       contextWindowSize: 32000,
+      backendConfig: null,
 
       addProvider: (p) => {
         const id = newId();
@@ -101,6 +116,19 @@ export const useSettingsStore = create<SettingsState>()(
       },
 
       setContextWindowSize: (size) => set({ contextWindowSize: size }),
+
+      setBackendConfig: (cfg) => set({ backendConfig: cfg }),
+
+      getEffectiveModel: () => {
+        const s = get();
+        const localModel = s.providers.find((p) => p.id === s.activeProviderId)?.model;
+        return localModel || s.backendConfig?.model || '';
+      },
+
+      getEffectiveContextWindow: () => {
+        const s = get();
+        return s.contextWindowSize || s.backendConfig?.contextWindowSize || 32000;
+      },
     }),
     { name: 'kalio-settings' },
   ),
