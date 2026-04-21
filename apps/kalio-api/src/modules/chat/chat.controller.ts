@@ -59,4 +59,10 @@ export class ChatController {
   async remove(@Param('id') id: string): Promise<void> {
     return this.chatService.deleteSession(id);
   }
+
+  @Post(':id/generate-title')
+  async generateTitle(@Param('id') id: string): Promise<{ title: string }> {
+    const title = await this.chatService.generateTitle(id);
+    return { title };
+  }
 }

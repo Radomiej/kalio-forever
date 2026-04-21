@@ -320,6 +320,35 @@ export class ChatService {
       .where(eq(sessions.id, sessionId));
   }
 
+  async generateTitle(sessionId: string): Promise<string> {
+    const msgs = await this.getMessages(sessionId);
+    const firstUser = msgs.find((m) => m.role === 'user');
+    if (!firstUser) return 'New conversation';
+
+    const snippet = firstUser.content.slice(0, 300);
+    let title = '';
+    try {
+      await this.llm.streamChat(
+        [
+          {
+            role: 'user',
+            content: `Summarize the following message in 5 words or less as a conversation title. Reply with ONLY the title, no quotes, no punctuation at the end:\n\n${snippet}`,
+          },
+        ],
+        [],
+        (chunk) => { if (!chunk.thinking) title += chunk.delta; },
+        sessionId,
+        'title-gen',
+      );
+      title = title.trim().replace(/["""]+/g, '').trim() || snippet.slice(0, 40);
+    } catch {
+      title = snippet.slice(0, 40);
+    }
+
+    await this.renameSession(sessionId, title);
+    return title;
+  }
+
   async getMessages(sessionId: string): Promise<ChatMessage[]> {
     const rows = await this.drizzle.db
       .select()
