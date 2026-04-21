@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { API_BASE } from '../helpers/test-config';
 
 // Check if real API key is available
-const hasRealApiKey = !!(globalThis as any).process?.env.COMET_API_KEY;
+const hasRealApiKey = !!(globalThis as any).process?.env.LLM_API_KEY;
 
 test.describe('Memory API Integration Tests', () => {
   let personaId: string;

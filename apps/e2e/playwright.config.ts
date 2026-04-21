@@ -1,12 +1,4 @@
 import { defineConfig, devices } from '@playwright/test';
-import { config } from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
-
-// Load .env.test for test environment
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-config({ path: resolve(__dirname, '../../.env.test') });
 
 const CI = (globalThis as any).process?.env.CI;
 
