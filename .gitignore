@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+data/
+coverage/
+.turbo/
+*.db
+*.db-shm
+*.db-wal
+test-results/
+playwright-report/
