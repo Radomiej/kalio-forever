@@ -1,300 +1,212 @@
-# AGENTS.md — Kalio v2 (NestJS Monorepo)
+# AGENTS.md
 
-> Cross-tool baseline for GitHub Copilot, Cursor, Claude, and all AI coding agents.
-> Read this file before touching any code. Every rule here is a hard constraint.
+Drop-in operating instructions for coding agents. Read this file before every task.
 
----
+**Working code only. Finish the job. Plausibility is not correctness.**
 
-## Project Summary
+This file follows the [AGENTS.md](https://agents.md) open standard (Linux Foundation / Agentic AI Foundation). Claude Code, Codex, Cursor, Windsurf, Copilot, Aider, Devin, Amp read it natively. For tools that look elsewhere, symlink:
 
-Kalio v2 is a **modular NestJS 11 monorepo** — a full rewrite of Kalio v1.
-The core product is an AI chat interface where a "fat" backend orchestrates LLM streaming,
-tool execution, HITL gates, VFS file I/O, persona management, and MCP dynamic tool discovery.
-The frontend is intentionally thin: it renders state, emits events, never calls LLM directly.
-
-### Workspace Layout
-
-```
-apps/
-  kalio-api/          ← NestJS fat backend          (port 3016)
-  kalio-web/          ← React thin frontend          (port 5188)
-  e2e/                ← Playwright E2E tests
-packages/
-  @kalio/types        ← ONLY source of truth for all contracts
-  @kalio/sdk          ← Socket.IO client SDK (typed, wraps eventBus)
-```
-
-### Key Technologies
-
-| Layer | Stack |
-|---|---|
-| Monorepo | Turborepo 2.4 + pnpm 9 workspaces |
-| Backend | NestJS 11, TypeScript 5.8 strict, Socket.IO 4.8 |
-| ORM | Drizzle ORM + better-sqlite3 |
-| Frontend | React 19, Vite 6, Zustand 5, TailwindCSS 4, daisyUI 5 |
-| Tests | Vitest (unit/integration) + Playwright (E2E) |
-
----
-
-## Build Commands
-
-```powershell
-# Install dependencies (root)
-pnpm install
-
-# Build all packages
-pnpm turbo run build
-
-# Type-check all packages
-pnpm turbo run typecheck
-
-# Lint all packages
-pnpm turbo run lint
-
-# Run all unit tests
-pnpm turbo run test
-
-# Run E2E tests
-pnpm turbo run test:e2e
-
-# Start dev servers (both API + web, hot-reload)
-.\start-dev.ps1
-
-# Drizzle migrations (run once on first start)
-pnpm --filter kalio-api drizzle-kit migrate
+```bash
+ln -s AGENTS.md CLAUDE.md
+ln -s AGENTS.md GEMINI.md
 ```
 
 ---
 
-## NestJS Module Map
+## 0. Non-negotiables
 
-| Module | Path | Responsibility |
-|---|---|---|
-| `ChatModule` | `src/modules/chat/` | Sessions, message history, LLM streaming gateway |
-| `PersonaModule` | `src/modules/persona/` | Persona CRUD, system prompt, model, skills, KV store |
-| `ToolModule` | `src/modules/tool/` | Registry, dispatch, native tools, HITL gate |
-| `VFSModule` | `src/modules/vfs/` | Filesystem per conversationId, path traversal guard |
-| `MCPModule` | `src/modules/mcp/` | Client manager, dynamic tool discovery, watchdog |
-| `RAAppModule` | `src/modules/raapp/` | DSL executor, sandbox (`vm.runInNewContext`), render |
-| `CredentialsModule` | `src/modules/credentials/` | API key storage (SQLite, never exposed in API responses) |
-| `LLMModule` | `src/modules/llm/` | Provider routing (OpenAI-compatible / Mock) |
+These rules override everything else in this file when in conflict:
+
+1. **No flattery, no filler.** Skip openers like "Great question", "You're absolutely right", "Excellent idea", "I'd be happy to". Start with the answer or the action.
+2. **Disagree when you disagree.** If the user's premise is wrong, say so before doing the work. Agreeing with false premises to be polite is the single worst failure mode in coding agents.
+3. **Never fabricate.** Not file paths, not commit hashes, not API names, not test results, not library functions. If you don't know, read the file, run the command, or say "I don't know, let me check."
+4. **Stop when confused.** If the task has two plausible interpretations, ask. Do not pick silently and proceed.
+5. **Touch only what you must.** Every changed line must trace directly to the user's request. No drive-by refactors, reformatting, or "while I was in there" cleanups.
 
 ---
 
-## Allowed and Restricted File Areas
+## 1. Before writing code
 
-### Agent MAY touch freely
-- `apps/kalio-api/src/modules/[module-name]/` — all module files
-- `apps/kalio-web/src/` — all frontend files
-- `apps/e2e/tests/` — E2E tests
-- `packages/@kalio/sdk/src/` — SDK wrapper
+**Goal: understand the problem and the codebase before producing a diff.**
 
-### Agent MUST NOT touch without human sign-off
-| File | Reason |
-|---|---|
-| `packages/@kalio/types/**` | Contract changes risk drift — require PR review |
-| `apps/kalio-api/src/main.ts` | Bootstrap — structural changes only |
-| `turbo.json` | Pipeline config — affects all CI |
-| `pnpm-workspace.yaml` | Workspace roots |
-| `drizzle.config.ts` | Schema generation source |
+- State your plan in one or two sentences before editing. For anything non-trivial, produce a numbered list of steps with a verification check for each.
+- Read the files you will touch. Read the files that call the files you will touch. Claude Code: use subagents for exploration so the main context stays clean.
+- Match existing patterns in the codebase. If the project uses pattern X, use pattern X, even if you'd do it differently in a greenfield repo.
+- Surface assumptions out loud: "I'm assuming you want X, Y, Z. If that's wrong, say so." Do not bury assumptions inside the implementation.
+- If two approaches exist, present both with tradeoffs. Do not pick one silently. Exception: trivial tasks (typo, rename, log line) where the diff fits in one sentence.
 
 ---
 
-## Hard Architecture Rules
+## 2. Writing code: simplicity first
 
-These are enforced by ESLint (`import/no-restricted-paths`) and blocked in CI. Breaking them is a stop condition.
+**Goal: the minimum code that solves the stated problem. Nothing speculative.**
 
-| Rule | Description |
-|---|---|
-| ❌ Zero cross-module imports | Modules may NOT import from each other. Only `@kalio/types` crosses module boundaries. |
-| ❌ No `any` in TypeScript | Strict mode is non-negotiable. Use `unknown` + narrowing or explicit types. |
-| ❌ No empty catch | `.catch(() => {})` is forbidden. Log the error AND rethrow or handle explicitly. |
-| ❌ No LLM calls from FE | All LLM traffic goes through the Socket.IO gateway on the backend. |
-| ❌ No direct filesystem access outside VFSModule | All file I/O must go through `VFSService`. |
-| ❌ No type duplication | Every shared type lives in `@kalio/types/src/index.ts`. Zero copy-paste. |
-| ✅ Tool = separate `@Injectable()` class | Each tool must have its own class with `@Tool()` decorator. |
-| ✅ Destructive tools need `requiresConfirmation: true` | VFS delete, terminal exec, etc. must trigger HITL dialog. |
-| ✅ Every error logged + handled | No silent failures. Always log with context. |
-| ✅ New env vars → `.env.example` + `env.schema.ts` | Joi schema is the only source of truth for env contract. |
+- No features beyond what was asked.
+- No abstractions for single-use code. No configurability, flexibility, or hooks that were not requested.
+- No error handling for impossible scenarios. Handle the failures that can actually happen.
+- If the solution runs 200 lines and could be 50, rewrite it before showing it.
+- If you find yourself adding "for future extensibility", stop. Future extensibility is a future decision.
+- Bias toward deleting code over adding code. Shipping less is almost always better.
 
-### File Size Limits
-
-| File Type | Soft Limit | Hard Limit |
-|---|---|---|
-| Controller / Gateway | 150 lines | 250 lines |
-| Service | 300 lines | 400 lines |
-| Module | 80 lines | 120 lines |
-| Test file | 400 lines | 600 lines |
-| React Component | 200 lines | 350 lines |
-
-When approaching the soft limit: stop, refactor, extract. Never exceed the hard limit.
+The test: would a senior engineer reading the diff call this overcomplicated? If yes, simplify.
 
 ---
 
-## HITL (Human-in-the-Loop) Gate
+## 3. Surgical changes
 
-Tools marked `@Tool({ requiresConfirmation: true })` trigger the HITL flow:
+**Goal: clean, reviewable diffs. Change only what the request requires.**
 
-1. Backend emits `tool:confirmation_required` via Socket.IO with `{ requestId, toolName, args }`
-2. Frontend shows `ConfirmationDialog` — user clicks Confirm or Cancel
-3. Frontend emits `tool:confirm` or `tool:cancel` with `{ requestId, sessionId }`
-4. Backend resolves the pending promise → tool executes (confirm) or `TOOL_CANCELLED` (cancel)
-5. 30-second timeout auto-cancels if no user response
+- Do not "improve" adjacent code, comments, formatting, or imports that are not part of the task.
+- Do not refactor code that works just because you are in the file.
+- Do not delete pre-existing dead code unless asked. If you notice it, mention it in the summary.
+- Do clean up orphans created by your own changes (unused imports, variables, functions your edit made obsolete).
+- Match the project's existing style exactly: indentation, quotes, naming, file layout.
 
-**All tools that write, delete, or execute system commands MUST have `requiresConfirmation: true`.**
-
----
-
-## TDD Workflow (Mandatory for all new features)
-
-```
-1. Read §7 of kalio-v2-mvp-spec.md — identify the AC you're implementing
-2. Write the test FIRST (unit in Vitest or E2E stub in Playwright)
-3. Run tests → RED ❌
-4. Implement the minimum code to pass
-5. Run tests → GREEN ✅
-6. Refactor if needed (no new test failures)
-7. Update AC-Status Tracker in kalio-v2-mvp-spec.md §11
-```
-
-**After 2 consecutive failures on the same AC: stop and report to human. Do NOT silently change the test.**
+The test: every changed line traces directly to the user's request. If a line fails that test, revert it.
 
 ---
 
-## Stop Conditions (Pause and Wait for Human)
+## 4. Goal-driven execution
 
-| Trigger | Why |
-|---|---|
-| Need to import from another module (not `@kalio/types`) | Module boundary violation |
-| Need to change types in `packages/@kalio/types` | Contract change — risk of drift |
-| Need a new env variable | Schema change → update §4 + `.env.example` + `env.schema.ts` |
-| File would exceed hard line limit | Refactor decision needed |
-| 2+ failures on same AC | Spec ambiguity |
-| A v1 pattern seems necessary | v2 architecture has a solution — ask first |
-| Destructive operation without HITL gate | Security boundary |
+**Goal: define success as something you can verify, then loop until verified.**
 
----
+Rewrite vague asks into verifiable goals before starting:
 
-## Skill Routing Table
+- "Add validation" becomes "Write tests for invalid inputs (empty, malformed, oversized), then make them pass."
+- "Fix the bug" becomes "Write a failing test that reproduces the reported symptom, then make it pass."
+- "Refactor X" becomes "Ensure the existing test suite passes before and after, and no public API changes."
+- "Make it faster" becomes "Benchmark the current hot path, identify the bottleneck with profiling, change it, show the benchmark is faster."
 
-| Task domain | Approach |
-|---|---|
-| Add a new native tool | Create `apps/kalio-api/src/modules/tool/tools/[name].tool.ts`, add to `ToolModule` providers, add to `ToolDispatchService` |
-| Add a new REST endpoint | Add method to existing controller, update Swagger if needed, add test |
-| Add a new Socket.IO event | Add to `SocketEvents` in `@kalio/types` first, then handler in `ChatGateway`, then SDK wrapper in `@kalio/sdk` |
-| Add a Zustand store | Create in `apps/kalio-web/src/store/`, never hold derived state that's available in server response |
-| Add a React feature component | Create in `apps/kalio-web/src/features/[domain]/`, use `data-testid` on all interactive elements |
-| Drizzle schema change | Edit `schema.ts`, run `drizzle-kit generate`, run `drizzle-kit migrate`, update types if needed |
-| MCP tool integration | Add via `MCPService.addServer()`, tools auto-discovered and registered in `ToolRegistryService` |
+For every task:
+
+1. State the success criteria before writing code.
+2. Write the verification (test, script, benchmark, screenshot diff) where practical.
+3. Run the verification. Read the output. Do not claim success without checking.
+4. If the verification fails, fix the cause, not the test.
 
 ---
 
-## Environment Variables Reference
+## 5. Tool use and verification
 
-| Variable | Required | Default | Notes |
-|---|---|---|---|
-| `PORT` | No | `3016` | Backend port |
-| `NODE_ENV` | No | `development` | `test` makes LLM vars optional (uses MockProvider) |
-| `DATABASE_PATH` | Yes | `./data/kalio.db` | SQLite file path |
-| `WORKSPACE_ROOT` | Yes | `./data/workspaces` | Root for VFS per conversation |
-| `LLM_API_KEY` | Yes* | — | *Optional when `NODE_ENV=test` (default: `'mock'`) |
-| `LLM_BASE_URL` | Yes* | — | *Optional when `NODE_ENV=test` |
-| `LLM_MODEL` | Yes* | — | *Optional when `NODE_ENV=test` |
-| `VITE_API_URL` | Yes | `http://localhost:3015` | FE → BE REST base URL |
-| `VITE_WS_URL` | Yes | `http://localhost:3015` | FE → BE Socket.IO URL |
+- Prefer running the code to guessing about the code. If a test suite exists, run it. If a linter exists, run it. If a type checker exists, run it.
+- Never report "done" based on a plausible-looking diff alone. Plausibility is not correctness.
+- When debugging, address root causes, not symptoms. Suppressing the error is not fixing the error.
+- For UI changes, verify visually: screenshot before, screenshot after, describe the diff.
+- Use CLI tools (gh, aws, gcloud, kubectl) when they exist. They are more context-efficient than reading docs or hitting APIs unauthenticated.
+- When reading logs, errors, or stack traces, read the whole thing. Half-read traces produce wrong fixes.
 
 ---
 
-## Common Patterns
+## 6. Session hygiene
 
-### NestJS Module (3-file pattern)
-```
-[module-name]/
-  [module-name].module.ts     ← Module definition, imports, providers, exports
-  [module-name].service.ts    ← Business logic
-  [module-name].controller.ts ← REST endpoints (if any)
-```
-
-### Adding a tool with HITL
-```typescript
-// In apps/kalio-api/src/modules/tool/tools/my-tool.tool.ts
-@Injectable()
-export class MyTool {
-  constructor(private readonly vfsService: VFSService) {}
-
-  @Tool({
-    name: 'my_tool',
-    description: 'Does something destructive',
-    parameters: { /* JSON Schema */ },
-    requiresConfirmation: true,   // ← REQUIRED for destructive tools
-  })
-  async execute(args: { path: string }): Promise<ToolResult> {
-    // implementation
-  }
-}
-```
-
-### Socket.IO event (full chain)
-1. Add event to `SocketEvents` in `@kalio/types/src/index.ts`
-2. Add handler in `ChatGateway` (`@SubscribeMessage('event:name')`)
-3. Add wrapper method in `KalioSDK` in `@kalio/sdk/src/index.ts`
-4. Use `eventBus.[method]()` in React component
-
-### Drizzle query pattern
-```typescript
-// Always inject DrizzleService, never instantiate directly
-constructor(private readonly db: DrizzleService) {}
-
-async findAll() {
-  return this.db.connection.select().from(personas).all();
-}
-```
+- Context is the constraint. Long sessions with accumulated failed attempts perform worse than fresh sessions with a better prompt.
+- After two failed corrections on the same issue, stop. Summarize what you learned and ask the user to reset the session with a sharper prompt.
+- Use subagents (Claude Code: "use subagents to investigate X") for exploration tasks that would otherwise pollute the main context with dozens of file reads.
+- When committing, write descriptive commit messages (subject under 72 chars, body explains the why). No "update file" or "fix bug" commits. No "Co-Authored-By: Claude" attribution unless the project explicitly wants it.
 
 ---
 
-## Anti-Patterns (Never Do These)
+## 7. Communication style
 
-These were the root causes of v1 collapse. Do not repeat them.
-
-| Pattern | v1 Problem | v2 Solution |
-|---|---|---|
-| God object / god component | `ToolRouter.ts` 1335L, `ChatInterface.tsx` 705L | Module classes + thin FE |
-| Manual type sync between BE and FE | `contracts.ts` drift | Single `@kalio/types` package |
-| Setter injection / global state | No DI container | NestJS `@Injectable()` DI |
-| Inline Socket.IO handlers in `index.ts` | Untestable, unscalable | `@WebSocketGateway()` |
-| In-memory VFS | Restart = data loss | Real filesystem + `VFSService` |
-| SQLite + PostgreSQL mix | No unified adapter | Drizzle ORM with dialect abstraction |
-| LLM calls from frontend | CORS, key exposure | Gateway-only LLM access |
+- Direct, not diplomatic. "This won't scale because X" beats "That's an interesting approach, but have you considered...".
+- Concise by default. Two or three short paragraphs unless the user asks for depth. No padding, no restating the question, no ceremonial closings.
+- When a question has a clear answer, give it. When it does not, say so and give your best read on the tradeoffs.
+- Celebrate only what matters: shipping, solving genuinely hard problems, metrics that moved. Not feature ideas, not scope creep, not "wouldn't it be cool if".
+- No excessive bullet points, no unprompted headers, no emoji. Prose is usually clearer than structure for short answers.
 
 ---
 
-## Testing Expectations
+## 8. When to ask, when to proceed
 
-### Unit/Integration (Vitest)
-- Every `Service` class: ≥80% coverage
-- `VFSService.resolveSafe()`: 100% coverage (security-critical)
-- `ToolRegistryService`: test that unknown tools throw `TOOL_NOT_FOUND`
-- `ChatService`: test HITL pending/confirm/cancel flow
-- Mock: use `MockLLMProvider` — never use real API keys in unit tests
+**Ask before proceeding when:**
+- The request has two plausible interpretations and the choice materially affects the output.
+- The change touches something you've been told is load-bearing, versioned, or has a migration path.
+- You need a credential, a secret, or a production resource you don't have access to.
+- The user's stated goal and the literal request appear to conflict.
 
-### E2E (Playwright)
-- All 15 AC from `docs/kalio-v2-mvp-spec.md §7` must have passing tests
-- Test stubs are in `apps/e2e/tests/ac-XX-*.spec.ts`
-- `NODE_ENV=test` in webServer config → uses `MockLLMProvider`
-- Every interactive element has `data-testid` attribute for stable selectors
+**Proceed without asking when:**
+- The task is trivial and reversible (typo, rename a local variable, add a log line).
+- The ambiguity can be resolved by reading the code or running a command.
+- The user has already answered the question once in this session.
 
 ---
 
-## Changelog of Key Decisions
+## 9. Self-improvement loop
 
-| Date | Decision | Reason |
-|---|---|---|
-| 2026-04-21 | Full rewrite (not migration) | v1 god objects impossible to incrementally fix |
-| 2026-04-21 | NestJS 11 over Express 5 | DI container, modules, testability |
-| 2026-04-21 | Drizzle ORM (not Prisma/TypeORM) | SQLite today → PG tomorrow, type-safe, minimal overhead |
-| 2026-04-21 | Real filesystem VFS | v1 restart = data loss — unacceptable |
-| 2026-04-21 | SQLite only to MVP | PostgreSQL post-MVP, Drizzle adapter ready |
-| 2026-04-21 | pnpm workspaces (not npm) | Monorepo dependency deduplication |
-| 2026-04-21 | `@kalio/types` as sole contract | Eliminates drift that plagued v1 |
-| 2026-04-21 | Auth = post-MVP | Local-only MVP, auth after validation |
-| 2026-04-21 | Forever Loop + Orchestrator = post-MVP | Core modularity more important than advanced features |
+**This file is living. Keep it short by keeping it honest.**
+
+After every session where the agent did something wrong:
+
+1. Ask: was the mistake because this file lacks a rule, or because the agent ignored a rule?
+2. If lacking: add the rule under "Project Learnings" below, written as concretely as possible ("Always use X for Y" not "be careful with Y").
+3. If ignored: the rule may be too long, too vague, or buried. Tighten it or move it up.
+4. Every few weeks, prune. For each line, ask: "Would removing this cause the agent to make a mistake?" If no, delete. Bloated AGENTS.md files get ignored wholesale.
+
+Boris Cherny (creator of Claude Code) keeps his team's file around 100 lines. Under 300 is a good ceiling. Over 500 and you are fighting your own config.
+
+---
+
+## 10. Project context
+
+**Fill this in per project. Keep it specific. Delete sections that don't apply.**
+
+### Stack
+- Language and version: TypeScript 5.8 strict
+- Frameworks: NestJS 11 (backend), React 19 (frontend)
+- Package manager: pnpm 9 with Turborepo 2.4 workspaces
+- Runtime / deployment target: Node.js
+
+### Commands
+- Install: `pnpm install` (from root)
+- Build: `pnpm turbo run build`
+- Test (all): `pnpm turbo run test`
+- Test (e2e): `pnpm turbo run test:e2e`
+- Lint: `pnpm turbo run lint`
+- Typecheck: `pnpm turbo run typecheck`
+- Run locally: `.\start-dev.ps1` (starts both API on port 3016 and web on port 5188)
+
+Prefer single-file or single-test runs during iteration. Full suites are for the final verification pass.
+
+### Layout
+- Source lives in: `apps/kalio-api/src/` (backend), `apps/kalio-web/src/` (frontend), `packages/@kalio/` (shared packages)
+- Tests live in: `apps/e2e/tests/` (E2E Playwright), unit tests alongside source in each module
+- Do not modify: `packages/@kalio/types/**` (contract changes require PR review), `apps/kalio-api/src/main.ts` (bootstrap only), `turbo.json`, `pnpm-workspace.yaml`, `drizzle.config.ts`
+
+### Conventions specific to this repo
+- Naming: PascalCase for classes, camelCase for variables/methods, kebab-case for files
+- Import style: Only import from `@kalio/types` across module boundaries. Zero cross-module imports.
+- Error handling pattern: Never use empty catch. Always log errors with context and rethrow or handle explicitly.
+- Testing pattern and framework: Vitest for unit/integration, Playwright for E2E. Mock LLM with `MockLLMProvider` in tests.
+
+### Forbidden
+- Cross-module imports (modules may only import from `@kalio/types`)
+- Using `any` in TypeScript (use `unknown` + narrowing or explicit types)
+- Empty catch blocks (`.catch(() => {})`)
+- LLM calls from frontend (all LLM traffic goes through Socket.IO gateway)
+- Direct filesystem access outside VFSModule (all file I/O through `VFSService`)
+- Type duplication (all shared types live in `@kalio/types/src/index.ts`)
+- Destructive tools without `requiresConfirmation: true` (VFS delete, terminal exec, etc.)
+
+---
+
+## 11. Project Learnings
+
+**Accumulated corrections. This section is for the agent to maintain, not just the human.**
+
+When the user corrects your approach, append a one-line rule here before ending the session. Write it concretely ("Always use X for Y"), never abstractly ("be careful with Y"). If an existing line already covers the correction, tighten it instead of adding a new one. Remove lines when the underlying issue goes away (model upgrades, refactors, process changes).
+
+- (empty)
+
+---
+
+## 12. How this file was built
+
+This boilerplate synthesizes:
+- Sean Donahoe's IJFW ("It Just F\*cking Works") principles: one install, working code, no ceremony.
+- Andrej Karpathy's observations on LLM coding pitfalls (the four principles: think-first, simplicity, surgical changes, goal-driven execution).
+- Boris Cherny's public Claude Code workflow (reactive pruning, keep it ~100 lines, only rules that fix real mistakes).
+- Anthropic's official Claude Code best practices (explore-plan-code-commit, verification loops, context as the scarce resource).
+- Community anti-sycophancy patterns (explicit banned phrases, direct-not-diplomatic).
+- The AGENTS.md open standard (cross-tool portability via symlinks).
+
+Read once. Edit sections 10 and 11 for your project. Prune the rest over time. This file gets better the more you use it.

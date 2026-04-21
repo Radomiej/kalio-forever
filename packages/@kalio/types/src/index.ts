@@ -187,12 +187,15 @@ export interface CreateCredentialDto {
 }
 
 // ─── MCP ──────────────────────────────────────────────────────────────────────
-export type MCPServerStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
+export type MCPServerStatus = 'connecting' | 'connected' | 'disconnected' | 'error' | 'stopped';
 
 export interface MCPServer {
   id: ID;
   name: string;
-  url: string;
+  transport: 'stdio' | 'http';
+  url?: string;
+  command?: string;
+  args?: string[];
   status: MCPServerStatus;
   toolCount?: number;
   lastError?: string;
@@ -205,6 +208,16 @@ export interface MCPTool {
   serverId: ID;
   requiresConfirmation: boolean;
   parameters: Record<string, unknown>;
+}
+
+export interface CreateMCPServerDto {
+  name: string;
+  transport: 'stdio' | 'http';
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
 }
 
 // ─── RA-App DSL ───────────────────────────────────────────────────────────────
@@ -237,6 +250,115 @@ export interface RAAppResult {
   requiresHITL?: boolean;     // true when mode='interactive' and has actions
 }
 
+// ─── MCP (extended) ───────────────────────────────────────────────────────────
+export type MCPTransport = 'stdio' | 'http';
+
+export interface MCPServerConfig {
+  id: ID;
+  name: string;
+  transport: MCPTransport;
+  enabled: boolean;
+  // stdio
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  // http
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+// ─── Skills ───────────────────────────────────────────────────────────────────
+export interface Skill {
+  id: ID;
+  name: string;
+  description: string;
+  prompt: string;               // injected into system prompt when skill is active
+  source: 'user' | 'agent';     // agent = proposed by LLM via create_skill tool
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface CreateSkillDto {
+  name: string;
+  description: string;
+  prompt: string;
+  source?: 'user' | 'agent';
+}
+
+export interface UpdateSkillDto {
+  name?: string;
+  description?: string;
+  prompt?: string;
+}
+
+// ─── Agent Loops (Forever Loop) ───────────────────────────────────────────────
+export type AgentLoopStatus = 'idle' | 'running' | 'paused' | 'stopped' | 'error' | 'completed';
+export type AgentTaskStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+export type AgentLoopMode = 'continuous' | 'watchdog';
+
+export interface AgentLoopConfig {
+  maxIterations: number;          // default 100
+  iterationDelayMs: number;       // delay between iterations, default 1000
+  mode: AgentLoopMode;
+  watchdogIntervalMs?: number;    // watchdog mode: interval to check for new tasks
+  maxConsecutiveFailures?: number; // circuit breaker, default 5
+}
+
+export interface AgentLoop {
+  id: ID;
+  name: string;
+  personaId: ID;                  // which persona drives this loop
+  systemPrompt: string;
+  status: AgentLoopStatus;
+  config: AgentLoopConfig;
+  currentTaskId?: ID;
+  chatSessionId?: ID;             // optional: linked session for progress updates
+  iterationCount: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface AgentTask {
+  id: ID;
+  loopId: ID;
+  title: string;
+  description: string;
+  priority: number;               // 0–10, higher = executed first
+  status: AgentTaskStatus;
+  resultSummary?: string;
+  orderIndex: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface AgentIteration {
+  id: ID;
+  loopId: ID;
+  taskId?: ID;
+  iterationNumber: number;
+  action: 'execute_task' | 'pause' | 'resume' | 'error' | 'watchdog';
+  promptUsed: string;
+  resultSummary: string;
+  durationMs: number;
+  createdAt: Timestamp;
+}
+
+export interface CreateAgentLoopDto {
+  name: string;
+  personaId: ID;
+  systemPrompt?: string;
+  mode?: AgentLoopMode;
+  watchdogIntervalMinutes?: number;
+  maxIterations?: number;
+}
+
+export interface CreateAgentTaskDto {
+  loopId: ID;
+  title: string;
+  description?: string;
+  priority?: number;
+}
+
 // ─── Socket.IO Event Map ──────────────────────────────────────────────────────
 // COMPLETE contract between FE and BE. All Socket.IO events defined here.
 export interface SocketEvents {
@@ -267,9 +389,26 @@ export interface SocketEvents {
   'tool:result': ToolResult;
 
   // MCP — server → client
+  'mcp:server:status': { serverId: ID; serverName: string; status: string; toolCount: number; lastError?: string };
   'mcp:connected': { serverId: ID; serverName: string; toolCount: number };
   'mcp:disconnected': { serverId: ID; reason: string };
   'mcp:error': { serverId: ID; error: string };
+
+  // Agent Loops — server → client
+  'agentLoop:stateChange': { loopId: ID; status: AgentLoopStatus; iterationCount?: number };
+  'agentLoop:taskStarted': { loopId: ID; taskId: ID };
+  'agentLoop:taskDone': { loopId: ID; taskId: ID; resultSummary: string };
+  'agentLoop:taskProgress': { loopId: ID; taskId?: ID; delta: string };
+  'agentLoop:error': { loopId: ID; taskId?: ID; error: string };
+  'agentLoop:idle': { loopId: ID; message: string };
+  'agentLoop:watchdog': { loopId: ID; message: string };
+  'agentLoop:complete': { loopId: ID; totalIterations: number };
+
+  // Agent Loops — client → server
+  'agentLoop:start': { loopId: ID };
+  'agentLoop:pause': { loopId: ID };
+  'agentLoop:stop': { loopId: ID };
+  'agentLoop:addTask': CreateAgentTaskDto;
 
   // Sessions — server → client
   'session:created': ChatSession;
