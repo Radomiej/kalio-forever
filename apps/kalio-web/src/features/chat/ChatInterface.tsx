@@ -13,7 +13,8 @@ import type { ChatMessage } from '@kalio/types';
 export function ChatInterface() {
   const { messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
-  const activeModel = useSettingsStore((s) => s.getActive()?.model ?? '');
+  const activeModel = useSettingsStore((s) => s.getEffectiveModel());
+  const contextWindow = useSettingsStore((s) => s.getEffectiveContextWindow());
   const {
     isStreaming,
     pendingConfirmation,
@@ -135,8 +136,8 @@ export function ChatInterface() {
         <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
           <span className="text-sm font-medium truncate flex-1">{activeSession.title}</span>
           {activeModel && (
-            <span className="text-[10px] font-mono text-base-content/35 shrink-0 truncate max-w-[7.5rem]" title={activeModel}>
-              {activeModel}
+            <span className="text-[10px] font-mono text-base-content/35 shrink-0 truncate max-w-[9rem]" title={`${activeModel} · ctx ${(contextWindow / 1000).toFixed(0)}k`}>
+              {activeModel} · {(contextWindow / 1000).toFixed(0)}k
             </span>
           )}
         </div>
