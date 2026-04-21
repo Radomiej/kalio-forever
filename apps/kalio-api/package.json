@@ -26,6 +26,7 @@
     "@nestjs/platform-socket.io": "^11.1.19",
     "@nestjs/websockets": "^11.1.19",
     "better-sqlite3": "^12.9.0",
+    "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.2",
     "joi": "^17.13.0",
     "nanoid": "^5.0.0",

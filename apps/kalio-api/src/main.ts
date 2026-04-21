@@ -3,6 +3,16 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AppModule } from './app.module';
+import { config } from 'dotenv';
+import { resolve } from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+// Load environment variables
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
+config({ path: resolve(__dirname, `../../${envFile}`) });
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
