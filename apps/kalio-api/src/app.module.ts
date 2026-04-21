@@ -10,6 +10,8 @@ import { VFSModule } from './modules/vfs/vfs.module';
 import { MCPModule } from './modules/mcp/mcp.module';
 import { RAAppModule } from './modules/raapp/raapp.module';
 import { CredentialsModule } from './modules/credentials/credentials.module';
+import { SkillsModule } from './modules/skills/skills.module';
+import { AgentLoopModule } from './modules/agentloop/agent-loop.module';
 
 @Module({
   imports: [
@@ -26,6 +28,8 @@ import { CredentialsModule } from './modules/credentials/credentials.module';
     ToolModule,
     MCPModule,
     RAAppModule,
+    SkillsModule,
+    AgentLoopModule,
     ChatModule,
   ],
 })
