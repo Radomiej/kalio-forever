@@ -16,6 +16,8 @@ interface SessionState {
   addMessage: (message: ChatMessage) => void;
   appendChunk: (messageId: string, delta: string, thinking?: boolean) => void;
   finalizeChunk: (messageId: string) => void;
+  removeSession: (id: string) => void;
+  updateSession: (id: string, patch: Partial<ChatSession>) => void;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -96,4 +98,16 @@ export const useSessionStore = create<SessionState>((set) => ({
         ),
       };
     }),
+
+  removeSession: (id) =>
+    set((s) => ({
+      sessions: s.sessions.filter((sess) => sess.id !== id),
+      activeSessionId: s.activeSessionId === id ? null : s.activeSessionId,
+      messages: s.activeSessionId === id ? [] : s.messages,
+    })),
+
+  updateSession: (id, patch) =>
+    set((s) => ({
+      sessions: s.sessions.map((sess) => (sess.id === id ? { ...sess, ...patch } : sess)),
+    })),
 }));
