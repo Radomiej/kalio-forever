@@ -68,6 +68,7 @@ export class ChatService {
     // Stream LLM response
     let toolCalls: LLMToolCall[] = [];
     let chunkCount = 0;
+    let assistantContent = '';
     try {
       const tools = this.toolRegistry.getToolsForSkills(personaConfig.availableSkills);
       this.logger.log(`[chat:send] Streaming LLM with ${tools.length} tools...`);
@@ -76,6 +77,7 @@ export class ChatService {
         tools,
         (chunk) => {
           chunkCount++;
+          if (!chunk.done) assistantContent += chunk.delta;
           client.emit('chat:chunk', chunk);
         },
         sessionId,
@@ -91,6 +93,16 @@ export class ChatService {
       } satisfies SocketEvents['chat:error']);
       return;
     }
+
+    // Persist assistant message to DB
+    await this.drizzle.db.insert(messages).values({
+      id: assistantMsgId,
+      sessionId,
+      role: 'assistant',
+      content: assistantContent,
+      createdAt: new Date(),
+    });
+    this.logger.log(`[chat:send] Assistant message persisted id=${assistantMsgId}`);
 
     client.emit('chat:complete', { sessionId, messageId: assistantMsgId });
     this.logger.log(`[chat:send] chat:complete emitted messageId=${assistantMsgId}`);

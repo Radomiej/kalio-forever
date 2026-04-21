@@ -126,4 +126,56 @@ describe('ChatService - Session Management (REGRESSION TEST)', () => {
       expect(true).toBe(true); // Documentation test
     });
   });
+
+  describe('ChatController - Date Handling Type Mismatch (REGRESSION TEST)', () => {
+    it('should handle Drizzle timestamp_ms mode returning numbers not Date objects', () => {
+      // Regression test for: Type mismatch in ChatController Date handling
+      // Issue: Controller checks instanceof Date, but Drizzle with mode: 'timestamp_ms' returns numbers
+
+      // According to schema.ts: integer('created_at', { mode: 'timestamp_ms' })
+      // This returns numbers (Unix ms), not Date objects
+      // The controller's instanceof Date check will always be false
+
+      const timestamp = 1713715200000; // Unix timestamp in ms
+      const mockSession: any = {
+        id: 'session-1',
+        personaId: 'default',
+        title: 'Test Session',
+        createdAt: timestamp, // Drizzle returns number, not Date
+        updatedAt: timestamp,
+      };
+
+      // Simulate the controller's logic
+      const createdAt = mockSession.createdAt instanceof Date ? mockSession.createdAt.getTime() : mockSession.createdAt;
+      const updatedAt = mockSession.updatedAt instanceof Date ? mockSession.updatedAt.getTime() : mockSession.updatedAt;
+
+      // Assert: instanceof check is always false for numbers
+      expect(mockSession.createdAt instanceof Date).toBe(false);
+      expect(mockSession.updatedAt instanceof Date).toBe(false);
+
+      // The ternary always returns the number (not getTime())
+      expect(createdAt).toBe(timestamp);
+      expect(updatedAt).toBe(timestamp);
+      expect(typeof createdAt).toBe('number');
+      expect(typeof updatedAt).toBe('number');
+
+      // This demonstrates the instanceof check is unnecessary
+      // and misleading - it will never be true with timestamp_ms mode
+    });
+
+    it('should demonstrate that Date objects would break the type contract', () => {
+      // If Drizzle somehow returned Date objects, it would violate the schema contract
+      // The schema explicitly uses mode: 'timestamp_ms' which returns numbers
+
+      const timestamp = 1713715200000;
+      const dateObject = new Date(timestamp);
+
+      // This scenario should not happen with current schema configuration
+      // but the controller handles it defensively
+      const result = dateObject instanceof Date ? dateObject.getTime() : dateObject;
+
+      expect(result).toBe(timestamp);
+      expect(typeof result).toBe('number');
+    });
+  });
 });

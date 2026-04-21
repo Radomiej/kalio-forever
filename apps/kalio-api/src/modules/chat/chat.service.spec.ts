@@ -15,9 +15,10 @@ import { Logger } from '@nestjs/common';
 describe('ChatService', () => {
   let service: ChatService;
   let logger: Logger;
+  let moduleRef: TestingModule;
 
   beforeEach(async () => {
-    const moduleRef: TestingModule = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       providers: [
         ChatService,
         {
@@ -161,6 +162,141 @@ describe('ChatService', () => {
 
       // Assert
       expect(session).toBeNull();
+    });
+  });
+
+  describe('processToolCall - Tool Result Persistence Error Handling (REGRESSION TEST)', () => {
+    it('should handle database errors when persisting tool results', async () => {
+      // Arrange
+      const mockDb = (service as any).drizzle.db;
+      const mockInsert = vi.fn().mockReturnValue({
+        values: vi.fn().mockRejectedValue(new Error('Database connection failed')),
+      });
+      mockDb.insert = mockInsert;
+
+      const mockToolMeta = {
+        name: 'test_tool',
+        description: 'Test tool',
+        parameters: {},
+        requiresConfirmation: false,
+      };
+      const toolRegistry = moduleRef.get<ToolRegistryService>(ToolRegistryService);
+      vi.spyOn(toolRegistry, 'getMeta').mockReturnValue(mockToolMeta);
+
+      const mockToolResult = {
+        callId: 'call-123',
+        status: 'success' as const,
+        data: { result: 'test' },
+      };
+      const toolDispatch = moduleRef.get<ToolDispatchService>(ToolDispatchService);
+      vi.spyOn(toolDispatch, 'dispatch').mockResolvedValue(mockToolResult);
+
+      const tc = {
+        id: 'call-123',
+        name: 'test_tool',
+        args: { test: 'value' },
+      };
+
+      const mockClient = {
+        emit: vi.fn(),
+      } as any;
+
+      const mockServer = {
+        emit: vi.fn(),
+      } as any;
+
+      const spyError = vi.spyOn(service['logger'], 'error');
+
+      // Act
+      await (service as any)['processToolCall'](
+        tc,
+        'session-123',
+        'conv-123',
+        mockServer,
+        mockClient,
+        ['test_tool'],
+      );
+
+      // Assert
+      // BUG: Current implementation does not handle database errors when persisting tool results
+      // Expected: Should log the error and still emit tool:result to client
+      // This test will fail until the bug is fixed
+      expect(spyError).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to persist tool result'),
+        expect.any(Error),
+      );
+      expect(mockClient.emit).toHaveBeenCalledWith('tool:result', mockToolResult);
+    });
+  });
+
+  describe('handleMessage - Sensitive Data Logging (REGRESSION TEST)', () => {
+    it('should not log full tool arguments that may contain sensitive data', async () => {
+      // Arrange
+      const personaConfig = {
+        systemPrompt: 'Test system prompt',
+        model: 'gpt-4',
+        availableSkills: ['test_tool'],
+        kv: {},
+      };
+      const personaService = moduleRef.get<PersonaService>(PersonaService);
+      vi.spyOn(personaService, 'getSessionConfig').mockResolvedValue(personaConfig);
+
+      const mockToolCall = {
+        id: 'call-123',
+        name: 'test_tool',
+        args: { apiKey: 'secret-key-12345', password: 'my-password' },
+      };
+      const llmService = moduleRef.get<LLMService>(LLMService);
+      vi.spyOn(llmService, 'streamChat').mockResolvedValue([mockToolCall]);
+
+      const mockToolMeta = {
+        name: 'test_tool',
+        description: 'Test tool',
+        parameters: {},
+        requiresConfirmation: false,
+      };
+      const toolRegistry = moduleRef.get<ToolRegistryService>(ToolRegistryService);
+      vi.spyOn(toolRegistry, 'getMeta').mockReturnValue(mockToolMeta);
+      vi.spyOn(toolRegistry, 'getToolsForSkills').mockReturnValue([mockToolMeta]);
+
+      const mockToolResult = {
+        callId: 'call-123',
+        status: 'success' as const,
+        data: { result: 'test' },
+      };
+      const toolDispatch = moduleRef.get<ToolDispatchService>(ToolDispatchService);
+      vi.spyOn(toolDispatch, 'dispatch').mockResolvedValue(mockToolResult);
+
+      const mockClient = {
+        emit: vi.fn(),
+      } as any;
+
+      const mockServer = {
+        emit: vi.fn(),
+      } as any;
+
+      const spyLog = vi.spyOn(service['logger'], 'log');
+
+      const payload = {
+        sessionId: 'session-123',
+        content: 'Test message',
+        personaId: 'persona-123',
+        conversationId: 'conv-123',
+      };
+
+      // Act
+      await service.handleMessage(payload, mockServer, mockClient);
+
+      // Assert
+      // BUG: Current implementation logs full tool arguments with JSON.stringify
+      // Expected: Should truncate or redact sensitive data in logs
+      // This test will fail until the bug is fixed
+      const logCalls = spyLog.mock.calls.map((call) => call[0]);
+      const argsLog = logCalls.find((call) => call.includes('args='));
+      expect(argsLog).toBeDefined();
+      // Should not contain full sensitive values
+      expect(argsLog).not.toContain('secret-key-12345');
+      expect(argsLog).not.toContain('my-password');
     });
   });
 });
