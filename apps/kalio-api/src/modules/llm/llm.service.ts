@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { LLMMessage, LLMStreamChunk, LLMToolCall, LLMConfig } from '@kalio/types';
-import { MockLLMProvider } from './providers/mock.provider';
-import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
+import type { LLMMessage, LLMStreamChunk, LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
+import { createLLMProvider, type ProviderConfig } from './providers/provider-factory';
 
 export interface ILLMProvider {
   streamChat(
@@ -20,16 +19,24 @@ export class LLMService {
   private readonly provider: ILLMProvider;
 
   constructor(private readonly config: ConfigService) {
+    const provider = this.config.get<string>('LLM_PROVIDER', 'openai') as LLMProviderType;
     const apiKey = this.config.get<string>('LLM_API_KEY', 'mock');
     const baseUrl = this.config.get<string>('LLM_BASE_URL', 'mock');
     const model = this.config.get<string>('LLM_MODEL', 'mock');
 
-    if (apiKey === 'mock' || baseUrl === 'mock') {
-      this.provider = new MockLLMProvider();
-      this.logger.warn('Using MockLLMProvider — no real LLM calls');
+    const providerConfig: ProviderConfig = {
+      provider,
+      apiKey,
+      model,
+      baseUrl,
+    };
+
+    this.provider = createLLMProvider(providerConfig);
+
+    if (provider === 'mock' || apiKey === 'mock' || baseUrl === 'mock') {
+      this.logger.warn('Using MockLLMProvider — no real LLM calls (add credentials in Settings or configure env vars)');
     } else {
-      this.provider = new OpenAICompatibleProvider({ apiKey, baseUrl, model });
-      this.logger.log(`LLM provider: ${baseUrl} / ${model}`);
+      this.logger.log(`LLM provider: ${provider} / ${model}`);
     }
   }
 
@@ -45,9 +52,17 @@ export class LLMService {
 
   getConfig(): LLMConfig {
     return {
+      provider: this.config.get<string>('LLM_PROVIDER', 'openai') as LLMProviderType,
       apiKey: this.config.get<string>('LLM_API_KEY', ''),
       baseUrl: this.config.get<string>('LLM_BASE_URL', ''),
       model: this.config.get<string>('LLM_MODEL', ''),
     };
+  }
+
+  /**
+   * Create a provider instance from config (useful for testing or dynamic provider switching)
+   */
+  createProvider(config: ProviderConfig): ILLMProvider {
+    return createLLMProvider(config);
   }
 }

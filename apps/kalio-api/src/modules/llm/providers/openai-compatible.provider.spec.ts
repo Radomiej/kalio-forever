@@ -12,6 +12,7 @@ describe('OpenAICompatibleProvider', () => {
 
   beforeEach(() => {
     const config: LLMConfig = {
+      provider: 'openai',
       model: 'gpt-4',
       apiKey: 'test-key',
       baseUrl: 'https://api.openai.com',
