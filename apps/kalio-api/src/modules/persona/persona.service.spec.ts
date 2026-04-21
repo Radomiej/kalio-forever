@@ -206,4 +206,38 @@ describe('PersonaService', () => {
       expect(mockDb.update).toHaveBeenCalled();
     });
   });
+
+  describe('onApplicationBootstrap - Missing Error Handling (REGRESSION TEST)', () => {
+    it('should throw unhandled error when database insert fails', async () => {
+      // Regression test for: Missing error handling in onApplicationBootstrap
+      // Issue: If database is unavailable or insert fails, application crashes with no error handling
+
+      // Arrange - Mock database to throw error on insert
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]), // No default persona exists
+        }),
+      });
+
+      const insertError = new Error('Database connection failed');
+      mockDb.insert.mockImplementation(() => {
+        throw insertError;
+      });
+
+      // Act & Assert - onApplicationBootstrap should throw unhandled error
+      // Current implementation has no try-catch, so error propagates
+      await expect(service.onApplicationBootstrap()).rejects.toThrow('Database connection failed');
+    });
+
+    it('should handle database error during persona existence check', async () => {
+      // Arrange - Mock database to throw error on select
+      const selectError = new Error('Database query failed');
+      mockDb.select.mockImplementation(() => {
+        throw selectError;
+      });
+
+      // Act & Assert - onApplicationBootstrap should throw unhandled error
+      await expect(service.onApplicationBootstrap()).rejects.toThrow('Database query failed');
+    });
+  });
 });
