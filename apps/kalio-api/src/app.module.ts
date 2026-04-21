@@ -12,6 +12,7 @@ import { RAAppModule } from './modules/raapp/raapp.module';
 import { CredentialsModule } from './modules/credentials/credentials.module';
 import { SkillsModule } from './modules/skills/skills.module';
 import { AgentLoopModule } from './modules/agentloop/agent-loop.module';
+import { MemoryModule } from './modules/memory/memory.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { AgentLoopModule } from './modules/agentloop/agent-loop.module';
     SkillsModule,
     AgentLoopModule,
     ChatModule,
+    MemoryModule,
   ],
 })
 export class AppModule {}
