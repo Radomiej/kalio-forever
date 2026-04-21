@@ -29,7 +29,7 @@ export function ChatInterface() {
 
     const offChunk = eventBus.onChunk((chunk) => {
       if (!chunk.done) {
-        appendChunk(chunk.messageId, chunk.delta);
+        appendChunk(chunk.messageId, chunk.delta, chunk.thinking);
       } else {
         finalizeChunk(chunk.messageId);
         setStreaming(false);
@@ -47,7 +47,7 @@ export function ChatInterface() {
       setPendingConfirmation(req);
       // Tool is awaiting confirmation — log it as an activity
       addToolActivity({
-        callId: req.requestId,
+        callId: req.toolCallId,
         toolName: req.toolName,
         args: req.args,
         status: 'awaiting_confirmation',
@@ -61,6 +61,10 @@ export function ChatInterface() {
         finishedAt: Date.now(),
         result,
       });
+      // Re-enable streaming state for follow-up LLM response after successful tool
+      if (result.status === 'success') {
+        setStreaming(true);
+      }
     });
 
     return () => {
@@ -102,14 +106,14 @@ export function ChatInterface() {
 
   const handleConfirm = () => {
     if (!pendingConfirmation || !activeSessionId) return;
-    updateToolActivity(pendingConfirmation.requestId, { status: 'running', startedAt: Date.now() });
+    updateToolActivity(pendingConfirmation.toolCallId, { status: 'running', startedAt: Date.now() });
     eventBus.confirmTool({ requestId: pendingConfirmation.requestId, sessionId: activeSessionId });
     setPendingConfirmation(null);
   };
 
   const handleCancel = () => {
     if (!pendingConfirmation || !activeSessionId) return;
-    updateToolActivity(pendingConfirmation.requestId, { status: 'cancelled', finishedAt: Date.now() });
+    updateToolActivity(pendingConfirmation.toolCallId, { status: 'cancelled', finishedAt: Date.now() });
     eventBus.cancelTool({ requestId: pendingConfirmation.requestId, sessionId: activeSessionId });
     setPendingConfirmation(null);
   };

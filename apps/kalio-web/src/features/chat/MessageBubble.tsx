@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { ChevronDown, BrainCircuit } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import type { ChatMessage } from '@kalio/types';
 
@@ -6,35 +8,78 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({ message }: MessageBubbleProps) {
-  const { streamingChunks } = useSessionStore();
+  const { streamingChunks, thinkingChunks } = useSessionStore();
+  const [thinkingOpen, setThinkingOpen] = useState(false);
+
   const isUser = message.role === 'user';
   const isStreaming = message.streaming === true;
+
   const displayContent = isStreaming
     ? (streamingChunks[message.id] ?? '')
     : message.content;
 
-  return (
-    <div
-      data-testid="message-bubble"
-      data-role={message.role}
-      className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
-    >
-      <div
-        className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm ${
-          isUser
-            ? 'bg-primary text-primary-content'
-            : 'bg-base-300 text-base-content'
-        }`}
-      >
-        {isStreaming && !displayContent ? (
-          <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
-        ) : (
+  const thinkingContent = thinkingChunks[message.id] ?? '';
+  const hasThinking = thinkingContent.length > 0;
+
+  if (isUser) {
+    return (
+      <div data-testid="message-bubble" data-role="user" className="flex justify-end">
+        <div className="max-w-[75%] rounded-2xl px-4 py-2 text-sm bg-primary text-primary-content">
           <span data-testid="message-content">{displayContent}</span>
-        )}
-        {isStreaming && displayContent && (
-          <span className="ml-1 inline-block h-3 w-0.5 animate-pulse bg-current" />
-        )}
+        </div>
+      </div>
+    );
+  }
+
+  // Assistant bubble
+  return (
+    <div data-testid="message-bubble" data-role="assistant" className="flex justify-start mb-1 w-full">
+      <div className="min-w-0 w-full max-w-[min(100%,68rem)]">
+        <p className="text-xs text-base-content/50 mb-1 ml-1">Kalio</p>
+
+        <div className="group relative rounded-2xl bg-base-300 text-base-content text-sm px-4 py-3 flex flex-col gap-2 w-full">
+          {/* Thinking block */}
+          {hasThinking && (
+            <div className="border border-base-content/10 rounded-lg overflow-hidden">
+              <button
+                className="flex items-center gap-2 w-full px-3 py-2 text-xs text-base-content/50 hover:text-base-content/70 transition-colors bg-base-200/50"
+                onClick={() => setThinkingOpen((v) => !v)}
+              >
+                <BrainCircuit size={12} className={isStreaming && !displayContent ? 'text-sky-400 animate-pulse' : 'text-base-content/40'} />
+                <span>Thinking</span>
+                {isStreaming && !displayContent && (
+                  <span className="loading loading-dots loading-xs ml-1" />
+                )}
+                <ChevronDown
+                  size={12}
+                  className={`ml-auto transition-transform duration-150 ${thinkingOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {thinkingOpen && (
+                <div className="px-3 py-2 text-xs text-base-content/50 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto bg-base-200/20">
+                  {thinkingContent}
+                  {isStreaming && !displayContent && (
+                    <span className="inline-block h-3 w-0.5 animate-pulse bg-current ml-0.5" />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Main content */}
+          {isStreaming && !displayContent && !hasThinking ? (
+            <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
+          ) : displayContent ? (
+            <span data-testid="message-content" className="whitespace-pre-wrap leading-relaxed">
+              {displayContent}
+              {isStreaming && (
+                <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-current" />
+              )}
+            </span>
+          ) : null}
+        </div>
       </div>
     </div>
   );
 }
+

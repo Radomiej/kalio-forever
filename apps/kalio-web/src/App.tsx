@@ -3,6 +3,7 @@ import {
   MessageSquare, Settings, FolderOpen, Bot, PanelLeftClose, PanelLeftOpen, Plug,
 } from 'lucide-react';
 import { ChatInterface } from './features/chat/ChatInterface';
+import { CanvasPanel } from './features/chat/CanvasPanel';
 import { SessionPanel } from './features/sessions/SessionPanel';
 import { PersonaPanel } from './features/persona/PersonaPanel';
 import { SettingsModal } from './features/settings/SettingsModal';
@@ -22,6 +23,7 @@ export function App() {
   const [tab, setTab] = useState<Tab>('sessions');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [canvasOpen, setCanvasOpen] = useState(false);
 
   const handleNavClick = (id: Tab) => {
     if (id === tab && sidebarOpen) {
@@ -104,9 +106,14 @@ export function App() {
       </aside>
 
       {/* ── Main chat ── */}
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden relative">
         <ChatInterface />
       </main>
+
+      {/* ── Canvas panel (right) ── */}
+      <div className="relative flex">
+        <CanvasPanel open={canvasOpen} onToggle={() => setCanvasOpen((v) => !v)} />
+      </div>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </div>
