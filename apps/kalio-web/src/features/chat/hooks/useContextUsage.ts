@@ -7,7 +7,6 @@ import { useMemo, useCallback } from 'react';
 import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
-import { useSettingsStore } from '../../../store/settingsStore';
 import { countTokens, type TokenCount, type CountTokensInput } from '../../../services/tokenCounter';
 import { getCompactStrategy } from '../../../services/compactStrategy';
 import { buildHistory } from '../buildHistory';
@@ -41,16 +40,12 @@ export interface ContextUsageResult {
 
 export function useContextUsage(): ContextUsageResult {
   const tools = useAgentStore((s: any) => s.tools);
-  const { activeSessionId, sessions } = useSessionStore();
-  const { llm } = useSettingsStore();
-
-  const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const messages = activeSession?.messages ?? [];
-  const contextLimit = llm.contextWindowSize ?? 32000;
+  const { activeSessionId, sessions, messages } = useSessionStore();
+  const contextLimit = 32000; // Default context window
 
   const tokenCount = useMemo(() => {
     // Build the same prompt parts that the backend uses
-    const basePromptText = getCoreOsPrompt(llm.primaryModel?.model);
+    const basePromptText = getCoreOsPrompt();
 
     const toolsText = tools.length > 0
       ? tools.map((t: any) => {
@@ -61,7 +56,7 @@ export function useContextUsage(): ContextUsageResult {
         }).join('\n')
       : '';
 
-    const toolCallingPrompt = getToolCallingPrompt(llm.primaryModel?.model);
+    const toolCallingPrompt = getToolCallingPrompt();
     const sessionNote = activeSessionId ? `\nCurrent session ID: ${activeSessionId}` : '';
 
     // Combine base + tool calling prompt + session note into "system prompt" category
@@ -84,12 +79,12 @@ export function useContextUsage(): ContextUsageResult {
       historyTexts,
       imageCount,
       contextLimit,
-      imageDetailMode: llm.imageDetailMode ?? 'auto',
+      imageDetailMode: 'auto',
     };
 
     return countTokens(countInput);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length, tools.length, llm.primaryModel, activeSessionId, contextLimit]);
+  }, [messages.length, tools.length, activeSessionId, contextLimit]);
 
   const needsCompact = tokenCount.total > contextLimit;
 
