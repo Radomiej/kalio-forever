@@ -44,6 +44,17 @@ export function ChatInterface() {
       } else {
         finalizeChunk(chunk.messageId);
         setStreaming(false);
+        // After first assistant reply, generate a real title via LLM
+        const { sessions, activeSessionId: sid } = useSessionStore.getState();
+        const session = sessions.find((s) => s.id === sid);
+        if (sid && session && (session.title === 'New Chat' || session.title === '')) {
+          fetch(`/api/sessions/${sid}/generate-title`, { method: 'POST' })
+            .then((r) => r.json())
+            .then((data: { title: string }) => {
+              useSessionStore.getState().updateSession(sid, { title: data.title });
+            })
+            .catch(() => { /* non-critical */ });
+        }
       }
     });
 

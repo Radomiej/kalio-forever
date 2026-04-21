@@ -51,6 +51,7 @@ export function App() {
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [canvasOpen, setCanvasOpen] = useState(false);
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
@@ -275,7 +276,7 @@ export function App() {
           {tab === 'workspaces' && <WorkspacePanel />}
 
           {/* Skills tab */}
-          {tab === 'skills' && <SkillListPanel />}
+          {tab === 'skills' && <SkillListPanel selectedId={selectedSkillId} onSelect={setSelectedSkillId} />}
 
           {/* Persona tab */}
           {tab === 'persona' && <PersonaPanel />}
@@ -300,7 +301,7 @@ export function App() {
         {view === 'landing' ? (
           <LandingPage onNavigateToChat={() => { setView('app'); setTab('sessions'); if (!sidebarOpen) setSidebarOpen(true); }} />
         ) : tab === 'skills' ? (
-          <SkillEditorPanel />
+          <SkillEditorPanel skillId={selectedSkillId} />
         ) : tab === 'memory' ? (
           <MemoryPage />
         ) : (
