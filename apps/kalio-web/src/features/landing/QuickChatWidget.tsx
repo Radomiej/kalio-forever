@@ -18,7 +18,7 @@ export function QuickChatWidget({ onMessageSent }: QuickChatWidgetProps) {
     if (!trimmed) return;
 
     // Create a new session
-    const sessionId = createSession('New chat');
+    const sessionId = createSession('New Chat');
     
     // Set it as active
     setActiveSession(sessionId);

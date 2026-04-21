@@ -10,6 +10,7 @@ interface SessionState {
 
   setSessions: (sessions: ChatSession[]) => void;
   addSession: (session: ChatSession) => void;
+  createSession: (name: string) => string;
   setActiveSession: (id: string | null) => void;
   setMessages: (messages: ChatMessage[]) => void;
   addMessage: (message: ChatMessage) => void;
@@ -27,6 +28,18 @@ export const useSessionStore = create<SessionState>((set) => ({
   setSessions: (sessions) => set({ sessions }),
   addSession: (session) =>
     set((s) => ({ sessions: [...s.sessions, session] })),
+  createSession: (title) => {
+    const id = crypto.randomUUID();
+    const newSession: ChatSession = {
+      id,
+      personaId: 'default',
+      title,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    set((s) => ({ sessions: [...s.sessions, newSession] }));
+    return id;
+  },
   setActiveSession: (id) => set({ activeSessionId: id, messages: [] }),
   setMessages: (messages) => set({ messages }),
   addMessage: (message) =>
