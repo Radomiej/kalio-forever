@@ -1,4 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
+import { config } from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+// Load .env.test for test environment
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+config({ path: resolve(__dirname, '../../.env.test') });
 
 const CI = (globalThis as any).process?.env.CI;
 
@@ -13,7 +21,7 @@ export default defineConfig({
   reporter: [['html', { open: 'never' }], ['list']],
 
   use: {
-    baseURL: 'http://localhost:5187',
+    baseURL: 'http://localhost:5188',
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },
@@ -27,21 +35,6 @@ export default defineConfig({
       name: 'integration',
       testDir: './tests/integration',
       use: { ...devices['Desktop Chrome'] },
-    },
-  ],
-
-  webServer: [
-    {
-      command: 'pnpm --filter kalio-api run start:dev',
-      url: 'http://localhost:3015/api/health',
-      reuseExistingServer: !CI,
-      timeout: 60_000,
-    },
-    {
-      command: 'pnpm --filter kalio-web run dev',
-      url: 'http://localhost:5187',
-      reuseExistingServer: !CI,
-      timeout: 60_000,
     },
   ],
 });
