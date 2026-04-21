@@ -25,6 +25,7 @@ import { LandingPage } from './features/landing/LandingPage';
 import { BackendStatusBadge } from './components/ui/BackendStatusBadge';
 import { useSessionStore } from './store/sessionStore';
 import { backendHealth } from './services/backendHealth';
+import { useSettingsStore } from './features/settings/settingsStore';
 
 type Tab = 'sessions' | 'tools' | 'raapps' | 'workspaces' | 'files' | 'agents' | 'agentloop' | 'skills' | 'memory' | 'audit' | 'persona' | 'mcp';
 
@@ -52,6 +53,7 @@ export function App() {
   const [canvasOpen, setCanvasOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
   const { sessions } = useSessionStore();
   // Use sessions for badge count
   void sessions;
@@ -59,7 +61,14 @@ export function App() {
   // Initialize on app mount
   useEffect(() => {
     backendHealth.start();
-  }, []);
+    // Fetch actual model + context from backend
+    void fetch('/api/llm/config')
+      .then((r) => r.json())
+      .then((cfg: { provider: string; model: string; baseUrl: string; contextWindowSize: number }) => {
+        setBackendConfig(cfg);
+      })
+      .catch(() => {/* non-fatal */});
+  }, [setBackendConfig]);
 
   const handleQuickUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
