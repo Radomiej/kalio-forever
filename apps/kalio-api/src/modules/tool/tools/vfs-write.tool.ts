@@ -15,7 +15,7 @@ import { VFSService } from '../../vfs/vfs.service';
       content:  { type: 'string', description: 'File content to write' },
     },
   },
-  requiresConfirmation: false,
+  requiresConfirmation: true,
 })
 export class VFSWriteTool {
   constructor(private readonly vfs: VFSService) {}

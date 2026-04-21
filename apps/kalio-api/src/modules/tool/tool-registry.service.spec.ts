@@ -40,7 +40,7 @@ describe('ToolRegistryService', () => {
   });
 
   describe('getToolsForSkills', () => {
-    it('should return all tools when skills array is empty', () => {
+    it('should return empty array when skills array is empty (REGRESSION TEST)', () => {
       // Arrange
       const skills: string[] = [];
 
@@ -48,9 +48,10 @@ describe('ToolRegistryService', () => {
       const result = service.getToolsForSkills(skills);
 
       // Assert
-      expect(result.length).toBeGreaterThan(0);
-      // Should return vfs_write tool
-      expect(result.some((t) => t.name === 'vfs_write')).toBe(true);
+      // BUG: Current implementation returns ALL tools when skills is empty
+      // Expected behavior: Empty skills should mean "no tools allowed" for security
+      // This test will fail until the bug is fixed
+      expect(result.length).toBe(0);
     });
 
     it('should filter tools by available skills', () => {

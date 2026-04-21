@@ -35,7 +35,7 @@ export class ToolRegistryService {
   }
 
   getToolsForSkills(skills: string[]): ToolMeta[] {
-    if (skills.length === 0) return this.getAllTools();
+    if (skills.length === 0) return [];
     return this.getAllTools().filter((t) => skills.includes(t.name));
   }
 }
