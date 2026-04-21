@@ -17,13 +17,13 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@kalio/types": "workspace:*",
     "@nestjs/common": "^11.1.19",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.19",
     "@nestjs/platform-express": "^11.1.19",
     "@nestjs/platform-socket.io": "^11.1.19",
     "@nestjs/websockets": "^11.1.19",
-    "@kalio/types": "workspace:*",
     "better-sqlite3": "^12.9.0",
     "drizzle-orm": "^0.45.2",
     "joi": "^17.13.0",
@@ -35,6 +35,8 @@
   "devDependencies": {
     "@nestjs/cli": "^11.0.21",
     "@nestjs/testing": "^11.1.19",
+    "@swc/cli": "^0.8.1",
+    "@swc/core": "^1.15.30",
     "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
