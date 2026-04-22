@@ -1,146 +1,209 @@
-import { useState } from 'react';
-import { Plus, Trash2, CheckCircle2, Circle, Loader2, AlertCircle, KeyRound, Zap } from 'lucide-react';
-import {
-  useSettingsStore,
-  PROVIDER_DEFAULTS,
-  DEFAULT_MODELS,
-  type LLMProviderType,
-  type LLMProvider,
-} from './settingsStore';
+import { useState, useEffect, useCallback } from 'react';
+import { Plus, CheckCircle2, Circle, Loader2, AlertCircle, Zap, Trash2 } from 'lucide-react';
+import type { Credential, CreateCredentialDto } from '@kalio/types';
+import { useSettingsStore } from './settingsStore';
 
-const API = '/api';
+const PROVIDER_LABELS: Record<string, string> = {
+  openai:     'OpenAI',
+  xiaomimimo: 'Xiaomi MiMo',
+  deepseek:   'DeepSeek',
+  cometapi:   'CometAPI',
+  openrouter: 'OpenRouter',
+  ollama:     'Ollama',
+  custom:     'Custom',
+};
 
-const PROVIDER_TYPES: LLMProviderType[] = ['openai', 'xiaomimimo', 'deepseek', 'cometapi', 'openrouter', 'ollama', 'custom'];
+const PROVIDER_BASE_URLS: Record<string, string> = {
+  openai:     'https://api.openai.com/v1',
+  xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
+  deepseek:   'https://api.deepseek.com/v1',
+  cometapi:   'https://api.cometapi.com/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
+  ollama:     'http://localhost:11434/v1',
+  custom:     '',
+};
 
-async function apiPost(path: string, body: unknown) {
-  const res = await fetch(`${API}${path}`, {
-    method: 'POST',
+const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+  openai:     'gpt-4o-mini',
+  xiaomimimo: 'mimo-v2-omni',
+  deepseek:   'deepseek-reasoner',
+  cometapi:   'gpt-4o-mini',
+  openrouter: 'openai/gpt-4o-mini',
+  ollama:     'llama3.2',
+  custom:     '',
+};
+
+const ALL_PROVIDER_TYPES = ['openai', 'xiaomimimo', 'deepseek', 'cometapi', 'openrouter', 'ollama', 'custom'];
+
+async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    ...opts,
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return res.json();
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`${res.status}: ${text}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
 }
 
-async function apiPut(path: string, body?: unknown) {
-  const res = await fetch(`${API}${path}`, {
-    method: 'PUT',
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+interface AddForm {
+  name: string;
+  provider: string;
+  apiKey: string;
+  baseUrl: string;
+  model: string;
 }
 
-async function apiDelete(path: string) {
-  const res = await fetch(`${API}${path}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-}
-
-function emptyForm(): Omit<LLMProvider, 'id'> {
+function emptyForm(): AddForm {
   return {
-    type: 'openai',
-    label: PROVIDER_DEFAULTS.openai.label,
-    baseUrl: PROVIDER_DEFAULTS.openai.baseUrl,
+    name: '',
+    provider: 'openai',
     apiKey: '',
-    model: DEFAULT_MODELS.openai,
+    baseUrl: PROVIDER_BASE_URLS['openai'] ?? '',
+    model: PROVIDER_DEFAULT_MODELS['openai'] ?? '',
   };
 }
 
 export function LLMPanel() {
-  const {
-    providers, activeProviderId, contextWindowSize,
-    addProvider, updateProvider, removeProvider, setActive, setContextWindowSize,
-  } = useSettingsStore();
-
-  const [showForm, setShowForm] = useState(providers.length === 0);
-  const [form, setForm] = useState<Omit<LLMProvider, 'id'>>(emptyForm());
+  const [credentials, setCredentials] = useState<Credential[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [contextWindow, setContextWindow] = useState(32000);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState<AddForm>(emptyForm());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
+  const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
+  const [testError, setTestError] = useState<string | null>(null);
 
-  const handleTypeChange = (type: LLMProviderType) => {
-    setForm({
-      type,
-      label: PROVIDER_DEFAULTS[type].label,
-      baseUrl: PROVIDER_DEFAULTS[type].baseUrl,
-      apiKey: '',
-      model: DEFAULT_MODELS[type],
-    });
+  const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
+
+  const refreshBackendConfig = useCallback(async () => {
+    try {
+      const cfg = await apiFetch<{ provider: string; model: string; baseUrl: string; contextWindowSize: number }>('/llm/config');
+      setBackendConfig(cfg);
+    } catch { /* non-fatal */ }
+  }, [setBackendConfig]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [creds, active, cw] = await Promise.all([
+        apiFetch<Credential[]>('/credentials'),
+        apiFetch<{ credentialId: string | null }>('/credentials/active'),
+        apiFetch<{ size: number }>('/credentials/settings/context-window'),
+      ]);
+      setCredentials(creds);
+      setActiveId(active.credentialId);
+      setContextWindow(cw.size);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const handleProviderChange = (provider: string) => {
+    setForm((f) => ({
+      ...f,
+      provider,
+      baseUrl: PROVIDER_BASE_URLS[provider] ?? '',
+      model: PROVIDER_DEFAULT_MODELS[provider] ?? '',
+    }));
+    setTestState('idle');
+    setTestError(null);
+  };
+
+  const handleTest = async () => {
+    setTestState('testing');
+    setTestError(null);
+    try {
+      const data = await apiFetch<{ ok: boolean; latencyMs: number; error?: string }>(
+        '/credentials/test',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            provider: form.provider,
+            apiKey: form.apiKey,
+            model: form.model,
+            baseUrl: form.baseUrl || undefined,
+          }),
+        },
+      );
+      setTestState(data.ok ? 'ok' : 'error');
+      if (!data.ok) setTestError(data.error ?? 'Connection failed');
+    } catch (e) {
+      setTestState('error');
+      setTestError(e instanceof Error ? e.message : 'Network error');
+    }
   };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSyncError(null);
-    const localId = addProvider(form);
+    setError(null);
     try {
-      setSyncing(localId);
-      const created = await apiPost('/credentials', {
-        name: form.label,
-        provider: form.type,
+      const dto: CreateCredentialDto = {
+        name: form.name,
+        provider: form.provider,
         apiKey: form.apiKey,
         baseUrl: form.baseUrl || undefined,
         model: form.model || undefined,
-      }) as { id: string };
-      updateProvider(localId, { backendId: created.id });
+      };
+      const created = await apiFetch<Credential>('/credentials', {
+        method: 'POST',
+        body: JSON.stringify(dto),
+      });
+      setCredentials((prev) => [...prev, created]);
+      setForm(emptyForm());
+      setShowForm(false);
+      setTestState('idle');
     } catch (err) {
-      setSyncError(`Backend sync failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setSyncing(null);
+      setError(err instanceof Error ? err.message : 'Failed to add');
     }
-    setForm(emptyForm());
-    setShowForm(false);
   };
 
-  const handleActivate = async (provider: LLMProvider) => {
-    setActive(provider.id);
-    let backendId = provider.backendId;
-    if (!backendId) {
-      try {
-        setSyncing(provider.id);
-        const created = await apiPost('/credentials', {
-          name: provider.label,
-          provider: provider.type,
-          apiKey: provider.apiKey,
-          baseUrl: provider.baseUrl || undefined,
-          model: provider.model || undefined,
-        }) as { id: string };
-        backendId = created.id;
-        updateProvider(provider.id, { backendId });
-      } catch (err) {
-        setSyncError(`Backend sync failed: ${err instanceof Error ? err.message : String(err)}`);
-        setSyncing(null);
-        return;
-      } finally {
-        setSyncing(null);
-      }
-    }
+  const handleActivate = async (credentialId: string) => {
+    setSyncing(credentialId);
     try {
-      setSyncing(provider.id);
-      await apiPut(`/credentials/active/${backendId}`);
+      await apiFetch(`/credentials/active/${credentialId}`, { method: 'PUT' });
+      setActiveId(credentialId);
+      await refreshBackendConfig();
     } catch (err) {
-      setSyncError(`Failed to set active: ${err instanceof Error ? err.message : String(err)}`);
+      setError(err instanceof Error ? err.message : 'Failed to activate');
     } finally {
       setSyncing(null);
     }
   };
 
-  const handleRemove = async (provider: LLMProvider) => {
-    removeProvider(provider.id);
-    if (provider.backendId) {
-      try {
-        await apiDelete(`/credentials/${provider.backendId}`);
-      } catch {
-        // Non-fatal
+  const handleRemove = async (credentialId: string) => {
+    setSyncing(credentialId);
+    try {
+      await apiFetch(`/credentials/${credentialId}`, { method: 'DELETE' });
+      setCredentials((prev) => prev.filter((c) => c.id !== credentialId));
+      if (activeId === credentialId) {
+        setActiveId(null);
+        await refreshBackendConfig();
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove');
+    } finally {
+      setSyncing(null);
     }
   };
 
   const handleContextWindowChange = async (size: number) => {
-    setContextWindowSize(size);
+    setContextWindow(size);
     try {
-      await apiPut('/credentials/settings/context-window', { size });
-    } catch {
-      // Non-fatal
-    }
+      await apiFetch('/credentials/settings/context-window', {
+        method: 'PUT',
+        body: JSON.stringify({ size }),
+      });
+      await refreshBackendConfig();
+    } catch { /* non-fatal */ }
   };
 
   return (
@@ -148,113 +211,179 @@ export function LLMPanel() {
       <div>
         <h2 className="text-base font-semibold mb-1">LLM Providers</h2>
         <p className="text-xs text-base-content/60">
-          Configure one or more API providers. The active provider is saved to the database.
+          Configure one or more API credentials. The active provider is stored in the database.
+          API keys are write-only and never returned.
         </p>
       </div>
 
-      {syncError && (
+      {error && (
         <div className="alert alert-warning py-2 text-xs gap-2">
           <AlertCircle size={14} />
-          {syncError}
-          <button className="btn btn-ghost btn-xs ml-auto" onClick={() => setSyncError(null)}>✕</button>
+          {error}
+          <button className="btn btn-ghost btn-xs ml-auto" onClick={() => setError(null)}>✕</button>
         </div>
       )}
 
-      {/* Provider list */}
-      {providers.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {providers.map((p) => (
-            <ProviderRow
-              key={p.id}
-              provider={p}
-              isActive={p.id === activeProviderId}
-              isSyncing={syncing === p.id}
-              onActivate={() => void handleActivate(p)}
-              onUpdate={(patch) => updateProvider(p.id, patch)}
-              onRemove={() => void handleRemove(p)}
-            />
-          ))}
+      {loading ? (
+        <div className="flex items-center gap-2 text-xs text-base-content/50 py-4">
+          <Loader2 size={14} className="animate-spin" /> Loading credentials…
         </div>
-      )}
-
-      {providers.length === 0 && !showForm && (
-        <div className="text-sm text-base-content/50 italic text-center py-6">
-          No providers configured. Add one below.
-        </div>
-      )}
-
-      {/* Add form */}
-      {showForm ? (
-        <form className="flex flex-col gap-3 border border-base-300 rounded-lg p-4 bg-base-200/40" onSubmit={(e) => void handleAdd(e)} data-testid="add-provider-form">
-          <h3 className="text-sm font-semibold">Add Provider</h3>
-
-          <div className="flex gap-2 flex-wrap">
-            {PROVIDER_TYPES.map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={`btn btn-xs ${form.type === t ? 'btn-primary' : 'btn-ghost border border-base-300'}`}
-                onClick={() => handleTypeChange(t)}
-              >
-                {PROVIDER_DEFAULTS[t].label}
-              </button>
-            ))}
-          </div>
-
-          <label className="form-control gap-1">
-            <span className="text-xs text-base-content/60">Label</span>
-            <input
-              className="input input-bordered input-sm"
-              value={form.label}
-              onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-              required
-            />
-          </label>
-
-          <label className="form-control gap-1">
-            <span className="text-xs text-base-content/60">API Key</span>
-            <input
-              className="input input-bordered input-sm font-mono"
-              type="password"
-              placeholder="sk-..."
-              value={form.apiKey}
-              onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
-              data-testid="add-provider-apikey"
-            />
-          </label>
-
-          <label className="form-control gap-1">
-            <span className="text-xs text-base-content/60">Base URL</span>
-            <input
-              className="input input-bordered input-sm font-mono"
-              value={form.baseUrl}
-              onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
-            />
-          </label>
-
-          <label className="form-control gap-1">
-            <span className="text-xs text-base-content/60">Model</span>
-            <input
-              className="input input-bordered input-sm font-mono"
-              value={form.model}
-              onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-              data-testid="add-provider-model"
-            />
-          </label>
-
-          <div className="flex gap-2 justify-end">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowForm(false)}>Cancel</button>
-            <button type="submit" className="btn btn-primary btn-sm" data-testid="add-provider-submit">Add Provider</button>
-          </div>
-        </form>
       ) : (
-        <button
-          className="btn btn-ghost btn-sm gap-2 self-start text-sky-400 hover:text-sky-300"
-          onClick={() => setShowForm(true)}
-          data-testid="add-provider-btn"
-        >
-          <Plus size={14} /> Add Provider
-        </button>
+        <>
+          {credentials.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {credentials.map((c) => {
+                const isActive = c.id === activeId;
+                const isSyncing = syncing === c.id;
+                return (
+                  <div
+                    key={c.id}
+                    data-testid={`provider-row-${c.id}`}
+                    className={`rounded-lg border p-3 flex items-center gap-3 transition-colors ${isActive ? 'border-sky-500/40 bg-sky-500/5' : 'border-base-300'}`}
+                  >
+                    <button
+                      className="text-base-content/40 hover:text-sky-400 transition-colors shrink-0"
+                      onClick={() => void handleActivate(c.id)}
+                      title={isActive ? 'Active provider' : 'Set as active'}
+                      disabled={isSyncing}
+                    >
+                      {isSyncing ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : isActive ? (
+                        <CheckCircle2 size={16} className="text-sky-400" />
+                      ) : (
+                        <Circle size={16} />
+                      )}
+                    </button>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate">{c.name}</span>
+                        {isActive && <span className="badge badge-xs badge-info">active</span>}
+                      </div>
+                      <div className="text-xs text-base-content/50 flex gap-2 mt-0.5">
+                        <span>{PROVIDER_LABELS[c.provider] ?? c.provider}</span>
+                        {c.model && <span className="font-mono">{c.model}</span>}
+                      </div>
+                    </div>
+
+                    <button
+                      className="btn btn-ghost btn-xs text-error opacity-60 hover:opacity-100"
+                      onClick={() => void handleRemove(c.id)}
+                      disabled={isSyncing}
+                      title="Remove credential"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {credentials.length === 0 && !showForm && (
+            <div className="text-sm text-base-content/50 italic text-center py-6">
+              No credentials configured. Add one below.
+            </div>
+          )}
+
+          {showForm ? (
+            <form
+              className="flex flex-col gap-3 border border-base-300 rounded-lg p-4 bg-base-200/40"
+              onSubmit={(e) => void handleAdd(e)}
+              data-testid="add-provider-form"
+            >
+              <h3 className="text-sm font-semibold">Add Provider</h3>
+
+              <label className="form-control gap-1">
+                <span className="text-xs text-base-content/60">Name</span>
+                <input
+                  className="input input-bordered input-sm"
+                  placeholder="e.g. My OpenAI Key"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  required
+                />
+              </label>
+
+              <div className="flex gap-2 flex-wrap">
+                {ALL_PROVIDER_TYPES.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`btn btn-xs ${form.provider === t ? 'btn-primary' : 'btn-ghost border border-base-300'}`}
+                    onClick={() => handleProviderChange(t)}
+                  >
+                    {PROVIDER_LABELS[t]}
+                  </button>
+                ))}
+              </div>
+
+              <label className="form-control gap-1">
+                <span className="text-xs text-base-content/60">API Key</span>
+                <input
+                  className="input input-bordered input-sm font-mono"
+                  type="password"
+                  placeholder="sk-…"
+                  value={form.apiKey}
+                  onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
+                  data-testid="add-provider-apikey"
+                  required
+                />
+              </label>
+
+              <label className="form-control gap-1">
+                <span className="text-xs text-base-content/60">Base URL</span>
+                <input
+                  className="input input-bordered input-sm font-mono"
+                  value={form.baseUrl}
+                  onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
+                />
+              </label>
+
+              <label className="form-control gap-1">
+                <span className="text-xs text-base-content/60">Model</span>
+                <input
+                  className="input input-bordered input-sm font-mono"
+                  value={form.model}
+                  onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
+                  data-testid="add-provider-model"
+                />
+              </label>
+
+              {testError && (
+                <div className="text-xs text-error flex gap-1 items-center">
+                  <AlertCircle size={12} /> {testError}
+                </div>
+              )}
+
+              <div className="flex gap-2 items-center justify-between">
+                <button
+                  type="button"
+                  className={`btn btn-ghost btn-xs gap-1 ${testState === 'ok' ? 'text-success' : testState === 'error' ? 'text-error' : 'text-base-content/60'}`}
+                  onClick={() => void handleTest()}
+                  disabled={!form.apiKey || testState === 'testing'}
+                  data-testid="add-provider-test"
+                >
+                  {testState === 'testing' ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                  {testState === 'ok' ? 'Connected!' : testState === 'error' ? 'Failed' : 'Test'}
+                </button>
+                <div className="flex gap-2">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setShowForm(false); setTestState('idle'); }}>Cancel</button>
+                  <button type="submit" className="btn btn-primary btn-sm" data-testid="add-provider-submit">Add Provider</button>
+                </div>
+              </div>
+            </form>
+          ) : (
+            <button
+              className="btn btn-ghost btn-sm gap-2 self-start text-sky-400 hover:text-sky-300"
+              onClick={() => setShowForm(true)}
+              data-testid="add-provider-btn"
+            >
+              <Plus size={14} /> Add Provider
+            </button>
+          )}
+        </>
       )}
 
       {/* Context window */}
@@ -262,11 +391,12 @@ export function LLMPanel() {
         <h3 className="text-sm font-semibold mb-1">Context Window</h3>
         <p className="text-xs text-base-content/60 mb-3">
           Oldest messages are trimmed automatically when history exceeds this limit.
+          Stored in the backend.
         </p>
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-base-content/60">Max tokens</span>
           <span className="badge badge-neutral font-mono text-xs" data-testid="context-window-value">
-            {(contextWindowSize / 1000).toFixed(0)}k
+            {(contextWindow / 1000).toFixed(0)}k
           </span>
         </div>
         <input
@@ -275,7 +405,7 @@ export function LLMPanel() {
           min={4000}
           max={200000}
           step={4000}
-          value={contextWindowSize}
+          value={contextWindow}
           onChange={(e) => void handleContextWindowChange(parseInt(e.target.value, 10))}
           data-testid="context-window-slider"
         />
@@ -283,158 +413,6 @@ export function LLMPanel() {
           <span>4k</span><span>32k</span><span>128k</span><span>200k</span>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ProviderRow({
-  provider,
-  isActive,
-  isSyncing,
-  onActivate,
-  onUpdate,
-  onRemove,
-}: {
-  provider: LLMProvider;
-  isActive: boolean;
-  isSyncing: boolean;
-  onActivate: () => void;
-  onUpdate: (patch: Partial<Omit<LLMProvider, 'id'>>) => void;
-  onRemove: () => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [local, setLocal] = useState({ apiKey: provider.apiKey, baseUrl: provider.baseUrl, model: provider.model });
-  const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
-  const [testError, setTestError] = useState<string | null>(null);
-
-  const handleSave = () => {
-    onUpdate(local);
-    setEditing(false);
-  };
-
-  const handleTest = async () => {
-    setTestState('testing');
-    setTestError(null);
-    try {
-      const res = await fetch('/api/credentials/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: provider.type,
-          apiKey: provider.apiKey,
-          model: provider.model,
-          baseUrl: provider.baseUrl || undefined,
-        }),
-      });
-      const data = (await res.json()) as { ok: boolean; latencyMs: number; error?: string };
-      if (data.ok) {
-        setTestState('ok');
-      } else {
-        setTestState('error');
-        setTestError(data.error ?? 'Connection failed');
-      }
-    } catch (e) {
-      setTestState('error');
-      setTestError(e instanceof Error ? e.message : 'Network error');
-    }
-  };
-
-  return (
-    <div
-      className={`rounded-lg border p-3 flex flex-col gap-2 transition-colors ${isActive ? 'border-sky-500/40 bg-sky-500/5' : 'border-base-300'}`}
-      data-testid={`provider-row-${provider.id}`}
-    >
-      <div className="flex items-center gap-2">
-        <button
-          className="text-base-content/50 hover:text-sky-400 transition-colors shrink-0"
-          onClick={onActivate}
-          disabled={isSyncing}
-          aria-label={isActive ? 'Active provider' : 'Set as active'}
-          data-testid={`provider-activate-${provider.id}`}
-        >
-          {isSyncing
-            ? <Loader2 size={16} className="animate-spin text-info" />
-            : isActive
-              ? <CheckCircle2 size={16} className="text-sky-400" />
-              : <Circle size={16} />
-          }
-        </button>
-
-        <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium">{provider.label}</span>
-          <span className="ml-2 badge badge-xs badge-ghost">{provider.type}</span>
-          {isActive && <span className="ml-2 badge badge-xs bg-sky-500/20 text-sky-400 border-none">active</span>}
-          {!provider.backendId && <span className="ml-2 badge badge-xs badge-warning border-none">local only</span>}
-        </div>
-
-        <span className="text-xs text-base-content/40 font-mono truncate max-w-28">{provider.model}</span>
-
-        {/* API key set indicator */}
-        {provider.apiKey && !editing && (
-          <span title="API key is set" className="text-success shrink-0">
-            <KeyRound size={12} />
-          </span>
-        )}
-
-        {/* Test connection button */}
-        {provider.backendId && !editing && (
-          <button
-            className={`btn btn-ghost btn-xs gap-1 shrink-0 ${
-              testState === 'ok' ? 'text-success' : testState === 'error' ? 'text-error' : 'text-base-content/40 hover:text-sky-400'
-            }`}
-            onClick={() => void handleTest()}
-            disabled={testState === 'testing'}
-            title={testState === 'error' ? testError ?? 'Test failed' : 'Test connection'}
-          >
-            {testState === 'testing'
-              ? <Loader2 size={12} className="animate-spin" />
-              : testState === 'ok'
-                ? <CheckCircle2 size={12} />
-                : testState === 'error'
-                  ? <AlertCircle size={12} />
-                  : <Zap size={12} />
-            }
-          </button>
-        )}
-
-        <button
-          className="btn btn-ghost btn-xs text-base-content/40 hover:text-sky-400"
-          onClick={() => setEditing((v) => !v)}
-        >
-          {editing ? 'Cancel' : 'Edit'}
-        </button>
-        <button
-          className="btn btn-ghost btn-xs text-base-content/40 hover:text-error"
-          onClick={onRemove}
-          data-testid={`provider-remove-${provider.id}`}
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
-
-      {editing && (
-        <div className="flex flex-col gap-2 pt-1 border-t border-base-300">
-          <label className="form-control gap-1">
-            <span className="text-xs text-base-content/50">API Key</span>
-            <input className="input input-bordered input-xs font-mono" type="password"
-              value={local.apiKey} onChange={(e) => setLocal((l) => ({ ...l, apiKey: e.target.value }))} />
-          </label>
-          <label className="form-control gap-1">
-            <span className="text-xs text-base-content/50">Base URL</span>
-            <input className="input input-bordered input-xs font-mono"
-              value={local.baseUrl} onChange={(e) => setLocal((l) => ({ ...l, baseUrl: e.target.value }))} />
-          </label>
-          <label className="form-control gap-1">
-            <span className="text-xs text-base-content/50">Model</span>
-            <input className="input input-bordered input-xs font-mono"
-              value={local.model} onChange={(e) => setLocal((l) => ({ ...l, model: e.target.value }))} />
-          </label>
-          <button className="btn btn-primary btn-xs self-end" onClick={handleSave}>Save</button>
-        </div>
-      )}
-      {testState === 'error' && testError && !editing && (
-        <p className="text-xs text-error/80 mt-1 px-1">{testError}</p>
-      )}
     </div>
   );
 }

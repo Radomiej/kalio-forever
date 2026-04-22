@@ -177,6 +177,10 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - Import style: Only import from `@kalio/types` across module boundaries. Zero cross-module imports.
 - Error handling pattern: Never use empty catch. Always log errors with context and rethrow or handle explicitly.
 - Testing pattern and framework: Vitest for unit/integration, Playwright for E2E. Mock LLM with `MockLLMProvider` in tests.
+- **File size hard limit: 500 LOC.** Any file approaching this must be split before adding more code.
+  - React components: extract sub-components to co-located files (`ComponentName.SubPart.tsx` or `components/` subfolder)
+  - Services/Controllers: extract domain helpers to separate `.utils.ts` or `.helpers.ts` files
+  - Test files are exempt from this limit.
 
 ### Forbidden
 - Cross-module imports (modules may only import from `@kalio/types`)
