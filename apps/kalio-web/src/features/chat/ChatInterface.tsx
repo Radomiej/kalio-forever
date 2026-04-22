@@ -14,7 +14,7 @@ import { useContextUsage } from './hooks/useContextUsage';
 import type { ChatMessage } from '@kalio/types';
 
 export function ChatInterface() {
-  const { messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages, updateSession } = useSessionStore();
+  const { messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
   const contextWindow = useSettingsStore((s) => s.getEffectiveContextWindow());

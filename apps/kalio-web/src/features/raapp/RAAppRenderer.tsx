@@ -25,8 +25,8 @@ export function RAAppRenderer({ block, result }: RAAppRendererProps) {
     return <HtmlIframeRenderer html={html} title="RA-App" />;
   }
 
-  // For json/gui blocks, try to sniff HTML out of the content
-  if (block.type === 'json' || block.type === 'gui') {
+  // For gui blocks, try to sniff HTML out of the content
+  if (block.type === 'gui') {
     if (isHtmlString(content)) {
       return <HtmlIframeRenderer html={content} title="RA-App" />;
     }

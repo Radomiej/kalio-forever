@@ -43,6 +43,7 @@ export function PersonaPanel() {
           className="btn btn-ghost btn-xs gap-1"
           onClick={() => setShowCreate((v) => !v)}
           title="New persona"
+          data-testid="new-persona-btn"
         >
           <Plus size={12} />
         </button>

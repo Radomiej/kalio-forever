@@ -70,8 +70,9 @@ function injectBeforeHeadClose(html: string, snippet: string): string {
   return snippet + '\n' + html;
 }
 
-export function injectEngineCDN(html: string, engine: UiRenderer): string {
-  const urls = ENGINE_CDN_MAP[engine];
+export function injectEngineCDN(html: string, engine?: string): string {
+  if (!engine) return html;
+  const urls = ENGINE_CDN_MAP[engine as UiRenderer];
   if (!urls) return html;
   return injectBeforeHeadClose(html, buildScriptTags(urls));
 }

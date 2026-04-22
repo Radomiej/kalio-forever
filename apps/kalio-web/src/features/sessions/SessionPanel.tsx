@@ -82,6 +82,7 @@ export function SessionPanel() {
           onClick={() => void createSession()}
           disabled={loading}
           title="New conversation"
+          data-testid="new-session-btn"
         >
           <Plus size={12} />
         </button>
