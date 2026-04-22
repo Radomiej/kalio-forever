@@ -12,6 +12,8 @@ import { FsWriteTool } from './tools/fs-write.tool';
 import { KVWriteTool, KVReadTool, KVListTool, KVDeleteTool } from './tools/kv.tools';
 import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
 import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
+import { RaAppCreateTool, RaAppCompileTool } from './tools/raapp.tools';
+import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 
 @Injectable()
 export class ToolRegistryService {
@@ -37,6 +39,11 @@ export class ToolRegistryService {
     private readonly terminalListTool: TerminalListTool,
     private readonly terminalOutputTool: TerminalOutputTool,
     private readonly terminalKillTool: TerminalKillTool,
+    private readonly raAppCreateTool: RaAppCreateTool,
+    private readonly raAppCompileTool: RaAppCompileTool,
+    private readonly memoryIngestTool: MemoryIngestTool,
+    private readonly memorySearchTool: MemorySearchTool,
+    private readonly memoryIngestConversationTool: MemoryIngestConversationTool,
   ) {
     this.registerAll([
       vfsWriteTool, vfsReadTool, vfsListTool, subagentTool,
@@ -44,6 +51,8 @@ export class ToolRegistryService {
       kvWriteTool, kvReadTool, kvListTool, kvDeleteTool,
       grepSearchTool, fileSearchTool,
       terminalSpawnTool, terminalListTool, terminalOutputTool, terminalKillTool,
+      raAppCreateTool, raAppCompileTool,
+      memoryIngestTool, memorySearchTool, memoryIngestConversationTool,
     ]);
   }
 

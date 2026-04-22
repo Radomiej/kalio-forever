@@ -1,47 +1,68 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { ToolRegistryService } from './tool-registry.service';
 import { VFSWriteTool } from './tools/vfs-write.tool';
+import { VFSReadTool } from './tools/vfs-read.tool';
+import { VFSListTool } from './tools/vfs-list.tool';
+import { SubagentTool } from './tools/subagent.tool';
+import { FsReadTool } from './tools/fs-read.tool';
+import { FsListTool } from './tools/fs-list.tool';
+import { FsWriteTool } from './tools/fs-write.tool';
+import { KVWriteTool, KVReadTool, KVListTool, KVDeleteTool } from './tools/kv.tools';
+import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
+import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
 import { VFSService } from '../vfs/vfs.service';
+import { KVStoreService } from './kv-store.service';
+import { TerminalService } from './terminal.service';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
+import { LLMService } from '../llm/llm.service';
+import { MemoryService } from '../memory/memory.service';
+import { RAAppService } from '../raapp/raapp.service';
+import { RAAppSandboxService } from '../raapp/raapp-sandbox.service';
+import { RaAppCreateTool, RaAppCompileTool } from './tools/raapp.tools';
+import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 
-// Regression test for: Hardcoded Tool Map in ToolDispatchService
-// Issue: The resolveTool method uses a hardcoded map instead of dynamic resolution from ToolRegistryService
-// This breaks scalability - every new tool requires manual addition to the map
+// AC-07: Unknown tool name returns TOOL_NOT_FOUND, session does not crash
 
 describe('ToolDispatchService', () => {
   let service: ToolDispatchService;
   let registryService: ToolRegistryService;
+
+  const mockVfsService = {
+    writeFile: vi.fn().mockImplementation((req: { filePath: string }) => {
+      if (req.filePath.includes('..')) {
+        throw new Error(`PATH_TRAVERSAL_DENIED: "${req.filePath}" escapes sandbox`);
+      }
+    }),
+    readFile: vi.fn().mockReturnValue({ conversationId: 'c', filePath: 'f', content: '' }),
+    listFiles: vi.fn().mockReturnValue({ conversationId: 'c', files: [] }),
+  };
+
+  const mockConfigService = { get: vi.fn().mockReturnValue('./test-workspace') };
 
   beforeEach(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         ToolDispatchService,
         ToolRegistryService,
-        VFSWriteTool,
         Reflector,
-        {
-          provide: VFSService,
-          useValue: {
-            writeFile: vi.fn().mockImplementation((req: { filePath: string }) => {
-              if (req.filePath.includes('..')) {
-                const err = new Error(`PATH_TRAVERSAL_DENIED: "${req.filePath}" escapes conversation sandbox`);
-                (err as NodeJS.ErrnoException).code = 'PATH_TRAVERSAL_DENIED';
-                throw err;
-              }
-            }),
-            readFile: vi.fn(),
-            listFiles: vi.fn(),
-          },
-        },
-        {
-          provide: ConfigService,
-          useValue: {
-            get: vi.fn().mockReturnValue('./test-workspace'),
-          },
-        },
+        VFSWriteTool, VFSReadTool, VFSListTool, SubagentTool,
+        FsReadTool, FsListTool, FsWriteTool,
+        KVWriteTool, KVReadTool, KVListTool, KVDeleteTool,
+        GrepSearchTool, FileSearchTool,
+        TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool,
+        RaAppCreateTool, RaAppCompileTool,
+        MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
+        { provide: VFSService, useValue: mockVfsService },
+        { provide: ConfigService, useValue: mockConfigService },
+        { provide: KVStoreService, useValue: { get: vi.fn(), set: vi.fn(), list: vi.fn(), delete: vi.fn() } },
+        { provide: TerminalService, useValue: { spawn: vi.fn(), list: vi.fn(), get: vi.fn(), kill: vi.fn() } },
+        { provide: LLMService, useValue: { streamChat: vi.fn() } },
+        { provide: MemoryService, useValue: { ingest: vi.fn(), search: vi.fn(), ingestConversation: vi.fn() } },
+        { provide: RAAppService, useValue: { execute: vi.fn().mockResolvedValue({ status: 'ready', renderedContent: '' }) } },
+        { provide: RAAppSandboxService, useValue: { execute: vi.fn().mockResolvedValue('') } },
       ],
     }).compile();
 
@@ -49,108 +70,72 @@ describe('ToolDispatchService', () => {
     registryService = moduleRef.get<ToolRegistryService>(ToolRegistryService);
   });
 
-  describe('resolveTool - Hardcoded Map Issue (REGRESSION TEST)', () => {
-    it('should resolve tools dynamically from registry, not hardcoded map', () => {
-      // Arrange
-      // Register a mock tool in the registry
-      const mockTool = {
-        execute: vi.fn().mockResolvedValue({ data: 'test' }),
-      };
-
-      // Act & Assert
-      // The current implementation has a hardcoded map:
-      // const map: Record<string, ...> = { vfs_write: this.vfsWriteTool };
-      // This test verifies that adding a new tool to the registry should make it available
-      // without modifying ToolDispatchService
-
-      // Get all registered tools from registry
-      const allTools = registryService.getAllTools();
-
-      // For each registered tool, the dispatch service should be able to resolve it
-      // This will fail if the implementation uses a hardcoded map that doesn't include the tool
-      for (const toolMeta of allTools) {
-        const request = {
-          sessionId: 'sess-123',
-          conversationId: 'conv-456',
-          toolName: toolMeta.name,
-          args: {},
-          callId: 'call-789',
-        };
-
-        // This dispatch call should work for any registered tool
-        // If the tool is in registry but not in the hardcoded map, it will fail
-        const result = service.dispatch(request);
-
-        // We don't care about the result, just that it doesn't throw TOOL_NOT_FOUND
-        // for tools that are registered
-        expect(result).resolves.not.toMatchObject({
-          errorCode: 'TOOL_NOT_FOUND',
-        });
-      }
-    });
-
-    it('should fail gracefully for tools not in registry', async () => {
-      // Arrange
-      const request = {
+  describe('AC-07 — unknown tool does not crash session', () => {
+    it('returns TOOL_NOT_FOUND for unregistered tool name', async () => {
+      const result = await service.dispatch({
         sessionId: 'sess-123',
         conversationId: 'conv-456',
         toolName: 'non_existent_tool',
         args: {},
         callId: 'call-789',
-      };
-
-      // Act
-      const result = await service.dispatch(request);
-
-      // Assert
-      expect(result).toMatchObject({
-        status: 'error',
-        errorCode: 'TOOL_NOT_FOUND',
       });
+
+      expect(result.status).toBe('error');
+      expect(result.errorCode).toBe('TOOL_NOT_FOUND');
+    });
+
+    it('resolves (does not throw) for unknown tool', async () => {
+      await expect(
+        service.dispatch({
+          sessionId: 'sess-123',
+          conversationId: 'conv-456',
+          toolName: 'this_does_not_exist',
+          args: {},
+          callId: 'call-000',
+        }),
+      ).resolves.toMatchObject({ status: 'error', errorCode: 'TOOL_NOT_FOUND' });
     });
   });
 
-  describe('dispatch', () => {
-    it('should dispatch known tool successfully', async () => {
-      // Arrange
-      const request = {
+  describe('dispatch — registered tools', () => {
+    it('dispatches vfs_write successfully', async () => {
+      const result = await service.dispatch({
         sessionId: 'sess-123',
         conversationId: 'conv-456',
         toolName: 'vfs_write',
-        args: {
-          filePath: 'test.txt',
-          content: 'Hello',
-        },
+        args: { filePath: 'test.txt', content: 'Hello' },
         callId: 'call-789',
-      };
+      });
 
-      // Act
-      const result = await service.dispatch(request);
-
-      // Assert
       expect(result.status).toBe('success');
       expect(result.callId).toBe('call-789');
     });
 
-    it('should handle tool execution errors', async () => {
-      // Arrange
-      const request = {
+    it('handles vfs_write path traversal as TOOL_EXEC_ERROR', async () => {
+      const result = await service.dispatch({
         sessionId: 'sess-123',
         conversationId: 'conv-456',
         toolName: 'vfs_write',
-        args: {
-          filePath: '../../../etc/passwd', // This will trigger path traversal error
-          content: 'malicious',
-        },
+        args: { filePath: '../../../etc/passwd', content: 'malicious' },
         callId: 'call-789',
-      };
+      });
 
-      // Act
-      const result = await service.dispatch(request);
-
-      // Assert
       expect(result.status).toBe('error');
       expect(result.errorCode).toBeDefined();
+    });
+
+    it('all registered tools are dispatchable — no TOOL_NOT_FOUND for any', async () => {
+      const allTools = registryService.getAllTools();
+      for (const toolMeta of allTools) {
+        const result = service.dispatch({
+          sessionId: 'sess-123',
+          conversationId: 'conv-456',
+          toolName: toolMeta.name,
+          args: {},
+          callId: 'call-789',
+        });
+        await expect(result).resolves.not.toMatchObject({ errorCode: 'TOOL_NOT_FOUND' });
+      }
     });
   });
 });
