@@ -8,9 +8,10 @@ import { ToolModule } from '../tool/tool.module';
 import { CredentialsModule } from '../credentials/credentials.module';
 import { MCPModule } from '../mcp/mcp.module';
 import { AgentLoopModule } from '../agentloop/agent-loop.module';
+import { VFSModule } from '../vfs/vfs.module';
 
 @Module({
-  imports: [LLMModule, PersonaModule, ToolModule, CredentialsModule, MCPModule, AgentLoopModule],
+  imports: [LLMModule, PersonaModule, ToolModule, CredentialsModule, MCPModule, AgentLoopModule, VFSModule],
   controllers: [ChatController],
   providers: [ChatGateway, ChatService],
 })
