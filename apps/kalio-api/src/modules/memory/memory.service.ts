@@ -68,6 +68,9 @@ export class MemoryService implements OnModuleDestroy {
     messages: Array<{ role: string; content: string }>,
     personaId: string
   ): Promise<MemoryIngestResult> {
+    if (!messages || !Array.isArray(messages)) {
+      return { ids: [], count: 0 };
+    }
     const meaningful = messages.filter(
       (m) => m.content && m.content.trim().length > 0 && m.role !== 'system'
     );
