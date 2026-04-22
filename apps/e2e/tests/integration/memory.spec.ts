@@ -99,7 +99,7 @@ test.describe('Memory API Integration Tests', () => {
       const response = await request.post(`${API_BASE}/memory/ingest-conversation`, {
         data: {
           personaId,
-          conversation: [
+          messages: [
             { role: 'user', content: 'Hello' },
             { role: 'assistant', content: 'Hi there!' },
           ],

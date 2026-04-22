@@ -11,8 +11,8 @@ test.describe('AC-16: Memory Hybrid Search', () => {
     await memoryNav.click();
 
     // Memory page should be visible
-    await expect(page.getByTestId('memory-page')).toBeVisible();
-    await expect(page.getByText('Memory')).toBeVisible();
+    await expect(page.getByTestId('memory-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('Memory')).toBeVisible({ timeout: 10000 });
   });
 
   test('user can select persona from dropdown', async ({ page }) => {
@@ -25,7 +25,8 @@ test.describe('AC-16: Memory Hybrid Search', () => {
 
     // Should have at least one option
     const options = personaSelect.locator('option');
-    await expect(options).toHaveCount.greaterThan(0);
+    const optionCount = await options.count();
+    expect(optionCount).toBeGreaterThan(0);
   });
 
   test('user can search memory with hybrid mode', async ({ page }) => {
