@@ -6,6 +6,6 @@ import { VFSModule } from '../vfs/vfs.module';
 @Module({
   imports: [VFSModule],
   providers: [RAAppService, RAAppSandboxService],
-  exports: [RAAppService],
+  exports: [RAAppService, RAAppSandboxService],
 })
 export class RAAppModule {}
