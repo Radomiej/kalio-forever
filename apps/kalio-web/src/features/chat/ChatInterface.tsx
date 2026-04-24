@@ -92,6 +92,21 @@ export function ChatInterface() {
         finishedAt: Date.now(),
         result,
       });
+      // Persist tool result into message store so RAAppManager (and chat history) can see it
+      if (result.status === 'success' && result.data !== undefined) {
+        const sid = useSessionStore.getState().activeSessionId;
+        if (sid) {
+          const toolResultMsg: ChatMessage = {
+            id: nanoid(),
+            sessionId: sid,
+            role: 'tool_result',
+            content: JSON.stringify(result.data),
+            toolCallId: result.callId,
+            createdAt: Date.now(),
+          };
+          addMessage(toolResultMsg);
+        }
+      }
       // Re-enable streaming state for follow-up LLM response after successful tool
       if (result.status === 'success') {
         setStreaming(true);

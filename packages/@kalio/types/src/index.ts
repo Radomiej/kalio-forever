@@ -385,6 +385,9 @@ export interface SocketEvents {
   'tool:confirm': { requestId: string; sessionId: ID };
   'tool:cancel': { requestId: string; sessionId: ID };
 
+  // Tool execution lifecycle — server → client
+  'tool:start': { callId: ID; toolName: string; args: Record<string, unknown> };
+
   // Tool result — server → client
   'tool:result': ToolResult;
 

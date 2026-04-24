@@ -23,7 +23,7 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
   const { icons, generating, generateIcon, removeIcon } = useTileIcons('raapp');
   const addSession = useSessionStore((s) => s.addSession);
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
-  const setPendingRAAppId = useSessionStore((s) => s.setPendingRAAppId);
+  const setPendingMessage = useSessionStore((s) => s.setPendingMessage);
 
   useEffect(() => {
     setLoading(true);
@@ -37,18 +37,21 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
   const handleTileClick = useCallback(async (tile: TileItem) => {
     try {
       const { data } = await apiClient.post<ChatSession>('/api/sessions', {
-        personaId: 'default',
+        personaId: 'ra-apps',
         title: tile.name,
       });
       console.debug('[Landing] RA-App tile session created', data.id, tile.id);
       addSession(data);
-      setPendingRAAppId(tile.id);
+      const prompt = `Run the "${tile.name}" RA-App for me.${
+        tile.description ? ` ${tile.description}` : ''
+      } Launch it immediately.`;
+      setPendingMessage(prompt);
       setActiveSession(data.id);
       onNavigateToChat();
     } catch (err) {
       console.error('[Landing] failed to create session for tile', tile.id, err);
     }
-  }, [addSession, setActiveSession, setPendingRAAppId, onNavigateToChat]);
+  }, [addSession, setActiveSession, setPendingMessage, onNavigateToChat]);
 
   const handleQuickChatSent = useCallback(() => {
     onNavigateToChat();

@@ -12,9 +12,10 @@ export class PersonaService implements OnApplicationBootstrap {
   constructor(private readonly drizzle: DrizzleService) {}
 
   async onApplicationBootstrap() {
-    const existing = await this.drizzle.db.select().from(personas).where(eq(personas.id, 'default')).then((r) => r[0]);
-    if (!existing) {
-      const now = new Date();
+    const now = new Date();
+
+    const defaultExists = await this.drizzle.db.select({ id: personas.id }).from(personas).where(eq(personas.id, 'default')).then((r) => r[0]);
+    if (!defaultExists) {
       await this.drizzle.db.insert(personas).values({
         id: 'default',
         name: 'Default',
@@ -25,6 +26,29 @@ export class PersonaService implements OnApplicationBootstrap {
         updatedAt: now,
       });
       this.logger.log('Seeded default persona');
+    }
+
+    const raAppsExists = await this.drizzle.db.select({ id: personas.id }).from(personas).where(eq(personas.id, 'ra-apps')).then((r) => r[0]);
+    if (!raAppsExists) {
+      await this.drizzle.db.insert(personas).values({
+        id: 'ra-apps',
+        name: 'RA-Apps',
+        systemPrompt: [
+          'You are an RA-App runner. Your ONLY job is to invoke RA-App tools.',
+          '',
+          'Rules:',
+          '- When asked to run or launch an app, IMMEDIATELY call the raapp_create tool.',
+          '- Use type="html" with a complete, self-contained HTML document for the app.',
+          '- Do NOT describe what you are about to do. Just call the tool.',
+          '- After the tool returns, write exactly one sentence confirming it is ready.',
+          '- Never generate the app yourself as plain text — always use raapp_create.',
+        ].join('\n'),
+        model: '',
+        skills: ['raapp_create', 'raapp_compile'],
+        createdAt: now,
+        updatedAt: now,
+      });
+      this.logger.log('Seeded ra-apps persona');
     }
   }
 

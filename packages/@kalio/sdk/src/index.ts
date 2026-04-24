@@ -11,6 +11,7 @@ export type ChunkHandler = (chunk: LLMStreamChunk) => void;
 export type CompleteHandler = (payload: SocketEvents['chat:complete']) => void;
 export type ErrorHandler = (payload: SocketEvents['chat:error']) => void;
 export type ConfirmationHandler = (req: ToolConfirmationRequest) => void;
+export type ToolStartHandler = (payload: SocketEvents['tool:start']) => void;
 export type ToolResultHandler = (result: ToolResult) => void;
 export type SessionCreatedHandler = (session: ChatSession) => void;
 
@@ -70,6 +71,11 @@ export class KalioSDK {
   onToolConfirmation(handler: ConfirmationHandler): () => void {
     this.socket.on('tool:confirmation_required', handler);
     return () => this.socket.off('tool:confirmation_required', handler);
+  }
+
+  onToolStart(handler: ToolStartHandler): () => void {
+    this.socket.on('tool:start', handler);
+    return () => this.socket.off('tool:start', handler);
   }
 
   onToolResult(handler: ToolResultHandler): () => void {

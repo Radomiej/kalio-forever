@@ -189,6 +189,10 @@ export class ChatService {
     client: Socket,
     availableSkills: string[],
   ): Promise<void> {
+    // Notify FE immediately so it can show a spinner for every tool call,
+    // even those that fail the skill/registry checks below.
+    client.emit('tool:start', { callId: tc.id, toolName: tc.name, args: tc.args });
+
     const toolMeta = this.toolRegistry.getMeta(tc.name);
 
     if (!toolMeta) {
