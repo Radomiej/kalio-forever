@@ -47,4 +47,21 @@ test.describe('AC-14: Session creation', () => {
 
     await request.delete(`${API_BASE}/sessions/${session.id}`);
   });
+
+  test('Quick Chat send navigates to chat and input is not permanently locked', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('landing-page')).toBeVisible({ timeout: 5000 });
+
+    const quickChatInput = page.getByTestId('quick-chat-input');
+    await expect(quickChatInput).toBeVisible();
+    await quickChatInput.fill('Hello from Quick Chat');
+    await page.getByTestId('quick-chat-send').click();
+
+    // Should navigate to chat interface
+    await expect(page.getByTestId('chat-interface')).toBeVisible({ timeout: 10_000 });
+
+    // Input must eventually re-enable (proves isStreaming was reset and error surfaced correctly)
+    const chatInput = page.getByTestId('chat-input');
+    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+  });
 });

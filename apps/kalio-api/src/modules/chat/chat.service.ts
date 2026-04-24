@@ -52,6 +52,22 @@ export class ChatService {
     }
     this.logger.log(`[chat:send] Using persona="${personaConfig.systemPrompt.slice(0, 40)}" model=${personaConfig.model}`);
 
+    // Guard: session must exist in DB before we can insert messages (FK constraint)
+    const [existingSession] = await this.drizzle.db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+    if (!existingSession) {
+      this.logger.error(`[chat:send] Session not found in DB: ${sessionId}`);
+      client.emit('chat:error', {
+        sessionId,
+        code: 'LLM_ERROR',
+        message: `Session ${sessionId} not found. Create it via POST /api/sessions first.`,
+      } satisfies SocketEvents['chat:error']);
+      return;
+    }
+
     // Persist user message
     const userMsgId = nanoid();
     await this.drizzle.db.insert(messages).values({

@@ -17,7 +17,6 @@ export function ChatInterface() {
   const { messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
-  const contextWindow = useSettingsStore((s) => s.getEffectiveContextWindow());
   const {
     isStreaming,
     pendingConfirmation,
@@ -64,9 +63,13 @@ export function ChatInterface() {
       }
     });
 
-    const offComplete = eventBus.onComplete(() => setStreaming(false));
+    const offComplete = eventBus.onComplete(() => {
+      console.debug('[EventBus] chat:complete');
+      setStreaming(false);
+    });
 
     const offError = eventBus.onError((payload) => {
+      console.error('[EventBus] chat:error', payload);
       setStreaming(false);
       setError(payload.message);
     });
@@ -134,6 +137,7 @@ export function ChatInterface() {
     addMessage(userMsg);
 
     setStreaming(true);
+    console.debug('[ChatInterface] sendMessage', { sessionId: activeSessionId, content: content.slice(0, 60) });
 
     eventBus.sendMessage({
       sessionId: activeSessionId,
@@ -149,6 +153,10 @@ export function ChatInterface() {
   // Auto-send pending message/RA-App when a new session becomes active
   useEffect(() => {
     if (!activeSessionId) return;
+    // Reset stale streaming state from any previous session
+    setStreaming(false);
+    clearToolActivities();
+    console.debug('[ChatInterface] session activated', activeSessionId, '— streaming reset');
     const { pendingMessage, pendingRAAppId, setPendingMessage, setPendingRAAppId, sessions: s } = useSessionStore.getState();
     const toSend = pendingMessage ?? (pendingRAAppId ? `Use the ${s.find((a) => a.id === activeSessionId)?.title ?? pendingRAAppId} tool` : null);
     if (!toSend) return;
@@ -202,8 +210,8 @@ export function ChatInterface() {
             )}
           </div>
           {activeModel && (
-            <span className="text-[10px] font-mono text-base-content/35 shrink-0 truncate max-w-[9rem]" title={`${activeModel} · ctx ${(contextWindow / 1000).toFixed(0)}k`}>
-              {activeModel} · {(contextWindow / 1000).toFixed(0)}k
+            <span className="text-[10px] font-mono text-base-content/35 shrink-0 truncate max-w-[9rem]" title={activeModel}>
+              {activeModel}
             </span>
           )}
         </div>

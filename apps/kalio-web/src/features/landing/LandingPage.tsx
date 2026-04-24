@@ -4,6 +4,8 @@ import { AppTile } from './AppTile';
 import { QuickChatWidget } from './QuickChatWidget';
 import { useTileIcons } from './useTileIcons';
 import { useSessionStore } from '../../store/sessionStore';
+import { apiClient } from '../../services/apiClient';
+import type { ChatSession } from '@kalio/types';
 
 interface TileItem {
   id: string;
@@ -19,7 +21,7 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
   const [tiles, setTiles] = useState<TileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const { icons, generating, generateIcon, removeIcon } = useTileIcons('raapp');
-  const createSession = useSessionStore((s) => s.createSession);
+  const addSession = useSessionStore((s) => s.addSession);
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
   const setPendingRAAppId = useSessionStore((s) => s.setPendingRAAppId);
 
@@ -32,12 +34,21 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
       .finally(() => setLoading(false));
   }, []);
 
-  const handleTileClick = useCallback((tile: TileItem) => {
-    const sessionId = createSession(tile.name);
-    setPendingRAAppId(tile.id);
-    setActiveSession(sessionId);
-    onNavigateToChat();
-  }, [createSession, setActiveSession, setPendingRAAppId, onNavigateToChat]);
+  const handleTileClick = useCallback(async (tile: TileItem) => {
+    try {
+      const { data } = await apiClient.post<ChatSession>('/api/sessions', {
+        personaId: 'default',
+        title: tile.name,
+      });
+      console.debug('[Landing] RA-App tile session created', data.id, tile.id);
+      addSession(data);
+      setPendingRAAppId(tile.id);
+      setActiveSession(data.id);
+      onNavigateToChat();
+    } catch (err) {
+      console.error('[Landing] failed to create session for tile', tile.id, err);
+    }
+  }, [addSession, setActiveSession, setPendingRAAppId, onNavigateToChat]);
 
   const handleQuickChatSent = useCallback(() => {
     onNavigateToChat();

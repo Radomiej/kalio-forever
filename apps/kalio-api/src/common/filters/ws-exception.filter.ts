@@ -14,6 +14,7 @@ export class WsExceptionFilter extends BaseWsExceptionFilter {
 
     this.logger.error(`[WS] Unhandled exception: ${String(message)}`, exception instanceof Error ? exception.stack : undefined);
 
-    client.emit('error', { message: String(message) });
+    // Must match KalioSDK.onError which listens on 'chat:error'
+    client.emit('chat:error', { message: String(message) });
   }
 }

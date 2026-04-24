@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback } from 'react';
 import { Send } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
+import { apiClient } from '../../services/apiClient';
+import type { ChatSession } from '@kalio/types';
 
 interface QuickChatWidgetProps {
   /** Called after the message is dispatched so the parent can switch views */
@@ -10,7 +12,7 @@ interface QuickChatWidgetProps {
 export function QuickChatWidget({ onMessageSent }: QuickChatWidgetProps) {
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const createSession = useSessionStore((s) => s.createSession);
+  const addSession = useSessionStore((s) => s.addSession);
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
   const setPendingMessage = useSessionStore((s) => s.setPendingMessage);
 
@@ -18,18 +20,23 @@ export function QuickChatWidget({ onMessageSent }: QuickChatWidgetProps) {
     const trimmed = value.trim();
     if (!trimmed) return;
 
-    // Create a new session
-    const sessionId = createSession('New Chat');
-    
-    // Store the message before navigating so ChatInterface can auto-send it
-    setPendingMessage(trimmed);
-
-    // Set it as active
-    setActiveSession(sessionId);
-    
-    setValue('');
-    onMessageSent();
-  }, [value, createSession, setActiveSession, setPendingMessage, onMessageSent]);
+    try {
+      // Create session in DB so backend can persist messages
+      const { data } = await apiClient.post<ChatSession>('/api/sessions', {
+        personaId: 'default',
+        title: 'New Chat',
+      });
+      console.debug('[QuickChat] session created', data.id);
+      addSession(data);
+      // Store message before navigating so ChatInterface auto-sends it
+      setPendingMessage(trimmed);
+      setActiveSession(data.id);
+      setValue('');
+      onMessageSent();
+    } catch (err) {
+      console.error('[QuickChat] failed to create session', err);
+    }
+  }, [value, addSession, setActiveSession, setPendingMessage, onMessageSent]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
