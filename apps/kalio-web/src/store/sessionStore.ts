@@ -7,6 +7,8 @@ interface SessionState {
   messages: ChatMessage[];
   streamingChunks: Record<string, string>;    // messageId → accumulated answer delta
   thinkingChunks: Record<string, string>;     // messageId → accumulated thinking delta
+  pendingMessage: string | null;
+  pendingRAAppId: string | null;
 
   setSessions: (sessions: ChatSession[]) => void;
   addSession: (session: ChatSession) => void;
@@ -18,6 +20,8 @@ interface SessionState {
   finalizeChunk: (messageId: string) => void;
   removeSession: (id: string) => void;
   updateSession: (id: string, patch: Partial<ChatSession>) => void;
+  setPendingMessage: (message: string | null) => void;
+  setPendingRAAppId: (id: string | null) => void;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -26,6 +30,8 @@ export const useSessionStore = create<SessionState>((set) => ({
   messages: [],
   streamingChunks: {},
   thinkingChunks: {},
+  pendingMessage: null,
+  pendingRAAppId: null,
 
   setSessions: (sessions) => set({ sessions }),
   addSession: (session) =>
@@ -110,4 +116,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     set((s) => ({
       sessions: s.sessions.map((sess) => (sess.id === id ? { ...sess, ...patch } : sess)),
     })),
+
+  setPendingMessage: (message) => set({ pendingMessage: message }),
+  setPendingRAAppId: (id) => set({ pendingRAAppId: id }),
 }));

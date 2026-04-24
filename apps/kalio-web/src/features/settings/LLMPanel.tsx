@@ -3,6 +3,7 @@ import { Plus, Loader2, AlertCircle, Zap } from 'lucide-react';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { useSettingsStore } from './settingsStore';
 import { ProviderCard } from './ProviderCard';
+import { ModelSettingsSection } from './ModelSettingsSection';
 
 const PROVIDER_LABELS: Record<string, string> = {
   openai:     'OpenAI',
@@ -348,6 +349,12 @@ export function LLMPanel() {
           )}
         </>
       )}
+
+      {/* Model + Generation settings */}
+      <ModelSettingsSection
+        activeCredential={credentials.find((c) => c.id === activeId) ?? null}
+        onModelChange={(updated) => setCredentials((prev) => prev.map((c) => c.id === updated.id ? updated : c))}
+      />
 
       {/* Context window */}
       <div className="border-t border-base-300 pt-4">

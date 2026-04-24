@@ -108,6 +108,9 @@ export function ChatInterface() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, toolActivities]);
 
+  // Latest-ref so the pending-message effect always calls the current handleSend
+  const handleSendRef = useRef<(content: string, personaId: string) => void>(() => {});
+
   const handleSend = (content: string, personaId: string) => {
     if (!activeSessionId) return;
     setError(null);
@@ -139,6 +142,20 @@ export function ChatInterface() {
       conversationId: activeSessionId,
     });
   };
+
+  // Keep ref current so the effect below always sees the latest handleSend
+  handleSendRef.current = handleSend;
+
+  // Auto-send pending message/RA-App when a new session becomes active
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const { pendingMessage, pendingRAAppId, setPendingMessage, setPendingRAAppId, sessions: s } = useSessionStore.getState();
+    const toSend = pendingMessage ?? (pendingRAAppId ? `Use the ${s.find((a) => a.id === activeSessionId)?.title ?? pendingRAAppId} tool` : null);
+    if (!toSend) return;
+    setPendingMessage(null);
+    setPendingRAAppId(null);
+    handleSendRef.current(toSend, 'default');
+  }, [activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleConfirm = () => {
     if (!pendingConfirmation || !activeSessionId) return;

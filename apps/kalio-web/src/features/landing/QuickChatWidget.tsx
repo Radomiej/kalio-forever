@@ -12,6 +12,7 @@ export function QuickChatWidget({ onMessageSent }: QuickChatWidgetProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const createSession = useSessionStore((s) => s.createSession);
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
+  const setPendingMessage = useSessionStore((s) => s.setPendingMessage);
 
   const handleSend = useCallback(async () => {
     const trimmed = value.trim();
@@ -20,12 +21,15 @@ export function QuickChatWidget({ onMessageSent }: QuickChatWidgetProps) {
     // Create a new session
     const sessionId = createSession('New Chat');
     
+    // Store the message before navigating so ChatInterface can auto-send it
+    setPendingMessage(trimmed);
+
     // Set it as active
     setActiveSession(sessionId);
     
     setValue('');
     onMessageSent();
-  }, [value, createSession, setActiveSession, onMessageSent]);
+  }, [value, createSession, setActiveSession, setPendingMessage, onMessageSent]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

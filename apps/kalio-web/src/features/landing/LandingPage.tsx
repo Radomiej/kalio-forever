@@ -3,6 +3,7 @@ import { tileSizeForIndex } from './tileColors';
 import { AppTile } from './AppTile';
 import { QuickChatWidget } from './QuickChatWidget';
 import { useTileIcons } from './useTileIcons';
+import { useSessionStore } from '../../store/sessionStore';
 
 interface TileItem {
   id: string;
@@ -18,22 +19,25 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
   const [tiles, setTiles] = useState<TileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const { icons, generating, generateIcon, removeIcon } = useTileIcons('raapp');
+  const createSession = useSessionStore((s) => s.createSession);
+  const setActiveSession = useSessionStore((s) => s.setActiveSession);
+  const setPendingRAAppId = useSessionStore((s) => s.setPendingRAAppId);
 
   useEffect(() => {
     setLoading(true);
-    // Placeholder for loading RA apps
-    // In the full implementation, this would call api.getRAAppGroups() and api.getRAApps()
-    setTimeout(() => {
-      setTiles([]);
-      setLoading(false);
-    }, 500);
+    fetch('/api/ra-apps')
+      .then((r) => r.json())
+      .then((data: TileItem[]) => setTiles(data))
+      .catch(() => setTiles([]))
+      .finally(() => setLoading(false));
   }, []);
 
-  const handleTileClick = useCallback((_tile: TileItem) => {
-    // Placeholder for handling tile clicks
-    // In the full implementation, this would create a session and set pending run
+  const handleTileClick = useCallback((tile: TileItem) => {
+    const sessionId = createSession(tile.name);
+    setPendingRAAppId(tile.id);
+    setActiveSession(sessionId);
     onNavigateToChat();
-  }, [onNavigateToChat]);
+  }, [createSession, setActiveSession, setPendingRAAppId, onNavigateToChat]);
 
   const handleQuickChatSent = useCallback(() => {
     onNavigateToChat();

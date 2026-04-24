@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { CredentialsService } from './credentials.service';
 import { createLLMProvider } from '../llm/providers/provider-factory';
@@ -55,6 +55,35 @@ export class CredentialsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async setContextWindow(@Body() body: { size: number }): Promise<void> {
     await this.credentialsService.setContextWindowSize(body.size);
+  }
+
+  // ─── Generation settings ─────────────────────────────────────────────────────
+
+  @Get('settings/generation')
+  async getGenerationSettings(): Promise<{ temperature: number; maxTokens: number }> {
+    return this.credentialsService.getGenerationSettings();
+  }
+
+  @Put('settings/generation')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async setGenerationSettings(@Body() body: { temperature?: number; maxTokens?: number }): Promise<void> {
+    await this.credentialsService.setGenerationSettings(body);
+  }
+
+  // ─── Model listing for credential (placed after settings/ routes) ─────────────
+
+  @Get(':id/models')
+  async getModels(@Param('id') id: string): Promise<{ models: string[] }> {
+    const models = await this.credentialsService.getModelsForCredential(id);
+    return { models };
+  }
+
+  @Patch(':id/model')
+  async updateModel(
+    @Param('id') id: string,
+    @Body() body: { model: string },
+  ): Promise<import('@kalio/types').Credential> {
+    return this.credentialsService.updateModel(id, body.model);
   }
 
   // ─── Test by credential ID (key looked up server-side) ──────────────────────
