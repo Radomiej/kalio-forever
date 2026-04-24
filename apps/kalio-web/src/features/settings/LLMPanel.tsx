@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, CheckCircle2, Circle, Loader2, AlertCircle, Zap, Trash2 } from 'lucide-react';
+import { Plus, Loader2, AlertCircle, Zap } from 'lucide-react';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { useSettingsStore } from './settingsStore';
+import { ProviderCard } from './ProviderCard';
 
 const PROVIDER_LABELS: Record<string, string> = {
   openai:     'OpenAI',
@@ -122,20 +123,18 @@ export function LLMPanel() {
     setTestState('testing');
     setTestError(null);
     try {
-      const data = await apiFetch<{ ok: boolean; latencyMs: number; error?: string }>(
-        '/credentials/test',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            provider: form.provider,
-            apiKey: form.apiKey,
-            model: form.model,
-            baseUrl: form.baseUrl || undefined,
-          }),
-        },
-      );
-      setTestState(data.ok ? 'ok' : 'error');
-      if (!data.ok) setTestError(data.error ?? 'Connection failed');
+      const params = new URLSearchParams({ provider: form.provider });
+      if (form.apiKey) params.set('apiKey', form.apiKey);
+      if (form.baseUrl) params.set('baseUrl', form.baseUrl);
+      const res = await fetch(`/api/llm/models?${params.toString()}`);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(errJson?.error ?? `HTTP ${res.status}`);
+      }
+      const json = await res.json() as { data?: unknown[]; models?: unknown[] };
+      const count = (json.data ?? json.models ?? []).length;
+      setTestState('ok');
+      setTestError(`${count} models available`);
     } catch (e) {
       setTestState('error');
       setTestError(e instanceof Error ? e.message : 'Network error');
@@ -232,52 +231,16 @@ export function LLMPanel() {
         <>
           {credentials.length > 0 && (
             <div className="flex flex-col gap-2">
-              {credentials.map((c) => {
-                const isActive = c.id === activeId;
-                const isSyncing = syncing === c.id;
-                return (
-                  <div
-                    key={c.id}
-                    data-testid={`provider-row-${c.id}`}
-                    className={`rounded-lg border p-3 flex items-center gap-3 transition-colors ${isActive ? 'border-sky-500/40 bg-sky-500/5' : 'border-base-300'}`}
-                  >
-                    <button
-                      className="text-base-content/40 hover:text-sky-400 transition-colors shrink-0"
-                      onClick={() => void handleActivate(c.id)}
-                      title={isActive ? 'Active provider' : 'Set as active'}
-                      disabled={isSyncing}
-                    >
-                      {isSyncing ? (
-                        <Loader2 size={16} className="animate-spin" />
-                      ) : isActive ? (
-                        <CheckCircle2 size={16} className="text-sky-400" />
-                      ) : (
-                        <Circle size={16} />
-                      )}
-                    </button>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">{c.name}</span>
-                        {isActive && <span className="badge badge-xs badge-info">active</span>}
-                      </div>
-                      <div className="text-xs text-base-content/50 flex gap-2 mt-0.5">
-                        <span>{PROVIDER_LABELS[c.provider] ?? c.provider}</span>
-                        {c.model && <span className="font-mono">{c.model}</span>}
-                      </div>
-                    </div>
-
-                    <button
-                      className="btn btn-ghost btn-xs text-error opacity-60 hover:opacity-100"
-                      onClick={() => void handleRemove(c.id)}
-                      disabled={isSyncing}
-                      title="Remove credential"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                );
-              })}
+              {credentials.map((c) => (
+                <ProviderCard
+                  key={c.id}
+                  credential={c}
+                  isActive={c.id === activeId}
+                  isSyncing={syncing === c.id}
+                  onActivate={(id) => void handleActivate(id)}
+                  onRemove={(id) => void handleRemove(id)}
+                />
+              ))}
             </div>
           )}
 
@@ -352,7 +315,7 @@ export function LLMPanel() {
               </label>
 
               {testError && (
-                <div className="text-xs text-error flex gap-1 items-center">
+                <div className={`text-xs flex gap-1 items-center ${testState === 'ok' ? 'text-success' : 'text-error'}`}>
                   <AlertCircle size={12} /> {testError}
                 </div>
               )}

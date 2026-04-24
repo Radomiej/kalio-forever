@@ -16,7 +16,7 @@ const CRED: Credential = {
   name: 'My OpenAI',
   provider: 'openai',
   model: 'gpt-4o-mini',
-  createdAt: '2024-01-01T00:00:00Z',
+  createdAt: 1704067200000,
 };
 
 type FetchMap = Record<string, unknown>;
@@ -31,8 +31,10 @@ function mockFetch(map: FetchMap) {
     'fetch',
     vi.fn((url: string, opts?: RequestInit) => {
       const method = opts?.method?.toUpperCase() ?? 'GET';
+      const urlWithoutParams = url.split('?')[0]!;
       const key = `${method} ${url}`;
-      const value = key in map ? map[key] : map[url] ?? null;
+      const keyNoParams = `${method} ${urlWithoutParams}`;
+      const value = key in map ? map[key] : (keyNoParams in map ? map[keyNoParams] : (map[url] ?? map[urlWithoutParams] ?? null));
 
       if (value === null) {
         return Promise.resolve(new Response(null, { status: 404 }));
@@ -89,7 +91,7 @@ describe('LLMPanel', () => {
     mockFetch(defaultMap({ credentials: [CRED] }));
     render(<LLMPanel />);
     await waitFor(() =>
-      expect(screen.getByTestId(`provider-row-${CRED.id}`)).toBeInTheDocument(),
+      expect(screen.getByTestId(`provider-card-${CRED.id}`)).toBeInTheDocument(),
     );
     expect(screen.getByText('My OpenAI')).toBeInTheDocument();
   });
@@ -134,7 +136,7 @@ describe('LLMPanel', () => {
   it('test button shows "Connected!" on successful test', async () => {
     const map = {
       ...defaultMap(),
-      'POST /api/credentials/test': { ok: true, latencyMs: 42 },
+      'GET /api/llm/models': { data: [{ id: 'm1' }, { id: 'm2' }] },
     };
     mockFetch(map);
     const user = userEvent.setup();
@@ -147,11 +149,8 @@ describe('LLMPanel', () => {
   });
 
   it('test button shows "Failed" on unsuccessful test', async () => {
-    const map = {
-      ...defaultMap(),
-      'POST /api/credentials/test': { ok: false, latencyMs: 0, error: 'Invalid key' },
-    };
-    mockFetch(map);
+    // No mock for /api/llm/models → 404 response → test fails
+    mockFetch(defaultMap());
     const user = userEvent.setup();
     render(<LLMPanel />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
@@ -159,7 +158,6 @@ describe('LLMPanel', () => {
     await user.type(screen.getByTestId('add-provider-apikey'), 'bad-key');
     await user.click(screen.getByTestId('add-provider-test'));
     await waitFor(() => expect(screen.getByTestId('add-provider-test')).toHaveTextContent('Failed'));
-    expect(screen.getByText('Invalid key')).toBeInTheDocument();
   });
 
   it('submitting add form adds the credential to the list', async () => {
@@ -176,7 +174,7 @@ describe('LLMPanel', () => {
     await user.type(screen.getByRole('textbox', { name: /name/i }), 'New Key');
     await user.type(screen.getByTestId('add-provider-apikey'), 'sk-test');
     await user.click(screen.getByTestId('add-provider-submit'));
-    await waitFor(() => expect(screen.getByTestId(`provider-row-${created.id}`)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId(`provider-card-${created.id}`)).toBeInTheDocument());
     // form should be hidden after submit
     expect(screen.queryByTestId('add-provider-form')).not.toBeInTheDocument();
   });
@@ -190,10 +188,8 @@ describe('LLMPanel', () => {
     mockFetch(map);
     const user = userEvent.setup();
     render(<LLMPanel />);
-    await waitFor(() => screen.getByTestId(`provider-row-${CRED.id}`));
-    const row = screen.getByTestId(`provider-row-${CRED.id}`);
-    const activateBtn = row.querySelector('button')!;
-    await user.click(activateBtn);
+    await waitFor(() => screen.getByTestId(`provider-activate-${CRED.id}`));
+    await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
     await waitFor(() => expect(screen.getByText('active')).toBeInTheDocument());
   });
 
@@ -205,12 +201,10 @@ describe('LLMPanel', () => {
     mockFetch(map);
     const user = userEvent.setup();
     render(<LLMPanel />);
-    await waitFor(() => screen.getByTestId(`provider-row-${CRED.id}`));
-    const row = screen.getByTestId(`provider-row-${CRED.id}`);
-    const deleteBtn = row.querySelectorAll('button')[1]!;
-    await user.click(deleteBtn);
+    await waitFor(() => screen.getByTestId(`provider-remove-${CRED.id}`));
+    await user.click(screen.getByTestId(`provider-remove-${CRED.id}`));
     await waitFor(() =>
-      expect(screen.queryByTestId(`provider-row-${CRED.id}`)).not.toBeInTheDocument(),
+      expect(screen.queryByTestId(`provider-card-${CRED.id}`)).not.toBeInTheDocument(),
     );
   });
 

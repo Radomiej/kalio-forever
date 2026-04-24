@@ -27,6 +27,8 @@ export function ChatInterface() {
     addToolActivity,
     updateToolActivity,
     clearToolActivities,
+    addLlmActivity,
+    updateLlmActivity,
   } = useAgentStore();
   const [error, setError] = useState<string | null>(null);
   const [showContextStats, setShowContextStats] = useState(false);
@@ -48,12 +50,16 @@ export function ChatInterface() {
         const { sessions, activeSessionId: sid } = useSessionStore.getState();
         const session = sessions.find((s) => s.id === sid);
         if (sid && session && (session.title === 'New Chat' || session.title === '')) {
+          addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: Date.now() });
           fetch(`/api/sessions/${sid}/generate-title`, { method: 'POST' })
             .then((r) => r.json())
             .then((data: { title: string }) => {
               useSessionStore.getState().updateSession(sid, { title: data.title });
+              updateLlmActivity('title-gen', { status: 'done', finishedAt: Date.now() });
             })
-            .catch(() => { /* non-critical */ });
+            .catch(() => {
+              updateLlmActivity('title-gen', { status: 'error', finishedAt: Date.now() });
+            });
         }
       }
     });

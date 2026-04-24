@@ -1,10 +1,12 @@
-import { BotMessageSquare, Zap } from 'lucide-react';
+import { BotMessageSquare, Zap, Brain } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
+import type { LlmActivity } from '../../store/agentStore';
 import { ToolActivityRow } from '../chat/ToolActivityRow';
 
 export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => void }) {
   const isStreaming = useAgentStore((s) => s.isStreaming);
   const toolActivities = useAgentStore((s) => s.toolActivities);
+  const llmActivities = useAgentStore((s) => s.llmActivities);
 
   const active = toolActivities.filter(
     (a) => a.status === 'running' || a.status === 'awaiting_confirmation',
@@ -13,7 +15,7 @@ export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => vo
     (a) => a.status !== 'running' && a.status !== 'awaiting_confirmation',
   );
 
-  if (!isStreaming && toolActivities.length === 0) {
+  if (!isStreaming && toolActivities.length === 0 && llmActivities.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-base-content/30 p-4">
         <BotMessageSquare size={28} />
@@ -38,7 +40,7 @@ export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => vo
             <span className="text-xs text-base-content/40">Last run</span>
           </>
         )}
-        <span className="ml-auto text-xs text-base-content/30">{toolActivities.length} call{toolActivities.length !== 1 ? 's' : ''}</span>
+        <span className="ml-auto text-xs text-base-content/30">{toolActivities.length} call{toolActivities.length !== 1 ? 's' : ''}{llmActivities.length > 0 ? ` · ${llmActivities.length} llm` : ''}</span>
       </div>
 
       {/* Active tool calls */}
@@ -52,7 +54,33 @@ export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => vo
         {done.map((a) => (
           <ToolActivityRow key={a.callId} activity={a} />
         ))}
+        {llmActivities.length > 0 && (
+          <>
+            {(active.length > 0 || done.length > 0) && <div className="border-t border-base-300/40 my-1" />}
+            {llmActivities.map((a) => (
+              <LlmActivityRow key={a.id} activity={a} />
+            ))}
+          </>
+        )}
       </div>
+    </div>
+  );
+}
+
+function LlmActivityRow({ activity }: { activity: LlmActivity }) {
+  const statusColor =
+    activity.status === 'running' ? 'text-sky-400' :
+    activity.status === 'error' ? 'text-error' :
+    'text-base-content/40';
+  return (
+    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-base-300/30 text-xs">
+      <Brain size={11} className={`shrink-0 ${activity.status === 'running' ? 'animate-pulse text-sky-400' : 'text-base-content/30'}`} />
+      <span className={`flex-1 truncate ${statusColor}`}>{activity.label}</span>
+      {activity.status === 'running' && (
+        <span className="loading loading-dots loading-xs shrink-0" />
+      )}
+      {activity.status === 'done' && <span className="text-success text-[10px] shrink-0">✓</span>}
+      {activity.status === 'error' && <span className="text-error text-[10px] shrink-0">✗</span>}
     </div>
   );
 }

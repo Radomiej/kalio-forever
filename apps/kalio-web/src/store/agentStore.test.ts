@@ -135,3 +135,66 @@ describe('agentStore - Tool Activity Status Mapping (REGRESSION TEST)', () => {
     expect(['success', 'error', 'cancelled']).toContain(toolResultExample.status);
   });
 });
+
+describe('agentStore - LlmActivity', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      toolActivities: [],
+      llmActivities: [],
+      isStreaming: false,
+      streamingMessageId: undefined,
+      pendingConfirmation: null,
+      availableTools: [],
+    });
+  });
+
+  it('addLlmActivity adds an entry', () => {
+    const store = useAgentStore.getState();
+    store.addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: 1000 });
+    const { llmActivities } = useAgentStore.getState();
+    expect(llmActivities).toHaveLength(1);
+    expect(llmActivities[0]).toMatchObject({ id: 'title-gen', status: 'running' });
+  });
+
+  it('updateLlmActivity patches by id', () => {
+    const store = useAgentStore.getState();
+    store.addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: 1000 });
+    store.updateLlmActivity('title-gen', { status: 'done', finishedAt: 2000 });
+    const { llmActivities } = useAgentStore.getState();
+    expect(llmActivities[0]).toMatchObject({ status: 'done', finishedAt: 2000 });
+  });
+
+  it('updateLlmActivity with error status', () => {
+    const store = useAgentStore.getState();
+    store.addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: 1000 });
+    store.updateLlmActivity('title-gen', { status: 'error', finishedAt: 3000 });
+    const { llmActivities } = useAgentStore.getState();
+    expect(llmActivities[0]?.status).toBe('error');
+  });
+
+  it('clearLlmActivities empties the array', () => {
+    const store = useAgentStore.getState();
+    store.addLlmActivity({ id: 'a', label: 'A', status: 'running', startedAt: 1000 });
+    store.addLlmActivity({ id: 'b', label: 'B', status: 'done', startedAt: 2000 });
+    store.clearLlmActivities();
+    expect(useAgentStore.getState().llmActivities).toHaveLength(0);
+  });
+
+  it('updateLlmActivity ignores unknown id', () => {
+    const store = useAgentStore.getState();
+    store.addLlmActivity({ id: 'title-gen', label: 'L', status: 'running', startedAt: 1000 });
+    store.updateLlmActivity('unknown-id', { status: 'done' });
+    expect(useAgentStore.getState().llmActivities[0]?.status).toBe('running');
+  });
+
+  it('multiple llmActivities coexist independently', () => {
+    const store = useAgentStore.getState();
+    store.addLlmActivity({ id: 'title-gen', label: 'Title', status: 'running', startedAt: 1000 });
+    store.addLlmActivity({ id: 'suggest', label: 'Suggest', status: 'running', startedAt: 1001 });
+    store.updateLlmActivity('title-gen', { status: 'done' });
+    const { llmActivities } = useAgentStore.getState();
+    expect(llmActivities).toHaveLength(2);
+    expect(llmActivities.find((a) => a.id === 'title-gen')?.status).toBe('done');
+    expect(llmActivities.find((a) => a.id === 'suggest')?.status).toBe('running');
+  });
+});

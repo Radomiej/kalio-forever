@@ -13,6 +13,16 @@ export interface ToolActivity {
   result?: ToolResult;
 }
 
+export type LlmActivityStatus = 'running' | 'done' | 'error';
+
+export interface LlmActivity {
+  id: string;
+  label: string;
+  status: LlmActivityStatus;
+  startedAt: number;
+  finishedAt?: number;
+}
+
 interface AgentState {
   isStreaming: boolean;
   streamingMessageId: string | undefined;
@@ -21,6 +31,8 @@ interface AgentState {
   tools: ToolMeta[];
   /** Tool calls active in the current turn, in order */
   toolActivities: ToolActivity[];
+  /** Auxiliary LLM sub-calls (title-gen, suggestions, etc.) */
+  llmActivities: LlmActivity[];
 
   setStreaming: (streaming: boolean, messageId?: string) => void;
   setPendingConfirmation: (req: ToolConfirmationRequest | null) => void;
@@ -29,6 +41,9 @@ interface AgentState {
   addToolActivity: (activity: ToolActivity) => void;
   updateToolActivity: (callId: string, patch: Partial<ToolActivity>) => void;
   clearToolActivities: () => void;
+  addLlmActivity: (activity: LlmActivity) => void;
+  updateLlmActivity: (id: string, patch: Partial<LlmActivity>) => void;
+  clearLlmActivities: () => void;
 }
 
 export const useAgentStore = create<AgentState>((set) => ({
@@ -38,6 +53,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   availableTools: [],
   tools: [],
   toolActivities: [],
+  llmActivities: [],
 
   setStreaming: (streaming, messageId = undefined) =>
     set({ isStreaming: streaming, streamingMessageId: messageId }),
@@ -56,4 +72,16 @@ export const useAgentStore = create<AgentState>((set) => ({
     })),
 
   clearToolActivities: () => set({ toolActivities: [] }),
+
+  addLlmActivity: (activity) =>
+    set((s) => ({ llmActivities: [...s.llmActivities, activity] })),
+
+  updateLlmActivity: (id, patch) =>
+    set((s) => ({
+      llmActivities: s.llmActivities.map((a) =>
+        a.id === id ? { ...a, ...patch } : a,
+      ),
+    })),
+
+  clearLlmActivities: () => set({ llmActivities: [] }),
 }));
