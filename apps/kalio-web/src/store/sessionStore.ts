@@ -9,6 +9,7 @@ interface SessionState {
   thinkingChunks: Record<string, string>;     // messageId → accumulated thinking delta
   pendingMessage: string | null;
   pendingRAAppId: string | null;
+  pendingUserActions: string[];
 
   setSessions: (sessions: ChatSession[]) => void;
   addSession: (session: ChatSession) => void;
@@ -22,6 +23,8 @@ interface SessionState {
   updateSession: (id: string, patch: Partial<ChatSession>) => void;
   setPendingMessage: (message: string | null) => void;
   setPendingRAAppId: (id: string | null) => void;
+  enqueueUserAction: (payload: string) => void;
+  dequeueUserAction: () => string | undefined;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -32,6 +35,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   thinkingChunks: {},
   pendingMessage: null,
   pendingRAAppId: null,
+  pendingUserActions: [],
 
   setSessions: (sessions) => set({ sessions }),
   addSession: (session) =>
@@ -48,7 +52,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     set((s) => ({ sessions: [...s.sessions, newSession] }));
     return id;
   },
-  setActiveSession: (id) => set({ activeSessionId: id, messages: [] }),
+  setActiveSession: (id) => set({ activeSessionId: id, messages: [], pendingUserActions: [] }),
   setMessages: (messages) => set({ messages }),
   addMessage: (message) =>
     set((s) => ({ messages: [...s.messages, message] })),
@@ -120,4 +124,16 @@ export const useSessionStore = create<SessionState>((set) => ({
 
   setPendingMessage: (message) => set({ pendingMessage: message }),
   setPendingRAAppId: (id) => set({ pendingRAAppId: id }),
+  enqueueUserAction: (payload: string) =>
+    set((s) => ({
+      pendingUserActions: [...s.pendingUserActions, payload],
+    })),
+  dequeueUserAction: () => {
+    let action: string | undefined;
+    set((s) => {
+      action = s.pendingUserActions[0];
+      return { pendingUserActions: s.pendingUserActions.slice(1) };
+    });
+    return action;
+  },
 }));
