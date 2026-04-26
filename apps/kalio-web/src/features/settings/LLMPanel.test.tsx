@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LLMPanel } from './LLMPanel';
 import type { Credential } from '@kalio/types';
@@ -225,7 +225,6 @@ describe('LLMPanel', () => {
       'PUT /api/credentials/settings/context-window': 204 as const,
     };
     mockFetch(map);
-    const user = userEvent.setup();
     render(<LLMPanel />);
     await waitFor(() => screen.getByTestId('context-window-slider'));
     const slider = screen.getByTestId('context-window-slider');

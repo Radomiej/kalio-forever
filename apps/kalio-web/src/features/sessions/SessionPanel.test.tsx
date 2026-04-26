@@ -177,3 +177,4 @@ describe('SessionPanel', () => {
     await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1));
   });
 });
+
