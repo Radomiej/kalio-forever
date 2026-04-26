@@ -34,17 +34,47 @@ function buildItems(
     messages.filter((m) => m.role === 'tool_result' && m.toolCallId).map((m) => m.toolCallId!),
   );
 
-  // messages[] is already in chronological insertion order — preserve it directly.
+  // Build a map: assistant message ID → tool_result messages
+  const assistantToToolResults = new Map<string, ChatMessage[]>();
+  const orphanToolResults: ChatMessage[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === 'tool_result' && msg.toolCallId) {
+      // Find the assistant message that has this toolCallId in its toolCalls
+      const parentMsg = messages.find(
+        (m) => m.role === 'assistant' && m.toolCalls?.some((tc) => tc.id === msg.toolCallId),
+      );
+      if (parentMsg) {
+        if (!assistantToToolResults.has(parentMsg.id)) {
+          assistantToToolResults.set(parentMsg.id, []);
+        }
+        assistantToToolResults.get(parentMsg.id)!.push(msg);
+      } else {
+        orphanToolResults.push(msg);
+      }
+    }
+  }
+
+  // Iterate messages in order, render assistant then its tool_results immediately after
   const items: Item[] = [];
 
   for (const msg of messages) {
     if (msg.role === 'assistant') {
       items.push({ kind: 'assistant', msg });
-    } else if (msg.role === 'tool_result' && msg.toolCallId) {
-      const toolName = toolCallIdToName.get(msg.toolCallId) ?? msg.toolCallId;
-      const isAnswered = answeredCallIds?.has(msg.toolCallId) ?? false;
-      items.push({ kind: 'tool_history', msg, toolName, isAnswered });
+      const toolResults = assistantToToolResults.get(msg.id) ?? [];
+      for (const tr of toolResults) {
+        const toolName = toolCallIdToName.get(tr.toolCallId!) ?? tr.toolCallId!;
+        const isAnswered = answeredCallIds?.has(tr.toolCallId!) ?? false;
+        items.push({ kind: 'tool_history', msg: tr, toolName, isAnswered });
+      }
     }
+  }
+
+  // Append orphan tool_results (no matching assistant message found)
+  for (const tr of orphanToolResults) {
+    const toolName = toolCallIdToName.get(tr.toolCallId!) ?? tr.toolCallId!;
+    const isAnswered = answeredCallIds?.has(tr.toolCallId!) ?? false;
+    items.push({ kind: 'tool_history', msg: tr, toolName, isAnswered });
   }
 
   // Append live activities whose tool_result hasn't arrived yet — they belong at the end.

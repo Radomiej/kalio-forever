@@ -62,12 +62,13 @@ export function SkillListPanel({ selectedId, onSelect }: Props) {
           >
             <span className="flex-1 truncate">{skill.name}</span>
             <span className="badge badge-xs opacity-60 shrink-0">{skill.source}</span>
-            <button
+            <span
               onClick={(e) => handleDelete(skill.id, e)}
-              className="opacity-0 group-hover:opacity-100 transition-opacity text-error hover:text-error"
+              role="button"
+              className="opacity-0 group-hover:opacity-100 transition-opacity text-error hover:text-error cursor-pointer"
             >
               <Trash2 size={12} />
-            </button>
+            </span>
           </button>
         ))}
       </div>

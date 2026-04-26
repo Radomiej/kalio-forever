@@ -5,6 +5,7 @@ import { HtmlIframeRenderer } from './HtmlIframeRenderer';
 import { isHtmlString, findHtmlInData, injectEngineCDN } from './raappRendererUtils';
 import { GuiDslRenderer, type GuiDslPayload } from './GuiDslRenderer';
 import { useSessionStore } from '../../store/sessionStore';
+import { useAgentStore } from '../../store/agentStore';
 import { eventBus } from '../../services/eventBus';
 
 interface RAAppRendererProps {
@@ -13,21 +14,33 @@ interface RAAppRendererProps {
 }
 
 export function RAAppRenderer({ block, result }: RAAppRendererProps) {
-  const handleGuiAction = useCallback((action: string) => {
-    const { activeSessionId, sessions, addMessage } = useSessionStore.getState();
-    if (!activeSessionId) return;
-    const session = sessions.find((s) => s.id === activeSessionId);
-    if (!session) return;
-    const userMsg: ChatMessage = {
-      id: nanoid(),
-      sessionId: activeSessionId,
-      role: 'user',
-      content: action,
-      createdAt: Date.now(),
-    };
-    addMessage(userMsg);
-    eventBus.sendMessage({ sessionId: activeSessionId, content: action, personaId: session.personaId });
-  }, []);
+  const isStreaming = useAgentStore((s) => s.isStreaming);
+
+  const handleGuiAction = useCallback(
+    (action: string) => {
+      const { activeSessionId, sessions, addMessage, enqueueUserAction } = useSessionStore.getState();
+      if (!activeSessionId) return;
+      const session = sessions.find((s) => s.id === activeSessionId);
+      if (!session) return;
+
+      // Queue action if agent is still streaming (prevents mid-stream widget clicks)
+      if (isStreaming) {
+        enqueueUserAction(action);
+        return;
+      }
+
+      const userMsg: ChatMessage = {
+        id: nanoid(),
+        sessionId: activeSessionId,
+        role: 'user',
+        content: action,
+        createdAt: Date.now(),
+      };
+      addMessage(userMsg);
+      eventBus.sendMessage({ sessionId: activeSessionId, content: action, personaId: session.personaId });
+    },
+    [isStreaming],
+  );
 
   if (result?.status === 'error') {
     return (

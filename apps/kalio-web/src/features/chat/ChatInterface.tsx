@@ -186,6 +186,31 @@ export function ChatInterface() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, toolActivities]);
 
+  // Flush queued RA-App user actions when agent finishes streaming
+  const prevStreamingRef = useRef(isStreaming);
+  useEffect(() => {
+    if (prevStreamingRef.current && !isStreaming) {
+      const { dequeueUserAction, activeSessionId: sid, sessions } = useSessionStore.getState();
+      let action = dequeueUserAction();
+      while (action && sid) {
+        const session = sessions.find((s) => s.id === sid);
+        if (session) {
+          const userMsg: ChatMessage = {
+            id: nanoid(),
+            sessionId: sid,
+            role: 'user',
+            content: action,
+            createdAt: Date.now(),
+          };
+          addMessage(userMsg);
+          eventBus.sendMessage({ sessionId: sid, content: action, personaId: session.personaId });
+        }
+        action = dequeueUserAction();
+      }
+    }
+    prevStreamingRef.current = isStreaming;
+  }, [isStreaming, addMessage]);
+
   // Latest-ref so the pending-message effect always calls the current handleSend
   const handleSendRef = useRef<(content: string, personaId: string) => void>(() => {});
 
