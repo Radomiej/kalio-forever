@@ -98,6 +98,7 @@ export class ChatService {
       agentIteration++;
       const msgId = nanoid();
       let msgContent = '';
+      let msgThinking = '';
       let msgChunkCount = 0;
       const msgStart = Date.now();
 
@@ -117,7 +118,13 @@ export class ChatService {
           tools,
           (chunk) => {
             msgChunkCount++;
-            if (!chunk.done) msgContent += chunk.delta;
+            if (!chunk.done) {
+              if (chunk.thinking) {
+                msgThinking += chunk.delta;
+              } else {
+                msgContent += chunk.delta;
+              }
+            }
             client.emit('chat:chunk', chunk);
           },
           sessionId,
@@ -128,7 +135,7 @@ export class ChatService {
         await this.auditService.log('llm_response', `LLM response — ${pendingToolCalls.length} tool call(s)`, {
           sessionId,
           durationMs: ms,
-          data: { model: personaConfig.model, chunks: msgChunkCount, toolCallCount: pendingToolCalls.length, refId: auditReqId },
+          data: { model: personaConfig.model, chunks: msgChunkCount, toolCallCount: pendingToolCalls.length, thinkingLength: msgThinking.length, refId: auditReqId },
         });
       } catch (err) {
         this.logger.error('[chat:send] LLM error', err);
@@ -151,6 +158,7 @@ export class ChatService {
         sessionId,
         role: 'assistant',
         content: msgContent,
+        thinking: msgThinking || null,
         toolCalls: pendingToolCalls.length > 0 ? pendingToolCalls : null,
         createdAt: new Date(),
       });
@@ -398,6 +406,7 @@ export class ChatService {
       sessionId: row.sessionId,
       role: row.role as ChatMessage['role'],
       content: row.content,
+      thinking: row.thinking ?? undefined,
       toolCalls: row.toolCalls ?? undefined,
       toolCallId: row.toolCallId ?? undefined,
       createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : row.createdAt,

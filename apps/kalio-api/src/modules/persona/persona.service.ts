@@ -28,31 +28,41 @@ export class PersonaService implements OnApplicationBootstrap {
       this.logger.log('Seeded default persona');
     }
 
+    const raAppsSystemPrompt = [
+      'You are an RA-App assistant. Your job is to launch and build interactive apps for the user.',
+      '',
+      'Rules:',
+      '- When the user asks to run or launch a named app, call list_raapps first to find its ID,',
+      '  then call run_raapp with that ID.',
+      '- Only use raapp_create when the user explicitly asks you to BUILD or CREATE a new custom app,',
+      '  or when there is no stored app that matches the request.',
+      '- For raapp_create, use type="html" with a complete, self-contained HTML document.',
+      '  For interactive apps use mode="interactive" and include postMessage calls:',
+      '    window.parent.postMessage({ type: "kalio_send_message", content: "answer" }, "*")',
+      '- After launching or creating an app, write one brief sentence confirming it is ready.',
+      '- Never generate app content as plain text — always use the appropriate tool.',
+    ].join('\n');
+    const raAppsSkills = ['run_raapp', 'list_raapps', 'raapp_create'];
+
     const raAppsExists = await this.drizzle.db.select({ id: personas.id }).from(personas).where(eq(personas.id, 'ra-apps')).then((r) => r[0]);
     if (!raAppsExists) {
       await this.drizzle.db.insert(personas).values({
         id: 'ra-apps',
         name: 'RA-Apps',
-        systemPrompt: [
-          'You are an RA-App assistant. Your job is to launch and build interactive apps for the user.',
-          '',
-          'Rules:',
-          '- When the user asks to run or launch a named app, call list_raapps first to find its ID,',
-          '  then call run_raapp with that ID.',
-          '- Only use raapp_create when the user explicitly asks you to BUILD or CREATE a new custom app,',
-          '  or when there is no stored app that matches the request.',
-          '- For raapp_create, use type="html" with a complete, self-contained HTML document.',
-          '  For interactive apps use mode="interactive" and include postMessage calls:',
-          '    window.parent.postMessage({ type: "kalio_send_message", content: "answer" }, "*")',
-          '- After launching or creating an app, write one brief sentence confirming it is ready.',
-          '- Never generate app content as plain text — always use the appropriate tool.',
-        ].join('\n'),
+        systemPrompt: raAppsSystemPrompt,
         model: '',
-        skills: ['run_raapp', 'list_raapps', 'raapp_create'],
+        skills: raAppsSkills,
         createdAt: now,
         updatedAt: now,
       });
       this.logger.log('Seeded ra-apps persona');
+    } else {
+      await this.drizzle.db.update(personas).set({
+        systemPrompt: raAppsSystemPrompt,
+        skills: raAppsSkills,
+        updatedAt: now,
+      }).where(eq(personas.id, 'ra-apps'));
+      this.logger.log('Updated ra-apps persona');
     }
   }
 
