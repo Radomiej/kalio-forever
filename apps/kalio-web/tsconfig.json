@@ -15,6 +15,7 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "outDir": "./dist",
     "paths": {
       "@/*": ["./src/*"],
       "@kalio/types": ["../../packages/@kalio/types/src"],
