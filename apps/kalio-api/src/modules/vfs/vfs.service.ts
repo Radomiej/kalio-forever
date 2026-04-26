@@ -48,6 +48,9 @@ export class VFSService {
   archiveSession(sessionId: string): archiver.Archiver {
     const dir = this.sessionDir(sessionId);
     const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', (err) => {
+      this.logger.error(`[VFSService] Archive error for session ${sessionId}`, err);
+    });
     if (existsSync(dir)) {
       archive.directory(dir, false);
     }

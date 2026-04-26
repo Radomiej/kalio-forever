@@ -30,7 +30,7 @@ function fileIcon(mimeType: string | undefined) {
   return <File size={16} className="text-base-content/50" />;
 }
 
-const API_BASE = (import.meta.env['VITE_API_URL'] as string | undefined) ?? 'http://localhost:3016';
+const API_BASE = apiClient.defaults.baseURL ?? '';
 
 export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationFilesBarProps) {
   const [files, setFiles] = useState<VFSFile[]>([]);
