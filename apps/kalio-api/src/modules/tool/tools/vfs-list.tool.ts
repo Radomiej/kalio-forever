@@ -15,11 +15,11 @@ import { VFSService } from '../../vfs/vfs.service';
 export class VFSListTool {
   constructor(private readonly vfs: VFSService) {}
 
-  async execute(request: ToolCallRequest): Promise<{ conversationId: string; files: { path: string; sizeBytes: number }[] }> {
-    const { conversationId } = request;
-    const result = this.vfs.listFiles(conversationId);
+  async execute(request: ToolCallRequest): Promise<{ sessionId: string; files: { path: string; sizeBytes: number }[] }> {
+    const { sessionId } = request;
+    const result = this.vfs.listFiles(sessionId);
     return {
-      conversationId: result.conversationId,
+      sessionId: result.sessionId,
       files: result.files.map((f) => ({ path: f.path, sizeBytes: f.sizeBytes })),
     };
   }

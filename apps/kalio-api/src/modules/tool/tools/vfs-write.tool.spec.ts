@@ -66,7 +66,6 @@ describe('VFSWriteTool', () => {
       const mockWriteFile = vi.spyOn(vfsService, 'writeFile').mockResolvedValue(undefined);
       const request = {
         sessionId: 'sess-123',
-        conversationId: 'conv-456',
         toolName: 'vfs_write',
         args: {
           filePath: 'test.txt',
@@ -80,7 +79,7 @@ describe('VFSWriteTool', () => {
 
       // Assert
       expect(mockWriteFile).toHaveBeenCalledWith({
-        conversationId: 'conv-456',
+        sessionId: 'sess-123',
         filePath: 'test.txt',
         content: 'Hello World',
       });
@@ -100,7 +99,6 @@ describe('VFSWriteTool', () => {
 
       const request = {
         sessionId: 'sess-123',
-        conversationId: 'conv-456',
         toolName: 'vfs_write',
         args: {
           filePath: 'test.txt',
@@ -114,3 +112,5 @@ describe('VFSWriteTool', () => {
     });
   });
 });
+
+

@@ -11,7 +11,7 @@ import { VFSService } from '../../vfs/vfs.service';
     type: 'object',
     required: ['filePath'],
     properties: {
-      filePath: { type: 'string', description: 'Path relative to the conversation workspace' },
+      filePath: { type: 'string', description: 'Path relative to the workspace' },
     },
   },
 })
@@ -19,9 +19,9 @@ export class VFSReadTool {
   constructor(private readonly vfs: VFSService) {}
 
   async execute(request: ToolCallRequest): Promise<{ filePath: string; content: string }> {
-    const { conversationId } = request;
+    const { sessionId } = request;
     const filePath = request.args['filePath'] as string;
-    const result = this.vfs.readFile(conversationId, filePath);
+    const result = this.vfs.readFile(sessionId, filePath);
     return { filePath: result.filePath, content: result.content };
   }
 }

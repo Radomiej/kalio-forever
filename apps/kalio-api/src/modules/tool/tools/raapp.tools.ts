@@ -9,7 +9,10 @@ import { RAAppSandboxService } from '../../raapp/raapp-sandbox.service';
   name: 'raapp_create',
   description:
     'Create an RA-App block from HTML or GUI DSL content and validate it. ' +
-    'Returns a ready block descriptor that can be rendered in the chat UI.',
+    'Returns a ready block descriptor that can be rendered in the chat UI. ' +
+    'For interactive mode (mode="interactive"), the HTML can send user selections back to the ' +
+    'conversation using: window.parent.postMessage({ type: "kalio_send_message", content: "user answer" }, "*"). ' +
+    'This lets users click buttons or options inside the app and have their choice appear as a chat message.',
   parameters: {
     type: 'object',
     required: ['type', 'content'],

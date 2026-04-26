@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { ToolRegistryService } from './tool-registry.service';
@@ -36,8 +36,8 @@ describe('ToolDispatchService', () => {
         throw new Error(`PATH_TRAVERSAL_DENIED: "${req.filePath}" escapes sandbox`);
       }
     }),
-    readFile: vi.fn().mockReturnValue({ conversationId: 'c', filePath: 'f', content: '' }),
-    listFiles: vi.fn().mockReturnValue({ conversationId: 'c', files: [] }),
+    readFile: vi.fn().mockReturnValue({ sessionId: 'ws', filePath: 'f', content: '' }),
+    listFiles: vi.fn().mockReturnValue({ sessionId: 'ws', files: [] }),
   };
 
   const mockConfigService = { get: vi.fn().mockReturnValue('./test-workspace') };
@@ -70,11 +70,10 @@ describe('ToolDispatchService', () => {
     registryService = moduleRef.get<ToolRegistryService>(ToolRegistryService);
   });
 
-  describe('AC-07 — unknown tool does not crash session', () => {
+  describe('AC-07 � unknown tool does not crash session', () => {
     it('returns TOOL_NOT_FOUND for unregistered tool name', async () => {
       const result = await service.dispatch({
         sessionId: 'sess-123',
-        conversationId: 'conv-456',
         toolName: 'non_existent_tool',
         args: {},
         callId: 'call-789',
@@ -88,8 +87,7 @@ describe('ToolDispatchService', () => {
       await expect(
         service.dispatch({
           sessionId: 'sess-123',
-          conversationId: 'conv-456',
-          toolName: 'this_does_not_exist',
+            toolName: 'this_does_not_exist',
           args: {},
           callId: 'call-000',
         }),
@@ -97,11 +95,10 @@ describe('ToolDispatchService', () => {
     });
   });
 
-  describe('dispatch — registered tools', () => {
+  describe('dispatch � registered tools', () => {
     it('dispatches vfs_write successfully', async () => {
       const result = await service.dispatch({
         sessionId: 'sess-123',
-        conversationId: 'conv-456',
         toolName: 'vfs_write',
         args: { filePath: 'test.txt', content: 'Hello' },
         callId: 'call-789',
@@ -114,7 +111,6 @@ describe('ToolDispatchService', () => {
     it('handles vfs_write path traversal as TOOL_EXEC_ERROR', async () => {
       const result = await service.dispatch({
         sessionId: 'sess-123',
-        conversationId: 'conv-456',
         toolName: 'vfs_write',
         args: { filePath: '../../../etc/passwd', content: 'malicious' },
         callId: 'call-789',
@@ -124,13 +120,12 @@ describe('ToolDispatchService', () => {
       expect(result.errorCode).toBeDefined();
     });
 
-    it('all registered tools are dispatchable — no TOOL_NOT_FOUND for any', async () => {
+    it('all registered tools are dispatchable � no TOOL_NOT_FOUND for any', async () => {
       const allTools = registryService.getAllTools();
       for (const toolMeta of allTools) {
         const result = service.dispatch({
           sessionId: 'sess-123',
-          conversationId: 'conv-456',
-          toolName: toolMeta.name,
+            toolName: toolMeta.name,
           args: {},
           callId: 'call-789',
         });
@@ -139,3 +134,4 @@ describe('ToolDispatchService', () => {
     });
   });
 });
+
