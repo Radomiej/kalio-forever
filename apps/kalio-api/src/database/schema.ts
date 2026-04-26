@@ -1,6 +1,5 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 import type { LLMToolCall, AgentLoopConfig, AgentLoopStatus, AgentTaskStatus } from '@kalio/types';
-
 // ─── personas ─────────────────────────────────────────────────────────────────
 export const personas = sqliteTable('personas', {
   id:           text('id').primaryKey(),
@@ -14,11 +13,11 @@ export const personas = sqliteTable('personas', {
 
 // ─── sessions ─────────────────────────────────────────────────────────────────
 export const sessions = sqliteTable('sessions', {
-  id:        text('id').primaryKey(),
-  personaId: text('persona_id').notNull().references(() => personas.id, { onDelete: 'cascade' }),
-  title:     text('title').notNull().default(''),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  id:          text('id').primaryKey(),
+  personaId:   text('persona_id').notNull().references(() => personas.id, { onDelete: 'cascade' }),
+  title:       text('title').notNull().default(''),
+  createdAt:   integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt:   integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
 // ─── messages ─────────────────────────────────────────────────────────────────
