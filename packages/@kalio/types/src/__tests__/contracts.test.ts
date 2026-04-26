@@ -101,19 +101,20 @@ describe('@kalio/types — P0-T01 contract shape', () => {
       requestId: 'req-1',
       sessionId: 'sess-1',
       toolName: 'rm_file',
+      toolCallId: 'call-1',
       args: { path: '/foo.txt' },
       timeoutMs: 30000,
     };
     expect(req.timeoutMs).toBe(30000);
   });
 
-  it('VFSWriteRequest has conversationId and filePath', () => {
+  it('VFSWriteRequest has sessionId and filePath', () => {
     const req: VFSWriteRequest = {
-      conversationId: 'conv-1',
+      sessionId: 'sess-1',
       filePath: 'output.txt',
       content: 'hello world',
     };
-    expect(req.conversationId).toBeDefined();
+    expect(req.sessionId).toBeDefined();
   });
 
   it('Credential never exposes apiKey', () => {
@@ -133,6 +134,7 @@ describe('@kalio/types — P0-T01 contract shape', () => {
       name: 'My MCP',
       url: 'http://localhost:9000',
       status: 'connected',
+      transport: 'stdio',
       createdAt: Date.now(),
     };
     expect(['connecting', 'connected', 'disconnected', 'error']).toContain(server.status);
@@ -175,7 +177,6 @@ describe('@kalio/types — P0-T01 contract shape', () => {
       sessionId: 's1',
       content: 'hi',
       personaId: 'p1',
-      conversationId: 'c1',
     };
     expect(event.content).toBeDefined();
   });
