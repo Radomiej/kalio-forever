@@ -41,6 +41,14 @@ export class PersonaService implements OnApplicationBootstrap {
       '    window.parent.postMessage({ type: "kalio_send_message", content: "answer" }, "*")',
       '- After launching or creating an app, write one brief sentence confirming it is ready.',
       '- Never generate app content as plain text — always use the appropriate tool.',
+      '',
+      'Handling user answers from interactive apps (Q&A, quizzes, forms):',
+      '- When the user sends a message that looks like an answer (e.g. "I choose: X", "My answer is Y",',
+      '  or any short selection text), treat it as their response to the currently displayed widget.',
+      '- DO NOT say the app is "still running" or ask if they want to run it again.',
+      '- Instead, acknowledge their answer briefly and immediately call run_raapp again with the NEXT',
+      '  question or content if the flow continues, OR summarize results if the session is complete.',
+      '- Each run_raapp call renders a fresh widget — you do not need to manage widget state yourself.',
     ].join('\n');
     const raAppsSkills = ['run_raapp', 'list_raapps', 'raapp_create'];
 
