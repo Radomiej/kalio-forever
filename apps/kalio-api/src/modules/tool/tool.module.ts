@@ -14,7 +14,7 @@ import { KVStoreService } from './kv-store.service';
 import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
 import { TerminalService } from './terminal.service';
 import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
-import { RaAppCreateTool, RaAppCompileTool } from './tools/raapp.tools';
+import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 import { VFSModule } from '../vfs/vfs.module';
 import { LLMModule } from '../llm/llm.module';
@@ -31,7 +31,7 @@ import { MemoryModule } from '../memory/memory.module';
     KVStoreService, KVWriteTool, KVReadTool, KVListTool, KVDeleteTool,
     GrepSearchTool, FileSearchTool,
     TerminalService, TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool,
-    RaAppCreateTool, RaAppCompileTool,
+    RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool,
     MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
   ],
   exports: [ToolRegistryService, ToolDispatchService],

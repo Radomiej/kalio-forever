@@ -12,7 +12,7 @@ import { FsWriteTool } from './tools/fs-write.tool';
 import { KVWriteTool, KVReadTool, KVListTool, KVDeleteTool } from './tools/kv.tools';
 import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
 import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
-import { RaAppCreateTool, RaAppCompileTool } from './tools/raapp.tools';
+import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 
 @Injectable()
@@ -41,6 +41,8 @@ export class ToolRegistryService {
     private readonly terminalKillTool: TerminalKillTool,
     private readonly raAppCreateTool: RaAppCreateTool,
     private readonly raAppCompileTool: RaAppCompileTool,
+    private readonly runRaAppTool: RunRaAppTool,
+    private readonly listRaAppsTool: ListRaAppsTool,
     private readonly memoryIngestTool: MemoryIngestTool,
     private readonly memorySearchTool: MemorySearchTool,
     private readonly memoryIngestConversationTool: MemoryIngestConversationTool,
@@ -51,7 +53,7 @@ export class ToolRegistryService {
       kvWriteTool, kvReadTool, kvListTool, kvDeleteTool,
       grepSearchTool, fileSearchTool,
       terminalSpawnTool, terminalListTool, terminalOutputTool, terminalKillTool,
-      raAppCreateTool, raAppCompileTool,
+      raAppCreateTool, raAppCompileTool, runRaAppTool, listRaAppsTool,
       memoryIngestTool, memorySearchTool, memoryIngestConversationTool,
     ]);
   }
