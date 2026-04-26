@@ -1,7 +1,11 @@
-import type { RAAppBlock, RAAppResult } from '@kalio/types';
+import { useCallback } from 'react';
+import { nanoid } from 'nanoid';
+import type { RAAppBlock, RAAppResult, ChatMessage } from '@kalio/types';
 import { HtmlIframeRenderer } from './HtmlIframeRenderer';
 import { isHtmlString, findHtmlInData, injectEngineCDN } from './raappRendererUtils';
 import { GuiDslRenderer, type GuiDslPayload } from './GuiDslRenderer';
+import { useSessionStore } from '../../store/sessionStore';
+import { eventBus } from '../../services/eventBus';
 
 interface RAAppRendererProps {
   block: RAAppBlock;
@@ -9,6 +13,22 @@ interface RAAppRendererProps {
 }
 
 export function RAAppRenderer({ block, result }: RAAppRendererProps) {
+  const handleGuiAction = useCallback((action: string) => {
+    const { activeSessionId, sessions, addMessage } = useSessionStore.getState();
+    if (!activeSessionId) return;
+    const session = sessions.find((s) => s.id === activeSessionId);
+    if (!session) return;
+    const userMsg: ChatMessage = {
+      id: nanoid(),
+      sessionId: activeSessionId,
+      role: 'user',
+      content: action,
+      createdAt: Date.now(),
+    };
+    addMessage(userMsg);
+    eventBus.sendMessage({ sessionId: activeSessionId, content: action, personaId: session.personaId });
+  }, []);
+
   if (result?.status === 'error') {
     return (
       <div data-testid="raapp-error" className="alert alert-error py-2 text-xs">
@@ -34,9 +54,12 @@ export function RAAppRenderer({ block, result }: RAAppRendererProps) {
         parsed !== null &&
         typeof parsed === 'object' &&
         'nodes' in parsed &&
-        Array.isArray((parsed as GuiDslPayload).nodes)
+        Array.isArray((parsed as GuiDslPayload).nodes) &&
+        'data' in parsed &&
+        typeof (parsed as GuiDslPayload).data === 'object' &&
+        (parsed as GuiDslPayload).data !== null
       ) {
-        return <GuiDslRenderer payload={parsed as GuiDslPayload} />;
+        return <GuiDslRenderer payload={parsed as GuiDslPayload} onAction={handleGuiAction} />;
       }
     } catch {
       // not JSON — fall through

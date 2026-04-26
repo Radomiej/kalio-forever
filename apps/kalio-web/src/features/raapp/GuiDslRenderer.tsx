@@ -95,7 +95,7 @@ function NodeView({ node, data, onAction }: NodeViewProps) {
     const m = res.match(/^\s*(-?[\d.]+)\s*([><=!]+)\s*(-?[\d.]+)\s*$/);
     if (m) {
       const l = parseFloat(m[1]), op = m[2], r = parseFloat(m[3]);
-      const show = op === '>' ? l > r : op === '<' ? l < r : op === '>=' || op === '=>' ? l >= r : op === '<=' || op === '=<' ? l <= r : op === '==' || op === '=' ? l === r : l !== r;
+      const show = op === '>' ? l > r : op === '<' ? l < r : op === '>=' || op === '=>' ? l >= r : op === '<=' || op === '=<' ? l <= r : op === '==' || op === '=' ? l === r : op === '!=' || op === '<>' ? l !== r : false;
       if (!show) return null;
     } else if (!res || res === '0' || res === 'false' || res === 'no') {
       return null;
