@@ -137,6 +137,19 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
+// ─── audit_log ────────────────────────────────────────────────────────────────
+export const auditLog = sqliteTable('audit_log', {
+  id:         text('id').primaryKey(),
+  sessionId:  text('session_id'),
+  type:       text('type', {
+    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'error'],
+  }).notNull().$type<'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error'>(),
+  label:      text('label').notNull(),
+  data:       text('data', { mode: 'json' }).$type<Record<string, unknown>>(),
+  durationMs: integer('duration_ms'),
+  createdAt:  integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
 // ─── Type inference helpers ───────────────────────────────────────────────────
 export type PersonaRow         = typeof personas.$inferSelect;
 export type SessionRow         = typeof sessions.$inferSelect;
@@ -148,6 +161,7 @@ export type SkillRow           = typeof skills.$inferSelect;
 export type AgentLoopRow       = typeof agentLoops.$inferSelect;
 export type AgentTaskRow       = typeof agentTasks.$inferSelect;
 export type AgentIterationRow  = typeof agentIterations.$inferSelect;
+export type AuditLogRow        = typeof auditLog.$inferSelect;
 export type AppSettingRow      = typeof appSettings.$inferSelect;
 
 export type InsertPersona      = typeof personas.$inferInsert;
