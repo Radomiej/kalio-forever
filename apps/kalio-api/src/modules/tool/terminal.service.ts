@@ -1,6 +1,7 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, ForbiddenException } from '@nestjs/common';
 import { spawn, ChildProcess } from 'node:child_process';
 import { nanoid } from 'nanoid';
+import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 
 export interface TerminalSession {
   id: string;
@@ -18,9 +19,16 @@ export class TerminalService implements OnModuleDestroy {
   private readonly sessions = new Map<string, { meta: TerminalSession; proc: ChildProcess }>();
   private readonly MAX_OUTPUT = 64 * 1024; // 64 KB per session
 
-  spawn(command: string, args: string[], cwd?: string): TerminalSession {
+  constructor(private readonly allowedPaths: AllowedPathsService) {}
+
+  async spawn(command: string, args: string[], cwd?: string): Promise<TerminalSession> {
     const id = nanoid();
     const safeCwd = cwd ?? process.cwd();
+
+    const allowed = await this.allowedPaths.isAllowed(safeCwd);
+    if (!allowed) {
+      throw new ForbiddenException(`ACCESS_DENIED: cwd is outside allowed roots: ${safeCwd}`);
+    }
 
     const proc = spawn(command, args, {
       cwd: safeCwd,

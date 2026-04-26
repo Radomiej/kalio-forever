@@ -119,6 +119,11 @@ export class RunRaAppTool {
         });
         delete outputData['options'];
       }
+      // Execute system effects to compute derived outputs (result, expression, etc.)
+      if (app.systemsContent) {
+        const computed = await this.raapp.executeSystems(app.systemsContent, inputs);
+        Object.assign(outputData, computed);
+      }
       const data = { output: outputData };
       const result = await this.raapp.execute({ type: 'gui', mode: app.appMode, content: app.guiContent }, data);
       if (result.status === 'error') {

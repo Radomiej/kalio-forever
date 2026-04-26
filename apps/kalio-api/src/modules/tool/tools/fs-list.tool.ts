@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { readdirSync, statSync, existsSync } from 'node:fs';
-import { resolve, normalize, relative, join } from 'node:path';
+import { resolve, relative, join } from 'node:path';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
+import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 
 interface FileEntry {
   path: string;
@@ -32,7 +32,7 @@ function walkDir(dir: string, root: string, maxDepth: number, depth: number): Fi
 @Injectable()
 @Tool({
   name: 'fs_list',
-  description: 'List files and directories at a path inside the allowed workspace root.',
+  description: 'List files and directories at a path inside an allowed directory.',
   parameters: {
     type: 'object',
     required: ['path'],
@@ -44,19 +44,16 @@ function walkDir(dir: string, root: string, maxDepth: number, depth: number): Fi
   requiresConfirmation: false,
 })
 export class FsListTool {
-  private readonly allowedRoot: string;
-
-  constructor(private readonly config: ConfigService) {
-    this.allowedRoot = resolve(this.config.get<string>('WORKSPACE_ROOT', './data/workspaces'));
-  }
+  constructor(private readonly allowedPaths: AllowedPathsService) {}
 
   async execute(request: ToolCallRequest): Promise<{ path: string; entries: FileEntry[] }> {
     const rawPath = request.args['path'] as string;
     const recursive = (request.args['recursive'] as boolean | undefined) ?? false;
 
     const absPath = resolve(rawPath);
-    if (!normalize(absPath).startsWith(this.allowedRoot)) {
-      throw new Error(`ACCESS_DENIED: path is outside allowed workspace root`);
+    const allowed = await this.allowedPaths.isAllowed(absPath);
+    if (!allowed) {
+      throw new Error(`ACCESS_DENIED: path is outside allowed roots`);
     }
     if (!existsSync(absPath)) throw new Error(`NOT_FOUND: ${rawPath}`);
     const stat = statSync(absPath);

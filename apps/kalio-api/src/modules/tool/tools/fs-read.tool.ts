@@ -1,16 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { readFileSync, existsSync, statSync } from 'node:fs';
-import { resolve, normalize } from 'node:path';
+import { resolve } from 'node:path';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
+import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 
 const MAX_BYTES = 512 * 1024; // 512 KB safety cap
 
 @Injectable()
 @Tool({
   name: 'fs_read',
-  description: 'Read the contents of a file from the local filesystem. Path must be inside the allowed workspace root.',
+  description: 'Read the contents of a file from the local filesystem. Path must be inside an allowed directory.',
   parameters: {
     type: 'object',
     required: ['path'],
@@ -23,11 +23,7 @@ const MAX_BYTES = 512 * 1024; // 512 KB safety cap
   requiresConfirmation: false,
 })
 export class FsReadTool {
-  private readonly allowedRoot: string;
-
-  constructor(private readonly config: ConfigService) {
-    this.allowedRoot = resolve(this.config.get<string>('WORKSPACE_ROOT', './data/workspaces'));
-  }
+  constructor(private readonly allowedPaths: AllowedPathsService) {}
 
   async execute(request: ToolCallRequest): Promise<{ path: string; content: string; lines: number }> {
     const rawPath = request.args['path'] as string;
@@ -35,8 +31,9 @@ export class FsReadTool {
     const endLine = request.args['endLine'] as number | undefined;
 
     const absPath = resolve(rawPath);
-    if (!normalize(absPath).startsWith(this.allowedRoot)) {
-      throw new Error(`ACCESS_DENIED: path is outside allowed workspace root`);
+    const allowed = await this.allowedPaths.isAllowed(absPath);
+    if (!allowed) {
+      throw new Error(`ACCESS_DENIED: path is outside allowed roots`);
     }
     if (!existsSync(absPath)) throw new Error(`NOT_FOUND: ${rawPath}`);
 

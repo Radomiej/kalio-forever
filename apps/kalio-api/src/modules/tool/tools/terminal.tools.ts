@@ -29,7 +29,7 @@ export class TerminalSpawnTool {
     const command = request.args['command'] as string;
     const args = (request.args['args'] as string[]) ?? [];
     const cwd = request.args['cwd'] as string | undefined;
-    const session = this.terminals.spawn(command, args, cwd);
+    const session = await this.terminals.spawn(command, args, cwd);
     return { id: session.id, pid: session.pid, command: session.command };
   }
 }

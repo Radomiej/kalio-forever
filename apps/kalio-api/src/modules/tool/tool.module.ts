@@ -20,9 +20,10 @@ import { VFSModule } from '../vfs/vfs.module';
 import { LLMModule } from '../llm/llm.module';
 import { RAAppModule } from '../raapp/raapp.module';
 import { MemoryModule } from '../memory/memory.module';
+import { AllowedPathsModule } from '../allowed-paths/allowed-paths.module';
 
 @Module({
-  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule],
+  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule],
   controllers: [ToolController],
   providers: [
     ToolRegistryService, ToolDispatchService,

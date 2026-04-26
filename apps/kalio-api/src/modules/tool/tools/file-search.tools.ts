@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import {
   readdirSync, readFileSync, statSync, existsSync,
 } from 'node:fs';
-import { resolve, normalize, join, relative } from 'node:path';
+import { resolve, join, relative } from 'node:path';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
+import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -52,7 +52,7 @@ function globToRegex(pattern: string): RegExp {
 @Injectable()
 @Tool({
   name: 'grep_search',
-  description: 'Search for text matches in files under the workspace root. Returns matching lines with file paths and line numbers.',
+  description: 'Search for text matches in files under configured allowed directories. Returns matching lines with file paths and line numbers.',
   parameters: {
     type: 'object',
     required: ['query'],
@@ -66,11 +66,7 @@ function globToRegex(pattern: string): RegExp {
   requiresConfirmation: false,
 })
 export class GrepSearchTool {
-  private readonly allowedRoot: string;
-
-  constructor(private readonly config: ConfigService) {
-    this.allowedRoot = resolve(this.config.get<string>('WORKSPACE_ROOT', './data/workspaces'));
-  }
+  constructor(private readonly allowedPaths: AllowedPathsService) {}
 
   async execute(request: ToolCallRequest): Promise<{ matches: Array<{ file: string; line: number; text: string }>; total: number }> {
     const query = request.args['query'] as string;
@@ -78,34 +74,39 @@ export class GrepSearchTool {
     const includePattern = request.args['includePattern'] as string | undefined;
     const maxResults = (request.args['maxResults'] as number) ?? 50;
 
-    if (!existsSync(this.allowedRoot)) {
+    const roots = await this.allowedPaths.getRoots();
+    if (roots.length === 0) {
       return { matches: [], total: 0 };
     }
 
     const pattern = isRegexp ? new RegExp(query, 'i') : new RegExp(escapeRegex(query), 'i');
     const globRe = includePattern ? globToRegex(includePattern) : null;
 
-    const allFiles = walkDir(this.allowedRoot, 10);
     const matches: Array<{ file: string; line: number; text: string }> = [];
 
-    for (const absPath of allFiles) {
-      if (matches.length >= maxResults) break;
-      const relPath = relative(this.allowedRoot, absPath);
-      if (globRe && !globRe.test(relPath) && !globRe.test(absPath)) continue;
+    for (const root of roots) {
+      if (!existsSync(root)) continue;
+      const allFiles = walkDir(root, 10);
 
-      let content: string;
-      try {
-        const stat = statSync(absPath);
-        if (stat.size > 512 * 1024) continue;
-        content = readFileSync(absPath, 'utf8');
-      } catch {
-        continue;
-      }
+      for (const absPath of allFiles) {
+        if (matches.length >= maxResults) break;
+        const relPath = relative(root, absPath);
+        if (globRe && !globRe.test(relPath) && !globRe.test(absPath)) continue;
 
-      const lines = content.split('\n');
-      for (let i = 0; i < lines.length && matches.length < maxResults; i++) {
-        if (pattern.test(lines[i])) {
-          matches.push({ file: relPath, line: i + 1, text: lines[i].slice(0, 300) });
+        let content: string;
+        try {
+          const stat = statSync(absPath);
+          if (stat.size > 512 * 1024) continue;
+          content = readFileSync(absPath, 'utf8');
+        } catch {
+          continue;
+        }
+
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length && matches.length < maxResults; i++) {
+          if (pattern.test(lines[i])) {
+            matches.push({ file: absPath, line: i + 1, text: lines[i].slice(0, 300) });
+          }
         }
       }
     }
@@ -117,7 +118,7 @@ export class GrepSearchTool {
 @Injectable()
 @Tool({
   name: 'file_search',
-  description: 'Find files matching a glob pattern under the workspace root. Returns relative file paths.',
+  description: 'Find files matching a glob pattern under configured allowed directories. Returns absolute file paths.',
   parameters: {
     type: 'object',
     required: ['pattern'],
@@ -129,29 +130,30 @@ export class GrepSearchTool {
   requiresConfirmation: false,
 })
 export class FileSearchTool {
-  private readonly allowedRoot: string;
-
-  constructor(private readonly config: ConfigService) {
-    this.allowedRoot = resolve(this.config.get<string>('WORKSPACE_ROOT', './data/workspaces'));
-  }
+  constructor(private readonly allowedPaths: AllowedPathsService) {}
 
   async execute(request: ToolCallRequest): Promise<{ files: string[]; total: number }> {
     const pattern = request.args['pattern'] as string;
     const maxResults = (request.args['maxResults'] as number) ?? 100;
 
-    if (!existsSync(this.allowedRoot)) {
+    const roots = await this.allowedPaths.getRoots();
+    if (roots.length === 0) {
       return { files: [], total: 0 };
     }
 
     const globRe = globToRegex(pattern);
-    const allFiles = walkDir(this.allowedRoot, 10);
     const matched: string[] = [];
 
-    for (const absPath of allFiles) {
-      if (matched.length >= maxResults) break;
-      const relPath = relative(this.allowedRoot, absPath);
-      if (globRe.test(relPath) || globRe.test(absPath)) {
-        matched.push(relPath);
+    for (const root of roots) {
+      if (!existsSync(root)) continue;
+      const allFiles = walkDir(root, 10);
+
+      for (const absPath of allFiles) {
+        if (matched.length >= maxResults) break;
+        const relPath = relative(root, absPath);
+        if (globRe.test(relPath) || globRe.test(absPath)) {
+          matched.push(absPath);
+        }
       }
     }
 

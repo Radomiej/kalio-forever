@@ -28,6 +28,7 @@ function makeApp(overrides: Partial<LoadedRAApp> = {}): LoadedRAApp {
     source: 'core',
     htmlContent: '<html><body>Q?</body></html>',
     guiContent: null,
+    systemsContent: null,
     appMode: 'interactive',
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -50,6 +51,7 @@ describe('RunRaAppTool', () => {
       getById: vi.fn(),
       getAll: vi.fn().mockReturnValue([]),
       execute: vi.fn(),
+      executeSystems: vi.fn().mockResolvedValue({}),
     };
     tool = new RunRaAppTool(raapp as RAAppService);
   });
@@ -120,6 +122,31 @@ describe('RunRaAppTool', () => {
       mode: 'display',
       content: app.htmlContent,
     });
+  });
+
+  it('executes systems.yml and merges computed outputs into GUI data', async () => {
+    const app = makeApp({
+      id: 'visual-calculator',
+      guiContent: 'vbox { label { text = "[output.result]" } }',
+      htmlContent: null,
+      systemsContent: 'systems:\n  - id: calc\n    effects:\n      - assign:\n          target: output.result\n          expression: input.a + input.b',
+      appMode: 'display',
+    });
+    (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(app);
+    (raapp.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'ready',
+      renderedContent: '{"nodes":[],"data":{}}',
+    });
+    (raapp.executeSystems as ReturnType<typeof vi.fn>).mockResolvedValue({ result: 8 });
+
+    const result = await tool.execute(makeRequest({ id: 'visual-calculator', inputs: { a: 5, b: 3 } })) as Record<string, unknown>;
+
+    expect(result.status).toBe('ready');
+    expect(raapp.executeSystems).toHaveBeenCalledWith(app.systemsContent, { a: 5, b: 3 });
+    expect(raapp.execute).toHaveBeenCalledWith(
+      { type: 'gui', mode: 'display', content: app.guiContent },
+      { output: { a: 5, b: 3, result: 8 } },
+    );
   });
 });
 
