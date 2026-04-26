@@ -20,8 +20,8 @@ interface Props {
 
 type Item =
   | { kind: 'assistant'; msg: ChatMessage }
-  | { kind: 'tool_live'; activity: ToolActivity; order: number }
-  | { kind: 'tool_history'; msg: ChatMessage; toolName: string; isAnswered: boolean; order: number };
+  | { kind: 'tool_live'; activity: ToolActivity }
+  | { kind: 'tool_history'; msg: ChatMessage; toolName: string; isAnswered: boolean };
 
 function buildItems(
   messages: ChatMessage[],
@@ -29,16 +29,12 @@ function buildItems(
   toolCallIdToName: Map<string, string>,
   answeredCallIds: Set<string> | undefined,
 ): Item[] {
-  // Map callId → order (position when tool:start arrived, preserved across transition)
-  const activityOrder = new Map<string, number>(
-    toolActivities.map((a, i) => [a.callId, i]),
-  );
-
-  // Which callIds already have a tool_result message
+  // Which callIds already have a tool_result message (history takes precedence over live)
   const historyCallIds = new Set(
     messages.filter((m) => m.role === 'tool_result' && m.toolCallId).map((m) => m.toolCallId!),
   );
 
+  // messages[] is already in chronological insertion order — preserve it directly.
   const items: Item[] = [];
 
   for (const msg of messages) {
@@ -47,35 +43,18 @@ function buildItems(
     } else if (msg.role === 'tool_result' && msg.toolCallId) {
       const toolName = toolCallIdToName.get(msg.toolCallId) ?? msg.toolCallId;
       const isAnswered = answeredCallIds?.has(msg.toolCallId) ?? false;
-      // order: use activity order if known, else append after current items
-      const order = activityOrder.get(msg.toolCallId) ?? items.length;
-      items.push({ kind: 'tool_history', msg, toolName, isAnswered, order });
+      items.push({ kind: 'tool_history', msg, toolName, isAnswered });
     }
   }
 
-  // Append live activities whose tool_result message hasn't arrived yet
+  // Append live activities whose tool_result hasn't arrived yet — they belong at the end.
   for (const activity of toolActivities) {
     if (!historyCallIds.has(activity.callId)) {
-      items.push({ kind: 'tool_live', activity, order: activityOrder.get(activity.callId) ?? items.length });
+      items.push({ kind: 'tool_live', activity });
     }
   }
 
-  // Sort: assistant messages keep their natural insertion order (stable),
-  // tool items are sorted by their activity order within the turn.
-  // Simple approach: tool items inserted after the last assistant msg before them.
-  // Since messages[] is already chronological and live activities append naturally,
-  // we just stable-sort tool items by order, keeping assistant messages in place.
-  // Actually: the items array is already in correct order (messages in sequence,
-  // live appended after). Re-sort only tool items relative to each other.
-  // Simplest correct approach: items from messages are in order, live items appended.
-  // For full chronology we sort the whole list by a sequence number:
-  const sequenced = items.map((item, idx) => {
-    if (item.kind === 'assistant') return { item, seq: idx * 1000 };
-    if (item.kind === 'tool_history') return { item, seq: item.order * 1000 + 1 };
-    return { item, seq: item.order * 1000 + 1 };
-  });
-  sequenced.sort((a, b) => a.seq - b.seq);
-  return sequenced.map((s) => s.item);
+  return items;
 }
 
 // ─── ThinkingBlock ────────────────────────────────────────────────────────────

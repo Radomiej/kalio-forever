@@ -124,6 +124,111 @@ describe('AgentTurnBubble', () => {
   });
 });
 
+// ── REGRESSION: multi-turn quiz ordering ────────────────────────────────────
+
+describe('REGRESSION: multi-turn quiz — tool chip ordering preserved', () => {
+  function makeToolResult(id: string, callId: string): ChatMessage {
+    return makeMsg({ id, role: 'tool_result', content: '{"type":"gui"}', toolCallId: callId });
+  }
+  function makeAssistantWithTool(id: string, callId: string, toolName: string): ChatMessage {
+    return makeMsg({ id, role: 'assistant', content: '', toolCalls: [{ id: callId, name: toolName, args: {} }] });
+  }
+
+  it('renders 3 sequential run_raapp chips in correct order with answeredCallIds', () => {
+    const messages: ChatMessage[] = [
+      makeAssistantWithTool('a1', 'tc-1', 'list_raapps'),
+      makeToolResult('t1', 'tc-1'),
+      makeAssistantWithTool('a2', 'tc-2', 'run_raapp'),
+      makeToolResult('t2', 'tc-2'),
+      makeMsg({ id: 'u1', role: 'user', content: 'Blue' }),
+      makeAssistantWithTool('a3', 'tc-3', 'run_raapp'),
+      makeToolResult('t3', 'tc-3'),
+    ];
+    const answeredCallIds = new Set(['tc-2']);
+
+    render(
+      <AgentTurnBubble
+        messages={messages.filter((m) => m.role !== 'user')}
+        toolActivities={[]}
+        answeredCallIds={answeredCallIds}
+      />,
+    );
+
+    const chips = screen.getAllByTestId(/^history-tool-/);
+    expect(chips).toHaveLength(3);
+    expect(chips[0]).toHaveAttribute('data-testid', 'history-tool-list_raapps');
+    expect(chips[1]).toHaveAttribute('data-testid', 'history-tool-run_raapp');
+    expect(chips[2]).toHaveAttribute('data-testid', 'history-tool-run_raapp');
+
+    // tc-2 answered, tc-3 not yet
+    expect(chips[1]).toHaveAttribute('data-answered', 'true');
+    expect(chips[2]).toHaveAttribute('data-answered', 'false');
+  });
+
+  it('renders 10 sequential run_raapp chips in order without duplication', () => {
+    const messages: ChatMessage[] = [];
+    for (let i = 1; i <= 10; i++) {
+      messages.push(makeAssistantWithTool(`a${i}`, `tc-${i}`, 'run_raapp'));
+      messages.push(makeToolResult(`t${i}`, `tc-${i}`));
+    }
+
+    render(
+      <AgentTurnBubble
+        messages={messages}
+        toolActivities={[]}
+        answeredCallIds={new Set(['tc-1', 'tc-2', 'tc-3', 'tc-4', 'tc-5', 'tc-6', 'tc-7', 'tc-8', 'tc-9'])}
+      />,
+    );
+
+    // 10 assistant messages + 10 tool_results rendered — no duplicates, no skipping
+    const chips = screen.getAllByTestId('history-tool-run_raapp');
+    expect(chips).toHaveLength(10);
+
+    // First 9 answered, last one not
+    chips.slice(0, 9).forEach((chip) => expect(chip).toHaveAttribute('data-answered', 'true'));
+    expect(chips[9]).toHaveAttribute('data-answered', 'false');
+  });
+
+  it('non-last turn gets toolActivities=[] — no live chips in history turns', () => {
+    const messages: ChatMessage[] = [
+      makeAssistantWithTool('a1', 'tc-1', 'run_raapp'),
+      makeToolResult('t1', 'tc-1'),
+    ];
+    const liveActivities = [
+      { callId: 'tc-live', toolName: 'run_raapp', args: {}, status: 'running' as const, startedAt: Date.now() },
+    ];
+
+    // Non-last turn: toolActivities=[]
+    render(
+      <AgentTurnBubble messages={messages} toolActivities={[]} answeredCallIds={new Set()} />,
+    );
+    expect(screen.queryByTestId('live-tool-tc-live')).not.toBeInTheDocument();
+
+    // Last turn: toolActivities with live activity
+    render(
+      <AgentTurnBubble messages={[]} toolActivities={liveActivities} answeredCallIds={new Set()} />,
+    );
+    expect(screen.getByTestId('live-tool-tc-live')).toBeInTheDocument();
+  });
+
+  it('live activity already resolved in messages does not render as live chip', () => {
+    const messages: ChatMessage[] = [
+      makeAssistantWithTool('a1', 'tc-resolved', 'run_raapp'),
+      makeToolResult('t1', 'tc-resolved'),
+    ];
+    const activities = [
+      { callId: 'tc-resolved', toolName: 'run_raapp', args: {}, status: 'success' as const, startedAt: Date.now(), finishedAt: Date.now() },
+    ];
+
+    render(
+      <AgentTurnBubble messages={messages} toolActivities={activities} answeredCallIds={new Set()} />,
+    );
+
+    expect(screen.queryByTestId('live-tool-tc-resolved')).not.toBeInTheDocument();
+    expect(screen.getByTestId('history-tool-run_raapp')).toBeInTheDocument();
+  });
+});
+
 // ── REGRESSION tests (bugs reported via screenshot) ─────────────────────────
 
 describe('REGRESSION: tool chip shows resolved name, not raw call ID', () => {
