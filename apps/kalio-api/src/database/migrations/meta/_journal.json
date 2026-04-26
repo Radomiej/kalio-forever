@@ -15,6 +15,13 @@
       "when": 1700000000001,
       "tag": "0001_add_thinking",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1700000000003,
+      "tag": "0003_last_satana",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,17 @@
+/**
+ * ToolCallBubble — unified chip for a single tool call.
+ *
+ * Architecture: one item per toolCallId, driven by a merged status:
+ *   running | awaiting_confirmation | success | error | cancelled
+ *
+ * While running: spinner + args (no widget).
+ * Once tool_result lands in ChatMessage: result shown inline, widget rendered.
+ * Once user answers (isAnswered): widget collapses to "answer submitted".
+ *
+ * Two named exports kept for AgentTurnBubble compatibility:
+ *   LiveToolCallBubble   — tool still in-flight (ToolActivity, no result yet)
+ *   HistoryToolCallBubble — tool finished (tool_result ChatMessage)
+ */
 import { useState, useEffect } from 'react';
 import { CheckCircle2, XCircle, Loader2, Clock, ChevronDown } from 'lucide-react';
 import type { ToolActivity } from '../../store/agentStore';
@@ -30,21 +44,7 @@ export function extractRAAppBlock(data: unknown): RAAppBlock | null {
   return null;
 }
 
-// ─── Result preview ───────────────────────────────────────────────────────────
-
-function ResultPreview({ data }: { data: unknown }) {
-  const raapp = extractRAAppBlock(data);
-  if (raapp) return <RAAppRenderer block={raapp} />;
-
-  const str = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  return (
-    <div className="font-mono bg-base-200/60 rounded px-2 py-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs text-base-content/60">
-      {str.length > 500 ? str.slice(0, 500) + '…' : str}
-    </div>
-  );
-}
-
-// ─── Shared chip chrome ───────────────────────────────────────────────────────
+// ─── Chip chrome ─────────────────────────────────────────────────────────────
 
 function Chip({
   icon,
@@ -97,16 +97,12 @@ function Chip({
   );
 }
 
-// ─── Live chip (from ToolActivity in agentStore) ──────────────────────────────
+// ─── Live chip — running/awaiting/error from ToolActivity ─────────────────────
+// Widget is NEVER rendered here. It appears in HistoryToolCallBubble once the
+// tool_result ChatMessage lands in the session store.
 
 export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
-  const raapp = activity.result?.data != null ? extractRAAppBlock(activity.result.data) : null;
-  // Auto-expand when there's a RA-App widget result
-  const [open, setOpen] = useState(() => raapp != null);
-  // If result arrives after mount (streaming), auto-open
-  useEffect(() => {
-    if (raapp != null) setOpen(true);
-  }, [raapp]);
+  const [open, setOpen] = useState(false);
   const elapsed = activity.finishedAt != null ? activity.finishedAt - activity.startedAt : null;
 
   const icon =
@@ -121,8 +117,8 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
     );
 
   const hasArgs = Object.keys(activity.args).length > 0;
-  const hasResult = !raapp && (activity.result?.data != null || activity.result?.errorMessage != null);
-  const expandable = hasArgs || hasResult || raapp != null;
+  const hasNonRaappResult = activity.result?.data != null && extractRAAppBlock(activity.result.data) == null;
+  const expandable = hasArgs || hasNonRaappResult;
 
   return (
     <Chip
@@ -142,16 +138,21 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
           ))}
         </div>
       )}
-      {hasResult && activity.result?.data != null && <ResultPreview data={activity.result.data} />}
+      {hasNonRaappResult && activity.result?.data != null && (
+        <div className="font-mono bg-base-200/60 rounded px-2 py-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs text-base-content/60">
+          {JSON.stringify(activity.result.data, null, 2)}
+        </div>
+      )}
       {activity.result?.errorMessage && (
         <div className="text-xs text-error">{activity.result.errorMessage}</div>
       )}
-      {raapp && <RAAppRenderer block={raapp} />}
     </Chip>
   );
 }
 
-// ─── History chip (from tool_result ChatMessage) ──────────────────────────────
+// ─── History chip — completed tool_result from ChatMessage ────────────────────
+// Widget renders inline here, in its chronological position within the agent turn.
+// Collapses to "answer submitted" when user responds (isAnswered=true).
 
 export function HistoryToolCallBubble({
   toolName,
@@ -170,14 +171,12 @@ export function HistoryToolCallBubble({
   }
 
   const raapp = extractRAAppBlock(parsed);
-  // Expand by default only when there's an active (unanswered) RA-App widget
   const [open, setOpen] = useState(() => raapp != null && !isAnswered);
-  // Auto-collapse widget when user answers
   useEffect(() => {
     if (isAnswered) setOpen(false);
   }, [isAnswered]);
+
   const hasResult = !raapp && content.length > 0;
-  // Expandable if there's non-raapp result to show, OR if raapp is not yet answered
   const expandable = hasResult || (raapp != null && !isAnswered);
 
   return (

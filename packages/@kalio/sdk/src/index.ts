@@ -22,6 +22,9 @@ export interface KalioSDKOptions {
 
 export class KalioSDK {
   private socket: Socket;
+  private thinkingAccum = '';
+  private inThinking = false;
+  private toolCallCount = 0;
 
   constructor(options: KalioSDKOptions) {
     this.socket = io(options.wsUrl, {
@@ -43,6 +46,13 @@ export class KalioSDK {
   }
 
   sendMessage(payload: SocketEvents['chat:send']): void {
+    this.toolCallCount = 0; // Reset counter for new message
+    this.thinkingAccum = '';
+    this.inThinking = false;
+    console.groupCollapsed(`[Thread] ▶ SEND sessionId=${payload.sessionId}`);
+    console.log('content:', payload.content.slice(0, 80) + (payload.content.length > 80 ? '...' : ''));
+    console.log('personaId:', payload.personaId);
+    console.groupEnd();
     this.socket.emit('chat:send', payload);
   }
 
@@ -55,42 +65,110 @@ export class KalioSDK {
   }
 
   onChunk(handler: ChunkHandler): () => void {
-    this.socket.on('chat:chunk', handler);
-    return () => this.socket.off('chat:chunk', handler);
+    const wrappedHandler = (chunk: LLMStreamChunk) => {
+      // Log thinking blocks separately
+      const delta = chunk.delta ?? '';
+      if (delta.includes('<think>')) this.inThinking = true;
+      if (this.inThinking) {
+        this.thinkingAccum += delta;
+        if (delta.includes('</think>')) {
+          const thinkMatch = this.thinkingAccum.match(/<think>([\s\S]*?)<\/think>/);
+          console.groupCollapsed('[Thread] 🧠 THINKING');
+          console.log(thinkMatch ? thinkMatch[1] : this.thinkingAccum);
+          console.groupEnd();
+          this.thinkingAccum = '';
+          this.inThinking = false;
+        }
+      }
+      handler(chunk);
+    };
+    this.socket.on('chat:chunk', wrappedHandler);
+    return () => this.socket.off('chat:chunk', wrappedHandler);
   }
 
   onComplete(handler: CompleteHandler): () => void {
-    this.socket.on('chat:complete', handler);
-    return () => this.socket.off('chat:complete', handler);
+    const wrappedHandler = (payload: SocketEvents['chat:complete']) => {
+      console.groupCollapsed(`[Thread] ✅ COMPLETE sessionId=${payload.sessionId} messageId=${payload.messageId}`);
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('chat:complete', wrappedHandler);
+    return () => this.socket.off('chat:complete', wrappedHandler);
   }
 
   onError(handler: ErrorHandler): () => void {
-    this.socket.on('chat:error', handler);
-    return () => this.socket.off('chat:error', handler);
+    const wrappedHandler = (payload: SocketEvents['chat:error']) => {
+      console.error('[Thread] ❌ ERROR:', payload);
+      handler(payload);
+    };
+    this.socket.on('chat:error', wrappedHandler);
+    return () => this.socket.off('chat:error', wrappedHandler);
   }
 
   onToolConfirmation(handler: ConfirmationHandler): () => void {
-    this.socket.on('tool:confirmation_required', handler);
-    return () => this.socket.off('tool:confirmation_required', handler);
+    const wrappedHandler = (req: ToolConfirmationRequest) => {
+      console.groupCollapsed(`[Thread] ⚠️ CONFIRMATION REQUIRED: ${req.toolName}`);
+      console.log('callId:', req.toolCallId);
+      console.log('args:', req.args);
+      console.log('timeout:', req.timeoutMs, 'ms');
+      console.groupEnd();
+      handler(req);
+    };
+    this.socket.on('tool:confirmation_required', wrappedHandler);
+    return () => this.socket.off('tool:confirmation_required', wrappedHandler);
   }
 
   onToolStart(handler: ToolStartHandler): () => void {
-    this.socket.on('tool:start', handler);
-    return () => this.socket.off('tool:start', handler);
+    const wrappedHandler = (payload: SocketEvents['tool:start']) => {
+      this.toolCallCount++;
+      console.groupCollapsed(`[Thread] 🔧 TOOL CALL #${this.toolCallCount}: ${payload.toolName}`);
+      console.log('callId:', payload.callId);
+      console.log('args:', payload.args);
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('tool:start', wrappedHandler);
+    return () => this.socket.off('tool:start', wrappedHandler);
   }
 
   onToolResult(handler: ToolResultHandler): () => void {
-    this.socket.on('tool:result', handler);
-    return () => this.socket.off('tool:result', handler);
+    const wrappedHandler = (result: ToolResult) => {
+      const isError = result.status !== 'success';
+      const logFn = isError ? console.error : console.groupCollapsed;
+      logFn(`[Thread] ${isError ? '❌' : '✅'} TOOL RESULT: ${result.callId} → ${result.status}`);
+      if (result.data !== undefined) {
+        console.log('output:', result.data);
+      }
+      if (isError) {
+        console.log('errorCode:', result.errorCode);
+        console.log('errorMessage:', result.errorMessage);
+      } else {
+        console.groupEnd();
+      }
+      handler(result);
+    };
+    this.socket.on('tool:result', wrappedHandler);
+    return () => this.socket.off('tool:result', wrappedHandler);
   }
 
   onSessionCreated(handler: SessionCreatedHandler): () => void {
-    this.socket.on('session:created', handler);
-    return () => this.socket.off('session:created', handler);
+    const wrappedHandler = (session: ChatSession) => {
+      console.log('[Thread] 📝 SESSION CREATED:', session.id, session.title);
+      handler(session);
+    };
+    this.socket.on('session:created', wrappedHandler);
+    return () => this.socket.off('session:created', wrappedHandler);
   }
 
   onContext(handler: ContextHandler): () => void {
-    this.socket.on('chat:context', handler);
-    return () => this.socket.off('chat:context', handler);
+    const wrappedHandler = (payload: SocketEvents['chat:context']) => {
+      console.groupCollapsed('[Thread] 🎯 CONTEXT');
+      console.log('systemPrompt:', payload.systemPrompt.slice(0, 100) + '...');
+      console.log('toolNames:', payload.toolNames);
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('chat:context', wrappedHandler);
+    return () => this.socket.off('chat:context', wrappedHandler);
   }
 }

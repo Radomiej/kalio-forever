@@ -84,42 +84,31 @@ describe('REGRESSION: HistoryToolCallBubble — RA-App widget inside chip', () =
 });
 
 // ── LiveToolCallBubble tests ──────────────────────────────────────────────────
+// Live chip = status indicator only. Widget NEVER renders here —
+// it appears in HistoryToolCallBubble once tool:result arrives as a ChatMessage.
 
-describe('REGRESSION: LiveToolCallBubble — RA-App widget inside chip', () => {
-  it('does not render widget when activity is still running (no result)', () => {
+describe('LiveToolCallBubble — status indicator only (no widget)', () => {
+  it('shows spinner when running', () => {
     const activity = makeActivity({ status: 'running' });
     render(<LiveToolCallBubble activity={activity} />);
+    expect(screen.getByTestId('tool-call-bubble')).toBeInTheDocument();
     expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
   });
 
-  it('renders RAAppRenderer when result arrives with RA-App block', () => {
+  it('never renders RAApp widget even when result has RA-App block', () => {
     const activity = makeActivity({
       status: 'success',
       finishedAt: Date.now(),
       result: { callId: 'call-1', status: 'success', data: JSON.parse(GUI_TOOL_RESULT) },
     });
     render(<LiveToolCallBubble activity={activity} />);
-    expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();
+    // Widget must NOT appear in live chip — it belongs in HistoryToolCallBubble
+    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
   });
 
-  it('auto-expands and shows widget when result arrives after mount', () => {
-    const running = makeActivity({ status: 'running' });
-    const { rerender } = render(<LiveToolCallBubble activity={running} />);
-
-    // Initially no widget
-    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
-
-    // Result arrives
-    const done = makeActivity({
-      status: 'success',
-      finishedAt: Date.now(),
-      result: { callId: 'call-1', status: 'success', data: JSON.parse(GUI_TOOL_RESULT) },
-    });
-    act(() => {
-      rerender(<LiveToolCallBubble activity={done} />);
-    });
-
-    // Widget should now be visible (auto-expanded)
-    expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();
+  it('shows tool name', () => {
+    const activity = makeActivity({ status: 'running' });
+    render(<LiveToolCallBubble activity={activity} />);
+    expect(screen.getByText('run_raapp')).toBeInTheDocument();
   });
 });
