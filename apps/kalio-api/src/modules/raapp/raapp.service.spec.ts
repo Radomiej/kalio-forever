@@ -85,4 +85,34 @@ describe('RAAppService', () => {
       ).resolves.toMatchObject({ status: 'error' });
     });
   });
+
+  describe('executeSystems', () => {
+    it('computes output from assign effects', async () => {
+      const systems = `
+        systems:
+          - id: calc
+            effects:
+              - assign:
+                  target: output.result
+                  expression: input.a + input.b
+              - assign:
+                  target: output.label
+                  expression: '"sum"'
+      `;
+      const result = await service.executeSystems(systems, { a: 3, b: 4 });
+
+      expect(result).toHaveProperty('result', 7);
+      expect(result).toHaveProperty('label', 'sum');
+    });
+
+    it('returns empty object on invalid YAML', async () => {
+      const result = await service.executeSystems('invalid {{{', { a: 1 });
+      expect(result).toEqual({});
+    });
+
+    it('returns empty object when no systems defined', async () => {
+      const result = await service.executeSystems('other: []', { a: 1 });
+      expect(result).toEqual({});
+    });
+  });
 });

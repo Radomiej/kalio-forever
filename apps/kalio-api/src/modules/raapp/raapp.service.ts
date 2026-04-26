@@ -35,6 +35,7 @@ export interface LoadedRAApp {
   source: 'core' | 'user';
   htmlContent: string | null;   // null = no main.html in zip
   guiContent: string | null;    // null = no ui.gui in zip
+  systemsContent: string | null; // null = no systems.yml in zip
   appMode: 'display' | 'interactive';
   createdAt: number;
   updatedAt: number;
@@ -107,10 +108,16 @@ export class RAAppService implements OnModuleInit {
         guiContent = await fs.readFile(path.join(tmpDir, 'ui.gui'), 'utf-8');
       } catch { /* not found */ }
 
+      // Try to read systems.yml (system effects for computed outputs)
+      let systemsContent: string | null = null;
+      try {
+        systemsContent = await fs.readFile(path.join(tmpDir, 'systems.yml'), 'utf-8');
+      } catch { /* not found */ }
+
       const renderAs = (meta.execution?.render_as as string | undefined) ?? (meta as { ui?: { render_as?: string } }).ui?.render_as;
       const appMode: 'display' | 'interactive' = renderAs === 'interactive' ? 'interactive' : 'display';
 
-      const app: LoadedRAApp = { id: meta.id, zipPath, meta, source, htmlContent, guiContent, appMode, createdAt, updatedAt: stats.mtimeMs };
+      const app: LoadedRAApp = { id: meta.id, zipPath, meta, source, htmlContent, guiContent, systemsContent, appMode, createdAt, updatedAt: stats.mtimeMs };
       this.loaded.set(meta.id, app);
       this.logger.log(`RA-App loaded: ${meta.id} v${meta.version ?? '?'} (${source}) html=${htmlContent != null} gui=${guiContent != null}`);
       return app;
@@ -140,6 +147,40 @@ export class RAAppService implements OnModuleInit {
     if (app.source === 'core') throw new Error(`Cannot delete core RA-App: ${id}`);
     await fs.unlink(app.zipPath);
     this.loaded.delete(id);
+  }
+
+  async executeSystems(systemsContent: string, inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
+    try {
+      const parsed = yaml.load(systemsContent) as {
+        systems?: Array<{
+          id: string;
+          effects?: Array<{
+            assign?: { target: string; expression: string };
+          }>;
+        }>;
+      };
+      const systems = parsed?.systems ?? [];
+
+      let jsCode = `const input = ${JSON.stringify(inputs)};\nconst output = {};\n`;
+      for (const system of systems) {
+        for (const effect of system.effects ?? []) {
+          const assign = effect.assign;
+          if (!assign) continue;
+          const targetKey = assign.target.replace(/^output\./, '');
+          const expr = (assign.expression ?? '').replace(/\s+/g, ' ').trim();
+          jsCode += `output['${targetKey}'] = ${expr};\n`;
+        }
+      }
+      jsCode += 'return JSON.stringify(output);';
+
+      const result = await this.sandbox.execute(jsCode);
+      return JSON.parse(result) as Record<string, unknown>;
+    } catch (err) {
+      this.logger.warn(
+        `[RAAppService] System execution error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return {};
+    }
   }
 
   async execute(block: RAAppBlock, data: Record<string, unknown> = {}): Promise<RAAppResult> {
