@@ -186,6 +186,17 @@ export interface CreateCredentialDto {
   model?: string;
 }
 
+// ─── Allowed Paths ──────────────────────────────────────────────────────────────
+export interface AllowedPath {
+  id: ID;
+  path: string;
+  createdAt: Timestamp;
+}
+
+export interface CreateAllowedPathDto {
+  path: string;
+}
+
 // ─── MCP ──────────────────────────────────────────────────────────────────────
 export type MCPServerStatus = 'connecting' | 'connected' | 'disconnected' | 'error' | 'stopped';
 
