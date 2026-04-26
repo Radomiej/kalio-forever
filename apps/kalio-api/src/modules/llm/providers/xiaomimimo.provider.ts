@@ -18,4 +18,13 @@ export class XiaomiMiMoProvider extends BaseOpenAICompatibleProvider {
       ...XIAOMI_COMPAT_HEADERS,
     };
   }
+
+  protected override buildThinkingParams(): Record<string, unknown> {
+    // Enable reasoning tokens for omni (reasoning) models.
+    // MiMo-v2-omni requires explicit opt-in to emit reasoning_content.
+    if (this.model.includes('omni')) {
+      return { thinking: { type: 'enabled' } };
+    }
+    return {};
+  }
 }

@@ -72,6 +72,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
             function: { name: t.name, description: t.description, parameters: t.parameters },
           }))
         : undefined,
+      ...this.buildThinkingParams(),
     });
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -95,6 +96,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let debugChunkCount = 0;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -124,6 +126,12 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
         const choices = parsed['choices'] as Array<Record<string, unknown>> | undefined;
         const delta = choices?.[0]?.['delta'] as Record<string, unknown> | undefined;
         if (!delta) continue;
+
+        // Debug: log delta keys on first few chunks to diagnose field names
+        debugChunkCount++;
+        if (debugChunkCount <= 3) {
+          this.logger.debug(`[${this.providerName}] delta keys: ${JSON.stringify(Object.keys(delta))}, reasoning_content=${JSON.stringify(delta['reasoning_content'])?.slice(0,40)}, content=${JSON.stringify(delta['content'])?.slice(0,40)}`);
+        }
 
         const content = delta['content'];
         if (typeof content === 'string' && content) {
@@ -173,5 +181,9 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${this.apiKey}`,
     };
+  }
+
+  protected buildThinkingParams(): Record<string, unknown> {
+    return {};
   }
 }
