@@ -12,7 +12,7 @@ test.describe('AC-01: LLM streaming', () => {
     const session = await res.json() as { id: string };
 
     await page.goto('/');
-    await page.getByTestId('nav-sessions').click();
+    await page.getByTestId('nav-talk').click();
 
     // Select the session we created via API
     await expect(
@@ -31,8 +31,8 @@ test.describe('AC-01: LLM streaming', () => {
     // Wait for response — input re-enables when chat:complete fires
     await expect(chatInput).toBeEnabled({ timeout: 30_000 });
 
-    // At least one assistant message bubble should be present
-    const assistantBubbles = page.locator('[data-testid="message-bubble"][data-role="assistant"]');
+    // At least one agent turn bubble should be present (assistant replies use AgentTurnBubble)
+    const assistantBubbles = page.getByTestId('agent-turn-bubble');
     await expect(assistantBubbles.first()).toBeVisible({ timeout: 5000 });
     const content = await assistantBubbles.first().textContent();
     expect(content?.trim().length).toBeGreaterThan(0);
@@ -49,7 +49,7 @@ test.describe('AC-01: LLM streaming', () => {
     const session = await res.json() as { id: string };
 
     await page.goto('/');
-    await page.getByTestId('nav-sessions').click();
+    await page.getByTestId('nav-talk').click();
 
     await expect(
       page.getByTestId('session-item').filter({ hasText: 'AC01 Error Test' }).first(),
@@ -80,7 +80,7 @@ test.describe('AC-01: LLM streaming', () => {
     const session = await res.json() as { id: string };
 
     await page.goto('/');
-    await page.getByTestId('nav-sessions').click();
+    await page.getByTestId('nav-talk').click();
 
     await expect(
       page.getByTestId('session-item').filter({ hasText: 'AC01 Guard Test' }).first(),

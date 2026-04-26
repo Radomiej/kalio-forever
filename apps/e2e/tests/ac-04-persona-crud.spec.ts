@@ -22,7 +22,9 @@ test.describe('AC-04: Persona CRUD', () => {
     const persona = await createRes.json();
 
     await page.goto('http://localhost:5188');
-    await page.getByTestId('nav-persona').click();
+    await page.getByTestId('nav-mind').click();
+    // Click Personas tab in Mind section
+    await page.getByRole('button', { name: 'Personas' }).click();
     await expect(
       page.getByTestId('persona-item').filter({ hasText: 'AC04 Panel Persona' }).first(),
     ).toBeVisible({ timeout: 5000 });

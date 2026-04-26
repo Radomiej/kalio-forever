@@ -5,19 +5,19 @@ test.describe('AC-16: Memory Hybrid Search', () => {
   test('user can navigate to Memory page', async ({ page }) => {
     await page.goto('http://localhost:5188');
 
-    // Click Memory tab in sidebar
-    const memoryNav = page.getByTestId('nav-memory');
-    await expect(memoryNav).toBeVisible();
-    await memoryNav.click();
+    // Click Mind section
+    await page.getByTestId('nav-mind').click();
+    // Click Memory tab (use role=button to avoid matching the h2 heading inside MemoryPage)
+    await page.getByRole('button', { name: 'Memory' }).click();
 
     // Memory page should be visible
     await expect(page.getByTestId('memory-page')).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText('Memory')).toBeVisible({ timeout: 10000 });
   });
 
   test('user can select persona from dropdown', async ({ page }) => {
     await page.goto('http://localhost:5188');
-    await page.getByTestId('nav-memory').click();
+    await page.getByTestId('nav-mind').click();
+    await page.getByRole('button', { name: 'Memory' }).click();
 
     // Persona selector should be visible
     const personaSelect = page.getByTestId('memory-persona-select');
@@ -31,7 +31,8 @@ test.describe('AC-16: Memory Hybrid Search', () => {
 
   test('user can search memory with hybrid mode', async ({ page }) => {
     await page.goto('http://localhost:5188');
-    await page.getByTestId('nav-memory').click();
+    await page.getByTestId('nav-mind').click();
+    await page.getByRole('button', { name: 'Memory' }).click();
 
     // Wait for persona to load and select one
     await page.waitForTimeout(500);
@@ -60,7 +61,8 @@ test.describe('AC-16: Memory Hybrid Search', () => {
 
   test('user can switch search modes', async ({ page }) => {
     await page.goto('http://localhost:5188');
-    await page.getByTestId('nav-memory').click();
+    await page.getByTestId('nav-mind').click();
+    await page.getByRole('button', { name: 'Memory' }).click();
 
     // All mode buttons should be visible
     await expect(page.getByTestId('memory-mode-hybrid')).toBeVisible();
@@ -79,7 +81,8 @@ test.describe('AC-16: Memory Hybrid Search', () => {
 
   test('user can ingest text to memory', async ({ page }) => {
     await page.goto('http://localhost:5188');
-    await page.getByTestId('nav-memory').click();
+    await page.getByTestId('nav-mind').click();
+    await page.getByRole('button', { name: 'Memory' }).click();
 
     // Wait for page to load
     await page.waitForTimeout(500);
@@ -112,7 +115,8 @@ test.describe('AC-16: Memory Hybrid Search', () => {
 
   test('memory page shows stats for selected persona', async ({ page }) => {
     await page.goto('http://localhost:5188');
-    await page.getByTestId('nav-memory').click();
+    await page.getByTestId('nav-mind').click();
+    await page.getByRole('button', { name: 'Memory' }).click();
 
     // Wait for stats to load
     await page.waitForTimeout(500);

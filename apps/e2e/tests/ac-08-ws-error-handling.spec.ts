@@ -11,7 +11,7 @@ test.describe('AC-08: WebSocket error handling', () => {
     const session = await res.json() as { id: string };
 
     await page.goto('/');
-    await page.getByTestId('nav-sessions').click();
+    await page.getByTestId('nav-talk').click();
     await expect(
       page.getByTestId('session-item').filter({ hasText: 'AC08 Error Banner' }).first(),
     ).toBeVisible({ timeout: 5000 });
@@ -36,7 +36,7 @@ test.describe('AC-08: WebSocket error handling', () => {
     const session = await res.json() as { id: string };
 
     await page.goto('/');
-    await page.getByTestId('nav-sessions').click();
+    await page.getByTestId('nav-talk').click();
     await expect(
       page.getByTestId('session-item').filter({ hasText: 'AC08 Streaming Recovery' }).first(),
     ).toBeVisible({ timeout: 5000 });
@@ -60,7 +60,7 @@ test.describe('AC-08: WebSocket error handling', () => {
     const session = await res.json() as { id: string };
 
     await page.goto('/');
-    await page.getByTestId('nav-sessions').click();
+    await page.getByTestId('nav-talk').click();
     await expect(
       page.getByTestId('session-item').filter({ hasText: 'AC08 Resend' }).first(),
     ).toBeVisible({ timeout: 5000 });

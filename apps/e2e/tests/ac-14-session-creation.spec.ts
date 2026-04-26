@@ -6,8 +6,8 @@ test.describe('AC-14: Session creation', () => {
   test('clicking new session creates a session and selects it', async ({ page }) => {
     await page.goto('http://localhost:5188');
 
-    // Open the sessions sidebar first
-    await page.getByTestId('nav-sessions').click();
+    // Open Talk section (contains Conversations)
+    await page.getByTestId('nav-talk').click();
 
     const newSessionBtn = page.getByTestId('new-session-btn');
     await expect(newSessionBtn).toBeVisible();
@@ -20,14 +20,14 @@ test.describe('AC-14: Session creation', () => {
   test('chat input is enabled after session is created', async ({ page }) => {
     await page.goto('http://localhost:5188');
 
-    // Open the sessions sidebar first
-    await page.getByTestId('nav-sessions').click();
+    // Open Talk section - chat is visible in split view
+    await page.getByTestId('nav-talk').click();
     await page.getByTestId('new-session-btn').click();
 
-    // Chat input should be visible and enabled
+    // Chat input should be visible and enabled immediately (split view)
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeVisible({ timeout: 5000 });
-    await expect(chatInput).toBeEnabled();
+    await expect(chatInput).toBeEnabled({ timeout: 5000 });
   });
 
   test('new session is listed in the session panel', async ({ request, page }) => {
@@ -37,10 +37,10 @@ test.describe('AC-14: Session creation', () => {
 
     await page.goto('http://localhost:5188');
 
-    // Open sessions sidebar
-    await page.getByTestId('nav-sessions').click();
+    // Open Talk section
+    await page.getByTestId('nav-talk').click();
 
-    // The session should appear in the sidebar session list
+    // The session should appear in the conversation list
     await expect(
       page.getByTestId('session-item').filter({ hasText: 'AC14 Listed Session' }).first(),
     ).toBeVisible({ timeout: 5000 });

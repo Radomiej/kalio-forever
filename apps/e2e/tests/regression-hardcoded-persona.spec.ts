@@ -24,9 +24,9 @@ test.describe('Hardcoded Persona ID (REGRESSION TEST)', () => {
     // 2. Use first available persona from API
     // 3. Allow user to select persona before creating session
 
-    // Open sessions panel if not already visible
-    const sessionsNav = page.getByTestId('nav-sessions');
-    await sessionsNav.click();
+    // Open Talk section
+    const talkNav = page.getByTestId('nav-talk');
+    await talkNav.click();
 
     // Click new session button
     const newSessionBtn = page.getByTestId('new-session-btn');
@@ -57,9 +57,10 @@ test.describe('Hardcoded Persona ID (REGRESSION TEST)', () => {
     // Ideal behavior: user should select persona first
     // Current behavior: hardcoded 'default' is used
 
-    // Navigate to persona panel
-    const personaNav = page.getByTestId('nav-persona');
-    await personaNav.click();
+    // Navigate to Mind section
+    await page.getByTestId('nav-mind').click();
+    // Click Personas tab
+    await page.getByRole('button', { name: 'Personas' }).click();
 
     // Check if any personas exist
     const personaItems = page.getByTestId('persona-item');
@@ -74,8 +75,8 @@ test.describe('Hardcoded Persona ID (REGRESSION TEST)', () => {
       await page.waitForTimeout(500);
     }
 
-    // Now go back to sessions and create one
-    await page.getByTestId('nav-sessions').click();
+    // Now go back to Talk and create one
+    await page.getByTestId('nav-talk').click();
     await page.getByTestId('new-session-btn').click();
 
     // The session should be created with the existing persona
