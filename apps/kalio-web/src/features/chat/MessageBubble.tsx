@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, BrainCircuit } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
@@ -19,8 +19,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     ? (streamingChunks[message.id] ?? '')
     : message.content;
 
-  const thinkingContent = thinkingChunks[message.id] ?? '';
+  const liveThinking = thinkingChunks[message.id] ?? '';
+  const historicalThinking = message.thinking ?? '';
+  const thinkingContent = liveThinking || historicalThinking;
   const hasThinking = thinkingContent.length > 0;
+
+  // Auto-expand thinking block while streaming so the user sees real reasoning tokens live
+  useEffect(() => {
+    if (isStreaming && hasThinking && !thinkingOpen) {
+      setThinkingOpen(true);
+    }
+  }, [isStreaming, hasThinking, thinkingOpen]);
 
   if (isUser) {
     return (
@@ -49,7 +58,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               >
                 <BrainCircuit size={12} className={isStreaming && !displayContent ? 'text-sky-400 animate-pulse' : 'text-base-content/40'} />
                 <span>Thinking</span>
-                {isStreaming && !displayContent && (
+                {isStreaming && (
                   <span className="loading loading-dots loading-xs ml-1" />
                 )}
                 <ChevronDown

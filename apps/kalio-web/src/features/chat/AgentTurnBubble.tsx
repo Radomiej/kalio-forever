@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrainCircuit, ChevronDown } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
@@ -46,11 +46,20 @@ export function AgentTurnBubble({ messages, toolActivities, answeredCallIds }: P
   // Aggregate thinking content from all assistant messages in this turn
   const thinkingContent = messages
     .filter((m) => m.role === 'assistant')
-    .map((m) => thinkingChunks[m.id] ?? '')
+    .map((m) => thinkingChunks[m.id] || m.thinking || '')
     .filter(Boolean)
     .join('\n');
 
   const isAnyStreaming = messages.some((m) => m.streaming === true);
+
+  const hasThinking = thinkingContent.length > 0;
+
+  // Auto-expand thinking block while streaming so the user sees real reasoning tokens live
+  useEffect(() => {
+    if (isAnyStreaming && hasThinking && !thinkingOpen) {
+      setThinkingOpen(true);
+    }
+  }, [isAnyStreaming, hasThinking, thinkingOpen]);
 
   return (
     <div data-testid="agent-turn-bubble" className="flex justify-start mb-2 w-full">
