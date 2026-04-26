@@ -9,9 +9,10 @@ import { CredentialsModule } from '../credentials/credentials.module';
 import { MCPModule } from '../mcp/mcp.module';
 import { AgentLoopModule } from '../agentloop/agent-loop.module';
 import { VFSModule } from '../vfs/vfs.module';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
-  imports: [LLMModule, PersonaModule, ToolModule, CredentialsModule, MCPModule, AgentLoopModule, VFSModule],
+  imports: [LLMModule, PersonaModule, ToolModule, CredentialsModule, MCPModule, AgentLoopModule, VFSModule, AuditModule],
   controllers: [ChatController],
   providers: [ChatGateway, ChatService],
 })
