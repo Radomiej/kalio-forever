@@ -27,6 +27,7 @@ function makeApp(overrides: Partial<LoadedRAApp> = {}): LoadedRAApp {
     },
     source: 'core',
     htmlContent: '<html><body>Q?</body></html>',
+    guiContent: null,
     appMode: 'interactive',
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -64,13 +65,13 @@ describe('RunRaAppTool', () => {
     expect(result.message as string).toContain('other-app');
   });
 
-  it('returns error when app has no htmlContent', async () => {
-    (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(makeApp({ htmlContent: null }));
+  it('returns error when app has no htmlContent and no guiContent', async () => {
+    (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(makeApp({ htmlContent: null, guiContent: null }));
 
     const result = await tool.execute(makeRequest({ id: 'interactive-qa' })) as Record<string, unknown>;
 
     expect(result.status).toBe('error');
-    expect(result.message as string).toContain('no HTML content');
+    expect(result.message as string).toContain('no renderable content');
   });
 
   it('returns ready block with correct structure when app executes successfully', async () => {

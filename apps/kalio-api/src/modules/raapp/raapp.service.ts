@@ -34,6 +34,7 @@ export interface LoadedRAApp {
   meta: RAAppMeta;
   source: 'core' | 'user';
   htmlContent: string | null;   // null = no main.html in zip
+  guiContent: string | null;    // null = no ui.gui in zip
   appMode: 'display' | 'interactive';
   createdAt: number;
   updatedAt: number;
@@ -100,12 +101,18 @@ export class RAAppService implements OnModuleInit {
         } catch { /* not found, try next */ }
       }
 
-      const appMode: 'display' | 'interactive' =
-        (meta.execution?.render_as as string | undefined) === 'interactive' ? 'interactive' : 'display';
+      // Try to read ui.gui (GUI DSL)
+      let guiContent: string | null = null;
+      try {
+        guiContent = await fs.readFile(path.join(tmpDir, 'ui.gui'), 'utf-8');
+      } catch { /* not found */ }
 
-      const app: LoadedRAApp = { id: meta.id, zipPath, meta, source, htmlContent, appMode, createdAt, updatedAt: stats.mtimeMs };
+      const renderAs = (meta.execution?.render_as as string | undefined) ?? (meta as { ui?: { render_as?: string } }).ui?.render_as;
+      const appMode: 'display' | 'interactive' = renderAs === 'interactive' ? 'interactive' : 'display';
+
+      const app: LoadedRAApp = { id: meta.id, zipPath, meta, source, htmlContent, guiContent, appMode, createdAt, updatedAt: stats.mtimeMs };
       this.loaded.set(meta.id, app);
-      this.logger.log(`RA-App loaded: ${meta.id} v${meta.version ?? '?'} (${source}) html=${htmlContent != null}`);
+      this.logger.log(`RA-App loaded: ${meta.id} v${meta.version ?? '?'} (${source}) html=${htmlContent != null} gui=${guiContent != null}`);
       return app;
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
@@ -135,14 +142,14 @@ export class RAAppService implements OnModuleInit {
     this.loaded.delete(id);
   }
 
-  async execute(block: RAAppBlock): Promise<RAAppResult> {
+  async execute(block: RAAppBlock, data: Record<string, unknown> = {}): Promise<RAAppResult> {
     if (block.type === 'html') {
       return { status: 'ready', renderedContent: block.content };
     }
     // gui type: parse with GUI DSL and return nodes+data as JSON string
     try {
       const nodes = compileGui(block.content);
-      const renderedContent = JSON.stringify({ nodes, data: {} });
+      const renderedContent = JSON.stringify({ nodes, data });
       return { status: 'ready', renderedContent };
     } catch (err) {
       this.logger.error('[RAAppService] GUI DSL parse error', err);

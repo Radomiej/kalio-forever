@@ -72,14 +72,20 @@ export class RaAppCreateTool {
   name: 'run_raapp',
   description:
     'Run a stored RA-App by its ID. The app is rendered in the chat UI as an interactive or display block. ' +
-    'Call list_raapps first to discover available app IDs and their descriptions.',
+    'Call list_raapps first to discover available app IDs and their descriptions. ' +
+    'For apps with input_schema, pass inputs via the "inputs" parameter (e.g. for qa-interactive: { question, options, allow_custom }). ' +
+    'GUI DSL apps use [output.key] bindings — inputs are passed as { output: { ...your inputs } } automatically.',
   parameters: {
     type: 'object',
     required: ['id'],
     properties: {
       id: {
         type: 'string',
-        description: 'The stored RA-App ID to run (e.g. "interactive-qa").',
+        description: 'The stored RA-App ID to run (e.g. "qa-interactive").',
+      },
+      inputs: {
+        type: 'object',
+        description: 'Input data for the app (matched to its input_schema). For qa-interactive: { question: string, options: string[], allow_custom?: boolean }',
       },
     },
   },
@@ -92,6 +98,7 @@ export class RunRaAppTool {
 
   async execute(request: ToolCallRequest): Promise<object> {
     const id = request.args['id'] as string;
+    const inputs = (request.args['inputs'] ?? {}) as Record<string, unknown>;
     const app = this.raapp.getById(id);
 
     if (!app) {
@@ -102,10 +109,36 @@ export class RunRaAppTool {
       };
     }
 
+    // GUI DSL app (ui.gui)
+    if (app.guiContent) {
+      // Flatten array inputs into indexed keys: options[0..N] → output.option_0..N
+      const outputData: Record<string, unknown> = { ...inputs };
+      if (Array.isArray(inputs['options'])) {
+        (inputs['options'] as unknown[]).forEach((opt, i) => {
+          outputData[`option_${i}`] = opt;
+        });
+        delete outputData['options'];
+      }
+      const data = { output: outputData };
+      const result = await this.raapp.execute({ type: 'gui', mode: app.appMode, content: app.guiContent }, data);
+      if (result.status === 'error') {
+        this.logger.warn(`[run_raapp] GUI DSL error: ${result.error?.message}`);
+        return { status: 'error', message: result.error?.message };
+      }
+      return {
+        status: 'ready',
+        type: 'gui',
+        mode: app.appMode,
+        content: app.guiContent,
+        renderedContent: result.renderedContent,
+      };
+    }
+
+    // HTML app (main.html / index.html)
     if (!app.htmlContent) {
       return {
         status: 'error',
-        message: `RA-App "${id}" has no HTML content (missing main.html or index.html in the zip).`,
+        message: `RA-App "${id}" has no renderable content (missing main.html, index.html, or ui.gui in the zip).`,
       };
     }
 
