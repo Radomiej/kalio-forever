@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { ToolRegistryService } from './tool-registry.service';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { ToolController } from './tool.controller';
@@ -21,9 +21,10 @@ import { LLMModule } from '../llm/llm.module';
 import { RAAppModule } from '../raapp/raapp.module';
 import { MemoryModule } from '../memory/memory.module';
 import { AllowedPathsModule } from '../allowed-paths/allowed-paths.module';
+import { MCPModule } from '../mcp/mcp.module';
 
 @Module({
-  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule],
+  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule],
   controllers: [ToolController],
   providers: [
     ToolRegistryService, ToolDispatchService,
@@ -37,4 +38,13 @@ import { AllowedPathsModule } from '../allowed-paths/allowed-paths.module';
   ],
   exports: [ToolRegistryService, ToolDispatchService],
 })
-export class ToolModule {}
+export class ToolModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: ToolRegistryService,
+    private readonly subagentTool: SubagentTool,
+  ) {}
+
+  onModuleInit() {
+    this.toolRegistry.registerSubagentTool(this.subagentTool);
+  }
+}

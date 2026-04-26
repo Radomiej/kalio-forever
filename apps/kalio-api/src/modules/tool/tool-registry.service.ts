@@ -1,11 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { ToolMeta } from '@kalio/types';
 import { TOOL_METADATA } from '../../common/decorators/tool.decorator';
 import { VFSWriteTool } from './tools/vfs-write.tool';
 import { VFSReadTool } from './tools/vfs-read.tool';
 import { VFSListTool } from './tools/vfs-list.tool';
-import { SubagentTool } from './tools/subagent.tool';
 import { FsReadTool } from './tools/fs-read.tool';
 import { FsListTool } from './tools/fs-list.tool';
 import { FsWriteTool } from './tools/fs-write.tool';
@@ -14,6 +13,7 @@ import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
 import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
 import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
+import { MCPService } from '../mcp/mcp.service';
 
 @Injectable()
 export class ToolRegistryService {
@@ -22,10 +22,10 @@ export class ToolRegistryService {
 
   constructor(
     private readonly reflector: Reflector,
+    private readonly mcpService: MCPService,
     private readonly vfsWriteTool: VFSWriteTool,
     private readonly vfsReadTool: VFSReadTool,
     private readonly vfsListTool: VFSListTool,
-    private readonly subagentTool: SubagentTool,
     private readonly fsReadTool: FsReadTool,
     private readonly fsListTool: FsListTool,
     private readonly fsWriteTool: FsWriteTool,
@@ -48,7 +48,7 @@ export class ToolRegistryService {
     private readonly memoryIngestConversationTool: MemoryIngestConversationTool,
   ) {
     this.registerAll([
-      vfsWriteTool, vfsReadTool, vfsListTool, subagentTool,
+      vfsWriteTool, vfsReadTool, vfsListTool,
       fsReadTool, fsListTool, fsWriteTool,
       kvWriteTool, kvReadTool, kvListTool, kvDeleteTool,
       grepSearchTool, fileSearchTool,
@@ -56,6 +56,10 @@ export class ToolRegistryService {
       raAppCreateTool, raAppCompileTool, runRaAppTool, listRaAppsTool,
       memoryIngestTool, memorySearchTool, memoryIngestConversationTool,
     ]);
+  }
+
+  registerSubagentTool(subagentTool: any): void {
+    this.registerAll([subagentTool]);
   }
 
   private registerAll(tools: object[]): void {
@@ -69,11 +73,33 @@ export class ToolRegistryService {
   }
 
   getMeta(name: string): ToolMeta | undefined {
-    return this.registry.get(name);
+    const nativeMeta = this.registry.get(name);
+    if (nativeMeta) return nativeMeta;
+
+    // Check MCP tools
+    const mcpTools = this.mcpService.getAllTools();
+    const mcpTool = mcpTools.find((t) => t.name === name);
+    if (mcpTool) {
+      return {
+        name: mcpTool.name,
+        description: mcpTool.description,
+        parameters: mcpTool.parameters as Record<string, unknown>,
+        requiresConfirmation: mcpTool.requiresConfirmation,
+      };
+    }
+
+    return undefined;
   }
 
   getAllTools(): ToolMeta[] {
-    return Array.from(this.registry.values());
+    const nativeTools = Array.from(this.registry.values());
+    const mcpTools = this.mcpService.getAllTools().map((mcpTool) => ({
+      name: mcpTool.name,
+      description: mcpTool.description,
+      parameters: mcpTool.parameters as Record<string, unknown>,
+      requiresConfirmation: mcpTool.requiresConfirmation,
+    }));
+    return [...nativeTools, ...mcpTools];
   }
 
   getToolsForSkills(skills: string[]): ToolMeta[] {

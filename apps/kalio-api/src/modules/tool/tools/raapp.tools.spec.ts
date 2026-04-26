@@ -24,6 +24,8 @@ function makeApp(overrides: Partial<LoadedRAApp> = {}): LoadedRAApp {
       name: 'Interactive Q&A',
       description: 'A simple Q&A interactive app',
       execution: { render_as: 'interactive' },
+      input_schema: { type: 'object', properties: { question: { type: 'string' } } },
+      tool_description: 'Run Q&A with { question, options, allow_custom }',
     },
     source: 'core',
     htmlContent: '<html><body>Q?</body></html>',
@@ -172,15 +174,15 @@ describe('ListRaAppsTool', () => {
 
   it('returns correct summary for each loaded app', async () => {
     (raapp.getAll as ReturnType<typeof vi.fn>).mockReturnValue([
-      makeApp({ id: 'quiz', meta: { id: 'quiz', name: 'Quiz App', description: 'A quiz', tags: ['fun'] } as LoadedRAApp['meta'], appMode: 'interactive', source: 'core' }),
-      makeApp({ id: 'report', meta: { id: 'report', name: 'Report View', description: '' } as LoadedRAApp['meta'], appMode: 'display', source: 'user' }),
+      makeApp({ id: 'quiz', meta: { id: 'quiz', name: 'Quiz App', description: 'A quiz', tags: ['fun'], input_schema: { type: 'object', properties: { q: { type: 'string' } } }, tool_description: 'Quiz tool' } as LoadedRAApp['meta'], appMode: 'interactive', source: 'core' }),
+      makeApp({ id: 'report', meta: { id: 'report', name: 'Report View', description: '', input_schema: null, tool_description: '' } as LoadedRAApp['meta'], appMode: 'display', source: 'user' }),
     ]);
 
     const result = await tool.execute(makeRequest()) as { count: number; apps: Record<string, unknown>[] };
 
     expect(result.count).toBe(2);
-    expect(result.apps[0]).toMatchObject({ id: 'quiz', name: 'Quiz App', description: 'A quiz', tags: ['fun'], mode: 'interactive', source: 'core' });
-    expect(result.apps[1]).toMatchObject({ id: 'report', name: 'Report View', description: '', tags: [], mode: 'display', source: 'user' });
+    expect(result.apps[0]).toMatchObject({ id: 'quiz', name: 'Quiz App', description: 'A quiz', tags: ['fun'], mode: 'interactive', source: 'core', input_schema: { type: 'object', properties: { q: { type: 'string' } } }, tool_description: 'Quiz tool' });
+    expect(result.apps[1]).toMatchObject({ id: 'report', name: 'Report View', description: '', tags: [], mode: 'display', source: 'user', input_schema: null, tool_description: '' });
   });
 });
 

@@ -178,6 +178,8 @@ export class ListRaAppsTool {
       id: a.id,
       name: a.meta.name,
       description: a.meta.description ?? '',
+      tool_description: a.meta.tool_description ?? '',
+      input_schema: a.meta.input_schema ?? null,
       tags: a.meta.tags ?? [],
       mode: a.appMode,
       source: a.source,

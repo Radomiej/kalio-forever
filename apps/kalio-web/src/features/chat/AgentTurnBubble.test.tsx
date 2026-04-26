@@ -227,6 +227,32 @@ describe('REGRESSION: multi-turn quiz — tool chip ordering preserved', () => {
     expect(screen.queryByTestId('live-tool-tc-resolved')).not.toBeInTheDocument();
     expect(screen.getByTestId('history-tool-run_raapp')).toBeInTheDocument();
   });
+
+  it('tool_result without matching toolCalls renders inline after its assistant (streaming placeholder case)', () => {
+    // Simulate streaming: assistant message arrives without toolCalls (placeholder)
+    // Then tool_result arrives and should be rendered immediately after it
+    const messages: ChatMessage[] = [
+      makeMsg({ id: 'assistant-1', role: 'assistant', content: 'First response' }),
+      makeMsg({ id: 'tool-1', role: 'tool_result', content: '{"result":1}', toolCallId: 'call-1' }),
+      makeMsg({ id: 'assistant-2', role: 'assistant', content: 'Second response' }),
+      makeMsg({ id: 'tool-2', role: 'tool_result', content: '{"result":2}', toolCallId: 'call-2' }),
+    ];
+
+    render(
+      <AgentTurnBubble messages={messages} toolActivities={[]} answeredCallIds={new Set()} />,
+    );
+
+    // Tool results should be rendered inline after their respective assistants
+    // Check that we have the right content in order
+    const markdowns = screen.getAllByTestId('markdown-viewer');
+    expect(markdowns).toHaveLength(2);
+    expect(markdowns[0]).toHaveTextContent('First response');
+    expect(markdowns[1]).toHaveTextContent('Second response');
+
+    // Check tool chips are present (2 tool results)
+    const chips = screen.getAllByTestId(/^history-tool-/);
+    expect(chips).toHaveLength(2);
+  });
 });
 
 // ── REGRESSION tests (bugs reported via screenshot) ─────────────────────────

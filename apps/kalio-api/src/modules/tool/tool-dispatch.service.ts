@@ -13,6 +13,7 @@ import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
 import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
 import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
+import { MCPService } from '../mcp/mcp.service';
 
 type ToolExecutor = { execute(req: ToolCallRequest): Promise<unknown> };
 
@@ -23,6 +24,7 @@ export class ToolDispatchService {
 
   constructor(
     private readonly registry: ToolRegistryService,
+    private readonly mcpService: MCPService,
     vfsWriteTool: VFSWriteTool,
     vfsReadTool: VFSReadTool,
     vfsListTool: VFSListTool,
@@ -87,6 +89,33 @@ export class ToolDispatchService {
       };
     }
 
+    // Handle MCP tools (prefix: mcp_{serverId}_{toolName})
+    if (request.toolName.startsWith('mcp_')) {
+      const resolved = this.mcpService.resolveToolName(request.toolName);
+      if (!resolved) {
+        return {
+          callId: request.callId,
+          status: 'error',
+          errorCode: 'TOOL_NOT_FOUND',
+          errorMessage: `MCP tool "${request.toolName}" not found`,
+        };
+      }
+
+      try {
+        const data = await this.mcpService.callTool(resolved.serverId, resolved.originalName, request.args);
+        return { callId: request.callId, status: 'success', data };
+      } catch (err) {
+        this.logger.error(`[ToolDispatch] MCP tool "${request.toolName}" failed`, err);
+        return {
+          callId: request.callId,
+          status: 'error',
+          errorCode: 'TOOL_EXEC_ERROR',
+          errorMessage: err instanceof Error ? err.message : 'Unknown MCP error',
+        };
+      }
+    }
+
+    // Handle native tools
     const tool = this.executors.get(request.toolName);
     if (!tool) {
       return {

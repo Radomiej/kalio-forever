@@ -30,8 +30,19 @@ function groupIntoTurns(messages: ChatMessage[]): Turn[] {
       turns.push({ type: 'user', msg: messages[i] });
       i++;
     } else {
+      // Agent turn - group until we hit a completed assistant message (streaming: false)
+      // or a user message
       const start = i;
-      while (i < messages.length && messages[i].role !== 'user') i++;
+      while (i < messages.length && messages[i].role !== 'user') {
+        // Check if this is a completed assistant message (end of iteration)
+        // This splits multi-iteration agent loops into separate turns
+        if (messages[i].role === 'assistant' && messages[i].streaming === false && i > start) {
+          // End the current turn here, next iteration will start a new turn
+          i++;
+          break;
+        }
+        i++;
+      }
       turns.push({ type: 'agent', msgs: messages.slice(start, i), isLast: i === messages.length });
     }
   }

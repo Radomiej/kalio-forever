@@ -34,47 +34,69 @@ function buildItems(
     messages.filter((m) => m.role === 'tool_result' && m.toolCallId).map((m) => m.toolCallId!),
   );
 
-  // Build a map: assistant message ID → tool_result messages
+  // Build map: assistant message ID → tool_result messages
+  // Use chronological order: each tool_result is assigned to the most recent assistant
+  // that doesn't already have a tool_result assigned (and is before this tool_result)
   const assistantToToolResults = new Map<string, ChatMessage[]>();
-  const orphanToolResults: ChatMessage[] = [];
+  const assistantIds: string[] = [];
 
+  // First pass: collect all assistant message IDs in order
+  for (const msg of messages) {
+    if (msg.role === 'assistant') {
+      assistantIds.push(msg.id);
+      if (!assistantToToolResults.has(msg.id)) {
+        assistantToToolResults.set(msg.id, []);
+      }
+    }
+  }
+
+  // Second pass: assign tool_results to assistants in order
+  let currentAssistantIdx = 0;
   for (const msg of messages) {
     if (msg.role === 'tool_result' && msg.toolCallId) {
-      // Find the assistant message that has this toolCallId in its toolCalls
-      const parentMsg = messages.find(
+      // Find the assistant that should own this tool_result
+      // Look for assistant with matching toolCalls first
+      const matchingAssistant = messages.find(
         (m) => m.role === 'assistant' && m.toolCalls?.some((tc) => tc.id === msg.toolCallId),
       );
-      if (parentMsg) {
-        if (!assistantToToolResults.has(parentMsg.id)) {
-          assistantToToolResults.set(parentMsg.id, []);
-        }
-        assistantToToolResults.get(parentMsg.id)!.push(msg);
+
+      if (matchingAssistant) {
+        assistantToToolResults.get(matchingAssistant.id)!.push(msg);
       } else {
-        orphanToolResults.push(msg);
+        // No matching assistant with toolCalls - use current assistant pointer
+        // Advance pointer until we find an assistant before this tool_result
+        while (currentAssistantIdx < assistantIds.length) {
+          const assistantId = assistantIds[currentAssistantIdx];
+          const assistantIdx = messages.findIndex((m) => m.id === assistantId);
+          const toolResultIdx = messages.findIndex((m) => m.id === msg.id);
+          if (assistantIdx < toolResultIdx) {
+            // This assistant is before the tool_result, assign to it
+            assistantToToolResults.get(assistantId)!.push(msg);
+            break;
+          }
+          currentAssistantIdx++;
+        }
       }
     }
   }
 
   // Iterate messages in order, render assistant then its tool_results immediately after
   const items: Item[] = [];
+  const processedToolResults = new Set<string>();
 
   for (const msg of messages) {
     if (msg.role === 'assistant') {
       items.push({ kind: 'assistant', msg });
       const toolResults = assistantToToolResults.get(msg.id) ?? [];
       for (const tr of toolResults) {
-        const toolName = toolCallIdToName.get(tr.toolCallId!) ?? tr.toolCallId!;
-        const isAnswered = answeredCallIds?.has(tr.toolCallId!) ?? false;
-        items.push({ kind: 'tool_history', msg: tr, toolName, isAnswered });
+        if (!processedToolResults.has(tr.id)) {
+          processedToolResults.add(tr.id);
+          const toolName = toolCallIdToName.get(tr.toolCallId!) ?? tr.toolCallId!;
+          const isAnswered = answeredCallIds?.has(tr.toolCallId!) ?? false;
+          items.push({ kind: 'tool_history', msg: tr, toolName, isAnswered });
+        }
       }
     }
-  }
-
-  // Append orphan tool_results (no matching assistant message found)
-  for (const tr of orphanToolResults) {
-    const toolName = toolCallIdToName.get(tr.toolCallId!) ?? tr.toolCallId!;
-    const isAnswered = answeredCallIds?.has(tr.toolCallId!) ?? false;
-    items.push({ kind: 'tool_history', msg: tr, toolName, isAnswered });
   }
 
   // Append live activities whose tool_result hasn't arrived yet — they belong at the end.

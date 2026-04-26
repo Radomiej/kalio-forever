@@ -12,7 +12,7 @@ import { FsWriteTool } from './tools/fs-write.tool';
 import { KVWriteTool, KVReadTool, KVListTool, KVDeleteTool } from './tools/kv.tools';
 import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
 import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
-import { RaAppCreateTool, RaAppCompileTool } from './tools/raapp.tools';
+import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 import { VFSService } from '../vfs/vfs.service';
 import { KVStoreService } from './kv-store.service';
@@ -22,6 +22,9 @@ import { MemoryService } from '../memory/memory.service';
 import { RAAppService } from '../raapp/raapp.service';
 import { RAAppSandboxService } from '../raapp/raapp-sandbox.service';
 import { ConfigService } from '@nestjs/config';
+import { MCPService } from '../mcp/mcp.service';
+import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
+import type { MCPTool } from '@kalio/types';
 
 // AC-11: getToolsForSkills with explicit skill list returns only those tools
 
@@ -36,18 +39,19 @@ describe('ToolRegistryService', () => {
   const mockMemory = { ingest: vi.fn(), search: vi.fn(), ingestConversation: vi.fn() };
   const mockRaApp = { execute: vi.fn() };
   const mockSandbox = { execute: vi.fn() };
+  const mockMCP = { getAllTools: vi.fn((): MCPTool[] => []), resolveToolName: vi.fn() };
+  const mockAllowedPaths = { isAllowed: vi.fn(() => true) };
 
   beforeEach(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
-        ToolRegistryService,
         Reflector,
-        VFSWriteTool, VFSReadTool, VFSListTool, SubagentTool,
+        VFSWriteTool, VFSReadTool, VFSListTool,
         FsReadTool, FsListTool, FsWriteTool,
         KVWriteTool, KVReadTool, KVListTool, KVDeleteTool,
         GrepSearchTool, FileSearchTool,
         TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool,
-        RaAppCreateTool, RaAppCompileTool,
+        RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool,
         MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
         { provide: VFSService, useValue: mockVfs },
         { provide: ConfigService, useValue: mockConfig },
@@ -57,6 +61,10 @@ describe('ToolRegistryService', () => {
         { provide: MemoryService, useValue: mockMemory },
         { provide: RAAppService, useValue: mockRaApp },
         { provide: RAAppSandboxService, useValue: mockSandbox },
+        { provide: MCPService, useValue: mockMCP },
+        { provide: AllowedPathsService, useValue: mockAllowedPaths },
+        { provide: SubagentTool, useValue: { execute: vi.fn() } },
+        ToolRegistryService,
       ],
     }).compile();
 
@@ -115,28 +123,82 @@ describe('ToolRegistryService', () => {
   });
 
   describe('getAllTools', () => {
-    it('returns all 22 registered tools', () => {
+    it('returns all 23 registered tools', () => {
       const result = service.getAllTools();
 
-      expect(result.length).toBe(22);
+      expect(result.length).toBe(23);
     });
 
     it('includes all expected tool names', () => {
       const names = service.getAllTools().map((t) => t.name);
 
       const expected = [
-        'vfs_write', 'vfs_read', 'vfs_list', 'run_subagent',
+        'vfs_write', 'vfs_read', 'vfs_list',
         'fs_read', 'fs_list', 'fs_write',
         'kv_write', 'kv_read', 'kv_list', 'kv_delete',
         'grep_search', 'file_search',
         'terminal_spawn', 'terminal_list', 'terminal_output', 'terminal_kill',
-        'raapp_create', 'raapp_compile',
+        'raapp_create', 'raapp_compile', 'run_raapp', 'list_raapps',
         'memory_ingest', 'memory_search', 'memory_ingest_conversation',
       ];
 
       for (const name of expected) {
         expect(names).toContain(name);
       }
+    });
+
+    it('includes MCP tools when available', () => {
+      mockMCP.getAllTools.mockReturnValue([
+        { name: 'mcp_server1_tool1', description: 'Test MCP tool', parameters: {}, requiresConfirmation: false, serverId: 'server1' },
+      ]);
+
+      const result = service.getAllTools();
+
+      expect(result.length).toBe(24);
+      expect(result.some((t) => t.name === 'mcp_server1_tool1')).toBe(true);
+    });
+  });
+
+  describe('MCP tools integration', () => {
+    it('getMeta returns metadata for MCP tool', () => {
+      mockMCP.getAllTools.mockReturnValue([
+        { name: 'mcp_server1_tool1', description: 'Test MCP tool', parameters: {}, requiresConfirmation: false, serverId: 'server1' },
+      ]);
+
+      const meta = service.getMeta('mcp_server1_tool1');
+
+      expect(meta).toBeDefined();
+      expect(meta?.name).toBe('mcp_server1_tool1');
+      expect(meta?.description).toBe('Test MCP tool');
+    });
+
+    it('getMeta returns undefined for unknown MCP tool', () => {
+      mockMCP.getAllTools.mockReturnValue([]);
+
+      const meta = service.getMeta('mcp_unknown_tool');
+
+      expect(meta).toBeUndefined();
+    });
+
+    it('getToolsForSkills includes MCP tools when skills list is empty', () => {
+      mockMCP.getAllTools.mockReturnValue([
+        { name: 'mcp_server1_tool1', description: 'Test MCP tool', parameters: {}, requiresConfirmation: false, serverId: 'server1' },
+      ]);
+
+      const result = service.getToolsForSkills([]);
+
+      expect(result.some((t) => t.name === 'mcp_server1_tool1')).toBe(true);
+    });
+
+    it('getToolsForSkills filters MCP tools by skill name', () => {
+      mockMCP.getAllTools.mockReturnValue([
+        { name: 'mcp_server1_tool1', description: 'Test MCP tool', parameters: {}, requiresConfirmation: false, serverId: 'server1' },
+      ]);
+
+      const result = service.getToolsForSkills(['mcp_server1_tool1']);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('mcp_server1_tool1');
     });
   });
 });
