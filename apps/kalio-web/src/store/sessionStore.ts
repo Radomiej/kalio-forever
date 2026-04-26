@@ -92,6 +92,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   finalizeChunk: (messageId) =>
     set((s) => {
       const finalContent = s.streamingChunks[messageId] ?? '';
+      const finalThinking = s.thinkingChunks[messageId] ?? '';
       const { [messageId]: _sc, ...restStreaming } = s.streamingChunks;
       const { [messageId]: _tc, ...restThinking } = s.thinkingChunks;
       return {
@@ -99,7 +100,7 @@ export const useSessionStore = create<SessionState>((set) => ({
         thinkingChunks: restThinking,
         messages: s.messages.map((m) =>
           m.id === messageId
-            ? { ...m, content: finalContent, streaming: false }
+            ? { ...m, content: finalContent, thinking: finalThinking || undefined, streaming: false }
             : m,
         ),
       };

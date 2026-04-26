@@ -77,7 +77,18 @@ export const useAgentStore = create<AgentState>((set) => ({
   setTools: (tools) => set({ tools }),
 
   addToolActivity: (activity) =>
-    set((s) => ({ toolActivities: [...s.toolActivities, activity] })),
+    set((s) => {
+      // If the same callId already exists (e.g. added by onToolConfirmation before tool:start fires),
+      // replace it instead of appending — prevents duplicate React keys.
+      if (s.toolActivities.some((a) => a.callId === activity.callId)) {
+        return {
+          toolActivities: s.toolActivities.map((a) =>
+            a.callId === activity.callId ? { ...a, ...activity } : a,
+          ),
+        };
+      }
+      return { toolActivities: [...s.toolActivities, activity] };
+    }),
 
   updateToolActivity: (callId, patch) =>
     set((s) => ({
