@@ -18,6 +18,17 @@ describe('ChatService', () => {
   let logger: Logger;
   let moduleRef: TestingModule;
 
+  // Flexible Drizzle mock that handles both .limit() and .orderBy() chains
+  const makeSelectChain = (rows: unknown[] = []) => ({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue(rows),
+        orderBy: vi.fn().mockResolvedValue(rows),
+      }),
+      orderBy: vi.fn().mockResolvedValue(rows),
+    }),
+  });
+
   beforeEach(async () => {
     moduleRef = await Test.createTestingModule({
       providers: [
@@ -53,7 +64,7 @@ describe('ChatService', () => {
           useValue: {
             db: {
               insert: vi.fn().mockReturnValue({ values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }),
-              select: vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ orderBy: vi.fn().mockResolvedValue([]) }) }) }),
+              select: vi.fn().mockImplementation(() => makeSelectChain([{ id: 's1' }])),
               update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }) }),
               delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
             },
@@ -219,7 +230,6 @@ describe('ChatService', () => {
       await (service as any)['processToolCall'](
         tc,
         'session-123',
-        'conv-123',
         mockServer,
         mockClient,
         ['test_tool'],
@@ -289,7 +299,6 @@ describe('ChatService', () => {
         sessionId: 'session-123',
         content: 'Test message',
         personaId: 'persona-123',
-        conversationId: 'conv-123',
       };
 
       // Act
@@ -346,7 +355,7 @@ describe('ChatService', () => {
 
       // Act
       await service.handleMessage(
-        { sessionId: 's1', content: 'hi', personaId: 'p1', conversationId: 'c1' },
+        { sessionId: 's1', content: 'hi', personaId: 'p1',  },
         server, client,
       );
 
@@ -370,7 +379,7 @@ describe('ChatService', () => {
 
       // Act
       await service.handleMessage(
-        { sessionId: 's1', content: 'hi', personaId: 'missing-persona', conversationId: 'c1' },
+        { sessionId: 's1', content: 'hi', personaId: 'missing-persona' },
         server, client,
       );
 
@@ -395,7 +404,7 @@ describe('ChatService', () => {
 
       // Act
       await service.handleMessage(
-        { sessionId: 's1', content: 'hi', personaId: 'p1', conversationId: 'c1' },
+        { sessionId: 's1', content: 'hi', personaId: 'p1',  },
         server, client,
       );
 
@@ -443,7 +452,7 @@ describe('ChatService', () => {
 
       // Act
       await service.handleMessage(
-        { sessionId: 's1', content: 'write file', personaId: 'p1', conversationId: 'c1' },
+        { sessionId: 's1', content: 'write file', personaId: 'p1',  },
         server, client,
       );
 
@@ -482,7 +491,7 @@ describe('ChatService', () => {
 
       // Act
       await service.handleMessage(
-        { sessionId: 's1', content: 'write file', personaId: 'p1', conversationId: 'c1' },
+        { sessionId: 's1', content: 'write file', personaId: 'p1',  },
         server, client,
       );
 
@@ -521,7 +530,7 @@ describe('ChatService', () => {
 
         // Act — start the message handler but advance timers to trigger timeout
         const handlePromise = service.handleMessage(
-          { sessionId: 's1', content: 'write', personaId: 'p1', conversationId: 'c1' },
+          { sessionId: 's1', content: 'write', personaId: 'p1',  },
           server, client,
         );
 
@@ -557,7 +566,7 @@ describe('ChatService', () => {
 
       // Act
       await service.handleMessage(
-        { sessionId: 's1', content: 'use unknown tool', personaId: 'p1', conversationId: 'c1' },
+        { sessionId: 's1', content: 'use unknown tool', personaId: 'p1',  },
         server, client,
       );
 
@@ -593,7 +602,7 @@ describe('ChatService', () => {
 
       // Act
       await service.handleMessage(
-        { sessionId: 's1', content: 'read file', personaId: 'p1', conversationId: 'c1' },
+        { sessionId: 's1', content: 'read file', personaId: 'p1',  },
         server, client,
       );
 
@@ -640,7 +649,7 @@ describe('ChatService', () => {
 
       // Act
       await service.handleMessage(
-        { sessionId: 's1', content: 'read', personaId: 'p1', conversationId: 'c1' },
+        { sessionId: 's1', content: 'read', personaId: 'p1',  },
         server, client,
       );
 
@@ -672,7 +681,7 @@ describe('ChatService', () => {
 
       // Act
       await service.handleMessage(
-        { sessionId: 's1', content: 'use secure tool', personaId: 'p1', conversationId: 'c1' },
+        { sessionId: 's1', content: 'use secure tool', personaId: 'p1',  },
         server, client,
       );
 

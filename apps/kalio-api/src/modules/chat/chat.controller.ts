@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, NotFoundException, BadRequestException, HttpCode, HttpStatus, Query } from '@nestjs/common';
-import type { ChatSession, CreateSessionDto, ChatMessage, VFSListResult, VFSReadResult } from '@kalio/types';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, NotFoundException, HttpCode, HttpStatus } from '@nestjs/common';
+import type { ChatSession, CreateSessionDto, ChatMessage, VFSReadResult, VFSListResult } from '@kalio/types';
 import { ChatService } from './chat.service';
 import { VFSService } from '../vfs/vfs.service';
 
@@ -70,39 +70,21 @@ export class ChatController {
     return { title };
   }
 
-  // ─── VFS (session-scoped virtual filesystem) ───────────────────────────────
-
   @Get(':id/vfs')
-  getVFSFiles(@Param('id') id: string): VFSListResult {
+  listVfs(@Param('id') id: string): VFSListResult {
     return this.vfsService.listFiles(id);
   }
 
-  @Post(':id/vfs')
-  writeVFSFile(
-    @Param('id') id: string,
-    @Body() body: { filePath: string; content: string },
-  ): { ok: boolean } {
-    try {
-      this.vfsService.writeFile({ conversationId: id, filePath: body.filePath, content: body.content });
-      return { ok: true };
-    } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'PATH_TRAVERSAL_DENIED') throw new BadRequestException('PATH_TRAVERSAL_DENIED');
-      throw err;
-    }
+  @Get(':id/vfs/read')
+  readVfs(@Param('id') id: string, @Query('path') path: string): VFSReadResult {
+    return this.vfsService.readFile(id, path);
   }
 
-  @Get(':id/vfs/read')
-  readVFSFile(
+  @Post(':id/vfs')
+  writeVfs(
     @Param('id') id: string,
-    @Query('path') filePath: string,
-  ): VFSReadResult {
-    try {
-      return this.vfsService.readFile(id, filePath);
-    } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'PATH_TRAVERSAL_DENIED') throw new BadRequestException('PATH_TRAVERSAL_DENIED');
-      throw err;
-    }
+    @Body() body: { filePath: string; content: string },
+  ): void {
+    this.vfsService.writeFile({ sessionId: id, filePath: body.filePath, content: body.content });
   }
 }

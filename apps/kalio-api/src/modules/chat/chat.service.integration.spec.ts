@@ -82,7 +82,6 @@ describe('ChatService - Integration Tests (REGRESSION)', () => {
     it('should persist tool results to messages table after execution', async () => {
       // Arrange
       const sessionId = await service.createSession(testPersonaId, 'Test Session');
-      const conversationId = nanoid();
 
       // Insert a user message
       const userMsgId = nanoid();
@@ -136,7 +135,6 @@ describe('ChatService - Integration Tests (REGRESSION)', () => {
     it('should include tool results in chat history for subsequent turns', async () => {
       // Arrange
       const sessionId = await service.createSession(testPersonaId, 'Test Session 2');
-      const conversationId = nanoid();
 
       // Insert user message
       await drizzleService.db.insert(messagesTable).values({
@@ -220,3 +218,5 @@ describe('ChatService - Integration Tests (REGRESSION)', () => {
     });
   });
 });
+
+

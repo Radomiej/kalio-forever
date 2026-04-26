@@ -37,7 +37,7 @@ export class ChatService {
     server: Server,
     client: Socket,
   ): Promise<void> {
-    const { sessionId, content, personaId, conversationId } = payload;
+    const { sessionId, content, personaId } = payload;
     this.logger.log(`[chat:send] session=${sessionId} persona=${personaId} content="${content.slice(0, 80)}..."`);
 
     const personaConfig = await this.persona.getSessionConfig(personaId);
@@ -51,6 +51,14 @@ export class ChatService {
       return;
     }
     this.logger.log(`[chat:send] Using persona="${personaConfig.systemPrompt.slice(0, 40)}" model=${personaConfig.model}`);
+
+    // Emit context info to client so FE can display system prompt and available tools
+    const contextTools = this.toolRegistry.getToolsForSkills(personaConfig.availableSkills);
+    client.emit('chat:context', {
+      sessionId,
+      systemPrompt: personaConfig.systemPrompt,
+      toolNames: contextTools.map((t) => t.name),
+    } satisfies SocketEvents['chat:context']);
 
     // Guard: session must exist in DB before we can insert messages (FK constraint)
     const [existingSession] = await this.drizzle.db
@@ -130,7 +138,7 @@ export class ChatService {
     // Process tool calls
     for (const tc of toolCalls) {
       this.logger.log(`[tool] Executing tool="${tc.name}" args=${JSON.stringify(this.redactArgs(tc.args)).slice(0, 200)}`);
-      await this.processToolCall(tc, sessionId, conversationId, server, client, personaConfig.availableSkills);
+      await this.processToolCall(tc, sessionId, server, client, personaConfig.availableSkills);
     }
 
     // After all tool calls complete, do follow-up LLM stream with tool results in history
@@ -184,7 +192,6 @@ export class ChatService {
   private async processToolCall(
     tc: LLMToolCall,
     sessionId: string,
-    conversationId: string,
     server: Server,
     client: Socket,
     availableSkills: string[],
@@ -202,7 +209,9 @@ export class ChatService {
       return;
     }
 
-    if (!availableSkills.includes(tc.name)) {
+    // Mirror getToolsForSkills semantics: empty array or '*' means all tools allowed
+    const skillsAllowAll = availableSkills.length === 0 || availableSkills.includes('*');
+    if (!skillsAllowAll && !availableSkills.includes(tc.name)) {
       this.logger.warn(`[tool] Tool "${tc.name}" not in availableSkills`);
       const result = { callId: tc.id, status: 'error' as const, errorCode: 'TOOL_NOT_FOUND', errorMessage: `Tool "${tc.name}" not available for this persona` };
       client.emit('tool:result', result);
@@ -233,7 +242,6 @@ export class ChatService {
     this.logger.log(`[tool] Dispatching tool="${tc.name}"`);
     const result = await this.toolDispatch.dispatch({
       sessionId,
-      conversationId,
       toolName: tc.name,
       args: tc.args,
       callId: tc.id,
