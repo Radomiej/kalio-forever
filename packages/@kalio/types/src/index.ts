@@ -403,6 +403,10 @@ export interface SocketEvents {
   // Tool result — server → client
   'tool:result': ToolResult;
 
+  // Agent loop lifecycle — server → client
+  'agent:start': { sessionId: ID; turnId: ID };
+  'agent:done': { sessionId: ID; turnId: ID };
+
   // MCP — server → client
   'mcp:server:status': { serverId: ID; serverName: string; status: string; toolCount: number; lastError?: string };
   'mcp:connected': { serverId: ID; serverName: string; toolCount: number };

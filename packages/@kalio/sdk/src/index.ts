@@ -15,6 +15,8 @@ export type ToolStartHandler = (payload: SocketEvents['tool:start']) => void;
 export type ToolResultHandler = (result: ToolResult) => void;
 export type SessionCreatedHandler = (session: ChatSession) => void;
 export type ContextHandler = (payload: SocketEvents['chat:context']) => void;
+export type AgentStartHandler = (payload: SocketEvents['agent:start']) => void;
+export type AgentDoneHandler = (payload: SocketEvents['agent:done']) => void;
 
 export interface KalioSDKOptions {
   wsUrl: string;
@@ -170,5 +172,25 @@ export class KalioSDK {
     };
     this.socket.on('chat:context', wrappedHandler);
     return () => this.socket.off('chat:context', wrappedHandler);
+  }
+
+  onAgentStart(handler: AgentStartHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['agent:start']) => {
+      console.groupCollapsed(`[Thread] ▶️ AGENT START sessionId=${payload.sessionId} turnId=${payload.turnId}`);
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('agent:start', wrappedHandler);
+    return () => this.socket.off('agent:start', wrappedHandler);
+  }
+
+  onAgentDone(handler: AgentDoneHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['agent:done']) => {
+      console.groupCollapsed(`[Thread] ✅ AGENT DONE sessionId=${payload.sessionId} turnId=${payload.turnId}`);
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('agent:done', wrappedHandler);
+    return () => this.socket.off('agent:done', wrappedHandler);
   }
 }

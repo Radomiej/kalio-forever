@@ -16,43 +16,13 @@ import { useContextUsage } from './hooks/useContextUsage';
 import { computeAnsweredCallIds } from './chatUtils';
 import type { ChatMessage } from '@kalio/types';
 
-// ─── Turn grouping ────────────────────────────────────────────────────────────
-
-type Turn =
-  | { type: 'user'; msg: ChatMessage }
-  | { type: 'agent'; msgs: ChatMessage[]; isLast: boolean };
-
-function groupIntoTurns(messages: ChatMessage[]): Turn[] {
-  const turns: Turn[] = [];
-  let i = 0;
-  while (i < messages.length) {
-    if (messages[i].role === 'user') {
-      turns.push({ type: 'user', msg: messages[i] });
-      i++;
-    } else {
-      // Agent turn - group until we hit a completed assistant message (streaming: false)
-      // or a user message
-      const start = i;
-      while (i < messages.length && messages[i].role !== 'user') {
-        // Check if this is a completed assistant message (end of iteration)
-        // This splits multi-iteration agent loops into separate turns
-        if (messages[i].role === 'assistant' && messages[i].streaming === false && i > start) {
-          // End the current turn here, next iteration will start a new turn
-          i++;
-          break;
-        }
-        i++;
-      }
-      turns.push({ type: 'agent', msgs: messages.slice(start, i), isLast: i === messages.length });
-    }
-  }
-  return turns;
-}
-
 export { computeAnsweredCallIds } from './chatUtils';
 
 export function ChatInterface() {
-  const { messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages } = useSessionStore();
+  const {
+    messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages,
+    agentTurns, activeTurnId, startAgentTurn, addTurnItem, finalizeAgentTurn, clearAgentTurns,
+  } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
   const {
@@ -88,6 +58,20 @@ export function ChatInterface() {
     const offChunk = eventBus.onChunk((chunk) => {
       if (!chunk.done) {
         appendChunk(chunk.messageId, chunk.delta, chunk.thinking);
+        
+        // Add to active turn for unified rendering
+        if (activeTurnId) {
+          const { agentTurns, addTurnItem } = useSessionStore.getState();
+          const turn = agentTurns.find((t) => t.id === activeTurnId);
+          if (turn) {
+            const hasItem = turn.items.some(
+              (item) => item.kind === (chunk.thinking ? 'thinking' : 'text') && item.messageId === chunk.messageId
+            );
+            if (!hasItem) {
+              addTurnItem({ kind: chunk.thinking ? 'thinking' : 'text', messageId: chunk.messageId });
+            }
+          }
+        }
       } else {
         finalizeChunk(chunk.messageId);
         setStreaming(false);
@@ -143,6 +127,19 @@ export function ChatInterface() {
         status: 'running',
         startedAt: Date.now(),
       });
+      // Add to active agent turn
+      addTurnItem({ kind: 'tool', callId: payload.callId });
+    });
+
+    const offAgentStart = eventBus.onAgentStart((payload) => {
+      console.log('[AgentStart]', payload.sessionId, payload.turnId);
+      startAgentTurn(payload.turnId, payload.sessionId);
+      clearToolActivities(); // Fresh turn = fresh tool activities
+    });
+
+    const offAgentDone = eventBus.onAgentDone((payload) => {
+      console.log('[AgentDone]', payload.sessionId, payload.turnId);
+      finalizeAgentTurn();
     });
 
     const offContext = eventBus.onContext((payload) => {
@@ -188,10 +185,12 @@ export function ChatInterface() {
       offError();
       offConfirmation();
       offToolStart();
+      offAgentStart();
+      offAgentDone();
       offContext();
       offToolResult();
     };
-  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext]);
+  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -266,6 +265,7 @@ export function ChatInterface() {
     // Reset stale streaming state from any previous session
     setStreaming(false);
     clearToolActivities();
+    clearAgentTurns(); // Clear previous turns
     console.debug('[ChatInterface] session activated', activeSessionId, '— streaming reset');
     const { pendingMessage, pendingRAAppId, setPendingMessage, setPendingRAAppId, sessions: s } = useSessionStore.getState();
     const toSend = pendingMessage ?? (pendingRAAppId ? `Use the ${s.find((a) => a.id === activeSessionId)?.title ?? pendingRAAppId} tool` : null);
@@ -273,7 +273,7 @@ export function ChatInterface() {
     setPendingMessage(null);
     setPendingRAAppId(null);
     handleSendRef.current(toSend, 'default');
-  }, [activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSessionId, clearAgentTurns]);
 
   const handleConfirm = () => {
     if (!pendingConfirmation || !activeSessionId) return;
@@ -384,18 +384,28 @@ export function ChatInterface() {
           </div>
         )}
 
-        {groupIntoTurns(messages).map((turn, idx) =>
-          turn.type === 'user' ? (
-            <MessageBubble key={turn.msg.id} message={turn.msg} />
-          ) : (
-            <AgentTurnBubble
-              key={`agent-${idx}`}
-              messages={turn.msgs}
-              toolActivities={turn.isLast ? toolActivities : []}
-              answeredCallIds={answeredCallIds}
-            />
-          ),
-        )}
+        {/* Interleaved timeline: user message → agent turn → user message → ... */}
+        {(() => {
+          const userMsgs = messages.filter((m) => m.role === 'user');
+          const timeline: React.ReactNode[] = [];
+          const maxLen = Math.max(userMsgs.length, agentTurns.length);
+          for (let i = 0; i < maxLen; i++) {
+            if (i < userMsgs.length) {
+              timeline.push(<MessageBubble key={userMsgs[i].id} message={userMsgs[i]} />);
+            }
+            if (i < agentTurns.length) {
+              timeline.push(
+                <AgentTurnBubble
+                  key={agentTurns[i].id}
+                  turn={agentTurns[i]}
+                  toolActivities={toolActivities}
+                  answeredCallIds={answeredCallIds}
+                />,
+              );
+            }
+          }
+          return timeline;
+        })()}
 
         {/* Generic streaming indicator when streaming with no messages yet */}
         {isStreaming && toolActivities.length === 0 && messages.length === 0 && (

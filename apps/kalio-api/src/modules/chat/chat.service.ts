@@ -92,6 +92,10 @@ export class ChatService {
     const MAX_AGENT_ITERATIONS = 8;
     let agentIteration = 0;
     let pendingToolCalls: LLMToolCall[] = [];
+    const turnId = nanoid();
+
+    // Signal agent loop start to frontend — enables unified turn rendering
+    client.emit('agent:start', { sessionId, turnId });
 
     // Agent loop: stream LLM → process tool calls → repeat until no more tool calls
     do {
@@ -173,6 +177,9 @@ export class ChatService {
         await this.processToolCall(tc, sessionId, server, client, personaConfig.availableSkills);
       }
     } while (pendingToolCalls.length > 0 && agentIteration < MAX_AGENT_ITERATIONS);
+
+    // Signal agent loop completion to frontend
+    client.emit('agent:done', { sessionId, turnId });
 
     if (agentIteration >= MAX_AGENT_ITERATIONS && pendingToolCalls.length > 0) {
       this.logger.warn(`[chat:send] Agent loop hit max iterations (${MAX_AGENT_ITERATIONS}) for session=${sessionId}`);

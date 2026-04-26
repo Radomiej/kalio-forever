@@ -3,110 +3,14 @@ import { BrainCircuit, ChevronDown } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
-import type { ChatMessage } from '@kalio/types';
+import type { AgentTurn } from '../../store/sessionStore';
 import type { ToolActivity } from '../../store/agentStore';
 import { LiveToolCallBubble, HistoryToolCallBubble } from './ToolCallBubble';
 
 interface Props {
-  messages: ChatMessage[];
+  turn: AgentTurn;
   toolActivities: ToolActivity[];
   answeredCallIds?: Set<string>;
-}
-
-// ─── Unified chronological item ───────────────────────────────────────────────
-// Each item is either an assistant message, a tool call (live or history), or
-// a thinking block. Tool calls are keyed by callId so live→history transition
-// happens in-place without position change.
-
-type Item =
-  | { kind: 'assistant'; msg: ChatMessage }
-  | { kind: 'tool_live'; activity: ToolActivity }
-  | { kind: 'tool_history'; msg: ChatMessage; toolName: string; isAnswered: boolean };
-
-function buildItems(
-  messages: ChatMessage[],
-  toolActivities: ToolActivity[],
-  toolCallIdToName: Map<string, string>,
-  answeredCallIds: Set<string> | undefined,
-): Item[] {
-  // Which callIds already have a tool_result message (history takes precedence over live)
-  const historyCallIds = new Set(
-    messages.filter((m) => m.role === 'tool_result' && m.toolCallId).map((m) => m.toolCallId!),
-  );
-
-  // Build map: assistant message ID → tool_result messages
-  // Use chronological order: each tool_result is assigned to the most recent assistant
-  // that doesn't already have a tool_result assigned (and is before this tool_result)
-  const assistantToToolResults = new Map<string, ChatMessage[]>();
-  const assistantIds: string[] = [];
-
-  // First pass: collect all assistant message IDs in order
-  for (const msg of messages) {
-    if (msg.role === 'assistant') {
-      assistantIds.push(msg.id);
-      if (!assistantToToolResults.has(msg.id)) {
-        assistantToToolResults.set(msg.id, []);
-      }
-    }
-  }
-
-  // Second pass: assign tool_results to assistants in order
-  let currentAssistantIdx = 0;
-  for (const msg of messages) {
-    if (msg.role === 'tool_result' && msg.toolCallId) {
-      // Find the assistant that should own this tool_result
-      // Look for assistant with matching toolCalls first
-      const matchingAssistant = messages.find(
-        (m) => m.role === 'assistant' && m.toolCalls?.some((tc) => tc.id === msg.toolCallId),
-      );
-
-      if (matchingAssistant) {
-        assistantToToolResults.get(matchingAssistant.id)!.push(msg);
-      } else {
-        // No matching assistant with toolCalls - use current assistant pointer
-        // Advance pointer until we find an assistant before this tool_result
-        while (currentAssistantIdx < assistantIds.length) {
-          const assistantId = assistantIds[currentAssistantIdx];
-          const assistantIdx = messages.findIndex((m) => m.id === assistantId);
-          const toolResultIdx = messages.findIndex((m) => m.id === msg.id);
-          if (assistantIdx < toolResultIdx) {
-            // This assistant is before the tool_result, assign to it
-            assistantToToolResults.get(assistantId)!.push(msg);
-            break;
-          }
-          currentAssistantIdx++;
-        }
-      }
-    }
-  }
-
-  // Iterate messages in order, render assistant then its tool_results immediately after
-  const items: Item[] = [];
-  const processedToolResults = new Set<string>();
-
-  for (const msg of messages) {
-    if (msg.role === 'assistant') {
-      items.push({ kind: 'assistant', msg });
-      const toolResults = assistantToToolResults.get(msg.id) ?? [];
-      for (const tr of toolResults) {
-        if (!processedToolResults.has(tr.id)) {
-          processedToolResults.add(tr.id);
-          const toolName = toolCallIdToName.get(tr.toolCallId!) ?? tr.toolCallId!;
-          const isAnswered = answeredCallIds?.has(tr.toolCallId!) ?? false;
-          items.push({ kind: 'tool_history', msg: tr, toolName, isAnswered });
-        }
-      }
-    }
-  }
-
-  // Append live activities whose tool_result hasn't arrived yet — they belong at the end.
-  for (const activity of toolActivities) {
-    if (!historyCallIds.has(activity.callId)) {
-      items.push({ kind: 'tool_live', activity });
-    }
-  }
-
-  return items;
 }
 
 // ─── ThinkingBlock ────────────────────────────────────────────────────────────
@@ -146,8 +50,8 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
 
 // ─── AgentTurnBubble ──────────────────────────────────────────────────────────
 
-export function AgentTurnBubble({ messages, toolActivities, answeredCallIds }: Props) {
-  const { streamingChunks, thinkingChunks } = useSessionStore();
+export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props) {
+  const { messages, streamingChunks, thinkingChunks } = useSessionStore();
   const { callIdToName: persistentCallIdToName } = useAgentStore();
 
   // Build callId → toolName from all available sources
@@ -159,7 +63,13 @@ export function AgentTurnBubble({ messages, toolActivities, answeredCallIds }: P
   }
   for (const a of toolActivities) toolCallIdToName.set(a.callId, a.toolName);
 
-  const items = buildItems(messages, toolActivities, toolCallIdToName, answeredCallIds);
+  // Build tool result lookup by callId
+  const toolResultByCallId = new Map<string, { content: string; status: string }>();
+  for (const msg of messages) {
+    if (msg.role === 'tool_result' && msg.toolCallId) {
+      toolResultByCallId.set(msg.toolCallId, { content: msg.content, status: 'success' });
+    }
+  }
 
   return (
     <div data-testid="agent-turn-bubble" className="flex justify-start mb-2 w-full">
@@ -167,34 +77,50 @@ export function AgentTurnBubble({ messages, toolActivities, answeredCallIds }: P
         <p className="text-xs text-base-content/50 mb-1 ml-1">Kalio</p>
 
         <div className="group relative rounded-2xl bg-base-300 text-base-content text-sm px-4 py-3 flex flex-col gap-2 w-full">
-          {items.map((item) => {
-            if (item.kind === 'tool_live') {
-              return <LiveToolCallBubble key={item.activity.callId} activity={item.activity} />;
-            }
-
-            if (item.kind === 'tool_history') {
+          {turn.items.map((item, idx) => {
+            if (item.kind === 'tool') {
+              const callId = item.callId;
+              const toolName = toolCallIdToName.get(callId) ?? callId;
+              const toolResult = toolResultByCallId.get(callId);
+              const isAnswered = answeredCallIds?.has(callId) ?? false;
+              
+              // Check if this is a live (in-progress) tool or completed
+              const liveActivity = toolActivities.find((a) => a.callId === callId);
+              
+              if (liveActivity && !toolResult) {
+                // Live tool call (still running)
+                return <LiveToolCallBubble key={`${callId}-${idx}`} activity={liveActivity} />;
+              }
+              
+              // Completed tool call
               return (
                 <HistoryToolCallBubble
-                  key={item.msg.id}
-                  toolName={item.toolName}
-                  content={item.msg.content}
-                  isAnswered={item.isAnswered}
+                  key={`${callId}-${idx}`}
+                  toolName={toolName}
+                  content={toolResult?.content ?? ''}
+                  isAnswered={isAnswered}
                 />
               );
             }
 
-            // assistant message
-            const msg = item.msg;
+            if (item.kind === 'thinking') {
+              const messageId = item.messageId;
+              const thinkingContent = thinkingChunks[messageId] ?? '';
+              if (!thinkingContent) return null;
+              return <ThinkingBlock key={`think-${messageId}`} content={thinkingContent} isStreaming={!turn.done} />;
+            }
+
+            // text item
+            const messageId = item.messageId;
+            const msg = messages.find((m) => m.id === messageId);
+            if (!msg) return null;
+            
             const isStreaming = msg.streaming === true;
-            const displayContent = isStreaming ? (streamingChunks[msg.id] ?? '') : msg.content;
-            const thinkingContent = thinkingChunks[msg.id] || msg.thinking || '';
+            const displayContent = isStreaming ? (streamingChunks[messageId] ?? '') : msg.content;
 
             return (
-              <div key={msg.id} className="flex flex-col gap-2">
-                {thinkingContent.length > 0 && (
-                  <ThinkingBlock content={thinkingContent} isStreaming={isStreaming} />
-                )}
-                {isStreaming && !displayContent && !thinkingContent ? (
+              <div key={`text-${messageId}`} className="flex flex-col gap-2">
+                {isStreaming && !displayContent ? (
                   <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
                 ) : displayContent ? (
                   <div>

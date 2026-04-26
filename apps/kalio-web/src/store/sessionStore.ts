@@ -1,5 +1,18 @@
 import { create } from 'zustand';
-import type { ChatSession, ChatMessage } from '@kalio/types';
+import type { ChatSession, ChatMessage, ID } from '@kalio/types';
+
+// ─── Agent Turn (unified chronological items per user prompt) ─────────────────
+export type AgentTurnItem =
+  | { kind: 'thinking'; messageId: ID }
+  | { kind: 'text'; messageId: ID }
+  | { kind: 'tool'; callId: ID };   // live or history
+
+export interface AgentTurn {
+  id: ID;              // turnId from agent:start
+  sessionId: ID;
+  items: AgentTurnItem[];  // ordered, append-only
+  done: boolean;
+}
 
 interface SessionState {
   sessions: ChatSession[];
@@ -10,6 +23,10 @@ interface SessionState {
   pendingMessage: string | null;
   pendingRAAppId: string | null;
   pendingUserActions: string[];
+
+  // Agent turns (unified chronological rendering)
+  agentTurns: AgentTurn[];
+  activeTurnId: ID | null;  // current turn being built (between agent:start and agent:done)
 
   setSessions: (sessions: ChatSession[]) => void;
   addSession: (session: ChatSession) => void;
@@ -25,6 +42,12 @@ interface SessionState {
   setPendingRAAppId: (id: string | null) => void;
   enqueueUserAction: (payload: string) => void;
   dequeueUserAction: () => string | undefined;
+
+  // Agent turn management
+  startAgentTurn: (turnId: ID, sessionId: ID) => void;
+  addTurnItem: (item: AgentTurnItem) => void;
+  finalizeAgentTurn: () => void;
+  clearAgentTurns: () => void;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -36,6 +59,10 @@ export const useSessionStore = create<SessionState>((set) => ({
   pendingMessage: null,
   pendingRAAppId: null,
   pendingUserActions: [],
+
+  // Agent turns
+  agentTurns: [],
+  activeTurnId: null,
 
   setSessions: (sessions) => set({ sessions }),
   addSession: (session) =>
@@ -136,4 +163,33 @@ export const useSessionStore = create<SessionState>((set) => ({
     });
     return action;
   },
+
+  // Agent turn management — unified chronological rendering per user prompt
+  startAgentTurn: (turnId, sessionId) =>
+    set((s) => ({
+      agentTurns: [...s.agentTurns, { id: turnId, sessionId, items: [], done: false }],
+      activeTurnId: turnId,
+    })),
+
+  addTurnItem: (item) =>
+    set((s) => {
+      if (!s.activeTurnId) return s;
+      return {
+        agentTurns: s.agentTurns.map((turn) =>
+          turn.id === s.activeTurnId
+            ? { ...turn, items: [...turn.items, item] }
+            : turn
+        ),
+      };
+    }),
+
+  finalizeAgentTurn: () =>
+    set((s) => ({
+      agentTurns: s.agentTurns.map((turn) =>
+        turn.id === s.activeTurnId ? { ...turn, done: true } : turn
+      ),
+      activeTurnId: null,
+    })),
+
+  clearAgentTurns: () => set({ agentTurns: [], activeTurnId: null }),
 }));

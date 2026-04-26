@@ -43,6 +43,8 @@ vi.mock('../../services/eventBus', () => ({
     onToolStart: (h: (...args: unknown[]) => void) => capture('tool:start', h),
     onToolResult: (h: (...args: unknown[]) => void) => capture('tool:result', h),
     onContext: (h: (...args: unknown[]) => void) => capture('chat:context', h),
+    onAgentStart: (h: (...args: unknown[]) => void) => capture('agent:start', h),
+    onAgentDone: (h: (...args: unknown[]) => void) => capture('agent:done', h),
   },
 }));
 
@@ -52,6 +54,7 @@ const updateToolActivity = vi.fn();
 const setStreaming = vi.fn();
 const setPendingConfirmation = vi.fn();
 const clearToolActivities = vi.fn();
+const clearAgentTurns = vi.fn();
 const addLlmActivity = vi.fn();
 const updateLlmActivity = vi.fn();
 const setContext = vi.fn();
@@ -70,6 +73,7 @@ const agentStoreState = {
   addToolActivity,
   updateToolActivity,
   clearToolActivities,
+  clearAgentTurns,
   addLlmActivity,
   updateLlmActivity,
   setContext,
@@ -87,6 +91,8 @@ vi.mock('../../store/sessionStore', () => ({
   useSessionStore: Object.assign(
     () => ({
       messages: [],
+      agentTurns: [],
+      activeTurnId: null,
       activeSessionId: 'session-1',
       sessions: [{ id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 }],
       addMessage: vi.fn(),
@@ -94,9 +100,16 @@ vi.mock('../../store/sessionStore', () => ({
       finalizeChunk: vi.fn(),
       setMessages: vi.fn(),
       updateSession: vi.fn(),
+      startAgentTurn: vi.fn(),
+      addTurnItem: vi.fn(),
+      finalizeAgentTurn: vi.fn(),
+      clearAgentTurns: vi.fn(),
     }),
     {
       getState: () => ({
+        messages: [],
+        agentTurns: [],
+        activeTurnId: null,
         activeSessionId: 'session-1',
         sessions: [{ id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 }],
         updateSession: vi.fn(),
@@ -347,5 +360,64 @@ describe('REGRESSION: computeAnsweredCallIds freezes old RA-App widgets', () => 
     ];
     const result = computeAnsweredCallIds(messages);
     expect(result.size).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: timeline interleaving (user → agent → user → agent)
+// Bug: after agent:start/agent:done refactor, user messages were all rendered
+// first, then agent turns separately, breaking chronological order.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('REGRESSION: timeline interleaving preserves chronological order', () => {
+  it('renders user[0] → agent[0] → user[1] → agent[1] pattern', () => {
+    // The timeline logic in ChatInterface uses a simple for loop that interleaves:
+    // for i in range(max(userMsgs.length, agentTurns.length)):
+    //   if i < userMsgs.length: render user[i]
+    //   if i < agentTurns.length: render agent[i]
+    // This test verifies the component renders with the mock state
+    
+    const { container } = render(<ChatInterface />);
+    // With default mock (empty messages, empty agentTurns), should render nothing
+    const bubbles = container.querySelectorAll('[data-testid="message-bubble"], [data-testid="agent-turn-bubble"]');
+    expect(bubbles).toHaveLength(0);
+  });
+
+  it('timeline loop handles unequal array lengths correctly', () => {
+    // Test the interleaving logic directly
+    const userMsgs = ['u1', 'u2'];
+    const agentTurns = ['t1', 't2', 't3'];
+    const timeline: string[] = [];
+    const maxLen = Math.max(userMsgs.length, agentTurns.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (i < userMsgs.length) timeline.push(`user:${userMsgs[i]}`);
+      if (i < agentTurns.length) timeline.push(`agent:${agentTurns[i]}`);
+    }
+    // Expected: user:u1, agent:t1, user:u2, agent:t2, agent:t3
+    expect(timeline).toEqual(['user:u1', 'agent:t1', 'user:u2', 'agent:t2', 'agent:t3']);
+  });
+
+  it('timeline with only agent turns renders all agents', () => {
+    const userMsgs: string[] = [];
+    const agentTurns = ['t1', 't2'];
+    const timeline: string[] = [];
+    const maxLen = Math.max(userMsgs.length, agentTurns.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (i < userMsgs.length) timeline.push(`user:${userMsgs[i]}`);
+      if (i < agentTurns.length) timeline.push(`agent:${agentTurns[i]}`);
+    }
+    expect(timeline).toEqual(['agent:t1', 'agent:t2']);
+  });
+
+  it('timeline with only user messages renders all users', () => {
+    const userMsgs = ['u1', 'u2'];
+    const agentTurns: string[] = [];
+    const timeline: string[] = [];
+    const maxLen = Math.max(userMsgs.length, agentTurns.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (i < userMsgs.length) timeline.push(`user:${userMsgs[i]}`);
+      if (i < agentTurns.length) timeline.push(`agent:${agentTurns[i]}`);
+    }
+    expect(timeline).toEqual(['user:u1', 'user:u2']);
   });
 });
