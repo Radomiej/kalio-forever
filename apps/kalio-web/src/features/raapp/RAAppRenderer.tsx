@@ -1,6 +1,7 @@
 import type { RAAppBlock, RAAppResult } from '@kalio/types';
 import { HtmlIframeRenderer } from './HtmlIframeRenderer';
 import { isHtmlString, findHtmlInData, injectEngineCDN } from './raappRendererUtils';
+import { GuiDslRenderer, type GuiDslPayload } from './GuiDslRenderer';
 
 interface RAAppRendererProps {
   block: RAAppBlock;
@@ -25,8 +26,23 @@ export function RAAppRenderer({ block, result }: RAAppRendererProps) {
     return <HtmlIframeRenderer html={html} title="RA-App" />;
   }
 
-  // For gui blocks, try to sniff HTML out of the content
   if (block.type === 'gui') {
+    // Try to parse as GUI DSL payload {nodes, data}
+    try {
+      const parsed: unknown = typeof content === 'string' ? JSON.parse(content) : content;
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        'nodes' in parsed &&
+        Array.isArray((parsed as GuiDslPayload).nodes)
+      ) {
+        return <GuiDslRenderer payload={parsed as GuiDslPayload} />;
+      }
+    } catch {
+      // not JSON — fall through
+    }
+
+    // Fallback: sniff raw HTML in content
     if (isHtmlString(content)) {
       return <HtmlIframeRenderer html={content} title="RA-App" />;
     }
@@ -37,7 +53,7 @@ export function RAAppRenderer({ block, result }: RAAppRendererProps) {
         return <HtmlIframeRenderer html={sniffed} title="RA-App" />;
       }
     } catch {
-      // not JSON — fall through
+      // not JSON
     }
   }
 
