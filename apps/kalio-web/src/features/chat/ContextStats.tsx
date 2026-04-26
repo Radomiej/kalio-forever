@@ -1,10 +1,13 @@
-import { X, Minimize2 } from 'lucide-react';
+import { useState } from 'react';
+import { X, Minimize2, ChevronDown } from 'lucide-react';
 import { formatTokenCount, type TokenCount } from '../../services/tokenCounter';
 
 interface ContextStatsProps {
   tokenCount: TokenCount;
   onCompactNow?: () => void;
   onClose: () => void;
+  systemPrompt?: string | null;
+  activeToolNames?: string[];
 }
 
 // ── Category config ────────────────────────────────────────────────────────────
@@ -27,8 +30,10 @@ const CATEGORIES: CategoryDef[] = [
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export function ContextStats({ tokenCount, onCompactNow, onClose }: ContextStatsProps) {
+export function ContextStats({ tokenCount, onCompactNow, onClose, systemPrompt, activeToolNames }: ContextStatsProps) {
   const { total, breakdown, cacheable, contextLimit, usagePercent } = tokenCount;
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const barColor =
     usagePercent >= 95
@@ -128,6 +133,44 @@ export function ContextStats({ tokenCount, onCompactNow, onClose }: ContextStats
           system + tools + skills (unchanged between turns)
         </p>
       </div>
+
+      {/* System prompt */}
+      {systemPrompt && (
+        <div className="border-t border-base-300 pt-2 mt-2" data-testid="context-stats-system-prompt">
+          <button
+            className="flex items-center gap-1.5 w-full text-left text-base-content/60 hover:text-base-content/80 transition-colors"
+            onClick={() => setPromptOpen((v) => !v)}
+          >
+            <span>📜 System Prompt</span>
+            <ChevronDown size={11} className={`ml-auto transition-transform duration-150 ${promptOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {promptOpen && (
+            <div className="mt-1.5 bg-base-300/60 rounded px-2 py-1.5 text-[10px] font-mono text-base-content/60 whitespace-pre-wrap max-h-48 overflow-y-auto">
+              {systemPrompt}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Available tools */}
+      {activeToolNames && activeToolNames.length > 0 && (
+        <div className="border-t border-base-300 pt-2 mt-2" data-testid="context-stats-tools">
+          <button
+            className="flex items-center gap-1.5 w-full text-left text-base-content/60 hover:text-base-content/80 transition-colors"
+            onClick={() => setToolsOpen((v) => !v)}
+          >
+            <span>🔧 Tools ({activeToolNames.length})</span>
+            <ChevronDown size={11} className={`ml-auto transition-transform duration-150 ${toolsOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {toolsOpen && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {activeToolNames.map((name) => (
+                <span key={name} className="font-mono text-[10px] bg-base-300/60 rounded px-1.5 py-0.5 text-sky-400/80">{name}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

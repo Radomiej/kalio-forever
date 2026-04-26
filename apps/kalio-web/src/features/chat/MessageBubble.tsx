@@ -32,7 +32,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     );
   }
 
-  // Assistant bubble
+  // tool_result messages are rendered inside AgentTurnBubble — skip here to avoid duplicate JSON bubbles
+  if (message.role === 'tool_result') return null;
   return (
     <div data-testid="message-bubble" data-role="assistant" className="flex justify-start mb-1 w-full">
       <div className="min-w-0 w-full max-w-[min(100%,68rem)]">
