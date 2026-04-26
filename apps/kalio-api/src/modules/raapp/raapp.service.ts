@@ -7,6 +7,8 @@ import extractZip from 'extract-zip';
 import yaml from 'js-yaml';
 import type { RAAppBlock, RAAppResult } from '@kalio/types';
 import { RAAppSandboxService } from './raapp-sandbox.service';
+import { compileGui } from './gui/guiDslExpand';
+import { GuiParseError } from './gui/guiDslParser';
 
 export interface RAAppMeta {
   id: string;
@@ -137,15 +139,17 @@ export class RAAppService implements OnModuleInit {
     if (block.type === 'html') {
       return { status: 'ready', renderedContent: block.content };
     }
+    // gui type: parse with GUI DSL and return nodes+data as JSON string
     try {
-      const result = await this.sandbox.execute(block.content);
-      return { status: 'ready', renderedContent: result };
+      const nodes = compileGui(block.content);
+      const renderedContent = JSON.stringify({ nodes, data: {} });
+      return { status: 'ready', renderedContent };
     } catch (err) {
-      this.logger.error('[RAAppService] DSL execution error', err);
+      this.logger.error('[RAAppService] GUI DSL parse error', err);
       return {
         status: 'error',
         error: {
-          code: 'DSL_EXEC_ERROR',
+          code: err instanceof GuiParseError ? 'DSL_PARSE_ERROR' : 'DSL_EXEC_ERROR',
           message: err instanceof Error ? err.message : 'Unknown error',
         },
       };

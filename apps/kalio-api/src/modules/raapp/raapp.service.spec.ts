@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { RAAppService } from './raapp.service';
 import { RAAppSandboxService } from './raapp-sandbox.service';
 
@@ -10,7 +11,11 @@ describe('RAAppService', () => {
 
   beforeEach(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [RAAppService, RAAppSandboxService],
+      providers: [
+        RAAppService,
+        RAAppSandboxService,
+        { provide: ConfigService, useValue: { get: (_key: string, def: unknown) => def } },
+      ],
     }).compile();
 
     service = moduleRef.get<RAAppService>(RAAppService);
@@ -54,17 +59,29 @@ describe('RAAppService', () => {
     });
   });
 
-  describe('execute — DSL sandbox errors returned inline', () => {
-    it('returns DSL_EXEC_ERROR when sandbox throws', async () => {
-      const result = await service.execute({ type: 'gui', mode: 'display', content: 'throw new Error("test error")' });
+  describe('execute — GUI DSL blocks', () => {
+    it('returns ready with nodes+data JSON for valid gui DSL', async () => {
+      const dsl = `vbox { label { text = "Hello" } }`;
+      const result = await service.execute({ type: 'gui', mode: 'display', content: dsl });
 
-      expect(result.status).toBe('error');
-      expect(result.error?.code).toBe('DSL_EXEC_ERROR');
+      expect(result.status).toBe('ready');
+      expect(result.renderedContent).toBeDefined();
+      const parsed = JSON.parse(result.renderedContent!);
+      expect(parsed).toHaveProperty('nodes');
+      expect(parsed).toHaveProperty('data');
+      expect(Array.isArray(parsed.nodes)).toBe(true);
     });
 
-    it('does not throw when DSL execution fails', async () => {
+    it('returns DSL_PARSE_ERROR for invalid gui DSL', async () => {
+      const result = await service.execute({ type: 'gui', mode: 'display', content: 'invalid )))' });
+
+      expect(result.status).toBe('error');
+      expect(result.error?.code).toMatch(/DSL_PARSE_ERROR|DSL_EXEC_ERROR/);
+    });
+
+    it('does not throw when gui DSL parse fails', async () => {
       await expect(
-        service.execute({ type: 'gui', mode: 'display', content: 'invalid javascript )(('}),
+        service.execute({ type: 'gui', mode: 'display', content: '{ unclosed' }),
       ).resolves.toMatchObject({ status: 'error' });
     });
   });
