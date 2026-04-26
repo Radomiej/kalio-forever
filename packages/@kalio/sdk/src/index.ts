@@ -14,6 +14,7 @@ export type ConfirmationHandler = (req: ToolConfirmationRequest) => void;
 export type ToolStartHandler = (payload: SocketEvents['tool:start']) => void;
 export type ToolResultHandler = (result: ToolResult) => void;
 export type SessionCreatedHandler = (session: ChatSession) => void;
+export type ContextHandler = (payload: SocketEvents['chat:context']) => void;
 
 export interface KalioSDKOptions {
   wsUrl: string;
@@ -86,5 +87,10 @@ export class KalioSDK {
   onSessionCreated(handler: SessionCreatedHandler): () => void {
     this.socket.on('session:created', handler);
     return () => this.socket.off('session:created', handler);
+  }
+
+  onContext(handler: ContextHandler): () => void {
+    this.socket.on('chat:context', handler);
+    return () => this.socket.off('chat:context', handler);
   }
 }

@@ -118,7 +118,6 @@ export interface ToolMeta {
 
 export interface ToolCallRequest {
   sessionId: ID;
-  conversationId: ID;
   toolName: string;
   args: Record<string, unknown>;
   callId: string;             // matches LLMToolCall.id
@@ -143,27 +142,27 @@ export interface ToolConfirmationRequest {
 
 // ─── VFS ──────────────────────────────────────────────────────────────────────
 export interface VFSFile {
-  conversationId: ID;
-  path: string;               // relative to conversations/{id}/files/
+  sessionId: ID;
+  path: string;               // relative to sessions/{id}/files/
   sizeBytes: number;
   mimeType?: string;
   updatedAt: Timestamp;
 }
 
 export interface VFSWriteRequest {
-  conversationId: ID;
+  sessionId: ID;
   filePath: string;
   content: string;
 }
 
 export interface VFSReadResult {
-  conversationId: ID;
+  sessionId: ID;
   filePath: string;
   content: string;
 }
 
 export interface VFSListResult {
-  conversationId: ID;
+  sessionId: ID;
   files: VFSFile[];
 }
 
@@ -363,9 +362,10 @@ export interface CreateAgentTaskDto {
 // COMPLETE contract between FE and BE. All Socket.IO events defined here.
 export interface SocketEvents {
   // Chat — client → server
-  'chat:send': { sessionId: ID; content: string; personaId: ID; conversationId: ID };
+  'chat:send': { sessionId: ID; content: string; personaId: ID };
 
   // Chat — server → client
+  'chat:context': { sessionId: ID; systemPrompt: string; toolNames: string[] };
   'chat:chunk': LLMStreamChunk;
   'chat:complete': {
     sessionId: ID;
