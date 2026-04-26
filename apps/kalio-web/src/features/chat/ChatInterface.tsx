@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { nanoid } from 'nanoid';
+import { Copy, Check } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { useSettingsStore } from '../settings/settingsStore';
@@ -35,6 +36,24 @@ function groupIntoTurns(messages: ChatMessage[]): Turn[] {
   return turns;
 }
 
+/**
+ * Returns a Set of toolCallIds for which a user message appears AFTER
+ * the corresponding tool_result — i.e., the user already submitted an answer.
+ */
+function computeAnsweredCallIds(messages: ChatMessage[]): Set<string> {
+  const answered = new Set<string>();
+  let hasUserAfter = false;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === 'user') {
+      hasUserAfter = true;
+    } else if (msg.role === 'tool_result' && msg.toolCallId && hasUserAfter) {
+      answered.add(msg.toolCallId);
+    }
+  }
+  return answered;
+}
+
 export function ChatInterface() {
   const { messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
@@ -53,10 +72,14 @@ export function ChatInterface() {
     addLlmActivity,
     updateLlmActivity,
     setContext,
+    registerCallId,
   } = useAgentStore();
   const [error, setError] = useState<string | null>(null);
   const [showContextStats, setShowContextStats] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Compute answered RA-App call IDs (user message appeared after the tool_result)
+  const answeredCallIds = computeAnsweredCallIds(messages);
 
   // Context usage monitoring
   const { tokenCount, needsCompact, compactMessages } = useContextUsage();
@@ -112,6 +135,9 @@ export function ChatInterface() {
     });
 
     const offToolStart = eventBus.onToolStart((payload) => {
+      console.log('[ToolStart]', payload.toolName, 'callId:', payload.callId, 'args:', payload.args);
+      // Persist this mapping permanently so older turns can still resolve tool names
+      registerCallId(payload.callId, payload.toolName);
       addToolActivity({
         callId: payload.callId,
         toolName: payload.toolName,
@@ -126,6 +152,7 @@ export function ChatInterface() {
     });
 
     const offToolResult = eventBus.onToolResult((result) => {
+      console.log('[ToolResult]', result.callId, 'status:', result.status, result.status !== 'success' ? `error: ${result.errorCode}` : '');
       updateToolActivity(result.callId, {
         status: result.status === 'success' ? 'success' : result.status === 'cancelled' ? 'cancelled' : 'error',
         finishedAt: Date.now(),
@@ -241,6 +268,22 @@ export function ChatInterface() {
     setShowContextStats(false);
   };
 
+  const [copied, setCopied] = useState(false);
+  const handleCopyChat = () => {
+    const text = messages
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => {
+        const who = m.role === 'user' ? 'You' : 'Kalio';
+        return `${who}: ${m.content}`;
+      })
+      .join('\n\n');
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      console.log('[ChatInterface] chat copied to clipboard', { messageCount: messages.length });
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
     <div data-testid="chat-interface" className="flex h-full flex-col bg-base-200 rounded-xl border border-base-300 overflow-hidden">
       {error && (
@@ -254,6 +297,15 @@ export function ChatInterface() {
       {activeSession && (
         <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
           <span className="text-sm font-medium truncate flex-1">{activeSession.title}</span>
+          {messages.length > 0 && (
+            <button
+              className="btn btn-ghost btn-xs text-base-content/40 hover:text-base-content/70"
+              onClick={handleCopyChat}
+              title="Copy chat to clipboard"
+            >
+              {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+            </button>
+          )}
           <div className="relative shrink-0">
             <TokenBadge tokenCount={tokenCount} onClick={() => setShowContextStats((v) => !v)} />
             {showContextStats && (
@@ -311,6 +363,7 @@ export function ChatInterface() {
               key={`agent-${idx}`}
               messages={turn.msgs}
               toolActivities={turn.isLast ? toolActivities : []}
+              answeredCallIds={answeredCallIds}
             />
           ),
         )}

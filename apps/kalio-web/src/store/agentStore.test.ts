@@ -198,3 +198,41 @@ describe('agentStore - LlmActivity', () => {
     expect(llmActivities.find((a) => a.id === 'suggest')?.status).toBe('running');
   });
 });
+
+describe('agentStore - Context (systemPrompt + activeToolNames)', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      systemPrompt: null,
+      activeToolNames: [],
+      toolActivities: [],
+      llmActivities: [],
+      isStreaming: false,
+      streamingMessageId: undefined,
+      pendingConfirmation: null,
+      availableTools: [],
+    });
+  });
+
+  it('setContext stores systemPrompt and activeToolNames', () => {
+    const store = useAgentStore.getState();
+    store.setContext('You are a helpful assistant.', ['vfs_read', 'vfs_write']);
+    const state = useAgentStore.getState();
+    expect(state.systemPrompt).toBe('You are a helpful assistant.');
+    expect(state.activeToolNames).toEqual(['vfs_read', 'vfs_write']);
+  });
+
+  it('setContext overwrites previous values', () => {
+    const store = useAgentStore.getState();
+    store.setContext('Old prompt', ['old_tool']);
+    store.setContext('New prompt', ['new_tool']);
+    const state = useAgentStore.getState();
+    expect(state.systemPrompt).toBe('New prompt');
+    expect(state.activeToolNames).toEqual(['new_tool']);
+  });
+
+  it('default state is null systemPrompt and empty activeToolNames', () => {
+    const state = useAgentStore.getState();
+    expect(state.systemPrompt).toBeNull();
+    expect(state.activeToolNames).toEqual([]);
+  });
+});

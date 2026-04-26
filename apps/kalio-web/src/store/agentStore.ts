@@ -37,6 +37,12 @@ interface AgentState {
   systemPrompt: string | null;
   /** Tool names available in the active session turn */
   activeToolNames: string[];
+  /**
+   * Persistent callId → toolName lookup across ALL turns in the current page session.
+   * Populated on tool:start, never cleared. Used by AgentTurnBubble to resolve
+   * tool names for history chips when msg.toolCalls is not available in Zustand.
+   */
+  callIdToName: Record<string, string>;
 
   setStreaming: (streaming: boolean, messageId?: string) => void;
   setPendingConfirmation: (req: ToolConfirmationRequest | null) => void;
@@ -49,6 +55,7 @@ interface AgentState {
   updateLlmActivity: (id: string, patch: Partial<LlmActivity>) => void;
   clearLlmActivities: () => void;
   setContext: (systemPrompt: string, toolNames: string[]) => void;
+  registerCallId: (callId: string, toolName: string) => void;
 }
 
 export const useAgentStore = create<AgentState>((set) => ({
@@ -61,6 +68,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   llmActivities: [],
   systemPrompt: null,
   activeToolNames: [],
+  callIdToName: {},
 
   setStreaming: (streaming, messageId = undefined) =>
     set({ isStreaming: streaming, streamingMessageId: messageId }),
@@ -93,4 +101,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   clearLlmActivities: () => set({ llmActivities: [] }),
 
   setContext: (systemPrompt, toolNames) => set({ systemPrompt, activeToolNames: toolNames }),
+
+  registerCallId: (callId, toolName) =>
+    set((s) => ({ callIdToName: { ...s.callIdToName, [callId]: toolName } })),
 }));

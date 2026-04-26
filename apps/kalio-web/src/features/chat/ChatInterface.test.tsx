@@ -40,7 +40,7 @@ vi.mock('../../services/eventBus', () => ({
     onToolConfirmation: (h: (...args: unknown[]) => void) => capture('tool:confirmation_required', h),
     onToolStart: (h: (...args: unknown[]) => void) => capture('tool:start', h),
     onToolResult: (h: (...args: unknown[]) => void) => capture('tool:result', h),
-    onContext: vi.fn().mockReturnValue(vi.fn()),
+    onContext: (h: (...args: unknown[]) => void) => capture('chat:context', h),
   },
 }));
 
@@ -52,6 +52,8 @@ const setPendingConfirmation = vi.fn();
 const clearToolActivities = vi.fn();
 const addLlmActivity = vi.fn();
 const updateLlmActivity = vi.fn();
+const setContext = vi.fn();
+const registerCallId = vi.fn();
 
 vi.mock('../../store/agentStore', () => ({
   useAgentStore: () => ({
@@ -59,6 +61,9 @@ vi.mock('../../store/agentStore', () => ({
     pendingConfirmation: null,
     toolActivities: [],
     llmActivities: [],
+    systemPrompt: null,
+    activeToolNames: [],
+    callIdToName: {},
     setStreaming,
     setPendingConfirmation,
     addToolActivity,
@@ -66,6 +71,8 @@ vi.mock('../../store/agentStore', () => ({
     clearToolActivities,
     addLlmActivity,
     updateLlmActivity,
+    setContext,
+    registerCallId,
   }),
 }));
 
@@ -205,5 +212,52 @@ describe('ChatInterface event wiring', () => {
         status: 'awaiting_confirmation',
       }),
     );
+  });
+
+  it('chat:context event calls setContext with systemPrompt and toolNames', () => {
+    render(<ChatInterface />);
+
+    act(() => {
+      fire('chat:context', {
+        sessionId: 'session-1',
+        systemPrompt: 'You are a test assistant.',
+        toolNames: ['vfs_read', 'vfs_write'],
+      });
+    });
+
+    expect(setContext).toHaveBeenCalledOnce();
+    expect(setContext).toHaveBeenCalledWith('You are a test assistant.', ['vfs_read', 'vfs_write']);
+  });
+});
+
+describe('REGRESSION: tool name resolution persists across turns', () => {
+  it('tool:start calls registerCallId so name survives clearToolActivities', () => {
+    render(<ChatInterface />);
+
+    act(() => {
+      fire('tool:start', {
+        callId: 'call_abc123',
+        toolName: 'raapp_create',
+        args: { type: 'html', content: '<div/>' },
+      });
+    });
+
+    // registerCallId must be called with the exact callId and toolName
+    expect(registerCallId).toHaveBeenCalledWith('call_abc123', 'raapp_create');
+  });
+
+  it('tool:start for a second turn also registers its callId', () => {
+    render(<ChatInterface />);
+
+    act(() => {
+      fire('tool:start', { callId: 'call_turn1', toolName: 'raapp_create', args: {} });
+    });
+    act(() => {
+      fire('tool:start', { callId: 'call_turn2', toolName: 'run_raapp', args: { id: 'interactive-qa' } });
+    });
+
+    expect(registerCallId).toHaveBeenCalledWith('call_turn1', 'raapp_create');
+    expect(registerCallId).toHaveBeenCalledWith('call_turn2', 'run_raapp');
+    expect(registerCallId).toHaveBeenCalledTimes(2);
   });
 });
