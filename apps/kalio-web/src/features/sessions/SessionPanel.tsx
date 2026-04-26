@@ -51,6 +51,8 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
       });
       addSession(data);
       setActiveSession(data.id);
+      setMessages([]);
+      onSelect?.();
     } catch (err) {
       console.error('[SessionPanel] create failed', err);
     }
