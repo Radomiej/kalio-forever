@@ -130,6 +130,14 @@ export const agentIterations = sqliteTable('agent_iterations', {
   createdAt:       integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
+// ─── allowed_paths ─────────────────────────────────────────────────────────────
+// Configurable list of filesystem roots the agent can access via fs_* tools
+export const allowedPaths = sqliteTable('allowed_paths', {
+  id:        text('id').primaryKey(),
+  path:      text('path').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
 // ─── app_settings ──────────────────────────────────────────────────────────────
 // Global key-value store for app-wide settings (e.g. active LLM credential)
 export const appSettings = sqliteTable('app_settings', {
@@ -164,6 +172,7 @@ export type AgentTaskRow       = typeof agentTasks.$inferSelect;
 export type AgentIterationRow  = typeof agentIterations.$inferSelect;
 export type AuditLogRow        = typeof auditLog.$inferSelect;
 export type AppSettingRow      = typeof appSettings.$inferSelect;
+export type AllowedPathRow     = typeof allowedPaths.$inferSelect;
 
 export type InsertPersona      = typeof personas.$inferInsert;
 export type InsertSession      = typeof sessions.$inferInsert;
@@ -175,3 +184,4 @@ export type InsertSkill        = typeof skills.$inferInsert;
 export type InsertAgentLoop    = typeof agentLoops.$inferInsert;
 export type InsertAgentTask    = typeof agentTasks.$inferInsert;
 export type InsertAgentIteration = typeof agentIterations.$inferInsert;
+export type InsertAllowedPath   = typeof allowedPaths.$inferInsert;
