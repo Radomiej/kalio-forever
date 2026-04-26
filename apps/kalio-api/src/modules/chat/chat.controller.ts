@@ -83,22 +83,45 @@ export class ChatController {
 
   @Get(':id/vfs/download')
   @Header('Content-Type', 'application/octet-stream')
-  downloadVfs(
+  async downloadVfs(
     @Param('id') id: string,
     @Query('path') path: string,
     @Res() res: Response,
-  ): void {
-    const { stream, filename } = this.vfsService.downloadFile(id, path);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    stream.pipe(res);
+  ): Promise<void> {
+    const session = await this.chatService.getSession(id);
+    if (!session) throw new NotFoundException('Session not found');
+    try {
+      const { stream, filename } = this.vfsService.downloadFile(id, path);
+      const sanitizedFilename = filename.replace(/[\r\n"]/g, '');
+      res.setHeader('Content-Disposition', `attachment; filename="${sanitizedFilename}"`);
+      stream.pipe(res);
+      stream.on('error', () => {
+        if (!res.headersSent) res.status(500).send('Download failed');
+      });
+    } catch (err) {
+      const code = err instanceof Error && 'code' in err ? (err as NodeJS.ErrnoException).code : undefined;
+      const status = code === 'ENOENT' || code === 'PATH_TRAVERSAL_DENIED' ? 404 : 500;
+      if (!res.headersSent) {
+        res.status(status).send(status === 404 ? 'File not found' : 'Download failed');
+      }
+    }
   }
 
   @Get(':id/vfs/zip')
   @Header('Content-Type', 'application/zip')
-  zipVfs(@Param('id') id: string, @Res() res: Response): void {
-    const archive = this.vfsService.archiveSession(id);
-    res.setHeader('Content-Disposition', `attachment; filename="session-${id}.zip"`);
-    archive.pipe(res);
+  async zipVfs(@Param('id') id: string, @Res() res: Response): Promise<void> {
+    const session = await this.chatService.getSession(id);
+    if (!session) throw new NotFoundException('Session not found');
+    try {
+      const archive = this.vfsService.archiveSession(id);
+      res.setHeader('Content-Disposition', `attachment; filename="session-${id}.zip"`);
+      archive.pipe(res);
+      archive.on('error', () => {
+        if (!res.headersSent) res.status(500).send('Archive failed');
+      });
+    } catch {
+      if (!res.headersSent) res.status(500).send('Archive failed');
+    }
   }
 
   @Post(':id/vfs')
