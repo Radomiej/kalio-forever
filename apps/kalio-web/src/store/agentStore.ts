@@ -33,6 +33,10 @@ interface AgentState {
   toolActivities: ToolActivity[];
   /** Auxiliary LLM sub-calls (title-gen, suggestions, etc.) */
   llmActivities: LlmActivity[];
+  /** System prompt sent to LLM for the active session turn */
+  systemPrompt: string | null;
+  /** Tool names available in the active session turn */
+  activeToolNames: string[];
 
   setStreaming: (streaming: boolean, messageId?: string) => void;
   setPendingConfirmation: (req: ToolConfirmationRequest | null) => void;
@@ -44,6 +48,7 @@ interface AgentState {
   addLlmActivity: (activity: LlmActivity) => void;
   updateLlmActivity: (id: string, patch: Partial<LlmActivity>) => void;
   clearLlmActivities: () => void;
+  setContext: (systemPrompt: string, toolNames: string[]) => void;
 }
 
 export const useAgentStore = create<AgentState>((set) => ({
@@ -54,6 +59,8 @@ export const useAgentStore = create<AgentState>((set) => ({
   tools: [],
   toolActivities: [],
   llmActivities: [],
+  systemPrompt: null,
+  activeToolNames: [],
 
   setStreaming: (streaming, messageId = undefined) =>
     set({ isStreaming: streaming, streamingMessageId: messageId }),
@@ -84,4 +91,6 @@ export const useAgentStore = create<AgentState>((set) => ({
     })),
 
   clearLlmActivities: () => set({ llmActivities: [] }),
+
+  setContext: (systemPrompt, toolNames) => set({ systemPrompt, activeToolNames: toolNames }),
 }));
