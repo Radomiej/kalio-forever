@@ -13,6 +13,7 @@ import { CredentialsModule } from './modules/credentials/credentials.module';
 import { SkillsModule } from './modules/skills/skills.module';
 import { AgentLoopModule } from './modules/agentloop/agent-loop.module';
 import { MemoryModule } from './modules/memory/memory.module';
+import { AuditModule } from './modules/audit/audit.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { MemoryModule } from './modules/memory/memory.module';
     RAAppModule,
     SkillsModule,
     AgentLoopModule,
+    AuditModule,
     ChatModule,
     MemoryModule,
   ],
