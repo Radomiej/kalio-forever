@@ -19,7 +19,7 @@ export interface CompactStrategy {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function estimateMessageTokens(msg: ChatMessage): number {
-  let tokens = estimateTextTokens(msg.content);
+  const tokens = estimateTextTokens(msg.content);
   return tokens;
 }
 
@@ -36,7 +36,7 @@ class AutoTrimStrategy implements CompactStrategy {
 
   compact(messages: ChatMessage[], targetTokens: number): ChatMessage[] {
     const safeTarget = targetTokens * 0.8;
-    let result = [...messages];
+    const result = [...messages];
 
     if (totalTokens(result) <= safeTarget) return result;
 
