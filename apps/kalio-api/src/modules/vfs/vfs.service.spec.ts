@@ -13,15 +13,15 @@ describe('VFSService', () => {
   let service: VFSService;
   let configService: ConfigService;
   let testWorkspace: string;
-  let conversationId: string;
+  let sessionId: string;
 
   beforeEach(async () => {
     // Create temporary workspace for tests
     testWorkspace = join(os.tmpdir(), `kalio-vfs-test-${Date.now()}`);
     mkdirSync(testWorkspace, { recursive: true });
 
-    conversationId = 'test-conv-123';
-    mkdirSync(join(testWorkspace, 'conversations', conversationId, 'files'), { recursive: true });
+    sessionId = 'test-ws-123';
+    mkdirSync(join(testWorkspace, 'sessions', sessionId, 'files'), { recursive: true });
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
@@ -57,7 +57,7 @@ describe('VFSService', () => {
 
       // Act & Assert
       expect(() => {
-        (service as any).resolveSafe(conversationId, maliciousPath);
+        (service as any).resolveSafe(sessionId, maliciousPath);
       }).toThrow(/PATH_TRAVERSAL_DENIED/);
     });
 
@@ -70,7 +70,7 @@ describe('VFSService', () => {
 
       for (const maliciousPath of maliciousPaths) {
         expect(() => {
-          (service as any).resolveSafe(conversationId, maliciousPath);
+          (service as any).resolveSafe(sessionId, maliciousPath);
         }).toThrow(/PATH_TRAVERSAL_DENIED/);
       }
     });
@@ -79,16 +79,16 @@ describe('VFSService', () => {
       const absolutePath = process.platform === 'win32' ? 'C:\\Windows\\System32' : '/etc/passwd';
 
       expect(() => {
-        (service as any).resolveSafe(conversationId, absolutePath);
+        (service as any).resolveSafe(sessionId, absolutePath);
       }).toThrow(/PATH_TRAVERSAL_DENIED/);
     });
 
-    it('should reject accessing sibling conversation directory', () => {
+    it('should reject accessing sibling workspace directory', () => {
       // This test specifically targets the Windows path separator issue
-      const siblingTraversal = '..\\..\\other-conversation\\files\\secret.txt';
+      const siblingTraversal = '..\\..\\other-workspace\\files\\secret.txt';
 
       expect(() => {
-        (service as any).resolveSafe(conversationId, siblingTraversal);
+        (service as any).resolveSafe(sessionId, siblingTraversal);
       }).toThrow(/PATH_TRAVERSAL_DENIED/);
     });
 
@@ -102,7 +102,7 @@ describe('VFSService', () => {
 
       for (const validPath of validPaths) {
         expect(() => {
-          (service as any).resolveSafe(conversationId, validPath);
+          (service as any).resolveSafe(sessionId, validPath);
         }).not.toThrow();
       }
     });
@@ -114,32 +114,32 @@ describe('VFSService', () => {
 
       // Should NOT throw for valid subdir path
       expect(() => {
-        (service as any).resolveSafe(conversationId, mixedSeparators);
+        (service as any).resolveSafe(sessionId, mixedSeparators);
       }).not.toThrow();
 
       // Verify the resolved path is within workspace
-      const result = (service as any).resolveSafe(conversationId, 'subdir/file.txt');
-      const baseDir = resolve(join(testWorkspace, 'conversations', conversationId, 'files'));
+      const result = (service as any).resolveSafe(sessionId, 'subdir/file.txt');
+      const baseDir = resolve(join(testWorkspace, 'sessions', sessionId, 'files'));
       expect(result.startsWith(baseDir) || result.startsWith(baseDir + '\\') || result.startsWith(baseDir + '/')).toBe(true);
     });
   });
 
   describe('writeFile', () => {
-    it('should write file within conversation workspace', () => {
+    it('should write file within workspace', () => {
       service.writeFile({
-        conversationId,
+        sessionId,
         filePath: 'test-file.txt',
         content: 'Hello World',
       });
 
-      const filePath = join(testWorkspace, 'conversations', conversationId, 'files', 'test-file.txt');
+      const filePath = join(testWorkspace, 'sessions', sessionId, 'files', 'test-file.txt');
       expect(existsSync(filePath)).toBe(true);
     });
 
-    it('should reject writing outside conversation workspace (regression test)', () => {
+    it('should reject writing outside workspace (regression test)', () => {
       expect(() => {
         service.writeFile({
-          conversationId,
+          sessionId,
           filePath: '../../../etc/malicious.txt',
           content: 'malicious content',
         });
@@ -148,22 +148,23 @@ describe('VFSService', () => {
   });
 
   describe('readFile', () => {
-    it('should read file within conversation workspace', () => {
+    it('should read file within workspace', () => {
       // Setup
-      const filePath = join(testWorkspace, 'conversations', conversationId, 'files', 'readable.txt');
+      const filePath = join(testWorkspace, 'sessions', sessionId, 'files', 'readable.txt');
       writeFileSync(filePath, 'test content', 'utf8');
 
       // Act
-      const result = service.readFile(conversationId, 'readable.txt');
+      const result = service.readFile(sessionId, 'readable.txt');
 
       // Assert
       expect(result.content).toBe('test content');
     });
 
-    it('should reject reading outside conversation workspace (regression test)', () => {
+    it('should reject reading outside workspace (regression test)', () => {
       expect(() => {
-        service.readFile(conversationId, '../../../etc/passwd');
+        service.readFile(sessionId, '../../../etc/passwd');
       }).toThrow(/PATH_TRAVERSAL_DENIED/);
     });
   });
 });
+
