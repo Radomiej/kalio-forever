@@ -14,6 +14,7 @@ import { SkillsModule } from './modules/skills/skills.module';
 import { AgentLoopModule } from './modules/agentloop/agent-loop.module';
 import { MemoryModule } from './modules/memory/memory.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { AllowedPathsModule } from './modules/allowed-paths/allowed-paths.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AuditModule } from './modules/audit/audit.module';
     SkillsModule,
     AgentLoopModule,
     AuditModule,
+    AllowedPathsModule,
     ChatModule,
     MemoryModule,
   ],
