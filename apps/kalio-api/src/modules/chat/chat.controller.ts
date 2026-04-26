@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, NotFoundException, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, NotFoundException, HttpCode, HttpStatus, Res, Header } from '@nestjs/common';
+import type { Response } from 'express';
 import type { ChatSession, CreateSessionDto, ChatMessage, VFSReadResult, VFSListResult } from '@kalio/types';
 import { ChatService } from './chat.service';
 import { VFSService } from '../vfs/vfs.service';
@@ -78,6 +79,26 @@ export class ChatController {
   @Get(':id/vfs/read')
   readVfs(@Param('id') id: string, @Query('path') path: string): VFSReadResult {
     return this.vfsService.readFile(id, path);
+  }
+
+  @Get(':id/vfs/download')
+  @Header('Content-Type', 'application/octet-stream')
+  downloadVfs(
+    @Param('id') id: string,
+    @Query('path') path: string,
+    @Res() res: Response,
+  ): void {
+    const { stream, filename } = this.vfsService.downloadFile(id, path);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    stream.pipe(res);
+  }
+
+  @Get(':id/vfs/zip')
+  @Header('Content-Type', 'application/zip')
+  zipVfs(@Param('id') id: string, @Res() res: Response): void {
+    const archive = this.vfsService.archiveSession(id);
+    res.setHeader('Content-Disposition', `attachment; filename="session-${id}.zip"`);
+    archive.pipe(res);
   }
 
   @Post(':id/vfs')

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { nanoid } from 'nanoid';
 import { Copy, Check } from 'lucide-react';
+import { ConversationFilesBar } from '../vfs/ConversationFilesBar';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { useSettingsStore } from '../settings/settingsStore';
@@ -76,6 +77,7 @@ export function ChatInterface() {
   } = useAgentStore();
   const [error, setError] = useState<string | null>(null);
   const [showContextStats, setShowContextStats] = useState(false);
+  const [vfsRefreshSignal, setVfsRefreshSignal] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Compute answered RA-App call IDs (user message appeared after the tool_result)
@@ -158,6 +160,11 @@ export function ChatInterface() {
         finishedAt: Date.now(),
         result,
       });
+      // Refresh VFS file list after a successful vfs_write
+      if (result.status === 'success') {
+        const toolName = useAgentStore.getState().toolActivities.find((a) => a.callId === result.callId)?.toolName;
+        if (toolName === 'vfs_write') setVfsRefreshSignal((n) => n + 1);
+      }
       // Persist tool result into message store so RAAppManager (and chat history) can see it
       if (result.status === 'success' && result.data !== undefined) {
         const sid = useSessionStore.getState().activeSessionId;
@@ -297,6 +304,7 @@ export function ChatInterface() {
       {activeSession && (
         <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
           <span className="text-sm font-medium truncate flex-1">{activeSession.title}</span>
+          <ConversationFilesBar sessionId={activeSessionId!} refreshSignal={vfsRefreshSignal} />
           {messages.length > 0 && (
             <button
               className="btn btn-ghost btn-xs text-base-content/40 hover:text-base-content/70"
