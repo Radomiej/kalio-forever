@@ -153,9 +153,11 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
 export function HistoryToolCallBubble({
   toolName,
   content,
+  isAnswered,
 }: {
   toolName: string;
   content: string;
+  isAnswered?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -174,6 +176,7 @@ export function HistoryToolCallBubble({
       <Chip
         icon={<CheckCircle2 size={12} className="text-success shrink-0" />}
         toolName={toolName}
+        badge={isAnswered ? <span className="text-[10px] font-mono text-base-content/40 bg-base-200/60 rounded px-1">↩ answered</span> : undefined}
         expandable={hasResult}
         open={open}
         onToggle={() => setOpen((v) => !v)}
@@ -182,7 +185,12 @@ export function HistoryToolCallBubble({
           {typeof parsed === 'object' ? JSON.stringify(parsed, null, 2) : String(parsed)}
         </div>
       </Chip>
-      {raapp && <RAAppRenderer block={raapp} />}
+      {raapp && !isAnswered && <RAAppRenderer block={raapp} />}
+      {raapp && isAnswered && (
+        <div className="border-l-[3px] border-l-emerald-500/20 pl-3 py-2 my-1 text-xs text-base-content/40 italic">
+          Interactive app — answer submitted
+        </div>
+      )}
     </>
   );
 }

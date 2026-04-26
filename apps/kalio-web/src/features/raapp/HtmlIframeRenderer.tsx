@@ -27,6 +27,7 @@ export function HtmlIframeRenderer({ html, title = 'App', minHeight = 200 }: Htm
 
       // Interactive bridge: iframe sends user answer back to chat
       if (data?.type === 'kalio_send_message' && typeof data.content === 'string') {
+        console.log('[RAApp:Bridge] received kalio_send_message', JSON.stringify(data.content).slice(0, 80));
         const { activeSessionId, sessions, addMessage } = useSessionStore.getState();
         if (!activeSessionId) return;
         const session = sessions.find((s) => s.id === activeSessionId);

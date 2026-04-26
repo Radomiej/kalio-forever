@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { BrainCircuit, ChevronDown } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
+import { useAgentStore } from '../../store/agentStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
 import type { ChatMessage } from '@kalio/types';
 import type { ToolActivity } from '../../store/agentStore';
@@ -11,15 +12,18 @@ interface Props {
   messages: ChatMessage[];
   /** Live tool activities — only pass for the currently active turn. */
   toolActivities: ToolActivity[];
+  /** Set of toolCallIds for which the user has already submitted an answer. */
+  answeredCallIds?: Set<string>;
 }
 
-export function AgentTurnBubble({ messages, toolActivities }: Props) {
+export function AgentTurnBubble({ messages, toolActivities, answeredCallIds }: Props) {
   const { streamingChunks, thinkingChunks } = useSessionStore();
+  const { callIdToName: persistentCallIdToName } = useAgentStore();
   const [thinkingOpen, setThinkingOpen] = useState(false);
 
-  // Build callId → toolName map from assistant messages' toolCalls arrays
-  // Also populate from live toolActivities so names are correct during streaming
-  const toolCallIdToName = new Map<string, string>();
+  // Build callId → toolName map from assistant messages' toolCalls arrays (loaded from DB),
+  // live toolActivities (current turn), and the persistent map (all prior turns in session).
+  const toolCallIdToName = new Map<string, string>(Object.entries(persistentCallIdToName));
   for (const msg of messages) {
     if (msg.role === 'assistant' && msg.toolCalls) {
       for (const tc of msg.toolCalls) {
@@ -91,6 +95,7 @@ export function AgentTurnBubble({ messages, toolActivities }: Props) {
                   key={msg.id}
                   toolName={toolName}
                   content={msg.content}
+                  isAnswered={msg.toolCallId ? (answeredCallIds?.has(msg.toolCallId) ?? false) : false}
                 />
               );
             }
