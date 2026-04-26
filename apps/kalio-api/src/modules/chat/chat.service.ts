@@ -12,6 +12,7 @@ import { CredentialsService } from '../credentials/credentials.service';
 import { sessions, messages } from '../../database/schema';
 import { eq } from 'drizzle-orm';
 import { trimToContextWindow } from './context-window';
+import { AuditService } from '../audit/audit.service';
 
 type ChatSendPayload = SocketEvents['chat:send'];
 
@@ -30,6 +31,7 @@ export class ChatService {
     private readonly toolDispatch: ToolDispatchService,
     private readonly drizzle: DrizzleService,
     private readonly credentials: CredentialsService,
+    private readonly auditService: AuditService,
   ) {}
 
   async handleMessage(
@@ -87,93 +89,85 @@ export class ChatService {
     });
     this.logger.log(`[chat:send] User message persisted id=${userMsgId}`);
 
-    // Build history
-    const history = await this.buildHistory(sessionId, personaConfig.systemPrompt);
-    this.logger.log(`[chat:send] History built: ${history.length} messages`);
-    const assistantMsgId = nanoid();
+    const MAX_AGENT_ITERATIONS = 8;
+    let agentIteration = 0;
+    let pendingToolCalls: LLMToolCall[] = [];
 
-    // Stream LLM response
-    let toolCalls: LLMToolCall[] = [];
-    let chunkCount = 0;
-    let assistantContent = '';
-    try {
+    // Agent loop: stream LLM → process tool calls → repeat until no more tool calls
+    do {
+      agentIteration++;
+      const msgId = nanoid();
+      let msgContent = '';
+      let msgChunkCount = 0;
+      const msgStart = Date.now();
+
+      const currentHistory = await this.buildHistory(sessionId, personaConfig.systemPrompt);
       const tools = this.toolRegistry.getToolsForSkills(personaConfig.availableSkills);
-      this.logger.log(`[chat:send] Streaming LLM with ${tools.length} tools...`);
-      toolCalls = await this.llm.streamChat(
-        history,
-        tools,
-        (chunk) => {
-          chunkCount++;
-          if (!chunk.done) assistantContent += chunk.delta;
-          client.emit('chat:chunk', chunk);
-        },
-        sessionId,
-        assistantMsgId,
+      this.logger.log(`[chat:send] Agent iteration ${agentIteration}: ${currentHistory.length} msgs, ${tools.length} tools`);
+
+      const auditReqId = await this.auditService.log(
+        'llm_request',
+        agentIteration === 1 ? `LLM request — session ${sessionId}` : `LLM follow-up #${agentIteration - 1}`,
+        { sessionId, data: { model: personaConfig.model, historyLength: currentHistory.length } },
       );
-      this.logger.log(`[chat:send] LLM stream done: ${chunkCount} chunks, ${toolCalls.length} tool calls`);
-    } catch (err) {
-      this.logger.error('[chat:send] LLM error', err);
-      server.emit('chat:error', {
-        sessionId,
-        code: 'LLM_ERROR',
-        message: err instanceof Error ? err.message : 'Unknown LLM error',
-      } satisfies SocketEvents['chat:error']);
-      return;
-    }
 
-    // Persist assistant message to DB
-    await this.drizzle.db.insert(messages).values({
-      id: assistantMsgId,
-      sessionId,
-      role: 'assistant',
-      content: assistantContent,
-      toolCalls: toolCalls.length > 0 ? toolCalls : null,
-      createdAt: new Date(),
-    });
-    this.logger.log(`[chat:send] Assistant message persisted id=${assistantMsgId}`);
-
-    client.emit('chat:complete', { sessionId, messageId: assistantMsgId });
-    this.logger.log(`[chat:send] chat:complete emitted messageId=${assistantMsgId}`);
-
-    // Process tool calls
-    for (const tc of toolCalls) {
-      this.logger.log(`[tool] Executing tool="${tc.name}" args=${JSON.stringify(this.redactArgs(tc.args)).slice(0, 200)}`);
-      await this.processToolCall(tc, sessionId, server, client, personaConfig.availableSkills);
-    }
-
-    // After all tool calls complete, do follow-up LLM stream with tool results in history
-    if (toolCalls.length > 0) {
-      this.logger.log(`[chat:send] Starting follow-up LLM stream after ${toolCalls.length} tool(s)`);
-      const followUpHistory = await this.buildHistory(sessionId, personaConfig.systemPrompt);
-      const followUpMsgId = nanoid();
-      let followUpContent = '';
-      let followUpChunkCount = 0;
       try {
-        const tools = this.toolRegistry.getToolsForSkills(personaConfig.availableSkills);
-        await this.llm.streamChat(
-          followUpHistory,
+        pendingToolCalls = await this.llm.streamChat(
+          currentHistory,
           tools,
           (chunk) => {
-            followUpChunkCount++;
-            if (!chunk.done) followUpContent += chunk.delta;
+            msgChunkCount++;
+            if (!chunk.done) msgContent += chunk.delta;
             client.emit('chat:chunk', chunk);
           },
           sessionId,
-          followUpMsgId,
+          msgId,
         );
-        this.logger.log(`[chat:send] Follow-up LLM done: ${followUpChunkCount} chunks`);
+        const ms = Date.now() - msgStart;
+        this.logger.log(`[chat:send] LLM done iter=${agentIteration}: ${msgChunkCount} chunks, ${pendingToolCalls.length} tool calls`);
+        await this.auditService.log('llm_response', `LLM response — ${pendingToolCalls.length} tool call(s)`, {
+          sessionId,
+          durationMs: ms,
+          data: { model: personaConfig.model, chunks: msgChunkCount, toolCallCount: pendingToolCalls.length, refId: auditReqId },
+        });
       } catch (err) {
-        this.logger.error('[chat:send] Follow-up LLM error', err);
+        this.logger.error('[chat:send] LLM error', err);
+        await this.auditService.log('error', `LLM error — ${err instanceof Error ? err.message : 'unknown'}`, {
+          sessionId,
+          durationMs: Date.now() - msgStart,
+          data: { error: err instanceof Error ? err.message : String(err) },
+        });
+        server.emit('chat:error', {
+          sessionId,
+          code: 'LLM_ERROR',
+          message: err instanceof Error ? err.message : 'Unknown LLM error',
+        } satisfies SocketEvents['chat:error']);
+        return;
       }
+
+      // Persist assistant message
       await this.drizzle.db.insert(messages).values({
-        id: followUpMsgId,
+        id: msgId,
         sessionId,
         role: 'assistant',
-        content: followUpContent,
+        content: msgContent,
+        toolCalls: pendingToolCalls.length > 0 ? pendingToolCalls : null,
         createdAt: new Date(),
       });
-      client.emit('chat:complete', { sessionId, messageId: followUpMsgId });
-      this.logger.log(`[chat:send] Follow-up chat:complete emitted messageId=${followUpMsgId}`);
+      this.logger.log(`[chat:send] Assistant message persisted id=${msgId} iter=${agentIteration}`);
+
+      client.emit('chat:complete', { sessionId, messageId: msgId });
+      this.logger.log(`[chat:send] chat:complete emitted messageId=${msgId} iter=${agentIteration}`);
+
+      // Process tool calls for this iteration
+      for (const tc of pendingToolCalls) {
+        this.logger.log(`[tool] iter=${agentIteration} tool="${tc.name}" args=${JSON.stringify(this.redactArgs(tc.args)).slice(0, 200)}`);
+        await this.processToolCall(tc, sessionId, server, client, personaConfig.availableSkills);
+      }
+    } while (pendingToolCalls.length > 0 && agentIteration < MAX_AGENT_ITERATIONS);
+
+    if (agentIteration >= MAX_AGENT_ITERATIONS && pendingToolCalls.length > 0) {
+      this.logger.warn(`[chat:send] Agent loop hit max iterations (${MAX_AGENT_ITERATIONS}) for session=${sessionId}`);
     }
   }
 
@@ -199,6 +193,11 @@ export class ChatService {
     // Notify FE immediately so it can show a spinner for every tool call,
     // even those that fail the skill/registry checks below.
     client.emit('tool:start', { callId: tc.id, toolName: tc.name, args: tc.args });
+    const toolStart = Date.now();
+    await this.auditService.log('tool_call', `Tool call — ${tc.name}`, {
+      sessionId,
+      data: { toolName: tc.name, callId: tc.id, args: this.redactArgs(tc.args) },
+    });
 
     const toolMeta = this.toolRegistry.getMeta(tc.name);
 
@@ -247,6 +246,16 @@ export class ChatService {
       callId: tc.id,
     });
     this.logger.log(`[tool] Result status="${result.status}"`);
+    await this.auditService.log('tool_result', `Tool result — ${tc.name} (${result.status})`, {
+      sessionId,
+      durationMs: Date.now() - toolStart,
+      data: {
+        toolName: tc.name,
+        callId: tc.id,
+        status: result.status,
+        errorCode: result.status !== 'success' ? result.errorCode : undefined,
+      },
+    });
 
     // Persist tool result to messages table for chat history
     const resultContent = result.status === 'success'

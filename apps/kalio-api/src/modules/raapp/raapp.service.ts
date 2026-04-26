@@ -31,6 +31,8 @@ export interface LoadedRAApp {
   zipPath: string;
   meta: RAAppMeta;
   source: 'core' | 'user';
+  htmlContent: string | null;   // null = no main.html in zip
+  appMode: 'display' | 'interactive';
   createdAt: number;
   updatedAt: number;
 }
@@ -86,9 +88,22 @@ export class RAAppService implements OnModuleInit {
       const meta = yaml.load(metaRaw) as RAAppMeta;
       const stats = await fs.stat(zipPath);
       const createdAt = stats.birthtimeMs > 0 ? Math.min(stats.birthtimeMs, stats.mtimeMs) : stats.mtimeMs;
-      const app: LoadedRAApp = { id: meta.id, zipPath, meta, source, createdAt, updatedAt: stats.mtimeMs };
+
+      // Try to read main.html (falling back to index.html)
+      let htmlContent: string | null = null;
+      for (const candidate of ['main.html', 'index.html']) {
+        try {
+          htmlContent = await fs.readFile(path.join(tmpDir, candidate), 'utf-8');
+          break;
+        } catch { /* not found, try next */ }
+      }
+
+      const appMode: 'display' | 'interactive' =
+        (meta.execution?.render_as as string | undefined) === 'interactive' ? 'interactive' : 'display';
+
+      const app: LoadedRAApp = { id: meta.id, zipPath, meta, source, htmlContent, appMode, createdAt, updatedAt: stats.mtimeMs };
       this.loaded.set(meta.id, app);
-      this.logger.log(`RA-App loaded: ${meta.id} v${meta.version ?? '?'} (${source})`);
+      this.logger.log(`RA-App loaded: ${meta.id} v${meta.version ?? '?'} (${source}) html=${htmlContent != null}`);
       return app;
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });

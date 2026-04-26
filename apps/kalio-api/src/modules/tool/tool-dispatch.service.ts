@@ -11,7 +11,7 @@ import { FsWriteTool } from './tools/fs-write.tool';
 import { KVWriteTool, KVReadTool, KVListTool, KVDeleteTool } from './tools/kv.tools';
 import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
 import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
-import { RaAppCreateTool, RaAppCompileTool } from './tools/raapp.tools';
+import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 
 type ToolExecutor = { execute(req: ToolCallRequest): Promise<unknown> };
@@ -42,6 +42,8 @@ export class ToolDispatchService {
     terminalKillTool: TerminalKillTool,
     raAppCreateTool: RaAppCreateTool,
     raAppCompileTool: RaAppCompileTool,
+    runRaAppTool: RunRaAppTool,
+    listRaAppsTool: ListRaAppsTool,
     memoryIngestTool: MemoryIngestTool,
     memorySearchTool: MemorySearchTool,
     memoryIngestConversationTool: MemoryIngestConversationTool,
@@ -66,6 +68,8 @@ export class ToolDispatchService {
       ['terminal_kill', terminalKillTool],
       ['raapp_create', raAppCreateTool],
       ['raapp_compile', raAppCompileTool],
+      ['run_raapp', runRaAppTool],
+      ['list_raapps', listRaAppsTool],
       ['memory_ingest', memoryIngestTool],
       ['memory_search', memorySearchTool],
       ['memory_ingest_conversation', memoryIngestConversationTool],
