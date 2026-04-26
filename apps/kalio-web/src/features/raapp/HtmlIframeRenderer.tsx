@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Download } from 'lucide-react';
+import { nanoid } from 'nanoid';
+import { useSessionStore } from '../../store/sessionStore';
+import { eventBus } from '../../services/eventBus';
+import type { ChatMessage } from '@kalio/types';
 
 interface HtmlIframeRendererProps {
   html: string;
@@ -15,8 +19,31 @@ export function HtmlIframeRenderer({ html, title = 'App', minHeight = 200 }: Htm
     (event: MessageEvent) => {
       if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) return;
       const data = event.data;
+
       if (data?.type === 'raapp_resize' && typeof data.height === 'number') {
         setHeight(Math.max(minHeight, data.height + 16));
+        return;
+      }
+
+      // Interactive bridge: iframe sends user answer back to chat
+      if (data?.type === 'kalio_send_message' && typeof data.content === 'string') {
+        const { activeSessionId, sessions, addMessage } = useSessionStore.getState();
+        if (!activeSessionId) return;
+        const session = sessions.find((s) => s.id === activeSessionId);
+        if (!session) return;
+        const userMsg: ChatMessage = {
+          id: nanoid(),
+          sessionId: activeSessionId,
+          role: 'user',
+          content: data.content as string,
+          createdAt: Date.now(),
+        };
+        addMessage(userMsg);
+        eventBus.sendMessage({
+          sessionId: activeSessionId,
+          content: data.content as string,
+          personaId: session.personaId,
+        });
       }
     },
     [minHeight],

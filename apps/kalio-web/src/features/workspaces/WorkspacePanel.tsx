@@ -2,60 +2,44 @@ import { useEffect, useState } from 'react';
 import { Folder, FolderOpen, FileText, RefreshCw, AlertCircle } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { apiClient } from '../../services/apiClient';
-import type { ChatSession } from '@kalio/types';
+import type { VFSListResult } from '@kalio/types';
 
-interface VFSFile {
-  path: string;
-  sizeBytes: number;
-  updatedAt: number;
-}
-
-interface WorkspaceEntry {
-  session: ChatSession;
-  files: VFSFile[];
+interface SessionEntry {
+  sessionId: string;
+  title: string;
+  files: VFSListResult['files'];
   loading: boolean;
   expanded: boolean;
   error?: string;
 }
 
 export function WorkspacePanel() {
-  const { setSessions } = useSessionStore();
-  const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
-  const [loadingSessions, setLoadingSessions] = useState(false);
+  const sessions = useSessionStore((s) => s.sessions);
+  const [entries, setEntries] = useState<SessionEntry[]>([]);
 
   useEffect(() => {
-    setLoadingSessions(true);
-    apiClient
-      .get<ChatSession[]>('/api/sessions')
-      .then((r) => {
-        setSessions(r.data);
-        setEntries(
-          r.data.map((s) => ({ session: s, files: [], loading: false, expanded: false })),
-        );
-      })
-      .catch((err: unknown) => console.error('[WorkspacePanel] load sessions failed', err))
-      .finally(() => setLoadingSessions(false));
-  }, [setSessions]);
+    setEntries((prev) =>
+      sessions.map((s) => {
+        const existing = prev.find((e) => e.sessionId === s.id);
+        return existing ?? { sessionId: s.id, title: s.title || 'Untitled', files: [], loading: false, expanded: false };
+      }),
+    );
+  }, [sessions]);
 
   const toggleExpand = async (sessionId: string) => {
     setEntries((prev) =>
       prev.map((e) => {
-        if (e.session.id !== sessionId) return e;
+        if (e.sessionId !== sessionId) return e;
         if (e.expanded) return { ...e, expanded: false };
         return { ...e, expanded: true, loading: true };
       }),
     );
 
     try {
-      // VFS list via tool dispatch — use vfs_list endpoint indirectly by calling session tools
-      // Since there's no direct VFS REST endpoint, we read the filesystem path
-      const { data } = await apiClient.get<{ files: VFSFile[] }>(
-        `/api/sessions/${sessionId}/vfs`,
-      ).catch(() => ({ data: { files: [] } }));
-
+      const { data } = await apiClient.get<VFSListResult>(`/api/sessions/${sessionId}/vfs`);
       setEntries((prev) =>
         prev.map((e) =>
-          e.session.id === sessionId
+          e.sessionId === sessionId
             ? { ...e, files: data.files ?? [], loading: false }
             : e,
         ),
@@ -63,7 +47,7 @@ export function WorkspacePanel() {
     } catch {
       setEntries((prev) =>
         prev.map((e) =>
-          e.session.id === sessionId
+          e.sessionId === sessionId
             ? { ...e, loading: false, error: 'Failed to load files' }
             : e,
         ),
@@ -77,23 +61,11 @@ export function WorkspacePanel() {
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
   };
 
-  const formatDate = (ms: number): string =>
-    new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-
-  if (loadingSessions) {
-    return (
-      <div className="p-4 flex items-center gap-2 text-sm text-base-content/60">
-        <RefreshCw size={14} className="animate-spin" />
-        Loading workspaces…
-      </div>
-    );
-  }
-
   return (
     <div className="p-3 flex flex-col gap-1 overflow-y-auto h-full">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-xs font-semibold text-base-content/60 uppercase tracking-wider">
-          Workspaces ({entries.length})
+          Session Files ({entries.length})
         </h2>
       </div>
 
@@ -102,21 +74,18 @@ export function WorkspacePanel() {
       )}
 
       {entries.map((entry) => (
-        <div key={entry.session.id} className="rounded border border-base-300 overflow-hidden">
+        <div key={entry.sessionId} className="rounded border border-base-300 overflow-hidden">
           <button
             className="w-full flex items-center gap-2 px-3 py-2 hover:bg-base-200 transition-colors text-left"
-            onClick={() => toggleExpand(entry.session.id)}
+            onClick={() => void toggleExpand(entry.sessionId)}
           >
             {entry.expanded ? (
               <FolderOpen size={14} className="text-warning shrink-0" />
             ) : (
               <Folder size={14} className="text-base-content/50 shrink-0" />
             )}
-            <span className="text-sm font-medium flex-1 truncate">{entry.session.title}</span>
+            <span className="text-sm font-medium flex-1 truncate">{entry.title}</span>
             {entry.loading && <RefreshCw size={12} className="animate-spin text-base-content/40" />}
-            <span className="text-xs text-base-content/40 shrink-0">
-              {formatDate(entry.session.createdAt)}
-            </span>
           </button>
 
           {entry.expanded && !entry.loading && (
@@ -128,13 +97,10 @@ export function WorkspacePanel() {
                 </div>
               )}
               {!entry.error && entry.files.length === 0 && (
-                <p className="px-3 py-2 text-xs text-base-content/40 italic">No files in workspace</p>
+                <p className="px-3 py-2 text-xs text-base-content/40 italic">No files in session</p>
               )}
               {entry.files.map((file) => (
-                <div
-                  key={file.path}
-                  className="flex items-center gap-2 px-4 py-1.5 hover:bg-base-200 text-xs"
-                >
+                <div key={file.path} className="flex items-center gap-2 px-4 py-1.5 hover:bg-base-200 text-xs">
                   <FileText size={12} className="text-base-content/40 shrink-0" />
                   <span className="flex-1 truncate font-mono">{file.path}</span>
                   <span className="text-base-content/40 shrink-0">{formatSize(file.sizeBytes)}</span>

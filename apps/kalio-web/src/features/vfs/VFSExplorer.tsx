@@ -4,13 +4,13 @@ import { apiClient } from '../../services/apiClient';
 import type { VFSListResult } from '@kalio/types';
 
 export function VFSExplorer() {
-  const { activeSessionId } = useSessionStore();
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const [files, setFiles] = useState<VFSListResult['files']>([]);
 
   useEffect(() => {
     if (!activeSessionId) return;
     apiClient
-      .get<VFSListResult>(`/api/vfs/${activeSessionId}`)
+      .get<VFSListResult>(`/api/sessions/${activeSessionId}/vfs`)
       .then((r) => setFiles(r.data.files))
       .catch((err: unknown) => console.error('[VFSExplorer] load failed', err));
   }, [activeSessionId]);
