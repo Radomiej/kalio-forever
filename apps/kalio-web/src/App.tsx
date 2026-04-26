@@ -22,7 +22,7 @@ import { useSessionStore } from './store/sessionStore';
 import { backendHealth } from './services/backendHealth';
 import { useSettingsStore } from './features/settings/settingsStore';
 
-type ActiveSection = 'landing' | 'talk' | 'tools' | 'mind' | 'chat';
+type ActiveSection = 'landing' | 'talk' | 'tools' | 'mind';
 
 const NAV: { id: ActiveSection; icon: React.ReactNode; label: string }[] = [
   { id: 'talk',  icon: <MessageSquare size={18} />, label: 'Talk' },
@@ -136,36 +136,41 @@ export function App() {
         )}
 
         {activeSection === 'talk' && (
-          <div className="flex flex-col h-full">
-            {/* Talk tabs */}
-            <div className="flex border-b border-base-300 shrink-0">
-              {[
-                { id: 'conversations' as const, label: 'Conversations' },
-                { id: 'agents' as const, label: 'Active' },
-                { id: 'loops' as const, label: 'Loops' },
-              ].map((t) => (
-                <button
-                  key={t.id}
-                  className={`flex-1 py-3 text-sm font-medium ${
-                    talkTab === t.id
-                      ? 'text-sky-400 border-b-2 border-sky-500 bg-sky-500/10'
-                      : 'text-base-content/50 hover:bg-base-200'
-                  }`}
-                  onClick={() => setTalkTab(t.id)}
-                >
-                  {t.label}
-                </button>
-              ))}
+          <div className="flex h-full">
+            {/* Left sidebar: session list */}
+            <div className="w-72 shrink-0 flex flex-col border-r border-base-300 overflow-hidden">
+              <div className="flex border-b border-base-300 shrink-0">
+                {[
+                  { id: 'conversations' as const, label: 'Conversations' },
+                  { id: 'agents' as const, label: 'Active' },
+                  { id: 'loops' as const, label: 'Loops' },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    className={`flex-1 py-2 text-xs font-medium ${
+                      talkTab === t.id
+                        ? 'text-sky-400 border-b-2 border-sky-500 bg-sky-500/10'
+                        : 'text-base-content/50 hover:bg-base-200'
+                    }`}
+                    onClick={() => setTalkTab(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 overflow-hidden">
+                {talkTab === 'conversations' && (
+                  <ConversationPanel onSelect={() => {}} />
+                )}
+                {talkTab === 'agents' && (
+                  <ConversationManagerPanel onNavigate={() => setTalkTab('conversations')} />
+                )}
+                {talkTab === 'loops' && <AgentLoopPanel />}
+              </div>
             </div>
-            {/* Talk content */}
+            {/* Right: chat area */}
             <div className="flex-1 overflow-hidden">
-              {talkTab === 'conversations' && (
-                <ConversationPanel onSelect={() => setActiveSection('chat')} />
-              )}
-              {talkTab === 'agents' && (
-                <ConversationManagerPanel onNavigate={() => setTalkTab('conversations')} />
-              )}
-              {talkTab === 'loops' && <AgentLoopPanel />}
+              <ChatInterface />
             </div>
           </div>
         )}
@@ -199,7 +204,7 @@ export function App() {
               {toolsTab === 'raapps' && (
                 <RAAppManager
                   onOpenVFS={() => {/* RA-Apps catalog has no VFS */}}
-                  onRunWithAgent={() => setActiveSection('chat')}
+                  onRunWithAgent={() => setActiveSection('talk')}
                 />
               )}
             </div>
@@ -243,7 +248,6 @@ export function App() {
           </div>
         )}
 
-        {activeSection === 'chat' && <ChatInterface />}
       </main>
 
       {/* ── Canvas panel (right) ── */}
