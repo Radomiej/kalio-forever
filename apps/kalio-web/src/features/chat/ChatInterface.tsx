@@ -5,13 +5,35 @@ import { useAgentStore } from '../../store/agentStore';
 import { useSettingsStore } from '../settings/settingsStore';
 import { eventBus } from '../../services/eventBus';
 import { MessageBubble } from './MessageBubble';
-import { ToolActivityRow } from './ToolActivityRow';
+import { AgentTurnBubble } from './AgentTurnBubble';
 import { ChatInput } from './ChatInput';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import { TokenBadge } from './TokenBadge';
 import { ContextStats } from './ContextStats';
 import { useContextUsage } from './hooks/useContextUsage';
 import type { ChatMessage } from '@kalio/types';
+
+// ─── Turn grouping ────────────────────────────────────────────────────────────
+
+type Turn =
+  | { type: 'user'; msg: ChatMessage }
+  | { type: 'agent'; msgs: ChatMessage[]; isLast: boolean };
+
+function groupIntoTurns(messages: ChatMessage[]): Turn[] {
+  const turns: Turn[] = [];
+  let i = 0;
+  while (i < messages.length) {
+    if (messages[i].role === 'user') {
+      turns.push({ type: 'user', msg: messages[i] });
+      i++;
+    } else {
+      const start = i;
+      while (i < messages.length && messages[i].role !== 'user') i++;
+      turns.push({ type: 'agent', msgs: messages.slice(start, i), isLast: i === messages.length });
+    }
+  }
+  return turns;
+}
 
 export function ChatInterface() {
   const { messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages } = useSessionStore();
@@ -21,6 +43,8 @@ export function ChatInterface() {
     isStreaming,
     pendingConfirmation,
     toolActivities,
+    systemPrompt,
+    activeToolNames,
     setStreaming,
     setPendingConfirmation,
     addToolActivity,
@@ -28,6 +52,7 @@ export function ChatInterface() {
     clearToolActivities,
     addLlmActivity,
     updateLlmActivity,
+    setContext,
   } = useAgentStore();
   const [error, setError] = useState<string | null>(null);
   const [showContextStats, setShowContextStats] = useState(false);
@@ -86,6 +111,20 @@ export function ChatInterface() {
       });
     });
 
+    const offToolStart = eventBus.onToolStart((payload) => {
+      addToolActivity({
+        callId: payload.callId,
+        toolName: payload.toolName,
+        args: payload.args,
+        status: 'running',
+        startedAt: Date.now(),
+      });
+    });
+
+    const offContext = eventBus.onContext((payload) => {
+      setContext(payload.systemPrompt, payload.toolNames);
+    });
+
     const offToolResult = eventBus.onToolResult((result) => {
       updateToolActivity(result.callId, {
         status: result.status === 'success' ? 'success' : result.status === 'cancelled' ? 'cancelled' : 'error',
@@ -118,9 +157,11 @@ export function ChatInterface() {
       offComplete();
       offError();
       offConfirmation();
+      offToolStart();
+      offContext();
       offToolResult();
     };
-  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity]);
+  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -158,7 +199,6 @@ export function ChatInterface() {
       sessionId: activeSessionId,
       content,
       personaId,
-      conversationId: activeSessionId,
     });
   };
 
@@ -221,6 +261,8 @@ export function ChatInterface() {
                 tokenCount={tokenCount}
                 onCompactNow={needsCompact ? handleCompactNow : undefined}
                 onClose={() => setShowContextStats(false)}
+                systemPrompt={systemPrompt}
+                activeToolNames={activeToolNames}
               />
             )}
           </div>
@@ -261,16 +303,19 @@ export function ChatInterface() {
           </div>
         )}
 
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
+        {groupIntoTurns(messages).map((turn, idx) =>
+          turn.type === 'user' ? (
+            <MessageBubble key={turn.msg.id} message={turn.msg} />
+          ) : (
+            <AgentTurnBubble
+              key={`agent-${idx}`}
+              messages={turn.msgs}
+              toolActivities={turn.isLast ? toolActivities : []}
+            />
+          ),
+        )}
 
-        {/* Tool activity rows — shown at the bottom of the current turn */}
-        {toolActivities.map((activity) => (
-          <ToolActivityRow key={activity.callId} activity={activity} />
-        ))}
-
-        {/* Generic streaming indicator when streaming but no tool activity */}
+        {/* Generic streaming indicator when streaming with no messages yet */}
         {isStreaming && toolActivities.length === 0 && messages.length === 0 && (
           <div className="flex justify-start">
             <div className="bg-base-300 rounded-2xl px-4 py-2">

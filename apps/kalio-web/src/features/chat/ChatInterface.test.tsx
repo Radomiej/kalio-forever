@@ -40,6 +40,7 @@ vi.mock('../../services/eventBus', () => ({
     onToolConfirmation: (h: (...args: unknown[]) => void) => capture('tool:confirmation_required', h),
     onToolStart: (h: (...args: unknown[]) => void) => capture('tool:start', h),
     onToolResult: (h: (...args: unknown[]) => void) => capture('tool:result', h),
+    onContext: vi.fn().mockReturnValue(vi.fn()),
   },
 }));
 
