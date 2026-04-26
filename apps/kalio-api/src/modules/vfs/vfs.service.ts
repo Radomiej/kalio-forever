@@ -7,8 +7,11 @@ import {
   readdirSync,
   statSync,
   existsSync,
+  createReadStream,
 } from 'node:fs';
 import { join, resolve, normalize, basename, sep } from 'node:path';
+import type { Readable } from 'node:stream';
+import archiver from 'archiver';
 import type { VFSWriteRequest, VFSReadResult, VFSListResult, VFSFile } from '@kalio/types';
 
 const PATH_TRAVERSAL_ERROR = 'PATH_TRAVERSAL_DENIED';
@@ -34,6 +37,22 @@ export class VFSService {
     const safePath = this.resolveSafe(sessionId, filePath);
     const content = readFileSync(safePath, 'utf8');
     return { sessionId, filePath, content };
+  }
+
+  downloadFile(sessionId: string, filePath: string): { stream: Readable; filename: string } {
+    const safePath = this.resolveSafe(sessionId, filePath);
+    const stream = createReadStream(safePath);
+    return { stream, filename: basename(safePath) };
+  }
+
+  archiveSession(sessionId: string): archiver.Archiver {
+    const dir = this.sessionDir(sessionId);
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    if (existsSync(dir)) {
+      archive.directory(dir, false);
+    }
+    archive.finalize();
+    return archive;
   }
 
   listFiles(sessionId: string): VFSListResult {
