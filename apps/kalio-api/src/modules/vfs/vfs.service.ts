@@ -24,37 +24,37 @@ export class VFSService {
   }
 
   writeFile(req: VFSWriteRequest): void {
-    const safePath = this.resolveSafe(req.conversationId, req.filePath);
+    const safePath = this.resolveSafe(req.sessionId, req.filePath);
     mkdirSync(resolve(safePath, '..'), { recursive: true });
     writeFileSync(safePath, req.content, 'utf8');
     this.logger.debug(`VFS write: ${safePath}`);
   }
 
-  readFile(conversationId: string, filePath: string): VFSReadResult {
-    const safePath = this.resolveSafe(conversationId, filePath);
+  readFile(sessionId: string, filePath: string): VFSReadResult {
+    const safePath = this.resolveSafe(sessionId, filePath);
     const content = readFileSync(safePath, 'utf8');
-    return { conversationId, filePath, content };
+    return { sessionId, filePath, content };
   }
 
-  listFiles(conversationId: string): VFSListResult {
-    const dir = this.conversationDir(conversationId);
-    if (!existsSync(dir)) return { conversationId, files: [] };
+  listFiles(sessionId: string): VFSListResult {
+    const dir = this.sessionDir(sessionId);
+    if (!existsSync(dir)) return { sessionId, files: [] };
 
-    const files: VFSFile[] = this.walkDir(dir, dir, conversationId);
-    return { conversationId, files };
+    const files: VFSFile[] = this.walkDir(dir, dir, sessionId);
+    return { sessionId, files };
   }
 
-  private walkDir(baseDir: string, currentDir: string, conversationId: string): VFSFile[] {
+  private walkDir(baseDir: string, currentDir: string, sessionId: string): VFSFile[] {
     const result: VFSFile[] = [];
     const entries = readdirSync(currentDir);
     for (const entry of entries) {
       const fullPath = join(currentDir, entry);
       const stat = statSync(fullPath);
       if (stat.isDirectory()) {
-        result.push(...this.walkDir(baseDir, fullPath, conversationId));
+        result.push(...this.walkDir(baseDir, fullPath, sessionId));
       } else {
         result.push({
-          conversationId,
+          sessionId,
           path: fullPath.slice(baseDir.length + 1).replace(/\\/g, '/'),
           sizeBytes: stat.size,
           updatedAt: stat.mtimeMs,
@@ -64,12 +64,12 @@ export class VFSService {
     return result;
   }
 
-  private conversationDir(conversationId: string): string {
-    return join(this.workspaceRoot, 'conversations', conversationId, 'files');
+  private sessionDir(sessionId: string): string {
+    return join(this.workspaceRoot, 'sessions', sessionId, 'files');
   }
 
-  private resolveSafe(conversationId: string, filePath: string): string {
-    const base = this.conversationDir(conversationId);
+  private resolveSafe(sessionId: string, filePath: string): string {
+    const base = this.sessionDir(sessionId);
     // Decode URL-encoded characters to catch encoded traversal attempts like ..%2f
     let decodedPath: string;
     try {
