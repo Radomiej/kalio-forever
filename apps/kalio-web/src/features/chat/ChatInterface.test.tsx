@@ -10,6 +10,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, act } from '@testing-library/react';
 import { ChatInterface } from './ChatInterface';
+import { computeAnsweredCallIds } from './chatUtils';
+import type { ChatMessage } from '@kalio/types';
 
 // jsdom does not implement scrollIntoView
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -55,24 +57,28 @@ const updateLlmActivity = vi.fn();
 const setContext = vi.fn();
 const registerCallId = vi.fn();
 
+const agentStoreState = {
+  isStreaming: false,
+  pendingConfirmation: null,
+  toolActivities: [] as { callId: string; toolName: string }[],
+  llmActivities: [],
+  systemPrompt: null,
+  activeToolNames: [],
+  callIdToName: {},
+  setStreaming,
+  setPendingConfirmation,
+  addToolActivity,
+  updateToolActivity,
+  clearToolActivities,
+  addLlmActivity,
+  updateLlmActivity,
+  setContext,
+  registerCallId,
+};
+
 vi.mock('../../store/agentStore', () => ({
-  useAgentStore: () => ({
-    isStreaming: false,
-    pendingConfirmation: null,
-    toolActivities: [],
-    llmActivities: [],
-    systemPrompt: null,
-    activeToolNames: [],
-    callIdToName: {},
-    setStreaming,
-    setPendingConfirmation,
-    addToolActivity,
-    updateToolActivity,
-    clearToolActivities,
-    addLlmActivity,
-    updateLlmActivity,
-    setContext,
-    registerCallId,
+  useAgentStore: Object.assign(() => agentStoreState, {
+    getState: () => agentStoreState,
   }),
 }));
 
@@ -128,6 +134,8 @@ vi.mock('./ChatInput', () => ({ ChatInput: () => null }));
 vi.mock('./ConfirmationDialog', () => ({ ConfirmationDialog: () => null }));
 vi.mock('./TokenBadge', () => ({ TokenBadge: () => null }));
 vi.mock('./ContextStats', () => ({ ContextStats: () => null }));
+vi.mock('../vfs/ConversationFilesBar', () => ({ ConversationFilesBar: () => null }));
+vi.mock('./AgentTurnBubble', () => ({ AgentTurnBubble: () => null }));
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -259,5 +267,85 @@ describe('REGRESSION: tool name resolution persists across turns', () => {
     expect(registerCallId).toHaveBeenCalledWith('call_turn1', 'raapp_create');
     expect(registerCallId).toHaveBeenCalledWith('call_turn2', 'run_raapp');
     expect(registerCallId).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: RA-App widget freezes after user answers (computeAnsweredCallIds)
+// Bug: after clicking an answer in Q&A interactive app, the old widget
+// remained interactive (not frozen) instead of showing "answer submitted".
+// ─────────────────────────────────────────────────────────────────────────────
+
+function makeMsg(overrides: Partial<ChatMessage>): ChatMessage {
+  return {
+    id: 'msg-default',
+    sessionId: 's1',
+    role: 'assistant',
+    content: '',
+    createdAt: Date.now(),
+    ...overrides,
+  } as ChatMessage;
+}
+
+describe('REGRESSION: computeAnsweredCallIds freezes old RA-App widgets', () => {
+  it('returns empty set when no user message follows any tool_result', () => {
+    const messages: ChatMessage[] = [
+      makeMsg({ id: 'u1', role: 'user', content: 'Run Q&A' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: '' }),
+      makeMsg({ id: 'tr1', role: 'tool_result', content: '{}', toolCallId: 'call_raapp_1' }),
+    ];
+    const result = computeAnsweredCallIds(messages);
+    expect(result.size).toBe(0);
+  });
+
+  it('marks run_raapp tool_result as answered when user message appears after it', () => {
+    const messages: ChatMessage[] = [
+      makeMsg({ id: 'u1', role: 'user', content: 'Run Q&A' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: '' }),
+      makeMsg({ id: 'tr1', role: 'tool_result', content: '{"type":"gui","status":"ready"}', toolCallId: 'call_raapp_1' }),
+      makeMsg({ id: 'u2', role: 'user', content: 'I choose: Java' }),
+    ];
+    const result = computeAnsweredCallIds(messages);
+    expect(result.has('call_raapp_1')).toBe(true);
+  });
+
+  it('does NOT mark second run_raapp as answered when no user message follows it', () => {
+    // Full Q&A round-trip: first widget answered, second widget still active
+    const messages: ChatMessage[] = [
+      makeMsg({ id: 'u1', role: 'user', content: 'Run Q&A' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: '' }),
+      makeMsg({ id: 'tr1', role: 'tool_result', content: '{"type":"gui","status":"ready"}', toolCallId: 'call_raapp_1' }),
+      makeMsg({ id: 'u2', role: 'user', content: 'I choose: Java' }),
+      makeMsg({ id: 'a2', role: 'assistant', content: 'Great choice!' }),
+      makeMsg({ id: 'tr2', role: 'tool_result', content: '{"type":"gui","status":"ready"}', toolCallId: 'call_raapp_2' }),
+    ];
+    const result = computeAnsweredCallIds(messages);
+    // First widget: answered ✓
+    expect(result.has('call_raapp_1')).toBe(true);
+    // Second widget: NOT answered yet (no user message after it)
+    expect(result.has('call_raapp_2')).toBe(false);
+  });
+
+  it('handles multiple tool_results in same agent turn — only run_raapp ones that matter', () => {
+    const messages: ChatMessage[] = [
+      makeMsg({ id: 'u1', role: 'user', content: 'Run Q&A' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: '' }),
+      makeMsg({ id: 'tr_list', role: 'tool_result', content: '[]', toolCallId: 'call_list_1' }),
+      makeMsg({ id: 'tr_run', role: 'tool_result', content: '{"type":"gui","status":"ready"}', toolCallId: 'call_raapp_1' }),
+      makeMsg({ id: 'u2', role: 'user', content: 'I choose: Java' }),
+    ];
+    const result = computeAnsweredCallIds(messages);
+    // Both tool_results before user message should be answered
+    expect(result.has('call_list_1')).toBe(true);
+    expect(result.has('call_raapp_1')).toBe(true);
+  });
+
+  it('tool_result without toolCallId is never included', () => {
+    const messages: ChatMessage[] = [
+      makeMsg({ id: 'tr1', role: 'tool_result', content: '{}' }), // no toolCallId
+      makeMsg({ id: 'u1', role: 'user', content: 'answer' }),
+    ];
+    const result = computeAnsweredCallIds(messages);
+    expect(result.size).toBe(0);
   });
 });

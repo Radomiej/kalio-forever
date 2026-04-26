@@ -13,6 +13,7 @@ import { ConfirmationDialog } from './ConfirmationDialog';
 import { TokenBadge } from './TokenBadge';
 import { ContextStats } from './ContextStats';
 import { useContextUsage } from './hooks/useContextUsage';
+import { computeAnsweredCallIds } from './chatUtils';
 import type { ChatMessage } from '@kalio/types';
 
 // ─── Turn grouping ────────────────────────────────────────────────────────────
@@ -37,23 +38,7 @@ function groupIntoTurns(messages: ChatMessage[]): Turn[] {
   return turns;
 }
 
-/**
- * Returns a Set of toolCallIds for which a user message appears AFTER
- * the corresponding tool_result — i.e., the user already submitted an answer.
- */
-function computeAnsweredCallIds(messages: ChatMessage[]): Set<string> {
-  const answered = new Set<string>();
-  let hasUserAfter = false;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role === 'user') {
-      hasUserAfter = true;
-    } else if (msg.role === 'tool_result' && msg.toolCallId && hasUserAfter) {
-      answered.add(msg.toolCallId);
-    }
-  }
-  return answered;
-}
+export { computeAnsweredCallIds } from './chatUtils';
 
 export function ChatInterface() {
   const { messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages } = useSessionStore();

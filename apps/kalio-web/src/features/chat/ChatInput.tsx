@@ -56,7 +56,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             onInput={handleInput}
           />
           <button
-            data-testid="send-button"
+            data-testid="chat-send-btn"
             className="btn btn-sm h-[32px] w-[32px] p-0 bg-[#00D535] border-none text-white hover:bg-[#00C030] rounded-full shrink-0 disabled:opacity-40"
             disabled={disabled || !value.trim()}
             onClick={handleSend}
