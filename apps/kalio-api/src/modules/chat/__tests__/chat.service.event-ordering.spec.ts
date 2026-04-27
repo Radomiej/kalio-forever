@@ -113,10 +113,12 @@ describe('ChatService — event ordering (integration)', () => {
         { name: 'list_raapps', description: '', parameters: {}, requiresConfirmation: false },
         { name: 'run_raapp', description: '', parameters: {}, requiresConfirmation: false },
       ]),
-      dispatch: vi.fn().mockImplementation(async (callId: string, name: string, _args: unknown, ctx: { emit: EmitFn }) => {
-        ctx.emit('tool:start', { callId, toolName: name, args: {} });
-        ctx.emit('tool:result', { callId, status: 'success', data: { ok: true } });
-      }),
+      // ChatService now owns tool:start/tool:result emission. Dispatch only executes the tool and returns a result.
+      dispatch: vi.fn().mockImplementation(async (callId: string) => ({
+        callId,
+        status: 'success' as const,
+        data: { ok: true },
+      })),
     };
   });
 
@@ -241,6 +243,29 @@ describe('ChatService — event ordering (integration)', () => {
       const slice = events.slice(starts[i], dones[i] + 1);
       expect(slice.filter((e) => e === 'chat:complete')).toHaveLength(1);
     }
+  });
+
+  it('aborted turn emits chat:error INTERRUPTED before agent:done (no chat:complete)', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(() => makeStream([{ type: 'text_delta', delta: 'partial' }, { type: 'done' }])),
+    };
+    const service = await buildService(llmSource, sessionManager, toolDispatch);
+
+    // Schedule an abort after the turn starts but before it finishes.
+    const turnPromise = service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+    // Microtask later: abort
+    queueMicrotask(() => service.abort('sid'));
+    await turnPromise;
+
+    const events = captureEvents(emit);
+    const interruptIdx = events.findIndex((e, i) =>
+      e === 'chat:error' && (emit.mock.calls[i][1] as { code: string }).code === 'INTERRUPTED',
+    );
+    const doneIdx = events.lastIndexOf('agent:done');
+
+    expect(interruptIdx).toBeGreaterThanOrEqual(0);
+    expect(doneIdx).toBeGreaterThan(interruptIdx);
+    expect(events).not.toContain('chat:complete');
   });
 
   it('multi-iteration tool chain emits tool events strictly between context and complete', async () => {

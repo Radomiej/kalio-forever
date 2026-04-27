@@ -40,6 +40,7 @@ export class DrizzleMessageRepository implements IMessageRepository {
       thinking: row.thinking ?? undefined,
       toolCalls: (row.toolCalls as ChatMessage['toolCalls']) ?? undefined,
       toolCallId: row.toolCallId ?? undefined,
+      attachments: (row.attachments as ChatMessage['attachments']) ?? undefined,
       createdAt: toMs(row.createdAt),
     }));
   }
@@ -53,6 +54,7 @@ export class DrizzleMessageRepository implements IMessageRepository {
       thinking: msg.thinking ?? null,
       toolCalls: msg.toolCalls ?? null,
       toolCallId: msg.toolCallId ?? null,
+      attachments: msg.attachments ?? null,
       createdAt: new Date(msg.createdAt),
     });
   }

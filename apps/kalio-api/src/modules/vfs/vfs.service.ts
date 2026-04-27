@@ -33,6 +33,28 @@ export class VFSService {
     this.logger.debug(`VFS write: ${safePath}`);
   }
 
+  /**
+   * Write raw bytes to the session sandbox. Same path-traversal guard as
+   * `writeFile`, but accepts a Buffer so binary uploads (images, etc.)
+   * keep their original encoding.
+   */
+  writeBinary(sessionId: string, filePath: string, buffer: Buffer): void {
+    const safePath = this.resolveSafe(sessionId, filePath);
+    mkdirSync(resolve(safePath, '..'), { recursive: true });
+    writeFileSync(safePath, buffer);
+    this.logger.debug(`VFS writeBinary: ${safePath} (${buffer.length} bytes)`);
+  }
+
+  /**
+   * Read raw bytes from the session sandbox.
+   * Throws on missing file. Used by ImageHydratorService to assemble
+   * multimodal LLM payloads.
+   */
+  readBinary(sessionId: string, filePath: string): Buffer {
+    const safePath = this.resolveSafe(sessionId, filePath);
+    return readFileSync(safePath);
+  }
+
   readFile(sessionId: string, filePath: string): VFSReadResult {
     const safePath = this.resolveSafe(sessionId, filePath);
     const content = readFileSync(safePath, 'utf8');

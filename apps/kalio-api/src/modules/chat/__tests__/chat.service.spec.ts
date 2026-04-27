@@ -29,9 +29,10 @@ describe('ChatService', () => {
     ensureSession: ReturnType<typeof vi.fn>;
     persistUserMessage: ReturnType<typeof vi.fn>;
     persistAssistantMessage: ReturnType<typeof vi.fn>;
+    saveToolResult: ReturnType<typeof vi.fn>;
     loadHistory: ReturnType<typeof vi.fn>;
   };
-  let toolDispatch: { getToolMetas: ReturnType<typeof vi.fn> };
+  let toolDispatch: { getToolMetas: ReturnType<typeof vi.fn>; dispatch: ReturnType<typeof vi.fn> };
   let personaService: Partial<PersonaService>;
   let auditService: Partial<AuditService>;
   let emit: ReturnType<typeof vi.fn>;
@@ -44,10 +45,12 @@ describe('ChatService', () => {
       ensureSession: vi.fn().mockResolvedValue(undefined),
       persistUserMessage: vi.fn().mockResolvedValue({ id: 'u1', sessionId: 'sid', role: 'user', content: 'hi', createdAt: 1 }),
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockResolvedValue(historyMessages),
     };
     toolDispatch = {
       getToolMetas: vi.fn().mockReturnValue([]),
+      dispatch: vi.fn().mockResolvedValue({ callId: 'c', status: 'success', data: {} }),
     };
     personaService = {
       getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }),
@@ -85,7 +88,15 @@ describe('ChatService', () => {
     const llmSource = makeLLMSource([]);
     await buildService(llmSource);
     await service.handleTurn('sid', 'hello', 'persona-1', emit as EmitFn);
-    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith('sid', 'hello');
+    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith('sid', 'hello', undefined);
+  });
+
+  it('forwards attachments to persistUserMessage', async () => {
+    const llmSource = makeLLMSource([]);
+    await buildService(llmSource);
+    const attachments = [{ path: 'uploads/a.png', mimeType: 'image/png' }];
+    await service.handleTurn('sid', 'see', 'p1', emit as EmitFn, attachments);
+    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith('sid', 'see', attachments);
   });
 
   it('emits chat:context with tool names before streaming', async () => {

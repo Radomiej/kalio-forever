@@ -9,9 +9,16 @@ export type ISOString = string;   // ISO 8601
 // ─── LLM Layer ───────────────────────────────────────────────────────────────
 export type LLMRole = 'system' | 'user' | 'assistant' | 'tool';
 
+// Multimodal content parts (OpenAI-compatible).
+// `image_url.url` is a data URL (`data:<mime>;base64,...`) so the same shape
+// works without provider-specific upload steps.
+export interface LLMTextPart { type: 'text'; text: string }
+export interface LLMImagePart { type: 'image_url'; image_url: { url: string } }
+export type LLMContent = string | Array<LLMTextPart | LLMImagePart>;
+
 export interface LLMMessage {
   role: LLMRole;
-  content: string;
+  content: LLMContent;
   toolCallId?: string;  // for role='tool' responses
   name?: string;        // for role='tool' — tool name
   toolCalls?: LLMToolCall[];  // for role='assistant' with tool calls
@@ -84,6 +91,12 @@ export interface UpdatePersonaDto {
 // ─── Session / Chat ───────────────────────────────────────────────────────────
 export type MessageRole = 'user' | 'assistant' | 'tool_result' | 'system';
 
+// VFS-relative attachment reference (no bytes — bytes live in session VFS)
+export interface ChatAttachment {
+  path: string;       // relative to session VFS root, e.g. 'uploads/abc.png'
+  mimeType: string;   // e.g. 'image/png'
+}
+
 export interface ChatMessage {
   id: ID;
   sessionId: ID;
@@ -92,6 +105,7 @@ export interface ChatMessage {
   thinking?: string;          // reasoning content from models like MiMo / DeepSeek
   toolCalls?: LLMToolCall[];  // populated for assistant messages with tool use
   toolCallId?: string;        // populated for role='tool_result'
+  attachments?: ChatAttachment[];  // image / file attachments on user messages
   streaming?: boolean;        // FE only — true while chunk stream is open
   createdAt: Timestamp;
 }
@@ -374,7 +388,11 @@ export interface CreateAgentTaskDto {
 // COMPLETE contract between FE and BE. All Socket.IO events defined here.
 export interface SocketEvents {
   // Chat — client → server
-  'chat:send': { sessionId: ID; content: string; personaId: ID };
+  'chat:send': { sessionId: ID; content: string; personaId: ID; interrupt?: boolean; attachments?: ChatAttachment[] };
+
+  // Server -> client ack when a chat:send arrives during an active turn and is enqueued.
+  // The FE can use this to render a "queued (n)" badge.
+  'chat:queued': { sessionId: ID; queueLength: number; position: number };
 
   // Chat — server → client
   'chat:context': { sessionId: ID; systemPrompt: string; toolNames: string[] };
@@ -386,7 +404,7 @@ export interface SocketEvents {
   };
   'chat:error': {
     sessionId: ID;
-    code: 'PROVIDER_NOT_CONFIGURED' | 'LLM_ERROR' | 'TOOL_ERROR';
+    code: 'PROVIDER_NOT_CONFIGURED' | 'LLM_ERROR' | 'TOOL_ERROR' | 'INTERRUPTED' | 'QUEUE_FULL';
     message: string;
   };
 

@@ -42,6 +42,7 @@ export class ChatService {
     content: string,
     personaId: string,
     emit: EmitFn,
+    attachments?: import('@kalio/types').ChatAttachment[],
   ): Promise<void> {
     const controller = new AbortController();
     this.abortControllers.set(sessionId, controller);
@@ -64,7 +65,7 @@ export class ChatService {
       const personaConfig = await this.personaService.getSessionConfig(personaId);
       const systemPrompt = personaConfig?.systemPrompt ?? '';
 
-      await this.sessionManager.persistUserMessage(sessionId, content);
+      await this.sessionManager.persistUserMessage(sessionId, content, attachments);
 
       // Filter tools to persona's allowed skill set (empty = all tools allowed)
       const allToolMetas = this.toolDispatch.getToolMetas();
@@ -172,8 +173,18 @@ export class ChatService {
         if (state.toolCalls.length === 0) break;
       }
 
-      // Single chat:complete + agent:done for the whole agentic chain
-      emit('chat:complete', { sessionId, messageId: lastMessageId });
+      // If the loop exited because of an abort (interrupt), surface a
+      // structured error before agent:done so the FE can distinguish it
+      // from a successful completion.
+      if (controller.signal.aborted) {
+        emit('chat:error', {
+          sessionId,
+          code: 'INTERRUPTED',
+          message: 'Turn interrupted by user',
+        });
+      } else {
+        emit('chat:complete', { sessionId, messageId: lastMessageId });
+      }
       emit('agent:done', { sessionId, turnId });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

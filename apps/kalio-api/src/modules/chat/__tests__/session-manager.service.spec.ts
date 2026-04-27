@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { SessionManagerService } from '../session-manager.service';
+import { ImageHydratorService } from '../image-hydrator.service';
 import { TurnState } from '../turn-state';
 import { MESSAGE_REPOSITORY } from '../chat.tokens';
 import type { IMessageRepository } from '../interfaces/message-repository.interface';
@@ -24,6 +25,7 @@ describe('SessionManagerService', () => {
       providers: [
         SessionManagerService,
         { provide: MESSAGE_REPOSITORY, useValue: repo },
+        { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
       ],
     }).compile();
     service = moduleRef.get(SessionManagerService);
@@ -90,6 +92,7 @@ describe('SessionManagerService', () => {
         providers: [
           SessionManagerService,
           { provide: MESSAGE_REPOSITORY, useValue: repo },
+        { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
         ],
       }).compile();
       service = moduleRef.get(SessionManagerService);
@@ -107,12 +110,72 @@ describe('SessionManagerService', () => {
         providers: [
           SessionManagerService,
           { provide: MESSAGE_REPOSITORY, useValue: repo },
+        { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
         ],
       }).compile();
       service = moduleRef.get(SessionManagerService);
 
       const history = await service.loadHistory('sid');
       expect(history[0]).toEqual({ role: 'assistant', content: 'result', toolCalls });
+    });
+
+    it('hydrates user messages with attachments into multimodal content', async () => {
+      repo = makeRepo([
+        {
+          id: 'u1',
+          sessionId: 'sid',
+          role: 'user',
+          content: 'see this',
+          attachments: [{ path: 'uploads/a.png', mimeType: 'image/png' }],
+          createdAt: 1,
+        },
+      ]);
+      const hydrator = {
+        hydrate: vi.fn().mockResolvedValue([
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,FAKE' } },
+        ]),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          SessionManagerService,
+          { provide: MESSAGE_REPOSITORY, useValue: repo },
+          { provide: ImageHydratorService, useValue: hydrator },
+        ],
+      }).compile();
+      service = moduleRef.get(SessionManagerService);
+
+      const history = await service.loadHistory('sid');
+      expect(hydrator.hydrate).toHaveBeenCalledWith('sid', [
+        { path: 'uploads/a.png', mimeType: 'image/png' },
+      ]);
+      expect(history).toEqual([
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'see this' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,FAKE' } },
+          ],
+        },
+      ]);
+    });
+
+    it('keeps user messages without attachments as plain string content (backwards compat)', async () => {
+      repo = makeRepo([
+        { id: 'u1', sessionId: 'sid', role: 'user', content: 'plain', createdAt: 1 },
+      ]);
+      const hydrator = { hydrate: vi.fn() };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          SessionManagerService,
+          { provide: MESSAGE_REPOSITORY, useValue: repo },
+          { provide: ImageHydratorService, useValue: hydrator },
+        ],
+      }).compile();
+      service = moduleRef.get(SessionManagerService);
+
+      const history = await service.loadHistory('sid');
+      expect(hydrator.hydrate).not.toHaveBeenCalled();
+      expect(history[0]).toEqual({ role: 'user', content: 'plain' });
     });
 
     it('converts tool_result messages to role:tool format', async () => {
@@ -123,6 +186,7 @@ describe('SessionManagerService', () => {
         providers: [
           SessionManagerService,
           { provide: MESSAGE_REPOSITORY, useValue: repo },
+        { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
         ],
       }).compile();
       service = moduleRef.get(SessionManagerService);

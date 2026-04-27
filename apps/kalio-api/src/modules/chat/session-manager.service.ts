@@ -1,9 +1,10 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import type { ChatMessage, LLMMessage } from '@kalio/types';
+import type { ChatAttachment, ChatMessage, LLMContent, LLMMessage, LLMTextPart } from '@kalio/types';
 import type { IMessageRepository } from './interfaces/message-repository.interface';
 import type { TurnState } from './turn-state';
 import { MESSAGE_REPOSITORY } from './chat.tokens';
+import { ImageHydratorService } from './image-hydrator.service';
 
 /**
  * Manages chat message persistence and history conversion.
@@ -13,6 +14,7 @@ import { MESSAGE_REPOSITORY } from './chat.tokens';
 export class SessionManagerService {
   constructor(
     @Inject(MESSAGE_REPOSITORY) private readonly repo: IMessageRepository,
+    private readonly imageHydrator: ImageHydratorService,
   ) {}
 
   /** Upserts the session row so FK constraints are satisfied before message inserts. */
@@ -22,15 +24,24 @@ export class SessionManagerService {
 
   async loadHistory(sessionId: string): Promise<LLMMessage[]> {
     const messages = await this.repo.loadHistory(sessionId);
-    return messages.flatMap(m => this.toChatMessages(m));
+    const out: LLMMessage[] = [];
+    for (const m of messages) {
+      out.push(...await this.toLLMMessages(sessionId, m));
+    }
+    return out;
   }
 
-  async persistUserMessage(sessionId: string, content: string): Promise<ChatMessage> {
+  async persistUserMessage(
+    sessionId: string,
+    content: string,
+    attachments?: ChatAttachment[],
+  ): Promise<ChatMessage> {
     const msg: ChatMessage = {
       id: nanoid(),
       sessionId,
       role: 'user',
       content,
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
       createdAt: Date.now(),
     };
     await this.repo.saveMessage(msg);
@@ -66,10 +77,23 @@ export class SessionManagerService {
     await this.repo.saveMessage(msg);
   }
 
-  private toChatMessages(msg: ChatMessage): LLMMessage[] {
+  /**
+   * Convert a persisted ChatMessage into one or more LLMMessages ready for
+   * the provider. User messages with attachments are hydrated into a
+   * multimodal `content` array (text part + image_url parts) — that's the
+   * only async branch.
+   */
+  private async toLLMMessages(sessionId: string, msg: ChatMessage): Promise<LLMMessage[]> {
     switch (msg.role) {
-      case 'user':
-        return [{ role: 'user', content: msg.content }];
+      case 'user': {
+        if (!msg.attachments || msg.attachments.length === 0) {
+          return [{ role: 'user', content: msg.content }];
+        }
+        const imageParts = await this.imageHydrator.hydrate(sessionId, msg.attachments);
+        const textPart: LLMTextPart = { type: 'text', text: msg.content };
+        const content: LLMContent = [textPart, ...imageParts];
+        return [{ role: 'user', content }];
+      }
 
       case 'assistant': {
         const m: LLMMessage = { role: 'assistant', content: msg.content };

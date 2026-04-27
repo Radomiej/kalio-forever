@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import type { LLMToolCall, AgentLoopConfig, AgentLoopStatus, AgentTaskStatus } from '@kalio/types';
+import type { LLMToolCall, AgentLoopConfig, AgentLoopStatus, AgentTaskStatus, ChatAttachment } from '@kalio/types';
 // ─── personas ─────────────────────────────────────────────────────────────────
 export const personas = sqliteTable('personas', {
   id:           text('id').primaryKey(),
@@ -29,6 +29,7 @@ export const messages = sqliteTable('messages', {
   thinking:   text('thinking'),       // reasoning content from models like MiMo / DeepSeek
   toolCalls:  text('tool_calls', { mode: 'json' }).$type<LLMToolCall[] | null>(),
   toolCallId: text('tool_call_id'),  // for role='tool_result'
+  attachments: text('attachments', { mode: 'json' }).$type<ChatAttachment[] | null>(),
   createdAt:  integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
