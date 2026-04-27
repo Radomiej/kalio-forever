@@ -1,19 +1,102 @@
 import { Module } from '@nestjs/common';
-import { ChatGateway } from './chat.gateway';
+import { TextDeltaHandler } from './handlers/text-delta.handler';
+import { ThinkingDeltaHandler } from './handlers/thinking-delta.handler';
+import { ToolCallHandler } from './handlers/tool-call.handler';
+import { DoneHandler } from './handlers/done.handler';
+import { abortCheckMiddleware } from './middleware/abort-check.middleware';
+import { errorBoundaryMiddleware } from './middleware/error-boundary.middleware';
+import { metricsMiddleware } from './middleware/metrics.middleware';
+import { StreamProcessorService } from './stream-processor.service';
+import { ToolDispatchService } from './tool-dispatch.service';
+import { SessionManagerService } from './session-manager.service';
 import { ChatService } from './chat.service';
-import { ChatController } from './chat.controller';
+import { ChatGateway } from './chat.gateway';
+import { SessionsService } from './sessions.service';
+import { SessionsController } from './sessions.controller';
+import { AuditService } from './audit.service';
+import { DrizzleMessageRepository } from './drizzle-message.repository';
+import { LLMServiceAdapter } from './llm-service.adapter';
 import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
-import { CredentialsModule } from '../credentials/credentials.module';
-import { MCPModule } from '../mcp/mcp.module';
-import { AgentLoopModule } from '../agentloop/agent-loop.module';
-import { VFSModule } from '../vfs/vfs.module';
-import { AuditModule } from '../audit/audit.module';
+import { ToolRegistryService } from '../tool/tool-registry.service';
+import {
+  CHUNK_HANDLERS,
+  STREAM_MIDDLEWARES,
+  TOOL_REGISTRY,
+  LLM_SOURCE,
+  MESSAGE_REPOSITORY,
+} from './chat.tokens';
 
+/**
+ * Fully wired chat module.
+ *
+ * Middleware execution order (outermost → innermost):
+ *   abortCheck → errorBoundary → metrics → handler
+ *
+ * Integration points:
+ *   LLM_SOURCE        → LLMServiceAdapter (wraps LLMModule)
+ *   MESSAGE_REPOSITORY → DrizzleMessageRepository (uses global DrizzleService)
+ *   TOOL_REGISTRY     → ToolRegistryService.getEntries() (from ToolModule)
+ */
 @Module({
-  imports: [LLMModule, PersonaModule, ToolModule, CredentialsModule, MCPModule, AgentLoopModule, VFSModule, AuditModule],
-  controllers: [ChatController],
-  providers: [ChatGateway, ChatService],
+  imports: [LLMModule, PersonaModule, ToolModule],
+  controllers: [SessionsController],
+  providers: [
+    // Handlers
+    TextDeltaHandler,
+    ThinkingDeltaHandler,
+    ToolCallHandler,
+    DoneHandler,
+
+    // Services
+    StreamProcessorService,
+    ToolDispatchService,
+    SessionManagerService,
+    SessionsService,
+    ChatService,
+    ChatGateway,
+    AuditService,
+    DrizzleMessageRepository,
+    LLMServiceAdapter,
+
+    // CHUNK_HANDLERS: ordered array injected into StreamProcessorService
+    {
+      provide: CHUNK_HANDLERS,
+      useFactory: (
+        textDelta: TextDeltaHandler,
+        thinkingDelta: ThinkingDeltaHandler,
+        toolCall: ToolCallHandler,
+        done: DoneHandler,
+      ) => [textDelta, thinkingDelta, toolCall, done],
+      inject: [TextDeltaHandler, ThinkingDeltaHandler, ToolCallHandler, DoneHandler],
+    },
+
+    // STREAM_MIDDLEWARES: ordered pipeline (outermost first)
+    {
+      provide: STREAM_MIDDLEWARES,
+      useFactory: () => [abortCheckMiddleware, errorBoundaryMiddleware, metricsMiddleware],
+    },
+
+    // TOOL_REGISTRY: built from ToolRegistryService (reads @Tool() metadata)
+    {
+      provide: TOOL_REGISTRY,
+      useFactory: (registry: ToolRegistryService) => registry.getEntries(),
+      inject: [ToolRegistryService],
+    },
+
+    // LLM_SOURCE: async iterable adapter over LLMService callback API
+    {
+      provide: LLM_SOURCE,
+      useExisting: LLMServiceAdapter,
+    },
+
+    // MESSAGE_REPOSITORY: Drizzle-backed implementation
+    {
+      provide: MESSAGE_REPOSITORY,
+      useExisting: DrizzleMessageRepository,
+    },
+  ],
+  exports: [ChatService, ChatGateway, ToolDispatchService, SessionManagerService, SessionsService],
 })
 export class ChatModule {}

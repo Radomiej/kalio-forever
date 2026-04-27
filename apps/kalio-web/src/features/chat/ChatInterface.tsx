@@ -95,8 +95,15 @@ export function ChatInterface() {
       }
     });
 
-    const offComplete = eventBus.onComplete(() => {
-      console.debug('[EventBus] chat:complete');
+    const offComplete = eventBus.onComplete((payload) => {
+      console.debug('[EventBus] chat:complete', payload.messageId);
+      // Finalize ALL streaming messages — the agent loop may have produced
+      // multiple assistant rows (one per LLM iteration). Without this each
+      // streamed bubble keeps `streaming: true` and the typing caret blinks
+      // forever even after the turn ends.
+      const { streamingChunks, thinkingChunks, finalizeChunk: doFinalize } = useSessionStore.getState();
+      const ids = new Set([...Object.keys(streamingChunks), ...Object.keys(thinkingChunks)]);
+      ids.forEach((id) => doFinalize(id));
       setStreaming(false);
     });
 

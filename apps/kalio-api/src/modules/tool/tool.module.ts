@@ -1,6 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
-import { ToolRegistryService } from './tool-registry.service';
-import { ToolDispatchService } from './tool-dispatch.service';
+import { Module } from '@nestjs/common';
 import { ToolController } from './tool.controller';
 import { VFSWriteTool } from './tools/vfs-write.tool';
 import { VFSReadTool } from './tools/vfs-read.tool';
@@ -22,12 +20,12 @@ import { RAAppModule } from '../raapp/raapp.module';
 import { MemoryModule } from '../memory/memory.module';
 import { AllowedPathsModule } from '../allowed-paths/allowed-paths.module';
 import { MCPModule } from '../mcp/mcp.module';
+import { ToolRegistryService } from './tool-registry.service';
 
 @Module({
   imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule],
   controllers: [ToolController],
   providers: [
-    ToolRegistryService, ToolDispatchService,
     VFSWriteTool, VFSReadTool, VFSListTool, SubagentTool,
     FsReadTool, FsListTool, FsWriteTool,
     KVStoreService, KVWriteTool, KVReadTool, KVListTool, KVDeleteTool,
@@ -35,16 +33,8 @@ import { MCPModule } from '../mcp/mcp.module';
     TerminalService, TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool,
     RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool,
     MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
+    ToolRegistryService,
   ],
-  exports: [ToolRegistryService, ToolDispatchService],
+  exports: [ToolRegistryService],
 })
-export class ToolModule implements OnModuleInit {
-  constructor(
-    private readonly toolRegistry: ToolRegistryService,
-    private readonly subagentTool: SubagentTool,
-  ) {}
-
-  onModuleInit() {
-    this.toolRegistry.registerSubagentTool(this.subagentTool);
-  }
-}
+export class ToolModule {}
