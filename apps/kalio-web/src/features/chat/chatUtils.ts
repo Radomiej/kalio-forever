@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@kalio/types';
+import type { AgentTurn } from '../../store/sessionStore';
 
 /**
  * Returns a Set of toolCallIds for which a user message appears AFTER
@@ -16,4 +17,35 @@ export function computeAnsweredCallIds(messages: ChatMessage[]): Set<string> {
     }
   }
   return answered;
+}
+
+/**
+ * Reconstructs a list of AgentTurns from persisted messages.
+ * Each assistant message becomes a completed turn with a synthetic ID.
+ * Tool calls within an assistant message are appended as tool items.
+ */
+export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string): AgentTurn[] {
+  const turns: AgentTurn[] = [];
+  let turnIndex = 0;
+
+  for (const msg of messages) {
+    if (msg.role !== 'assistant') continue;
+    const turnId = `history-turn-${turnIndex++}-${msg.id}`;
+    const items: AgentTurn['items'] = [];
+
+    if (msg.thinking) {
+      items.push({ kind: 'thinking', messageId: msg.id });
+    }
+    items.push({ kind: 'text', messageId: msg.id });
+
+    if (msg.toolCalls) {
+      for (const tc of msg.toolCalls) {
+        items.push({ kind: 'tool', callId: tc.id });
+      }
+    }
+
+    turns.push({ id: turnId, sessionId, items, done: true });
+  }
+
+  return turns;
 }

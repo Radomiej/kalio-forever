@@ -77,6 +77,10 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
         <p className="text-xs text-base-content/50 mb-1 ml-1">Kalio</p>
 
         <div className="group relative rounded-2xl bg-base-300 text-base-content text-sm px-4 py-3 flex flex-col gap-2 w-full">
+          {/* Loading indicator while turn is active but no items have arrived yet */}
+          {!turn.done && turn.items.length === 0 && (
+            <span data-testid="turn-loading-indicator" className="loading loading-dots loading-xs" />
+          )}
           {turn.items.map((item, idx) => {
             if (item.kind === 'tool') {
               const callId = item.callId;
@@ -105,7 +109,9 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
 
             if (item.kind === 'thinking') {
               const messageId = item.messageId;
-              const thinkingContent = thinkingChunks[messageId] ?? '';
+              const msg = messages.find((m) => m.id === messageId);
+              // Prefer live chunk (streaming); fall back to persisted msg.thinking for history
+              const thinkingContent = thinkingChunks[messageId] ?? msg?.thinking ?? '';
               if (!thinkingContent) return null;
               return <ThinkingBlock key={`think-${messageId}`} content={thinkingContent} isStreaming={!turn.done} />;
             }

@@ -48,6 +48,7 @@ interface SessionState {
   addTurnItem: (item: AgentTurnItem) => void;
   finalizeAgentTurn: () => void;
   clearAgentTurns: () => void;
+  setAgentTurns: (turns: AgentTurn[]) => void;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -192,4 +193,6 @@ export const useSessionStore = create<SessionState>((set) => ({
     })),
 
   clearAgentTurns: () => set({ agentTurns: [], activeTurnId: null }),
+
+  setAgentTurns: (turns) => set({ agentTurns: turns, activeTurnId: null }),
 }));

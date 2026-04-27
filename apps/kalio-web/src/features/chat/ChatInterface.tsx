@@ -13,7 +13,7 @@ import { ConfirmationDialog } from './ConfirmationDialog';
 import { TokenBadge } from './TokenBadge';
 import { ContextStats } from './ContextStats';
 import { useContextUsage } from './hooks/useContextUsage';
-import { computeAnsweredCallIds } from './chatUtils';
+import { computeAnsweredCallIds, buildTurnsFromHistory } from './chatUtils';
 import type { ChatMessage } from '@kalio/types';
 
 export { computeAnsweredCallIds } from './chatUtils';
@@ -21,7 +21,8 @@ export { computeAnsweredCallIds } from './chatUtils';
 export function ChatInterface() {
   const {
     messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages,
-    agentTurns, activeTurnId, startAgentTurn, addTurnItem, finalizeAgentTurn, clearAgentTurns,
+    agentTurns, startAgentTurn, addTurnItem, finalizeAgentTurn, clearAgentTurns,
+    setAgentTurns,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
@@ -58,11 +59,12 @@ export function ChatInterface() {
     const offChunk = eventBus.onChunk((chunk) => {
       if (!chunk.done) {
         appendChunk(chunk.messageId, chunk.delta, chunk.thinking);
-        
+
         // Add to active turn for unified rendering
-        if (activeTurnId) {
-          const { agentTurns, addTurnItem } = useSessionStore.getState();
-          const turn = agentTurns.find((t) => t.id === activeTurnId);
+        // Read activeTurnId from store (not closure) to avoid stale reference
+        const { activeTurnId: currentTurnId, agentTurns, addTurnItem } = useSessionStore.getState();
+        if (currentTurnId) {
+          const turn = agentTurns.find((t) => t.id === currentTurnId);
           if (turn) {
             const hasItem = turn.items.some(
               (item) => item.kind === (chunk.thinking ? 'thinking' : 'text') && item.messageId === chunk.messageId
@@ -267,13 +269,27 @@ export function ChatInterface() {
     clearToolActivities();
     clearAgentTurns(); // Clear previous turns
     console.debug('[ChatInterface] session activated', activeSessionId, '— streaming reset');
+
+    // Load message history from backend
+    fetch(`/api/sessions/${activeSessionId}/messages`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((data: ChatMessage[]) => {
+        // Only apply if the session is still active when the response arrives
+        if (useSessionStore.getState().activeSessionId !== activeSessionId) return;
+        setMessages(data);
+        setAgentTurns(buildTurnsFromHistory(data, activeSessionId));
+      })
+      .catch((err: unknown) => {
+        console.error('[ChatInterface] failed to load message history', err instanceof Error ? err : new Error(String(err)));
+      });
+
     const { pendingMessage, pendingRAAppId, setPendingMessage, setPendingRAAppId, sessions: s } = useSessionStore.getState();
     const toSend = pendingMessage ?? (pendingRAAppId ? `Use the ${s.find((a) => a.id === activeSessionId)?.title ?? pendingRAAppId} tool` : null);
     if (!toSend) return;
     setPendingMessage(null);
     setPendingRAAppId(null);
     handleSendRef.current(toSend, 'default');
-  }, [activeSessionId, clearAgentTurns]);
+  }, [activeSessionId, clearAgentTurns, setMessages, setAgentTurns]);
 
   const handleConfirm = () => {
     if (!pendingConfirmation || !activeSessionId) return;
