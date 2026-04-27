@@ -121,7 +121,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
             const msg = messages.find((m) => m.id === messageId);
             if (!msg) return null;
             
-            const isStreaming = msg.streaming === true;
+            const isStreaming = !turn.done;
             const displayContent = isStreaming ? (streamingChunks[messageId] ?? '') : msg.content;
 
             return (

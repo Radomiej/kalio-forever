@@ -139,6 +139,15 @@ describe('AgentTurnBubble', () => {
     render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], false)} toolActivities={[]} />);
     expect(screen.getByTestId('streaming-indicator')).toBeInTheDocument();
   });
+
+  it('REGRESSION: hides streaming indicator after agent:done even if msg.streaming is still true', () => {
+    // Scenario: backend sent agent:start, created a placeholder message,
+    // but no chat:chunk ever arrived and no chat:complete was emitted.
+    // Then agent:done fires, setting turn.done=true, but msg.streaming stays true.
+    mockMessages.push(makeMsg({ id: 'msg-1', streaming: true, content: '' }));
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], true)} toolActivities={[]} />);
+    expect(screen.queryByTestId('streaming-indicator')).not.toBeInTheDocument();
+  });
 });
 
 // ── REGRESSION: multi-turn quiz ordering ────────────────────────────────────
