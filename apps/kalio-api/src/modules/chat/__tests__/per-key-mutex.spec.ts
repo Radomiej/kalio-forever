@@ -66,4 +66,40 @@ describe('PerKeyMutex', () => {
     const result = await mutex.runExclusive('A', async () => 'hello');
     expect(result).toBe('hello');
   });
+
+  it('size() returns 0 after a rejected fn settles (no memory leak on rejection)', async () => {
+    const mutex = new PerKeyMutex();
+    await expect(
+      mutex.runExclusive('A', async () => { throw new Error('boom'); }),
+    ).rejects.toThrow('boom');
+    await tick(5);
+    expect(mutex.size()).toBe(0);
+  });
+
+  it('concurrent rejections for the same key do not cascade errors to later callers', async () => {
+    const mutex = new PerKeyMutex();
+    const results: string[] = [];
+
+    const p1 = mutex.runExclusive('A', async () => {
+      await tick(5);
+      throw new Error('first failure');
+    }).catch(() => results.push('caught-1'));
+
+    const p2 = mutex.runExclusive('A', async () => {
+      await tick(5);
+      throw new Error('second failure');
+    }).catch(() => results.push('caught-2'));
+
+    const p3 = mutex.runExclusive('A', async () => {
+      await tick(1);
+      results.push('ok');
+      return 'ok';
+    });
+
+    await Promise.all([p1, p2, p3]);
+    // Each caller handles its own error independently; p3 must succeed
+    expect(results).toContain('caught-1');
+    expect(results).toContain('caught-2');
+    expect(results).toContain('ok');
+  });
 });

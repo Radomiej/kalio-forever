@@ -22,6 +22,10 @@ export const errorBoundaryMiddleware: StreamMiddleware = async (chunk, ctx, next
       sessionId: ctx.sessionId,
       code: 'LLM_ERROR',
       message,
+      // The middleware intercepts mid-stream errors, so at least some chunk processing
+      // has started. hadContent reflects whether trackingEmit has fired chat:chunk.
+      // We conservatively set true here since this middleware fires during streaming.
+      hadContent: true,
     });
     throw new TurnErrorAlreadyEmitted(err);
   }

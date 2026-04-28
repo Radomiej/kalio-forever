@@ -352,3 +352,38 @@ describe('REGRESSION: RA-App freezes after user answers', () => {
     expect(screen.getByText('Interactive app — answer submitted')).toBeInTheDocument();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// turn.error indicator
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('turn.error indicator', () => {
+  it('renders turn-error-indicator when turn.error is set', () => {
+    const turn: AgentTurn = {
+      ...makeTurn([{ kind: 'text', messageId: 'msg-1' }], true),
+      error: { code: 'INTERRUPTED', message: 'Turn interrupted by user' },
+    };
+    mockMessages.push(makeMsg({ id: 'msg-1', content: 'Partial answer' }));
+    render(<AgentTurnBubble turn={turn} toolActivities={[]} />);
+    expect(screen.getByTestId('turn-error-indicator')).toBeInTheDocument();
+    expect(screen.getByText('Interrupted')).toBeInTheDocument();
+  });
+
+  it('renders MAX_ITERATIONS_REACHED label', () => {
+    const turn: AgentTurn = {
+      ...makeTurn([{ kind: 'text', messageId: 'msg-1' }], true),
+      error: { code: 'MAX_ITERATIONS_REACHED', message: 'Agent loop exceeded 8 iterations' },
+    };
+    mockMessages.push(makeMsg({ id: 'msg-1', content: 'Some content' }));
+    render(<AgentTurnBubble turn={turn} toolActivities={[]} />);
+    expect(screen.getByTestId('turn-error-indicator')).toBeInTheDocument();
+    expect(screen.getByText('Reached iteration limit')).toBeInTheDocument();
+  });
+
+  it('does not render turn-error-indicator when turn.error is undefined', () => {
+    const turn = makeTurn([{ kind: 'text', messageId: 'msg-1' }], true);
+    mockMessages.push(makeMsg({ id: 'msg-1', content: 'Full answer' }));
+    render(<AgentTurnBubble turn={turn} toolActivities={[]} />);
+    expect(screen.queryByTestId('turn-error-indicator')).not.toBeInTheDocument();
+  });
+});

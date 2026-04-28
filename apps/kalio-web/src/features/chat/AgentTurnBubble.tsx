@@ -137,6 +137,18 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
               </div>
             );
           })}
+          {turn.error && (
+            <div data-testid="turn-error-indicator" className="flex items-center gap-1.5 text-xs text-warning/80 pt-1 border-t border-base-content/10">
+              <span>⚠</span>
+              <span>
+                {turn.error.code === 'INTERRUPTED'
+                  ? 'Interrupted'
+                  : turn.error.code === 'MAX_ITERATIONS_REACHED'
+                    ? 'Reached iteration limit'
+                    : turn.error.message}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>

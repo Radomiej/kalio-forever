@@ -406,6 +406,11 @@ export interface SocketEvents {
     sessionId: ID;
     code: 'PROVIDER_NOT_CONFIGURED' | 'LLM_ERROR' | 'TOOL_ERROR' | 'INTERRUPTED' | 'QUEUE_FULL' | 'MAX_ITERATIONS_REACHED';
     message: string;
+    /** True if at least one `chat:chunk` was emitted before this error.
+     *  FE uses this to decide whether to append the error to the existing
+     *  response bubble (true) or roll back the empty bubble and show a
+     *  retry banner (false). */
+    hadContent: boolean;
   };
 
   // Tool HITL — server → client

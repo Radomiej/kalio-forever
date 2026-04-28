@@ -255,4 +255,8 @@ describe('SessionPipelineService', () => {
     // After purge, the queued b/c never reach handleTurn
     expect(chatHarness.callsReceived.map((c) => c.content)).toEqual(['a']);
   });
+
+  it('abortAll on idle session (no active turn) is a no-op and does not throw', () => {
+    expect(() => svc.abortAll('never-used-session')).not.toThrow();
+  });
 });

@@ -245,4 +245,154 @@ describe('ChatService', () => {
     // After the turn finishes, the controller should be cleaned up; calling abort is a no-op
     expect(() => service.abort('sid')).not.toThrow();
   });
+
+  // ─── hadContent tracking ────────────────────────────────────────────────────
+
+  it('emits hadContent=false when LLM throws before any chunk (early LLM_ERROR)', async () => {
+    const failSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(() => { throw new Error('LLM unavailable'); }),
+    };
+    await buildService(failSource);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+    const errorCall = (emit as ReturnType<typeof vi.fn>).mock.calls.find(
+      (args: unknown[]) => args[0] === 'chat:error',
+    );
+    expect(errorCall).toBeDefined();
+    expect(errorCall![1]).toMatchObject({ hadContent: false });
+  });
+
+  it('emits hadContent=false when abort happens before any chat:chunk', async () => {
+    // LLM source that signals abort before yielding any chunk
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(async function* () {
+        // Yield nothing — abort fires from the outside
+      }),
+    };
+    await buildService(llmSource);
+    // Start the turn, then abort synchronously
+    const promise = service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+    service.abort('sid');
+    await promise;
+    const errorCall = (emit as ReturnType<typeof vi.fn>).mock.calls.find(
+      (args: unknown[]) => args[0] === 'chat:error',
+    );
+    expect(errorCall).toBeDefined();
+    expect(errorCall![1]).toMatchObject({ code: 'INTERRUPTED', hadContent: false });
+  });
+
+  it('emits hadContent=true when abort happens after at least one chat:chunk', async () => {
+    // We need a StreamProcessorService that emits a chat:chunk and THEN aborts.
+    // Calling service.abort() before the promise starts would race and
+    // potentially abort before any chunk, keeping hadContent=false.
+    let capturedService: typeof service;
+    const chunks: InternalLLMChunk[] = [{ type: 'text_delta', delta: 'hello' }, { type: 'done' }];
+    const llmSource = makeLLMSource(chunks);
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ChatService,
+        {
+          provide: StreamProcessorService,
+          useValue: {
+            process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { emit: EmitFn; sessionId: string; messageId: string }) => {
+              // Emit chat:chunk first (sets hadContent=true), then abort
+              ctx.emit('chat:chunk', { sessionId: ctx.sessionId, messageId: ctx.messageId, delta: 'hi', done: false });
+              capturedService.abort(ctx.sessionId);
+            }),
+            onModuleInit: vi.fn(),
+          },
+        },
+        { provide: SessionManagerService, useValue: sessionManager },
+        { provide: ToolDispatchService, useValue: toolDispatch },
+        { provide: PersonaService, useValue: personaService },
+        { provide: AuditService, useValue: auditService },
+        { provide: LLM_SOURCE, useValue: llmSource },
+        { provide: CHUNK_HANDLERS, useValue: [] },
+        { provide: STREAM_MIDDLEWARES, useValue: [] },
+        { provide: TOOL_REGISTRY, useValue: [] },
+      ],
+    }).compile();
+    capturedService = moduleRef.get(ChatService);
+
+    await capturedService.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    const errorCall = (emit as ReturnType<typeof vi.fn>).mock.calls.find(
+      (args: unknown[]) => args[0] === 'chat:error',
+    );
+    expect(errorCall).toBeDefined();
+    expect(errorCall![1]).toMatchObject({ code: 'INTERRUPTED', hadContent: true });
+  });
+
+  // ─── MAX_ITERATIONS ─────────────────────────────────────────────────────────
+
+  it('MAX_ITERATIONS: emits chat:error not chat:complete', async () => {
+    // Every iteration always produces a tool call so the loop never exits normally
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(() => makeStream([{ type: 'done' }])),
+    };
+    const processor = {
+      process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { state: { addToolCall: (tc: unknown) => void } }) => {
+        ctx.state.addToolCall({ id: `c${Date.now()}`, name: 'tool_a', args: {} });
+      }),
+      onModuleInit: vi.fn(),
+    };
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ChatService,
+        { provide: StreamProcessorService, useValue: processor },
+        { provide: SessionManagerService, useValue: sessionManager },
+        { provide: ToolDispatchService, useValue: toolDispatch },
+        { provide: PersonaService, useValue: personaService },
+        { provide: AuditService, useValue: auditService },
+        { provide: LLM_SOURCE, useValue: llmSource },
+        { provide: CHUNK_HANDLERS, useValue: [] },
+        { provide: STREAM_MIDDLEWARES, useValue: [] },
+        { provide: TOOL_REGISTRY, useValue: [] },
+      ],
+    }).compile();
+    service = moduleRef.get(ChatService);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    const completeCalls = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => args[0] === 'chat:complete',
+    );
+    const errorCalls = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => args[0] === 'chat:error',
+    );
+    expect(completeCalls).toHaveLength(0);
+    expect(errorCalls).toHaveLength(1);
+    expect(errorCalls[0][1]).toMatchObject({ code: 'MAX_ITERATIONS_REACHED' });
+  });
+
+  it('MAX_ITERATIONS: always emits agent:done', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(() => makeStream([{ type: 'done' }])),
+    };
+    const processor = {
+      process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { state: { addToolCall: (tc: unknown) => void } }) => {
+        ctx.state.addToolCall({ id: `c${Date.now()}`, name: 'tool_a', args: {} });
+      }),
+      onModuleInit: vi.fn(),
+    };
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ChatService,
+        { provide: StreamProcessorService, useValue: processor },
+        { provide: SessionManagerService, useValue: sessionManager },
+        { provide: ToolDispatchService, useValue: toolDispatch },
+        { provide: PersonaService, useValue: personaService },
+        { provide: AuditService, useValue: auditService },
+        { provide: LLM_SOURCE, useValue: llmSource },
+        { provide: CHUNK_HANDLERS, useValue: [] },
+        { provide: STREAM_MIDDLEWARES, useValue: [] },
+        { provide: TOOL_REGISTRY, useValue: [] },
+      ],
+    }).compile();
+    service = moduleRef.get(ChatService);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    const doneCalls = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => args[0] === 'agent:done',
+    );
+    expect(doneCalls).toHaveLength(1);
+  });
 });

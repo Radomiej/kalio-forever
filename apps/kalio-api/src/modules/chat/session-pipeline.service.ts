@@ -75,6 +75,7 @@ export class SessionPipelineService {
             sessionId: sid,
             code: 'QUEUE_FULL',
             message: `Queue is full (max ${QUEUE_CAP} pending messages per session)`,
+            hadContent: false,
           });
           return { kind: 'rejected' };
         }

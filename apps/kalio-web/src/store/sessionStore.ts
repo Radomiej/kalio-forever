@@ -12,6 +12,8 @@ export interface AgentTurn {
   sessionId: ID;
   items: AgentTurnItem[];  // ordered, append-only
   done: boolean;
+  /** Set when the turn ends with a chat:error that had content (mid-turn error). */
+  error?: { code: string; message: string };
 }
 
 interface SessionState {
@@ -49,6 +51,8 @@ interface SessionState {
   finalizeAgentTurn: () => void;
   clearAgentTurns: () => void;
   setAgentTurns: (turns: AgentTurn[]) => void;
+  markAgentTurnError: (turnId: ID, error: { code: string; message: string }) => void;
+  removeLastAgentTurn: () => void;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -195,4 +199,17 @@ export const useSessionStore = create<SessionState>((set) => ({
   clearAgentTurns: () => set({ agentTurns: [], activeTurnId: null }),
 
   setAgentTurns: (turns) => set({ agentTurns: turns, activeTurnId: null }),
+
+  markAgentTurnError: (turnId, error) =>
+    set((s) => ({
+      agentTurns: s.agentTurns.map((turn) =>
+        turn.id === turnId ? { ...turn, error } : turn
+      ),
+    })),
+
+  removeLastAgentTurn: () =>
+    set((s) => ({
+      agentTurns: s.agentTurns.slice(0, -1),
+      activeTurnId: null,
+    })),
 }));

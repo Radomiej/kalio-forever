@@ -37,6 +37,7 @@ describe('errorBoundaryMiddleware', () => {
       sessionId: 'sid-err',
       code: 'LLM_ERROR',
       message: 'boom',
+      hadContent: true,
     });
   });
 
@@ -71,6 +72,7 @@ describe('errorBoundaryMiddleware', () => {
       sessionId: 'sid-err',
       code: 'LLM_ERROR',
       message: 'string error',
+      hadContent: true,
     });
   });
 });

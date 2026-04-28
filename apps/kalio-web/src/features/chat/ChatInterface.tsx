@@ -22,7 +22,7 @@ export function ChatInterface() {
   const {
     messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages,
     agentTurns, startAgentTurn, addTurnItem, finalizeAgentTurn, clearAgentTurns,
-    setAgentTurns,
+    setAgentTurns, markAgentTurnError, removeLastAgentTurn,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
@@ -43,6 +43,8 @@ export function ChatInterface() {
     registerCallId,
   } = useAgentStore();
   const [error, setError] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const lastSentContentRef = useRef<string>('');
   const [showContextStats, setShowContextStats] = useState(false);
   const [vfsRefreshSignal, setVfsRefreshSignal] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -110,7 +112,21 @@ export function ChatInterface() {
     const offError = eventBus.onError((payload) => {
       console.error('[EventBus] chat:error', payload);
       setStreaming(false);
-      setError(payload.message);
+      const { activeTurnId } = useSessionStore.getState();
+      if (!activeTurnId) {
+        // Error before agent turn opened (e.g. QUEUE_FULL) → floating banner
+        setError(payload.message);
+      } else if (payload.hadContent) {
+        // Error after content was streamed → mark the turn bubble with an error indicator
+        markAgentTurnError(activeTurnId, { code: payload.code, message: payload.message });
+      } else if (payload.code === 'INTERRUPTED') {
+        // User stopped before any content — silently remove the empty bubble
+        removeLastAgentTurn();
+      } else {
+        // Early failure (LLM down, not configured) — remove empty bubble, offer retry
+        removeLastAgentTurn();
+        setRetryError(payload.message);
+      }
     });
 
     const offConfirmation = eventBus.onToolConfirmation((req) => {
@@ -199,7 +215,7 @@ export function ChatInterface() {
       offContext();
       offToolResult();
     };
-  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn]);
+  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -236,6 +252,8 @@ export function ChatInterface() {
   const handleSend = (content: string, personaId: string) => {
     if (!activeSessionId) return;
     setError(null);
+    setRetryError(null);
+    lastSentContentRef.current = content;
     clearToolActivities();
 
     // Auto-generate title from first message if session still has default title
@@ -341,6 +359,25 @@ export function ChatInterface() {
         <div data-testid="chat-error" className="alert alert-error m-2 py-2 text-sm">
           {error}
           <button className="btn btn-ghost btn-xs ml-auto" onClick={() => setError(null)}>✕</button>
+        </div>
+      )}
+      {retryError && (
+        <div data-testid="chat-retry-error" className="alert alert-warning m-2 py-2 text-sm flex items-center gap-2">
+          <span className="flex-1">{retryError}</span>
+          <button
+            className="btn btn-xs btn-warning"
+            onClick={() => {
+              const content = lastSentContentRef.current;
+              const session = sessions.find((s) => s.id === activeSessionId);
+              if (content && session) {
+                setRetryError(null);
+                handleSend(content, session.personaId);
+              }
+            }}
+          >
+            Retry
+          </button>
+          <button className="btn btn-ghost btn-xs" onClick={() => setRetryError(null)}>✕</button>
         </div>
       )}
 

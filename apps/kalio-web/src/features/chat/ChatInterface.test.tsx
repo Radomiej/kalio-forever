@@ -87,12 +87,21 @@ vi.mock('../../store/agentStore', () => ({
 }));
 
 // ── sessionStore mock ─────────────────────────────────────────────────────────
+const markAgentTurnError = vi.fn();
+const removeLastAgentTurn = vi.fn();
+const startAgentTurn = vi.fn();
+const finalizeAgentTurn = vi.fn();
+const addTurnItem = vi.fn();
+
+// Mutable activeTurnId so tests can control what the store returns
+let mockActiveTurnId: string | null = null;
+
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: Object.assign(
     () => ({
       messages: [],
       agentTurns: [],
-      activeTurnId: null,
+      activeTurnId: mockActiveTurnId,
       activeSessionId: 'session-1',
       sessions: [{ id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 }],
       addMessage: vi.fn(),
@@ -100,19 +109,27 @@ vi.mock('../../store/sessionStore', () => ({
       finalizeChunk: vi.fn(),
       setMessages: vi.fn(),
       updateSession: vi.fn(),
-      startAgentTurn: vi.fn(),
-      addTurnItem: vi.fn(),
-      finalizeAgentTurn: vi.fn(),
+      setAgentTurns: vi.fn(),
+      startAgentTurn,
+      addTurnItem,
+      finalizeAgentTurn,
       clearAgentTurns: vi.fn(),
+      markAgentTurnError,
+      removeLastAgentTurn,
     }),
     {
       getState: () => ({
         messages: [],
         agentTurns: [],
-        activeTurnId: null,
+        activeTurnId: mockActiveTurnId,
         activeSessionId: 'session-1',
         sessions: [{ id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 }],
         updateSession: vi.fn(),
+        streamingChunks: {},
+        thinkingChunks: {},
+        finalizeChunk: vi.fn(),
+        markAgentTurnError,
+        removeLastAgentTurn,
       }),
     },
   ),
@@ -154,6 +171,7 @@ vi.mock('./AgentTurnBubble', () => ({ AgentTurnBubble: () => null }));
 
 beforeEach(() => {
   Object.keys(handlers).forEach((k) => delete handlers[k]);
+  mockActiveTurnId = null;
   vi.clearAllMocks();
 });
 
@@ -419,5 +437,84 @@ describe('REGRESSION: timeline interleaving preserves chronological order', () =
       if (i < agentTurns.length) timeline.push(`agent:${agentTurns[i]}`);
     }
     expect(timeline).toEqual(['user:u1', 'user:u2']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// chat:error two-path dispatch
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('chat:error two-path dispatch', () => {
+  it('chat:error with active turn and hadContent=true calls markAgentTurnError', () => {
+    mockActiveTurnId = 'turn-abc';
+    render(<ChatInterface />);
+
+    act(() => {
+      fire('chat:error', {
+        sessionId: 'session-1',
+        code: 'INTERRUPTED',
+        message: 'Turn interrupted by user',
+        hadContent: true,
+      });
+    });
+
+    expect(markAgentTurnError).toHaveBeenCalledWith('turn-abc', {
+      code: 'INTERRUPTED',
+      message: 'Turn interrupted by user',
+    });
+    expect(removeLastAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it('chat:error with active turn, hadContent=false and non-INTERRUPTED code removes bubble and sets retry', () => {
+    mockActiveTurnId = 'turn-abc';
+    render(<ChatInterface />);
+
+    act(() => {
+      fire('chat:error', {
+        sessionId: 'session-1',
+        code: 'LLM_ERROR',
+        message: 'LLM unavailable',
+        hadContent: false,
+      });
+    });
+
+    expect(removeLastAgentTurn).toHaveBeenCalledOnce();
+    expect(markAgentTurnError).not.toHaveBeenCalled();
+  });
+
+  it('chat:error with active turn, hadContent=false and INTERRUPTED silently removes bubble', () => {
+    mockActiveTurnId = 'turn-abc';
+    render(<ChatInterface />);
+
+    act(() => {
+      fire('chat:error', {
+        sessionId: 'session-1',
+        code: 'INTERRUPTED',
+        message: 'Turn interrupted by user',
+        hadContent: false,
+      });
+    });
+
+    expect(removeLastAgentTurn).toHaveBeenCalledOnce();
+    expect(markAgentTurnError).not.toHaveBeenCalled();
+  });
+
+  it('chat:error QUEUE_FULL with no active turn calls setStreaming(false) only (floating banner path)', () => {
+    // activeTurnId remains null
+    render(<ChatInterface />);
+
+    act(() => {
+      fire('chat:error', {
+        sessionId: 'session-1',
+        code: 'QUEUE_FULL',
+        message: 'Queue is full',
+        hadContent: false,
+      });
+    });
+
+    // Neither turn action should be called — floating banner handles it
+    expect(markAgentTurnError).not.toHaveBeenCalled();
+    expect(removeLastAgentTurn).not.toHaveBeenCalled();
+    expect(setStreaming).toHaveBeenCalledWith(false);
   });
 });

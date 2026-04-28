@@ -50,13 +50,21 @@ export class ChatService {
     const firstMessageId = nanoid();
     let lastMessageId = firstMessageId;
     const turnId = nanoid();
+    // Tracks whether at least one chat:chunk was emitted so the FE can
+    // choose between appending an error to an existing bubble (hadContent=true)
+    // vs rolling back an empty bubble and offering retry (hadContent=false).
+    let hadContent = false;
+    const trackingEmit: EmitFn = (event, data) => {
+      if (event === 'chat:chunk') hadContent = true;
+      emit(event, data);
+    };
 
     try {
       // Signal start of agent turn so the FE can open an AgentTurn bubble
       // BEFORE any chunks arrive. Without this the chunk handler has no
       // activeTurnId to attach text/tool items to and the live stream is
       // invisible (only history reload would reconstruct it).
-      emit('agent:start', { sessionId, turnId });
+      trackingEmit('agent:start', { sessionId, turnId });
 
       // Ensure session row exists before any FK-constrained inserts
       await this.sessionManager.ensureSession(sessionId, personaId);
@@ -71,7 +79,7 @@ export class ChatService {
       const allToolMetas = this.toolDispatch.getToolMetas();
       const toolMetas = this.filterTools(allToolMetas, personaConfig?.availableSkills);
 
-      emit('chat:context', {
+      trackingEmit('chat:context', {
         sessionId,
         systemPrompt,
         toolNames: toolMetas.map(t => t.name),
@@ -81,6 +89,9 @@ export class ChatService {
       // or we hit MAX_ITERATIONS as a safety net.
       const MAX_ITERATIONS = 8;
       let iteration = 0;
+      // Declared outside the loop so that the MAX_ITERATIONS guard can read
+      // the value from the last completed iteration.
+      let iterationMessageId = firstMessageId;
 
       while (true) {
         if (controller.signal.aborted) break;
@@ -89,10 +100,11 @@ export class ChatService {
           this.logger.warn(
             `Agent loop exceeded ${MAX_ITERATIONS} iterations for session ${sessionId}`,
           );
+          lastMessageId = iterationMessageId;
           break;
         }
 
-        const iterationMessageId = iteration === 1 ? firstMessageId : nanoid();
+        iterationMessageId = iteration === 1 ? firstMessageId : nanoid();
 
         const state = new TurnState();
         const ctx: StreamContext = {
@@ -100,7 +112,7 @@ export class ChatService {
           messageId: iterationMessageId,
           abortSignal: controller.signal,
           state,
-          emit,
+          emit: trackingEmit,
         };
 
         // Reload history so it picks up tool_result rows persisted by ToolCallHandler
@@ -142,9 +154,9 @@ export class ChatService {
         if (!controller.signal.aborted && state.toolCalls.length > 0) {
           for (const tc of state.toolCalls) {
             if (controller.signal.aborted) break;
-            emit('tool:start', { callId: tc.id, toolName: tc.name, args: tc.args });
+            trackingEmit('tool:start', { callId: tc.id, toolName: tc.name, args: tc.args });
             const result = await this.toolDispatch.dispatch(tc.id, tc.name, tc.args, ctx);
-            emit('tool:result', result);
+            trackingEmit('tool:result', result);
             if (result.status !== 'cancelled') {
               const content =
                 result.status === 'success'
@@ -179,21 +191,23 @@ export class ChatService {
       // structured error before agent:done so the FE can distinguish it
       // from a successful completion.
       if (controller.signal.aborted) {
-        emit('chat:error', {
+        trackingEmit('chat:error', {
           sessionId,
           code: 'INTERRUPTED',
           message: 'Turn interrupted by user',
+          hadContent,
         });
       } else if (iteration > MAX_ITERATIONS) {
-        emit('chat:error', {
+        trackingEmit('chat:error', {
           sessionId,
           code: 'MAX_ITERATIONS_REACHED',
           message: `Agent loop exceeded ${MAX_ITERATIONS} iterations`,
+          hadContent,
         });
       } else {
-        emit('chat:complete', { sessionId, messageId: lastMessageId });
+        trackingEmit('chat:complete', { sessionId, messageId: lastMessageId });
       }
-      emit('agent:done', { sessionId, turnId });
+      trackingEmit('agent:done', { sessionId, turnId });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
@@ -201,7 +215,7 @@ export class ChatService {
         err instanceof Error ? err.stack : undefined,
       );
       if (!(err instanceof TurnErrorAlreadyEmitted)) {
-        emit('chat:error', { sessionId, code: 'LLM_ERROR', message });
+        emit('chat:error', { sessionId, code: 'LLM_ERROR', message, hadContent });
       }
       // Always close the agent turn so the FE doesn't keep an open bubble forever
       emit('agent:done', { sessionId, turnId });
