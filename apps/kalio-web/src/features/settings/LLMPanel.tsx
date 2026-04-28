@@ -56,6 +56,7 @@ interface AddForm {
   apiKey: string;
   baseUrl: string;
   model: string;
+  nameEdited?: boolean;
 }
 
 function emptyForm(): AddForm {
@@ -65,6 +66,7 @@ function emptyForm(): AddForm {
     apiKey: '',
     baseUrl: PROVIDER_BASE_URLS['openai'] ?? '',
     model: PROVIDER_DEFAULT_MODELS['openai'] ?? '',
+    nameEdited: false,
   };
 }
 
@@ -115,7 +117,7 @@ export function LLMPanel() {
       provider,
       baseUrl: PROVIDER_BASE_URLS[provider] ?? '',
       model: PROVIDER_DEFAULT_MODELS[provider] ?? '',
-      name: f.name || PROVIDER_LABELS[provider] || '',
+      name: f.nameEdited ? f.name : (PROVIDER_LABELS[provider] || ''),
     }));
     setTestState('idle');
     setTestError(null);
@@ -266,7 +268,7 @@ export function LLMPanel() {
                   className="input input-bordered input-sm"
                   placeholder="e.g. My OpenAI Key"
                   value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value, nameEdited: true }))}
                   required
                 />
               </label>
