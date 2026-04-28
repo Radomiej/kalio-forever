@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Pencil, Trash2, Check, X, ChevronDown } from 'lucide-react';
+import { Plus, Pencil, Trash2, Check, X, ChevronDown, Wrench } from 'lucide-react';
 import { apiClient } from '../../services/apiClient';
 import type { Persona, CreatePersonaDto, UpdatePersonaDto } from '@kalio/types';
+import { PersonaToolPicker, PersonaToolBadges } from './PersonaToolPicker';
 
 export function PersonaPanel() {
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -77,20 +78,22 @@ function PersonaForm({
   onSave,
   onCancel,
 }: {
-  initial?: Partial<CreatePersonaDto>;
+  initial?: Partial<CreatePersonaDto & { skills: string[] }>;
   onSave: (dto: CreatePersonaDto) => Promise<void>;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(initial?.name ?? '');
   const [model, setModel] = useState(initial?.model ?? 'gpt-4o-mini');
   const [systemPrompt, setSystemPrompt] = useState(initial?.systemPrompt ?? 'You are a helpful assistant.');
+  const [skills, setSkills] = useState<string[]>(initial?.skills ?? []);
   const [saving, setSaving] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const submit = async () => {
     if (!name.trim()) return;
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), model: model.trim(), systemPrompt: systemPrompt.trim(), skills: [] });
+      await onSave({ name: name.trim(), model: model.trim(), systemPrompt: systemPrompt.trim(), skills });
     } finally {
       setSaving(false);
     }
@@ -99,6 +102,7 @@ function PersonaForm({
   return (
     <div className="border-b border-base-300 p-3 flex flex-col gap-2 bg-base-200/40">
       <input
+        data-testid="persona-name-input"
         className="input input-bordered input-xs w-full"
         placeholder="Name"
         value={name}
@@ -106,21 +110,51 @@ function PersonaForm({
         autoFocus
       />
       <input
+        data-testid="persona-model-input"
         className="input input-bordered input-xs w-full font-mono"
         placeholder="Model (e.g. gpt-4o-mini)"
         value={model}
         onChange={(e) => setModel(e.target.value)}
       />
       <textarea
+        data-testid="persona-prompt-textarea"
         className="textarea textarea-bordered textarea-xs w-full resize-none"
         rows={3}
         placeholder="System prompt"
         value={systemPrompt}
         onChange={(e) => setSystemPrompt(e.target.value)}
       />
+
+      {/* Tools section */}
+      <div className="rounded border border-base-300 overflow-hidden">
+        <button
+          type="button"
+          data-testid="persona-tools-toggle"
+          className="w-full flex items-center gap-2 px-2 py-1.5 bg-base-200/60 hover:bg-base-200 text-left"
+          onClick={() => setToolsOpen((v) => !v)}
+        >
+          <Wrench size={11} className="text-base-content/40 shrink-0" />
+          <span className="text-xs text-base-content/70 flex-1">Tools</span>
+          {skills.length > 0 && (
+            <span className="badge badge-xs badge-primary">{skills.length}</span>
+          )}
+          <ChevronDown size={10} className={`text-base-content/30 transition-transform ${toolsOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {toolsOpen && (
+          <div className="p-2">
+            <PersonaToolPicker selected={skills} onChange={setSkills} />
+          </div>
+        )}
+      </div>
+
       <div className="flex gap-1 justify-end">
         <button className="btn btn-ghost btn-xs" onClick={onCancel}><X size={12} /></button>
-        <button className="btn btn-primary btn-xs gap-1" onClick={() => void submit()} disabled={saving || !name.trim()}>
+        <button
+          data-testid="persona-save-btn"
+          className="btn btn-primary btn-xs gap-1"
+          onClick={() => void submit()}
+          disabled={saving || !name.trim()}
+        >
           <Check size={12} /> Save
         </button>
       </div>
@@ -142,9 +176,11 @@ function PersonaRow({
   const [name, setName] = useState(persona.name);
   const [model, setModel] = useState(persona.model);
   const [systemPrompt, setSystemPrompt] = useState(persona.systemPrompt);
+  const [skills, setSkills] = useState<string[]>(persona.skills ?? []);
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const save = () => {
-    onUpdate({ name: name.trim(), model: model.trim(), systemPrompt: systemPrompt.trim() });
+    onUpdate({ name: name.trim(), model: model.trim(), systemPrompt: systemPrompt.trim(), skills });
     setEditing(false);
   };
 
@@ -152,23 +188,23 @@ function PersonaRow({
     setName(persona.name);
     setModel(persona.model);
     setSystemPrompt(persona.systemPrompt);
+    setSkills(persona.skills ?? []);
     setEditing(false);
   };
 
   return (
-    <div
-      data-testid="persona-item"
-      className="border-b border-base-300/50 last:border-0"
-    >
+    <div data-testid="persona-item" className="border-b border-base-300/50 last:border-0">
       <div className="flex items-center gap-1 px-3 py-2">
-        <button
-          className="flex-1 text-left min-w-0"
-          onClick={() => setExpanded((v) => !v)}
-        >
+        <button className="flex-1 text-left min-w-0" onClick={() => setExpanded((v) => !v)}>
           <div className="flex items-center gap-1">
             <ChevronDown size={10} className={`shrink-0 text-base-content/30 transition-transform ${expanded ? 'rotate-180' : ''}`} />
             <span className="text-xs font-medium truncate">{persona.name}</span>
             <span className="text-[10px] text-base-content/40 font-mono ml-1 truncate">{persona.model}</span>
+            {(persona.skills?.length ?? 0) > 0 && (
+              <span className="ml-1 badge badge-xs badge-ghost" title={`${persona.skills.length} tools`}>
+                <Wrench size={8} className="mr-0.5" />{persona.skills.length}
+              </span>
+            )}
           </div>
         </button>
         <button
@@ -182,6 +218,7 @@ function PersonaRow({
           className="btn btn-ghost btn-xs text-base-content/30 hover:text-error p-0 w-5 h-5"
           onClick={onDelete}
           title="Delete"
+          data-testid="persona-delete-btn"
         >
           <Trash2 size={10} />
         </button>
@@ -209,13 +246,39 @@ function PersonaRow({
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
               />
+
+              {/* Tools section in edit mode */}
+              <div className="rounded border border-base-300 overflow-hidden">
+                <button
+                  type="button"
+                  data-testid="persona-tools-toggle"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 bg-base-200/60 hover:bg-base-200 text-left"
+                  onClick={() => setToolsOpen((v) => !v)}
+                >
+                  <Wrench size={11} className="text-base-content/40 shrink-0" />
+                  <span className="text-xs text-base-content/70 flex-1">Tools</span>
+                  {skills.length > 0 && (
+                    <span className="badge badge-xs badge-primary">{skills.length}</span>
+                  )}
+                  <ChevronDown size={10} className={`text-base-content/30 transition-transform ${toolsOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {toolsOpen && (
+                  <div className="p-2">
+                    <PersonaToolPicker selected={skills} onChange={setSkills} />
+                  </div>
+                )}
+              </div>
+
               <div className="flex gap-1 justify-end">
                 <button className="btn btn-ghost btn-xs" onClick={cancel}><X size={12} /></button>
                 <button className="btn btn-primary btn-xs gap-1" onClick={save}><Check size={12} /> Save</button>
               </div>
             </>
           ) : (
-            <p className="text-xs text-base-content/50 whitespace-pre-wrap">{persona.systemPrompt}</p>
+            <>
+              <p className="text-xs text-base-content/50 whitespace-pre-wrap">{persona.systemPrompt}</p>
+              <PersonaToolBadges tools={persona.skills ?? []} />
+            </>
           )}
         </div>
       )}

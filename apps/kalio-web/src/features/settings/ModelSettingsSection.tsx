@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, RefreshCw, Check, AlertCircle, ChevronDown } from 'lucide-react';
+import { Loader2, RefreshCw, Check, AlertCircle } from 'lucide-react';
 import type { Credential } from '@kalio/types';
+import { ModelCombobox } from './ModelCombobox';
 
 interface Props {
   activeCredential: Credential | null;
@@ -125,36 +126,14 @@ export function ModelSettingsSection({ activeCredential, onModelChange }: Props)
 
             <div className="flex gap-2 items-start">
               <div className="flex-1">
-                {modelsLoading ? (
-                  <div className="input input-bordered input-sm flex items-center gap-2 text-xs text-base-content/50">
-                    <Loader2 size={12} className="animate-spin" /> Loading models…
-                  </div>
-                ) : models.length > 0 ? (
-                  <div className="relative">
-                    <select
-                      className="select select-bordered select-sm w-full font-mono pr-8"
-                      value={selectedModel}
-                      onChange={(e) => { setSelectedModel(e.target.value); setModelSaved(false); }}
-                      data-testid="model-selector"
-                    >
-                      {selectedModel && !models.includes(selectedModel) && (
-                        <option value={selectedModel}>{selectedModel} (current)</option>
-                      )}
-                      {models.map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                    <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-base-content/50" />
-                  </div>
-                ) : (
-                  <input
-                    className="input input-bordered input-sm w-full font-mono"
-                    value={selectedModel}
-                    onChange={(e) => { setSelectedModel(e.target.value); setModelSaved(false); }}
-                    placeholder="e.g. gpt-4o-mini"
-                    data-testid="model-selector"
-                  />
-                )}
+                <ModelCombobox
+                  value={selectedModel}
+                  options={models}
+                  onChange={(v) => { setSelectedModel(v); setModelSaved(false); }}
+                  loading={modelsLoading}
+                  placeholder="e.g. gpt-4o-mini"
+                  data-testid="model-selector"
+                />
                 {modelsError && (
                   <p className="text-xs text-error mt-1 flex items-center gap-1">
                     <AlertCircle size={11} /> {modelsError}

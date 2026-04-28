@@ -45,7 +45,7 @@ export function SkillListPanel({ selectedId, onSelect }: Props) {
       <div className="px-3 py-2 border-b border-base-300 flex items-center gap-2">
         <Sparkles size={14} className="text-base-content/50" />
         <span className="text-sm font-semibold flex-1">Skills</span>
-        <button className="btn btn-xs btn-ghost" onClick={handleCreate} title="New skill">
+        <button className="btn btn-xs btn-ghost" onClick={handleCreate} title="New skill" data-testid="new-skill-btn">
           <Plus size={14} />
         </button>
       </div>
@@ -57,6 +57,7 @@ export function SkillListPanel({ selectedId, onSelect }: Props) {
         {skills.map((skill) => (
           <button
             key={skill.id}
+            data-testid="skill-item"
             onClick={() => onSelect(skill.id)}
             className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-base-200 transition-colors group ${selectedId === skill.id ? 'bg-base-300' : ''}`}
           >
@@ -65,6 +66,7 @@ export function SkillListPanel({ selectedId, onSelect }: Props) {
             <span
               onClick={(e) => handleDelete(skill.id, e)}
               role="button"
+              data-testid="skill-delete-btn"
               className="opacity-0 group-hover:opacity-100 transition-opacity text-error hover:text-error cursor-pointer"
             >
               <Trash2 size={12} />

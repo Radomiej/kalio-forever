@@ -61,13 +61,30 @@ describe('ModelSettingsSection', () => {
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
       [`GET /api/credentials/${CRED.id}/models`]: { models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'] },
     });
+    const user = userEvent.setup();
     render(<ModelSettingsSection activeCredential={CRED} onModelChange={vi.fn()} />);
-    await waitFor(() => {
-      const select = screen.getByTestId('model-selector') as HTMLSelectElement;
-      expect(select.options.length).toBeGreaterThanOrEqual(2);
+    const input = screen.getByTestId('model-selector');
+    await waitFor(() => expect(input).toBeInTheDocument());
+    await user.click(input);
+    await waitFor(() => expect(screen.getByText('gpt-4o')).toBeInTheDocument());
+    expect(screen.getByText('gpt-4o-mini')).toBeInTheDocument();
+    expect(screen.getByText('gpt-3.5-turbo')).toBeInTheDocument();
+  });
+
+  it('filters model list when typing', async () => {
+    mockFetch({
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+      [`GET /api/credentials/${CRED.id}/models`]: { models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'] },
     });
-    const select = screen.getByTestId('model-selector') as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.value)).toContain('gpt-4o');
+    const user = userEvent.setup();
+    render(<ModelSettingsSection activeCredential={CRED} onModelChange={vi.fn()} />);
+    const input = screen.getByTestId('model-selector');
+    await waitFor(() => expect(input).toBeInTheDocument());
+    await user.click(input);
+    await waitFor(() => expect(screen.getByText('gpt-4o')).toBeInTheDocument());
+    await user.type(input, 'mini');
+    expect(screen.queryByText('gpt-4o')).not.toBeInTheDocument();
+    expect(screen.getByText('gpt-4o-mini')).toBeInTheDocument();
   });
 
   it('gen-save calls PUT /api/credentials/settings/generation with current values', async () => {

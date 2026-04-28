@@ -55,12 +55,13 @@ export function SkillEditorPanel({ skillId }: Props) {
   if (!skill) return <div className="p-4 text-sm text-base-content/40">Loading…</div>;
 
   return (
-    <div className="flex flex-col h-full p-4 gap-4 max-w-2xl">
+    <div data-testid="skill-editor" className="flex flex-col h-full p-4 gap-4 max-w-2xl">
       <div className="flex items-center gap-2">
         <Sparkles size={16} className="text-primary" />
         <h2 className="text-base font-semibold flex-1">Skill Editor</h2>
         <button
           className={`btn btn-sm btn-primary ${saving ? 'loading' : ''}`}
+          data-testid="skill-save-btn"
           onClick={handleSave}
           disabled={saving}
         >
@@ -71,6 +72,7 @@ export function SkillEditorPanel({ skillId }: Props) {
       <div className="form-control gap-1">
         <label className="label py-0"><span className="label-text text-xs">Name</span></label>
         <input
+          data-testid="skill-name-input"
           className="input input-sm input-bordered w-full"
           value={name}
           onChange={(e) => setName(e.target.value)}

@@ -186,6 +186,7 @@ export function App() {
               ].map((t) => (
                 <button
                   key={t.id}
+                  data-testid={`tools-tab-${t.id}`}
                   className={`flex-1 py-3 text-sm font-medium ${
                     toolsTab === t.id
                       ? 'text-sky-400 border-b-2 border-sky-500 bg-sky-500/10'
@@ -223,6 +224,7 @@ export function App() {
               ].map((t) => (
                 <button
                   key={t.id}
+                  data-testid={`mind-tab-${t.id}`}
                   className={`flex-1 py-3 text-sm font-medium ${
                     mindTab === t.id
                       ? 'text-sky-400 border-b-2 border-sky-500 bg-sky-500/10'
@@ -238,10 +240,15 @@ export function App() {
             <div className="flex-1 overflow-hidden">
               {mindTab === 'memory' && <MemoryPage />}
               {mindTab === 'files' && <WorkspacePanel />}
-              {mindTab === 'skills' && selectedSkillId ? (
-                <SkillEditorPanel skillId={selectedSkillId} />
-              ) : (
-                <SkillListPanel selectedId={selectedSkillId} onSelect={setSelectedSkillId} />
+              {mindTab === 'skills' && (
+                <div className="flex h-full">
+                  <div className="w-64 shrink-0 border-r border-base-300 overflow-hidden">
+                    <SkillListPanel selectedId={selectedSkillId} onSelect={setSelectedSkillId} />
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <SkillEditorPanel skillId={selectedSkillId} />
+                  </div>
+                </div>
               )}
               {mindTab === 'personas' && <PersonaPanel />}
             </div>
