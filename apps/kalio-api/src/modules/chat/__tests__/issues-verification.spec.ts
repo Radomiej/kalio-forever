@@ -176,22 +176,19 @@ describe('ISSUE 1: Interrupt race condition', () => {
 });
 
 // ============================================================================
-// ISSUE 2: MAX_ITERATIONS error branch is unreachable
+// ISSUE 2: MAX_ITERATIONS behavior verification
 // ============================================================================
 
-async function* infiniteToolStream(): AsyncIterable<InternalLLMChunk> {
-  // Always yield tool calls to force infinite loop
-  while (true) {
-    yield { type: 'tool_call', callId: 'tc-1', name: 'test_tool', args: {} };
-    yield { type: 'done' };
-  }
+function makeFiniteToolStream(): ILLMSource {
+  return {
+    stream: vi.fn().mockImplementation(async function* () {
+      yield { type: 'tool_call', callId: 'tc-1', name: 'test_tool', args: {} };
+      yield { type: 'done' };
+    }),
+  };
 }
 
-function makeInfiniteLLMSource(): ILLMSource {
-  return { stream: vi.fn().mockReturnValue(infiniteToolStream()) };
-}
-
-describe('ISSUE 2: MAX_ITERATIONS unreachable code', () => {
+describe('ISSUE 2: MAX_ITERATIONS behavior', () => {
   let chatService: ChatService;
   let events: Array<{ event: string; data: unknown }>;
   let emit: EmitFn;
@@ -202,15 +199,22 @@ describe('ISSUE 2: MAX_ITERATIONS unreachable code', () => {
       events.push({ event: event as string, data });
     };
 
-    const llmSource = makeInfiniteLLMSource();
+    const llmSource = makeFiniteToolStream();
+
+    // Mock streamProcessor to populate state.toolCalls so loop continues
+    const mockStreamProcessor = {
+      process: vi.fn().mockImplementation(async (chunk: InternalLLMChunk, ctx: any) => {
+        if (chunk.type === 'tool_call') {
+          ctx.state.toolCalls.push({ id: chunk.callId, name: chunk.name, args: chunk.args });
+        }
+      }),
+      onModuleInit: vi.fn(),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ChatService,
-        {
-          provide: StreamProcessorService,
-          useValue: { process: vi.fn().mockResolvedValue(undefined), onModuleInit: vi.fn() },
-        },
+        { provide: StreamProcessorService, useValue: mockStreamProcessor },
         {
           provide: SessionManagerService,
           useValue: {
@@ -233,10 +237,7 @@ describe('ISSUE 2: MAX_ITERATIONS unreachable code', () => {
             getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }),
           },
         },
-        {
-          provide: AuditService,
-          useValue: { log: vi.fn().mockResolvedValue(undefined) },
-        },
+        { provide: AuditService, useValue: { log: vi.fn().mockResolvedValue(undefined) } },
         { provide: LLM_SOURCE, useValue: llmSource },
         { provide: CHUNK_HANDLERS, useValue: [] },
         { provide: STREAM_MIDDLEWARES, useValue: [] },
@@ -247,37 +248,7 @@ describe('ISSUE 2: MAX_ITERATIONS unreachable code', () => {
     chatService = moduleRef.get(ChatService);
   });
 
-  /**
-   * This test documents the CURRENT BUG: when MAX_ITERATIONS is reached,
-   * the code at line 187-192 is never executed because the loop already
-   * broke at line 88-92 for the same condition.
-   *
-   * EXPECTED: Should emit 'chat:error' with code 'MAX_ITERATIONS_REACHED'
-   * ACTUAL: Emits 'chat:complete' (the else branch) because iteration was
-   *         reset/not tracked properly after loop break
-   */
-  it('CURRENT BUG: does NOT emit MAX_ITERATIONS_REACHED when limit exceeded', async () => {
-    await chatService.handleTurn('s1', 'test', 'p1', emit);
-
-    // The loop breaks at iteration > 8, but then falls through to the
-    // `else` branch and emits 'chat:complete' instead of error
-    const errorEvents = events.filter(e => e.event === 'chat:error');
-    const maxIterationsError = errorEvents.find(
-      e => (e.data as any).code === 'MAX_ITERATIONS_REACHED'
-    );
-
-    // This assertion documents the BUG - the error is NOT emitted
-    expect(maxIterationsError).toBeUndefined();
-
-    // Instead, chat:complete is emitted (incorrectly)
-    const completeEvent = events.find(e => e.event === 'chat:complete');
-    expect(completeEvent).toBeDefined();
-  });
-
-  /**
-   * Expected behavior after fix: should emit error instead of completion
-   */
-  it.skip('EXPECTED: emits MAX_ITERATIONS_REACHED when loop limit exceeded', async () => {
+  it('emits MAX_ITERATIONS_REACHED when loop limit exceeded', async () => {
     await chatService.handleTurn('s1', 'test', 'p1', emit);
 
     const errorEvents = events.filter(e => e.event === 'chat:error');
