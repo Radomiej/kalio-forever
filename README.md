@@ -41,6 +41,41 @@ Built as a clean-slate rewrite (v2) to avoid the "god object" trap that plagued 
 
 ---
 
+## Data Storage
+
+Kalio uses two separate storage systems for different purposes:
+
+| Storage | Purpose | Location (default) | Technology |
+|---|---|---|---|
+| **Database** | Structured app data: sessions, users, personas, credentials | `./data/kalio.db` | SQLite (Drizzle ORM) |
+| **Memory** | Vector embeddings for RAG: conversation context, semantic search | `./data/memory/{personaId}.db` | SQLite + sqlite-vec |
+
+### Changing storage locations
+
+Edit `.env` to customize paths:
+
+```env
+# Database (relational)
+DATABASE_PATH=./data/kalio.db
+
+# Memory (vector, per-persona)
+MEMORY_DB_PATH=./data/memory
+
+# VFS (per-conversation files)
+WORKSPACE_ROOT=./data/workspaces
+```
+
+Example for custom location:
+```env
+DATABASE_PATH=C:/MyData/kalio/kalio.db
+MEMORY_DB_PATH=C:/MyData/kalio/memory
+WORKSPACE_ROOT=C:/MyData/kalio/workspaces
+```
+
+Restart the backend after changing paths.
+
+---
+
 ## Architecture
 
 ```
