@@ -124,6 +124,26 @@ describe('LLMPanel', () => {
     expect(modelInput.value).toBe('deepseek-reasoner');
   });
 
+  it('pre-fills name with provider label and updates on provider change', async () => {
+    mockFetch(defaultMap());
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+
+    const nameInput = screen.getByRole('textbox', { name: /name/i }) as HTMLInputElement;
+    expect(nameInput.value).toBe('OpenAI');
+
+    await user.click(screen.getByRole('button', { name: 'DeepSeek' }));
+    expect(nameInput.value).toBe('DeepSeek');
+
+    // user types custom name — provider switch should not overwrite it
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Custom');
+    await user.click(screen.getByRole('button', { name: 'OpenRouter' }));
+    expect(nameInput.value).toBe('Custom');
+  });
+
   it('test button is disabled when API key is empty', async () => {
     mockFetch(defaultMap());
     const user = userEvent.setup();
@@ -171,7 +191,9 @@ describe('LLMPanel', () => {
     render(<LLMPanel />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
-    await user.type(screen.getByRole('textbox', { name: /name/i }), 'New Key');
+    const nameInput = screen.getByRole('textbox', { name: /name/i });
+    await user.clear(nameInput);
+    await user.type(nameInput, 'New Key');
     await user.type(screen.getByTestId('add-provider-apikey'), 'sk-test');
     await user.click(screen.getByTestId('add-provider-submit'));
     await waitFor(() => expect(screen.getByTestId(`provider-card-${created.id}`)).toBeInTheDocument());

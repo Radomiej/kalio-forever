@@ -60,7 +60,7 @@ interface AddForm {
 
 function emptyForm(): AddForm {
   return {
-    name: '',
+    name: PROVIDER_LABELS['openai'] ?? '',
     provider: 'openai',
     apiKey: '',
     baseUrl: PROVIDER_BASE_URLS['openai'] ?? '',
@@ -115,6 +115,7 @@ export function LLMPanel() {
       provider,
       baseUrl: PROVIDER_BASE_URLS[provider] ?? '',
       model: PROVIDER_DEFAULT_MODELS[provider] ?? '',
+      name: f.name || PROVIDER_LABELS[provider] || '',
     }));
     setTestState('idle');
     setTestError(null);
@@ -260,7 +261,7 @@ export function LLMPanel() {
               <h3 className="text-sm font-semibold">Add Provider</h3>
 
               <label className="form-control gap-1">
-                <span className="text-xs text-base-content/60">Name</span>
+                <span className="text-xs text-base-content/60">Name <span className="text-base-content/40">(optional — defaults to provider)</span></span>
                 <input
                   className="input input-bordered input-sm"
                   placeholder="e.g. My OpenAI Key"

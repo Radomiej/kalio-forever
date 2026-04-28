@@ -69,14 +69,14 @@ export class ImageHydratorService {
       );
     }
 
-    const base64 = outBuffer.toString('base64');
-    // Quick rough estimate: base64 ~= 4/3 * bytes — but check the actual length.
-    if (base64.length > HARD_CEILING_BYTES) {
+    // Check raw buffer size (not base64 character length) against ceiling
+    if (outBuffer.length > HARD_CEILING_BYTES) {
       throw new ImageHydrationError(
         'PAYLOAD_TOO_LARGE',
-        `Image ${att.path} exceeds ${HARD_CEILING_BYTES} bytes after resize (${base64.length} bytes base64)`,
+        `Image ${att.path} exceeds ${HARD_CEILING_BYTES} bytes after resize (${outBuffer.length} bytes)`,
       );
     }
+    const base64 = outBuffer.toString('base64');
     return {
       type: 'image_url',
       image_url: { url: `data:${outMime};base64,${base64}` },
@@ -89,8 +89,11 @@ export class ImageHydratorService {
       const w = meta.width ?? 0;
       const h = meta.height ?? 0;
       return Math.max(w, h) > MAX_LONG_SIDE;
-    } catch {
-      return false;
+    } catch (err) {
+      throw new ImageHydrationError(
+        'UNSUPPORTED_MIME',
+        `Failed to read image metadata: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 }

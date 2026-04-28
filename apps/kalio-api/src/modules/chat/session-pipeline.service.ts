@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { SocketEvents } from '@kalio/types';
 import { ChatService } from './chat.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
+import { PerKeyMutex } from './per-key-mutex';
 
 type ChatSendPayload = SocketEvents['chat:send'];
 
@@ -37,45 +38,75 @@ export class SessionPipelineService {
   private readonly logger = new Logger(SessionPipelineService.name);
   private readonly active = new Map<string, ActiveSlot>();
   private readonly queues = new Map<string, QueuedItem[]>();
+  private readonly mutex = new PerKeyMutex();
 
   constructor(private readonly chat: ChatService) {}
 
   async submit(payload: ChatSendPayload, emit: EmitFn): Promise<void> {
     const sid = payload.sessionId;
-    const isActive = this.active.has(sid);
     const isInterrupt = payload.interrupt === true;
 
-    if (isInterrupt && isActive) {
-      // Abort current; wait for the in-flight turn to finish unwinding
-      // (handleTurn always emits agent:done before resolving).
-      this.chat.abort(sid);
-      const slot = this.active.get(sid);
+    // Decide+claim atomically per-session. The decision phase mutates
+    // `active` and `queues`; without the mutex two concurrent submits for
+    // an idle session could both pass the `isActive` check and both call
+    // `runWithDrain`, double-booking the session.
+    //
+    // Returns one of:
+    //   { kind: 'dispatch' }  → run the payload now (we own the slot)
+    //   { kind: 'queued' }    → enqueued; nothing else to do
+    //   { kind: 'rejected' }  → queue full / no-op interrupt
+    //   { kind: 'wait', wait: Promise } → interrupt fired, must drain
+    //                                      the prior turn before dispatching
+    const decision = await this.mutex.runExclusive<
+      | { kind: 'dispatch' }
+      | { kind: 'queued' }
+      | { kind: 'rejected' }
+      | { kind: 'interrupt'; prior: Promise<void> }
+    >(sid, async () => {
+      if (isInterrupt && this.active.has(sid)) {
+        this.chat.abort(sid);
+        const slot = this.active.get(sid);
+        return { kind: 'interrupt', prior: slot?.donePromise ?? Promise.resolve() };
+      }
+      if (this.active.has(sid)) {
+        const queue = this.queues.get(sid) ?? [];
+        if (queue.length >= QUEUE_CAP) {
+          emit('chat:error', {
+            sessionId: sid,
+            code: 'QUEUE_FULL',
+            message: `Queue is full (max ${QUEUE_CAP} pending messages per session)`,
+          });
+          return { kind: 'rejected' };
+        }
+        queue.push({ payload, emit });
+        this.queues.set(sid, queue);
+        emit('chat:queued', {
+          sessionId: sid,
+          queueLength: queue.length,
+          position: queue.length,
+        });
+        return { kind: 'queued' };
+      }
+      // Idle session: claim the active slot before releasing the lock so
+      // any concurrent submit will see us as active.
+      this.active.set(sid, { donePromise: Promise.resolve() });
+      return { kind: 'dispatch' };
+    });
+
+    if (decision.kind === 'queued' || decision.kind === 'rejected') return;
+
+    if (decision.kind === 'interrupt') {
       try {
-        await slot?.donePromise;
+        await decision.prior;
       } catch {
         // handleTurn doesn't throw, but be defensive
       }
-      // Empty content = pure Stop, no new turn
       if (payload.content.trim().length === 0) return;
-      // Fall through to immediate dispatch of the interrupting payload
-    } else if (isActive) {
-      const queue = this.queues.get(sid) ?? [];
-      if (queue.length >= QUEUE_CAP) {
-        emit('chat:error', {
-          sessionId: sid,
-          code: 'QUEUE_FULL',
-          message: `Queue is full (max ${QUEUE_CAP} pending messages per session)`,
-        });
-        return;
-      }
-      queue.push({ payload, emit });
-      this.queues.set(sid, queue);
-      emit('chat:queued', {
-        sessionId: sid,
-        queueLength: queue.length,
-        position: queue.length,
+      // Re-claim the slot atomically before dispatching the interrupting
+      // payload (the prior turn just released it).
+      await this.mutex.runExclusive(sid, async () => {
+        this.active.set(sid, { donePromise: Promise.resolve() });
       });
-      return;
     }
 
     await this.runWithDrain(payload, emit);
@@ -93,17 +124,26 @@ export class SessionPipelineService {
   }
 
   private async runWithDrain(payload: ChatSendPayload, emit: EmitFn): Promise<void> {
-    await this.runOne(payload, emit);
-    // Drain any queued follow-ups for the same session in FIFO order.
-    while (true) {
-      const queue = this.queues.get(payload.sessionId);
-      if (!queue || queue.length === 0) {
-        this.queues.delete(payload.sessionId);
-        return;
-      }
-      const next = queue.shift()!;
-      this.queues.set(payload.sessionId, queue);
-      await this.runOne(next.payload, next.emit);
+    const sid = payload.sessionId;
+    let current: { payload: ChatSendPayload; emit: EmitFn } | null = { payload, emit };
+    while (current) {
+      await this.runOne(current.payload, current.emit);
+      // Pop next queued item OR release active slot, atomically.
+      // Without the mutex a concurrent submit could observe `active=false`
+      // (briefly between iterations) and start a parallel drain.
+      current = await this.mutex.runExclusive<
+        { payload: ChatSendPayload; emit: EmitFn } | null
+      >(sid, async () => {
+        const queue = this.queues.get(sid);
+        if (!queue || queue.length === 0) {
+          this.queues.delete(sid);
+          this.active.delete(sid);
+          return null;
+        }
+        const next = queue.shift()!;
+        // Keep `active` set so concurrent submits enqueue rather than dispatch.
+        return next;
+      });
     }
   }
 
@@ -119,11 +159,8 @@ export class SessionPipelineService {
         );
       });
 
+    // Update donePromise so an interrupt waiter can observe completion.
     this.active.set(sid, { donePromise });
-    try {
-      await donePromise;
-    } finally {
-      this.active.delete(sid);
-    }
+    await donePromise;
   }
 }

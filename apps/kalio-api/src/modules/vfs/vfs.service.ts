@@ -52,7 +52,16 @@ export class VFSService {
    */
   readBinary(sessionId: string, filePath: string): Buffer {
     const safePath = this.resolveSafe(sessionId, filePath);
-    return readFileSync(safePath);
+    try {
+      return readFileSync(safePath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        const typedErr = new Error(`VFS_FILE_NOT_FOUND: ${filePath} not found in session ${sessionId}`);
+        (typedErr as NodeJS.ErrnoException).code = 'VFS_FILE_NOT_FOUND';
+        throw typedErr;
+      }
+      throw err;
+    }
   }
 
   readFile(sessionId: string, filePath: string): VFSReadResult {

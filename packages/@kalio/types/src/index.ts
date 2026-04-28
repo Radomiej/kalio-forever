@@ -404,7 +404,7 @@ export interface SocketEvents {
   };
   'chat:error': {
     sessionId: ID;
-    code: 'PROVIDER_NOT_CONFIGURED' | 'LLM_ERROR' | 'TOOL_ERROR' | 'INTERRUPTED' | 'QUEUE_FULL';
+    code: 'PROVIDER_NOT_CONFIGURED' | 'LLM_ERROR' | 'TOOL_ERROR' | 'INTERRUPTED' | 'QUEUE_FULL' | 'MAX_ITERATIONS_REACHED';
     message: string;
   };
 

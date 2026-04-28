@@ -68,6 +68,9 @@ function makeBlockingChatService(): {
   };
 }
 
+/** Drain all pending microtasks/macrotasks so the mutex chain can settle. */
+const flush = () => new Promise<void>((r) => setImmediate(r));
+
 function makeEmit(): { emit: EmitFn; events: Array<{ event: string; data: unknown }> } {
   const events: Array<{ event: string; data: unknown }> = [];
   const emit: EmitFn = (event, data) => {
@@ -95,8 +98,7 @@ describe('SessionPipelineService', () => {
   it('idle submit dispatches immediately', async () => {
     const { emit, events } = makeEmit();
     const promise = svc.submit(basePayload('s1', 'hello'), emit);
-    // give the microtask a tick
-    await Promise.resolve();
+    await flush();
     expect(chatHarness.callsReceived).toHaveLength(1);
     expect(chatHarness.callsReceived[0].content).toBe('hello');
     // No chat:queued for an idle session
@@ -108,11 +110,11 @@ describe('SessionPipelineService', () => {
   it('submit during active turn enqueues and emits chat:queued', async () => {
     const { emit, events } = makeEmit();
     const first = svc.submit(basePayload('s1', 'first'), emit);
-    await Promise.resolve();
+    await flush();
     expect(chatHarness.callsReceived).toHaveLength(1);
 
     const second = svc.submit(basePayload('s1', 'second'), emit);
-    await Promise.resolve();
+    await flush();
 
     // Still only one handleTurn call
     expect(chatHarness.callsReceived).toHaveLength(1);
@@ -129,10 +131,10 @@ describe('SessionPipelineService', () => {
   it('drains queue head after agent:done in FIFO order', async () => {
     const { emit } = makeEmit();
     const p1 = svc.submit(basePayload('s1', 'a'), emit);
-    await Promise.resolve();
+    await flush();
     const p2 = svc.submit(basePayload('s1', 'b'), emit);
     const p3 = svc.submit(basePayload('s1', 'c'), emit);
-    await Promise.resolve();
+    await flush();
 
     expect(chatHarness.callsReceived).toHaveLength(1);
     await chatHarness.releaseAll();
@@ -144,12 +146,12 @@ describe('SessionPipelineService', () => {
   it('interrupt aborts current turn and starts new one with the interrupting payload', async () => {
     const { emit } = makeEmit();
     const p1 = svc.submit(basePayload('s1', 'first'), emit);
-    await Promise.resolve();
+    await flush();
     expect(chatHarness.callsReceived).toHaveLength(1);
 
     const p2 = svc.submit(basePayload('s1', 'urgent', true), emit);
     // Interrupt should call abort on the chat service
-    await Promise.resolve();
+    await flush();
     expect(chatHarness.chat.abort).toHaveBeenCalledWith('s1');
 
     await chatHarness.releaseAll(); // unblock both runs
@@ -163,7 +165,7 @@ describe('SessionPipelineService', () => {
     const { emit } = makeEmit();
     const a = svc.submit(basePayload('sA', 'msgA'), emit);
     const b = svc.submit(basePayload('sB', 'msgB'), emit);
-    await Promise.resolve();
+    await flush();
     // Both should run concurrently
     expect(chatHarness.callsReceived).toHaveLength(2);
     await chatHarness.releaseAll();
@@ -174,15 +176,15 @@ describe('SessionPipelineService', () => {
     const { emit, events } = makeEmit();
     const promises: Promise<void>[] = [];
     promises.push(svc.submit(basePayload('s1', 'active'), emit));
-    await Promise.resolve();
+    await flush();
     // Fill queue to cap
     for (let i = 0; i < 10; i++) {
       promises.push(svc.submit(basePayload('s1', `q${i}`), emit));
+      await flush();
     }
-    await Promise.resolve();
     // 11th queued submit should be rejected
     promises.push(svc.submit(basePayload('s1', 'overflow'), emit));
-    await Promise.resolve();
+    await flush();
 
     const errors = events.filter((e) => e.event === 'chat:error');
     expect(errors.some((e) => (e.data as { code: string }).code === 'QUEUE_FULL')).toBe(true);
@@ -194,9 +196,9 @@ describe('SessionPipelineService', () => {
   it('empty interrupt acts as a pure Stop (aborts current, no new turn)', async () => {
     const { emit } = makeEmit();
     const p1 = svc.submit(basePayload('s1', 'first'), emit);
-    await Promise.resolve();
+    await flush();
     const stop = svc.submit(basePayload('s1', '', true), emit);
-    await Promise.resolve();
+    await flush();
 
     expect(chatHarness.chat.abort).toHaveBeenCalledWith('s1');
     await chatHarness.releaseAll();
@@ -208,13 +210,42 @@ describe('SessionPipelineService', () => {
     expect(chatHarness.callsReceived[0].content).toBe('first');
   });
 
+  it('serialises concurrent submits to an idle session (race condition guard)', async () => {
+    // Fire 5 submits in the same microtask without any awaits between them.
+    // Without per-session atomicity, several would observe `isActive=false`
+    // and all call handleTurn → multiple agent:start brackets per session.
+    const { emit, events } = makeEmit();
+    const promises = [
+      svc.submit(basePayload('s1', 'm0'), emit),
+      svc.submit(basePayload('s1', 'm1'), emit),
+      svc.submit(basePayload('s1', 'm2'), emit),
+      svc.submit(basePayload('s1', 'm3'), emit),
+      svc.submit(basePayload('s1', 'm4'), emit),
+    ];
+    // Let mutex chains settle their decision phase
+    await new Promise((r) => setImmediate(r));
+
+    // Exactly one handleTurn should be active; the rest must be queued.
+    expect(chatHarness.callsReceived).toHaveLength(1);
+    const queuedEvents = events.filter((e) => e.event === 'chat:queued');
+    expect(queuedEvents).toHaveLength(4);
+
+    await chatHarness.releaseAll();
+    await Promise.all(promises);
+
+    // All five should eventually run in submission order.
+    expect(chatHarness.callsReceived.map((c) => c.content)).toEqual([
+      'm0', 'm1', 'm2', 'm3', 'm4',
+    ]);
+  });
+
   it('disconnect/abortAll purges queue and active for a session', async () => {
     const { emit } = makeEmit();
     svc.submit(basePayload('s1', 'a'), emit);
-    await Promise.resolve();
+    await flush();
     svc.submit(basePayload('s1', 'b'), emit);
     svc.submit(basePayload('s1', 'c'), emit);
-    await Promise.resolve();
+    await flush();
 
     svc.abortAll('s1');
     await chatHarness.releaseAll();

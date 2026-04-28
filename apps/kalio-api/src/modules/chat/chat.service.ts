@@ -93,7 +93,6 @@ export class ChatService {
         }
 
         const iterationMessageId = iteration === 1 ? firstMessageId : nanoid();
-        lastMessageId = iterationMessageId;
 
         const state = new TurnState();
         const ctx: StreamContext = {
@@ -170,7 +169,10 @@ export class ChatService {
         });
 
         // No tool calls this iteration → final answer reached.
-        if (state.toolCalls.length === 0) break;
+        if (state.toolCalls.length === 0) {
+          lastMessageId = iterationMessageId;
+          break;
+        }
       }
 
       // If the loop exited because of an abort (interrupt), surface a
@@ -181,6 +183,12 @@ export class ChatService {
           sessionId,
           code: 'INTERRUPTED',
           message: 'Turn interrupted by user',
+        });
+      } else if (iteration > MAX_ITERATIONS) {
+        emit('chat:error', {
+          sessionId,
+          code: 'MAX_ITERATIONS_REACHED',
+          message: `Agent loop exceeded ${MAX_ITERATIONS} iterations`,
         });
       } else {
         emit('chat:complete', { sessionId, messageId: lastMessageId });
