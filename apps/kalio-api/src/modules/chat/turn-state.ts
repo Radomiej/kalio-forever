@@ -7,6 +7,7 @@ import type { LLMToolCall } from '@kalio/types';
 export class TurnState {
   text = '';
   thinking = '';
+  hadContent = false;
   readonly toolCalls: LLMToolCall[] = [];
   private seq = 0;
 

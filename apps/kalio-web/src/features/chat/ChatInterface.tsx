@@ -217,6 +217,13 @@ export function ChatInterface() {
     };
   }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn]);
 
+  // Clear stale retry content when the user switches sessions.
+  // Without this, clicking Retry after switching sessions would send the previous
+  // session's message into the new session.
+  useEffect(() => {
+    lastSentContentRef.current = '';
+  }, [activeSessionId]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, toolActivities]);

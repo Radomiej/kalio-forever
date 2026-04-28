@@ -27,20 +27,22 @@ export function ModelCombobox({
   'data-testid': testId,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState(value);
+  const [query, setQuery] = useState('');
+  const [typedSinceOpen, setTypedSinceOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Keep query in sync with external value when not typing
-  useEffect(() => {
-    if (!open) setQuery(value);
-  }, [value, open]);
 
   useEffect(() => {
     if (open && inputRef.current) {
       inputRef.current.focus();
     }
   }, [open]);
+
+  const openDropdown = () => {
+    setQuery('');
+    setTypedSinceOpen(false);
+    setOpen(true);
+  };
 
   // Close when clicking outside
   useEffect(() => {
@@ -54,9 +56,12 @@ export function ModelCombobox({
     return () => document.removeEventListener('mousedown', handleMouseDown);
   }, [open]);
 
-  const filtered = useMemo(() => fuzzyFilter(query, options), [query, options]);
+  const filtered = useMemo(() => {
+    if (!typedSinceOpen) return options;
+    return fuzzyFilter(query, options);
+  }, [typedSinceOpen, query, options]);
 
-  const displayValue = open ? query : value;
+  const displayValue = open && typedSinceOpen ? query : value;
 
   return (
     <div ref={containerRef} className="relative w-full">
@@ -68,10 +73,14 @@ export function ModelCombobox({
           value={displayValue}
           onChange={(e) => {
             setQuery(e.target.value);
+            setTypedSinceOpen(true);
             onChange(e.target.value);
             if (!open) setOpen(true);
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            openDropdown();
+            inputRef.current?.select();
+          }}
           disabled={disabled || loading}
           placeholder={loading ? 'Loading models…' : placeholder}
           data-testid={testId}
@@ -86,6 +95,7 @@ export function ModelCombobox({
               className="btn btn-ghost btn-xs px-1 text-base-content/40"
               onClick={() => {
                 setQuery('');
+                setTypedSinceOpen(false);
                 onChange('');
                 inputRef.current?.focus();
               }}
@@ -99,8 +109,11 @@ export function ModelCombobox({
             type="button"
             className="btn btn-ghost btn-xs px-1 text-base-content/40"
             onClick={() => {
-              if (!disabled && !loading) {
-                setOpen((o) => !o);
+              if (disabled || loading) return;
+              if (open) {
+                setOpen(false);
+              } else {
+                openDropdown();
               }
             }}
             tabIndex={-1}

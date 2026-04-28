@@ -208,8 +208,14 @@ export const useSessionStore = create<SessionState>((set) => ({
     })),
 
   removeLastAgentTurn: () =>
-    set((s) => ({
-      agentTurns: s.agentTurns.slice(0, -1),
-      activeTurnId: null,
-    })),
+    set((s) => {
+      if (!s.activeSessionId) return s;
+      const sid = s.activeSessionId;
+      const lastIdx = s.agentTurns.map((t) => t.sessionId).lastIndexOf(sid);
+      if (lastIdx === -1) return s;
+      return {
+        agentTurns: s.agentTurns.filter((_, i) => i !== lastIdx),
+        activeTurnId: null,
+      };
+    }),
 }));

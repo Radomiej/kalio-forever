@@ -9,6 +9,7 @@ export class TextDeltaHandler implements ChunkHandler<TextDeltaChunk> {
 
   async handle(chunk: TextDeltaChunk, ctx: StreamContext): Promise<void> {
     ctx.state.appendText(chunk.delta);
+    ctx.state.hadContent = true;
     ctx.emit('chat:chunk', {
       delta: chunk.delta,
       done: false,

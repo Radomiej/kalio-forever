@@ -1,16 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useSessionStore } from './sessionStore';
 
-/**
- * Unit tests for AgentTurn management actions in sessionStore.
- * Focuses on the new `markAgentTurnError` and `removeLastAgentTurn` actions
- * added for the execution-tracking error strategy.
- */
-
 function resetStore() {
   useSessionStore.setState({
     agentTurns: [],
     activeTurnId: null,
+    activeSessionId: null,
   });
 }
 
@@ -68,6 +63,7 @@ describe('sessionStore — AgentTurn actions', () => {
 
   describe('removeLastAgentTurn', () => {
     it('removes the last turn from agentTurns', () => {
+      useSessionStore.setState({ activeSessionId: 's1' });
       useSessionStore.getState().startAgentTurn('t1', 's1');
       useSessionStore.getState().finalizeAgentTurn();
       useSessionStore.getState().startAgentTurn('t2', 's1');
@@ -80,6 +76,7 @@ describe('sessionStore — AgentTurn actions', () => {
     });
 
     it('clears activeTurnId', () => {
+      useSessionStore.setState({ activeSessionId: 's1' });
       useSessionStore.getState().startAgentTurn('t1', 's1');
       useSessionStore.getState().removeLastAgentTurn();
 
@@ -87,8 +84,42 @@ describe('sessionStore — AgentTurn actions', () => {
     });
 
     it('is a no-op when agentTurns is empty (does not throw)', () => {
+      useSessionStore.setState({ activeSessionId: 's1' });
       expect(() => useSessionStore.getState().removeLastAgentTurn()).not.toThrow();
       expect(useSessionStore.getState().agentTurns).toHaveLength(0);
+    });
+
+    it('only removes the last turn for the active session, leaves other-session turns intact', () => {
+      // s1 has two turns, s2 has one turn
+      useSessionStore.setState({
+        activeSessionId: 's1',
+        agentTurns: [
+          { id: 'a1', sessionId: 's1', items: [], done: true },
+          { id: 'b1', sessionId: 's2', items: [], done: true },
+          { id: 'a2', sessionId: 's1', items: [], done: false },
+        ],
+        activeTurnId: 'a2',
+      });
+
+      useSessionStore.getState().removeLastAgentTurn();
+
+      const { agentTurns, activeTurnId } = useSessionStore.getState();
+      expect(agentTurns.map((t) => t.id)).toEqual(['a1', 'b1']);
+      expect(activeTurnId).toBeNull();
+    });
+
+    it('does not touch turns from another session when active session has no turns', () => {
+      useSessionStore.setState({
+        activeSessionId: 's2',
+        agentTurns: [
+          { id: 'a1', sessionId: 's1', items: [], done: true },
+        ],
+        activeTurnId: null,
+      });
+
+      useSessionStore.getState().removeLastAgentTurn();
+
+      expect(useSessionStore.getState().agentTurns).toHaveLength(1);
     });
   });
 });
