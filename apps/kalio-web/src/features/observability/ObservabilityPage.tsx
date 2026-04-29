@@ -4,6 +4,7 @@ import {
   RefreshCw, Zap, Play, Pause, Search, X,
 } from 'lucide-react';
 import type { AuditType, AuditLogEntry } from '@kalio/types';
+import { FriendlyId } from '../../components/ui/FriendlyId';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -80,9 +81,7 @@ function EntryRow({ entry }: { entry: AuditLogEntry }) {
 
         {/* session */}
         {entry.sessionId && (
-          <span className="text-[10px] font-mono text-base-content/25 shrink-0 max-w-[80px] truncate" title={entry.sessionId}>
-            {entry.sessionId.slice(0, 8)}
-          </span>
+          <FriendlyId id={entry.sessionId} className="shrink-0" />
         )}
 
         {/* time */}
