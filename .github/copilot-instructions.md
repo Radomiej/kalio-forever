@@ -130,6 +130,19 @@ window.parent.postMessage({ type: 'kalio_send_message', content: 'user answer' }
 - E2E: Playwright in `apps/e2e/`, start server with `.\start-dev.ps1` before running
 - Pre-existing failing test: `raapp.service.spec.ts` — 7 failures due to missing `ConfigService` mock — do NOT fix unless specifically asked
 
+### Test-driven bug fixes & review changes
+
+**Every bug fix must be preceded by a failing test that reproduces the problem. Only apply the fix after the test fails.**
+- Write or update a test that demonstrates the bug
+- Run the test — confirm it fails with the expected error
+- Apply the minimal fix
+- Run the test again — confirm it passes
+
+**Every code change requested during review must be confirmed by a test.**
+- If review points out a missing edge case → write a test for that edge case first
+- If review requests behavioral change → update existing tests or add new ones before modifying implementation
+- Never apply review feedback without test coverage
+
 ## Forbidden
 
 - `any` in TypeScript
