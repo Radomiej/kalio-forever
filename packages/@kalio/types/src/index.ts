@@ -558,7 +558,7 @@ export interface MemorySearchRequest {
 }
 
 export interface EmbeddingStatus {
-  provider: 'openai-compatible' | 'ollama';
+  provider: 'openai-compatible' | 'ollama' | 'mock';
   model: string;
   dimensions: number;
   baseUrlMasked: string;
