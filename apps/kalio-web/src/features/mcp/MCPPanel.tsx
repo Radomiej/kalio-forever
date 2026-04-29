@@ -124,7 +124,9 @@ export function MCPPanel() {
   };
 
   const deleteServer = async (id: string) => {
-    await apiClient.delete(`/api/mcp/servers/${id}`).catch(() => {});
+    await apiClient.delete(`/api/mcp/servers/${id}`).catch((err: unknown) => {
+      console.error('[MCPPanel] delete failed', err);
+    });
     setServers((prev) => prev.filter((s) => s.id !== id));
   };
 

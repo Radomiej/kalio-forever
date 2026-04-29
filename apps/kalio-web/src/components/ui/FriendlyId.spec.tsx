@@ -115,4 +115,59 @@ describe('FriendlyId', () => {
     });
     expect(parentClick).not.toHaveBeenCalled();
   });
+
+  // ── context prop ──────────────────────────────────────────────────────────
+
+  it('includes context label in tooltip when context is provided', () => {
+    render(<FriendlyId id="sess-123" context="Session" />);
+    const el = screen.getByTestId('friendly-id');
+    expect(el.getAttribute('data-tip')).toContain('Session ID');
+    expect(el.getAttribute('data-tip')).toContain('sess-123');
+  });
+
+  it('shows context prefix text in the rendered label', () => {
+    render(<FriendlyId id="msg-456" context="Msg" />);
+    expect(screen.getByTestId('friendly-id').textContent).toContain('Msg');
+  });
+
+  it('omits context prefix when context is not provided', () => {
+    render(<FriendlyId id="plain-id" />);
+    const el = screen.getByTestId('friendly-id');
+    // tooltip is just the raw ID with no prefix
+    expect(el.getAttribute('data-tip')).toBe('plain-id');
+  });
+
+  // ── resolvedTitle prop ────────────────────────────────────────────────────
+
+  it('shows resolvedTitle instead of friendly hash when provided', () => {
+    render(<FriendlyId id="raw-id-xyz" resolvedTitle="My Chat Session" />);
+    const el = screen.getByTestId('friendly-id');
+    expect(el.textContent).toContain('My Chat Session');
+    expect(el.textContent).not.toMatch(/^[a-z]+_[a-z]+/);
+  });
+
+  it('truncates long resolvedTitle to 18 chars with ellipsis', () => {
+    render(<FriendlyId id="raw-id-abc" resolvedTitle="A very long session title indeed" />);
+    const el = screen.getByTestId('friendly-id');
+    expect(el.textContent).toContain('…');
+    // visible text should be ≤ 19 chars (17 + ellipsis char)
+    const visibleTitle = el.textContent?.replace('…', '') ?? '';
+    expect(visibleTitle.length).toBeLessThanOrEqual(18);
+  });
+
+  it('includes resolvedTitle in tooltip when both context and resolvedTitle are provided', () => {
+    render(<FriendlyId id="s-id" context="Session" resolvedTitle="Kalio Demo" />);
+    const tip = screen.getByTestId('friendly-id').getAttribute('data-tip') ?? '';
+    expect(tip).toContain('Session ID');
+    expect(tip).toContain('Kalio Demo');
+    expect(tip).toContain('s-id');
+  });
+
+  it('copies the raw ID (not the resolvedTitle) on click', async () => {
+    render(<FriendlyId id="the-real-id" resolvedTitle="Human Title" />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('friendly-id'));
+    });
+    expect(mockWriteText).toHaveBeenCalledWith('the-real-id');
+  });
 });

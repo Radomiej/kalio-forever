@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import type { AuditType, AuditLogEntry } from '@kalio/types';
 import { FriendlyId } from '../../components/ui/FriendlyId';
+import { useSessionStore } from '../../store/sessionStore';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -54,11 +55,17 @@ function isSameDay(a: number, b: number) {
          da.getDate() === db.getDate();
 }
 
+/** True for strings that look like bare nanoid/UUID IDs (no spaces, 15-36 chars). */
+function isRawId(s: string): boolean {
+  return s.length >= 15 && s.length <= 36 && /^[A-Za-z0-9_-]+$/.test(s);
+}
+
 // ─── EntryRow ─────────────────────────────────────────────────────────────────
 
-function EntryRow({ entry }: { entry: AuditLogEntry }) {
+function EntryRow({ entry, sessionTitles }: { entry: AuditLogEntry; sessionTitles: Record<string, string> }) {
   const [open, setOpen] = useState(false);
   const cfg = TYPE_CONFIG[entry.type] ?? TYPE_CONFIG.error;
+  const sessionTitle = entry.sessionId ? sessionTitles[entry.sessionId] : undefined;
 
   return (
     <div className={`rounded-lg border border-base-300 px-3 py-2 ${cfg.bg} transition-all`}>
@@ -69,8 +76,12 @@ function EntryRow({ entry }: { entry: AuditLogEntry }) {
           {cfg.short}
         </span>
 
-        {/* label */}
-        <span className="text-xs text-base-content/90 flex-1 truncate min-w-0">{entry.label}</span>
+        {/* label — auto-convert bare IDs to FriendlyId */}
+        {isRawId(entry.label) ? (
+          <FriendlyId id={entry.label} context="Msg" className="flex-1" />
+        ) : (
+          <span className="text-xs text-base-content/90 flex-1 truncate min-w-0">{entry.label}</span>
+        )}
 
         {/* duration */}
         {entry.durationMs != null && (
@@ -81,7 +92,12 @@ function EntryRow({ entry }: { entry: AuditLogEntry }) {
 
         {/* session */}
         {entry.sessionId && (
-          <FriendlyId id={entry.sessionId} className="shrink-0" />
+          <FriendlyId
+            id={entry.sessionId}
+            context="Session"
+            resolvedTitle={sessionTitle}
+            className="shrink-0"
+          />
         )}
 
         {/* time */}
@@ -137,6 +153,11 @@ function StatsBar({ entries }: { entries: AuditLogEntry[] }) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function ObservabilityPage() {
+  const sessions = useSessionStore((s) => s.sessions);
+  const sessionTitles = Object.fromEntries(
+    sessions.filter((s) => s.title).map((s) => [s.id, s.title]),
+  ) as Record<string, string>;
+
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -351,7 +372,7 @@ export function ObservabilityPage() {
               </div>
             );
           }
-          return <EntryRow key={row.entry.id} entry={row.entry} />;
+          return <EntryRow key={row.entry.id} entry={row.entry} sessionTitles={sessionTitles} />;
         })}
 
         <div ref={bottomRef} />
