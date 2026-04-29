@@ -2,7 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { nanoid } from 'nanoid';
 import { eq } from 'drizzle-orm';
 import { resolve, normalize, sep } from 'node:path';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync, realpathSync } from 'node:fs';
 import { DrizzleService } from '../../database/drizzle.service';
 import { allowedPaths } from '../../database/schema';
 import type { AllowedPath, CreateAllowedPathDto } from '@kalio/types';
@@ -66,6 +66,13 @@ export class AllowedPathsService {
   }
 
   private normalizeAndValidate(p: string): string {
-    return normalize(resolve(p));
+    const abs = normalize(resolve(p));
+    try {
+      return realpathSync(abs);
+    } catch {
+      // Path does not exist yet — fall back to the normalised path.
+      // This handles pre-flight checks on paths that haven't been created.
+      return abs;
+    }
   }
 }
