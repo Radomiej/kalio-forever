@@ -23,7 +23,7 @@ export class KVWriteTool {
   async execute(request: ToolCallRequest): Promise<{ key: string; ok: true }> {
     const key = request.args['key'] as string;
     const value = request.args['value'] as string;
-    this.kv.set(request.sessionId, key, value);
+    await this.kv.set(request.sessionId, key, value);
     return { key, ok: true };
   }
 }
@@ -46,7 +46,7 @@ export class KVReadTool {
 
   async execute(request: ToolCallRequest): Promise<{ key: string; value: string | null }> {
     const key = request.args['key'] as string;
-    const value = this.kv.get(request.sessionId, key) ?? null;
+    const value = (await this.kv.get(request.sessionId, key)) ?? null;
     return { key, value };
   }
 }
@@ -65,7 +65,7 @@ export class KVListTool {
   constructor(private readonly kv: KVStoreService) {}
 
   async execute(request: ToolCallRequest): Promise<{ entries: Record<string, string> }> {
-    return { entries: this.kv.list(request.sessionId) };
+    return { entries: await this.kv.list(request.sessionId) };
   }
 }
 
@@ -87,7 +87,7 @@ export class KVDeleteTool {
 
   async execute(request: ToolCallRequest): Promise<{ key: string; deleted: boolean }> {
     const key = request.args['key'] as string;
-    const deleted = this.kv.delete(request.sessionId, key);
+    const deleted = await this.kv.delete(request.sessionId, key);
     return { key, deleted };
   }
 }

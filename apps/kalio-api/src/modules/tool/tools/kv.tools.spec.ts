@@ -29,6 +29,7 @@ describe('KVWriteTool', () => {
 
   describe('positive scenarios', () => {
     it('calls kv.set with sessionId, key, value and returns { key, ok: true }', async () => {
+      (kv.set as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
       const result = await tool.execute(makeRequest('kv_write', { key: 'name', value: 'Alice' }));
 
       expect(kv.set).toHaveBeenCalledWith('sess-kv', 'name', 'Alice');
@@ -36,6 +37,7 @@ describe('KVWriteTool', () => {
     });
 
     it('overwrites existing key without error', async () => {
+      (kv.set as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
       await tool.execute(makeRequest('kv_write', { key: 'counter', value: '1' }));
       await tool.execute(makeRequest('kv_write', { key: 'counter', value: '2' }));
 
@@ -45,6 +47,7 @@ describe('KVWriteTool', () => {
 
   describe('edge cases', () => {
     it('handles empty string value', async () => {
+      (kv.set as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
       const result = await tool.execute(makeRequest('kv_write', { key: 'empty', value: '' }));
 
       expect(kv.set).toHaveBeenCalledWith('sess-kv', 'empty', '');
@@ -52,6 +55,7 @@ describe('KVWriteTool', () => {
     });
 
     it('handles key with special characters', async () => {
+      (kv.set as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
       const result = await tool.execute(makeRequest('kv_write', { key: 'some:key.path', value: 'v' }));
 
       expect(result.key).toBe('some:key.path');
@@ -60,9 +64,7 @@ describe('KVWriteTool', () => {
 
   describe('negative scenarios', () => {
     it('propagates error if kv.set throws', async () => {
-      (kv.set as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        throw new Error('KV_WRITE_FAILED');
-      });
+      (kv.set as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('KV_WRITE_FAILED'));
 
       await expect(tool.execute(makeRequest('kv_write', { key: 'x', value: 'y' }))).rejects.toThrow('KV_WRITE_FAILED');
     });
@@ -82,7 +84,7 @@ describe('KVReadTool', () => {
 
   describe('positive scenarios', () => {
     it('returns { key, value } when key exists', async () => {
-      (kv.get as ReturnType<typeof vi.fn>).mockReturnValue('Alice');
+      (kv.get as ReturnType<typeof vi.fn>).mockResolvedValue('Alice');
 
       const result = await tool.execute(makeRequest('kv_read', { key: 'name' }));
 
@@ -90,7 +92,7 @@ describe('KVReadTool', () => {
     });
 
     it('passes sessionId and key to kv.get', async () => {
-      (kv.get as ReturnType<typeof vi.fn>).mockReturnValue('v');
+      (kv.get as ReturnType<typeof vi.fn>).mockResolvedValue('v');
 
       await tool.execute(makeRequest('kv_read', { key: 'mykey' }, 'sess-other'));
 
@@ -100,7 +102,7 @@ describe('KVReadTool', () => {
 
   describe('edge cases', () => {
     it('returns null value when key does not exist', async () => {
-      (kv.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+      (kv.get as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
       const result = await tool.execute(makeRequest('kv_read', { key: 'missing' }));
 
@@ -110,9 +112,7 @@ describe('KVReadTool', () => {
 
   describe('negative scenarios', () => {
     it('propagates error if kv.get throws', async () => {
-      (kv.get as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        throw new Error('KV_IO_ERROR');
-      });
+      (kv.get as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('KV_IO_ERROR'));
 
       await expect(tool.execute(makeRequest('kv_read', { key: 'x' }))).rejects.toThrow('KV_IO_ERROR');
     });
@@ -132,7 +132,7 @@ describe('KVListTool', () => {
 
   describe('positive scenarios', () => {
     it('returns all entries from kv.list', async () => {
-      (kv.list as ReturnType<typeof vi.fn>).mockReturnValue({ name: 'Alice', age: '30' });
+      (kv.list as ReturnType<typeof vi.fn>).mockResolvedValue({ name: 'Alice', age: '30' });
 
       const result = await tool.execute(makeRequest('kv_list'));
 
@@ -140,7 +140,7 @@ describe('KVListTool', () => {
     });
 
     it('passes sessionId to kv.list', async () => {
-      (kv.list as ReturnType<typeof vi.fn>).mockReturnValue({});
+      (kv.list as ReturnType<typeof vi.fn>).mockResolvedValue({});
 
       await tool.execute(makeRequest('kv_list', {}, 'sess-xyz'));
 
@@ -150,7 +150,7 @@ describe('KVListTool', () => {
 
   describe('edge cases', () => {
     it('returns empty object when store is empty', async () => {
-      (kv.list as ReturnType<typeof vi.fn>).mockReturnValue({});
+      (kv.list as ReturnType<typeof vi.fn>).mockResolvedValue({});
 
       const result = await tool.execute(makeRequest('kv_list'));
 
@@ -160,9 +160,7 @@ describe('KVListTool', () => {
 
   describe('negative scenarios', () => {
     it('propagates error if kv.list throws', async () => {
-      (kv.list as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        throw new Error('KV_LIST_ERROR');
-      });
+      (kv.list as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('KV_LIST_ERROR'));
 
       await expect(tool.execute(makeRequest('kv_list'))).rejects.toThrow('KV_LIST_ERROR');
     });
@@ -182,7 +180,7 @@ describe('KVDeleteTool', () => {
 
   describe('positive scenarios', () => {
     it('returns { key, deleted: true } when key was present', async () => {
-      (kv.delete as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (kv.delete as ReturnType<typeof vi.fn>).mockResolvedValue(true);
 
       const result = await tool.execute(makeRequest('kv_delete', { key: 'name' }));
 
@@ -190,7 +188,7 @@ describe('KVDeleteTool', () => {
     });
 
     it('passes sessionId and key to kv.delete', async () => {
-      (kv.delete as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (kv.delete as ReturnType<typeof vi.fn>).mockResolvedValue(true);
 
       await tool.execute(makeRequest('kv_delete', { key: 'thekey' }, 'sess-del'));
 
@@ -200,7 +198,7 @@ describe('KVDeleteTool', () => {
 
   describe('edge cases', () => {
     it('returns { key, deleted: false } when key was not present', async () => {
-      (kv.delete as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (kv.delete as ReturnType<typeof vi.fn>).mockResolvedValue(false);
 
       const result = await tool.execute(makeRequest('kv_delete', { key: 'nonexistent' }));
 
@@ -210,9 +208,7 @@ describe('KVDeleteTool', () => {
 
   describe('negative scenarios', () => {
     it('propagates error if kv.delete throws', async () => {
-      (kv.delete as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        throw new Error('KV_DELETE_ERROR');
-      });
+      (kv.delete as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('KV_DELETE_ERROR'));
 
       await expect(tool.execute(makeRequest('kv_delete', { key: 'x' }))).rejects.toThrow('KV_DELETE_ERROR');
     });
