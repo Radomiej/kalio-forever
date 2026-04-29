@@ -3,15 +3,23 @@ import {
   Get,
   Post,
   Delete,
+  Put,
   Body,
   Param,
   Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import type { MemoryIngestResult, MemorySearchResult, MemorySearchMode } from '@kalio/types';
+import type { MemoryIngestResult, MemorySearchResult, MemorySearchMode, EmbeddingStatus } from '@kalio/types';
 import { MemoryService } from './memory.service';
 import type { IngestDto, IngestConversationDto, SearchDto } from './dto';
+
+interface EmbeddingConfigDto {
+  baseUrl: string;
+  apiKey?: string;
+  model: string;
+  dimensions: number;
+}
 
 @Controller('memory')
 export class MemoryController {
@@ -68,7 +76,29 @@ export class MemoryController {
   }
 
   @Get('status/embedding')
-  getEmbeddingStatus() {
+  getEmbeddingStatus(): EmbeddingStatus {
     return this.memoryService.getEmbeddingService().getStatus();
+  }
+
+  @Put('config/embedding')
+  async setEmbeddingConfig(@Body() dto: EmbeddingConfigDto): Promise<EmbeddingStatus> {
+    await this.memoryService.getEmbeddingService().reconfigure({
+      baseUrl: dto.baseUrl,
+      apiKey: dto.apiKey ?? null,
+      model: dto.model,
+      dimensions: dto.dimensions,
+    });
+    return this.memoryService.getEmbeddingService().getStatus();
+  }
+
+  @Post('test/embedding')
+  @HttpCode(HttpStatus.OK)
+  async testEmbedding(): Promise<{ ok: boolean; error?: string }> {
+    try {
+      await this.memoryService.getEmbeddingService().embedOne('test');
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 }

@@ -1,10 +1,11 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { nanoid } from 'nanoid';
 import path from 'node:path';
 import type { MemoryIngestResult, MemorySearchResult } from '@kalio/types';
 import { EmbeddingService } from './embedding.service';
 import { VectorStoreService } from './vector-store.service';
+import { AppSettingsService } from '../../database/app-settings.service';
 
 // ── Text splitting constants ────────────────────────────────────────────────
 
@@ -14,20 +15,27 @@ const CHUNK_OVERLAP = 200;
 // ── MemoryService ───────────────────────────────────────────────────────────
 
 @Injectable()
-export class MemoryService implements OnModuleDestroy {
+export class MemoryService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MemoryService.name);
   private readonly embeddingService: EmbeddingService;
   private readonly stores = new Map<string, VectorStoreService>();
   private readonly dbBasePath: string;
 
-  constructor(private readonly config: ConfigService) {
-    this.embeddingService = new EmbeddingService(config);
+  constructor(
+    private readonly config: ConfigService,
+    private readonly appSettings: AppSettingsService,
+  ) {
+    this.embeddingService = new EmbeddingService(config, appSettings);
     this.dbBasePath = this.config.get<string>('MEMORY_DB_PATH', './data/memory');
     this.logger.log(`MemoryService initialized: ${this.dbBasePath}`);
   }
 
   getEmbeddingService(): EmbeddingService {
     return this.embeddingService;
+  }
+
+  async onModuleInit(): Promise<void> {
+    await this.embeddingService.onModuleInit();
   }
 
   private getStore(personaId: string): VectorStoreService {
