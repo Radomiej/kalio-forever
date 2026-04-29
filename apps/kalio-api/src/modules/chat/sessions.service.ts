@@ -62,6 +62,16 @@ export class SessionsService {
       .where(eq(sessions.id, id));
   }
 
+  async generateTitle(id: string): Promise<{ title: string }> {
+    await this.assertExists(id);
+    const history = await this.repo.loadHistory(id);
+    const firstUser = history.find((m) => m.role === 'user');
+    const title = firstUser
+      ? firstUser.content.slice(0, 60).trim() + (firstUser.content.length > 60 ? '…' : '')
+      : 'New Chat';
+    return { title };
+  }
+
   private async assertExists(id: string): Promise<void> {
     const [row] = await this.drizzle.db
       .select()

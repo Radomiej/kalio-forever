@@ -16,13 +16,18 @@ const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v)
 export class DrizzleMessageRepository implements IMessageRepository {
   constructor(private readonly drizzle: DrizzleService) {}
 
-  /** Creates the session row if it does not already exist (idempotent). */
-  async ensureSession(sessionId: string, personaId: string): Promise<void> {
-    const now = new Date();
-    await this.drizzle.db
-      .insert(sessions)
-      .values({ id: sessionId, personaId, title: '', createdAt: now, updatedAt: now })
-      .onConflictDoNothing();
+  /** Validates the session row exists. Throws if the session was deleted. */
+  async ensureSession(sessionId: string, _personaId: string): Promise<void> {
+    const row = await this.drizzle.db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .then((r) => r[0]);
+    if (!row) {
+      const err = new Error(`Session ${sessionId} not found`);
+      (err as NodeJS.ErrnoException).code = 'SESSION_NOT_FOUND';
+      throw err;
+    }
   }
 
   async loadHistory(sessionId: string): Promise<ChatMessage[]> {

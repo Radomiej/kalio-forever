@@ -33,4 +33,9 @@ export class SessionsController {
   ): Promise<void> {
     await this.sessions.rename(id, body.title);
   }
+
+  @Post(':id/generate-title')
+  async generateTitle(@Param('id') id: string): Promise<{ title: string }> {
+    return this.sessions.generateTitle(id);
+  }
 }
