@@ -3,6 +3,7 @@ import { SubagentTool } from './subagent.tool';
 import type { LLMService } from '../../llm/llm.service';
 import type { ModuleRef } from '@nestjs/core';
 import type { ToolCallRequest } from '@kalio/types';
+import type { ToolEntry } from '../tool-registry.service';
 
 function makeRequest(args: Record<string, unknown> = {}, sessionId = 'sess-sub'): ToolCallRequest {
   return { callId: 'call-1', sessionId, toolName: 'run_subagent', args };
@@ -83,6 +84,38 @@ describe('SubagentTool', () => {
 
       expect(registry.getToolsForSkills).toHaveBeenCalledWith(['vfs_read', 'vfs_write']);
       expect(registry.getAllTools).not.toHaveBeenCalled();
+    });
+
+    it('works with the public ToolRegistryService API that exposes getEntries()', async () => {
+      const entry: ToolEntry = {
+        meta: {
+          name: 'vfs_read',
+          description: 'Read a file',
+          parameters: { type: 'object' },
+          requiresConfirmation: false,
+        },
+        execute: vi.fn().mockResolvedValue({}),
+      };
+
+      moduleRef = {
+        get: vi.fn().mockReturnValue({
+          getEntries: vi.fn().mockReturnValue([entry]),
+        }),
+      };
+      tool = new SubagentTool(llm as LLMService, moduleRef as ModuleRef);
+      (llm.streamChat as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+      await expect(tool.execute(makeRequest({ objective: 'task' }))).resolves.toMatchObject({
+        result: 'Sub-agent completed with no output.',
+      });
+
+      expect(llm.streamChat).toHaveBeenCalledWith(
+        expect.any(Array),
+        [entry.meta],
+        expect.any(Function),
+        'sess-sub',
+        expect.stringMatching(/^subagent-/),
+      );
     });
   });
 

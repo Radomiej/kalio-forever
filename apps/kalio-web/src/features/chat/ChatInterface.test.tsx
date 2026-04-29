@@ -48,6 +48,7 @@ vi.mock('../../services/eventBus', () => ({
     onContext: (h: (...args: unknown[]) => void) => capture('chat:context', h),
     onAgentStart: (h: (...args: unknown[]) => void) => capture('agent:start', h),
     onAgentDone: (h: (...args: unknown[]) => void) => capture('agent:done', h),
+    onRaAppNativeResult: (h: (...args: unknown[]) => void) => capture('raapp:native_result', h),
     sendMessage: mockSendMessage,
   },
 }));

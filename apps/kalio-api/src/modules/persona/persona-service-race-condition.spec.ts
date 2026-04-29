@@ -16,6 +16,7 @@ describe('PersonaService - Race Condition in onApplicationBootstrap (REGRESSION 
     mockDb = {
       select: vi.fn(),
       insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue(undefined) }),
+      update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }) }),
     };
 
     const moduleRef: TestingModule = await Test.createTestingModule({

@@ -240,4 +240,57 @@ describe('PersonaService', () => {
       await expect(service.onApplicationBootstrap()).rejects.toThrow('Database query failed');
     });
   });
+
+  describe('onApplicationBootstrap — ra-apps prompt guard (BUG-5)', () => {
+    /**
+     * BUG-5: persona.service.ts onApplicationBootstrap() else-branch
+     *
+     * When the `ra-apps` persona already exists, the code always calls
+     * `db.update().set({ systemPrompt: hardcoded, skills, updatedAt })`.
+     * This overwrites any system-prompt customisation the user made, every
+     * time the server restarts.
+     *
+     * Expected: update should NOT include `systemPrompt` so user changes survive.
+     * Actual before fix: `systemPrompt` is always overwritten with the hardcoded value.
+     */
+    it('should NOT overwrite systemPrompt when ra-apps already exists (BUG-5)', async () => {
+      // Both default and ra-apps already exist → skip inserts, reach the else branch
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: 'existing' }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      // The SET payload must not contain systemPrompt — user customisations survive
+      expect(setMock).toHaveBeenCalledWith(
+        expect.not.objectContaining({ systemPrompt: expect.any(String) }),
+      );
+    });
+
+    it('still updates skills when ra-apps already exists', async () => {
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: 'existing' }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({ skills: expect.any(Array) }),
+      );
+    });
+  });
 });

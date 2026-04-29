@@ -91,7 +91,7 @@ describe('LLMPanel', () => {
     mockFetch(defaultMap({ credentials: [CRED] }));
     render(<LLMPanel />);
     await waitFor(() =>
-      expect(screen.getByTestId(`provider-card-${CRED.id}`)).toBeInTheDocument(),
+      expect(screen.getByTestId(`provider-row-${CRED.id}`)).toBeInTheDocument(),
     );
     expect(screen.getByText('My OpenAI')).toBeInTheDocument();
   });
@@ -196,7 +196,7 @@ describe('LLMPanel', () => {
     await user.type(nameInput, 'New Key');
     await user.type(screen.getByTestId('add-provider-apikey'), 'sk-test');
     await user.click(screen.getByTestId('add-provider-submit'));
-    await waitFor(() => expect(screen.getByTestId(`provider-card-${created.id}`)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId(`provider-row-${created.id}`)).toBeInTheDocument());
     // form should be hidden after submit
     expect(screen.queryByTestId('add-provider-form')).not.toBeInTheDocument();
   });
@@ -226,7 +226,7 @@ describe('LLMPanel', () => {
     await waitFor(() => screen.getByTestId(`provider-remove-${CRED.id}`));
     await user.click(screen.getByTestId(`provider-remove-${CRED.id}`));
     await waitFor(() =>
-      expect(screen.queryByTestId(`provider-card-${CRED.id}`)).not.toBeInTheDocument(),
+      expect(screen.queryByTestId(`provider-row-${CRED.id}`)).not.toBeInTheDocument(),
     );
   });
 

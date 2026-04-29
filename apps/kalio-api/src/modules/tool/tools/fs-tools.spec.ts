@@ -125,6 +125,36 @@ describe('FsReadTool', () => {
         tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/huge.bin` })),
       ).rejects.toThrow('FILE_TOO_LARGE');
     });
+
+    /**
+     * BUG-7: fs-read.tool.ts — silent line-range truncation
+     *
+     * When `endLine` or `startLine` exceeds the actual line count,
+     * `Array.slice()` silently returns fewer lines than requested.
+     * No error is surfaced to the LLM or the user.
+     *
+     * Expected: throw `LINE_OUT_OF_RANGE` so the caller knows the range is invalid.
+     * Actual before fix: resolves with truncated content and no indication of the problem.
+     */
+    it('throws LINE_OUT_OF_RANGE when endLine exceeds total line count (BUG-7)', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isFile: () => true, size: 50 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('line1\nline2'); // 2 lines only
+
+      await expect(
+        tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/f.ts`, startLine: 1, endLine: 999 })),
+      ).rejects.toThrow('LINE_OUT_OF_RANGE');
+    });
+
+    it('throws LINE_OUT_OF_RANGE when startLine exceeds total line count (BUG-7)', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isFile: () => true, size: 50 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('line1\nline2'); // 2 lines only
+
+      await expect(
+        tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/f.ts`, startLine: 5 })),
+      ).rejects.toThrow('LINE_OUT_OF_RANGE');
+    });
   });
 });
 
