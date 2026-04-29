@@ -15,8 +15,25 @@ export default defineConfig({
   server: {
     port: 5188,
     proxy: {
-      '/api': { target: 'http://localhost:3016', changeOrigin: true },
-      '/socket.io': { target: 'http://localhost:3016', ws: true, changeOrigin: true },
+      '/api': {
+        target: 'http://localhost:3016',
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            console.warn('[proxy] /api error:', err.message);
+          });
+        },
+      },
+      '/socket.io': {
+        target: 'http://localhost:3016',
+        ws: true,
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            console.warn('[proxy] /socket.io error:', err.message);
+          });
+        },
+      },
     },
   },
 });

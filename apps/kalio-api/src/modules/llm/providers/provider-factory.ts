@@ -1,4 +1,4 @@
-import type { ILLMProvider } from '../llm.service';
+import type { ILLMProvider, ProviderConfig } from '../llm.types';
 import { MockLLMProvider } from './mock.provider';
 import { OpenRouterProvider } from './openrouter.provider';
 import { CometAPIProvider } from './cometapi.provider';
@@ -7,12 +7,7 @@ import { OllamaProvider } from './ollama.provider';
 import { XiaomiMiMoProvider } from './xiaomimimo.provider';
 import { BaseOpenAICompatibleProvider } from './base-openai-compatible.provider';
 
-export interface ProviderConfig {
-  provider: string;
-  apiKey: string;
-  model: string;
-  baseUrl?: string;
-}
+export type { ProviderConfig } from '../llm.types';
 
 export function createLLMProvider(config: ProviderConfig): ILLMProvider {
   const { provider, apiKey, model, baseUrl } = config;

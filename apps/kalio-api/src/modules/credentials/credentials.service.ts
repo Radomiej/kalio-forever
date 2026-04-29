@@ -4,7 +4,7 @@ import type { Credential, CreateCredentialDto, LLMProviderType } from '@kalio/ty
 import { DrizzleService } from '../../database/drizzle.service';
 import { credentials, appSettings } from '../../database/schema';
 import { eq } from 'drizzle-orm';
-import type { ProviderConfig } from '../llm/providers/provider-factory';
+import type { ProviderConfig } from '../llm/llm.types';
 
 @Injectable()
 export class CredentialsService {

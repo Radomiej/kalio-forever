@@ -1,4 +1,4 @@
-import type { ILLMProvider } from '../llm.service';
+import type { ILLMProvider } from '../llm.types';
 import type { LLMMessage, LLMStreamChunk, LLMToolCall } from '@kalio/types';
 
 export class MockLLMProvider implements ILLMProvider {

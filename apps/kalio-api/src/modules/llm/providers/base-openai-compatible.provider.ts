@@ -1,4 +1,4 @@
-import type { ILLMProvider } from '../llm.service';
+import type { ILLMProvider } from '../llm.types';
 import type { LLMMessage, LLMStreamChunk, LLMToolCall, LLMConfig } from '@kalio/types';
 import { Logger } from '@nestjs/common';
 

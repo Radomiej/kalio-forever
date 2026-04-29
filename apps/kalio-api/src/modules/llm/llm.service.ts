@@ -1,18 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { LLMMessage, LLMStreamChunk, LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
-import { createLLMProvider, type ProviderConfig } from './providers/provider-factory';
+import type { ILLMProvider, ProviderConfig } from './llm.types';
+import { createLLMProvider } from './providers/provider-factory';
 import { CredentialsService } from '../credentials/credentials.service';
 
-export interface ILLMProvider {
-  streamChat(
-    messages: LLMMessage[],
-    tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
-    onChunk: (chunk: LLMStreamChunk) => void,
-    sessionId: string,
-    messageId: string,
-  ): Promise<LLMToolCall[]>;
-}
+export type { ILLMProvider } from './llm.types';
 
 @Injectable()
 export class LLMService {
