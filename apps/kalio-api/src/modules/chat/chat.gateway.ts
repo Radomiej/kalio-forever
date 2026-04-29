@@ -119,13 +119,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
+      const pending = await this.raappHITL.getPendingForSession(payload.sessionId);
+      const pendingById = new Map(
+        pending
+          .filter((item) => payload.requestIds.includes(item.id))
+          .map((item) => [item.id, item]),
+      );
       const cancelled = await this.raappHITL.cancelApprovals(payload.requestIds, payload.sessionId);
       client.emit('raapp:native_result', {
         toolCallId: cancelled.toolCallId,
         sessionId: payload.sessionId,
         results: payload.requestIds.map((id) => ({
           id,
-          system: 'unknown',
+          system: pendingById.get(id)?.system ?? 'unknown',
           status: 'cancelled' as const,
         })),
       } satisfies SocketEvents['raapp:native_result']);
