@@ -42,6 +42,13 @@ export const personaKV = sqliteTable('persona_kv', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
+// ─── app_settings ────────────────────────────────────────────────────────────
+export const appSettings = sqliteTable('app_settings', {
+  key:       text('key').primaryKey(),
+  value:     text('value').notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
 // ─── credentials ──────────────────────────────────────────────────────────────
 export const credentials = sqliteTable('credentials', {
   id:        text('id').primaryKey(),
@@ -137,14 +144,6 @@ export const allowedPaths = sqliteTable('allowed_paths', {
   id:        text('id').primaryKey(),
   path:      text('path').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-});
-
-// ─── app_settings ──────────────────────────────────────────────────────────────
-// Global key-value store for app-wide settings (e.g. active LLM credential)
-export const appSettings = sqliteTable('app_settings', {
-  key:       text('key').primaryKey(),
-  value:     text('value').notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
 // ─── raapp_pending_approvals ──────────────────────────────────────────────────
