@@ -42,7 +42,8 @@ test.describe('AC-01: LLM streaming', () => {
   });
 
   test('error from server shows error banner and re-enables input', async ({ page, request }) => {
-    // Create session with an invalid persona so the backend emits chat:error immediately
+    // Create a valid session, navigate to it, then delete it via API before sending
+    // so the backend emits chat:error (SESSION_NOT_FOUND) immediately
     const res = await request.post(`${API_BASE}/sessions`, {
       data: { title: 'AC01 Error Test', personaId: 'default' },
     });
@@ -59,16 +60,17 @@ test.describe('AC-01: LLM streaming', () => {
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });
 
-    // Send a message with a non-existent persona via direct WS; instead simulate by filling and sending normally
-    // The test validates the input recovers after any error
-    await chatInput.fill('trigger test');
+    // Delete the session via API — the next message send will trigger SESSION_NOT_FOUND
+    await request.delete(`${API_BASE}/sessions/${session.id}`);
+
+    await chatInput.fill('trigger error');
     await page.getByTestId('chat-send-btn').click();
 
-    // Input should eventually re-enable (either from response or error recovery)
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    // Input should re-enable quickly after the error (no LLM involved)
+    await expect(chatInput).toBeEnabled({ timeout: 10_000 });
 
-    // Cleanup
-    await request.delete(`${API_BASE}/sessions/${session.id}`);
+    // Error banner should be visible
+    await expect(page.getByTestId('chat-error')).toBeVisible({ timeout: 5000 });
   });
 
   test('WS SESSION_NOT_FOUND error surfaces in chat UI', async ({ page, request }) => {

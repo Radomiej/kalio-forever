@@ -33,7 +33,7 @@ test.describe('AC-13: Anti-spam protection', () => {
     await expect(chatInput).toBeDisabled({ timeout: 3000 });
 
     // Try clicking send button again while disabled — should not send second message
-    await chatInput.fill('This should NOT be sent');
+    await chatInput.fill('This should NOT be sent', { force: true });
     await sendBtn.click({ timeout: 1000 }).catch(() => { /* expected to be blocked */ });
 
     // Wait for first response to complete
