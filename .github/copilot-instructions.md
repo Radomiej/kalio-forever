@@ -143,6 +143,13 @@ window.parent.postMessage({ type: 'kalio_send_message', content: 'user answer' }
 - If review requests behavioral change → update existing tests or add new ones before modifying implementation
 - Never apply review feedback without test coverage
 
+## Agent Session Logging
+
+- After every non-trivial task, create or append a session log in `docs/sessions/`
+- Filename pattern: `YYYY-MM-DD-HH-MM-<brief-topic>.md`
+- Include: what was done, files touched, decisions made, open questions, next steps
+- These logs are for future agents (and humans) to reconstruct context quickly
+
 ## Forbidden
 
 - `any` in TypeScript
