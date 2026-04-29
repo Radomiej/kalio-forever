@@ -3,6 +3,8 @@ import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { RAAppService } from '../../raapp/raapp.service';
 import { RAAppSandboxService } from '../../raapp/raapp-sandbox.service';
+import { EffectsProcessorService } from '../../raapp/effects-processor.service';
+import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
 
 @Injectable()
 @Tool({
@@ -94,11 +96,16 @@ export class RaAppCreateTool {
 export class RunRaAppTool {
   private readonly logger = new Logger(RunRaAppTool.name);
 
-  constructor(private readonly raapp: RAAppService) {}
+  constructor(
+    private readonly raapp: RAAppService,
+    private readonly effectsProcessor: EffectsProcessorService,
+    private readonly hitl: RAAppHITLService,
+  ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
     const id = request.args['id'] as string;
     const inputs = (request.args['inputs'] ?? {}) as Record<string, unknown>;
+    const sessionId = request.sessionId;
     const app = this.raapp.getById(id);
 
     if (!app) {
@@ -119,10 +126,25 @@ export class RunRaAppTool {
         });
         delete outputData['options'];
       }
-      // Execute system effects to compute derived outputs (result, expression, etc.)
+      // Execute system effects (including call_native) to compute derived outputs
+      let pendingApprovals: import('@kalio/types').RaAppPendingApproval[] = [];
       if (app.systemsContent) {
-        const computed = await this.raapp.executeSystems(app.systemsContent, inputs);
-        Object.assign(outputData, computed);
+        const effectsResult = await this.effectsProcessor.processSystemsYaml(
+          app.systemsContent,
+          inputs,
+          { sessionId },
+        );
+        Object.assign(outputData, effectsResult.output);
+
+        if (effectsResult.pendingApprovals.length > 0) {
+          await this.hitl.savePendingApprovals(request.callId, sessionId, effectsResult.pendingApprovals);
+          pendingApprovals = effectsResult.pendingApprovals.map((a) => ({
+            id: a.id,
+            system: a.system,
+            displayLabel: a.displayLabel,
+            args: a.args,
+          }));
+        }
       }
       const data = { output: outputData };
       const result = await this.raapp.execute({ type: 'gui', mode: app.appMode, content: app.guiContent }, data);
@@ -136,6 +158,7 @@ export class RunRaAppTool {
         mode: app.appMode,
         content: app.guiContent,
         renderedContent: result.renderedContent,
+        ...(pendingApprovals.length > 0 ? { pendingApprovals } : {}),
       };
     }
 

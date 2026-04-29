@@ -4,6 +4,7 @@ import type { RAAppBlock, RAAppResult, ChatMessage } from '@kalio/types';
 import { HtmlIframeRenderer } from './HtmlIframeRenderer';
 import { isHtmlString, findHtmlInData, injectEngineCDN } from './raappRendererUtils';
 import { GuiDslRenderer, type GuiDslPayload } from './GuiDslRenderer';
+import { RaAppHITLOverlay } from './RaAppHITLOverlay';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { eventBus } from '../../services/eventBus';
@@ -52,11 +53,23 @@ export function RAAppRenderer({ block, result }: RAAppRendererProps) {
     );
   }
 
+  const pendingApprovals = block.pendingApprovals ?? result?.pendingApprovals ?? [];
+
   const content = result?.renderedContent ?? block.content;
+
+  const hitlOverlay =
+    pendingApprovals.length > 0 ? (
+      <RaAppHITLOverlay pendingApprovals={pendingApprovals} />
+    ) : null;
 
   if (block.type === 'html') {
     const html = injectEngineCDN(content, (block as { engine?: string }).engine);
-    return <HtmlIframeRenderer html={html} title="RA-App" />;
+    return (
+      <>
+        <HtmlIframeRenderer html={html} title="RA-App" />
+        {hitlOverlay}
+      </>
+    );
   }
 
   if (block.type === 'gui') {
@@ -72,7 +85,12 @@ export function RAAppRenderer({ block, result }: RAAppRendererProps) {
         typeof (parsed as GuiDslPayload).data === 'object' &&
         (parsed as GuiDslPayload).data !== null
       ) {
-        return <GuiDslRenderer payload={parsed as GuiDslPayload} onAction={handleGuiAction} />;
+        return (
+          <>
+            <GuiDslRenderer payload={parsed as GuiDslPayload} onAction={handleGuiAction} />
+            {hitlOverlay}
+          </>
+        );
       }
     } catch {
       // not JSON — fall through
@@ -80,13 +98,23 @@ export function RAAppRenderer({ block, result }: RAAppRendererProps) {
 
     // Fallback: sniff raw HTML in content
     if (isHtmlString(content)) {
-      return <HtmlIframeRenderer html={content} title="RA-App" />;
+      return (
+        <>
+          <HtmlIframeRenderer html={content} title="RA-App" />
+          {hitlOverlay}
+        </>
+      );
     }
     try {
       const parsed: unknown = typeof content === 'string' ? JSON.parse(content) : content;
       const sniffed = findHtmlInData(parsed);
       if (sniffed) {
-        return <HtmlIframeRenderer html={sniffed} title="RA-App" />;
+        return (
+          <>
+            <HtmlIframeRenderer html={sniffed} title="RA-App" />
+            {hitlOverlay}
+          </>
+        );
       }
     } catch {
       // not JSON
@@ -94,8 +122,11 @@ export function RAAppRenderer({ block, result }: RAAppRendererProps) {
   }
 
   return (
-    <div data-testid="raapp-gui" className="rounded border border-base-300 p-3 text-xs whitespace-pre-wrap font-mono">
-      {content}
-    </div>
+    <>
+      <div data-testid="raapp-gui" className="rounded border border-base-300 p-3 text-xs whitespace-pre-wrap font-mono">
+        {content}
+      </div>
+      {hitlOverlay}
+    </>
   );
 }

@@ -123,9 +123,9 @@ export function ChatInterface() {
         // User stopped before any content — silently remove the empty bubble
         removeLastAgentTurn();
       } else {
-        // Early failure (LLM down, not configured) — remove empty bubble, offer retry
+        // Early failure (LLM down, session deleted, not configured) — remove empty bubble, show error banner
         removeLastAgentTurn();
-        setRetryError(payload.message);
+        setError(payload.message);
       }
     });
 
@@ -204,6 +204,27 @@ export function ChatInterface() {
       }
     });
 
+    const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
+      console.log('[RaAppNativeResult]', payload.toolCallId, payload.results);
+      // Update the in-memory tool_result message to reflect executed native operations
+      const sid = useSessionStore.getState().activeSessionId;
+      if (!sid) return;
+      const { messages: msgs, setMessages: setMsgs } = useSessionStore.getState();
+      const updated = msgs.map((m) => {
+        if (m.toolCallId !== payload.toolCallId || m.role !== 'tool_result') return m;
+        try {
+          const data = JSON.parse(m.content) as Record<string, unknown>;
+          return {
+            ...m,
+            content: JSON.stringify({ ...data, nativeResults: payload.results, pendingApprovals: [] }),
+          };
+        } catch {
+          return m;
+        }
+      });
+      setMsgs(updated);
+    });
+
     return () => {
       offChunk();
       offComplete();
@@ -214,6 +235,7 @@ export function ChatInterface() {
       offAgentDone();
       offContext();
       offToolResult();
+      offRaAppNative();
     };
   }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn]);
 
@@ -258,6 +280,8 @@ export function ChatInterface() {
 
   const handleSend = (content: string, personaId: string) => {
     if (!activeSessionId) return;
+    // Guard against double-submit: check store state synchronously before any renders
+    if (useAgentStore.getState().isStreaming) return;
     setError(null);
     setRetryError(null);
     lastSentContentRef.current = content;

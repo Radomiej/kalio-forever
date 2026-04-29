@@ -17,6 +17,7 @@ export type SessionCreatedHandler = (session: ChatSession) => void;
 export type ContextHandler = (payload: SocketEvents['chat:context']) => void;
 export type AgentStartHandler = (payload: SocketEvents['agent:start']) => void;
 export type AgentDoneHandler = (payload: SocketEvents['agent:done']) => void;
+export type RaAppNativeResultHandler = (payload: SocketEvents['raapp:native_result']) => void;
 
 export interface KalioSDKOptions {
   wsUrl: string;
@@ -64,6 +65,25 @@ export class KalioSDK {
 
   cancelTool(payload: SocketEvents['tool:cancel']): void {
     this.socket.emit('tool:cancel', payload);
+  }
+
+  approveRaApp(payload: SocketEvents['raapp:approve']): void {
+    this.socket.emit('raapp:approve', payload);
+  }
+
+  cancelRaApp(payload: SocketEvents['raapp:cancel']): void {
+    this.socket.emit('raapp:cancel', payload);
+  }
+
+  onRaAppNativeResult(handler: RaAppNativeResultHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['raapp:native_result']) => {
+      console.groupCollapsed(`[Thread] 🔄 RAAPP NATIVE RESULT toolCallId=${payload.toolCallId}`);
+      console.log('results:', payload.results);
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('raapp:native_result', wrappedHandler);
+    return () => this.socket.off('raapp:native_result', wrappedHandler);
   }
 
   onChunk(handler: ChunkHandler): () => void {

@@ -35,7 +35,7 @@ export class SessionsService {
     const now = new Date();
     const row = {
       id: nanoid(),
-      personaId: dto.personaId,
+      personaId: dto.personaId ?? 'default',
       title: dto.title ?? 'New Chat',
       createdAt: now,
       updatedAt: now,

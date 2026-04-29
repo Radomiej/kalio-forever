@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { BrainCircuit, Wrench, CheckCircle2, XCircle, RefreshCw, ChevronDown } from 'lucide-react';
+import { BrainCircuit, Wrench, CheckCircle2, XCircle, RefreshCw, ChevronDown, Zap } from 'lucide-react';
 
 interface AuditEntry {
   id: string;
   sessionId: string | null;
-  type: 'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error';
+  type: 'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error' | 'raapp_native_call' | 'raapp_native_approved';
   label: string;
   data: Record<string, unknown> | null;
   durationMs: number | null;
@@ -12,11 +12,13 @@ interface AuditEntry {
 }
 
 const TYPE_CONFIG: Record<AuditEntry['type'], { icon: React.ReactNode; cls: string; short: string }> = {
-  llm_request:  { icon: <BrainCircuit size={12} />, cls: 'text-sky-400',    short: 'LLM →' },
-  llm_response: { icon: <BrainCircuit size={12} />, cls: 'text-sky-400',    short: '← LLM' },
-  tool_call:    { icon: <Wrench size={12} />,        cls: 'text-emerald-400', short: 'Tool →' },
-  tool_result:  { icon: <CheckCircle2 size={12} />,  cls: 'text-emerald-400', short: '← Tool' },
-  error:        { icon: <XCircle size={12} />,       cls: 'text-error',       short: 'Error' },
+  llm_request:          { icon: <BrainCircuit size={12} />, cls: 'text-sky-400',    short: 'LLM →' },
+  llm_response:         { icon: <BrainCircuit size={12} />, cls: 'text-sky-400',    short: '← LLM' },
+  tool_call:            { icon: <Wrench size={12} />,        cls: 'text-emerald-400', short: 'Tool →' },
+  tool_result:          { icon: <CheckCircle2 size={12} />,  cls: 'text-emerald-400', short: '← Tool' },
+  error:                { icon: <XCircle size={12} />,       cls: 'text-error',       short: 'Error' },
+  raapp_native_call:    { icon: <Zap size={12} />,           cls: 'text-warning',     short: 'RA call' },
+  raapp_native_approved:{ icon: <CheckCircle2 size={12} />,  cls: 'text-warning',     short: 'RA ok' },
 };
 
 function formatTime(ts: number) {

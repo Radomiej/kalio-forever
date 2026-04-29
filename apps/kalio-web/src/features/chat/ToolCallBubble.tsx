@@ -15,7 +15,7 @@
 import { useState, useEffect } from 'react';
 import { CheckCircle2, XCircle, Loader2, Clock, ChevronDown } from 'lucide-react';
 import type { ToolActivity } from '../../store/agentStore';
-import type { RAAppBlock } from '@kalio/types';
+import type { RAAppBlock, RaAppPendingApproval } from '@kalio/types';
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -39,6 +39,7 @@ export function extractRAAppBlock(data: unknown): RAAppBlock | null {
       type: d['type'] as 'html' | 'gui',
       mode: (d['mode'] as 'display' | 'interactive') ?? 'display',
       content: (d['renderedContent'] as string | undefined) ?? (d['content'] as string),
+      pendingApprovals: (d['pendingApprovals'] as RaAppPendingApproval[] | undefined) ?? [],
     };
   }
   return null;
@@ -70,7 +71,7 @@ function Chip({
       data-testid="tool-call-bubble"
       className="border-l-[3px] border-l-emerald-500/40 pl-3 py-1 my-1"
     >
-      <div className="flex items-center gap-1.5 flex-wrap">
+      <div data-testid="tool-call-chip" className="flex items-center gap-1.5 flex-wrap">
         {icon}
         <span className="font-mono text-xs text-sky-400">{toolName}</span>
         {badge}

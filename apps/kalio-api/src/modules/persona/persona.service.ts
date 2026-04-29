@@ -50,7 +50,7 @@ export class PersonaService implements OnApplicationBootstrap {
       '  question or content if the flow continues, OR summarize results if the session is complete.',
       '- Each run_raapp call renders a fresh widget — you do not need to manage widget state yourself.',
     ].join('\n');
-    const raAppsSkills = ['run_raapp', 'list_raapps', 'raapp_create'];
+    const raAppsSkills = ['run_raapp', 'list_raapps', 'raapp_create', 'raapp_compile'];
 
     const raAppsExists = await this.drizzle.db.select({ id: personas.id }).from(personas).where(eq(personas.id, 'ra-apps')).then((r) => r[0]);
     if (!raAppsExists) {

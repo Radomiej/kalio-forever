@@ -147,13 +147,30 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
+// ─── raapp_pending_approvals ──────────────────────────────────────────────────
+// Persists call_native approval requests that require explicit user confirmation.
+export const raappPendingApprovals = sqliteTable('raapp_pending_approvals', {
+  id:          text('id').primaryKey(),
+  sessionId:   text('session_id').notNull(),
+  toolCallId:  text('tool_call_id').notNull(),
+  system:      text('system').notNull(),
+  args:        text('args', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  outputPath:  text('output_path'),
+  displayLabel: text('display_label').notNull(),
+  status:      text('status', {
+    enum: ['pending', 'approved', 'cancelled', 'executed', 'error'],
+  }).notNull().default('pending'),
+  result:      text('result', { mode: 'json' }).$type<Record<string, unknown>>(),
+  createdAt:   integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
 // ─── audit_log ────────────────────────────────────────────────────────────────
 export const auditLog = sqliteTable('audit_log', {
   id:         text('id').primaryKey(),
   sessionId:  text('session_id'),
   type:       text('type', {
-    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'error'],
-  }).notNull().$type<'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error'>(),
+    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'error', 'raapp_native_call', 'raapp_native_approved'],
+  }).notNull().$type<'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error' | 'raapp_native_call' | 'raapp_native_approved'>(),
   label:      text('label').notNull(),
   data:       text('data', { mode: 'json' }).$type<Record<string, unknown>>(),
   durationMs: integer('duration_ms'),
@@ -174,6 +191,7 @@ export type AgentIterationRow  = typeof agentIterations.$inferSelect;
 export type AuditLogRow        = typeof auditLog.$inferSelect;
 export type AppSettingRow      = typeof appSettings.$inferSelect;
 export type AllowedPathRow     = typeof allowedPaths.$inferSelect;
+export type RaappPendingApprovalRow = typeof raappPendingApprovals.$inferSelect;
 
 export type InsertPersona      = typeof personas.$inferInsert;
 export type InsertSession      = typeof sessions.$inferInsert;

@@ -51,7 +51,7 @@ export function ProviderCard({ credential, isActive, isSyncing, onActivate, onRe
   return (
     <div
       className={`border rounded-lg overflow-hidden transition-colors ${isActive ? 'border-sky-500/40 bg-sky-500/5' : 'border-base-300 bg-base-200/50'}`}
-      data-testid={`provider-card-${credential.id}`}
+      data-testid={`provider-row-${credential.id}`}
     >
       {/* Header */}
       <div

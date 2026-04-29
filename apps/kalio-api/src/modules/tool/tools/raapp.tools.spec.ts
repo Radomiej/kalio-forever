@@ -12,6 +12,8 @@ import { RunRaAppTool, ListRaAppsTool } from './raapp.tools';
 import type { RAAppService } from '../../raapp/raapp.service';
 import type { LoadedRAApp } from '../../raapp/raapp.service';
 import type { ToolCallRequest } from '@kalio/types';
+import type { EffectsProcessorService } from '../../raapp/effects-processor.service';
+import type { RAAppHITLService } from '../../raapp/raapp-hitl.service';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -55,7 +57,13 @@ describe('RunRaAppTool', () => {
       execute: vi.fn(),
       executeSystems: vi.fn().mockResolvedValue({}),
     };
-    tool = new RunRaAppTool(raapp as RAAppService);
+    const mockEffectsProcessor = {
+      processSystemsYaml: vi.fn().mockResolvedValue({ output: {}, pendingApprovals: [] }),
+    } as unknown as EffectsProcessorService;
+    const mockHITL = {
+      savePendingApprovals: vi.fn().mockResolvedValue([]),
+    } as unknown as RAAppHITLService;
+    tool = new RunRaAppTool(raapp as RAAppService, mockEffectsProcessor, mockHITL);
   });
 
   it('returns error with available IDs when app ID is not found', async () => {
@@ -139,12 +147,24 @@ describe('RunRaAppTool', () => {
       status: 'ready',
       renderedContent: '{"nodes":[],"data":{}}',
     });
-    (raapp.executeSystems as ReturnType<typeof vi.fn>).mockResolvedValue({ result: 8 });
+    // effectsProcessor mock is set up in beforeEach to return { output: {}, pendingApprovals: [] }
+    // Override with a result for this test
+    const mockEffectsProcessor = {
+      processSystemsYaml: vi.fn().mockResolvedValue({ output: { result: 8 }, pendingApprovals: [] }),
+    } as unknown as EffectsProcessorService;
+    const mockHITL = {
+      savePendingApprovals: vi.fn().mockResolvedValue([]),
+    } as unknown as RAAppHITLService;
+    tool = new RunRaAppTool(raapp as RAAppService, mockEffectsProcessor, mockHITL);
 
     const result = await tool.execute(makeRequest({ id: 'visual-calculator', inputs: { a: 5, b: 3 } })) as Record<string, unknown>;
 
     expect(result.status).toBe('ready');
-    expect(raapp.executeSystems).toHaveBeenCalledWith(app.systemsContent, { a: 5, b: 3 });
+    expect(mockEffectsProcessor.processSystemsYaml).toHaveBeenCalledWith(
+      app.systemsContent,
+      { a: 5, b: 3 },
+      expect.objectContaining({ sessionId: expect.any(String) }),
+    );
     expect(raapp.execute).toHaveBeenCalledWith(
       { type: 'gui', mode: 'display', content: app.guiContent },
       { output: { a: 5, b: 3, result: 8 } },

@@ -7,6 +7,7 @@ import {
   readdirSync,
   statSync,
   existsSync,
+  unlinkSync,
   createReadStream,
 } from 'node:fs';
 import { join, resolve, normalize, basename, sep } from 'node:path';
@@ -87,6 +88,12 @@ export class VFSService {
     }
     archive.finalize();
     return archive;
+  }
+
+  deleteFile(sessionId: string, filePath: string): void {
+    const safePath = this.resolveSafe(sessionId, filePath);
+    unlinkSync(safePath);
+    this.logger.debug(`VFS delete: ${safePath}`);
   }
 
   listFiles(sessionId: string): VFSListResult {

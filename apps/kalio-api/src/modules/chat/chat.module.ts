@@ -15,6 +15,7 @@ import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import { SessionsController } from './sessions.controller';
 import { AuditService } from './audit.service';
+import { AuditLogController } from './audit-log.controller';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
 import { LLMServiceAdapter } from './llm-service.adapter';
 import { ImageHydratorService } from './image-hydrator.service';
@@ -22,6 +23,7 @@ import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
 import { VFSModule } from '../vfs/vfs.module';
+import { RAAppModule } from '../raapp/raapp.module';
 import { ToolRegistryService } from '../tool/tool-registry.service';
 import {
   CHUNK_HANDLERS,
@@ -43,8 +45,8 @@ import {
  *   TOOL_REGISTRY     → ToolRegistryService.getEntries() (from ToolModule)
  */
 @Module({
-  imports: [LLMModule, PersonaModule, ToolModule, VFSModule],
-  controllers: [SessionsController],
+  imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule],
+  controllers: [SessionsController, AuditLogController],
   providers: [
     // Handlers
     TextDeltaHandler,

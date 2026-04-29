@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  MessageSquare, Settings, Wrench, BrainCircuit,
+  MessageSquare, Settings, Wrench, BrainCircuit, Activity,
 } from 'lucide-react';
 import { ChatInterface } from './features/chat/ChatInterface';
 import { CanvasPanel } from './features/chat/CanvasPanel';
@@ -18,16 +18,18 @@ import { MemoryPage } from './features/memory/MemoryPage';
 import { AgentLoopPanel } from './features/agentLoop/AgentLoopPanel';
 import { LandingPage } from './features/landing/LandingPage';
 import { BackendStatusBadge } from './components/ui/BackendStatusBadge';
+import { ObservabilityPage } from './features/observability/ObservabilityPage';
 import { useSessionStore } from './store/sessionStore';
 import { backendHealth } from './services/backendHealth';
 import { useSettingsStore } from './features/settings/settingsStore';
 
-type ActiveSection = 'landing' | 'talk' | 'tools' | 'mind';
+type ActiveSection = 'landing' | 'talk' | 'tools' | 'mind' | 'observe';
 
 const NAV: { id: ActiveSection; icon: React.ReactNode; label: string }[] = [
-  { id: 'talk',  icon: <MessageSquare size={18} />, label: 'Talk' },
-  { id: 'tools', icon: <Wrench size={18} />,        label: 'Tools' },
-  { id: 'mind',  icon: <BrainCircuit size={18} />,  label: 'Mind' },
+  { id: 'talk',    icon: <MessageSquare size={18} />, label: 'Talk' },
+  { id: 'tools',   icon: <Wrench size={18} />,        label: 'Tools' },
+  { id: 'mind',    icon: <BrainCircuit size={18} />,  label: 'Mind' },
+  { id: 'observe', icon: <Activity size={18} />,      label: 'Observability' },
 ];
 
 type TalkTab = 'conversations' | 'agents' | 'loops';
@@ -253,6 +255,10 @@ export function App() {
               {mindTab === 'personas' && <PersonaPanel />}
             </div>
           </div>
+        )}
+
+        {activeSection === 'observe' && (
+          <ObservabilityPage />
         )}
 
       </main>

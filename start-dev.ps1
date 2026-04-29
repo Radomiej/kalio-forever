@@ -42,23 +42,41 @@ $beJob = Start-Job -ScriptBlock {
 
 Write-Host "  Backend  -> http://localhost:$BE_PORT  (Job $($beJob.Id))" -ForegroundColor Green
 
-# Wait for backend to be ready
+# Wait for backend to be ready — show output while waiting
 Write-Host "  Waiting for backend to be ready..." -ForegroundColor DarkYellow
 $retries = 0
-while ($retries -lt 40) {
-    Start-Sleep -Milliseconds 300
+$maxRetries = 120   # 120 × 500ms = 60s total
+while ($retries -lt $maxRetries) {
+    Start-Sleep -Milliseconds 500
+
+    # Always stream backend output so we can see what's happening
+    $beOut = Receive-Job -Job $beJob -ErrorAction SilentlyContinue
+    if ($beOut) {
+        $beOut | ForEach-Object { Write-Host "  [be] $_" -ForegroundColor DarkCyan }
+    }
+
+    # Bail early if job already died
+    if ($beJob.State -eq 'Failed' -or $beJob.State -eq 'Completed') {
+        $remaining = Receive-Job -Job $beJob -ErrorAction SilentlyContinue
+        if ($remaining) { $remaining | ForEach-Object { Write-Host "  [be] $_" -ForegroundColor Red } }
+        Write-Host "  [FAIL] Backend process exited unexpectedly ($($beJob.State))." -ForegroundColor Red
+        Stop-Job $beJob -ErrorAction SilentlyContinue
+        Remove-Job $beJob -Force -ErrorAction SilentlyContinue
+        Kill-Port $BE_PORT
+        exit 1
+    }
+
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:$BE_PORT/api/health" -UseBasicParsing -ErrorAction Stop
+        $response = Invoke-WebRequest -Uri "http://localhost:$BE_PORT/api/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
         if ($response.StatusCode -eq 200) { break }
     } catch { }
     $retries++
 }
-if ($retries -ge 40) {
-    $earlyOut = Receive-Job -Job $beJob -ErrorAction SilentlyContinue
-    if ($earlyOut) {
-        $earlyOut | ForEach-Object { Write-Host "[be] $_" -ForegroundColor Red }
-    }
-    Write-Host "  [FAIL] Backend did not start. Check output above." -ForegroundColor Red
+
+if ($retries -ge $maxRetries) {
+    $remaining = Receive-Job -Job $beJob -ErrorAction SilentlyContinue
+    if ($remaining) { $remaining | ForEach-Object { Write-Host "  [be] $_" -ForegroundColor Red } }
+    Write-Host "  [FAIL] Backend did not respond within 60s. Check output above." -ForegroundColor Red
     Stop-Job $beJob -ErrorAction SilentlyContinue
     Remove-Job $beJob -Force -ErrorAction SilentlyContinue
     Kill-Port $BE_PORT

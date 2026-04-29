@@ -249,6 +249,23 @@ export interface CreateMCPServerDto {
 export type RAAppMode = 'display' | 'interactive';
 export type RAAppType = 'html' | 'gui';
 
+// A single pending call_native approval surfaced to the frontend
+export interface RaAppPendingApproval {
+  id: string;                           // unique per approval request
+  system: string;                       // native system ID (e.g. "vfs_write")
+  displayLabel: string;                 // human-readable description
+  args: Record<string, unknown>;        // resolved args to be executed on approval
+}
+
+// Native execution result pushed back to FE after approve/cancel
+export interface RaAppNativeResult {
+  id: string;                           // matches RaAppPendingApproval.id
+  system: string;
+  status: 'executed' | 'cancelled' | 'error';
+  result?: unknown;
+  error?: string;
+}
+
 export interface RAAppAction {
   label: string;
   tool: string;               // tool name to call
@@ -262,6 +279,7 @@ export interface RAAppBlock {
   content: string;            // HTML string or GUI DSL YAML
   vfsPath?: string;           // optional: load content from VFS path
   actions?: RAAppAction[];    // only for mode='interactive'
+  pendingApprovals?: RaAppPendingApproval[];  // populated when call_native needs HITL
 }
 
 export interface RAAppResult {
@@ -273,6 +291,7 @@ export interface RAAppResult {
     line?: number;
   };
   requiresHITL?: boolean;     // true when mode='interactive' and has actions
+  pendingApprovals?: RaAppPendingApproval[];  // populated by EffectsProcessorService
 }
 
 // ─── MCP (extended) ───────────────────────────────────────────────────────────
@@ -425,6 +444,13 @@ export interface SocketEvents {
 
   // Tool result — server → client
   'tool:result': ToolResult;
+
+  // RA-App HITL — client → server
+  'raapp:approve': { requestIds: string[]; sessionId: ID };
+  'raapp:cancel':  { requestIds: string[]; sessionId: ID };
+
+  // RA-App HITL — server → client (result after approve/cancel)
+  'raapp:native_result': { toolCallId: string; sessionId: ID; results: RaAppNativeResult[] };
 
   // Agent loop lifecycle — server → client
   'agent:start': { sessionId: ID; turnId: ID };

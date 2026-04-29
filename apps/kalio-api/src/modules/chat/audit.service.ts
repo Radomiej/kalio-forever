@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { DrizzleService } from '../../database/drizzle.service';
 import { auditLog } from '../../database/schema';
 
-export type AuditType = 'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error';
+export type AuditType = 'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error' | 'raapp_native_call' | 'raapp_native_approved';
 
 export interface AuditEntry {
   sessionId?: string;
