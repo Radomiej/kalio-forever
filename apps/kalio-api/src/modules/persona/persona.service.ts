@@ -66,11 +66,10 @@ export class PersonaService implements OnApplicationBootstrap {
       this.logger.log('Seeded ra-apps persona');
     } else {
       await this.drizzle.db.update(personas).set({
-        systemPrompt: raAppsSystemPrompt,
         skills: raAppsSkills,
         updatedAt: now,
       }).where(eq(personas.id, 'ra-apps'));
-      this.logger.log('Updated ra-apps persona');
+      this.logger.log('Updated ra-apps persona skills');
     }
   }
 
