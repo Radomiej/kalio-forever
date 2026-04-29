@@ -31,6 +31,9 @@ function fire(event: string, payload: unknown) {
   (handlers[event] ?? []).forEach((h) => h(payload));
 }
 
+// Spies declared via vi.hoisted() so they're initialized before vi.mock factories run
+const mockSendMessage = vi.hoisted(() => vi.fn());
+
 // ── eventBus mock ─────────────────────────────────────────────────────────────
 vi.mock('../../services/eventBus', () => ({
   eventBus: {
@@ -45,6 +48,7 @@ vi.mock('../../services/eventBus', () => ({
     onContext: (h: (...args: unknown[]) => void) => capture('chat:context', h),
     onAgentStart: (h: (...args: unknown[]) => void) => capture('agent:start', h),
     onAgentDone: (h: (...args: unknown[]) => void) => capture('agent:done', h),
+    sendMessage: mockSendMessage,
   },
 }));
 
@@ -96,6 +100,9 @@ const addTurnItem = vi.fn();
 // Mutable activeTurnId so tests can control what the store returns
 let mockActiveTurnId: string | null = null;
 let mockActiveSessionId = 'session-1';
+let mockPendingMessage: string | null = null;
+const mockSetPendingMessage = vi.fn();
+const mockSetPendingRAAppId = vi.fn();
 
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: Object.assign(
@@ -107,6 +114,7 @@ vi.mock('../../store/sessionStore', () => ({
       sessions: [
         { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
         { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
+        { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
       ],
       addMessage: vi.fn(),
       appendChunk: vi.fn(),
@@ -130,7 +138,12 @@ vi.mock('../../store/sessionStore', () => ({
         sessions: [
           { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
           { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
+          { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
         ],
+        pendingMessage: mockPendingMessage,
+        pendingRAAppId: null,
+        setPendingMessage: mockSetPendingMessage,
+        setPendingRAAppId: mockSetPendingRAAppId,
         updateSession: vi.fn(),
         streamingChunks: {},
         thinkingChunks: {},
@@ -180,6 +193,7 @@ beforeEach(() => {
   Object.keys(handlers).forEach((k) => delete handlers[k]);
   mockActiveTurnId = null;
   mockActiveSessionId = 'session-1';
+  mockPendingMessage = null;
   vi.clearAllMocks();
 });
 
@@ -580,5 +594,49 @@ describe('Retry stale ref: session switch clears lastSentContentRef', () => {
 
     // session-2's own turn is removed — not a stale session-1 turn
     expect(removeLastAgentTurn).toHaveBeenCalledOnce();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: auto-send pending message uses session's personaId
+// Bug: ChatInterface hardcoded 'default' personaId when auto-sending the pending
+// message after tile click, causing the LLM to use the wrong persona config.
+// Sessions created for RA-App tiles use personaId: 'ra-apps' which has the
+// required system prompt and tool set to launch RA-Apps automatically.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('auto-send pending message uses session personaId (not hardcoded default)', () => {
+  it('sends with the session stored personaId when pendingMessage is set', () => {
+    mockActiveSessionId = 'session-raapp';
+    mockPendingMessage = 'Run the My RA App RA-App for me. Launch it immediately.';
+
+    render(<ChatInterface />);
+
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ personaId: 'ra-apps' }),
+    );
+  });
+
+  it('never sends with hardcoded default personaId for ra-apps sessions', () => {
+    mockActiveSessionId = 'session-raapp';
+    mockPendingMessage = 'Run the My RA App RA-App for me. Launch it immediately.';
+
+    render(<ChatInterface />);
+
+    expect(mockSendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ personaId: 'default' }),
+    );
+  });
+
+  it('falls back to default personaId when session is not found', () => {
+    mockActiveSessionId = 'unknown-session-id';
+    mockPendingMessage = 'Some pending message';
+
+    render(<ChatInterface />);
+
+    // session not in list → falls back to 'default'
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ personaId: 'default' }),
+    );
   });
 });

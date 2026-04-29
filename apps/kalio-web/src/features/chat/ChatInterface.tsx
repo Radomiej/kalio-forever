@@ -320,7 +320,8 @@ export function ChatInterface() {
     if (!toSend) return;
     setPendingMessage(null);
     setPendingRAAppId(null);
-    handleSendRef.current(toSend, 'default');
+    const pendingSession = s.find((sess) => sess.id === activeSessionId);
+    handleSendRef.current(toSend, pendingSession?.personaId ?? 'default');
   }, [activeSessionId, clearAgentTurns, setMessages, setAgentTurns]);
 
   const handleConfirm = () => {

@@ -128,7 +128,7 @@ export function ModelCombobox({
       </div>
 
       {open && (
-        <div className="absolute z-10 mt-1 w-full max-h-60 overflow-auto rounded-md border border-base-300 bg-base-100 shadow-lg">
+        <div className="absolute z-10 mt-1 w-full max-h-60 overflow-auto rounded-md border border-base-300 bg-base-100 shadow-lg" role="listbox">
           {filtered.length === 0 ? (
             <div className="px-3 py-2 text-xs text-base-content/40 italic">
               No matches — press Enter or click Save to use “{query}”
@@ -138,7 +138,7 @@ export function ModelCombobox({
               {filtered.map((item) => {
                 const active = item === value;
                 return (
-                  <li key={item}>
+                  <li key={item} role="option" aria-selected={active}>
                     <button
                       type="button"
                       className={`w-full text-left px-3 py-1.5 text-xs font-mono hover:bg-base-200 ${
@@ -172,10 +172,6 @@ function highlightMatch(text: string, query: string) {
   const match = text.slice(idx, idx + q.length);
   const after = text.slice(idx + q.length);
   return (
-    <>
-      {before}
-      <span className="underline decoration-primary decoration-2">{match}</span>
-      {after}
-    </>
+    <>{before}<span className="underline decoration-primary decoration-2">{match}</span>{after}</>
   );
 }

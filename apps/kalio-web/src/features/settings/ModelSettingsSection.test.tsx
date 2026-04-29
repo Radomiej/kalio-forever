@@ -66,9 +66,11 @@ describe('ModelSettingsSection', () => {
     const input = screen.getByTestId('model-selector');
     await waitFor(() => expect(input).toBeInTheDocument());
     await user.click(input);
-    await waitFor(() => expect(screen.getByText('gpt-4o')).toBeInTheDocument());
-    expect(screen.getByText('gpt-4o-mini')).toBeInTheDocument();
-    expect(screen.getByText('gpt-3.5-turbo')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThanOrEqual(3));
+    const options1 = screen.getAllByRole('option').map((el) => el.textContent);
+    expect(options1).toContain('gpt-4o');
+    expect(options1).toContain('gpt-4o-mini');
+    expect(options1).toContain('gpt-3.5-turbo');
   });
 
   it('filters model list when typing', async () => {
@@ -81,10 +83,14 @@ describe('ModelSettingsSection', () => {
     const input = screen.getByTestId('model-selector');
     await waitFor(() => expect(input).toBeInTheDocument());
     await user.click(input);
-    await waitFor(() => expect(screen.getByText('gpt-4o')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('option', { name: 'gpt-4o' })).toBeInTheDocument());
+    await user.clear(input);
     await user.type(input, 'mini');
-    expect(screen.queryByText('gpt-4o')).not.toBeInTheDocument();
-    expect(screen.getByText('gpt-4o-mini')).toBeInTheDocument();
+    await waitFor(() => {
+      const options2 = screen.getAllByRole('option').map((el) => el.textContent);
+      expect(options2).not.toContain('gpt-4o');
+      expect(options2).toContain('gpt-4o-mini');
+    });
   });
 
   it('gen-save calls PUT /api/credentials/settings/generation with current values', async () => {
