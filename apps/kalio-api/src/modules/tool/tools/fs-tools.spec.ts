@@ -1,0 +1,305 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { FsReadTool } from './fs-read.tool';
+import { FsListTool } from './fs-list.tool';
+import { FsWriteTool } from './fs-write.tool';
+import type { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
+import type { ToolCallRequest } from '@kalio/types';
+import { Reflector } from '@nestjs/core';
+import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
+
+vi.mock('node:fs', () => ({
+  existsSync: vi.fn(),
+  statSync: vi.fn(),
+  readFileSync: vi.fn(),
+  readdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  mkdirSync: vi.fn(),
+}));
+
+import * as nodefs from 'node:fs';
+
+function makeRequest(toolName: string, args: Record<string, unknown> = {}, sessionId = 'sess-abc'): ToolCallRequest {
+  return { callId: 'call-1', sessionId, toolName, args };
+}
+
+const ALLOWED_DIR = '/projects/myapp';
+
+// ── FsReadTool ────────────────────────────────────────────────────────────────
+
+describe('FsReadTool', () => {
+  let tool: FsReadTool;
+  let allowedPaths: Partial<AllowedPathsService>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    };
+    tool = new FsReadTool(allowedPaths as AllowedPathsService);
+  });
+
+  describe('positive scenarios', () => {
+    it('returns path, content and line count for an allowed file', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isFile: () => true, size: 100 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('line1\nline2\nline3');
+
+      const result = await tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/hello.ts` }));
+
+      expect(result.content).toBe('line1\nline2\nline3');
+      expect(result.lines).toBe(3);
+    });
+
+    it('returns line slice when startLine and endLine are provided', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isFile: () => true, size: 100 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('a\nb\nc\nd\ne');
+
+      const result = await tool.execute(
+        makeRequest('fs_read', { path: `${ALLOWED_DIR}/file.ts`, startLine: 2, endLine: 4 }),
+      );
+
+      expect(result.content).toBe('b\nc\nd');
+      expect(result.lines).toBe(5);
+    });
+
+    it('uses 1 as default startLine when only endLine is given', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isFile: () => true, size: 100 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('x\ny\nz');
+
+      const result = await tool.execute(
+        makeRequest('fs_read', { path: `${ALLOWED_DIR}/file.ts`, endLine: 2 }),
+      );
+
+      expect(result.content).toBe('x\ny');
+    });
+  });
+
+  describe('edge cases', () => {
+    it('returns whole file when no startLine/endLine given', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isFile: () => true, size: 50 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('only line');
+
+      const result = await tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/single.txt` }));
+
+      expect(result.content).toBe('only line');
+    });
+  });
+
+  describe('negative scenarios', () => {
+    it('throws ACCESS_DENIED when path is not in allowed roots', async () => {
+      (allowedPaths.isAllowed as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+      await expect(
+        tool.execute(makeRequest('fs_read', { path: '/etc/passwd' })),
+      ).rejects.toThrow('ACCESS_DENIED');
+    });
+
+    it('throws NOT_FOUND when file does not exist', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(false);
+
+      await expect(
+        tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/missing.ts` })),
+      ).rejects.toThrow('NOT_FOUND');
+    });
+
+    it('throws NOT_A_FILE when path is a directory', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isFile: () => false, size: 0 } as ReturnType<typeof nodefs.statSync>);
+
+      await expect(
+        tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/somedir` })),
+      ).rejects.toThrow('NOT_A_FILE');
+    });
+
+    it('throws FILE_TOO_LARGE when file exceeds 512KB', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({
+        isFile: () => true,
+        size: 600 * 1024,
+      } as ReturnType<typeof nodefs.statSync>);
+
+      await expect(
+        tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/huge.bin` })),
+      ).rejects.toThrow('FILE_TOO_LARGE');
+    });
+  });
+});
+
+// ── FsListTool ────────────────────────────────────────────────────────────────
+
+describe('FsListTool', () => {
+  let tool: FsListTool;
+  let allowedPaths: Partial<AllowedPathsService>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    };
+    tool = new FsListTool(allowedPaths as AllowedPathsService);
+  });
+
+  describe('positive scenarios', () => {
+    it('returns entries for a flat directory (non-recursive)', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      // First call: statSync for the dir itself → isDirectory
+      // Second call: statSync for 'file.ts' entry → isFile
+      // Third call: statSync for 'sub' entry → isDirectory (then depth>maxDepth so no recursion)
+      vi.mocked(nodefs.statSync)
+        .mockReturnValueOnce({ isDirectory: () => true } as ReturnType<typeof nodefs.statSync>)
+        .mockReturnValueOnce({ isDirectory: () => false, isFile: () => true, size: 50 } as ReturnType<typeof nodefs.statSync>)
+        .mockReturnValueOnce({ isDirectory: () => true, isFile: () => false, size: 0 } as ReturnType<typeof nodefs.statSync>);
+
+      vi.mocked(nodefs.readdirSync).mockReturnValue(
+        ['file.ts', 'sub'] as unknown as ReturnType<typeof nodefs.readdirSync>,
+      );
+
+      const result = await tool.execute(makeRequest('fs_list', { path: ALLOWED_DIR }));
+
+      expect(result.path).toBeTruthy();
+      expect(result.entries.length).toBeGreaterThan(0);
+    });
+
+    it('returns absolute resolved path in result', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isDirectory: () => true } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readdirSync).mockReturnValue([] as unknown as ReturnType<typeof nodefs.readdirSync>);
+
+      const result = await tool.execute(makeRequest('fs_list', { path: ALLOWED_DIR }));
+
+      expect(result.path).toBeTruthy();
+      expect(typeof result.path).toBe('string');
+    });
+  });
+
+  describe('edge cases', () => {
+    it('returns empty entries for an empty directory', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isDirectory: () => true } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readdirSync).mockReturnValue([] as unknown as ReturnType<typeof nodefs.readdirSync>);
+
+      const result = await tool.execute(makeRequest('fs_list', { path: ALLOWED_DIR }));
+
+      expect(result.entries).toHaveLength(0);
+    });
+  });
+
+  describe('negative scenarios', () => {
+    it('throws ACCESS_DENIED for path outside allowed roots', async () => {
+      (allowedPaths.isAllowed as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+      await expect(
+        tool.execute(makeRequest('fs_list', { path: '/secret/dir' })),
+      ).rejects.toThrow('ACCESS_DENIED');
+    });
+
+    it('throws NOT_FOUND when path does not exist', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(false);
+
+      await expect(
+        tool.execute(makeRequest('fs_list', { path: `${ALLOWED_DIR}/nope` })),
+      ).rejects.toThrow('NOT_FOUND');
+    });
+
+    it('throws NOT_A_DIRECTORY when path is a file', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isDirectory: () => false } as ReturnType<typeof nodefs.statSync>);
+
+      await expect(
+        tool.execute(makeRequest('fs_list', { path: `${ALLOWED_DIR}/file.ts` })),
+      ).rejects.toThrow('NOT_A_DIRECTORY');
+    });
+  });
+});
+
+// ── FsWriteTool ───────────────────────────────────────────────────────────────
+
+describe('FsWriteTool', () => {
+  let tool: FsWriteTool;
+  let allowedPaths: Partial<AllowedPathsService>;
+  let reflector: Reflector;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    };
+    tool = new FsWriteTool(allowedPaths as AllowedPathsService);
+    reflector = new Reflector();
+  });
+
+  describe('@Tool() decorator (REGRESSION)', () => {
+    it('MUST have requiresConfirmation=true for filesystem write', () => {
+      const metadata = reflector.get(TOOL_METADATA, FsWriteTool);
+      expect(metadata.requiresConfirmation).toBe(true);
+    });
+
+    it('has correct tool name', () => {
+      const metadata = reflector.get(TOOL_METADATA, FsWriteTool);
+      expect(metadata.name).toBe('fs_write');
+    });
+  });
+
+  describe('positive scenarios', () => {
+    it('writes file and returns path and bytesWritten', async () => {
+      vi.mocked(nodefs.mkdirSync).mockReturnValue(undefined);
+      vi.mocked(nodefs.writeFileSync).mockReturnValue(undefined);
+
+      const result = await tool.execute(
+        makeRequest('fs_write', { path: `${ALLOWED_DIR}/out.txt`, content: 'Hello' }),
+      );
+
+      expect(result.bytesWritten).toBe(5);
+      expect(result.path).toBeTruthy();
+      expect(nodefs.writeFileSync).toHaveBeenCalled();
+    });
+
+    it('auto-creates parent directory via mkdirSync recursive', async () => {
+      vi.mocked(nodefs.mkdirSync).mockReturnValue(undefined);
+      vi.mocked(nodefs.writeFileSync).mockReturnValue(undefined);
+
+      await tool.execute(
+        makeRequest('fs_write', { path: `${ALLOWED_DIR}/deep/new/dir/file.txt`, content: 'x' }),
+      );
+
+      expect(nodefs.mkdirSync).toHaveBeenCalledWith(expect.any(String), { recursive: true });
+    });
+
+    it('returns correct bytesWritten for multi-byte content', async () => {
+      vi.mocked(nodefs.mkdirSync).mockReturnValue(undefined);
+      vi.mocked(nodefs.writeFileSync).mockReturnValue(undefined);
+
+      const content = 'abc';
+      const result = await tool.execute(
+        makeRequest('fs_write', { path: `${ALLOWED_DIR}/out.txt`, content }),
+      );
+
+      expect(result.bytesWritten).toBe(Buffer.byteLength(content, 'utf8'));
+    });
+  });
+
+  describe('negative scenarios', () => {
+    it('throws ACCESS_DENIED for path outside allowed roots', async () => {
+      (allowedPaths.isAllowed as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+      await expect(
+        tool.execute(makeRequest('fs_write', { path: '/etc/evil.txt', content: 'pwned' })),
+      ).rejects.toThrow('ACCESS_DENIED');
+    });
+
+    it('does not call writeFileSync when access is denied', async () => {
+      (allowedPaths.isAllowed as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+      try {
+        await tool.execute(makeRequest('fs_write', { path: '/etc/evil.txt', content: 'x' }));
+      } catch {
+        // expected
+      }
+
+      expect(nodefs.writeFileSync).not.toHaveBeenCalled();
+    });
+  });
+});

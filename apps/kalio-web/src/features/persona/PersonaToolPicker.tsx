@@ -9,19 +9,17 @@ const GROUP_LABELS: Record<string, string> = {
   terminal: 'Terminal',
   kv: 'KV Store',
   raapp: 'RA-Apps',
-  search: 'Search',
   agent: 'Agent',
   other: 'Other',
 };
 
 function deriveGroup(name: string): string {
   if (name.startsWith('vfs_')) return 'vfs';
-  if (name.startsWith('fs_')) return 'fs';
+  if (name.startsWith('fs_') || name === 'grep_search' || name === 'file_search') return 'fs';
   if (name.startsWith('memory_')) return 'memory';
   if (name.startsWith('terminal_')) return 'terminal';
   if (name.startsWith('kv_')) return 'kv';
   if (name.startsWith('raapp_') || name === 'run_raapp' || name === 'list_raapps') return 'raapp';
-  if (name.startsWith('grep_') || name === 'file_search') return 'search';
   if (name === 'run_subagent') return 'agent';
   return 'other';
 }

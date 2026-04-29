@@ -6,10 +6,7 @@ import { resolve, join, relative } from 'node:path';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+import { escapeRegex, globToRegex } from './search.utils';
 
 function walkDir(dir: string, maxDepth: number, depth = 0): string[] {
   if (depth > maxDepth) return [];
@@ -24,29 +21,6 @@ function walkDir(dir: string, maxDepth: number, depth = 0): string[] {
     }
   }
   return results;
-}
-
-function globToRegex(pattern: string): RegExp {
-  let r = '';
-  let i = 0;
-  while (i < pattern.length) {
-    const ch = pattern[i];
-    if (ch === '*' && pattern[i + 1] === '*') {
-      r += '.*';
-      i += 2;
-      if (pattern[i] === '/') i++;
-    } else if (ch === '*') {
-      r += '[^/]*';
-      i++;
-    } else if (ch === '?') {
-      r += '[^/]';
-      i++;
-    } else {
-      r += escapeRegex(ch);
-      i++;
-    }
-  }
-  return new RegExp(r + '$');
 }
 
 @Injectable()
@@ -79,7 +53,13 @@ export class GrepSearchTool {
       return { matches: [], total: 0 };
     }
 
-    const pattern = isRegexp ? new RegExp(query, 'i') : new RegExp(escapeRegex(query), 'i');
+    let pattern: RegExp;
+    try {
+      pattern = isRegexp ? new RegExp(query, 'i') : new RegExp(escapeRegex(query), 'i');
+    } catch {
+      return { matches: [], total: 0 };
+    }
+
     const globRe = includePattern ? globToRegex(includePattern) : null;
 
     const matches: Array<{ file: string; line: number; text: string }> = [];
