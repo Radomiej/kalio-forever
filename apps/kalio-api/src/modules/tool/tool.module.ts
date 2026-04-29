@@ -15,16 +15,18 @@ import { TerminalService } from './terminal.service';
 import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
 import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
+import { WebSearchTool } from './tools/web-search.tool';
 import { VFSModule } from '../vfs/vfs.module';
 import { LLMModule } from '../llm/llm.module';
 import { RAAppModule } from '../raapp/raapp.module';
 import { MemoryModule } from '../memory/memory.module';
 import { AllowedPathsModule } from '../allowed-paths/allowed-paths.module';
 import { MCPModule } from '../mcp/mcp.module';
+import { SearchModule } from '../search/search.module';
 import { ToolRegistryService } from './tool-registry.service';
 
 @Module({
-  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule],
+  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule],
   controllers: [ToolController],
   providers: [
     VFSWriteTool, VFSReadTool, VFSListTool, VFSGrepSearchTool, VFSFileSearchTool, SubagentTool,
@@ -34,6 +36,7 @@ import { ToolRegistryService } from './tool-registry.service';
     TerminalService, TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool,
     RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool,
     MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
+    WebSearchTool,
     ToolRegistryService,
   ],
   exports: [ToolRegistryService],

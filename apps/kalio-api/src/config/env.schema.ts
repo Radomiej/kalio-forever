@@ -11,6 +11,9 @@ export const envSchema = Joi.object({
   // Dedicated embedding provider (optional — falls back to LLM config if not set)
   EMBEDDING_BASE_URL:  Joi.string().optional(),
   EMBEDDING_API_KEY:   Joi.string().optional(),
+  // Web search (Perplexity) — optional, can be configured via Settings UI
+  PERPLEXITY_API_KEY:  Joi.string().optional(),
+  PERPLEXITY_PROVIDER: Joi.string().valid('perplexity', 'perplexity-openrouter').optional(),
   LLM_API_KEY:         Joi.string().when('NODE_ENV', {
     is: 'test',
     then: Joi.string().optional().default('mock'),
