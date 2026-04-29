@@ -113,7 +113,8 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
               // Prefer live chunk (streaming); fall back to persisted msg.thinking for history
               const thinkingContent = thinkingChunks[messageId] ?? msg?.thinking ?? '';
               if (!thinkingContent) return null;
-              return <ThinkingBlock key={`think-${messageId}`} content={thinkingContent} isStreaming={!turn.done} />;
+              const isThinkingStreaming = thinkingChunks[messageId] !== undefined;
+              return <ThinkingBlock key={`think-${messageId}`} content={thinkingContent} isStreaming={isThinkingStreaming} />;
             }
 
             // text item

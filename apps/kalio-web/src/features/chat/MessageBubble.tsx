@@ -56,9 +56,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 className="flex items-center gap-2 w-full px-3 py-2 text-xs text-base-content/50 hover:text-base-content/70 transition-colors bg-base-200/50"
                 onClick={() => setThinkingOpen((v) => !v)}
               >
-                <BrainCircuit size={12} className={isStreaming && !displayContent ? 'text-sky-400 animate-pulse' : 'text-base-content/40'} />
+                <BrainCircuit size={12} className={liveThinking.length > 0 ? 'text-sky-400 animate-pulse' : 'text-base-content/40'} />
                 <span>Thinking</span>
-                {isStreaming && (
+                {liveThinking.length > 0 && (
                   <span className="loading loading-dots loading-xs ml-1" />
                 )}
                 <ChevronDown
@@ -69,7 +69,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               {thinkingOpen && (
                 <div className="px-3 py-2 text-xs text-base-content/50 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto bg-base-200/20">
                   {thinkingContent}
-                  {isStreaming && !displayContent && (
+                  {liveThinking.length > 0 && (
                     <span className="inline-block h-3 w-0.5 animate-pulse bg-current ml-0.5" />
                   )}
                 </div>
