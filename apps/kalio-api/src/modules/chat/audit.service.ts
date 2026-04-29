@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { nanoid } from 'nanoid';
+import type { AuditType } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { auditLog } from '../../database/schema';
 
-export type AuditType = 'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error' | 'raapp_native_call' | 'raapp_native_approved';
+export type { AuditType };
 
-export interface AuditEntry {
+export interface AuditLogInput {
   sessionId?: string;
   type: AuditType;
   label: string;
@@ -24,7 +25,7 @@ export class AuditService {
 
   constructor(private readonly drizzle: DrizzleService) {}
 
-  async log(entry: AuditEntry): Promise<void> {
+  async log(entry: AuditLogInput): Promise<void> {
     try {
       await this.drizzle.db.insert(auditLog).values({
         id: nanoid(),

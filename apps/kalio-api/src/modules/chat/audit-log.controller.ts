@@ -2,7 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { desc, and, gte, lte, inArray } from 'drizzle-orm';
 import { DrizzleService } from '../../database/drizzle.service';
 import { auditLog } from '../../database/schema';
-import type { AuditType } from './audit.service';
+import type { AuditType } from '@kalio/types';
 
 @Controller('audit-log')
 export class AuditLogController {

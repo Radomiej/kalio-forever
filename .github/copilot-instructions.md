@@ -48,6 +48,10 @@ All shared types live exclusively in `packages/@kalio/types/src/index.ts`.
 - **Never duplicate types** across apps
 - **Never add `workspaceId`** to session, message, or tool types — this was deliberately removed
 - Import with `import type { … } from '@kalio/types'` — type-only across module boundaries
+- **GUI DSL wire types** (`GuiNode`, `GuiElementNode`, `GuiBlockNode`, `GuiValue`, `GuiDslPayload`) are in `@kalio/types` — never redefine locally in FE or BE
+- **Audit types** (`AuditType`, `AuditLogEntry`) are in `@kalio/types` — never redefine locally
+- The BE's internal `guiDslAst.ts` full AST types are intentionally NOT in `@kalio/types` (they are structurally richer than the wire format and internal to the parser)
+- When a new shared type is needed, add it to `@kalio/types` first, then import it everywhere
 
 ### Tool system
 New tools follow this exact pattern:

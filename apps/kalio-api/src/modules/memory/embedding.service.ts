@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { EmbeddingStatus } from '@kalio/types';
 
 // ── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -112,14 +113,22 @@ export class OllamaEmbeddingProvider implements IEmbeddingProvider {
   }
 }
 
-// ── Status interface ──────────────────────────────────────────────────────
+// ── MockEmbeddingProvider ─────────────────────────────────────────────────
 
-export interface EmbeddingStatus {
-  provider: 'openai-compatible' | 'ollama';
-  model: string;
-  dimensions: number;
-  baseUrlMasked: string;
-  configured: boolean;
+export class MockEmbeddingProvider implements IEmbeddingProvider {
+  private readonly dimensions: number;
+
+  constructor(dimensions = 1536) {
+    this.dimensions = dimensions;
+  }
+
+  async embed(texts: string[]): Promise<number[][]> {
+    return texts.map(() => Array<number>(this.dimensions).fill(0.1));
+  }
+
+  getDimensions(): number {
+    return this.dimensions;
+  }
 }
 
 // ── EmbeddingService ────────────────────────────────────────────────────────
@@ -140,8 +149,9 @@ export class EmbeddingService {
     const dimensions = this.config.get<number>('EMBEDDING_DIMENSIONS', 1536);
 
     if (!apiKey || !baseUrl || apiKey === 'mock' || baseUrl === 'mock') {
-      this.logger.warn('Embedding provider not configured');
-      throw new Error('Embedding provider not configured');
+      this.logger.warn('Embedding provider not configured — using MockEmbeddingProvider');
+      this.provider = new MockEmbeddingProvider(dimensions);
+      return this.provider;
     }
 
     const isOllama = baseUrl.includes('localhost:11434') || baseUrl.includes('ollama');

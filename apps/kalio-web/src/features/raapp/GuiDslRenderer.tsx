@@ -1,29 +1,8 @@
-interface GuiString    { kind: 'string';     value: string; }
-interface GuiNumber    { kind: 'number';     value: number; }
-interface GuiBoolean   { kind: 'boolean';    value: boolean; }
-interface GuiIdentifier{ kind: 'identifier'; value: string; }
-interface GuiBlock     { kind: 'block';      items: unknown[]; }
-type GuiValue = GuiString | GuiNumber | GuiBoolean | GuiIdentifier | GuiBlock;
+import type {
+  GuiValue, GuiElementNode, GuiBlockNode, GuiNode, GuiDslPayload,
+} from '@kalio/types';
 
-export interface GuiElementNode {
-  kind: 'element';
-  tag: string;
-  props: Record<string, GuiValue>;
-  children: GuiNode[];
-}
-export interface GuiBlockNode {
-  kind: 'block_node';
-  mode: 'block' | 'blockoverride';
-  name: string;
-  props: Record<string, GuiValue>;
-  children: GuiNode[];
-}
-export type GuiNode = GuiElementNode | GuiBlockNode;
-
-export interface GuiDslPayload {
-  nodes: GuiNode[];
-  data: Record<string, unknown>;
-}
+export type { GuiElementNode, GuiBlockNode, GuiNode, GuiDslPayload };
 
 function scalarToString(v: GuiValue | undefined): string | null {
   if (!v) return null;

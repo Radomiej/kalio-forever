@@ -1,17 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { BrainCircuit, Wrench, CheckCircle2, XCircle, RefreshCw, ChevronDown, Zap } from 'lucide-react';
+import type { AuditLogEntry } from '@kalio/types';
 
-interface AuditEntry {
-  id: string;
-  sessionId: string | null;
-  type: 'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error' | 'raapp_native_call' | 'raapp_native_approved';
-  label: string;
-  data: Record<string, unknown> | null;
-  durationMs: number | null;
-  createdAt: number;
-}
-
-const TYPE_CONFIG: Record<AuditEntry['type'], { icon: React.ReactNode; cls: string; short: string }> = {
+const TYPE_CONFIG: Record<AuditLogEntry['type'], { icon: React.ReactNode; cls: string; short: string }> = {
   llm_request:          { icon: <BrainCircuit size={12} />, cls: 'text-sky-400',    short: 'LLM →' },
   llm_response:         { icon: <BrainCircuit size={12} />, cls: 'text-sky-400',    short: '← LLM' },
   tool_call:            { icon: <Wrench size={12} />,        cls: 'text-emerald-400', short: 'Tool →' },
@@ -31,7 +22,7 @@ function formatMs(ms: number | null) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function EntryRow({ entry }: { entry: AuditEntry }) {
+function EntryRow({ entry }: { entry: AuditLogEntry }) {
   const [open, setOpen] = useState(false);
   const cfg = TYPE_CONFIG[entry.type];
 
@@ -65,7 +56,7 @@ function EntryRow({ entry }: { entry: AuditEntry }) {
 }
 
 export function AuditLogPanel() {
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [entries, setEntries] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -75,7 +66,7 @@ export function AuditLogPanel() {
     try {
       const res = await fetch('/api/audit-log?limit=200');
       if (res.ok) {
-        const data = await res.json() as AuditEntry[];
+        const data = await res.json() as AuditLogEntry[];
         setEntries(data);
       }
     } catch {

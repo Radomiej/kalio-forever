@@ -294,6 +294,37 @@ export interface RAAppResult {
   pendingApprovals?: RaAppPendingApproval[];  // populated by EffectsProcessorService
 }
 
+// ─── GUI DSL (rendered wire format) ─────────────────────────────────────────
+// Subset of the internal AST that crosses the wire as JSON (BE → FE).
+// The full parser AST (with richer block/statement types) lives in
+// apps/kalio-api/src/modules/raapp/gui/guiDslAst.ts — do NOT import from there.
+export interface GuiString     { kind: 'string';     value: string  }
+export interface GuiNumber     { kind: 'number';     value: number  }
+export interface GuiBoolean    { kind: 'boolean';    value: boolean }
+export interface GuiIdentifier { kind: 'identifier'; value: string  }
+export interface GuiFunctionCall { kind: 'function'; name: string; args: GuiScalar[] }
+export type GuiScalar = GuiString | GuiNumber | GuiBoolean | GuiIdentifier | GuiFunctionCall;
+export interface GuiBlock      { kind: 'block'; items: unknown[] }  // opaque in wire format
+export type GuiValue = GuiScalar | GuiBlock;
+export interface GuiElementNode {
+  kind: 'element';
+  tag: string;
+  props: Record<string, GuiValue>;
+  children: GuiNode[];
+}
+export interface GuiBlockNode {
+  kind: 'block_node';
+  mode: 'block' | 'blockoverride';
+  name: string;
+  props: Record<string, GuiValue>;
+  children: GuiNode[];
+}
+export type GuiNode = GuiElementNode | GuiBlockNode;
+export interface GuiDslPayload {
+  nodes: GuiNode[];
+  data: Record<string, unknown>;
+}
+
 // ─── MCP (extended) ───────────────────────────────────────────────────────────
 export type MCPTransport = 'stdio' | 'http';
 
@@ -532,4 +563,26 @@ export interface EmbeddingStatus {
   dimensions: number;
   baseUrlMasked: string;
   configured: boolean;
+}
+
+// ─── Audit Log ───────────────────────────────────────────────────────────────
+// Shared between the audit-log controller (GET /api/audit-log response) and
+// the observability UI. AuditType is also used by AuditService internally.
+export type AuditType =
+  | 'llm_request'
+  | 'llm_response'
+  | 'tool_call'
+  | 'tool_result'
+  | 'error'
+  | 'raapp_native_call'
+  | 'raapp_native_approved';
+
+export interface AuditLogEntry {
+  id: ID;
+  sessionId: string | null;
+  type: AuditType;
+  label: string;
+  data: Record<string, unknown> | null;
+  durationMs: number | null;
+  createdAt: Timestamp;
 }

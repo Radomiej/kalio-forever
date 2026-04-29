@@ -3,27 +3,7 @@ import {
   BrainCircuit, Wrench, CheckCircle2, XCircle, ChevronDown,
   RefreshCw, Zap, Play, Pause, Search, X,
 } from 'lucide-react';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type AuditType =
-  | 'llm_request'
-  | 'llm_response'
-  | 'tool_call'
-  | 'tool_result'
-  | 'error'
-  | 'raapp_native_call'
-  | 'raapp_native_approved';
-
-interface AuditEntry {
-  id: string;
-  sessionId: string | null;
-  type: AuditType;
-  label: string;
-  data: Record<string, unknown> | null;
-  durationMs: number | null;
-  createdAt: number;
-}
+import type { AuditType, AuditLogEntry } from '@kalio/types';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -75,7 +55,7 @@ function isSameDay(a: number, b: number) {
 
 // ─── EntryRow ─────────────────────────────────────────────────────────────────
 
-function EntryRow({ entry }: { entry: AuditEntry }) {
+function EntryRow({ entry }: { entry: AuditLogEntry }) {
   const [open, setOpen] = useState(false);
   const cfg = TYPE_CONFIG[entry.type] ?? TYPE_CONFIG.error;
 
@@ -131,7 +111,7 @@ function EntryRow({ entry }: { entry: AuditEntry }) {
 
 // ─── Stats bar ────────────────────────────────────────────────────────────────
 
-function StatsBar({ entries }: { entries: AuditEntry[] }) {
+function StatsBar({ entries }: { entries: AuditLogEntry[] }) {
   const counts = ALL_TYPES.reduce((acc, t) => {
     acc[t] = entries.filter((e) => e.type === t).length;
     return acc;
@@ -158,7 +138,7 @@ function StatsBar({ entries }: { entries: AuditEntry[] }) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function ObservabilityPage() {
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [entries, setEntries] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedTypes, setSelectedTypes] = useState<Set<AuditType>>(new Set(ALL_TYPES));
@@ -181,7 +161,7 @@ export function ObservabilityPage() {
       }
       const res = await fetch(`/api/audit-log?${params}`);
       if (res.ok) {
-        const data = await res.json() as AuditEntry[];
+        const data = await res.json() as AuditLogEntry[];
         setEntries(data);
       }
     } catch {
@@ -223,7 +203,7 @@ export function ObservabilityPage() {
   });
 
   // Group by day for date separators
-  const rows: Array<{ kind: 'date'; date: string } | { kind: 'entry'; entry: AuditEntry }> = [];
+  const rows: Array<{ kind: 'date'; date: string } | { kind: 'entry'; entry: AuditLogEntry }> = [];
   let lastDay: number | null = null;
   for (const e of filtered) {
     if (lastDay === null || !isSameDay(lastDay, e.createdAt)) {
