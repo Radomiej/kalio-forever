@@ -48,6 +48,12 @@ export class FsReadTool {
     if (startLine !== undefined || endLine !== undefined) {
       const s = (startLine ?? 1) - 1;
       const e = endLine ?? total;
+      if (s >= total) {
+        throw new Error(`LINE_OUT_OF_RANGE: startLine ${startLine ?? 1} exceeds file length (${total} lines)`);
+      }
+      if (e > total) {
+        throw new Error(`LINE_OUT_OF_RANGE: endLine ${endLine} exceeds file length (${total} lines)`);
+      }
       const slice = allLines.slice(s, e).join('\n');
       return { path: absPath, content: slice, lines: total };
     }

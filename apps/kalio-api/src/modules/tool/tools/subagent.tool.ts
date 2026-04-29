@@ -1,9 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { randomUUID } from 'node:crypto';
-import type { ToolCallRequest } from '@kalio/types';
+import type { ToolCallRequest, ToolMeta } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { LLMService } from '../../llm/llm.service';
+
+interface ToolRegistryLike {
+  getEntries?: () => Array<{ meta: ToolMeta }>;
+  getAllTools?: () => ToolMeta[];
+  getToolsForSkills?: (skills: string[]) => ToolMeta[];
+}
 
 const SUBAGENT_SYSTEM_PROMPT = `You are a focused sub-agent completing a single specific task.
 Act immediately — call tools if available, return a clear result.
@@ -45,8 +51,34 @@ export class SubagentTool {
     private readonly moduleRef: ModuleRef,
   ) {}
 
-  private getToolRegistry(): any {
-    return this.moduleRef.get('ToolRegistryService');
+  private getToolRegistry(): ToolRegistryLike {
+    return this.moduleRef.get('ToolRegistryService') as ToolRegistryLike;
+  }
+
+  private getTools(availableTools?: string[]): ToolMeta[] {
+    const registry = this.getToolRegistry();
+
+    if (availableTools && availableTools.length > 0) {
+      if (typeof registry.getToolsForSkills === 'function') {
+        return registry.getToolsForSkills(availableTools);
+      }
+      if (typeof registry.getEntries === 'function') {
+        const allowed = new Set(availableTools);
+        return registry
+          .getEntries()
+          .map((entry) => entry.meta)
+          .filter((meta) => allowed.has(meta.name));
+      }
+    }
+
+    if (typeof registry.getAllTools === 'function') {
+      return registry.getAllTools();
+    }
+    if (typeof registry.getEntries === 'function') {
+      return registry.getEntries().map((entry) => entry.meta);
+    }
+
+    throw new Error('ToolRegistryService does not expose a supported tool listing API');
   }
 
   async execute(request: ToolCallRequest): Promise<{ result: string; taskId: string }> {
@@ -63,12 +95,7 @@ export class SubagentTool {
     const chunks: string[] = [];
 
     // Get tools: use availableTools if provided, otherwise all tools
-    let tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
-    if (availableTools && availableTools.length > 0) {
-      tools = this.getToolRegistry().getToolsForSkills(availableTools);
-    } else {
-      tools = this.getToolRegistry().getAllTools();
-    }
+    const tools = this.getTools(availableTools);
 
     const runPromise = this.llm.streamChat(
       [

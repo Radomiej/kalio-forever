@@ -1,7 +1,9 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Post,
   Query,
@@ -39,9 +41,35 @@ export class SessionVfsController {
     return this.vfs.listFiles(sessionId);
   }
 
+  @Post()
+  @HttpCode(200)
+  writeText(
+    @Param('id') sessionId: string,
+    @Body() body: { filePath: string; content: string },
+  ): { ok: boolean } {
+    if (!body.filePath) throw new BadRequestException('filePath is required');
+    if (body.content === undefined) throw new BadRequestException('content is required');
+    try {
+      this.vfs.writeFile({ sessionId, filePath: body.filePath, content: body.content });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'PATH_TRAVERSAL_DENIED') {
+        throw new BadRequestException((err as Error).message);
+      }
+      throw err;
+    }
+    return { ok: true };
+  }
+
   @Get('read')
   read(@Param('id') sessionId: string, @Query('path') path: string): VFSReadResult {
-    return this.vfs.readFile(sessionId, path);
+    try {
+      return this.vfs.readFile(sessionId, path);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'PATH_TRAVERSAL_DENIED') {
+        throw new BadRequestException((err as Error).message);
+      }
+      throw err;
+    }
   }
 
   @Get('download')

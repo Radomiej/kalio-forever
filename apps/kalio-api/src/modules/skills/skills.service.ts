@@ -31,7 +31,9 @@ export class SkillsService {
       createdAt: now,
       updatedAt: now,
     });
-    return this.findOne(id) as Promise<Skill>;
+    const skill = await this.findOne(id);
+    if (!skill) throw new Error(`Skill ${id} not found after insert`);
+    return skill;
   }
 
   async update(id: string, dto: UpdateSkillDto): Promise<Skill | null> {

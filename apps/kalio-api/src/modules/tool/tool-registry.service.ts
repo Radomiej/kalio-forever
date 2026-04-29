@@ -74,6 +74,17 @@ export class ToolRegistryService {
     return this.entries;
   }
 
+  getAllTools(): ToolMeta[] {
+    return this.entries.map((entry) => entry.meta);
+  }
+
+  getToolsForSkills(skills: string[]): ToolMeta[] {
+    const allowed = new Set(skills);
+    return this.entries
+      .map((entry) => entry.meta)
+      .filter((meta) => allowed.has(meta.name));
+  }
+
   private toEntry(tool: object): ToolEntry {
     const opts = this.reflector.get<ToolOptions>(TOOL_METADATA, tool.constructor as NewableFunction);
     return {
