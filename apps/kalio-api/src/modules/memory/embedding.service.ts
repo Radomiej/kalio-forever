@@ -143,15 +143,27 @@ export class EmbeddingService {
   private getProvider(): IEmbeddingProvider {
     if (this.provider) return this.provider;
 
-    const apiKey = this.config.get<string>('LLM_API_KEY', '');
-    const baseUrl = this.config.get<string>('LLM_BASE_URL', '');
+    // Dedicated embedding config takes priority; fall back to chat LLM config
+    const apiKey = this.config.get<string>('EMBEDDING_API_KEY', '')
+      || this.config.get<string>('LLM_API_KEY', '');
+    const baseUrl = this.config.get<string>('EMBEDDING_BASE_URL', '')
+      || this.config.get<string>('LLM_BASE_URL', '');
     const model = this.config.get<string>('EMBEDDING_MODEL', 'text-embedding-3-small');
     const dimensions = this.config.get<number>('EMBEDDING_DIMENSIONS', 1536);
 
     if (!apiKey || !baseUrl || apiKey === 'mock' || baseUrl === 'mock') {
-      this.logger.warn('Embedding provider not configured — using MockEmbeddingProvider');
+      this.logger.warn('Embedding provider not configured — using MockEmbeddingProvider (set EMBEDDING_BASE_URL + EMBEDDING_API_KEY for real embeddings)');
       this.provider = new MockEmbeddingProvider(dimensions);
       return this.provider;
+    }
+
+    // Warn if falling back to the chat LLM URL (many chat-only providers don't support /embeddings)
+    const explicitEmbedUrl = this.config.get<string>('EMBEDDING_BASE_URL', '');
+    if (!explicitEmbedUrl) {
+      this.logger.warn(
+        `EMBEDDING_BASE_URL not set — using LLM_BASE_URL (${baseUrl}) for embeddings. ` +
+        'Set EMBEDDING_BASE_URL if your chat provider does not support /embeddings.',
+      );
     }
 
     const isOllama = baseUrl.includes('localhost:11434') || baseUrl.includes('ollama');
@@ -160,21 +172,18 @@ export class EmbeddingService {
       this.provider = new OllamaEmbeddingProvider(baseUrl, model, dimensions);
       this.logger.log(`Ollama embedding provider initialized: ${model}`);
     } else {
-      this.provider = new OpenAICompatibleEmbeddingProvider({
-        apiKey,
-        baseUrl,
-        model,
-        dimensions,
-      });
-      this.logger.log(`OpenAI-compatible embedding provider initialized: ${model}`);
+      this.provider = new OpenAICompatibleEmbeddingProvider({ apiKey, baseUrl, model, dimensions });
+      this.logger.log(`OpenAI-compatible embedding provider initialized: ${model} @ ${baseUrl}`);
     }
 
     return this.provider;
   }
 
   getStatus(): EmbeddingStatus {
-    const apiKey = this.config.get<string>('LLM_API_KEY', '');
-    const baseUrl = this.config.get<string>('LLM_BASE_URL', '');
+    const apiKey = this.config.get<string>('EMBEDDING_API_KEY', '')
+      || this.config.get<string>('LLM_API_KEY', '');
+    const baseUrl = this.config.get<string>('EMBEDDING_BASE_URL', '')
+      || this.config.get<string>('LLM_BASE_URL', '');
     const model = this.config.get<string>('EMBEDDING_MODEL', 'text-embedding-3-small');
     const dimensions = this.config.get<number>('EMBEDDING_DIMENSIONS', 1536);
 
@@ -188,11 +197,13 @@ export class EmbeddingService {
       baseUrlMasked = baseUrl ? '(invalid URL)' : '(not set)';
     }
 
+    const hasDedicatedUrl = !!this.config.get<string>('EMBEDDING_BASE_URL', '');
+
     return {
       provider: isOllama ? 'ollama' : 'openai-compatible',
       model,
       dimensions,
-      baseUrlMasked,
+      baseUrlMasked: hasDedicatedUrl ? baseUrlMasked : `${baseUrlMasked} (shared with LLM)`,
       configured: !!apiKey && apiKey !== 'mock' && !!baseUrl && baseUrl !== 'mock',
     };
   }

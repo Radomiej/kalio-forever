@@ -166,6 +166,43 @@ describe('SubagentTool', () => {
     });
   });
 
+  describe('DI token correctness', () => {
+    it('resolves registry when moduleRef.get is called with class token (not string)', async () => {
+      // Reproduces: "Nest could not find ToolRegistryService element" — caused by
+      // using string token 'ToolRegistryService' instead of the class reference.
+      const stringRejectingModuleRef = {
+        get: vi.fn().mockImplementation((token: unknown) => {
+          if (typeof token === 'string') {
+            throw new Error(
+              `Nest could not find ${String(token)} element (this provider does not exist in the current context)`,
+            );
+          }
+          return registry;
+        }),
+      };
+      const toolWithClassToken = new SubagentTool(
+        llm as LLMService,
+        stringRejectingModuleRef as unknown as ModuleRef,
+      );
+      (llm.streamChat as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+      await expect(
+        toolWithClassToken.execute(makeRequest({ objective: 'task' })),
+      ).resolves.toBeDefined();
+    });
+
+    it('calls moduleRef.get with a class (Function) token and { strict: false }', async () => {
+      (llm.streamChat as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+      await tool.execute(makeRequest({ objective: 'task' }));
+
+      expect(moduleRef.get).toHaveBeenCalledWith(
+        expect.any(Function),
+        expect.objectContaining({ strict: false }),
+      );
+    });
+  });
+
   describe('negative scenarios', () => {
     it('rejects with timeout error when LLM takes too long', async () => {
       vi.useFakeTimers();

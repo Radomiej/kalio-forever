@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import type { ToolCallRequest, ToolMeta } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { LLMService } from '../../llm/llm.service';
+// eslint-disable-next-line import/no-cycle
+import { ToolRegistryService } from '../tool-registry.service';
 
 interface ToolRegistryLike {
   getEntries?: () => Array<{ meta: ToolMeta }>;
@@ -52,7 +54,11 @@ export class SubagentTool {
   ) {}
 
   private getToolRegistry(): ToolRegistryLike {
-    return this.moduleRef.get('ToolRegistryService') as ToolRegistryLike;
+    // Use the class as the DI token (not a string) so NestJS can resolve it.
+    // { strict: false } searches the entire application graph, which is needed
+    // because ToolRegistryService and SubagentTool are in the same module but
+    // the default strict lookup fails with a class-keyed provider.
+    return this.moduleRef.get(ToolRegistryService, { strict: false });
   }
 
   private getTools(availableTools?: string[]): ToolMeta[] {
