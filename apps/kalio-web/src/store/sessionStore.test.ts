@@ -123,3 +123,44 @@ describe('sessionStore — AgentTurn actions', () => {
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: switching sessions must clear in-flight agent turns so stale
+// streaming content from the old session does not bleed into the new session.
+// Bug: setActiveSession only cleared messages and pendingUserActions but left
+// agentTurns and activeTurnId intact, causing ghost turns to appear.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('REGRESSION: setActiveSession clears in-flight agent state', () => {
+  beforeEach(resetStore);
+
+  it('clears agentTurns on session switch', () => {
+    useSessionStore.setState({ activeSessionId: 'session-A' });
+    useSessionStore.getState().startAgentTurn('t1', 'session-A');
+    expect(useSessionStore.getState().agentTurns).toHaveLength(1);
+
+    useSessionStore.getState().setActiveSession('session-B');
+
+    expect(useSessionStore.getState().agentTurns).toHaveLength(0);
+  });
+
+  it('clears activeTurnId on session switch', () => {
+    useSessionStore.setState({ activeSessionId: 'session-A' });
+    useSessionStore.getState().startAgentTurn('t1', 'session-A');
+    expect(useSessionStore.getState().activeTurnId).toBe('t1');
+
+    useSessionStore.getState().setActiveSession('session-B');
+
+    expect(useSessionStore.getState().activeTurnId).toBeNull();
+  });
+
+  it('clears messages on session switch', () => {
+    useSessionStore.setState({
+      activeSessionId: 'session-A',
+      messages: [{ id: 'm1', sessionId: 'session-A', role: 'user', content: 'hello', createdAt: 0 }],
+    });
+
+    useSessionStore.getState().setActiveSession('session-B');
+
+    expect(useSessionStore.getState().messages).toHaveLength(0);
+  });
+});

@@ -57,6 +57,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     const store = this.getStore(personaId);
     const chunks = splitTextIntoChunks(text);
     const ids: string[] = [];
+    const embeddingModel = await this.embeddingService.getModelName();
 
     const embeddings = await this.embeddingService.embedBatch(chunks);
 
@@ -64,7 +65,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       const id = nanoid();
       const chunk = chunks[i]!;
       const embedding = embeddings[i]!;
-      store.insert(id, embedding, chunk, { ...metadata, chunk_index: String(i) });
+      store.insert(id, embedding, chunk, { ...metadata, chunk_index: String(i) }, embeddingModel);
       ids.push(id);
     }
 
@@ -105,6 +106,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
 
     const store = this.getStore(personaId);
     const ids: string[] = [];
+    const embeddingModel = await this.embeddingService.getModelName();
     const embeddings = await this.embeddingService.embedBatch(blocks);
 
     for (let i = 0; i < blocks.length; i++) {
@@ -112,7 +114,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       store.insert(id, embeddings[i]!, blocks[i]!, {
         source: 'conversation',
         block_index: String(i),
-      });
+      }, embeddingModel);
       ids.push(id);
     }
 

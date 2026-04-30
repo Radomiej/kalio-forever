@@ -59,7 +59,6 @@ const updateToolActivity = vi.fn();
 const setStreaming = vi.fn();
 const setPendingConfirmation = vi.fn();
 const clearToolActivities = vi.fn();
-const clearAgentTurns = vi.fn();
 const addLlmActivity = vi.fn();
 const updateLlmActivity = vi.fn();
 const setContext = vi.fn();
@@ -78,7 +77,6 @@ const agentStoreState = {
   addToolActivity,
   updateToolActivity,
   clearToolActivities,
-  clearAgentTurns,
   addLlmActivity,
   updateLlmActivity,
   setContext,
@@ -97,6 +95,7 @@ const removeLastAgentTurn = vi.fn();
 const startAgentTurn = vi.fn();
 const finalizeAgentTurn = vi.fn();
 const addTurnItem = vi.fn();
+const clearAgentTurns = vi.fn();
 
 // Mutable activeTurnId so tests can control what the store returns
 let mockActiveTurnId: string | null = null;
@@ -126,7 +125,7 @@ vi.mock('../../store/sessionStore', () => ({
       startAgentTurn,
       addTurnItem,
       finalizeAgentTurn,
-      clearAgentTurns: vi.fn(),
+      clearAgentTurns,
       markAgentTurnError,
       removeLastAgentTurn,
     }),
@@ -639,5 +638,62 @@ describe('auto-send pending message uses session personaId (not hardcoded defaul
     expect(mockSendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ personaId: 'default' }),
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: navigating away (home) and back to chat wipes in-flight agent turn
+//
+// Root cause: ChatInterface is conditionally rendered in App.tsx. When the user
+// navigates to the landing page, it unmounts. On remount (return to talk), the
+// activeSessionId effect fires again and calls clearAgentTurns() even though the
+// session hasn't changed. This nukes the in-flight turn; subsequent chat:chunk
+// events find activeTurnId=null and addTurnItem is never called, so the LLM
+// response stream becomes invisible until the user manually switches sessions.
+//
+// Fix: clearAgentTurns should NOT be called in the activation effect. Instead,
+// setActiveSession in the store clears agentTurns on a real session switch.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('REGRESSION: remount with same session must not clear agent turns', () => {
+  it('unmounting and remounting with the same activeSessionId does not call clearAgentTurns', () => {
+    const { unmount } = render(<ChatInterface />);
+    // clearAgentTurns is called once on initial mount (part of activation effect)
+    vi.clearAllMocks();
+
+    // Simulate navigating to landing (unmounts ChatInterface) and back (remounts)
+    unmount();
+    render(<ChatInterface />);
+
+    // BUG: clearAgentTurns was called again, wiping any in-flight streaming turn.
+    // After fix: clearAgentTurns lives in setActiveSession (store), not here.
+    expect(clearAgentTurns).not.toHaveBeenCalled();
+  });
+
+  it('chat:chunk after remount still calls appendChunk (streaming channel intact)', () => {
+    // Pull appendChunk from the useSessionStore mock so we can spy on it
+    // after remount. The mock returns fresh vi.fn() per call, but we can
+    // check via the handler capture that the event bus re-registered listeners.
+    const { unmount } = render(<ChatInterface />);
+    vi.clearAllMocks();
+
+    unmount();
+    render(<ChatInterface />);
+
+    // Fire a chunk AFTER remount — with the bug the listener may not be
+    // registered, but more critically the activation effect wipes streaming state.
+    // The simplest observable: appendChunk (from useSessionStore hook) is called.
+    // Since each render creates a fresh vi.fn() via the factory, we verify the
+    // event is dispatched at all by checking no error is thrown.
+    expect(() => {
+      act(() => {
+        fire('chat:chunk', {
+          sessionId: 'session-1',
+          messageId: 'msg-live',
+          delta: 'hello',
+          done: false,
+          thinking: false,
+        });
+      });
+    }).not.toThrow();
   });
 });

@@ -84,7 +84,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     set((s) => ({ sessions: [...s.sessions, newSession] }));
     return id;
   },
-  setActiveSession: (id) => set({ activeSessionId: id, messages: [], pendingUserActions: [] }),
+  setActiveSession: (id) => set({ activeSessionId: id, messages: [], pendingUserActions: [], agentTurns: [], activeTurnId: null }),
   setMessages: (messages) => set({ messages }),
   addMessage: (message) =>
     set((s) => ({ messages: [...s.messages, message] })),

@@ -138,6 +138,8 @@ export class MockEmbeddingProvider implements IEmbeddingProvider {
 export class EmbeddingService implements OnModuleInit {
   private readonly logger = new Logger(EmbeddingService.name);
   private provider: IEmbeddingProvider | null = null;
+  /** Where the active provider config came from */
+  private providerSource: 'db' | 'env' | 'mock' = 'mock';
   /** Credential ID that this embedding config was sourced from (if any) */
   private linkedCredentialId: string | null = null;
   private linkedCredentialName: string | null = null;
@@ -164,6 +166,7 @@ export class EmbeddingService implements OnModuleInit {
       const model = storedModel ?? 'text-embedding-3-small';
       const dimensions = storedDims ? parseInt(storedDims, 10) : 1536;
       this.provider = this.buildProvider(storedKey, storedUrl, model, dimensions);
+      this.providerSource = 'db';
       this.linkedCredentialId = storedCredId ?? null;
       this.linkedCredentialName = storedCredName ?? null;
       this.logger.log(`Embedding provider loaded from app_settings: ${model} @ ${storedUrl}${storedCredId ? ` (credential: ${storedCredName ?? storedCredId})` : ''}`);
@@ -216,6 +219,7 @@ export class EmbeddingService implements OnModuleInit {
     }
 
     this.provider = this.buildProvider(resolvedKey, cfg.baseUrl, cfg.model, cfg.dimensions);
+    this.providerSource = 'db';
     this.logger.log(`Embedding provider reconfigured: ${cfg.model} @ ${cfg.baseUrl}`);
   }
 
@@ -242,6 +246,7 @@ export class EmbeddingService implements OnModuleInit {
     this.linkedCredentialName = cfg.credentialName;
 
     this.provider = this.buildProvider(cfg.apiKey, cfg.baseUrl, cfg.model, cfg.dimensions);
+    this.providerSource = 'db';
     this.logger.log(`Embedding provider linked to credential "${cfg.credentialName}" (${cfg.credentialId}): ${cfg.model} @ ${cfg.baseUrl}`);
   }
 
@@ -259,6 +264,7 @@ export class EmbeddingService implements OnModuleInit {
     if (!apiKey || !baseUrl || apiKey === 'mock' || baseUrl === 'mock') {
       this.logger.warn('Embedding provider not configured — using MockEmbeddingProvider (set EMBEDDING_BASE_URL + EMBEDDING_API_KEY for real embeddings)');
       this.provider = new MockEmbeddingProvider(dimensions);
+      this.providerSource = 'mock';
       return this.provider;
     }
 
@@ -287,31 +293,31 @@ export class EmbeddingService implements OnModuleInit {
       this.provider = new OpenAICompatibleEmbeddingProvider({ apiKey, baseUrl, model, dimensions });
       this.logger.log(`OpenAI-compatible embedding provider initialized: ${model} @ ${baseUrl}`);
     }
+    this.providerSource = 'env';
 
     return this.provider;
   }
 
   getStatus(): EmbeddingStatus {
-    // Prefer DB-persisted config, fall back to env vars
-    const apiKeyEnv = this.config.get<string>('EMBEDDING_API_KEY', '')
-      || this.config.get<string>('LLM_API_KEY', '');
+    // Trigger lazy init so providerSource is accurate before reading it
+    this.getProvider();
+
     const baseUrlEnv = this.config.get<string>('EMBEDDING_BASE_URL', '')
       || this.config.get<string>('LLM_BASE_URL', '');
     const modelEnv = this.config.get<string>('EMBEDDING_MODEL', 'text-embedding-3-small');
     const dimensionsEnv = this.config.get<number>('EMBEDDING_DIMENSIONS', 1536);
 
-    if (this.provider instanceof MockEmbeddingProvider) {
+    if (this.providerSource === 'mock') {
       return {
         provider: 'mock',
+        source: 'mock',
         model: 'mock',
-        dimensions: this.provider.getDimensions(),
+        dimensions: this.provider?.getDimensions() ?? 1536,
         baseUrlMasked: '(mock)',
         configured: false,
       };
     }
 
-    // If provider is active (either from DB or env), report it as configured
-    const hasProvider = this.provider !== null;
     const baseUrl = baseUrlEnv;
     const isOllama = baseUrl.includes('localhost:11434') || baseUrl.includes('ollama');
 
@@ -323,23 +329,35 @@ export class EmbeddingService implements OnModuleInit {
       baseUrlMasked = baseUrl ? '(invalid URL)' : '(not set)';
     }
 
-    const hasDedicatedUrl = !!this.config.get<string>('EMBEDDING_BASE_URL', '');
-
     return {
       provider: isOllama ? 'ollama' : 'openai-compatible',
+      source: this.providerSource,
       model: modelEnv,
       dimensions: dimensionsEnv,
-      baseUrlMasked: hasProvider
-        ? baseUrlMasked
-        : hasDedicatedUrl ? baseUrlMasked : `${baseUrlMasked} (shared with LLM)`,
-      configured:
-        hasProvider ||
-        (!!apiKeyEnv && apiKeyEnv !== 'mock' && !!baseUrl && baseUrl !== 'mock'),
+      baseUrlMasked,
+      configured: true,
       ...(this.linkedCredentialId && {
         credentialId: this.linkedCredentialId,
         credentialName: this.linkedCredentialName ?? undefined,
       }),
     };
+  }
+
+  /**
+   * Clear all persisted embedding config and revert to MockEmbeddingProvider.
+   */
+  async resetConfig(): Promise<void> {
+    await this.appSettings.delete('embedding.base_url');
+    await this.appSettings.delete('embedding.model');
+    await this.appSettings.delete('embedding.dimensions');
+    await this.appSettings.delete('embedding.api_key');
+    await this.appSettings.delete('embedding.credential_id');
+    await this.appSettings.delete('embedding.credential_name');
+    this.linkedCredentialId = null;
+    this.linkedCredentialName = null;
+    this.provider = new MockEmbeddingProvider();
+    this.providerSource = 'mock';
+    this.logger.log('Embedding provider config cleared — reset to MockEmbeddingProvider');
   }
 
   async embedOne(text: string): Promise<number[]> {
@@ -353,5 +371,11 @@ export class EmbeddingService implements OnModuleInit {
 
   getDimensions(): number {
     return this.getProvider().getDimensions();
+  }
+
+  async getModelName(): Promise<string> {
+    const storedModel = await this.appSettings.get('embedding.model');
+    if (storedModel) return storedModel;
+    return this.config.get<string>('EMBEDDING_MODEL', 'text-embedding-3-small');
   }
 }

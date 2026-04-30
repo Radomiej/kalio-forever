@@ -9,6 +9,7 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type { MemoryIngestResult, MemorySearchResult, MemorySearchMode, EmbeddingStatus } from '@kalio/types';
@@ -31,6 +32,8 @@ interface EmbeddingFromCredentialDto {
 
 @Controller('memory')
 export class MemoryController {
+  private readonly logger = new Logger(MemoryController.name);
+
   constructor(
     private readonly memoryService: MemoryService,
     private readonly credentialsService: CredentialsService,
@@ -71,6 +74,15 @@ export class MemoryController {
     return this.memoryService.getAll(personaId);
   }
 
+  // NOTE: This route must be declared before @Delete(':personaId') and @Delete(':personaId/:id')
+  // because 'config/embedding' is a two-segment path and would otherwise match ':personaId/:id'.
+  @Delete('config/embedding')
+  async clearEmbeddingConfig(): Promise<EmbeddingStatus> {
+    this.logger.log('Embedding config cleared via API — reverting to mock');
+    await this.memoryService.getEmbeddingService().resetConfig();
+    return this.memoryService.getEmbeddingService().getStatus();
+  }
+
   @Delete(':personaId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteAll(@Param('personaId') personaId: string): Promise<void> {
@@ -93,6 +105,7 @@ export class MemoryController {
 
   @Put('config/embedding')
   async setEmbeddingConfig(@Body() dto: EmbeddingConfigDto): Promise<EmbeddingStatus> {
+    this.logger.log(`Embedding config update via API: model=${dto.model} baseUrl=${dto.baseUrl} dimensions=${dto.dimensions}`);
     await this.memoryService.getEmbeddingService().reconfigure({
       baseUrl: dto.baseUrl,
       apiKey: dto.apiKey ?? null,
@@ -109,6 +122,8 @@ export class MemoryController {
 
     const apiKey = await this.credentialsService.getApiKey(dto.credentialId);
     if (!apiKey) throw new NotFoundException(`No API key found for credential ${dto.credentialId}`);
+
+    this.logger.log(`Embedding linked to credential "${cred.name}" (${cred.id}) via API: model=${dto.model} dimensions=${dto.dimensions}`);
 
     const PROVIDER_BASE_URLS: Record<string, string> = {
       openai:     'https://api.openai.com/v1',

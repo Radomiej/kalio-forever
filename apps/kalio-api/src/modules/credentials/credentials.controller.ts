@@ -1,10 +1,12 @@
-import { Controller, Get, Post, Put, Patch, Delete, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, HttpCode, HttpStatus, Logger } from '@nestjs/common';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { CredentialsService } from './credentials.service';
 import { createLLMProvider } from '../llm/providers/provider-factory';
 
 @Controller('credentials')
 export class CredentialsController {
+  private readonly logger = new Logger(CredentialsController.name);
+
   constructor(private readonly credentialsService: CredentialsService) {}
 
   @Get()
@@ -34,13 +36,15 @@ export class CredentialsController {
   @Put('active/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async setActive(@Param('id') id: string): Promise<void> {
-    return this.credentialsService.setActiveCredential(id);
+    await this.credentialsService.setActiveCredential(id);
+    this.logger.log(`Active LLM credential set via API: ${id}`);
   }
 
   @Delete('active')
   @HttpCode(HttpStatus.NO_CONTENT)
   async clearActive(): Promise<void> {
-    return this.credentialsService.clearActiveCredential();
+    await this.credentialsService.clearActiveCredential();
+    this.logger.log('Active LLM credential cleared via API');
   }
 
   // ─── Context window size ──────────────────────────────────────────────────────
@@ -55,6 +59,7 @@ export class CredentialsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async setContextWindow(@Body() body: { size: number }): Promise<void> {
     await this.credentialsService.setContextWindowSize(body.size);
+    this.logger.log(`Context window size updated via API: ${body.size}`);
   }
 
   // ─── Generation settings ─────────────────────────────────────────────────────
@@ -68,6 +73,7 @@ export class CredentialsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async setGenerationSettings(@Body() body: { temperature?: number; maxTokens?: number }): Promise<void> {
     await this.credentialsService.setGenerationSettings(body);
+    this.logger.log(`Generation settings updated via API: temperature=${body.temperature ?? '—'} maxTokens=${body.maxTokens ?? '—'}`);
   }
 
   // ─── Model listing for credential (placed after settings/ routes) ─────────────

@@ -26,6 +26,7 @@ export interface VecEntry {
   id: string;
   content: string;
   metadata: Record<string, string>;
+  embeddingModel: string;
   createdAt: number;
 }
 
@@ -58,6 +59,7 @@ export class VectorStoreService {
         id TEXT PRIMARY KEY,
         content TEXT NOT NULL,
         metadata TEXT NOT NULL DEFAULT '{}',
+        embedding_model TEXT NOT NULL DEFAULT '',
         created_at INTEGER NOT NULL
       )
     `);
@@ -78,12 +80,12 @@ export class VectorStoreService {
     `);
   }
 
-  insert(id: string, embedding: number[], content: string, metadata: Record<string, string> = {}): void {
+  insert(id: string, embedding: number[], content: string, metadata: Record<string, string> = {}, embeddingModel = ''): void {
     const now = Date.now();
     const vecBuffer = new Float32Array(embedding);
 
     const insertMeta = this.db.prepare(
-      'INSERT OR REPLACE INTO memories (id, content, metadata, created_at) VALUES (?, ?, ?, ?)'
+      'INSERT OR REPLACE INTO memories (id, content, metadata, embedding_model, created_at) VALUES (?, ?, ?, ?, ?)'
     );
     const deleteVec = this.db.prepare('DELETE FROM memories_vec WHERE id = ?');
     const insertVec = this.db.prepare(
@@ -95,7 +97,7 @@ export class VectorStoreService {
     );
 
     const transaction = this.db.transaction(() => {
-      insertMeta.run(id, content, JSON.stringify(metadata), now);
+      insertMeta.run(id, content, JSON.stringify(metadata), embeddingModel, now);
       deleteVec.run(id);
       insertVec.run(id, vecBuffer);
       deleteFts.run(id);
@@ -182,11 +184,12 @@ export class VectorStoreService {
 
   getAll(): VecEntry[] {
     const rows = this.db
-      .prepare('SELECT id, content, metadata, created_at FROM memories ORDER BY created_at DESC')
+      .prepare('SELECT id, content, metadata, embedding_model, created_at FROM memories ORDER BY created_at DESC')
       .all() as Array<{
         id: string;
         content: string;
         metadata: string;
+        embedding_model: string;
         created_at: number;
       }>;
 
@@ -194,6 +197,7 @@ export class VectorStoreService {
       id: r.id,
       content: r.content,
       metadata: JSON.parse(r.metadata) as Record<string, string>,
+      embeddingModel: r.embedding_model,
       createdAt: r.created_at,
     }));
   }

@@ -5,6 +5,8 @@ import type { LLMConfig } from '@kalio/types';
 
 export interface LLMConfigResponse extends LLMConfig {
   contextWindowSize: number;
+  /** Whether the active LLM config comes from a DB credential or .env fallback */
+  source: 'db' | 'env';
 }
 
 const PROVIDER_BASE_URLS: Record<string, string> = {

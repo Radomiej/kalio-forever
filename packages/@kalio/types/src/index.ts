@@ -557,15 +557,42 @@ export interface MemorySearchRequest {
   mode?: MemorySearchMode;
 }
 
+// ─── Embedding Credentials ───────────────────────────────────────────────────
+// Independent credential table for embedding providers (separate from LLM
+// credentials — embedding has `dimensions` and different provider set).
+export type EmbeddingProviderType = 'openai' | 'cometapi' | 'openrouter' | 'ollama' | 'custom';
+
+/** apiKey is NEVER included in EmbeddingCredential — never exposed after creation. */
+export interface EmbeddingCredential {
+  id: ID;
+  name: string;
+  provider: EmbeddingProviderType;
+  baseUrl: string;
+  model: string;
+  dimensions: number;
+  createdAt: Timestamp;
+}
+
+export interface CreateEmbeddingCredentialDto {
+  name: string;
+  provider: EmbeddingProviderType;
+  apiKey: string;          // write-only, never returned
+  baseUrl: string;
+  model: string;
+  dimensions: number;
+}
+
 export interface EmbeddingStatus {
   provider: 'openai-compatible' | 'ollama' | 'mock';
+  /** Where the active embedding config comes from */
+  source: 'db' | 'env' | 'mock';
   model: string;
   dimensions: number;
   baseUrlMasked: string;
   configured: boolean;
-  /** Set when embedding is sourced from an existing Credential row */
-  credentialId?: string;
-  credentialName?: string;
+  /** Set when source === 'db' */
+  activeCredentialId?: string;
+  activeCredentialName?: string;
 }
 
 // ─── Audit Log ───────────────────────────────────────────────────────────────

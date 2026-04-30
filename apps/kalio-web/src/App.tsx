@@ -137,8 +137,9 @@ export function App() {
           <LandingPage onNavigateToChat={() => setActiveSection('talk')} />
         )}
 
-        {activeSection === 'talk' && (
-          <div className="flex h-full">
+        {/* talk section: always mounted so ChatInterface never loses socket listeners
+            or in-flight streaming state when the user navigates to the landing page */}
+        <div className={`flex h-full ${activeSection !== 'talk' ? 'hidden' : ''}`}>
             {/* Left sidebar: session list */}
             <div className="w-72 shrink-0 flex flex-col border-r border-base-300 overflow-hidden">
               <div className="flex border-b border-base-300 shrink-0">
@@ -175,7 +176,6 @@ export function App() {
               <ChatInterface />
             </div>
           </div>
-        )}
 
         {activeSection === 'tools' && (
           <div className="flex flex-col h-full">

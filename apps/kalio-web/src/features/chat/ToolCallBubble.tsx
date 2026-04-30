@@ -159,10 +159,12 @@ export function HistoryToolCallBubble({
   toolName,
   content,
   isAnswered,
+  args,
 }: {
   toolName: string;
   content: string;
   isAnswered?: boolean;
+  args?: Record<string, unknown>;
 }) {
   let parsed: unknown;
   try {
@@ -172,13 +174,14 @@ export function HistoryToolCallBubble({
   }
 
   const raapp = extractRAAppBlock(parsed);
+  const hasArgs = args != null && Object.keys(args).length > 0;
   const [open, setOpen] = useState(() => raapp != null && !isAnswered);
   useEffect(() => {
     if (isAnswered) setOpen(false);
   }, [isAnswered]);
 
   const hasResult = !raapp && content.length > 0;
-  const expandable = hasResult || (raapp != null && !isAnswered);
+  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered);
 
   return (
     <>
@@ -190,6 +193,16 @@ export function HistoryToolCallBubble({
         open={open}
         onToggle={() => setOpen((v) => !v)}
       >
+        {hasArgs && (
+          <div className="font-mono bg-base-200/60 rounded px-2 py-1 text-xs text-base-content/50">
+            <div className="text-[10px] text-base-content/30 mb-0.5">input</div>
+            {Object.entries(args!).map(([k, v]) => (
+              <div key={k}>
+                <span className="text-base-content/40">{k}:</span> {formatArgValue(v)}
+              </div>
+            ))}
+          </div>
+        )}
         {hasResult && (
           <div className="font-mono bg-base-200/60 rounded px-2 py-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs text-base-content/60">
             {typeof parsed === 'object' ? JSON.stringify(parsed, null, 2) : String(parsed)}

@@ -21,7 +21,7 @@ export { computeAnsweredCallIds } from './chatUtils';
 export function ChatInterface() {
   const {
     messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages,
-    agentTurns, startAgentTurn, addTurnItem, finalizeAgentTurn, clearAgentTurns,
+    agentTurns, startAgentTurn, addTurnItem, finalizeAgentTurn,
     setAgentTurns, markAgentTurnError, removeLastAgentTurn,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
@@ -323,7 +323,9 @@ export function ChatInterface() {
     // Reset stale streaming state from any previous session
     setStreaming(false);
     clearToolActivities();
-    clearAgentTurns(); // Clear previous turns
+    // Note: agentTurns are cleared by setActiveSession in the store on real session switch.
+    // Do NOT call clearAgentTurns here — this effect also fires on component remount
+    // (e.g. navigating home and back), which would wipe an in-flight streaming turn.
     console.debug('[ChatInterface] session activated', activeSessionId, '— streaming reset');
 
     // Load message history from backend
@@ -346,7 +348,7 @@ export function ChatInterface() {
     setPendingRAAppId(null);
     const pendingSession = s.find((sess) => sess.id === activeSessionId);
     handleSendRef.current(toSend, pendingSession?.personaId ?? 'default');
-  }, [activeSessionId, clearAgentTurns, setMessages, setAgentTurns]);
+  }, [activeSessionId, setMessages, setAgentTurns]);
 
   const handleConfirm = () => {
     if (!pendingConfirmation || !activeSessionId) return;

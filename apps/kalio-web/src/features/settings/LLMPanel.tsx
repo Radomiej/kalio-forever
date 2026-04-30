@@ -1,9 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Loader2, AlertCircle, Zap } from 'lucide-react';
+import { Plus, Loader2, AlertCircle, Zap, Info } from 'lucide-react';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { useSettingsStore } from './settingsStore';
 import { ProviderCard } from './ProviderCard';
 import { ModelSettingsSection } from './ModelSettingsSection';
+
+interface LLMConfigWithSource {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  contextWindowSize: number;
+  source: 'db' | 'env';
+}
 
 const PROVIDER_LABELS: Record<string, string> = {
   openai:     'OpenAI',
@@ -74,6 +82,7 @@ export function LLMPanel() {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [contextWindow, setContextWindow] = useState(32000);
+  const [envConfig, setEnvConfig] = useState<LLMConfigWithSource | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<AddForm>(emptyForm());
   const [loading, setLoading] = useState(true);
@@ -94,20 +103,23 @@ export function LLMPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [creds, active, cw] = await Promise.all([
+      const [creds, active, cw, llmCfg] = await Promise.all([
         apiFetch<Credential[]>('/credentials'),
         apiFetch<{ credentialId: string | null }>('/credentials/active'),
         apiFetch<{ size: number }>('/credentials/settings/context-window'),
+        apiFetch<LLMConfigWithSource>('/llm/config'),
       ]);
       setCredentials(creds);
       setActiveId(active.credentialId);
       setContextWindow(cw.size);
+      setEnvConfig(llmCfg);
+      setBackendConfig(llmCfg);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setBackendConfig]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -249,9 +261,29 @@ export function LLMPanel() {
           )}
 
           {credentials.length === 0 && !showForm && (
-            <div className="text-sm text-base-content/50 italic text-center py-6">
-              No credentials configured. Add one below.
-            </div>
+            <>
+              {envConfig && envConfig.source === 'env' && envConfig.model && envConfig.model !== 'mock' ? (
+                <div className="border border-base-300 rounded-lg p-3 bg-base-200/40 flex flex-col gap-1" data-testid="env-provider-card">
+                  <div className="flex items-center gap-2">
+                    <Info size={13} className="text-sky-400 shrink-0" />
+                    <span className="text-xs font-semibold text-base-content/80">Env Provider (read-only)</span>
+                    <span className="badge badge-ghost badge-xs ml-auto">active</span>
+                  </div>
+                  <div className="text-xs text-base-content/60 pl-5 space-y-0.5">
+                    <div>Provider: <span className="font-mono text-base-content/80">{PROVIDER_LABELS[envConfig.provider] ?? envConfig.provider}</span></div>
+                    <div>Model: <span className="font-mono text-base-content/80">{envConfig.model}</span></div>
+                    {envConfig.baseUrl && <div>Base URL: <span className="font-mono text-base-content/80">{envConfig.baseUrl}</span></div>}
+                  </div>
+                  <p className="text-[10px] text-base-content/40 pl-5 mt-1">
+                    Configured via environment variables. Add a provider above to override.
+                  </p>
+                </div>
+              ) : (
+                <div className="text-sm text-base-content/50 italic text-center py-6">
+                  No credentials configured. Add one below.
+                </div>
+              )}
+            </>
           )}
 
           {showForm ? (

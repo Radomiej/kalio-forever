@@ -63,6 +63,16 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
   }
   for (const a of toolActivities) toolCallIdToName.set(a.callId, a.toolName);
 
+  // Build callId → args from assistant messages (for HistoryToolCallBubble)
+  const toolArgsByCallId = new Map<string, Record<string, unknown>>();
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.toolCalls) {
+      for (const tc of msg.toolCalls) toolArgsByCallId.set(tc.id, tc.args);
+    }
+  }
+  // Also pick up args from current-turn toolActivities (may not be persisted yet)
+  for (const a of toolActivities) toolArgsByCallId.set(a.callId, a.args);
+
   // Build tool result lookup by callId
   const toolResultByCallId = new Map<string, { content: string; status: string }>();
   for (const msg of messages) {
@@ -103,6 +113,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
                   toolName={toolName}
                   content={toolResult?.content ?? ''}
                   isAnswered={isAnswered}
+                  args={toolArgsByCallId.get(callId)}
                 />
               );
             }

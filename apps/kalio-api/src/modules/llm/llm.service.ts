@@ -57,7 +57,7 @@ export class LLMService {
     return provider.streamChat(messages, tools, onChunk, sessionId, messageId);
   }
 
-  async getConfig(): Promise<LLMConfig> {
+  async getConfig(): Promise<LLMConfig & { source: 'db' | 'env' }> {
     const dbConfig = await this.credentialsService.getActiveProviderConfig();
     if (dbConfig) {
       return {
@@ -65,6 +65,7 @@ export class LLMService {
         apiKey: '',  // never expose in API
         baseUrl: dbConfig.baseUrl ?? '',
         model: dbConfig.model,
+        source: 'db',
       };
     }
     return {
@@ -72,6 +73,7 @@ export class LLMService {
       apiKey: '',
       baseUrl: this.config.get<string>('LLM_BASE_URL', ''),
       model: this.config.get<string>('LLM_MODEL', ''),
+      source: 'env',
     };
   }
 

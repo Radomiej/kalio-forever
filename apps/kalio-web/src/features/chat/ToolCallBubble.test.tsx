@@ -112,3 +112,53 @@ describe('LiveToolCallBubble — status indicator only (no widget)', () => {
     expect(screen.getByText('run_raapp')).toBeInTheDocument();
   });
 });
+
+// ── HistoryToolCallBubble args display ────────────────────────────────────────
+
+describe('HistoryToolCallBubble — tool input args display', () => {
+  it('shows args key/value when args prop is provided', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="web_search"
+        content={NON_RAAPP_RESULT}
+        args={{ query: 'how to fix bugs', maxResults: 5 }}
+      />,
+    );
+    // Chip renders, but args are in the expandable section — click to open
+    const toggle = screen.getByRole('button', { name: /toggle details/i });
+    act(() => toggle.click());
+
+    expect(screen.getByText('query:')).toBeInTheDocument();
+    expect(screen.getByText('how to fix bugs')).toBeInTheDocument();
+    expect(screen.getByText('maxResults:')).toBeInTheDocument();
+  });
+
+  it('shows "input" label above args', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="web_search"
+        content={NON_RAAPP_RESULT}
+        args={{ query: 'test' }}
+      />,
+    );
+    const toggle = screen.getByRole('button', { name: /toggle details/i });
+    act(() => toggle.click());
+
+    expect(screen.getByText('input')).toBeInTheDocument();
+  });
+
+  it('does NOT show args section when args is undefined', () => {
+    render(<HistoryToolCallBubble toolName="list_raapps" content={NON_RAAPP_RESULT} />);
+    // Open the expandable section if any
+    const toggle = screen.queryByRole('button', { name: /toggle details/i });
+    if (toggle) act(() => toggle.click());
+    expect(screen.queryByText('input')).not.toBeInTheDocument();
+  });
+
+  it('does NOT show args section when args is empty object', () => {
+    render(<HistoryToolCallBubble toolName="list_raapps" content={NON_RAAPP_RESULT} args={{}} />);
+    const toggle = screen.queryByRole('button', { name: /toggle details/i });
+    if (toggle) act(() => toggle.click());
+    expect(screen.queryByText('input')).not.toBeInTheDocument();
+  });
+});
