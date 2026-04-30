@@ -64,6 +64,13 @@ export class VectorStoreService {
       )
     `);
 
+    // Migrate existing DBs that were created before embedding_model column was added
+    try {
+      this.db.exec(`ALTER TABLE memories ADD COLUMN embedding_model TEXT NOT NULL DEFAULT ''`);
+    } catch {
+      // Column already exists — ignore
+    }
+
     this.db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(
         id TEXT PRIMARY KEY,

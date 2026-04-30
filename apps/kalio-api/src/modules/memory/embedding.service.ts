@@ -198,11 +198,12 @@ export class EmbeddingService implements OnModuleInit {
       return;
     }
 
-    // No DB credential — check env vars
-    const apiKey = this.config.get<string>('EMBEDDING_API_KEY', '')
-      || this.config.get<string>('LLM_API_KEY', '');
-    const baseUrl = this.config.get<string>('EMBEDDING_BASE_URL', '')
-      || this.config.get<string>('LLM_BASE_URL', '');
+    // No DB credential — check EMBEDDING_* env vars only.
+    // We deliberately do NOT fall back to LLM_API_KEY / LLM_BASE_URL:
+    // an LLM key may not support the embeddings API, and silently inheriting
+    // it causes confusing runtime failures.
+    const apiKey = this.config.get<string>('EMBEDDING_API_KEY', '');
+    const baseUrl = this.config.get<string>('EMBEDDING_BASE_URL', '');
     const model = this.config.get<string>('EMBEDDING_MODEL', 'text-embedding-3-small');
     const dimensions = parseInt(this.config.get<string>('EMBEDDING_DIMENSIONS', '1536'), 10);
 

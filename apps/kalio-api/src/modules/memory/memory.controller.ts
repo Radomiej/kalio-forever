@@ -68,26 +68,6 @@ export class MemoryController {
     }
   }
 
-  @Get(':personaId')
-  async getAll(@Param('personaId') personaId: string): Promise<MemorySearchResult[]> {
-    return this.memoryService.getAll(personaId);
-  }
-
-  @Delete(':personaId')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteAll(@Param('personaId') personaId: string): Promise<void> {
-    this.memoryService.deleteAll(personaId);
-  }
-
-  @Delete(':personaId/:id')
-  async delete(
-    @Param('personaId') personaId: string,
-    @Param('id') id: string
-  ): Promise<{ deleted: boolean }> {
-    const deleted = this.memoryService.delete(id, personaId);
-    return { deleted };
-  }
-
   // ── Embedding status ─────────────────────────────────────────────────────
 
   @Get('status/embedding')
@@ -96,6 +76,8 @@ export class MemoryController {
   }
 
   // ── Embedding credentials CRUD ───────────────────────────────────────────
+  // NOTE: all embedding-credentials routes must be declared BEFORE :personaId
+  // to prevent NestJS from routing literal paths to the parameterized handler.
 
   @Get('embedding-credentials')
   async listEmbeddingCredentials(): Promise<EmbeddingCredential[]> {
@@ -137,6 +119,38 @@ export class MemoryController {
     return this.memoryService.getEmbeddingService().getStatus();
   }
 
+  /**
+   * Probe a credential without saving it.
+   * Accepts a full credential payload (including apiKey) and runs a live
+   * connectivity test.  No row is written to the database.
+   * Route must be declared BEFORE @Post('embedding-credentials/:id/test')
+   * so 'probe' is not mistaken for an id segment.
+   */
+  @Post('embedding-credentials/probe')
+  @HttpCode(HttpStatus.OK)
+  async probeEmbeddingCredential(
+    @Body() dto: CreateEmbeddingCredentialDto
+  ): Promise<{ ok: boolean; error?: string }> {
+    const isOllama = dto.baseUrl.includes('localhost:11434') || dto.baseUrl.toLowerCase().includes('ollama');
+    try {
+      if (isOllama) {
+        const p = new OllamaEmbeddingProvider(dto.baseUrl, dto.model, dto.dimensions);
+        await p.embed(['test']);
+      } else {
+        const p = new OpenAICompatibleEmbeddingProvider({
+          apiKey: dto.apiKey,
+          baseUrl: dto.baseUrl,
+          model: dto.model,
+          dimensions: dto.dimensions,
+        });
+        await p.embed(['test']);
+      }
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   @Post('embedding-credentials/:id/test')
   @HttpCode(HttpStatus.OK)
   async testEmbeddingCredential(
@@ -162,5 +176,27 @@ export class MemoryController {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  // ── Memory CRUD (parameterized — must be LAST to avoid capturing literal routes) ─
+
+  @Get(':personaId')
+  async getAll(@Param('personaId') personaId: string): Promise<MemorySearchResult[]> {
+    return this.memoryService.getAll(personaId);
+  }
+
+  @Delete(':personaId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteAll(@Param('personaId') personaId: string): Promise<void> {
+    this.memoryService.deleteAll(personaId);
+  }
+
+  @Delete(':personaId/:id')
+  async delete(
+    @Param('personaId') personaId: string,
+    @Param('id') id: string
+  ): Promise<{ deleted: boolean }> {
+    const deleted = this.memoryService.delete(id, personaId);
+    return { deleted };
   }
 }

@@ -445,17 +445,32 @@ export function EmbeddingsPanel() {
                   className={`btn btn-ghost btn-xs gap-1 ${addTestState === 'ok' ? 'text-success' : addTestState === 'error' ? 'text-error' : 'text-base-content/60'}`}
                   onClick={() => {
                     if (!form.apiKey && form.provider !== 'ollama') { setAddTestError('Enter API key before testing'); return; }
+                    if (!form.baseUrl) { setAddTestError('Enter Base URL before testing'); return; }
                     setAddTestState('testing');
                     setAddTestError(null);
-                    // Create a temp credential to test — we test by saving then deleting
-                    // For simplicity in the add-form, surface a note to user
-                    setAddTestState('idle');
-                    setAddTestError('Save the credential first, then test it from the list');
+                    apiFetch<{ ok: boolean; error?: string }>('/memory/embedding-credentials/probe', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        name: form.name,
+                        provider: form.provider,
+                        apiKey: form.apiKey,
+                        baseUrl: form.baseUrl,
+                        model: form.model,
+                        dimensions: form.dimensions,
+                      }),
+                    }).then((r) => {
+                      setAddTestState(r.ok ? 'ok' : 'error');
+                      setAddTestError(r.error ?? null);
+                    }).catch((err) => {
+                      setAddTestState('error');
+                      setAddTestError(err instanceof Error ? err.message : 'Network error');
+                    });
                   }}
+                  disabled={addTestState === 'testing'}
                   data-testid="add-form-test-btn"
                 >
-                  <Zap size={12} />
-                  {addTestState === 'ok' ? 'OK!' : 'Test hint'}
+                  {addTestState === 'testing' ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                  {addTestState === 'ok' ? 'OK!' : addTestState === 'error' ? 'Failed' : 'Test'}
                 </button>
                 <div className="flex gap-2">
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setShowForm(false); setForm(emptyForm()); }}>

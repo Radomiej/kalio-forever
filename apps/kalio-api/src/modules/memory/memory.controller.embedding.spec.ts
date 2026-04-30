@@ -291,4 +291,67 @@ describe('MemoryController — embedding credential routes', () => {
       expect(remaining[0]!.id).toBe(p1.id);
     });
   });
+
+  // ── POST /embedding-credentials/probe (test-without-saving) ──────────────────
+
+  describe('probeEmbeddingCredential', () => {
+    it('returns { ok: true } when provider responds correctly — without saving a credential', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [{ index: 0, embedding: [0.1, 0.2] }] }),
+      }));
+      const result = await controller.probeEmbeddingCredential(BASE_DTO);
+      expect(result.ok).toBe(true);
+      expect(result.error).toBeUndefined();
+      // Must NOT have created a credential
+      expect(await controller.listEmbeddingCredentials()).toHaveLength(0);
+      vi.unstubAllGlobals();
+    });
+
+    it('returns { ok: false, error } when provider returns HTTP error — no credential saved', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        text: async () => 'Unauthorized',
+      }));
+      const result = await controller.probeEmbeddingCredential(BASE_DTO);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('401');
+      expect(await controller.listEmbeddingCredentials()).toHaveLength(0);
+      vi.unstubAllGlobals();
+    });
+
+    it('tests ollama URL via OllamaEmbeddingProvider in probe', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ embeddings: [[0.1, 0.2]] }),
+      }));
+      const result = await controller.probeEmbeddingCredential({
+        name: 'probe-ollama',
+        provider: 'ollama',
+        apiKey: '',
+        baseUrl: 'http://localhost:11434',
+        model: 'nomic-embed-text',
+        dimensions: 768,
+      });
+      expect(result.ok).toBe(true);
+      vi.unstubAllGlobals();
+    });
+
+    it('does NOT affect the active credential after a probe', async () => {
+      // Activate something first
+      const c = await controller.createEmbeddingCredential({ ...BASE_DTO, name: 'Active' });
+      await controller.setActiveEmbeddingCredential(c.id);
+
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [{ index: 0, embedding: [0.1] }] }),
+      }));
+      await controller.probeEmbeddingCredential({ ...BASE_DTO, name: 'probe-only' });
+
+      const status = await controller.getEmbeddingStatus();
+      expect(status.activeCredentialId).toBe(c.id); // unchanged
+      vi.unstubAllGlobals();
+    });
+  });
 });

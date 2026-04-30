@@ -242,15 +242,18 @@ describe('EmbeddingService', () => {
       expect(status.model).toBe('text-embedding-ada-002');
     });
 
-    it('falls back to LLM_API_KEY + LLM_BASE_URL if embedding-specific vars absent', async () => {
+    it('does NOT fall back to LLM_API_KEY/LLM_BASE_URL — embedding must be explicitly configured', async () => {
+      // Regression: LLM env vars must never be used as embedding fallback.
+      // An LLM key may not support embeddings API; silently using it causes
+      // confusing failures at runtime.
       const { svc } = makeService({
         LLM_API_KEY: 'sk-llm',
         LLM_BASE_URL: 'https://cometapi.com/v1',
       });
       await svc.reloadFromCredential();
       const status = svc.getStatus();
-      expect(status.source).toBe('env');
-      expect(status.configured).toBe(true);
+      expect(status.source).toBe('mock');      // must NOT pick up LLM vars
+      expect(status.configured).toBe(false);
     });
 
     it('treats "mock" as missing for env fallback', async () => {
