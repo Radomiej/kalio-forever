@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, Trash2, Pencil, Check, X, SlidersHorizontal } from 'lucide-react';
+import { Plus, Trash2, Pencil, Check, X } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { apiClient } from '../../services/apiClient';
 import type { ChatSession, ChatMessage, Persona } from '@kalio/types';
@@ -12,8 +12,8 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
   const [renameValue, setRenameValue] = useState('');
   const renameRef = useRef<HTMLInputElement>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
-  const [showFilters, setShowFilters] = useState(false);
   const [personaFilter, setPersonaFilter] = useState<string>('all');
+  const [newPersonaId, setNewPersonaId] = useState<string>('default');
 
   useEffect(() => {
     setLoading(true);
@@ -40,7 +40,7 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
   const createSession = async () => {
     try {
       const { data } = await apiClient.post<ChatSession>('/api/sessions', {
-        personaId: 'default',
+        personaId: newPersonaId,
         title: 'New Chat',
       });
       addSession(data);
@@ -105,60 +105,49 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
     }
   };
 
-  const usedPersonaIds = [...new Set(sessions.map((s) => s.personaId))];
-
   return (
     <div data-testid="session-panel" className="flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-1 px-3 py-2 border-b border-base-300 shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-base-300 shrink-0">
         <span className="text-xs text-base-content/50 flex-1">{sessions.length} chat{sessions.length !== 1 ? 's' : ''}</span>
         <button
-          className={`btn btn-ghost btn-xs p-1 ${showFilters ? 'text-sky-400' : 'text-base-content/40'}`}
-          onClick={() => setShowFilters((v) => !v)}
-          title="Filters"
-        >
-          <SlidersHorizontal size={12} />
-        </button>
-        <button
-          className="btn btn-ghost btn-xs p-1 text-base-content/40 hover:text-sky-400"
+          className="btn btn-success btn-xs gap-1 px-2.5 min-h-0 h-6 font-medium"
           onClick={() => void createSession()}
           disabled={loading}
-          title="New conversation"
+          title={`New ${personas.find((p) => p.id === newPersonaId)?.name ?? ''} chat`}
           data-testid="new-session-btn"
         >
-          <Plus size={12} />
+          <Plus size={11} />
+          <span className="text-[10px]">New</span>
         </button>
       </div>
 
-      {/* Collapsible filter row */}
-      {showFilters && (
+      {/* Persona filter pills — always visible, shows all personas */}
+      {personas.length > 0 && (
         <div className="flex flex-wrap gap-1 px-3 py-1.5 border-b border-base-300/60 bg-base-200/30 shrink-0">
           <button
             className={`btn btn-xs rounded-full h-5 min-h-0 px-2 text-[10px] ${
               personaFilter === 'all' ? 'btn-primary' : 'btn-ghost border border-base-300/60'
             }`}
-            onClick={() => setPersonaFilter('all')}
+            onClick={() => { setPersonaFilter('all'); setNewPersonaId('default'); }}
           >
             All
           </button>
-          {usedPersonaIds.map((pid) => {
-            const name = getPersonaName(pid) ?? pid;
-            return (
-              <button
-                key={pid}
-                className={`btn btn-xs rounded-full h-5 min-h-0 px-2 text-[10px] ${
-                  personaFilter === pid ? 'btn-primary' : 'btn-ghost border border-base-300/60'
-                }`}
-                onClick={() => setPersonaFilter(pid)}
-              >
-                {name}
-              </button>
-            );
-          })}
+          {personas.map((p) => (
+            <button
+              key={p.id}
+              className={`btn btn-xs rounded-full h-5 min-h-0 px-2 text-[10px] ${
+                personaFilter === p.id ? 'btn-primary' : 'btn-ghost border border-base-300/60'
+              }`}
+              onClick={() => { setPersonaFilter(p.id); setNewPersonaId(p.id); }}
+            >
+              {p.name}
+            </button>
+          ))}
           {personaFilter !== 'all' && (
             <button
               className="btn btn-ghost btn-xs p-0 w-4 h-4 min-h-0 ml-auto text-base-content/30 hover:text-base-content/60"
-              onClick={() => setPersonaFilter('all')}
+              onClick={() => { setPersonaFilter('all'); setNewPersonaId('default'); }}
             >
               <X size={10} />
             </button>

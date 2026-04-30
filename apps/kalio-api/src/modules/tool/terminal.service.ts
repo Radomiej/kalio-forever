@@ -21,7 +21,12 @@ export class TerminalService implements OnModuleDestroy {
 
   constructor(private readonly allowedPaths: AllowedPathsService) {}
 
-  async spawn(command: string, args: string[], cwd?: string): Promise<TerminalSession> {
+  async spawn(
+    command: string,
+    args: string[],
+    cwd?: string,
+    closeStdin = false,
+  ): Promise<TerminalSession> {
     const id = nanoid();
     const safeCwd = cwd ?? process.cwd();
 
@@ -33,8 +38,12 @@ export class TerminalService implements OnModuleDestroy {
     const proc = spawn(command, args, {
       cwd: safeCwd,
       shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    if (closeStdin && proc.stdin) {
+      proc.stdin.end();
+    }
 
     const meta: TerminalSession = {
       id,
@@ -88,6 +97,31 @@ export class TerminalService implements OnModuleDestroy {
     s.meta.status = 'killed';
     s.proc.kill('SIGTERM');
     return true;
+  }
+
+  /**
+   * Wait for a terminal session to exit (or timeout).
+   * Returns the final output and exit code.
+   * On timeout, kills the process and rejects.
+   */
+  waitForExit(id: string, timeoutMs: number): Promise<{ output: string; exitCode: number }> {
+    const s = this.sessions.get(id);
+    if (!s) return Promise.reject(new Error(`Terminal session not found: ${id}`));
+    if (s.meta.status !== 'running') {
+      return Promise.resolve({ output: s.meta.output, exitCode: s.meta.exitCode ?? 0 });
+    }
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        s.proc.kill('SIGTERM');
+        reject(new Error(`CLI agent timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      s.proc.on('close', () => {
+        clearTimeout(timer);
+        resolve({ output: s.meta.output, exitCode: s.meta.exitCode ?? 0 });
+      });
+    });
   }
 
   onModuleDestroy(): void {

@@ -14,7 +14,8 @@ import { TokenBadge } from './TokenBadge';
 import { ContextStats } from './ContextStats';
 import { useContextUsage } from './hooks/useContextUsage';
 import { computeAnsweredCallIds, buildTurnsFromHistory } from './chatUtils';
-import type { ChatMessage } from '@kalio/types';
+import { apiClient } from '../../services/apiClient';
+import type { ChatMessage, Persona } from '@kalio/types';
 
 export { computeAnsweredCallIds } from './chatUtils';
 
@@ -47,6 +48,25 @@ export function ChatInterface() {
   const [error, setError] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
   const lastSentContentRef = useRef<string>('');
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const { updateSession } = useSessionStore();
+
+  useEffect(() => {
+    apiClient
+      .get<Persona[]>('/api/personas')
+      .then((r) => setPersonas(r.data))
+      .catch((err: unknown) => console.error('[ChatInterface] personas load failed', err));
+  }, []);
+
+  const handlePersonaChange = async (personaId: string) => {
+    if (!activeSessionId) return;
+    try {
+      await apiClient.patch(`/api/sessions/${activeSessionId}`, { personaId });
+      updateSession(activeSessionId, { personaId });
+    } catch (err: unknown) {
+      console.error('[ChatInterface] persona change failed', err instanceof Error ? err : new Error(String(err)));
+    }
+  };
   const [showContextStats, setShowContextStats] = useState(false);
   const [vfsRefreshSignal, setVfsRefreshSignal] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -500,6 +520,24 @@ export function ChatInterface() {
                 AI assistant — build apps, query data, generate images, run tools
               </p>
             </div>
+            {activeSessionId && personas.length > 1 && (
+              <div className="w-full max-w-xs">
+                <label className="text-[10px] uppercase tracking-wider text-base-content/35 mb-1 block pl-1">
+                  Persona
+                </label>
+                <select
+                  className="select select-bordered select-sm w-full text-sm"
+                  value={activeSession?.personaId ?? 'default'}
+                  onChange={(e) => void handlePersonaChange(e.target.value)}
+                  disabled={isStreaming}
+                  data-testid="welcome-persona-select"
+                >
+                  {personas.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             {activeSessionId && (
               <div className="flex flex-wrap justify-center gap-2 mt-1">
                 {['What can you do?', 'Build a calculator app', 'Create a todo list', 'Generate an image of a fox'].map((prompt) => (
@@ -507,7 +545,7 @@ export function ChatInterface() {
                     key={prompt}
                     type="button"
                     className="btn btn-sm btn-ghost border border-base-300/70 text-xs text-base-content/70 hover:text-primary hover:border-primary/40"
-                    onClick={() => handleSend(prompt, 'default')}
+                    onClick={() => handleSend(prompt, activeSession?.personaId ?? 'default')}
                     disabled={isStreaming}
                   >
                     {prompt}

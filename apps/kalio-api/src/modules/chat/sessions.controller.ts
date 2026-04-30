@@ -27,11 +27,11 @@ export class SessionsController {
   }
 
   @Patch(':id')
-  async rename(
+  async update(
     @Param('id') id: string,
-    @Body() body: { title: string },
+    @Body() body: { title?: string; personaId?: string },
   ): Promise<void> {
-    await this.sessions.rename(id, body.title);
+    await this.sessions.update(id, body);
   }
 
   @Post(':id/generate-title')

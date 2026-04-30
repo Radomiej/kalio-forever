@@ -55,11 +55,15 @@ export class SessionsService {
   }
 
   async rename(id: string, title: string): Promise<void> {
+    await this.update(id, { title });
+  }
+
+  async update(id: string, patch: { title?: string; personaId?: string }): Promise<void> {
     await this.assertExists(id);
-    await this.drizzle.db
-      .update(sessions)
-      .set({ title, updatedAt: new Date() })
-      .where(eq(sessions.id, id));
+    const set: Record<string, unknown> = { updatedAt: new Date() };
+    if (patch.title !== undefined) set['title'] = patch.title;
+    if (patch.personaId !== undefined) set['personaId'] = patch.personaId;
+    await this.drizzle.db.update(sessions).set(set).where(eq(sessions.id, id));
   }
 
   async generateTitle(id: string): Promise<{ title: string }> {

@@ -12,12 +12,13 @@ interface ChatInputProps {
 export function ChatInput({ onSend, disabled, isStreaming = false, onStop }: ChatInputProps) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { activeSessionId } = useSessionStore();
+  const { activeSessionId, sessions } = useSessionStore();
+  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
 
   const handleSend = () => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
-    onSend(trimmed, 'default');
+    onSend(trimmed, activeSession?.personaId ?? 'default');
     setValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   };

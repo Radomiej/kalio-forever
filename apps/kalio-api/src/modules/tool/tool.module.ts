@@ -18,6 +18,7 @@ import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from
 import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
+import { RunCliAgentTool } from './tools/run-cli-agent.tool';
 import { VFSModule } from '../vfs/vfs.module';
 import { LLMModule } from '../llm/llm.module';
 import { RAAppModule } from '../raapp/raapp.module';
@@ -40,6 +41,7 @@ import { ToolRegistryService } from './tool-registry.service';
     MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
     WebSearchTool,
     ListToolsTool, GetToolDetailsTool,
+    RunCliAgentTool,
     ToolRegistryService,
   ],
   exports: [ToolRegistryService],

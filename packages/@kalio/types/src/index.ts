@@ -441,6 +441,14 @@ export interface SocketEvents {
 
 }
 
+// ─── CLI Agent ────────────────────────────────────────────────────────────────
+/** Result returned by the run_cli_agent tool after a Copilot CLI run completes. */
+export interface CLIAgentResult {
+  output: string;       // combined stdout+stderr from the CLI process
+  exitCode: number;     // 0 = success, non-zero = failure
+  durationMs: number;   // wall-clock time of the CLI run
+}
+
 // ─── Memory (Hybrid: Vector + BM25) ─────────────────────────────────────────
 export type MemorySearchMode = 'vector' | 'fts' | 'hybrid';
 

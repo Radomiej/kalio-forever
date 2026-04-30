@@ -16,8 +16,9 @@ import { useState, useEffect } from 'react';
 import { CheckCircle2, XCircle, Loader2, Clock, ChevronDown, ExternalLink } from 'lucide-react';
 import type { ToolActivity } from '../../store/agentStore';
 import { useAgentStore } from '../../store/agentStore';
-import type { RAAppBlock, RaAppPendingApproval } from '@kalio/types';
+import type { RAAppBlock, RaAppPendingApproval, CLIAgentResult } from '@kalio/types';
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
+import { TerminalOutputBlock } from './TerminalOutputBlock';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,19 @@ export function extractRAAppBlock(data: unknown): RAAppBlock | null {
       content: (d['renderedContent'] as string | undefined) ?? (d['content'] as string),
       pendingApprovals: (d['pendingApprovals'] as RaAppPendingApproval[] | undefined) ?? [],
     };
+  }
+  return null;
+}
+
+function extractCLIAgentResult(data: unknown): CLIAgentResult | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (
+    typeof d['output'] === 'string' &&
+    typeof d['exitCode'] === 'number' &&
+    typeof d['durationMs'] === 'number'
+  ) {
+    return { output: d['output'], exitCode: d['exitCode'], durationMs: d['durationMs'] };
   }
   return null;
 }
@@ -169,6 +183,7 @@ export function HistoryToolCallBubble({
 }) {
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
   const isSubagent = toolName === 'run_subagent';
+  const isCliAgent = toolName === 'run_cli_agent';
 
   let parsed: unknown;
   try {
@@ -178,14 +193,15 @@ export function HistoryToolCallBubble({
   }
 
   const raapp = extractRAAppBlock(parsed);
+  const cliResult = isCliAgent ? extractCLIAgentResult(parsed) : null;
   const hasArgs = args != null && Object.keys(args).length > 0;
-  const [open, setOpen] = useState(() => raapp != null && !isAnswered);
+  const [open, setOpen] = useState(() => (raapp != null && !isAnswered) || cliResult != null);
   useEffect(() => {
     if (isAnswered) setOpen(false);
   }, [isAnswered]);
 
-  const hasResult = !raapp && content.length > 0;
-  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered);
+  const hasResult = !raapp && !cliResult && content.length > 0;
+  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null;
 
   return (
     <>
@@ -224,6 +240,13 @@ export function HistoryToolCallBubble({
           <div className="font-mono bg-base-200/60 rounded px-2 py-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs text-base-content/60">
             {typeof parsed === 'object' ? JSON.stringify(parsed, null, 2) : String(parsed)}
           </div>
+        )}
+        {cliResult && (
+          <TerminalOutputBlock
+            result={cliResult}
+            isExpanded={open}
+            onToggle={() => setOpen((v) => !v)}
+          />
         )}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}
       </Chip>

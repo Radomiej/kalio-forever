@@ -24,7 +24,7 @@ function makeService() {
     create: vi.fn().mockResolvedValue(mockSession),
     getMessages: vi.fn().mockResolvedValue([mockMessage]),
     delete: vi.fn().mockResolvedValue(undefined),
-    rename: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(undefined),
     generateTitle: vi.fn().mockResolvedValue({ title: 'Generated Title' }),
   };
 }
@@ -70,10 +70,15 @@ describe('SessionsController', () => {
     });
   });
 
-  describe('rename()', () => {
-    it('renames a session', async () => {
-      await controller.rename('sess-1', { title: 'New Title' });
-      expect(svc.rename).toHaveBeenCalledWith('sess-1', 'New Title');
+  describe('update()', () => {
+    it('updates a session title', async () => {
+      await controller.update('sess-1', { title: 'New Title' });
+      expect(svc.update).toHaveBeenCalledWith('sess-1', { title: 'New Title' });
+    });
+
+    it('updates a session personaId', async () => {
+      await controller.update('sess-1', { personaId: 'builder' });
+      expect(svc.update).toHaveBeenCalledWith('sess-1', { personaId: 'builder' });
     });
   });
 
