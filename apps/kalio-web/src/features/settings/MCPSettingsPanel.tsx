@@ -13,8 +13,8 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`${res.status}: ${text}`);
   }
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 const DOCKER_GATEWAY_NAME = 'Docker MCP Gateway';
@@ -29,7 +29,8 @@ export function MCPSettingsPanel() {
   const load = useCallback(async () => {
     try {
       const list = await apiFetch<MCPServer[]>('/mcp/servers');
-      setServers(list);
+      // Deduplicate by ID to prevent React key collision warnings
+      setServers([...new Map(list.map((s) => [s.id, s])).values()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load servers');
     } finally {
@@ -48,7 +49,7 @@ export function MCPSettingsPanel() {
       method: 'POST',
       body: JSON.stringify(dto),
     });
-    setServers((prev) => [...prev, created]);
+    setServers((prev) => prev.some((s) => s.id === created.id) ? prev : [...prev, created]);
     setShowForm(false);
   };
 

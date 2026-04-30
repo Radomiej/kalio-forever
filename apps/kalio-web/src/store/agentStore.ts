@@ -45,6 +45,11 @@ interface AgentState {
   callIdToName: Record<string, string>;
   /** Canvas panel open state — true when the canvas is visible */
   canvasOpen: boolean;
+  /**
+   * All agent loops currently active on the BE, keyed by sessionId.
+   * Populated by agent:start / agent:done events across ALL sessions.
+   */
+  activeAgentLoops: Record<string, { sessionId: string; turnId: string; startedAt: number }>;
 
   setStreaming: (streaming: boolean, messageId?: string) => void;
   setPendingConfirmation: (req: ToolConfirmationRequest | null) => void;
@@ -60,6 +65,8 @@ interface AgentState {
   registerCallId: (callId: string, toolName: string) => void;
   setCanvasOpen: (open: boolean) => void;
   toggleCanvas: () => void;
+  addActiveAgentLoop: (sessionId: string, turnId: string) => void;
+  removeActiveAgentLoop: (sessionId: string) => void;
 }
 
 export const useAgentStore = create<AgentState>((set) => ({
@@ -74,6 +81,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   activeToolNames: [],
   callIdToName: {},
   canvasOpen: false,
+  activeAgentLoops: {},
 
   setStreaming: (streaming, messageId = undefined) =>
     set({ isStreaming: streaming, streamingMessageId: messageId }),
@@ -123,4 +131,18 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   setCanvasOpen: (open) => set({ canvasOpen: open }),
   toggleCanvas: () => set((s) => ({ canvasOpen: !s.canvasOpen })),
+
+  addActiveAgentLoop: (sessionId, turnId) =>
+    set((s) => ({
+      activeAgentLoops: {
+        ...s.activeAgentLoops,
+        [sessionId]: { sessionId, turnId, startedAt: Date.now() },
+      },
+    })),
+
+  removeActiveAgentLoop: (sessionId) =>
+    set((s) => {
+      const { [sessionId]: _removed, ...rest } = s.activeAgentLoops;
+      return { activeAgentLoops: rest };
+    }),
 }));

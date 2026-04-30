@@ -59,6 +59,11 @@ export class KalioSDK {
     this.socket.emit('chat:send', payload);
   }
 
+  stopTurn(sessionId: string): void {
+    console.log(`[Thread] ⏹ STOP sessionId=${sessionId}`);
+    this.socket.emit('chat:stop', { sessionId });
+  }
+
   confirmTool(payload: SocketEvents['tool:confirm']): void {
     this.socket.emit('tool:confirm', payload);
   }

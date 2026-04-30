@@ -1,13 +1,18 @@
-import { BotMessageSquare, Zap, Brain } from 'lucide-react';
+import { BotMessageSquare, Zap, Brain, StopCircle } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 import type { LlmActivity } from '../../store/agentStore';
 import { ToolActivityRow } from '../chat/ToolActivityRow';
+import { useSessionStore } from '../../store/sessionStore';
+import { eventBus } from '../../services/eventBus';
 
 export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => void }) {
   const isStreaming = useAgentStore((s) => s.isStreaming);
   const toolActivities = useAgentStore((s) => s.toolActivities);
   const llmActivities = useAgentStore((s) => s.llmActivities);
+  const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
+  const sessions = useSessionStore((s) => s.sessions);
 
+  const runningLoops = Object.values(activeAgentLoops);
   const active = toolActivities.filter(
     (a) => a.status === 'running' || a.status === 'awaiting_confirmation',
   );
@@ -15,7 +20,9 @@ export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => vo
     (a) => a.status !== 'running' && a.status !== 'awaiting_confirmation',
   );
 
-  if (!isStreaming && toolActivities.length === 0 && llmActivities.length === 0) {
+  const isEmpty = runningLoops.length === 0 && !isStreaming && toolActivities.length === 0 && llmActivities.length === 0;
+
+  if (isEmpty) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-base-content/30 p-4">
         <BotMessageSquare size={28} />
@@ -27,6 +34,39 @@ export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => vo
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Active LLM sessions */}
+      {runningLoops.length > 0 && (
+        <div className="px-2 pt-2 pb-1 flex flex-col gap-1 shrink-0">
+          <p className="text-[10px] uppercase tracking-wider text-base-content/30 px-2 pb-0.5">Running sessions</p>
+          {runningLoops.map((loop) => {
+            const session = sessions.find((s) => s.id === loop.sessionId);
+            return (
+              <div
+                key={loop.sessionId}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-xs"
+                data-testid={`active-loop-${loop.sessionId}`}
+              >
+                <Zap size={11} className="text-sky-400 animate-pulse shrink-0" />
+                <span className="flex-1 truncate text-sky-300">
+                  {session?.title ?? loop.sessionId}
+                </span>
+                <button
+                  className="btn btn-xs btn-ghost text-error hover:text-error p-0.5"
+                  title="Stop agent"
+                  onClick={() => eventBus.stopTurn(loop.sessionId)}
+                  data-testid={`stop-loop-${loop.sessionId}`}
+                >
+                  <StopCircle size={13} />
+                </button>
+              </div>
+            );
+          })}
+          {(active.length > 0 || done.length > 0 || llmActivities.length > 0) && (
+            <div className="border-t border-base-300/40 mt-1" />
+          )}
+        </div>
+      )}
+
       {/* Status bar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-base-300 shrink-0">
         {isStreaming ? (

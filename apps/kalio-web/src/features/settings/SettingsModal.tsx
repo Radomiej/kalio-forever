@@ -4,10 +4,11 @@ import { SETTINGS_BLOCKS } from './registry';
 
 interface SettingsModalProps {
   onClose: () => void;
+  initialTab?: string;
 }
 
-export function SettingsModal({ onClose }: SettingsModalProps) {
-  const [tabId, setTabId] = useState(SETTINGS_BLOCKS[0]?.id ?? 'llm');
+export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
+  const [tabId, setTabId] = useState(initialTab ?? SETTINGS_BLOCKS[0]?.id ?? 'llm');
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };

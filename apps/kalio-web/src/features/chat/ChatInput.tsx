@@ -1,13 +1,15 @@
 import { useState, useRef, type KeyboardEvent } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Square } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 
 interface ChatInputProps {
   onSend: (content: string, personaId: string) => void;
   disabled: boolean;
+  isStreaming?: boolean;
+  onStop?: () => void;
 }
 
-export function ChatInput({ onSend, disabled }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, isStreaming = false, onStop }: ChatInputProps) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { activeSessionId } = useSessionStore();
@@ -55,15 +57,26 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             onKeyDown={handleKeyDown}
             onInput={handleInput}
           />
-          <button
-            data-testid="chat-send-btn"
-            className="btn btn-sm h-[32px] w-[32px] p-0 bg-[#00D535] border-none text-white hover:bg-[#00C030] rounded-full shrink-0 disabled:opacity-40"
-            disabled={disabled || !value.trim()}
-            onClick={handleSend}
-            aria-label="Send message"
-          >
-            <Send size={16} />
-          </button>
+          {isStreaming && onStop ? (
+            <button
+              data-testid="chat-stop-btn"
+              className="btn btn-sm h-[32px] w-[32px] p-0 bg-error border-none text-white hover:bg-error/80 rounded-full shrink-0"
+              onClick={onStop}
+              aria-label="Stop agent"
+            >
+              <Square size={14} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              data-testid="chat-send-btn"
+              className="btn btn-sm h-[32px] w-[32px] p-0 bg-[#00D535] border-none text-white hover:bg-[#00C030] rounded-full shrink-0 disabled:opacity-40"
+              disabled={disabled || !value.trim()}
+              onClick={handleSend}
+              aria-label="Send message"
+            >
+              <Send size={16} />
+            </button>
+          )}
         </div>
       </div>
     </div>

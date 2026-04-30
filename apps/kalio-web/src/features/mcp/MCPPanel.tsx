@@ -1,26 +1,55 @@
-import { useEffect, useState } from 'react';
-import { RefreshCw, Trash2, ChevronDown, ChevronRight, Wrench } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { RefreshCw, ChevronDown, ChevronRight, Wrench, Settings, AlertCircle } from 'lucide-react';
 import { apiClient } from '../../services/apiClient';
 import type { MCPServer, MCPTool } from '@kalio/types';
 
-function ServerRow({ server, onDelete, onRestart }: { server: MCPServer; onDelete: (id: string) => void; onRestart: (id: string) => void }) {
+interface MCPPanelProps {
+  onOpenSettings: () => void;
+}
+
+/** Strip the `mcp_{serverId}_` prefix that the backend adds to tool names. */
+function cleanToolName(toolName: string, serverId: string): string {
+  const prefix = `mcp_${serverId}_`;
+  if (toolName.startsWith(prefix)) return toolName.slice(prefix.length);
+  // Also handle :: namespace format (legacy)
+  const colonIdx = toolName.lastIndexOf('::');
+  if (colonIdx !== -1) return toolName.slice(colonIdx + 2);
+  return toolName;
+}
+
+const STATUS_DOT: Record<string, string> = {
+  connected:    'bg-success',
+  connecting:   'bg-warning animate-pulse',
+  disconnected: 'bg-neutral',
+  error:        'bg-error',
+  stopped:      'bg-neutral',
+};
+
+interface ServerRowProps {
+  server: MCPServer;
+  onRestart: (id: string) => void;
+}
+
+function ServerRow({ server, onRestart }: ServerRowProps) {
   const [open, setOpen] = useState(false);
   const [tools, setTools] = useState<MCPTool[]>([]);
   const [loadingTools, setLoadingTools] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
-  const loadTools = () => {
+  const loadTools = useCallback(() => {
     setLoadingTools(true);
     apiClient
-      .get<MCPTool[]>('/api/mcp/tools', { params: { serverId: server.id } })
+      .get<MCPTool[]>('/api/mcp/tools')
       .then((r) => setTools(r.data.filter((t) => t.serverId === server.id)))
       .catch(() => setTools([]))
       .finally(() => setLoadingTools(false));
-  };
+  }, [server.id]);
 
   const toggle = () => {
-    setOpen((v) => !v);
-    if (!open && tools.length === 0) loadTools();
+    setOpen((v) => {
+      if (!v && tools.length === 0) loadTools();
+      return !v;
+    });
   };
 
   const handleRestart = async () => {
@@ -29,135 +58,149 @@ function ServerRow({ server, onDelete, onRestart }: { server: MCPServer; onDelet
       await apiClient.post(`/api/mcp/servers/${server.id}/restart`);
       onRestart(server.id);
     } catch (err) {
-      console.error('[MCPPanel] restart failed', err);
+      console.error('[MCPPanel] restart failed', err instanceof Error ? err.message : err);
     } finally {
       setRestarting(false);
     }
   };
 
-  const statusColor = server.status === 'connected' ? 'badge-success' : server.status === 'error' ? 'badge-error' : 'badge-warning';
+  const dotClass = STATUS_DOT[server.status] ?? 'bg-neutral';
 
   return (
-    <div className="rounded border border-base-300 overflow-hidden text-xs">
-      <div className="flex items-center gap-2 px-2 py-2 bg-base-200">
-        <button onClick={toggle} className="flex items-center gap-1 flex-1 min-w-0 text-left">
-          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+    <div className="border border-base-300 rounded overflow-hidden text-xs">
+      {/* Header row */}
+      <div className="flex items-center gap-2 px-2 py-2 bg-base-200/60">
+        <button onClick={toggle} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
+          <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} />
+          {open ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
           <span className="font-medium truncate">{server.name}</span>
-          <span className={`badge badge-xs ${statusColor}`}>{server.status}</span>
-          {server.toolCount != null && (
-            <span className="text-base-content/40 ml-1">{server.toolCount} tools</span>
+          {server.toolCount != null && server.toolCount > 0 && (
+            <span className="text-base-content/40 shrink-0 flex items-center gap-0.5">
+              <Wrench size={9} /> {server.toolCount}
+            </span>
           )}
         </button>
-        <div className="flex gap-1 shrink-0">
-          <button
-            className={`btn btn-xs btn-ghost ${restarting ? 'loading' : ''}`}
-            onClick={handleRestart}
-            title="Restart server"
-            data-testid="mcp-restart"
-          >
-            {!restarting && <RefreshCw size={11} />}
-          </button>
-          <button
-            className="btn btn-xs btn-ghost text-error"
-            onClick={() => onDelete(server.id)}
-            title="Delete server"
-            data-testid="mcp-delete"
-          >
-            <Trash2 size={11} />
-          </button>
-        </div>
+        <button
+          className="btn btn-ghost btn-xs shrink-0"
+          onClick={() => void handleRestart()}
+          disabled={restarting}
+          title="Restart"
+          data-testid="mcp-restart"
+        >
+          <RefreshCw size={11} className={restarting ? 'animate-spin' : ''} />
+        </button>
       </div>
-      <div className="px-2 py-1 text-base-content/40 text-xs">{server.url ?? server.command}</div>
-      {server.lastError && (
-        <div className="px-2 pb-1 text-error text-xs truncate">{server.lastError}</div>
+
+      {/* Connection info / error */}
+      {(server.url ?? server.command) && (
+        <div className="px-2 py-0.5 text-base-content/30 font-mono text-[10px] bg-base-100/50 truncate">
+          {server.url ?? server.command}
+        </div>
       )}
+      {server.lastError && server.status === 'error' && (
+        <div className="flex items-center gap-1 px-2 py-1 text-error text-[10px]">
+          <AlertCircle size={10} className="shrink-0" />
+          <span className="truncate">{server.lastError}</span>
+        </div>
+      )}
+
+      {/* Expandable tool list */}
       {open && (
         <div className="px-2 py-2 border-t border-base-300 space-y-1 bg-base-100">
-          {loadingTools && <p className="text-base-content/40">Loading tools…</p>}
-          {!loadingTools && tools.length === 0 && <p className="text-base-content/40">No tools found.</p>}
-          {tools.map((t) => (
-            <div key={t.name} className="flex items-start gap-2">
-              <Wrench size={10} className="mt-0.5 text-base-content/40 shrink-0" />
-              <div>
-                <span className="font-mono font-medium">{t.name.split('::').pop()}</span>
-                {t.description && <p className="text-base-content/50">{t.description}</p>}
+          {loadingTools && <p className="text-base-content/40 text-[10px]">Loading tools…</p>}
+          {!loadingTools && tools.length === 0 && (
+            <p className="text-base-content/40 text-[10px]">No tools exposed.</p>
+          )}
+          {tools.map((t) => {
+            const displayName = cleanToolName(t.name, server.id);
+            return (
+              <div key={t.name} className="flex items-start gap-1.5">
+                <Wrench size={9} className="mt-0.5 text-base-content/30 shrink-0" />
+                <div className="min-w-0">
+                  <span className="font-mono text-[10px] text-primary">{displayName}</span>
+                  {t.description && (
+                    <p className="text-base-content/40 text-[10px] leading-tight">{t.description}</p>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-export function MCPPanel() {
+export function MCPPanel({ onOpenSettings }: MCPPanelProps) {
   const [servers, setServers] = useState<MCPServer[]>([]);
-  const [url, setUrl] = useState('');
-  const [name, setName] = useState('');
-  const [transport, setTransport] = useState<'http' | 'stdio'>('http');
-  const [command, setCommand] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const load = () => {
+  const load = useCallback(() => {
+    setLoading(true);
     apiClient
       .get<MCPServer[]>('/api/mcp/servers')
-      .then((r) => setServers(r.data))
-      .catch((err: unknown) => console.error('[MCPPanel] load failed', err));
-  };
+      .then((r) => setServers([...new Map(r.data.map((s) => [s.id, s])).values()]))
+      .catch((err: unknown) => console.error('[MCPPanel] load failed', err))
+      .finally(() => setLoading(false));
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 8000);
+    return () => clearInterval(interval);
+  }, [load]);
 
-  const addServer = async () => {
-    const nameVal = name.trim();
-    const urlVal = url.trim();
-    const cmdVal = command.trim();
-    if (!nameVal || (transport === 'http' && !urlVal) || (transport === 'stdio' && !cmdVal)) return;
-    try {
-      const payload = transport === 'http'
-        ? { name: nameVal, transport, url: urlVal }
-        : { name: nameVal, transport, command: cmdVal };
-      const { data } = await apiClient.post<MCPServer>('/api/mcp/servers', payload);
-      setServers((prev) => [...prev, data]);
-      setUrl(''); setName(''); setCommand('');
-    } catch (err) {
-      console.error('[MCPPanel] add failed', err);
-    }
-  };
-
-  const deleteServer = async (id: string) => {
-    await apiClient.delete(`/api/mcp/servers/${id}`).catch((err: unknown) => {
-      console.error('[MCPPanel] delete failed', err);
-    });
-    setServers((prev) => prev.filter((s) => s.id !== id));
-  };
+  const totalTools = servers.reduce((n, s) => n + (s.toolCount ?? 0), 0);
 
   return (
-    <div data-testid="mcp-panel" className="flex flex-col gap-2 p-2">
-      <div className="text-xs font-semibold">MCP Servers</div>
-
-      <div className="flex gap-1 mb-1">
-        <button
-          className={`btn btn-xs flex-1 ${transport === 'http' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setTransport('http')}
-        >HTTP</button>
-        <button
-          className={`btn btn-xs flex-1 ${transport === 'stdio' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setTransport('stdio')}
-        >stdio</button>
+    <div data-testid="mcp-panel" className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-base-300 shrink-0">
+        <span className="text-xs text-base-content/50">
+          {servers.length} server{servers.length !== 1 ? 's' : ''}
+          {totalTools > 0 && ` · ${totalTools} tools`}
+        </span>
+        <div className="flex items-center gap-1">
+          <button
+            className="btn btn-ghost btn-xs"
+            onClick={load}
+            disabled={loading}
+            title="Refresh"
+          >
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button
+            className="btn btn-ghost btn-xs"
+            onClick={onOpenSettings}
+            title="Configure MCP servers in Settings"
+            data-testid="mcp-open-settings"
+          >
+            <Settings size={12} />
+          </button>
+        </div>
       </div>
 
-      <input data-testid="mcp-name" className="input input-bordered input-xs" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-      {transport === 'http' ? (
-        <input data-testid="mcp-url" className="input input-bordered input-xs" placeholder="URL (http://...)" value={url} onChange={(e) => setUrl(e.target.value)} />
-      ) : (
-        <input data-testid="mcp-command" className="input input-bordered input-xs" placeholder="Command (e.g. npx mcp-server)" value={command} onChange={(e) => setCommand(e.target.value)} />
-      )}
-      <button data-testid="mcp-add" className="btn btn-primary btn-xs" onClick={addServer}>Add Server</button>
-
-      <div className="space-y-2 mt-1">
+      {/* Server list */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-2">
+        {loading && servers.length === 0 && (
+          <div className="flex items-center justify-center h-16 text-base-content/30 text-xs">
+            Loading…
+          </div>
+        )}
+        {!loading && servers.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-24 gap-2 text-center px-4">
+            <p className="text-xs text-base-content/40">No MCP servers configured.</p>
+            <button
+              className="btn btn-outline btn-xs gap-1"
+              onClick={onOpenSettings}
+            >
+              <Settings size={11} /> Configure in Settings
+            </button>
+          </div>
+        )}
         {servers.map((s) => (
-          <ServerRow key={s.id} server={s} onDelete={deleteServer} onRestart={load} />
+          <ServerRow key={s.id} server={s} onRestart={load} />
         ))}
-        {servers.length === 0 && <p className="text-xs text-base-content/40">No MCP servers configured.</p>}
       </div>
     </div>
   );

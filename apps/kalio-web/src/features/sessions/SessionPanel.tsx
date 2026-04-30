@@ -31,10 +31,16 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
     setLoading(true);
     apiClient
       .get<ChatSession[]>('/api/sessions')
-      .then((r) => setSessions(r.data))
+      .then((r) => {
+        setSessions(r.data);
+        // Auto-select the most recent session on initial load (API returns updatedAt DESC)
+        if (!useSessionStore.getState().activeSessionId && r.data.length > 0) {
+          void selectSession(r.data[0].id);
+        }
+      })
       .catch((err: unknown) => console.error('[SessionPanel] load failed', err))
       .finally(() => setLoading(false));
-  }, [setSessions]);
+  }, [setSessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     apiClient
@@ -63,6 +69,8 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
     onSelect?.();
     try {
       const { data } = await apiClient.get<ChatMessage[]>(`/api/sessions/${id}/messages`);
+      // Discard stale result if user switched to another session while this fetch was in-flight
+      if (useSessionStore.getState().activeSessionId !== id) return;
       setMessages(data);
     } catch (err) {
       console.error('[SessionPanel] load messages failed', err);

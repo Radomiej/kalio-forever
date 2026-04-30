@@ -114,6 +114,18 @@ export class SessionPipelineService {
   }
 
   /**
+   * Abort the active turn (if any) for a session without dispatching a new one.
+   * Used by the explicit chat:stop socket event.
+   */
+  stop(sessionId: string): void {
+    if (this.active.has(sessionId)) {
+      this.chat.abort(sessionId);
+    }
+    // Drop queued items too — user explicitly stopped this session
+    this.queues.delete(sessionId);
+  }
+
+  /**
    * Cancel the in-flight turn (if any) and drop any queued items for the
    * given session. Used on socket disconnect.
    */

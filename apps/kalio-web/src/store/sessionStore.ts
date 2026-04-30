@@ -55,7 +55,7 @@ interface SessionState {
   removeLastAgentTurn: () => void;
 }
 
-export const useSessionStore = create<SessionState>((set) => ({
+export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
   messages: [],
@@ -84,7 +84,13 @@ export const useSessionStore = create<SessionState>((set) => ({
     set((s) => ({ sessions: [...s.sessions, newSession] }));
     return id;
   },
-  setActiveSession: (id) => set({ activeSessionId: id, messages: [], pendingUserActions: [], agentTurns: [], activeTurnId: null }),
+  setActiveSession: (id) => {
+    // No-op if this session is already active — avoids wiping messages/agentTurns
+    // when the same session is re-selected (e.g. user clicks an already-active session
+    // or auto-select fires for a session that's already loaded).
+    if (get().activeSessionId === id) return;
+    set({ activeSessionId: id, messages: [], pendingUserActions: [], agentTurns: [], activeTurnId: null });
+  },
   setMessages: (messages) => set({ messages }),
   addMessage: (message) =>
     set((s) => ({ messages: [...s.messages, message] })),
@@ -116,6 +122,24 @@ export const useSessionStore = create<SessionState>((set) => ({
           },
         };
       }
+
+      // First text chunk after thinking — flush thinking to message.thinking and clear live chunk
+      const hadThinking = s.thinkingChunks[messageId] !== undefined;
+      if (hadThinking) {
+        const thinkingContent = s.thinkingChunks[messageId];
+        const { [messageId]: _removed, ...restThinking } = s.thinkingChunks;
+        return {
+          messages: newMessages.map((m) =>
+            m.id === messageId ? { ...m, thinking: thinkingContent } : m,
+          ),
+          thinkingChunks: restThinking,
+          streamingChunks: {
+            ...s.streamingChunks,
+            [messageId]: (s.streamingChunks[messageId] ?? '') + delta,
+          },
+        };
+      }
+
       return {
         messages: newMessages,
         streamingChunks: {

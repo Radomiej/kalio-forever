@@ -371,6 +371,8 @@ export interface UpdateSkillDto {
 export interface SocketEvents {
   // Chat — client → server
   'chat:send': { sessionId: ID; content: string; personaId: ID; interrupt?: boolean; attachments?: ChatAttachment[] };
+  /** Client requests immediate abort of the active agent loop for sessionId. No new turn is started. */
+  'chat:stop': { sessionId: ID };
 
   // Server -> client ack when a chat:send arrives during an active turn and is enqueued.
   // The FE can use this to render a "queued (n)" badge.

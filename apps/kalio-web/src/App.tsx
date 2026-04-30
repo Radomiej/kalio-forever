@@ -43,6 +43,9 @@ export function App() {
   const [mindTab, setMindTab] = useState<MindTab>('memory');
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined);
+
+  const openSettings = (tab?: string) => { setSettingsInitialTab(tab); setSettingsOpen(true); };
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
   const { sessions } = useSessionStore();
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
@@ -128,7 +131,7 @@ export function App() {
           <button
             className="btn btn-ghost btn-sm w-10 h-10 p-0 flex items-center justify-center tooltip tooltip-right text-base-content/60 hover:text-primary"
             data-tip="Settings"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => openSettings()}
             data-testid="nav-settings"
             aria-label="Settings"
             title="Settings"
@@ -212,7 +215,7 @@ export function App() {
             {/* Tools content */}
             <div className="flex-1 overflow-hidden">
               {toolsTab === 'native' && <ToolPanel />}
-              {toolsTab === 'mcp' && <MCPPanel />}
+              {toolsTab === 'mcp' && <MCPPanel onOpenSettings={() => openSettings('mcp')} />}
               {toolsTab === 'raapps' && (
                 <RAAppManager
                   onOpenVFS={() => {/* RA-Apps catalog has no VFS */}}
@@ -272,7 +275,7 @@ export function App() {
 
       </main>
 
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} initialTab={settingsInitialTab} />}
 
       {/* Backend offline banner — only visible while the backend is unreachable */}
       <BackendStatusBadge />

@@ -57,6 +57,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await this.pipeline.submit(payload, emit);
   }
 
+  @SubscribeMessage('chat:stop')
+  handleChatStop(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: SocketEvents['chat:stop'],
+  ): void {
+    const socketSessions = this.socketSessions.get(client.id);
+    if (!socketSessions?.has(payload.sessionId)) {
+      this.logger.warn(`chat:stop rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
+      return;
+    }
+    this.pipeline.stop(payload.sessionId);
+  }
+
   @SubscribeMessage('tool:confirm')
   handleToolConfirm(@MessageBody() payload: SocketEvents['tool:confirm']): void {
     this.toolDispatch.resolveConfirmation(payload.requestId);

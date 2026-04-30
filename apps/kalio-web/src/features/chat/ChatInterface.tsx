@@ -41,6 +41,8 @@ export function ChatInterface() {
     updateLlmActivity,
     setContext,
     registerCallId,
+    addActiveAgentLoop,
+    removeActiveAgentLoop,
   } = useAgentStore();
   const [error, setError] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -160,11 +162,13 @@ export function ChatInterface() {
       console.log('[AgentStart]', payload.sessionId, payload.turnId);
       startAgentTurn(payload.turnId, payload.sessionId);
       clearToolActivities(); // Fresh turn = fresh tool activities
+      addActiveAgentLoop(payload.sessionId, payload.turnId);
     });
 
     const offAgentDone = eventBus.onAgentDone((payload) => {
       console.log('[AgentDone]', payload.sessionId, payload.turnId);
       finalizeAgentTurn();
+      removeActiveAgentLoop(payload.sessionId);
     });
 
     const offContext = eventBus.onContext((payload) => {
@@ -237,7 +241,7 @@ export function ChatInterface() {
       offToolResult();
       offRaAppNative();
     };
-  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn]);
+  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop]);
 
   // Clear stale retry content when the user switches sessions.
   // Without this, clicking Retry after switching sessions would send the previous
@@ -355,6 +359,11 @@ export function ChatInterface() {
     updateToolActivity(pendingConfirmation.toolCallId, { status: 'running', startedAt: Date.now() });
     eventBus.confirmTool({ requestId: pendingConfirmation.requestId, sessionId: activeSessionId });
     setPendingConfirmation(null);
+  };
+
+  const handleStop = () => {
+    if (!activeSessionId) return;
+    eventBus.stopTurn(activeSessionId);
   };
 
   const handleCancel = () => {
@@ -513,7 +522,7 @@ export function ChatInterface() {
         <div ref={bottomRef} />
       </div>
 
-      <ChatInput onSend={handleSend} disabled={isStreaming || !activeSessionId} />
+      <ChatInput onSend={handleSend} disabled={isStreaming || !activeSessionId} isStreaming={isStreaming} onStop={handleStop} />
 
       {pendingConfirmation && (
         <ConfirmationDialog
