@@ -8,6 +8,7 @@ import { EffectsProcessorService } from './effects-processor.service';
 import { NativeSystemRegistry } from './native/native-system-registry.service';
 import { HttpFetchSystem } from './native/systems/http-fetch.system';
 import { VfsNativeSystems } from './native/systems/vfs.systems';
+import { RAAppVersioningService } from './raapp-versioning.service';
 import { VFSModule } from '../vfs/vfs.module';
 import { AuditService } from '../chat/audit.service';
 
@@ -22,8 +23,9 @@ import { AuditService } from '../chat/audit.service';
     VfsNativeSystems,
     EffectsProcessorService,
     RAAppHITLService,
+    RAAppVersioningService,
     AuditService,
   ],
-  exports: [RAAppService, RAAppSandboxService, RAAppHITLService, EffectsProcessorService, NativeSystemRegistry, AuditService],
+  exports: [RAAppService, RAAppSandboxService, RAAppHITLService, EffectsProcessorService, NativeSystemRegistry, RAAppVersioningService, AuditService],
 })
 export class RAAppModule {}

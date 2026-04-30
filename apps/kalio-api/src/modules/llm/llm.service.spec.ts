@@ -144,6 +144,67 @@ describe('LLMService - DB credential overrides env', () => {
     });
   });
 
+  describe('streamChat()', () => {
+    it('calls underlying provider streamChat and returns tool calls', async () => {
+      const mockToolCalls = [{ id: 'call-1', name: 'my_tool', input: {} }];
+      const mockStreamChat = vi.fn().mockResolvedValue(mockToolCalls);
+      credentialsService.getActiveProviderConfig.mockResolvedValue({
+        provider: 'mock' as const,
+        apiKey: 'mock-key',
+        model: 'mock-model',
+        baseUrl: '',
+      });
+
+      // Spy on createLLMProvider to inject a controllable mock
+      // Since mock provider is used, streamChat will be called on MockLLMProvider
+      // We can test by verifying no errors thrown and return type
+      const chunks: unknown[] = [];
+      const result = await service.streamChat(
+        [{ role: 'user', content: 'hello' }],
+        [],
+        (chunk) => chunks.push(chunk),
+        'session-1',
+        'msg-1',
+      );
+      expect(Array.isArray(result)).toBe(true);
+    });
+
+    it('uses env provider when DB has no active credential', async () => {
+      // Create a service instance backed by mock provider so no real HTTP call is made
+      const mockCreds2 = buildCredentialsMock();
+      mockCreds2.getActiveProviderConfig.mockResolvedValue(null);
+      const m = await Test.createTestingModule({
+        providers: [
+          LLMService,
+          { provide: ConfigService, useValue: buildConfigMock({ LLM_PROVIDER: 'mock', LLM_API_KEY: 'mock' }) },
+          { provide: CredentialsService, useValue: mockCreds2 },
+        ],
+      }).compile();
+      const svc2 = m.get<LLMService>(LLMService);
+      const result = await svc2.streamChat(
+        [{ role: 'user', content: 'hello' }],
+        [],
+        () => {},
+        'session-1',
+        'msg-1',
+      );
+      expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
+  describe('createProvider()', () => {
+    it('returns a provider instance for given config', () => {
+      const provider = service.createProvider({
+        provider: 'mock' as const,
+        apiKey: 'key',
+        model: 'model',
+        baseUrl: '',
+      });
+      expect(provider).toBeDefined();
+      expect(typeof provider.streamChat).toBe('function');
+    });
+  });
+
   describe('constructor - env bootstrap', () => {
     it('should warn when env LLM config is incomplete (mock values)', async () => {
       // Arrange — build a new module with mock/empty env

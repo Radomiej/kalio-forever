@@ -100,42 +100,38 @@ if ($retries -ge $maxRetries) {
 Write-Host "  Backend ready!" -ForegroundColor Green
 
 # --- Start frontend (vite dev) ---
-$feJob = Start-Job -ScriptBlock {
-    param($dir)
-    Set-Location $dir
-    & pnpm run dev 2>&1
-} -ArgumentList $web
+# IMPORTANT: @tailwindcss/oxide (Rust native module used by Tailwind CSS v4)
+# crashes with exit code -1 (4294967295) on Windows when stdout is redirected
+# to a file or pipe. The process MUST inherit the real console handles.
+# We therefore run it without any output redirect; Vite output goes directly
+# to the current console (interleaved with [be] output). No [fe] prefix, but stable.
+$pnpmCmd = (Get-Command pnpm.CMD -ErrorAction SilentlyContinue)
+if (-not $pnpmCmd) { $pnpmCmd = Get-Command pnpm -ErrorAction SilentlyContinue }
+if (-not $pnpmCmd) { Write-Host "[FAIL] pnpm not found on PATH" -ForegroundColor Red; exit 1 }
 
-Write-Host "  Frontend -> http://localhost:$FE_PORT  (Job $($feJob.Id))" -ForegroundColor Green
+$feProcess = Start-Process -FilePath $pnpmCmd.Source -ArgumentList "run", "dev" `
+    -WorkingDirectory $web -NoNewWindow -PassThru
+
+Write-Host "  Frontend -> http://localhost:$FE_PORT  (PID $($feProcess.Id))" -ForegroundColor Green
 Write-Host "  Ctrl+C to stop both" -ForegroundColor Yellow
 Write-Host ""
 
-# --- Tail job output ---
+# --- Tail backend output + monitor both processes ---
 try {
     while ($true) {
-        # Backend output
         $beOut = Receive-Job -Job $beJob -ErrorAction SilentlyContinue
         if ($beOut) {
             $beOut | ForEach-Object { Write-Host "[be] $_" -ForegroundColor DarkCyan }
         }
 
-        # Frontend output
-        $feOut = Receive-Job -Job $feJob -ErrorAction SilentlyContinue
-        if ($feOut) {
-            $feOut | ForEach-Object { Write-Host "[fe] $_" -ForegroundColor DarkGreen }
-        }
-
-        # Crash detection
         if ($beJob.State -eq 'Failed' -or $beJob.State -eq 'Completed') {
             $beOut = Receive-Job -Job $beJob -ErrorAction SilentlyContinue
             if ($beOut) { $beOut | ForEach-Object { Write-Host "[be] $_" -ForegroundColor Red } }
             Write-Host "[FAIL] Backend exited ($($beJob.State))" -ForegroundColor Red
             break
         }
-        if ($feJob.State -eq 'Failed' -or $feJob.State -eq 'Completed') {
-            $feOut = Receive-Job -Job $feJob -ErrorAction SilentlyContinue
-            if ($feOut) { $feOut | ForEach-Object { Write-Host "[fe] $_" -ForegroundColor Red } }
-            Write-Host "[FAIL] Frontend exited ($($feJob.State))" -ForegroundColor Red
+        if ($feProcess -and $feProcess.HasExited) {
+            Write-Host "[FAIL] Frontend exited (code $($feProcess.ExitCode))" -ForegroundColor Red
             break
         }
 
@@ -144,8 +140,11 @@ try {
 } finally {
     Write-Host ""
     Write-Host "Stopping stack..." -ForegroundColor Yellow
-    Stop-Job $beJob, $feJob -ErrorAction SilentlyContinue
-    Remove-Job $beJob, $feJob -Force -ErrorAction SilentlyContinue
+    Stop-Job $beJob -ErrorAction SilentlyContinue
+    Remove-Job $beJob -Force -ErrorAction SilentlyContinue
+    if ($feProcess -and -not $feProcess.HasExited) {
+        Stop-Process -Id $feProcess.Id -Force -ErrorAction SilentlyContinue
+    }
     Kill-Port $BE_PORT
     Kill-Port $FE_PORT
     Kill-KalioNodeProcesses

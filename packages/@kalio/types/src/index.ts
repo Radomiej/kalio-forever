@@ -487,6 +487,51 @@ export interface EmbeddingStatus {
   activeCredentialName?: string;
 }
 
+// ─── RA-App Catalog (stored apps — distinct from inline raapp_create results) ─
+// These types cross the BE↔FE boundary for the versioned app catalog.
+
+export interface RAAppSummary {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  tags: string[];
+  expose_as_tool: boolean;
+  tool_description: string;
+  source: 'core' | 'user';
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface RAAppVersionInfo {
+  version: string;
+  meta: RAAppMetaSummary;
+  status: 'current' | 'draft' | 'archived';
+  zipPath: string;
+  createdAt: Timestamp;
+  approvedAt?: Timestamp;
+}
+
+/** Subset of meta.yml fields needed by the UI — not the full internal type. */
+export interface RAAppMetaSummary {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  tags?: string[];
+  expose_as_tool?: boolean;
+  tool_description?: string;
+}
+
+export interface RAAppGroup {
+  slug: string;
+  name: string;
+  source: 'core' | 'user';
+  current: RAAppVersionInfo;
+  draft?: RAAppVersionInfo;
+  history: RAAppVersionInfo[];
+}
+
 // ─── Audit Log ───────────────────────────────────────────────────────────────
 // Shared between the audit-log controller (GET /api/audit-log response) and
 // the observability UI. AuditType is also used by AuditService internally.

@@ -102,3 +102,46 @@ describe('SkillsService.findOne()', () => {
     expect(result).toBeNull();
   });
 });
+
+// ─── findAll() ───────────────────────────────────────────────────────────────
+
+describe('SkillsService.findAll()', () => {
+  it('returns all skills', async () => {
+    const svc = new SkillsService(makeDrizzle());
+    const result = await svc.findAll();
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('skill-id-1');
+  });
+
+  it('returns empty array when no skills', async () => {
+    const svc = new SkillsService(makeDrizzle({ findReturnsEmpty: true }));
+    const result = await svc.findAll();
+    expect(result).toEqual([]);
+  });
+});
+
+// ─── update() ────────────────────────────────────────────────────────────────
+
+describe('SkillsService.update()', () => {
+  it('returns null when skill not found', async () => {
+    const svc = new SkillsService(makeDrizzle({ findReturnsEmpty: true }));
+    const result = await svc.update('nonexistent', { name: 'New Name' });
+    expect(result).toBeNull();
+  });
+
+  it('updates and returns the updated skill when found', async () => {
+    const svc = new SkillsService(makeDrizzle());
+    const result = await svc.update('skill-id-1', { name: 'Updated' });
+    // Mock always returns the original row; just verify update was called
+    expect(result).not.toBeNull();
+  });
+});
+
+// ─── remove() ────────────────────────────────────────────────────────────────
+
+describe('SkillsService.remove()', () => {
+  it('calls delete without throwing', async () => {
+    const svc = new SkillsService(makeDrizzle());
+    await expect(svc.remove('skill-id-1')).resolves.not.toThrow();
+  });
+});

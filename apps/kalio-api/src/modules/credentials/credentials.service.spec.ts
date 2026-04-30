@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CredentialsService } from './credentials.service';
 import { DrizzleService } from '../../database/drizzle.service';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -146,6 +146,111 @@ describe('CredentialsService', () => {
       await svc.setContextWindowSize(16000);
       await svc.setContextWindowSize(128000);
       expect(await svc.getContextWindowSize()).toBe(128000);
+    });
+  });
+
+  describe('updateModel()', () => {
+    it('throws NotFoundException for nonexistent credential', async () => {
+      await expect(svc.updateModel('nonexistent', 'gpt-4o')).rejects.toThrow();
+    });
+
+    it('updates model and returns credential without apiKey', async () => {
+      const c = await svc.create({ name: 'A', provider: 'openai', apiKey: 'key', model: 'old-model' });
+      const updated = await svc.updateModel(c.id, 'new-model');
+      expect(updated.model).toBe('new-model');
+      expect((updated as unknown as Record<string, unknown>)['apiKey']).toBeUndefined();
+    });
+  });
+
+  describe('generation settings', () => {
+    it('getGenerationSettings returns defaults when not set', async () => {
+      const settings = await svc.getGenerationSettings();
+      expect(settings.temperature).toBe(0.7);
+      expect(settings.maxTokens).toBe(4096);
+    });
+
+    it('setGenerationSettings persists temperature', async () => {
+      await svc.setGenerationSettings({ temperature: 0.9 });
+      const settings = await svc.getGenerationSettings();
+      expect(settings.temperature).toBe(0.9);
+    });
+
+    it('setGenerationSettings persists maxTokens', async () => {
+      await svc.setGenerationSettings({ maxTokens: 8192 });
+      const settings = await svc.getGenerationSettings();
+      expect(settings.maxTokens).toBe(8192);
+    });
+
+    it('setGenerationSettings updates existing values (upsert)', async () => {
+      await svc.setGenerationSettings({ temperature: 0.5, maxTokens: 2048 });
+      await svc.setGenerationSettings({ temperature: 0.8, maxTokens: 4096 });
+      const settings = await svc.getGenerationSettings();
+      expect(settings.temperature).toBe(0.8);
+      expect(settings.maxTokens).toBe(4096);
+    });
+
+    it('setGenerationSettings with only temperature does not change maxTokens', async () => {
+      await svc.setGenerationSettings({ maxTokens: 1024 });
+      await svc.setGenerationSettings({ temperature: 0.3 });
+      const settings = await svc.getGenerationSettings();
+      expect(settings.temperature).toBe(0.3);
+      expect(settings.maxTokens).toBe(1024);
+    });
+  });
+
+  describe('setActiveCredential() upsert branch', () => {
+    it('updates existing active_llm_credential when already set (upsert update path)', async () => {
+      const c1 = await svc.create({ name: 'C1', provider: 'openai', apiKey: 'key1' });
+      const c2 = await svc.create({ name: 'C2', provider: 'openai', apiKey: 'key2' });
+      // First call: inserts
+      await svc.setActiveCredential(c1.id);
+      expect(await svc.getActiveCredentialId()).toBe(c1.id);
+      // Second call: updates existing row (tests the `if (existing)` branch)
+      await svc.setActiveCredential(c2.id);
+      expect(await svc.getActiveCredentialId()).toBe(c2.id);
+    });
+  });
+
+  describe('getModelsForCredential()', () => {
+    it('throws NotFoundException for nonexistent credential', async () => {
+      await expect(svc.getModelsForCredential('nonexistent')).rejects.toThrow();
+    });
+
+    it('returns empty array when baseUrl is empty and no provider URL', async () => {
+      const c = await svc.create({ name: 'Custom', provider: 'unknown-provider' as 'openai', apiKey: 'key' });
+      const result = await svc.getModelsForCredential(c.id);
+      expect(result).toEqual([]);
+    });
+
+    it('returns empty array when fetch fails', async () => {
+      const fetchMock = vi.fn().mockRejectedValue(new Error('network error'));
+      vi.stubGlobal('fetch', fetchMock);
+      const c = await svc.create({ name: 'OpenAI', provider: 'openai', apiKey: 'key', model: 'gpt-4' });
+      const result = await svc.getModelsForCredential(c.id);
+      expect(result).toEqual([]);
+      vi.unstubAllGlobals();
+    });
+
+    it('returns model list from successful fetch', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ id: 'gpt-4o' }, { id: 'gpt-4-turbo' }] }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const c = await svc.create({ name: 'OpenAI', provider: 'openai', apiKey: 'key' });
+      const result = await svc.getModelsForCredential(c.id);
+      expect(result).toContain('gpt-4o');
+      expect(result).toContain('gpt-4-turbo');
+      vi.unstubAllGlobals();
+    });
+
+    it('returns empty array when fetch response is not ok', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: false });
+      vi.stubGlobal('fetch', fetchMock);
+      const c = await svc.create({ name: 'OpenAI', provider: 'openai', apiKey: 'key' });
+      const result = await svc.getModelsForCredential(c.id);
+      expect(result).toEqual([]);
+      vi.unstubAllGlobals();
     });
   });
 });

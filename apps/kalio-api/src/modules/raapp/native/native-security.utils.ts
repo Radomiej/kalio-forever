@@ -9,6 +9,10 @@ import path from 'node:path';
 export function isPrivateUrl(rawUrl: string): boolean {
   try {
     const url = new URL(rawUrl);
+
+    // Only allow http and https — block javascript:, file:, data:, etc.
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return true;
+
     const hostname = url.hostname.toLowerCase();
 
     // IPv6 loopback / unspecified

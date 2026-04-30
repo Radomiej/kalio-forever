@@ -166,5 +166,68 @@ describe('VFSService', () => {
       }).toThrow(/PATH_TRAVERSAL_DENIED/);
     });
   });
+
+  describe('deleteFile', () => {
+    it('should delete an existing file', () => {
+      const filePath = join(testWorkspace, 'sessions', sessionId, 'files', 'to-delete.txt');
+      writeFileSync(filePath, 'data', 'utf8');
+      expect(existsSync(filePath)).toBe(true);
+
+      service.deleteFile(sessionId, 'to-delete.txt');
+      expect(existsSync(filePath)).toBe(false);
+    });
+
+    it('throws when file does not exist', () => {
+      expect(() => service.deleteFile(sessionId, 'nonexistent.txt')).toThrow();
+    });
+  });
+
+  describe('writeBinary / readBinary', () => {
+    it('should write and read binary data round-trip', () => {
+      const buffer = Buffer.from([0x00, 0x01, 0x02, 0xff]);
+      service.writeBinary(sessionId, 'binary.bin', buffer);
+      const result = service.readBinary(sessionId, 'binary.bin');
+      expect(result).toEqual(buffer);
+    });
+
+    it('readBinary throws VFS_FILE_NOT_FOUND for missing file', () => {
+      expect(() => service.readBinary(sessionId, 'missing.bin')).toThrow('VFS_FILE_NOT_FOUND');
+    });
+  });
+
+  describe('listFiles', () => {
+    it('returns empty array when session directory does not exist', () => {
+      const result = service.listFiles('no-such-session');
+      expect(result.files).toEqual([]);
+    });
+
+    it('lists files including nested directories', () => {
+      const filesDir = join(testWorkspace, 'sessions', sessionId, 'files');
+      writeFileSync(join(filesDir, 'root.txt'), 'root', 'utf8');
+      mkdirSync(join(filesDir, 'sub'), { recursive: true });
+      writeFileSync(join(filesDir, 'sub', 'nested.txt'), 'nested', 'utf8');
+
+      const result = service.listFiles(sessionId);
+      const paths = result.files.map((f) => f.path);
+      expect(paths).toContain('root.txt');
+      expect(paths.some((p) => p.includes('nested.txt'))).toBe(true);
+    });
+  });
+
+  describe('resolveSafe - invalid percent encoding', () => {
+    it('falls back gracefully when decodeURIComponent throws (invalid percent encoding)', () => {
+      // '%xyz' has invalid percent encoding - decodeURIComponent throws
+      // The service falls back to using the raw string - which is a valid filename
+      // It should not throw PATH_TRAVERSAL_DENIED for a safe relative path
+      const result = (service as unknown as { resolveSafe: (s: string, p: string) => string })
+        .resolveSafe(sessionId, '%xyz-file.txt');
+      expect(result).toBeTruthy();
+      // Combined traversal + invalid encoding should still be blocked
+      expect(() => {
+        (service as unknown as { resolveSafe: (s: string, p: string) => string })
+          .resolveSafe(sessionId, '%2e%2e%2f%2e%2e%2fetc%2fpasswd');
+      }).toThrow(/PATH_TRAVERSAL_DENIED/);
+    });
+  });
 });
 

@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@nestjs/cli':
+    hash: p6oqejapo5faagzeczvuqubdim
+    path: patches/@nestjs__cli.patch
+
 importers:
 
   .:
@@ -95,7 +100,7 @@ importers:
     devDependencies:
       '@nestjs/cli':
         specifier: ^11.0.21
-        version: 11.0.21(@swc/cli@0.8.1(@swc/core@1.15.30)(chokidar@4.0.3))(@swc/core@1.15.30)(@types/node@22.19.17)(esbuild@0.19.12)
+        version: 11.0.21(patch_hash=p6oqejapo5faagzeczvuqubdim)(@swc/cli@0.8.1(@swc/core@1.15.30)(chokidar@4.0.3))(@swc/core@1.15.30)(@types/node@22.19.17)(esbuild@0.19.12)
       '@nestjs/testing':
         specifier: ^11.1.19
         version: 11.1.19(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.19)(@nestjs/platform-express@11.1.19)
@@ -6482,7 +6487,7 @@ snapshots:
       '@napi-rs/nice-win32-x64-msvc': 1.1.1
     optional: true
 
-  '@nestjs/cli@11.0.21(@swc/cli@0.8.1(@swc/core@1.15.30)(chokidar@4.0.3))(@swc/core@1.15.30)(@types/node@22.19.17)(esbuild@0.19.12)':
+  '@nestjs/cli@11.0.21(patch_hash=p6oqejapo5faagzeczvuqubdim)(@swc/cli@0.8.1(@swc/core@1.15.30)(chokidar@4.0.3))(@swc/core@1.15.30)(@types/node@22.19.17)(esbuild@0.19.12)':
     dependencies:
       '@angular-devkit/core': 19.2.24(chokidar@4.0.3)
       '@angular-devkit/schematics': 19.2.24(chokidar@4.0.3)

@@ -26,7 +26,7 @@ function makeDrizzleNoSessionMock(): DrizzleService {
   return { db: { select: mockSelect } } as unknown as DrizzleService;
 }
 
-// ¦¦ MemoryIngestTool ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+// ï¿½ï¿½ MemoryIngestTool ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 describe('MemoryIngestTool', () => {
   let tool: MemoryIngestTool;
@@ -57,7 +57,7 @@ describe('MemoryIngestTool', () => {
       expect(memory.ingest).toHaveBeenCalledWith('fact', 'persona-1', { source: 'web', topic: 'ai' });
     });
 
-    it('ignores any personaId arg from LLM — always uses session-resolved value', async () => {
+    it('ignores any personaId arg from LLM ï¿½ always uses session-resolved value', async () => {
       (memory.ingest as ReturnType<typeof vi.fn>).mockResolvedValue({ ids: ['c'], count: 1 });
 
       await tool.execute(makeRequest('memory_ingest', { text: 'fact', personaId: 'user' }));
@@ -100,7 +100,7 @@ describe('MemoryIngestTool', () => {
   });
 });
 
-// ¦¦ MemorySearchTool ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+// ï¿½ï¿½ MemorySearchTool ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 describe('MemorySearchTool', () => {
   let tool: MemorySearchTool;
@@ -168,7 +168,7 @@ describe('MemorySearchTool', () => {
   });
 });
 
-// ¦¦ MemoryIngestConversationTool ¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦¦
+// ï¿½ï¿½ MemoryIngestConversationTool ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 describe('MemoryIngestConversationTool', () => {
   let tool: MemoryIngestConversationTool;
