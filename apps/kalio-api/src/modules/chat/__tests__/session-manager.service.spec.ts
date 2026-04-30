@@ -194,5 +194,64 @@ describe('SessionManagerService', () => {
       const history = await service.loadHistory('sid');
       expect(history[0]).toEqual({ role: 'tool', content: '{"ok":true}', toolCallId: 'tc-1' });
     });
+
+    it('converts system messages to role:system format', async () => {
+      repo = makeRepo([
+        { id: '4', sessionId: 'sid', role: 'system', content: 'You are a helpful assistant', createdAt: 1 },
+      ]);
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          SessionManagerService,
+          { provide: MESSAGE_REPOSITORY, useValue: repo },
+          { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
+        ],
+      }).compile();
+      service = moduleRef.get(SessionManagerService);
+
+      const history = await service.loadHistory('sid');
+      expect(history[0]).toEqual({ role: 'system', content: 'You are a helpful assistant' });
+    });
+
+    it('returns empty array for unknown role', async () => {
+      repo = makeRepo([
+        { id: '5', sessionId: 'sid', role: 'unknown_role' as 'user', content: 'test', createdAt: 1 },
+      ]);
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          SessionManagerService,
+          { provide: MESSAGE_REPOSITORY, useValue: repo },
+          { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
+        ],
+      }).compile();
+      service = moduleRef.get(SessionManagerService);
+
+      const history = await service.loadHistory('sid');
+      expect(history).toHaveLength(0);
+    });
+  });
+
+  describe('saveToolResult', () => {
+    it('saves a tool_result message with correct fields', async () => {
+      await service.saveToolResult('sid-1', 'call-abc', '{"result":"ok"}');
+
+      expect(repo.saveMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'sid-1',
+          role: 'tool_result',
+          content: '{"result":"ok"}',
+          toolCallId: 'call-abc',
+        }),
+      );
+    });
+
+    it('generates a unique id for each tool result', async () => {
+      await service.saveToolResult('sid', 'call-1', 'res');
+      await service.saveToolResult('sid', 'call-2', 'res');
+
+      const calls = (repo.saveMessage as ReturnType<typeof vi.fn>).mock.calls;
+      const id1 = calls[0][0].id as string;
+      const id2 = calls[1][0].id as string;
+      expect(id1).not.toBe(id2);
+    });
   });
 });

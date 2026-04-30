@@ -143,4 +143,38 @@ describe('SessionsService', () => {
       expect(rows[0].title).toBe('New');
     });
   });
+
+  describe('generateTitle', () => {
+    it('throws NotFoundException for missing session', async () => {
+      await expect(service.generateTitle('missing')).rejects.toThrow(NotFoundException);
+    });
+
+    it('returns title from first user message content (truncated at 60 chars)', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
+      (repo.loadHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: '1', sessionId: 's1', role: 'user', content: 'Hello world', createdAt: 1 },
+      ]);
+      const result = await service.generateTitle('s1');
+      expect(result.title).toBe('Hello world');
+    });
+
+    it('truncates title with ellipsis when content exceeds 60 chars', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
+      const longContent = 'A'.repeat(80);
+      (repo.loadHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: '1', sessionId: 's1', role: 'user', content: longContent, createdAt: 1 },
+      ]);
+      const result = await service.generateTitle('s1');
+      expect(result.title).toBe('A'.repeat(60) + '…');
+    });
+
+    it('returns "New Chat" when no user messages in history', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
+      (repo.loadHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: '1', sessionId: 's1', role: 'assistant', content: 'Hi there!', createdAt: 1 },
+      ]);
+      const result = await service.generateTitle('s1');
+      expect(result.title).toBe('New Chat');
+    });
+  });
 });

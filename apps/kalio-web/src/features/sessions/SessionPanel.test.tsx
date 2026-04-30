@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { SessionPanel, formatRelativeTime } from './SessionPanel';
+import { SessionPanel } from './SessionPanel';
+import { formatRelativeTime } from './session.utils';
 import type { ChatSession, Persona } from '@kalio/types';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
