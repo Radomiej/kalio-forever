@@ -38,6 +38,7 @@ interface SessionState {
   addMessage: (message: ChatMessage) => void;
   appendChunk: (messageId: string, delta: string, thinking?: boolean) => void;
   finalizeChunk: (messageId: string) => void;
+  flushThinkingChunks: () => void;
   removeSession: (id: string) => void;
   updateSession: (id: string, patch: Partial<ChatSession>) => void;
   setPendingMessage: (message: string | null) => void;
@@ -163,6 +164,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             ? { ...m, content: finalContent, thinking: finalThinking || undefined, streaming: false }
             : m,
         ),
+      };
+    }),
+
+  // Called on tool:start — thinking is done once the agent invokes a tool.
+  // Without this, thinkingChunks stay populated (and the bubble keeps animating)
+  // when the LLM goes thinking → tool call without emitting a text chunk first.
+  flushThinkingChunks: () =>
+    set((s) => {
+      if (Object.keys(s.thinkingChunks).length === 0) return s;
+      const updates = Object.entries(s.thinkingChunks);
+      return {
+        thinkingChunks: {},
+        messages: s.messages.map((m) => {
+          const thinkingContent = updates.find(([id]) => id === m.id)?.[1];
+          return thinkingContent !== undefined ? { ...m, thinking: thinkingContent } : m;
+        }),
       };
     }),
 

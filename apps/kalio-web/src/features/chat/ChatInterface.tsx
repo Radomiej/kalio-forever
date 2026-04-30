@@ -22,7 +22,7 @@ export function ChatInterface() {
   const {
     messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages,
     agentTurns, startAgentTurn, addTurnItem, finalizeAgentTurn,
-    setAgentTurns, markAgentTurnError, removeLastAgentTurn,
+    setAgentTurns, markAgentTurnError, removeLastAgentTurn, flushThinkingChunks,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
@@ -146,6 +146,9 @@ export function ChatInterface() {
 
     const offToolStart = eventBus.onToolStart((payload) => {
       console.log('[ToolStart]', payload.toolName, 'callId:', payload.callId, 'args:', payload.args);
+      // Thinking is over once the agent calls a tool — flush any live thinkingChunks
+      // so the ThinkingBlock stops animating (isThinkingStreaming → false).
+      flushThinkingChunks();
       // Persist this mapping permanently so older turns can still resolve tool names
       registerCallId(payload.callId, payload.toolName);
       addToolActivity({

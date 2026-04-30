@@ -98,6 +98,22 @@ describe('ImageHydratorService', () => {
   });
 
   it('exports a typed ImageHydrationError', () => {
+    const err = new ImageHydrationError('PAYLOAD_TOO_LARGE', 'too big');
+    expect(err.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(err.message).toBe('too big');
+    expect(err.name).toBe('ImageHydrationError');
+  });
+
+  it('exceedsDimensions catch: throws UNSUPPORTED_MIME when sharp metadata fails on corrupted image bytes', async () => {
+    // Small buffer (< 1MB) with valid mime type but invalid image content
+    // This triggers exceedsDimensions(), which calls sharp().metadata(), which fails
+    const corrupted = Buffer.from('these-are-not-valid-image-bytes-at-all');
+    const hydrator = new ImageHydratorService(makeVfsMock(corrupted));
+    await expect(
+      hydrator.hydrate('sid', [{ path: 'corrupt.png', mimeType: 'image/png' }]),
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED_MIME' });
+  });
+});
     const err = new ImageHydrationError('UNSUPPORTED_MIME', 'msg');
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBe('UNSUPPORTED_MIME');

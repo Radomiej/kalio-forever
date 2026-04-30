@@ -441,31 +441,6 @@ describe('ChatService', () => {
     expect(toolResultLog![0]).toMatchObject({ type: 'tool_result', label: 'my_tool', data: { callId: 'tc1', status: 'success' } });
   });
 
-  it('chat:context emits effectiveSystemPrompt that includes tools section', async () => {
-    personaService.getSessionConfig = vi.fn().mockResolvedValue({
-      systemPrompt: 'You are helpful.',
-      model: '',
-      availableSkills: [],
-      kv: {},
-    });
-    toolDispatch.getToolMetas.mockReturnValue([
-      { name: 'my_tool', description: 'Does something useful', parameters: {}, requiresConfirmation: false },
-    ]);
-    const llmSource = makeLLMSource([]);
-    await buildService(llmSource);
-    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
-
-    const contextCall = (emit as ReturnType<typeof vi.fn>).mock.calls.find(
-      (args: unknown[]) => args[0] === 'chat:context',
-    );
-    expect(contextCall).toBeDefined();
-    const payload = contextCall![1] as { systemPrompt: string };
-    // effectiveSystemPrompt must include both the base persona prompt AND the tools section
-    expect(payload.systemPrompt).toContain('You are helpful.');
-    expect(payload.systemPrompt).toContain('my_tool');
-    expect(payload.systemPrompt).toContain('Does something useful');
-  });
-
   it('logs chunkCount via audit.update after streaming completes', async () => {
     const chunks: InternalLLMChunk[] = [
       { type: 'text_delta', delta: 'a' },
