@@ -63,6 +63,8 @@ const addLlmActivity = vi.fn();
 const updateLlmActivity = vi.fn();
 const setContext = vi.fn();
 const registerCallId = vi.fn();
+const addActiveAgentLoop = vi.fn();
+const removeActiveAgentLoop = vi.fn();
 
 const agentStoreState = {
   isStreaming: false,
@@ -72,6 +74,7 @@ const agentStoreState = {
   systemPrompt: null,
   activeToolNames: [],
   callIdToName: {},
+  activeAgentLoops: {} as Record<string, { sessionId: string; turnId: string; startedAt: number }>,
   setStreaming,
   setPendingConfirmation,
   addToolActivity,
@@ -81,6 +84,8 @@ const agentStoreState = {
   updateLlmActivity,
   setContext,
   registerCallId,
+  addActiveAgentLoop,
+  removeActiveAgentLoop,
 };
 
 vi.mock('../../store/agentStore', () => ({
@@ -90,6 +95,8 @@ vi.mock('../../store/agentStore', () => ({
 }));
 
 // ── sessionStore mock ─────────────────────────────────────────────────────────
+const setAgentTurns = vi.fn();
+const setMessages = vi.fn();
 const markAgentTurnError = vi.fn();
 const removeLastAgentTurn = vi.fn();
 const startAgentTurn = vi.fn();
@@ -119,9 +126,9 @@ vi.mock('../../store/sessionStore', () => ({
       addMessage: vi.fn(),
       appendChunk: vi.fn(),
       finalizeChunk: vi.fn(),
-      setMessages: vi.fn(),
+      setMessages,
       updateSession: vi.fn(),
-      setAgentTurns: vi.fn(),
+      setAgentTurns,
       startAgentTurn,
       addTurnItem,
       finalizeAgentTurn,
@@ -194,6 +201,7 @@ beforeEach(() => {
   mockActiveTurnId = null;
   mockActiveSessionId = 'session-1';
   mockPendingMessage = null;
+  agentStoreState.activeAgentLoops = {};
   vi.clearAllMocks();
 });
 
@@ -695,5 +703,111 @@ describe('REGRESSION: remount with same session must not clear agent turns', () 
         });
       });
     }).not.toThrow();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: RA-App launched from home disappears after tools complete
+//
+// Root cause: race condition in the session activation useEffect.
+// When a new session is activated (e.g. after clicking an RA-App tile on home),
+// two things happen nearly simultaneously:
+//   1. fetch('/api/sessions/:id/messages') fires to load persisted history
+//   2. pendingMessage is auto-sent → backend starts the agent turn → agent:start
+//      fires → startAgentTurn() populates agentTurns + sets activeTurnId
+//
+// If the fetch resolves AFTER agent:start (typical: fetch ~10-50ms, tool calls
+// take seconds), the .then() callback calls:
+//   setAgentTurns(buildTurnsFromHistory([])) → agentTurns = [], activeTurnId = null
+//
+// With activeTurnId = null:
+//   - addTurnItem() is a no-op for ALL subsequent tool:start events
+//   - finalizeAgentTurn() is a no-op on agent:done
+//   - agentTurns stays empty → no AgentTurnBubble renders → nothing appears
+//
+// Fix: guard setAgentTurns with activeAgentLoops[sessionId]. If a live turn is
+// active for this session when the fetch resolves, skip setAgentTurns entirely.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('REGRESSION: session history fetch does not overwrite live agent turn', () => {
+  it('BEFORE FIX: setAgentTurns([]) is called even mid-turn (documents the bug)', async () => {
+    // This test demonstrates the raw behaviour WITHOUT the guard.
+    // It is intentionally a "would fail after fix" marker — once the fix is
+    // applied the guard prevents setAgentTurns from being called, so this
+    // passes as "not.toHaveBeenCalled" in the real regression test below.
+    // We keep this as a documentation block only — no assertion here.
+    // (The real assertion is in the next test.)
+  });
+
+  it('REGRESSION: setAgentTurns is NOT called when activeAgentLoops has an entry for the session', async () => {
+    // Arrange: fetch returns a deferred promise so we control timing
+    let resolveMessages!: (d: unknown) => void;
+    const deferred = new Promise((res) => {
+      resolveMessages = res;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: () => deferred })),
+    );
+
+    // Simulate that agent:start already fired before the fetch resolves —
+    // this is the normal production sequence (agent:start fires in ~1ms,
+    // fetch resolves in ~10-50ms). We do it by directly mutating the mock
+    // state object (same reference used by useAgentStore.getState()).
+    agentStoreState.activeAgentLoops = {
+      'session-1': { sessionId: 'session-1', turnId: 'turn-live', startedAt: Date.now() },
+    };
+
+    render(<ChatInterface />);
+    // useEffect fired during render; fetch is pending. Clear any setup-time calls.
+    setAgentTurns.mockClear();
+
+    // Act: fetch completes with empty history (new session — nothing persisted yet)
+    await act(async () => {
+      resolveMessages([]);
+      await deferred;
+    });
+
+    // Assert: because activeAgentLoops['session-1'] is populated, setAgentTurns
+    // must NOT be called. Calling it would set activeTurnId = null, making all
+    // subsequent addTurnItem / finalizeAgentTurn calls no-ops.
+    expect(setAgentTurns).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('calls setAgentTurns from history when no active agent loop exists for the session', async () => {
+    // Normal path: fetch resolves before any agent:start — safe to set history turns.
+    const historyMsg = {
+      id: 'a1',
+      sessionId: 'session-1',
+      role: 'assistant' as const,
+      content: 'Previous answer',
+      createdAt: 0,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([historyMsg]) })),
+    );
+
+    agentStoreState.activeAgentLoops = {}; // no active loop
+
+    render(<ChatInterface />);
+    setAgentTurns.mockClear();
+
+    await act(async () => {
+      // flush the fetch + .json() + .then() microtask chain
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // With no active loop, setAgentTurns SHOULD be called with the history turns
+    expect(setAgentTurns).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ done: true })]),
+    );
+
+    vi.unstubAllGlobals();
   });
 });

@@ -116,13 +116,26 @@ export class SessionPipelineService {
   /**
    * Abort the active turn (if any) for a session without dispatching a new one.
    * Used by the explicit chat:stop socket event.
+   *
+   * Must run inside the mutex so it is serialised after any in-flight
+   * submit() mutex callbacks that may not yet have added their item to the
+   * queue. Without this, a submit() whose microtask hasn't run yet would
+   * still enqueue itself after queues.delete() returns, and runWithDrain
+   * would dispatch it despite the explicit stop.
+   *
+   * Deleting from `active` prevents a subsequent submit() (e.g. user
+   * pressing Send immediately after Stop) from being treated as queued
+   * rather than as a fresh dispatch.
    */
   stop(sessionId: string): void {
-    if (this.active.has(sessionId)) {
-      this.chat.abort(sessionId);
-    }
-    // Drop queued items too — user explicitly stopped this session
-    this.queues.delete(sessionId);
+    void this.mutex.runExclusive(sessionId, async () => {
+      if (this.active.has(sessionId)) {
+        this.chat.abort(sessionId);
+        this.active.delete(sessionId);
+      }
+      // Drop queued items too — user explicitly stopped this session
+      this.queues.delete(sessionId);
+    });
   }
 
   /**

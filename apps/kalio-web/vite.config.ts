@@ -5,6 +5,9 @@ import { resolve } from 'node:path';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  optimizeDeps: {
+    exclude: ['vitest'],
+  },
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
@@ -14,6 +17,9 @@ export default defineConfig({
   },
   server: {
     port: 5188,
+    watch: {
+      ignored: ['**/*.spec.ts', '**/*.spec.tsx', '**/*.test.ts', '**/*.test.tsx'],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:3016',

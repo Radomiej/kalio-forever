@@ -20,12 +20,27 @@ function Kill-Port {
     }
 }
 
+function Kill-KalioNodeProcesses {
+    # Kill any node.exe whose command line references this project — catches
+    # orphaned nest/vite processes from crashed or duplicate start-dev runs.
+    try {
+        $marker = "kalio-forever"
+        Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -and $_.CommandLine -like "*$marker*" } |
+            ForEach-Object {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                Write-Host "  [kill] kalio node PID $($_.ProcessId)" -ForegroundColor DarkYellow
+            }
+    } catch { }
+}
+
 # --- Kill any leftover processes on our ports ---
 Write-Host "KALIO Dev Stack" -ForegroundColor Cyan
 Write-Host "  Clearing ports $BE_PORT and $FE_PORT..." -ForegroundColor DarkYellow
 Kill-Port $BE_PORT
 Kill-Port $FE_PORT
-Start-Sleep -Milliseconds 300
+Kill-KalioNodeProcesses
+Start-Sleep -Milliseconds 600
 
 Write-Host ""
 Write-Host "Kalio v2 - dev environment" -ForegroundColor Cyan
@@ -133,5 +148,6 @@ try {
     Remove-Job $beJob, $feJob -Force -ErrorAction SilentlyContinue
     Kill-Port $BE_PORT
     Kill-Port $FE_PORT
+    Kill-KalioNodeProcesses
     Write-Host "[OK] Stack stopped." -ForegroundColor Green
 }

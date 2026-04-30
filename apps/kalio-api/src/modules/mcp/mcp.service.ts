@@ -53,8 +53,13 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     const rows = await this.drizzle.db.select().from(mcpServers).where(eq(mcpServers.enabled, true));
     if (rows.length === 0) return;
-    this.logger.log(`[MCP] Connecting ${rows.length} saved server(s)…`);
-    await Promise.allSettled(rows.map((r) => this.connectHandle(this.rowToHandle(r))));
+    this.logger.log(`[MCP] Scheduling background connect for ${rows.length} server(s)…`);
+    // Fire-and-forget — do NOT await so NestJS finishes startup and health endpoint
+    // responds immediately; MCP servers connect in the background.
+    void Promise.allSettled(rows.map((r) => this.connectHandle(this.rowToHandle(r)))).then(() => {
+      const connected = [...this.handles.values()].filter((h) => h.status === 'connected').length;
+      this.logger.log(`[MCP] Background connect done: ${connected}/${rows.length} connected`);
+    });
     this.healthTimer = setInterval(() => void this.healthCheckAll(), HEALTH_CHECK_MS);
   }
 

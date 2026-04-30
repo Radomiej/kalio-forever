@@ -114,6 +114,7 @@ export function ChatInterface() {
     const offError = eventBus.onError((payload) => {
       console.error('[EventBus] chat:error', payload);
       setStreaming(false);
+      removeActiveAgentLoop(payload.sessionId);
       const { activeTurnId } = useSessionStore.getState();
       if (!activeTurnId) {
         // Error before agent turn opened (e.g. QUEUE_FULL) → floating banner
@@ -339,7 +340,16 @@ export function ChatInterface() {
         // Only apply if the session is still active when the response arrives
         if (useSessionStore.getState().activeSessionId !== activeSessionId) return;
         setMessages(data);
-        setAgentTurns(buildTurnsFromHistory(data, activeSessionId));
+        // Guard: if a live agent turn is already running for this session, do NOT
+        // overwrite agentTurns. setAgentTurns() also resets activeTurnId to null,
+        // which would make all subsequent addTurnItem / finalizeAgentTurn calls
+        // no-ops — causing the entire turn (and any RA-App widgets) to disappear.
+        // This race happens when: session activates → pendingMessage auto-sent →
+        // agent:start fires → fetch resolves with empty history and clobbers the
+        // live turn that was just created.
+        if (!useAgentStore.getState().activeAgentLoops[activeSessionId]) {
+          setAgentTurns(buildTurnsFromHistory(data, activeSessionId));
+        }
       })
       .catch((err: unknown) => {
         console.error('[ChatInterface] failed to load message history', err instanceof Error ? err : new Error(String(err)));

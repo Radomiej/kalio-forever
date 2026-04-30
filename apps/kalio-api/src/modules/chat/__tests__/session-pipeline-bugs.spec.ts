@@ -231,6 +231,51 @@ describe('SessionPipelineService - Bug Reproductions', () => {
   });
 
   /**
+   * BUG REPRODUCTION: stop() queue-clear race with concurrent submit()
+   *
+   * stop() is synchronous and calls queues.delete() directly, without the mutex.
+   * If a submit() has been called but its mutex callback has not yet run
+   * (it is scheduled as a microtask), stop() deletes an empty queue (no-op).
+   * The submit()'s callback then runs and adds the message to the queue.
+   * runWithDrain subsequently picks it up and dispatches it — defeating the stop.
+   *
+   * Fix: wrap stop()'s abort + queue-clear in void this.mutex.runExclusive()
+   * so it is serialized after any in-flight submit() mutex callbacks.
+   */
+  it('stop() called before queued submit is processed should drop the queued message', async () => {
+    const { emit: emit1 } = makeEmit();
+    const { emit: emit2 } = makeEmit();
+
+    // Start first turn — claims the active slot.
+    void svc.submit({ sessionId: 's1', content: 'first', personaId: 'p1' }, emit1);
+    await flush(); // first turn is now blocked in handleTurn
+    expect(harness.callsReceived).toHaveLength(1);
+
+    // Fire second submit WITHOUT awaiting — the mutex callback is scheduled as a
+    // microtask but has not run yet.
+    void svc.submit({ sessionId: 's1', content: 'second', personaId: 'p1' }, emit2);
+
+    // Call stop() synchronously. Without the mutex fix, queues.delete() is a no-op
+    // here (queue doesn't exist yet). After the next flush(), the second submit's
+    // callback will run and add 'second' to the queue anyway.
+    svc.stop('s1');
+
+    // Let all pending microtasks/promises run.
+    await flush();
+
+    // Release the first (aborted) turn.
+    harness.release();
+    await flush();
+    await harness.releaseAll();
+
+    // After the fix: stop() is serialized via the mutex and runs AFTER the second
+    // submit's queuing callback, so it deletes 'second' from the queue.
+    // 'second' must NOT be dispatched.
+    expect(harness.callsReceived).toHaveLength(1);
+    expect(harness.callsReceived[0].content).toBe('first');
+  });
+
+  /**
    * CORRECTNESS TEST: Concurrent submits to idle session
    * Verifies the mutex properly serializes concurrent submits.
    */
