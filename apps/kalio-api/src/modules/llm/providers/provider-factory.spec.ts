@@ -209,5 +209,24 @@ describe('createLLMProvider', () => {
       // Assert
       expect(provider).toBeInstanceOf(OpenAIProvider);
     });
+
+    it('should return BaseOpenAICompatibleProvider for custom with baseUrl', () => {
+      const provider = createLLMProvider({
+        provider: 'custom',
+        apiKey: 'test-key',
+        model: 'my-model',
+        baseUrl: 'https://my-api.example.com/v1',
+      });
+      expect(provider).toBeDefined();
+    });
+
+    it('should return BaseOpenAICompatibleProvider for deepseek', () => {
+      const provider = createLLMProvider({
+        provider: 'deepseek',
+        apiKey: 'ds-key',
+        model: 'deepseek-chat',
+      });
+      expect(provider).toBeDefined();
+    });
   });
 });

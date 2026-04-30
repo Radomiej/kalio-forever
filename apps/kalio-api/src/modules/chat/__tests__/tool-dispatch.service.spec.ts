@@ -221,5 +221,28 @@ describe('ToolDispatchService', () => {
       expect(result.status).toBe('success');
       expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
     });
+
+    it('returns error result when MCP callTool throws', async () => {
+      const mcpService = {
+        resolveToolName: vi.fn().mockReturnValue({ serverId: 's1', originalName: 'broken_tool' }),
+        callTool: vi.fn().mockRejectedValue(new Error('MCP connection lost')),
+        getToolByName: vi.fn().mockReturnValue(
+          { name: 'mcp_s1_broken_tool', description: 'Broken', parameters: {}, requiresConfirmation: false, serverId: 's1' },
+        ),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [] },
+          { provide: MCPService, useValue: mcpService },
+        ],
+      }).compile();
+      const service = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+      const result = await service.dispatch('c1', 'mcp_s1_broken_tool', {}, ctx);
+      expect(result.status).toBe('error');
+      expect((result as { errorCode: string }).errorCode).toBe('TOOL_EXECUTION_FAILED');
+      expect((result as { errorMessage: string }).errorMessage).toContain('MCP connection lost');
+    });
   });
 });

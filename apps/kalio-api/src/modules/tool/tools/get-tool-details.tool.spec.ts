@@ -90,4 +90,28 @@ describe('GetToolDetailsTool', () => {
     expect(result.details[0]).toContain('### ping');
     expect(result.details[0]).toContain('(none)');
   });
+
+  it('shows "any" as typeHint when parameter has no type or enum', async () => {
+    const untypedTool = makeMeta('my_tool', 'A tool.', {
+      type: 'object',
+      properties: {
+        param1: { description: 'No type defined here' },
+      },
+      required: [],
+    });
+    const result = await tool.execute(makeRequest(['my_tool'], [untypedTool]));
+    expect(result.details[0]).toContain('any');
+  });
+
+  it('shows enum values as typeHint when parameter has enum', async () => {
+    const enumTool = makeMeta('enum_tool', 'A tool.', {
+      type: 'object',
+      properties: {
+        mode: { enum: ['fast', 'slow', 'medium', 'extra'], description: 'Mode selector' },
+      },
+      required: ['mode'],
+    });
+    const result = await tool.execute(makeRequest(['enum_tool'], [enumTool]));
+    expect(result.details[0]).toContain('enum(fast|slow|medium)');
+  });
 });

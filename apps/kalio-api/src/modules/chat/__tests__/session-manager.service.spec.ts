@@ -254,4 +254,11 @@ describe('SessionManagerService', () => {
       expect(id1).not.toBe(id2);
     });
   });
+
+  describe('ensureSession', () => {
+    it('delegates to repo.ensureSession', async () => {
+      await service.ensureSession('sid-1', 'persona-1');
+      expect(repo.ensureSession).toHaveBeenCalledWith('sid-1', 'persona-1');
+    });
+  });
 });
