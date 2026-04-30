@@ -9,6 +9,7 @@ export function MemoryPage() {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<MemorySearchMode>('hybrid');
   const [results, setResults] = useState<MemorySearchResult[]>([]);
+  const [browseMode, setBrowseMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [ingestOpen, setIngestOpen] = useState(false);
   const [ingestText, setIngestText] = useState('');
@@ -31,6 +32,8 @@ export function MemoryPage() {
   // Load stats when persona changes
   useEffect(() => {
     if (!selectedPersonaId) return;
+    setResults([]);
+    setBrowseMode(false);
     loadStats();
   }, [selectedPersonaId]);
 
@@ -48,6 +51,7 @@ export function MemoryPage() {
 
   const handleSearch = async () => {
     if (!selectedPersonaId || !query.trim()) return;
+    setBrowseMode(false);
     setLoading(true);
     try {
       const { data } = await apiClient.get<MemorySearchResult[]>('/api/memory/search', {
@@ -87,8 +91,22 @@ export function MemoryPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleBrowseAll = async () => {
     if (!selectedPersonaId) return;
+    setLoading(true);
+    setBrowseMode(true);
+    try {
+      const { data } = await apiClient.get<MemorySearchResult[]>(`/api/memory/${selectedPersonaId}`);
+      setResults(data);
+    } catch (err) {
+      console.error('[MemoryPage] browse all failed', err);
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {    if (!selectedPersonaId) return;
     if (!confirm('Delete this memory entry?')) return;
     try {
       await apiClient.delete(`/api/memory/${selectedPersonaId}/${id}`);
@@ -209,6 +227,15 @@ export function MemoryPage() {
           >
             {loading ? 'Searching...' : 'Search'}
           </button>
+          <button
+            className="btn btn-outline gap-1"
+            onClick={() => void handleBrowseAll()}
+            disabled={loading || !selectedPersonaId}
+            data-testid="memory-browse-btn"
+            title="Show all entries"
+          >
+            All
+          </button>
         </div>
 
         {/* Mode Toggle */}
@@ -247,15 +274,22 @@ export function MemoryPage() {
               <>
                 <BrainCircuit size={32} className="mx-auto mb-2 opacity-50" />
                 <p className="text-sm">
-                  {query.trim()
+                  {browseMode
+                    ? 'No entries in memory for this persona'
+                    : query.trim()
                     ? 'No results found'
-                    : 'Search to find memories'}
+                    : 'Search memories or click "All" to browse everything'}
                 </p>
               </>
             )}
           </div>
         ) : (
           <div className="space-y-3">
+            {browseMode && (
+              <p className="text-xs text-base-content/40 mb-2">
+                Showing all {results.length} entr{results.length === 1 ? 'y' : 'ies'}
+              </p>
+            )}
             {results.map((result, index) => (
               <ResultCard
                 key={result.id}

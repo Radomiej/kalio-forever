@@ -1,25 +1,36 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { MemoryService } from '../../memory/memory.service';
+import { DrizzleService } from '../../../database/drizzle.service';
+import { sessions } from '../../../database/schema';
+
+/** Resolves the persona that owns the current chat session from the DB. */
+async function resolvePersonaId(drizzle: DrizzleService, sessionId: string): Promise<string> {
+  const row = drizzle.db
+    .select({ personaId: sessions.personaId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .get();
+  if (!row) throw new Error(`Session ${sessionId} not found — cannot resolve personaId`);
+  return row.personaId;
+}
 
 @Injectable()
 @Tool({
   name: 'memory_ingest',
   description:
-    'Store a text passage in the long-term memory for a persona. ' +
-    'The text is chunked, embedded, and indexed for future retrieval.',
+    'Store a text passage in the long-term memory for the active persona. ' +
+    'The text is chunked, embedded, and indexed for future retrieval. ' +
+    'The persona is resolved automatically from the current session — do not guess it.',
   parameters: {
     type: 'object',
-    required: ['text', 'personaId'],
+    required: ['text'],
     properties: {
       text: {
         type: 'string',
         description: 'Text content to ingest into memory',
-      },
-      personaId: {
-        type: 'string',
-        description: 'Persona identifier whose memory store to update',
       },
       metadata: {
         type: 'object',
@@ -33,12 +44,15 @@ import { MemoryService } from '../../memory/memory.service';
 export class MemoryIngestTool {
   private readonly logger = new Logger(MemoryIngestTool.name);
 
-  constructor(private readonly memory: MemoryService) {}
+  constructor(
+    private readonly memory: MemoryService,
+    private readonly drizzle: DrizzleService,
+  ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
     const text = request.args['text'] as string;
-    const personaId = request.args['personaId'] as string;
     const metadata = (request.args['metadata'] as Record<string, string> | undefined) ?? {};
+    const personaId = await resolvePersonaId(this.drizzle, request.sessionId);
 
     const result = await this.memory.ingest(text, personaId, metadata);
     this.logger.debug(`[memory_ingest] Ingested ${result.count} chunks for persona=${personaId}`);
@@ -51,18 +65,15 @@ export class MemoryIngestTool {
   name: 'memory_search',
   description:
     'Search long-term memory for passages related to a query. ' +
-    'Returns the most relevant chunks with relevance scores.',
+    'Returns the most relevant chunks with relevance scores. ' +
+    'The persona is resolved automatically from the current session — do not guess it.',
   parameters: {
     type: 'object',
-    required: ['query', 'personaId'],
+    required: ['query'],
     properties: {
       query: {
         type: 'string',
         description: 'Natural language search query',
-      },
-      personaId: {
-        type: 'string',
-        description: 'Persona identifier whose memory to search',
       },
       limit: {
         type: 'integer',
@@ -77,12 +88,15 @@ export class MemoryIngestTool {
 export class MemorySearchTool {
   private readonly logger = new Logger(MemorySearchTool.name);
 
-  constructor(private readonly memory: MemoryService) {}
+  constructor(
+    private readonly memory: MemoryService,
+    private readonly drizzle: DrizzleService,
+  ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
     const query = request.args['query'] as string;
-    const personaId = request.args['personaId'] as string;
     const limit = (request.args['limit'] as number | undefined) ?? 5;
+    const personaId = await resolvePersonaId(this.drizzle, request.sessionId);
 
     const results = await this.memory.search(query, personaId, limit);
     this.logger.debug(`[memory_search] Found ${results.length} results for query="${query.slice(0, 50)}"`);
@@ -94,11 +108,12 @@ export class MemorySearchTool {
 @Tool({
   name: 'memory_ingest_conversation',
   description:
-    'Ingest an entire conversation (list of messages) into long-term memory for a persona. ' +
-    'Messages are grouped into contextual blocks before embedding.',
+    'Ingest an entire conversation (list of messages) into long-term memory for the active persona. ' +
+    'Messages are grouped into contextual blocks before embedding. ' +
+    'The persona is resolved automatically from the current session — do not guess it.',
   parameters: {
     type: 'object',
-    required: ['messages', 'personaId'],
+    required: ['messages'],
     properties: {
       messages: {
         type: 'array',
@@ -112,10 +127,6 @@ export class MemorySearchTool {
           },
         },
       },
-      personaId: {
-        type: 'string',
-        description: 'Persona identifier whose memory store to update',
-      },
     },
   },
   requiresConfirmation: false,
@@ -123,11 +134,14 @@ export class MemorySearchTool {
 export class MemoryIngestConversationTool {
   private readonly logger = new Logger(MemoryIngestConversationTool.name);
 
-  constructor(private readonly memory: MemoryService) {}
+  constructor(
+    private readonly memory: MemoryService,
+    private readonly drizzle: DrizzleService,
+  ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
     const messages = request.args['messages'] as Array<{ role: string; content: string }>;
-    const personaId = request.args['personaId'] as string;
+    const personaId = await resolvePersonaId(this.drizzle, request.sessionId);
 
     const result = await this.memory.ingestConversation(messages, personaId);
     this.logger.debug(`[memory_ingest_conversation] Ingested ${result.count} blocks for persona=${personaId}`);
