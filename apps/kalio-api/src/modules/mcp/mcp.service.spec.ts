@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
+import type { MCPTool } from '@kalio/types';
 import { MCPService } from './mcp.service';
 import { DrizzleService } from '../../database/drizzle.service';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -157,6 +158,107 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
     it('stdio transport missing command throws via restartServer', async () => {
       // restartServer throws when handle not found
       await expect(service.restartServer('no-such-id')).rejects.toThrow('MCP server not found: no-such-id');
+    });
+  });
+
+  // --- Internal state helpers (accessed via unknown cast, no `any`) ---
+  type ServiceInternals = {
+    toolNameMap: Map<string, { serverId: string; originalName: string }>;
+    handles: Map<string, { id: string; tools: MCPTool[]; status: string }>;
+    discoverTools(serverId: string, client: unknown): Promise<MCPTool[]>;
+  };
+
+  describe('getToolByName()', () => {
+    it('returns undefined for an unknown tool name (not in toolNameMap)', () => {
+      expect(service.getToolByName('mcp_s1_foo')).toBeUndefined();
+    });
+
+    it('returns undefined when tool is in toolNameMap but server handle does not exist', () => {
+      const internals = service as unknown as ServiceInternals;
+      internals.toolNameMap.set('mcp_s1_foo', { serverId: 's1', originalName: 'foo' });
+      // No handle for 's1' → optional chain returns undefined
+      expect(service.getToolByName('mcp_s1_foo')).toBeUndefined();
+    });
+
+    it('returns undefined when server is present but tools array is empty (disconnected)', () => {
+      const internals = service as unknown as ServiceInternals;
+      internals.toolNameMap.set('mcp_s1_bar', { serverId: 's1', originalName: 'bar' });
+      internals.handles.set('s1', { id: 's1', tools: [], status: 'disconnected' });
+      expect(service.getToolByName('mcp_s1_bar')).toBeUndefined();
+    });
+
+    it('returns the matching MCPTool when server is connected and tool exists', () => {
+      const tool: MCPTool = {
+        name: 'mcp_s1_baz',
+        description: 'baz',
+        parameters: {},
+        requiresConfirmation: false,
+        serverId: 's1',
+      };
+      const internals = service as unknown as ServiceInternals;
+      internals.toolNameMap.set('mcp_s1_baz', { serverId: 's1', originalName: 'baz' });
+      internals.handles.set('s1', { id: 's1', tools: [tool], status: 'connected' });
+      expect(service.getToolByName('mcp_s1_baz')).toStrictEqual(tool);
+    });
+  });
+
+  describe('discoverTools() — pagination safety cap', () => {
+    it('stops after 100 iterations when server always returns a nextCursor', async () => {
+      let callCount = 0;
+      const fakeClient = {
+        listTools: vi.fn(async (_opts?: unknown) => {
+          callCount++;
+          return {
+            tools: [{ name: `tool_${callCount}`, description: 'test', inputSchema: {} }],
+            nextCursor: 'always-truthy',
+          };
+        }),
+      };
+
+      const internals = service as unknown as ServiceInternals;
+      const tools = await internals.discoverTools('s1', fakeClient);
+
+      expect(callCount).toBe(100);
+      expect(tools).toHaveLength(100);
+      expect(tools[0].name).toBe('mcp_s1_tool_1');
+      expect(tools[99].name).toBe('mcp_s1_tool_100');
+    });
+
+    it('stops early when server returns no nextCursor', async () => {
+      const fakeClient = {
+        listTools: vi.fn(async () => ({
+          tools: [
+            { name: 'alpha', description: 'first', inputSchema: {} },
+            { name: 'beta', description: 'second', inputSchema: {} },
+          ],
+          nextCursor: undefined,
+        })),
+      };
+
+      const internals = service as unknown as ServiceInternals;
+      const tools = await internals.discoverTools('s2', fakeClient);
+
+      expect(fakeClient.listTools).toHaveBeenCalledTimes(1);
+      expect(tools).toHaveLength(2);
+      expect(tools.map((t) => t.name)).toEqual(['mcp_s2_alpha', 'mcp_s2_beta']);
+    });
+
+    it('follows cursor across multiple pages until exhausted', async () => {
+      const pages = [
+        { tools: [{ name: 'a', description: '', inputSchema: {} }], nextCursor: 'page2' },
+        { tools: [{ name: 'b', description: '', inputSchema: {} }], nextCursor: 'page3' },
+        { tools: [{ name: 'c', description: '', inputSchema: {} }], nextCursor: undefined },
+      ];
+      let page = 0;
+      const fakeClient = {
+        listTools: vi.fn(async () => pages[page++]),
+      };
+
+      const internals = service as unknown as ServiceInternals;
+      const tools = await internals.discoverTools('s3', fakeClient);
+
+      expect(fakeClient.listTools).toHaveBeenCalledTimes(3);
+      expect(tools.map((t) => t.name)).toEqual(['mcp_s3_a', 'mcp_s3_b', 'mcp_s3_c']);
     });
   });
 });

@@ -114,8 +114,3 @@ describe('ImageHydratorService', () => {
     ).rejects.toMatchObject({ code: 'UNSUPPORTED_MIME' });
   });
 });
-    const err = new ImageHydrationError('UNSUPPORTED_MIME', 'msg');
-    expect(err).toBeInstanceOf(Error);
-    expect(err.code).toBe('UNSUPPORTED_MIME');
-  });
-});

@@ -202,8 +202,8 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   private async disconnectHandle(id: string): Promise<void> {
     const handle = this.handles.get(id);
     if (!handle) return;
-    try { await handle.client?.close(); } catch { /* ignore */ }
-    try { await handle.rawTransport?.close(); } catch { /* ignore */ }
+    try { await handle.client?.close(); } catch (err) { this.logger.warn(`[MCP] Error closing client for ${handle.id}`, err instanceof Error ? err.stack : String(err)); }
+    try { await handle.rawTransport?.close(); } catch (err) { this.logger.warn(`[MCP] Error closing transport for ${handle.id}`, err instanceof Error ? err.stack : String(err)); }
     handle.status = 'disconnected';
     handle.tools = [];
     this.emitStatus(handle);
@@ -257,8 +257,8 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       if (handle.status !== 'connected' || handle.permanentError) continue;
       try {
         await handle.client.listTools();
-      } catch {
-        this.logger.warn(`[MCP] Health check failed for ${handle.id}`);
+      } catch (err) {
+        this.logger.warn(`[MCP] Health check failed for ${handle.id}`, err instanceof Error ? err.stack : String(err));
         handle.status = 'error';
         handle.lastError = 'Health check failed';
         void this.persistStatus(handle);
