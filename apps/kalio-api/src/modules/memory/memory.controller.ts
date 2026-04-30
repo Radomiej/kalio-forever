@@ -9,9 +9,11 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  NotFoundException,
 } from '@nestjs/common';
 import type { MemoryIngestResult, MemorySearchResult, MemorySearchMode, EmbeddingStatus } from '@kalio/types';
 import { MemoryService } from './memory.service';
+import { CredentialsService } from '../credentials/credentials.service';
 import type { IngestDto, IngestConversationDto, SearchDto } from './dto';
 
 interface EmbeddingConfigDto {
@@ -21,9 +23,18 @@ interface EmbeddingConfigDto {
   dimensions: number;
 }
 
+interface EmbeddingFromCredentialDto {
+  credentialId: string;
+  model: string;
+  dimensions: number;
+}
+
 @Controller('memory')
 export class MemoryController {
-  constructor(private readonly memoryService: MemoryService) {}
+  constructor(
+    private readonly memoryService: MemoryService,
+    private readonly credentialsService: CredentialsService,
+  ) {}
 
   @Post('ingest')
   async ingest(@Body() dto: IngestDto): Promise<MemoryIngestResult> {
@@ -85,6 +96,35 @@ export class MemoryController {
     await this.memoryService.getEmbeddingService().reconfigure({
       baseUrl: dto.baseUrl,
       apiKey: dto.apiKey ?? null,
+      model: dto.model,
+      dimensions: dto.dimensions,
+    });
+    return this.memoryService.getEmbeddingService().getStatus();
+  }
+
+  @Put('config/embedding/from-credential')
+  async setEmbeddingFromCredential(@Body() dto: EmbeddingFromCredentialDto): Promise<EmbeddingStatus> {
+    const cred = (await this.credentialsService.findAll()).find((c) => c.id === dto.credentialId);
+    if (!cred) throw new NotFoundException(`Credential ${dto.credentialId} not found`);
+
+    const apiKey = await this.credentialsService.getApiKey(dto.credentialId);
+    if (!apiKey) throw new NotFoundException(`No API key found for credential ${dto.credentialId}`);
+
+    const PROVIDER_BASE_URLS: Record<string, string> = {
+      openai:     'https://api.openai.com/v1',
+      xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
+      deepseek:   'https://api.deepseek.com/v1',
+      cometapi:   'https://api.cometapi.com/v1',
+      openrouter: 'https://openrouter.ai/api/v1',
+      ollama:     'http://localhost:11434/v1',
+    };
+    const baseUrl = cred.baseUrl ?? PROVIDER_BASE_URLS[cred.provider] ?? '';
+
+    await this.memoryService.getEmbeddingService().reconfigureFromCredential({
+      credentialId: cred.id,
+      credentialName: cred.name,
+      apiKey,
+      baseUrl,
       model: dto.model,
       dimensions: dto.dimensions,
     });

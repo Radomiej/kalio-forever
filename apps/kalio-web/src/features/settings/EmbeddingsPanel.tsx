@@ -1,22 +1,35 @@
 import { useState, useEffect, useCallback } from 'react';
-import { AlertCircle, Loader2, Zap, Check, RefreshCw } from 'lucide-react';
+import { AlertCircle, Loader2, Zap, Check, RefreshCw, Link, Settings } from 'lucide-react';
+import type { Credential, EmbeddingStatus } from '@kalio/types';
 
-interface EmbeddingStatus {
-  provider: string;
+// ── Types ──────────────────────────────────────────────────────────────────
+
+type Mode = 'credential' | 'custom';
+
+interface CredentialForm {
+  credentialId: string;
   model: string;
   dimensions: number;
-  baseUrlMasked: string;
-  configured: boolean;
 }
 
-interface EmbeddingForm {
+interface CustomForm {
   baseUrl: string;
   apiKey: string;
   model: string;
   dimensions: number;
 }
 
-const PROVIDER_PRESETS: Array<{ label: string; baseUrl: string; model: string; dimensions: number }> = [
+// Preset model options per provider type
+const EMBEDDING_MODELS: Record<string, Array<{ model: string; dimensions: number }>> = {
+  openai:     [{ model: 'text-embedding-3-small', dimensions: 1536 }, { model: 'text-embedding-3-large', dimensions: 3072 }],
+  cometapi:   [{ model: 'text-embedding-3-small', dimensions: 1536 }, { model: 'text-embedding-3-large', dimensions: 3072 }],
+  xiaomimimo: [{ model: 'text-embedding-3-small', dimensions: 1536 }],
+  openrouter: [{ model: 'text-embedding-3-small', dimensions: 1536 }],
+  ollama:     [{ model: 'nomic-embed-text', dimensions: 768 }, { model: 'mxbai-embed-large', dimensions: 1024 }],
+  deepseek:   [{ model: 'text-embedding-3-small', dimensions: 1536 }],
+};
+
+const CUSTOM_PRESETS = [
   { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'text-embedding-3-small', dimensions: 1536 },
   { label: 'OpenAI large', baseUrl: 'https://api.openai.com/v1', model: 'text-embedding-3-large', dimensions: 3072 },
   { label: 'CometAPI', baseUrl: 'https://api.cometapi.com/v1', model: 'text-embedding-3-small', dimensions: 1536 },
@@ -36,30 +49,42 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-function emptyForm(): EmbeddingForm {
-  return {
-    baseUrl: 'https://api.openai.com/v1',
-    apiKey: '',
-    model: 'text-embedding-3-small',
-    dimensions: 1536,
-  };
-}
-
 export function EmbeddingsPanel() {
   const [status, setStatus] = useState<EmbeddingStatus | null>(null);
-  const [form, setForm] = useState<EmbeddingForm>(emptyForm());
+  const [credentials, setCredentials] = useState<Credential[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [mode, setMode] = useState<Mode>('credential');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
   const [testMsg, setTestMsg] = useState<string | null>(null);
 
+  const [credForm, setCredForm] = useState<CredentialForm>({
+    credentialId: '',
+    model: 'text-embedding-3-small',
+    dimensions: 1536,
+  });
+  const [customForm, setCustomForm] = useState<CustomForm>({
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: '',
+    model: 'text-embedding-3-small',
+    dimensions: 1536,
+  });
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const s = await apiFetch<EmbeddingStatus>('/memory/status/embedding');
+      const [s, creds] = await Promise.all([
+        apiFetch<EmbeddingStatus>('/memory/status/embedding'),
+        apiFetch<Credential[]>('/credentials'),
+      ]);
       setStatus(s);
+      setCredentials(creds);
+      if (s.credentialId) {
+        setCredForm((f) => ({ ...f, credentialId: s.credentialId! }));
+        setMode('credential');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
@@ -69,8 +94,25 @@ export function EmbeddingsPanel() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const handlePreset = (preset: typeof PROVIDER_PRESETS[number]) => {
-    setForm((f) => ({ ...f, baseUrl: preset.baseUrl, model: preset.model, dimensions: preset.dimensions }));
+  const selectedCred = credentials.find((c) => c.id === credForm.credentialId);
+  const modelSuggestions = selectedCred
+    ? (EMBEDDING_MODELS[selectedCred.provider] ?? [{ model: 'text-embedding-3-small', dimensions: 1536 }])
+    : [];
+
+  const handleCredentialChange = (credentialId: string) => {
+    const cred = credentials.find((c) => c.id === credentialId);
+    const suggestions = cred ? (EMBEDDING_MODELS[cred.provider] ?? []) : [];
+    const first = suggestions[0];
+    setCredForm({
+      credentialId,
+      model: first?.model ?? 'text-embedding-3-small',
+      dimensions: first?.dimensions ?? 1536,
+    });
+    setTestState('idle');
+  };
+
+  const handleCustomPreset = (p: typeof CUSTOM_PRESETS[number]) => {
+    setCustomForm((f) => ({ ...f, baseUrl: p.baseUrl, model: p.model, dimensions: p.dimensions }));
     setTestState('idle');
   };
 
@@ -97,15 +139,27 @@ export function EmbeddingsPanel() {
     setSaving(true);
     setError(null);
     try {
-      const updated = await apiFetch<EmbeddingStatus>('/memory/config/embedding', {
-        method: 'PUT',
-        body: JSON.stringify({
-          baseUrl: form.baseUrl,
-          apiKey: form.apiKey || undefined,
-          model: form.model,
-          dimensions: form.dimensions,
-        }),
-      });
+      let updated: EmbeddingStatus;
+      if (mode === 'credential') {
+        updated = await apiFetch<EmbeddingStatus>('/memory/config/embedding/from-credential', {
+          method: 'PUT',
+          body: JSON.stringify({
+            credentialId: credForm.credentialId,
+            model: credForm.model,
+            dimensions: credForm.dimensions,
+          }),
+        });
+      } else {
+        updated = await apiFetch<EmbeddingStatus>('/memory/config/embedding', {
+          method: 'PUT',
+          body: JSON.stringify({
+            baseUrl: customForm.baseUrl,
+            apiKey: customForm.apiKey || undefined,
+            model: customForm.model,
+            dimensions: customForm.dimensions,
+          }),
+        });
+      }
       setStatus(updated);
       setShowForm(false);
       setTestState('idle');
@@ -122,7 +176,7 @@ export function EmbeddingsPanel() {
         <h2 className="text-base font-semibold mb-1">Embeddings Provider</h2>
         <p className="text-xs text-base-content/60">
           Configure the embedding model used for semantic memory search.
-          Requires an OpenAI-compatible API (e.g. OpenAI, CometAPI) or a local Ollama instance.
+          You can reuse an existing LLM provider credential, or configure a separate endpoint.
         </p>
       </div>
 
@@ -156,6 +210,12 @@ export function EmbeddingsPanel() {
               </div>
               {status.configured && (
                 <div className="text-xs text-base-content/60 ml-5 flex flex-col gap-0.5">
+                  {status.credentialName && (
+                    <span className="flex items-center gap-1">
+                      <Link size={11} className="text-sky-400" />
+                      Linked to: <span className="font-medium">{status.credentialName}</span>
+                    </span>
+                  )}
                   <span>Model: <span className="font-mono">{status.model}</span></span>
                   <span>Dimensions: <span className="font-mono">{status.dimensions}</span></span>
                   <span>Endpoint: <span className="font-mono">{status.baseUrlMasked}</span></span>
@@ -163,7 +223,7 @@ export function EmbeddingsPanel() {
               )}
               {!status.configured && (
                 <p className="text-xs text-base-content/50 ml-5">
-                  Memory search will use mock embeddings. Add a provider below to enable real semantic search.
+                  Memory search will use mock embeddings. Configure a provider below to enable real semantic search.
                 </p>
               )}
             </div>
@@ -172,69 +232,153 @@ export function EmbeddingsPanel() {
           {/* Configure form */}
           {showForm ? (
             <form
-              className="flex flex-col gap-3 border border-base-300 rounded-lg p-4 bg-base-200/40"
+              className="flex flex-col gap-4 border border-base-300 rounded-lg p-4 bg-base-200/40"
               onSubmit={(e) => void handleSave(e)}
               data-testid="embedding-config-form"
             >
               <h3 className="text-sm font-semibold">Configure Embedding Provider</h3>
 
-              <div className="flex gap-2 flex-wrap">
-                {PROVIDER_PRESETS.map((p) => (
-                  <button
-                    key={`${p.label}-${p.model}`}
-                    type="button"
-                    className={`btn btn-xs ${form.baseUrl === p.baseUrl && form.model === p.model ? 'btn-primary' : 'btn-ghost border border-base-300'}`}
-                    onClick={() => handlePreset(p)}
-                  >
-                    {p.label}
-                  </button>
-                ))}
+              {/* Mode tabs */}
+              <div className="flex gap-1 p-1 bg-base-300/50 rounded-lg w-fit">
+                <button
+                  type="button"
+                  className={`btn btn-xs gap-1 ${mode === 'credential' ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setMode('credential')}
+                >
+                  <Link size={12} /> From existing provider
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-xs gap-1 ${mode === 'custom' ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setMode('custom')}
+                >
+                  <Settings size={12} /> Custom
+                </button>
               </div>
 
-              <label className="form-control gap-1">
-                <span className="text-xs text-base-content/60">API Key <span className="text-base-content/40">(leave blank to keep existing)</span></span>
-                <input
-                  className="input input-bordered input-sm font-mono"
-                  type="password"
-                  placeholder="sk-… or pplx-…"
-                  value={form.apiKey}
-                  onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
-                />
-              </label>
+              {mode === 'credential' ? (
+                <>
+                  <label className="form-control gap-1">
+                    <span className="text-xs text-base-content/60">Select provider</span>
+                    <select
+                      className="select select-bordered select-sm"
+                      value={credForm.credentialId}
+                      onChange={(e) => handleCredentialChange(e.target.value)}
+                      required
+                    >
+                      <option value="" disabled>— pick a credential —</option>
+                      {credentials.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.provider}{c.model ? ` · ${c.model}` : ''})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-              <label className="form-control gap-1">
-                <span className="text-xs text-base-content/60">Base URL</span>
-                <input
-                  className="input input-bordered input-sm font-mono"
-                  value={form.baseUrl}
-                  onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
-                  required
-                />
-              </label>
+                  {credForm.credentialId && modelSuggestions.length > 0 && (
+                    <div className="flex gap-2 flex-wrap">
+                      {modelSuggestions.map((s) => (
+                        <button
+                          key={s.model}
+                          type="button"
+                          className={`btn btn-xs ${credForm.model === s.model ? 'btn-primary' : 'btn-ghost border border-base-300'}`}
+                          onClick={() => setCredForm((f) => ({ ...f, model: s.model, dimensions: s.dimensions }))}
+                        >
+                          {s.model}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-              <div className="flex gap-3">
-                <label className="form-control gap-1 flex-1">
-                  <span className="text-xs text-base-content/60">Model</span>
-                  <input
-                    className="input input-bordered input-sm font-mono"
-                    value={form.model}
-                    onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-                    required
-                  />
-                </label>
-                <label className="form-control gap-1 w-28">
-                  <span className="text-xs text-base-content/60">Dimensions</span>
-                  <input
-                    className="input input-bordered input-sm font-mono"
-                    type="number"
-                    min={64}
-                    max={4096}
-                    value={form.dimensions}
-                    onChange={(e) => setForm((f) => ({ ...f, dimensions: parseInt(e.target.value, 10) || 1536 }))}
-                    required
-                  />
-                </label>
-              </div>
+                  <div className="flex gap-3">
+                    <label className="form-control gap-1 flex-1">
+                      <span className="text-xs text-base-content/60">Embedding model</span>
+                      <input
+                        className="input input-bordered input-sm font-mono"
+                        value={credForm.model}
+                        onChange={(e) => setCredForm((f) => ({ ...f, model: e.target.value }))}
+                        required
+                      />
+                    </label>
+                    <label className="form-control gap-1 w-28">
+                      <span className="text-xs text-base-content/60">Dimensions</span>
+                      <input
+                        className="input input-bordered input-sm font-mono"
+                        type="number"
+                        min={64}
+                        max={4096}
+                        value={credForm.dimensions}
+                        onChange={(e) => setCredForm((f) => ({ ...f, dimensions: parseInt(e.target.value, 10) || 1536 }))}
+                        required
+                      />
+                    </label>
+                  </div>
+
+                  {credentials.length === 0 && (
+                    <p className="text-xs text-warning">No LLM credentials configured yet. Add one in the LLM tab first.</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="flex gap-2 flex-wrap">
+                    {CUSTOM_PRESETS.map((p) => (
+                      <button
+                        key={`${p.label}-${p.model}`}
+                        type="button"
+                        className={`btn btn-xs ${customForm.baseUrl === p.baseUrl && customForm.model === p.model ? 'btn-primary' : 'btn-ghost border border-base-300'}`}
+                        onClick={() => handleCustomPreset(p)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <label className="form-control gap-1">
+                    <span className="text-xs text-base-content/60">API Key <span className="text-base-content/40">(leave blank to keep existing)</span></span>
+                    <input
+                      className="input input-bordered input-sm font-mono"
+                      type="password"
+                      placeholder="sk-… or pplx-…"
+                      value={customForm.apiKey}
+                      onChange={(e) => setCustomForm((f) => ({ ...f, apiKey: e.target.value }))}
+                    />
+                  </label>
+
+                  <label className="form-control gap-1">
+                    <span className="text-xs text-base-content/60">Base URL</span>
+                    <input
+                      className="input input-bordered input-sm font-mono"
+                      value={customForm.baseUrl}
+                      onChange={(e) => setCustomForm((f) => ({ ...f, baseUrl: e.target.value }))}
+                      required
+                    />
+                  </label>
+
+                  <div className="flex gap-3">
+                    <label className="form-control gap-1 flex-1">
+                      <span className="text-xs text-base-content/60">Model</span>
+                      <input
+                        className="input input-bordered input-sm font-mono"
+                        value={customForm.model}
+                        onChange={(e) => setCustomForm((f) => ({ ...f, model: e.target.value }))}
+                        required
+                      />
+                    </label>
+                    <label className="form-control gap-1 w-28">
+                      <span className="text-xs text-base-content/60">Dimensions</span>
+                      <input
+                        className="input input-bordered input-sm font-mono"
+                        type="number"
+                        min={64}
+                        max={4096}
+                        value={customForm.dimensions}
+                        onChange={(e) => setCustomForm((f) => ({ ...f, dimensions: parseInt(e.target.value, 10) || 1536 }))}
+                        required
+                      />
+                    </label>
+                  </div>
+                </>
+              )}
 
               {testMsg && (
                 <div className={`text-xs flex gap-1 items-center ${testState === 'ok' ? 'text-success' : 'text-error'}`}>
@@ -256,7 +400,7 @@ export function EmbeddingsPanel() {
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setShowForm(false); setTestState('idle'); }}>
                     Cancel
                   </button>
-                  <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
+                  <button type="submit" className="btn btn-primary btn-sm" disabled={saving || (mode === 'credential' && !credForm.credentialId)}>
                     {saving ? <Loader2 size={14} className="animate-spin" /> : null}
                     Save
                   </button>

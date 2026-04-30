@@ -563,6 +563,9 @@ export interface EmbeddingStatus {
   dimensions: number;
   baseUrlMasked: string;
   configured: boolean;
+  /** Set when embedding is sourced from an existing Credential row */
+  credentialId?: string;
+  credentialName?: string;
 }
 
 // ─── Audit Log ───────────────────────────────────────────────────────────────

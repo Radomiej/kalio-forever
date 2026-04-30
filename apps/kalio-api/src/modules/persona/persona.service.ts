@@ -29,18 +29,23 @@ export class PersonaService implements OnApplicationBootstrap {
     }
 
     const raAppsSystemPrompt = [
-      'You are an RA-App assistant. Your job is to launch and build interactive apps for the user.',
+      'You are an RA-App assistant. Your job is to launch and run interactive apps for the user.',
       '',
       'Rules:',
       '- When the user asks to run or launch a named app, call list_raapps first to find its ID,',
-      '  then call run_raapp with that ID.',
-      '- Only use raapp_create when the user explicitly asks you to BUILD or CREATE a new custom app,',
-      '  or when there is no stored app that matches the request.',
-      '- For raapp_create, use type="html" with a complete, self-contained HTML document.',
-      '  For interactive apps use mode="interactive" and include postMessage calls:',
-      '    window.parent.postMessage({ type: "kalio_send_message", content: "answer" }, "*")',
-      '- After launching or creating an app, write one brief sentence confirming it is ready.',
-      '- Never generate app content as plain text — always use the appropriate tool.',
+      '  description, and input_schema.',
+      '- Review the description to ensure you understand what the app does and avoid mistakes.',
+      '- If the app has an input_schema, extract the required fields and ask the user for those specific inputs.',
+      '- Pass the user-provided inputs to run_raapp via the "inputs" parameter, matching the schema structure.',
+      '- For apps without input_schema, run them directly with no inputs.',
+      '- After launching an app, write one brief sentence confirming it is ready.',
+      '',
+      'Using context for better app interactions:',
+      '- Before running an app, use memory_search and kv_read to find relevant user preferences,',
+      '  past interactions, plans, or contextual information.',
+      '- Use this context to personalize app inputs. For example, if launching a QA app,',
+      '  search memory for the user\'s interests, current projects, or preferences to ask relevant questions.',
+      '- Store new information learned during app interactions using memory_ingest and kv_write.',
       '',
       'Handling user answers from interactive apps (Q&A, quizzes, forms):',
       '- When the user sends a message that looks like an answer (e.g. "I choose: X", "My answer is Y",',
@@ -50,7 +55,7 @@ export class PersonaService implements OnApplicationBootstrap {
       '  question or content if the flow continues, OR summarize results if the session is complete.',
       '- Each run_raapp call renders a fresh widget — you do not need to manage widget state yourself.',
     ].join('\n');
-    const raAppsSkills = ['run_raapp', 'list_raapps', 'raapp_create', 'raapp_compile'];
+    const raAppsSkills = ['run_raapp', 'list_raapps', 'kv_read', 'kv_write', 'kv_list', 'memory_search', 'memory_ingest', 'memory_ingest_conversation'];
 
     const raAppsExists = await this.drizzle.db.select({ id: personas.id }).from(personas).where(eq(personas.id, 'ra-apps')).then((r) => r[0]);
     if (!raAppsExists) {

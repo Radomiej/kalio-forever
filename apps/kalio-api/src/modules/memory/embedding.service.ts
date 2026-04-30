@@ -138,6 +138,9 @@ export class MockEmbeddingProvider implements IEmbeddingProvider {
 export class EmbeddingService implements OnModuleInit {
   private readonly logger = new Logger(EmbeddingService.name);
   private provider: IEmbeddingProvider | null = null;
+  /** Credential ID that this embedding config was sourced from (if any) */
+  private linkedCredentialId: string | null = null;
+  private linkedCredentialName: string | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -154,12 +157,16 @@ export class EmbeddingService implements OnModuleInit {
     const storedUrl = await this.appSettings.get('embedding.base_url');
     const storedModel = await this.appSettings.get('embedding.model');
     const storedDims = await this.appSettings.get('embedding.dimensions');
+    const storedCredId = await this.appSettings.get('embedding.credential_id');
+    const storedCredName = await this.appSettings.get('embedding.credential_name');
 
     if (storedUrl && storedKey) {
       const model = storedModel ?? 'text-embedding-3-small';
       const dimensions = storedDims ? parseInt(storedDims, 10) : 1536;
       this.provider = this.buildProvider(storedKey, storedUrl, model, dimensions);
-      this.logger.log(`Embedding provider loaded from app_settings: ${model} @ ${storedUrl}`);
+      this.linkedCredentialId = storedCredId ?? null;
+      this.linkedCredentialName = storedCredName ?? null;
+      this.logger.log(`Embedding provider loaded from app_settings: ${model} @ ${storedUrl}${storedCredId ? ` (credential: ${storedCredName ?? storedCredId})` : ''}`);
     }
     // If no stored config, getProvider() will fall back to env vars lazily
   }
@@ -192,6 +199,11 @@ export class EmbeddingService implements OnModuleInit {
     await this.appSettings.set('embedding.base_url', cfg.baseUrl);
     await this.appSettings.set('embedding.model', cfg.model);
     await this.appSettings.set('embedding.dimensions', String(cfg.dimensions));
+    // Clear credential link — this is a manual config
+    await this.appSettings.delete('embedding.credential_id');
+    await this.appSettings.delete('embedding.credential_name');
+    this.linkedCredentialId = null;
+    this.linkedCredentialName = null;
 
     const resolvedKey =
       cfg.apiKey ??
@@ -205,6 +217,32 @@ export class EmbeddingService implements OnModuleInit {
 
     this.provider = this.buildProvider(resolvedKey, cfg.baseUrl, cfg.model, cfg.dimensions);
     this.logger.log(`Embedding provider reconfigured: ${cfg.model} @ ${cfg.baseUrl}`);
+  }
+
+  /**
+   * Reconfigure the embedding provider from an existing LLM credential.
+   * The apiKey is sourced from the caller (credentials service) and not stored
+   * in plain text — only the credentialId reference is persisted.
+   */
+  async reconfigureFromCredential(cfg: {
+    credentialId: string;
+    credentialName: string;
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+    dimensions: number;
+  }): Promise<void> {
+    await this.appSettings.set('embedding.base_url', cfg.baseUrl);
+    await this.appSettings.set('embedding.model', cfg.model);
+    await this.appSettings.set('embedding.dimensions', String(cfg.dimensions));
+    await this.appSettings.set('embedding.api_key', cfg.apiKey);
+    await this.appSettings.set('embedding.credential_id', cfg.credentialId);
+    await this.appSettings.set('embedding.credential_name', cfg.credentialName);
+    this.linkedCredentialId = cfg.credentialId;
+    this.linkedCredentialName = cfg.credentialName;
+
+    this.provider = this.buildProvider(cfg.apiKey, cfg.baseUrl, cfg.model, cfg.dimensions);
+    this.logger.log(`Embedding provider linked to credential "${cfg.credentialName}" (${cfg.credentialId}): ${cfg.model} @ ${cfg.baseUrl}`);
   }
 
   private getProvider(): IEmbeddingProvider {
@@ -297,6 +335,10 @@ export class EmbeddingService implements OnModuleInit {
       configured:
         hasProvider ||
         (!!apiKeyEnv && apiKeyEnv !== 'mock' && !!baseUrl && baseUrl !== 'mock'),
+      ...(this.linkedCredentialId && {
+        credentialId: this.linkedCredentialId,
+        credentialName: this.linkedCredentialName ?? undefined,
+      }),
     };
   }
 
