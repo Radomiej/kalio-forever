@@ -49,12 +49,16 @@ export interface LLMConfig {
 export type LLMProviderType = 'openai' | 'openrouter' | 'cometapi' | 'xiaomimimo' | 'ollama' | 'mock';
 
 // ─── Persona ──────────────────────────────────────────────────────────────────
+/** Controls which MCP tools a persona can access. */
+export type MCPPolicy = 'allow_all' | 'deny_all' | 'allow_list';
+
 export interface Persona {
   id: ID;
   name: string;
   systemPrompt: string;
   model: string;        // e.g. "claude-sonnet-4-6", "gpt-4o", "qwen3:8b"
-  skills: string[];     // tool names available to this persona
+  skills: string[];     // native tool names available to this persona
+  mcpPolicy: MCPPolicy; // how MCP tools are filtered for this persona
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -71,6 +75,7 @@ export interface PersonaSessionConfig {
   systemPrompt: string;
   model: string;
   availableSkills: string[];    // filtered tool list for this session
+  mcpPolicy: MCPPolicy;         // how MCP tools are filtered for this session
   kv: Record<string, string>;   // all KV entries for this persona
 }
 
@@ -79,6 +84,7 @@ export interface CreatePersonaDto {
   systemPrompt: string;
   model: string;
   skills: string[];
+  mcpPolicy?: MCPPolicy;
 }
 
 export interface UpdatePersonaDto {
@@ -86,6 +92,7 @@ export interface UpdatePersonaDto {
   systemPrompt?: string;
   model?: string;
   skills?: string[];
+  mcpPolicy?: MCPPolicy;
 }
 
 // ─── Session / Chat ───────────────────────────────────────────────────────────
@@ -136,6 +143,7 @@ export interface ToolCallRequest {
   toolName: string;
   args: Record<string, unknown>;
   callId: string;             // matches LLMToolCall.id
+  availableTools?: ToolMeta[]; // persona-filtered set visible to the agent
 }
 
 export interface ToolResult {
@@ -551,5 +559,6 @@ export interface AuditLogEntry {
   label: string;
   data: Record<string, unknown> | null;
   durationMs: number | null;
+  chunkCount: number | null;
   createdAt: Timestamp;
 }

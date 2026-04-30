@@ -19,7 +19,7 @@ const mockSessions: ChatSession[] = [
 ];
 
 const mockPersonas: Persona[] = [
-  { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', skills: [], createdAt: 0, updatedAt: 0 },
+  { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', skills: [], mcpPolicy: 'allow_all', createdAt: 0, updatedAt: 0 },
 ];
 
 const mockState = {

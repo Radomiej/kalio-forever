@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Plus, Pencil, Trash2, Check, X, ChevronDown, Wrench } from 'lucide-react';
 import { apiClient } from '../../services/apiClient';
-import type { Persona, CreatePersonaDto, UpdatePersonaDto } from '@kalio/types';
+import type { Persona, CreatePersonaDto, MCPPolicy, UpdatePersonaDto } from '@kalio/types';
 import { PersonaToolPicker, PersonaToolBadges } from './PersonaToolPicker';
 
 export function PersonaPanel() {
@@ -78,7 +78,7 @@ function PersonaForm({
   onSave,
   onCancel,
 }: {
-  initial?: Partial<CreatePersonaDto & { skills: string[] }>;
+  initial?: Partial<CreatePersonaDto & { skills: string[]; mcpPolicy: MCPPolicy }>;
   onSave: (dto: CreatePersonaDto) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -86,6 +86,7 @@ function PersonaForm({
   const [model, setModel] = useState(initial?.model ?? 'gpt-4o-mini');
   const [systemPrompt, setSystemPrompt] = useState(initial?.systemPrompt ?? 'You are a helpful assistant.');
   const [skills, setSkills] = useState<string[]>(initial?.skills ?? []);
+  const [mcpPolicy, setMcpPolicy] = useState<MCPPolicy>(initial?.mcpPolicy ?? 'allow_all');
   const [saving, setSaving] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
 
@@ -93,7 +94,7 @@ function PersonaForm({
     if (!name.trim()) return;
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), model: model.trim(), systemPrompt: systemPrompt.trim(), skills });
+      await onSave({ name: name.trim(), model: model.trim(), systemPrompt: systemPrompt.trim(), skills, mcpPolicy });
     } finally {
       setSaving(false);
     }
@@ -142,7 +143,11 @@ function PersonaForm({
         </button>
         {toolsOpen && (
           <div className="p-2">
-            <PersonaToolPicker selected={skills} onChange={setSkills} />
+            <PersonaToolPicker
+              selected={skills}
+              mcpPolicy={mcpPolicy}
+              onChange={(s, p) => { setSkills(s); setMcpPolicy(p); }}
+            />
           </div>
         )}
       </div>
@@ -177,10 +182,11 @@ function PersonaRow({
   const [model, setModel] = useState(persona.model);
   const [systemPrompt, setSystemPrompt] = useState(persona.systemPrompt);
   const [skills, setSkills] = useState<string[]>(persona.skills ?? []);
+  const [mcpPolicy, setMcpPolicy] = useState<MCPPolicy>(persona.mcpPolicy ?? 'allow_all');
   const [toolsOpen, setToolsOpen] = useState(false);
 
   const save = () => {
-    onUpdate({ name: name.trim(), model: model.trim(), systemPrompt: systemPrompt.trim(), skills });
+    onUpdate({ name: name.trim(), model: model.trim(), systemPrompt: systemPrompt.trim(), skills, mcpPolicy });
     setEditing(false);
   };
 
@@ -189,6 +195,7 @@ function PersonaRow({
     setModel(persona.model);
     setSystemPrompt(persona.systemPrompt);
     setSkills(persona.skills ?? []);
+    setMcpPolicy(persona.mcpPolicy ?? 'allow_all');
     setEditing(false);
   };
 
@@ -264,7 +271,11 @@ function PersonaRow({
                 </button>
                 {toolsOpen && (
                   <div className="p-2">
-                    <PersonaToolPicker selected={skills} onChange={setSkills} />
+                    <PersonaToolPicker
+                      selected={skills}
+                      mcpPolicy={mcpPolicy}
+                      onChange={(s, p) => { setSkills(s); setMcpPolicy(p); }}
+                    />
                   </div>
                 )}
               </div>
@@ -277,7 +288,7 @@ function PersonaRow({
           ) : (
             <>
               <p className="text-xs text-base-content/50 whitespace-pre-wrap">{persona.systemPrompt}</p>
-              <PersonaToolBadges tools={persona.skills ?? []} />
+              <PersonaToolBadges tools={persona.skills ?? []} mcpPolicy={persona.mcpPolicy} />
             </>
           )}
         </div>

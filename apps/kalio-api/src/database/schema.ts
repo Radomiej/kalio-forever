@@ -1,12 +1,13 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import type { LLMToolCall, ChatAttachment } from '@kalio/types';
-// ─── personas ─────────────────────────────────────────────────────────────────
+import type { LLMToolCall, ChatAttachment, MCPPolicy } from '@kalio/types';
+// ─── personas ──────────────────────────────────────────────────────────────────
 export const personas = sqliteTable('personas', {
   id:           text('id').primaryKey(),
   name:         text('name').notNull(),
   systemPrompt: text('system_prompt').notNull().default(''),
   model:        text('model').notNull(),
   skills:       text('skills', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  mcpPolicy:    text('mcp_policy').$type<MCPPolicy>().notNull().default('allow_all'),
   createdAt:    integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt:    integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
@@ -145,6 +146,7 @@ export const auditLog = sqliteTable('audit_log', {
   label:      text('label').notNull(),
   data:       text('data', { mode: 'json' }).$type<Record<string, unknown>>(),
   durationMs: integer('duration_ms'),
+  chunkCount: integer('chunk_count'),
   createdAt:  integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
 

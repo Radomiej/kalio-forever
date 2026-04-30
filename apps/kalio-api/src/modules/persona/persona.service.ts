@@ -19,7 +19,7 @@ export class PersonaService implements OnApplicationBootstrap {
       await this.drizzle.db.insert(personas).values({
         id: 'default',
         name: 'Default',
-        systemPrompt: 'You are a helpful AI assistant.',
+        systemPrompt: 'You are a helpful AI assistant. You have access to a set of tools — call `list_tools` at the start of complex tasks to review what you can do.',
         model: '',
         skills: [],
         createdAt: now,
@@ -122,6 +122,7 @@ export class PersonaService implements OnApplicationBootstrap {
       systemPrompt: persona.systemPrompt,
       model: persona.model,
       availableSkills: persona.skills ?? [],
+      mcpPolicy: persona.mcpPolicy ?? 'allow_all',
       kv,
     };
   }
@@ -145,7 +146,7 @@ export class PersonaService implements OnApplicationBootstrap {
     return { id, personaId, key, value, updatedAt: nowMs };
   }
 
-  private mapRow(row: { id: string; name: string; systemPrompt: string; model: string; skills: string[] | null; createdAt: number | Date; updatedAt: number | Date }): Persona {
+  private mapRow(row: { id: string; name: string; systemPrompt: string; model: string; skills: string[] | null; mcpPolicy?: string | null; createdAt: number | Date; updatedAt: number | Date }): Persona {
     const toMs = (v: number | Date) => v instanceof Date ? v.getTime() : v;
     return {
       id: row.id,
@@ -153,6 +154,7 @@ export class PersonaService implements OnApplicationBootstrap {
       systemPrompt: row.systemPrompt,
       model: row.model,
       skills: row.skills ?? [],
+      mcpPolicy: (row.mcpPolicy as import('@kalio/types').MCPPolicy | null | undefined) ?? 'allow_all',
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),
     };

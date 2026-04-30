@@ -55,7 +55,10 @@ describe('AuditService', () => {
     const fixture = makeDrizzle({ fail: true });
     const failing = new AuditService(fixture.drizzle);
     const warn = vi.spyOn((failing as unknown as { logger: { warn: (m: string) => void } }).logger, 'warn').mockImplementation(() => undefined);
-    await expect(failing.log({ type: 'error', label: 'x' })).resolves.toBeUndefined();
+    // log() always returns a string id even when the DB insert fails
+    const result = await failing.log({ type: 'error', label: 'x' });
+    expect(typeof result).toBe('string');
+    expect(result.length).toBeGreaterThan(0);
     expect(warn).toHaveBeenCalled();
   });
 });

@@ -73,7 +73,7 @@ async function buildService(
           getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }),
         },
       },
-      { provide: AuditService, useValue: { log: vi.fn().mockResolvedValue(undefined) } },
+      { provide: AuditService, useValue: { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) } },
       { provide: LLM_SOURCE, useValue: llmSource },
       { provide: TOOL_REGISTRY, useValue: [] },
     ],

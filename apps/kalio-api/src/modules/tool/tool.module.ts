@@ -16,6 +16,8 @@ import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTo
 import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 import { WebSearchTool } from './tools/web-search.tool';
+import { ListToolsTool } from './tools/list-tools.tool';
+import { GetToolDetailsTool } from './tools/get-tool-details.tool';
 import { VFSModule } from '../vfs/vfs.module';
 import { LLMModule } from '../llm/llm.module';
 import { RAAppModule } from '../raapp/raapp.module';
@@ -37,6 +39,7 @@ import { ToolRegistryService } from './tool-registry.service';
     RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool,
     MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
     WebSearchTool,
+    ListToolsTool, GetToolDetailsTool,
     ToolRegistryService,
   ],
   exports: [ToolRegistryService],

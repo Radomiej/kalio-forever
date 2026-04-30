@@ -15,6 +15,8 @@ import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTo
 import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 import { WebSearchTool } from './tools/web-search.tool';
+import { ListToolsTool } from './tools/list-tools.tool';
+import { GetToolDetailsTool } from './tools/get-tool-details.tool';
 
 /** Minimal registry entry shape — structurally compatible with chat module's ToolRegistryEntry. */
 export interface ToolEntry {
@@ -59,6 +61,8 @@ export class ToolRegistryService {
     private readonly memorySearch: MemorySearchTool,
     private readonly memoryIngestConversation: MemoryIngestConversationTool,
     private readonly webSearch: WebSearchTool,
+    private readonly listTools: ListToolsTool,
+    private readonly getToolDetails: GetToolDetailsTool,
   ) {
     const all: object[] = [
       vfsWrite, vfsRead, vfsList, subagent,
@@ -69,6 +73,7 @@ export class ToolRegistryService {
       raappCreate, raappCompile, runRaApp, listRaApps,
       memoryIngest, memorySearch, memoryIngestConversation,
       webSearch,
+      listTools, getToolDetails,
     ];
     this.entries = all.map(t => this.toEntry(t));
   }

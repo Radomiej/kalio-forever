@@ -56,7 +56,8 @@ describe('ChatService', () => {
       getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }),
     };
     auditService = {
-      log: vi.fn().mockResolvedValue(undefined),
+      log: vi.fn().mockResolvedValue('audit-id'),
+      update: vi.fn().mockResolvedValue(undefined),
     };
   });
 
@@ -394,5 +395,68 @@ describe('ChatService', () => {
       (args: unknown[]) => args[0] === 'agent:done',
     );
     expect(doneCalls).toHaveLength(1);
+  });
+
+  // ─── Audit: tool_call / tool_result logging ─────────────────────────────────
+
+  it('logs tool_call and tool_result to audit when a tool is dispatched', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(() => makeStream([{ type: 'done' }])),
+    };
+    const processor = {
+      // First iteration adds one tool call; second iteration is clean.
+      process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { state: { addToolCall: (tc: unknown) => void } }) => {
+        if ((processor.process as ReturnType<typeof vi.fn>).mock.calls.length === 1) {
+          ctx.state.addToolCall({ id: 'tc1', name: 'my_tool', args: { x: 1 } });
+        }
+      }),
+      onModuleInit: vi.fn(),
+    };
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ChatService,
+        { provide: StreamProcessorService, useValue: processor },
+        { provide: SessionManagerService, useValue: sessionManager },
+        { provide: ToolDispatchService, useValue: toolDispatch },
+        { provide: PersonaService, useValue: personaService },
+        { provide: AuditService, useValue: auditService },
+        { provide: LLM_SOURCE, useValue: llmSource },
+        { provide: CHUNK_HANDLERS, useValue: [] },
+        { provide: STREAM_MIDDLEWARES, useValue: [] },
+        { provide: TOOL_REGISTRY, useValue: [] },
+      ],
+    }).compile();
+    service = moduleRef.get(ChatService);
+
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    const logCalls = (auditService.log as ReturnType<typeof vi.fn>).mock.calls as Array<[unknown]>;
+    const toolCallLog = logCalls.find((args) => (args[0] as { type: string }).type === 'tool_call');
+    const toolResultLog = logCalls.find((args) => (args[0] as { type: string }).type === 'tool_result');
+
+    expect(toolCallLog).toBeDefined();
+    expect(toolCallLog![0]).toMatchObject({ type: 'tool_call', label: 'my_tool', data: { callId: 'tc1' } });
+
+    expect(toolResultLog).toBeDefined();
+    expect(toolResultLog![0]).toMatchObject({ type: 'tool_result', label: 'my_tool', data: { callId: 'tc1', status: 'success' } });
+  });
+
+  it('logs chunkCount via audit.update after streaming completes', async () => {
+    const chunks: InternalLLMChunk[] = [
+      { type: 'text_delta', delta: 'a' },
+      { type: 'text_delta', delta: 'b' },
+      { type: 'done' },
+    ];
+    const llmSource = makeLLMSource(chunks);
+    await buildService(llmSource);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    const updateCalls = (auditService.update as ReturnType<typeof vi.fn>).mock.calls as Array<[string, unknown]>;
+    // There must be at least one final update with chunkCount = 3 (3 chunks were yielded)
+    const finalUpdate = updateCalls.find(
+      (args) => typeof (args[1] as { chunkCount?: number }).chunkCount === 'number',
+    );
+    expect(finalUpdate).toBeDefined();
+    expect((finalUpdate![1] as { chunkCount: number }).chunkCount).toBe(3);
   });
 });

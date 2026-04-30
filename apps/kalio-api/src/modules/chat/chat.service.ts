@@ -77,7 +77,24 @@ export class ChatService {
 
       // Filter tools to persona's allowed skill set (empty = all tools allowed)
       const allToolMetas = this.toolDispatch.getToolMetas();
-      const toolMetas = this.filterTools(allToolMetas, personaConfig?.availableSkills);
+      const toolMetas = this.filterTools(
+        allToolMetas,
+        personaConfig?.availableSkills,
+        personaConfig?.mcpPolicy ?? 'allow_all',
+      );
+
+      // Append a compact tool listing to the system prompt so the agent
+      // knows what tools are available without calling list_tools first.
+      const toolsSection = toolMetas.length > 0
+        ? `\n\n## Available tools (${toolMetas.length})\n` +
+          toolMetas.map(t => {
+            const desc = t.description.length > 80
+              ? t.description.slice(0, 79) + '…'
+              : t.description;
+            return `- ${t.name}: ${desc}`;
+          }).join('\n')
+        : '';
+      const effectiveSystemPrompt = systemPrompt + toolsSection;
 
       trackingEmit('chat:context', {
         sessionId,
@@ -117,8 +134,8 @@ export class ChatService {
 
         // Reload history so it picks up tool_result rows persisted by ToolCallHandler
         const rawHistory = await this.sessionManager.loadHistory(sessionId);
-        const history: LLMMessage[] = systemPrompt
-          ? [{ role: 'system', content: systemPrompt }, ...rawHistory]
+        const history: LLMMessage[] = effectiveSystemPrompt
+          ? [{ role: 'system', content: effectiveSystemPrompt }, ...rawHistory]
           : rawHistory;
 
         const turnStart = performance.now();
@@ -134,6 +151,20 @@ export class ChatService {
           },
         });
 
+        // Pre-insert llm_response so we can update chunkCount live during streaming
+        const auditResId = await this.audit.log({
+          sessionId,
+          type: 'llm_response',
+          label: iterationMessageId,
+          data: {
+            iteration,
+            textLength: 0,
+            thinkingLength: 0,
+            toolCallCount: 0,
+          },
+          chunkCount: 0,
+        });
+
         const params = {
           messages: history,
           tools: toolMetas,
@@ -141,9 +172,18 @@ export class ChatService {
           messageId: iterationMessageId,
         };
 
+        let chunkCount = 0;
+        let lastAuditUpdate = performance.now();
+
         for await (const chunk of this.llmSource.stream(params)) {
           if (controller.signal.aborted) break;
+          chunkCount++;
           await this.streamProcessor.process(chunk, ctx);
+          // Throttle live audit updates to every 500ms so we don't hammer the DB
+          if (performance.now() - lastAuditUpdate >= 500) {
+            void this.audit.update(auditResId, { chunkCount });
+            lastAuditUpdate = performance.now();
+          }
         }
 
         // Tool dispatch happens AFTER the LLM iteration's `done` chunk has
@@ -155,8 +195,22 @@ export class ChatService {
           for (const tc of state.toolCalls) {
             if (controller.signal.aborted) break;
             trackingEmit('tool:start', { callId: tc.id, toolName: tc.name, args: tc.args });
-            const result = await this.toolDispatch.dispatch(tc.id, tc.name, tc.args, ctx);
+            await this.audit.log({
+              sessionId,
+              type: 'tool_call',
+              label: tc.name,
+              data: { callId: tc.id, args: tc.args },
+            });
+            const toolStart = performance.now();
+            const result = await this.toolDispatch.dispatch(tc.id, tc.name, tc.args, ctx, toolMetas);
             trackingEmit('tool:result', result);
+            await this.audit.log({
+              sessionId,
+              type: 'tool_result',
+              label: tc.name,
+              data: { callId: tc.id, status: result.status },
+              durationMs: Math.round(performance.now() - toolStart),
+            });
             if (result.status !== 'cancelled') {
               const content =
                 result.status === 'success'
@@ -167,17 +221,16 @@ export class ChatService {
           }
         }
 
-        await this.audit.log({
-          sessionId,
-          type: 'llm_response',
-          label: iterationMessageId,
+        // Final update: persist actual chunkCount, duration, and real text stats
+        await this.audit.update(auditResId, {
+          chunkCount,
+          durationMs: Math.round(performance.now() - turnStart),
           data: {
             iteration,
             textLength: state.text.length,
             thinkingLength: state.thinking.length,
             toolCallCount: state.toolCalls.length,
           },
-          durationMs: Math.round(performance.now() - turnStart),
         });
 
         // No tool calls this iteration → final answer reached.
@@ -238,9 +291,28 @@ export class ChatService {
     }
   }
 
-  private filterTools(tools: ToolMeta[], availableSkills?: string[]): ToolMeta[] {
-    if (!availableSkills || availableSkills.length === 0) return tools;
-    return tools.filter(t => availableSkills.includes(t.name));
+  private filterTools(tools: ToolMeta[], availableSkills?: string[], mcpPolicy: import('@kalio/types').MCPPolicy = 'allow_all'): ToolMeta[] {
+    const nativeTools = tools.filter(t => !t.name.startsWith('mcp_'));
+    const mcpTools = tools.filter(t => t.name.startsWith('mcp_'));
+
+    // Native tools: empty skills = all allowed; otherwise filter by name list
+    const filteredNative = !availableSkills || availableSkills.length === 0
+      ? nativeTools
+      : nativeTools.filter(t => availableSkills.includes(t.name));
+
+    // MCP tools: controlled by policy
+    let filteredMcp: ToolMeta[];
+    if (mcpPolicy === 'allow_all') {
+      filteredMcp = mcpTools;
+    } else if (mcpPolicy === 'deny_all') {
+      filteredMcp = [];
+    } else {
+      // allow_list: specific mcp_* names stored in skills array
+      const skillSet = new Set(availableSkills ?? []);
+      filteredMcp = mcpTools.filter(t => skillSet.has(t.name));
+    }
+
+    return [...filteredNative, ...filteredMcp];
   }
 }
 

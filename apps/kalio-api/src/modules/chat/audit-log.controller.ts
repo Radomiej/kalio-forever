@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Delete, Query, BadRequestException } from '@nestjs/common';
 import { desc, and, gte, lte, inArray } from 'drizzle-orm';
 import { DrizzleService } from '../../database/drizzle.service';
 import { auditLog } from '../../database/schema';
@@ -54,7 +54,21 @@ export class AuditLogController {
       label: r.label,
       data: r.data ?? null,
       durationMs: r.durationMs ?? null,
+      chunkCount: r.chunkCount ?? null,
       createdAt: r.createdAt instanceof Date ? r.createdAt.getTime() : r.createdAt,
     }));
+  }
+
+  /**
+   * DELETE /api/audit-log?confirm=true
+   * Clears all audit log entries. Requires ?confirm=true as a safety gate.
+   */
+  @Delete()
+  async clear(@Query('confirm') confirm?: string) {
+    if (confirm !== 'true') {
+      throw new BadRequestException('Pass ?confirm=true to clear the audit log');
+    }
+    await this.drizzle.db.delete(auditLog);
+    return { deleted: true };
   }
 }

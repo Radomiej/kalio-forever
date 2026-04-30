@@ -15,6 +15,7 @@ function makeTestDrizzle(): DrizzleService {
       label TEXT NOT NULL,
       data TEXT,
       duration_ms INTEGER,
+      chunk_count INTEGER,
       created_at INTEGER NOT NULL
     )
   `);
@@ -134,6 +135,24 @@ describe('AuditLogController', () => {
       const rows = await controller.list('invalid');
       // parseInt('invalid') returns NaN, should fall back to 200
       expect(rows.length).toBeLessThanOrEqual(3);
+    });
+  });
+
+  describe('clear()', () => {
+    it('rejects without confirm=true', async () => {
+      await expect(controller.clear()).rejects.toThrow();
+      await expect(controller.clear('false')).rejects.toThrow();
+    });
+
+    it('deletes all entries when confirm=true', async () => {
+      const before = await controller.list();
+      expect(before.length).toBeGreaterThan(0);
+
+      const result = await controller.clear('true');
+      expect(result).toEqual({ deleted: true });
+
+      const after = await controller.list();
+      expect(after).toHaveLength(0);
     });
   });
 });

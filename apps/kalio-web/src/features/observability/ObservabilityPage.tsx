@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   BrainCircuit, Wrench, CheckCircle2, XCircle, ChevronDown,
-  RefreshCw, Zap, Play, Pause, Search, X,
+  RefreshCw, Zap, Play, Pause, Search, X, Trash2,
 } from 'lucide-react';
 import type { AuditType, AuditLogEntry } from '@kalio/types';
 import { FriendlyId } from '../../components/ui/FriendlyId';
@@ -83,6 +83,11 @@ function EntryRow({ entry, sessionTitles }: { entry: AuditLogEntry; sessionTitle
           <span className="text-xs text-base-content/90 flex-1 truncate min-w-0">{entry.label}</span>
         )}
 
+        {/* chunkCount badge for llm_response */}
+        {entry.type === 'llm_response' && entry.chunkCount != null && (
+          <span className="text-[10px] font-mono text-sky-400/70 shrink-0">{entry.chunkCount}c</span>
+        )}
+
         {/* duration */}
         {entry.durationMs != null && (
           <span className={`text-[10px] font-mono shrink-0 ${entry.durationMs > 5000 ? 'text-warning' : 'text-base-content/40'}`}>
@@ -160,6 +165,7 @@ export function ObservabilityPage() {
 
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedTypes, setSelectedTypes] = useState<Set<AuditType>>(new Set(ALL_TYPES));
   const [timeRange, setTimeRange] = useState<TimeRange>('live');
@@ -190,6 +196,19 @@ export function ObservabilityPage() {
       setLoading(false);
     }
   }, [timeRange, selectedTypes]);
+
+  const clearLogs = async () => {
+    if (!window.confirm('Clear all audit log entries? This cannot be undone.')) return;
+    setClearing(true);
+    try {
+      await fetch('/api/audit-log?confirm=true', { method: 'DELETE' });
+      await load();
+    } catch {
+      // network error — silently ignore
+    } finally {
+      setClearing(false);
+    }
+  };
 
   // Initial load + on filter change
   useEffect(() => { void load(); }, [load]);
@@ -265,6 +284,15 @@ export function ObservabilityPage() {
           >
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
             <span className="hidden sm:inline text-[10px]">Refresh</span>
+          </button>
+          <button
+            className={`btn btn-ghost btn-xs gap-1 text-error/60 hover:text-error ${clearing ? 'opacity-60' : ''}`}
+            onClick={() => { void clearLogs(); }}
+            title="Clear all audit log entries"
+            disabled={clearing}
+          >
+            <Trash2 size={12} />
+            <span className="hidden sm:inline text-[10px]">Clear</span>
           </button>
           <button
             className={`btn btn-ghost btn-xs gap-1 ${autoRefresh ? 'text-sky-400' : 'text-base-content/40'}`}

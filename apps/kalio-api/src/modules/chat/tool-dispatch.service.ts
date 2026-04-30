@@ -1,9 +1,10 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Optional, Logger } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import type { ToolMeta, ToolCallRequest, ToolResult, ToolConfirmationRequest } from '@kalio/types';
 import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from './interfaces/tool-registry-entry.interface';
 import { TOOL_REGISTRY } from './chat.tokens';
+import { MCPService } from '../mcp/mcp.service';
 
 const HITL_TIMEOUT_MS = 30_000;
 
@@ -24,13 +25,25 @@ export class ToolDispatchService {
   private readonly pending = new Map<string, PendingConfirmation>();
   private readonly toolMap: ReadonlyMap<string, ToolRegistryEntry>;
 
-  constructor(@Inject(TOOL_REGISTRY) tools: ToolRegistryEntry[]) {
+  constructor(
+    @Inject(TOOL_REGISTRY) tools: ToolRegistryEntry[],
+    @Optional() private readonly mcpService: MCPService | null,
+  ) {
     this.toolMap = new Map(tools.map(t => [t.meta.name, t]));
     this.logger.log(`Tool registry loaded: [${[...this.toolMap.keys()].join(', ')}]`);
   }
 
   getToolMetas(): ToolMeta[] {
-    return Array.from(this.toolMap.values()).map(t => t.meta);
+    const staticMetas = Array.from(this.toolMap.values()).map(t => t.meta);
+    const mcpMetas: ToolMeta[] = this.mcpService
+      ? this.mcpService.getAllTools().map(t => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+          requiresConfirmation: t.requiresConfirmation,
+        }))
+      : [];
+    return [...staticMetas, ...mcpMetas];
   }
 
   async dispatch(
@@ -38,9 +51,24 @@ export class ToolDispatchService {
     toolName: string,
     args: Record<string, unknown>,
     ctx: StreamContext,
+    toolMetas?: ToolMeta[],
   ): Promise<ToolResult> {
     const entry = this.toolMap.get(toolName);
     if (!entry) {
+      // Route MCP tools: names follow mcp_{serverId}_{toolName} pattern
+      if (this.mcpService) {
+        const mcpRef = this.mcpService.resolveToolName(toolName);
+        if (mcpRef) {
+          try {
+            const data = await this.mcpService.callTool(mcpRef.serverId, mcpRef.originalName, args);
+            return { callId, status: 'success', data };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.error(`MCP tool [${toolName}] failed: ${message}`, err instanceof Error ? err.stack : undefined);
+            return { callId, status: 'error', errorCode: 'TOOL_EXECUTION_FAILED', errorMessage: message };
+          }
+        }
+      }
       return {
         callId,
         status: 'error',
@@ -62,6 +90,7 @@ export class ToolDispatchService {
         toolName,
         args,
         callId,
+        availableTools: toolMetas,
       };
       const data = await entry.execute(req);
       return { callId, status: 'success', data };

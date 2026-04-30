@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ChevronDown } from 'lucide-react';
-import type { ToolMeta } from '@kalio/types';
+import type { MCPPolicy, ToolMeta } from '@kalio/types';
 
 const GROUP_LABELS: Record<string, string> = {
   vfs: 'VFS',
@@ -26,7 +26,8 @@ function deriveGroup(name: string): string {
 
 interface Props {
   selected: string[];
-  onChange: (tools: string[]) => void;
+  mcpPolicy: MCPPolicy;
+  onChange: (tools: string[], mcpPolicy: MCPPolicy) => void;
 }
 
 interface ToolGroup {
@@ -35,8 +36,15 @@ interface ToolGroup {
   tools: ToolMeta[];
 }
 
-export function PersonaToolPicker({ selected, onChange }: Props) {
+const MCP_POLICY_LABELS: Record<MCPPolicy, string> = {
+  allow_all:  'Allow all',
+  deny_all:   'Deny all',
+  allow_list: 'Allow list',
+};
+
+export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
   const [groups, setGroups] = useState<ToolGroup[]>([]);
+  const [mcpTools, setMcpTools] = useState<ToolMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -45,8 +53,11 @@ export function PersonaToolPicker({ selected, onChange }: Props) {
     try {
       const res = await fetch('/api/tools');
       const data: ToolMeta[] = await res.json() as ToolMeta[];
+      const nativeTools = data.filter(t => !t.name.startsWith('mcp_'));
+      const mcp = data.filter(t => t.name.startsWith('mcp_'));
+      setMcpTools(mcp);
       const map = new Map<string, ToolMeta[]>();
-      for (const tool of data) {
+      for (const tool of nativeTools) {
         const g = deriveGroup(tool.name);
         const arr = map.get(g) ?? [];
         arr.push(tool);
@@ -72,12 +83,13 @@ export function PersonaToolPicker({ selected, onChange }: Props) {
   useEffect(() => { void load(); }, [load]);
 
   const selectedSet = new Set(selected);
-  const allNames = groups.flatMap((g) => g.tools.map((t) => t.name));
+  const allNativeNames = groups.flatMap((g) => g.tools.map((t) => t.name));
+  const mcpAllowListNames = selected.filter(n => n.startsWith('mcp_'));
 
   const toggleTool = (name: string) => {
     const next = new Set(selectedSet);
     next.has(name) ? next.delete(name) : next.add(name);
-    onChange([...next]);
+    onChange([...next], mcpPolicy);
   };
 
   const toggleGroup = (group: ToolGroup) => {
@@ -85,11 +97,27 @@ export function PersonaToolPicker({ selected, onChange }: Props) {
     const allOn = names.every((n) => selectedSet.has(n));
     const next = new Set(selectedSet);
     names.forEach((n) => (allOn ? next.delete(n) : next.add(n)));
-    onChange([...next]);
+    onChange([...next], mcpPolicy);
   };
 
-  const enableAll = () => onChange([...allNames]);
-  const disableAll = () => onChange([]);
+  const toggleMcpTool = (name: string) => {
+    const next = new Set(selectedSet);
+    next.has(name) ? next.delete(name) : next.add(name);
+    onChange([...next], 'allow_list');
+  };
+
+  const enableAll = () => onChange([...allNativeNames], mcpPolicy);
+  const disableAll = () => onChange([], mcpPolicy);
+
+  const setPolicy = (policy: MCPPolicy) => {
+    if (policy !== 'allow_list') {
+      // strip mcp_* entries from skills when not using allow_list
+      const withoutMcp = selected.filter(n => !n.startsWith('mcp_'));
+      onChange(withoutMcp, policy);
+    } else {
+      onChange(selected, policy);
+    }
+  };
 
   if (loading) {
     return (
@@ -113,7 +141,7 @@ export function PersonaToolPicker({ selected, onChange }: Props) {
         <span className="text-xs font-medium text-base-content/70">
           Tools
           <span className="ml-1 text-base-content/40">
-            ({selected.length}/{allNames.length})
+            ({selected.filter(n => !n.startsWith('mcp_')).length}/{allNativeNames.length})
           </span>
         </span>
         <div className="flex gap-1">
@@ -198,18 +226,86 @@ export function PersonaToolPicker({ selected, onChange }: Props) {
           </div>
         );
       })}
+
+      {/* MCP section */}
+      <div className="rounded border border-base-300 overflow-hidden mt-1">
+        <div className="flex items-center gap-2 px-2 py-1.5 bg-base-200/60">
+          <span className="text-xs font-medium text-base-content/80 flex-1">MCP Tools</span>
+          {mcpTools.length > 0 && (
+            <span className="text-[10px] text-base-content/40">
+              {mcpPolicy === 'allow_list' ? `${mcpAllowListNames.length}/${mcpTools.length}` : `${mcpTools.length} available`}
+            </span>
+          )}
+        </div>
+        <div className="px-2 py-2 bg-base-100/30 flex flex-col gap-2">
+          {/* Policy radio group */}
+          <div className="flex gap-3">
+            {(['allow_all', 'deny_all', 'allow_list'] as MCPPolicy[]).map((p) => (
+              <label
+                key={p}
+                className="flex items-center gap-1 cursor-pointer"
+                data-testid={`mcp-policy-${p}`}
+              >
+                <input
+                  type="radio"
+                  className="radio radio-xs"
+                  name="mcp-policy"
+                  checked={mcpPolicy === p}
+                  onChange={() => setPolicy(p)}
+                />
+                <span className="text-[11px] text-base-content/70">{MCP_POLICY_LABELS[p]}</span>
+              </label>
+            ))}
+          </div>
+
+          {/* Allow-list checkboxes */}
+          {mcpPolicy === 'allow_list' && (
+            mcpTools.length === 0 ? (
+              <span className="text-[10px] text-base-content/30">No MCP servers connected</span>
+            ) : (
+              <div className="space-y-0.5 border-t border-base-300 pt-1.5">
+                {mcpTools.map((tool) => (
+                  <label
+                    key={tool.name}
+                    className="flex items-center gap-2 py-0.5 cursor-pointer hover:bg-base-200/40 rounded px-1"
+                    data-testid={`tool-toggle-${tool.name}`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="checkbox checkbox-xs"
+                      checked={selectedSet.has(tool.name)}
+                      onChange={() => toggleMcpTool(tool.name)}
+                    />
+                    <span className="font-mono text-[11px] text-secondary/80 truncate">{tool.name}</span>
+                    {tool.requiresConfirmation && (
+                      <span className="badge badge-xs badge-warning shrink-0">confirm</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            )
+          )}
+          {mcpPolicy === 'allow_all' && (
+            <span className="text-[10px] text-base-content/40">All connected MCP tools are accessible</span>
+          )}
+          {mcpPolicy === 'deny_all' && (
+            <span className="text-[10px] text-base-content/40">MCP tools are blocked for this persona</span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 /** Compact read-only summary shown in the expanded persona view */
-export function PersonaToolBadges({ tools }: { tools: string[] }) {
-  if (tools.length === 0) {
+export function PersonaToolBadges({ tools, mcpPolicy }: { tools: string[]; mcpPolicy?: MCPPolicy }) {
+  const nativeTools = tools.filter(n => !n.startsWith('mcp_'));
+  const mcpSelected = tools.filter(n => n.startsWith('mcp_'));
+  if (nativeTools.length === 0 && (!mcpPolicy || mcpPolicy === 'deny_all')) {
     return <span className="text-[10px] text-base-content/30">No tools enabled</span>;
   }
-  // Group them
   const byGroup = new Map<string, string[]>();
-  for (const name of tools) {
+  for (const name of nativeTools) {
     const g = deriveGroup(name);
     const arr = byGroup.get(g) ?? [];
     arr.push(name);
@@ -222,6 +318,14 @@ export function PersonaToolBadges({ tools }: { tools: string[] }) {
           {GROUP_LABELS[g] ?? g} ×{names.length}
         </span>
       ))}
+      {mcpPolicy && mcpPolicy !== 'deny_all' && (
+        <span
+          className="badge badge-xs badge-secondary font-mono"
+          title={mcpPolicy === 'allow_list' ? mcpSelected.join(', ') : 'All MCP tools allowed'}
+        >
+          MCP:{mcpPolicy === 'allow_all' ? 'all' : mcpSelected.length}
+        </span>
+      )}
     </div>
   );
 }

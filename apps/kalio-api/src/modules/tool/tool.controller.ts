@@ -1,15 +1,17 @@
-import { Body, Controller, Get, NotFoundException, OnModuleInit, Param, Patch } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, OnModuleInit, Optional, Param, Patch } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { ToolMeta } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { toolOverrides } from '../../database/schema';
 import { ToolRegistryService } from './tool-registry.service';
+import { MCPService } from '../mcp/mcp.service';
 
 @Controller('tools')
 export class ToolController implements OnModuleInit {
   constructor(
     private readonly registry: ToolRegistryService,
     private readonly drizzle: DrizzleService,
+    @Optional() private readonly mcpService: MCPService | null,
   ) {}
 
   /** Load persisted overrides into the in-memory registry on startup. */
@@ -22,7 +24,16 @@ export class ToolController implements OnModuleInit {
 
   @Get()
   findAll(): ToolMeta[] {
-    return this.registry.getEntries().map((e) => e.meta);
+    const staticMetas = this.registry.getEntries().map((e) => e.meta);
+    const mcpMetas: ToolMeta[] = this.mcpService
+      ? this.mcpService.getAllTools().map((t) => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+          requiresConfirmation: t.requiresConfirmation,
+        }))
+      : [];
+    return [...staticMetas, ...mcpMetas];
   }
 
   @Patch(':name')

@@ -54,7 +54,7 @@ describe('ChatService — MAX_ITERATIONS', () => {
   const personaService = {
     getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }),
   };
-  const auditService = { log: vi.fn().mockResolvedValue(undefined) };
+  const auditService = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
 
   beforeEach(async () => {
     emit = vi.fn();

@@ -17,6 +17,7 @@ function makeTestDrizzle(): DrizzleService {
       system_prompt TEXT NOT NULL DEFAULT '',
       model TEXT NOT NULL,
       skills TEXT NOT NULL DEFAULT '[]',
+      mcp_policy TEXT NOT NULL DEFAULT 'allow_all',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );

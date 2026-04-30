@@ -41,7 +41,7 @@ describe('ToolController', () => {
   beforeEach(() => {
     registry = makeRegistry();
     drizzle = makeDrizzle();
-    controller = new ToolController(registry as never, drizzle as never);
+    controller = new ToolController(registry as never, drizzle as never, null);
   });
 
   describe('onModuleInit()', () => {

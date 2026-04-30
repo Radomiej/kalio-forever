@@ -52,7 +52,8 @@ describe('ChatService - Agent Loop Limits', () => {
     } as any;
 
     mockAudit = {
-      log: vi.fn().mockResolvedValue(undefined),
+      log: vi.fn().mockResolvedValue('audit-id'),
+      update: vi.fn().mockResolvedValue(undefined),
     } as any;
 
     service = new ChatService(
