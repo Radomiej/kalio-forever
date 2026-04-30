@@ -22,6 +22,7 @@ interface SessionState {
   messages: ChatMessage[];
   streamingChunks: Record<string, string>;    // messageId → accumulated answer delta
   thinkingChunks: Record<string, string>;     // messageId → accumulated thinking delta
+  chunkSessionIds: Record<string, string>;    // messageId → sessionId (cross-session isolation)
   pendingMessage: string | null;
   pendingRAAppId: string | null;
   pendingUserActions: string[];
@@ -36,7 +37,7 @@ interface SessionState {
   setActiveSession: (id: string | null) => void;
   setMessages: (messages: ChatMessage[]) => void;
   addMessage: (message: ChatMessage) => void;
-  appendChunk: (messageId: string, delta: string, thinking?: boolean) => void;
+  appendChunk: (messageId: string, delta: string, thinking?: boolean, chunkSessionId?: string) => void;
   finalizeChunk: (messageId: string) => void;
   flushThinkingChunks: () => void;
   removeSession: (id: string) => void;
@@ -62,6 +63,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   messages: [],
   streamingChunks: {},
   thinkingChunks: {},
+  chunkSessionIds: {},
   pendingMessage: null,
   pendingRAAppId: null,
   pendingUserActions: [],
@@ -90,15 +92,75 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // when the same session is re-selected (e.g. user clicks an already-active session
     // or auto-select fires for a session that's already loaded).
     if (get().activeSessionId === id) return;
-    set({ activeSessionId: id, messages: [], pendingUserActions: [], agentTurns: [], activeTurnId: null });
+    const { streamingChunks, thinkingChunks, chunkSessionIds } = get();
+    // Check for in-progress streams belonging to the target session
+    const pendingEntries = id ? Object.entries(chunkSessionIds).filter(([, sid]) => sid === id) : [];
+    const pendingMessages: ChatMessage[] = pendingEntries.map(([mid]) => ({
+      id: mid,
+      sessionId: id ?? '',
+      role: 'assistant' as const,
+      content: streamingChunks[mid] ?? '',
+      thinking: thinkingChunks[mid] || undefined,
+      streaming: true,
+      createdAt: Date.now(),
+    }));
+    // Restore a synthetic agent turn so the streaming messages are rendered
+    const pendingAgentTurns: AgentTurn[] = pendingEntries.length > 0
+      ? [{ id: `restoring-${id}`, sessionId: id ?? '', items: pendingEntries.map(([mid]) => ({ kind: 'text' as const, messageId: mid })), done: false }]
+      : [];
+    set({
+      activeSessionId: id,
+      messages: pendingMessages,
+      pendingUserActions: [],
+      agentTurns: pendingAgentTurns,
+      activeTurnId: pendingEntries.length > 0 ? `restoring-${id}` : null,
+    });
   },
-  setMessages: (messages) => set({ messages }),
+  setMessages: (messages) =>
+    set((s) => {
+      const activeId = s.activeSessionId;
+      // Merge in any in-progress streaming messages for the active session not yet in DB
+      const pendingIds = Object.entries(s.chunkSessionIds)
+        .filter(([, sid]) => sid === activeId)
+        .map(([mid]) => mid);
+      const pendingMsgs: ChatMessage[] = pendingIds
+        .filter((mid) => !messages.some((m) => m.id === mid))
+        .map((mid) => ({
+          id: mid,
+          sessionId: activeId ?? '',
+          role: 'assistant' as const,
+          content: s.streamingChunks[mid] ?? '',
+          thinking: s.thinkingChunks[mid] || undefined,
+          streaming: true,
+          createdAt: Date.now(),
+        }));
+      return { messages: [...messages, ...pendingMsgs] };
+    }),
   addMessage: (message) =>
     set((s) => ({ messages: [...s.messages, message] })),
 
-  appendChunk: (messageId, delta, thinking = false) =>
+  appendChunk: (messageId, delta, thinking = false, chunkSessionId?) =>
     set((s) => {
-      // Ensure the streaming message placeholder exists
+      const targetSessionId = chunkSessionId ?? s.activeSessionId ?? '';
+      const updatedChunkSessionIds = chunkSessionId
+        ? { ...s.chunkSessionIds, [messageId]: targetSessionId }
+        : s.chunkSessionIds;
+
+      // Non-active session: accumulate content but do NOT touch messages array
+      if (targetSessionId !== s.activeSessionId) {
+        if (thinking) {
+          return {
+            chunkSessionIds: updatedChunkSessionIds,
+            thinkingChunks: { ...s.thinkingChunks, [messageId]: (s.thinkingChunks[messageId] ?? '') + delta },
+          };
+        }
+        return {
+          chunkSessionIds: updatedChunkSessionIds,
+          streamingChunks: { ...s.streamingChunks, [messageId]: (s.streamingChunks[messageId] ?? '') + delta },
+        };
+      }
+
+      // Active session: ensure the streaming message placeholder exists
       const msgExists = s.messages.some((m) => m.id === messageId);
       const newMessages = msgExists
         ? s.messages
@@ -106,7 +168,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             ...s.messages,
             {
               id: messageId,
-              sessionId: s.activeSessionId ?? '',
+              sessionId: targetSessionId,
               role: 'assistant' as const,
               content: '',
               streaming: true,
@@ -116,6 +178,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
       if (thinking) {
         return {
+          chunkSessionIds: updatedChunkSessionIds,
           messages: newMessages,
           thinkingChunks: {
             ...s.thinkingChunks,
@@ -130,6 +193,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         const thinkingContent = s.thinkingChunks[messageId];
         const { [messageId]: _removed, ...restThinking } = s.thinkingChunks;
         return {
+          chunkSessionIds: updatedChunkSessionIds,
           messages: newMessages.map((m) =>
             m.id === messageId ? { ...m, thinking: thinkingContent } : m,
           ),
@@ -142,6 +206,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
 
       return {
+        chunkSessionIds: updatedChunkSessionIds,
         messages: newMessages,
         streamingChunks: {
           ...s.streamingChunks,
@@ -152,18 +217,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   finalizeChunk: (messageId) =>
     set((s) => {
+      const targetSessionId = s.chunkSessionIds[messageId];
       const finalContent = s.streamingChunks[messageId] ?? '';
       const finalThinking = s.thinkingChunks[messageId] ?? '';
       const { [messageId]: _sc, ...restStreaming } = s.streamingChunks;
       const { [messageId]: _tc, ...restThinking } = s.thinkingChunks;
+      const { [messageId]: _csi, ...restChunkSessionIds } = s.chunkSessionIds;
+      // Only update messages if this chunk belongs to the currently active session
+      const shouldUpdateMessages = !targetSessionId || targetSessionId === s.activeSessionId;
       return {
+        chunkSessionIds: restChunkSessionIds,
         streamingChunks: restStreaming,
         thinkingChunks: restThinking,
-        messages: s.messages.map((m) =>
-          m.id === messageId
-            ? { ...m, content: finalContent, thinking: finalThinking || undefined, streaming: false }
-            : m,
-        ),
+        messages: shouldUpdateMessages
+          ? s.messages.map((m) =>
+              m.id === messageId
+                ? { ...m, content: finalContent, thinking: finalThinking || undefined, streaming: false }
+                : m,
+            )
+          : s.messages,
       };
     }),
 

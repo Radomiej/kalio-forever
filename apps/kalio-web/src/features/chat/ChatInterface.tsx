@@ -62,53 +62,64 @@ export function ChatInterface() {
 
     const offChunk = eventBus.onChunk((chunk) => {
       if (!chunk.done) {
-        appendChunk(chunk.messageId, chunk.delta, chunk.thinking);
+        appendChunk(chunk.messageId, chunk.delta, chunk.thinking, chunk.sessionId);
 
-        // Add to active turn for unified rendering
-        // Read activeTurnId from store (not closure) to avoid stale reference
-        const { activeTurnId: currentTurnId, agentTurns, addTurnItem } = useSessionStore.getState();
-        if (currentTurnId) {
-          const turn = agentTurns.find((t) => t.id === currentTurnId);
-          if (turn) {
-            const hasItem = turn.items.some(
-              (item) => item.kind === (chunk.thinking ? 'thinking' : 'text') && item.messageId === chunk.messageId
-            );
-            if (!hasItem) {
-              addTurnItem({ kind: chunk.thinking ? 'thinking' : 'text', messageId: chunk.messageId });
+        // Only manage turn items for the currently active session
+        if (chunk.sessionId === useSessionStore.getState().activeSessionId) {
+          // Add to active turn for unified rendering
+          // Read activeTurnId from store (not closure) to avoid stale reference
+          const { activeTurnId: currentTurnId, agentTurns, addTurnItem } = useSessionStore.getState();
+          if (currentTurnId) {
+            const turn = agentTurns.find((t) => t.id === currentTurnId);
+            if (turn) {
+              const hasItem = turn.items.some(
+                (item) => item.kind === (chunk.thinking ? 'thinking' : 'text') && item.messageId === chunk.messageId
+              );
+              if (!hasItem) {
+                addTurnItem({ kind: chunk.thinking ? 'thinking' : 'text', messageId: chunk.messageId });
+              }
             }
           }
         }
       } else {
         finalizeChunk(chunk.messageId);
-        setStreaming(false);
-        // After first assistant reply, generate a real title via LLM
-        const { sessions, activeSessionId: sid } = useSessionStore.getState();
-        const session = sessions.find((s) => s.id === sid);
-        if (sid && session && (session.title === 'New Chat' || session.title === '')) {
-          addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: Date.now() });
-          fetch(`/api/sessions/${sid}/generate-title`, { method: 'POST' })
-            .then((r) => r.json())
-            .then((data: { title: string }) => {
-              useSessionStore.getState().updateSession(sid, { title: data.title });
-              updateLlmActivity('title-gen', { status: 'done', finishedAt: Date.now() });
-            })
-            .catch(() => {
-              updateLlmActivity('title-gen', { status: 'error', finishedAt: Date.now() });
-            });
+        // Only update UI state for the active session
+        if (chunk.sessionId === useSessionStore.getState().activeSessionId) {
+          setStreaming(false);
+          // After first assistant reply, generate a real title via LLM
+          const { sessions, activeSessionId: sid } = useSessionStore.getState();
+          const session = sessions.find((s) => s.id === sid);
+          if (sid && session && (session.title === 'New Chat' || session.title === '')) {
+            addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: Date.now() });
+            fetch(`/api/sessions/${sid}/generate-title`, { method: 'POST' })
+              .then((r) => r.json())
+              .then((data: { title: string }) => {
+                useSessionStore.getState().updateSession(sid, { title: data.title });
+                updateLlmActivity('title-gen', { status: 'done', finishedAt: Date.now() });
+              })
+              .catch(() => {
+                updateLlmActivity('title-gen', { status: 'error', finishedAt: Date.now() });
+              });
+          }
         }
       }
     });
 
     const offComplete = eventBus.onComplete((payload) => {
       console.debug('[EventBus] chat:complete', payload.messageId);
-      // Finalize ALL streaming messages — the agent loop may have produced
+      // Finalize ALL streaming messages for this session — the agent loop may have produced
       // multiple assistant rows (one per LLM iteration). Without this each
       // streamed bubble keeps `streaming: true` and the typing caret blinks
       // forever even after the turn ends.
-      const { streamingChunks, thinkingChunks, finalizeChunk: doFinalize } = useSessionStore.getState();
-      const ids = new Set([...Object.keys(streamingChunks), ...Object.keys(thinkingChunks)]);
-      ids.forEach((id) => doFinalize(id));
-      setStreaming(false);
+      const { streamingChunks, thinkingChunks, finalizeChunk: doFinalize, chunkSessionIds } = useSessionStore.getState();
+      const ids = new Set([...Object.keys(streamingChunks), ...Object.keys(thinkingChunks)])
+      ids.forEach((id) => {
+        // Only finalize chunks belonging to this session
+        if (!chunkSessionIds[id] || chunkSessionIds[id] === payload.sessionId) doFinalize(id);
+      });
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setStreaming(false);
+      }
     });
 
     const offError = eventBus.onError((payload) => {
@@ -164,19 +175,26 @@ export function ChatInterface() {
 
     const offAgentStart = eventBus.onAgentStart((payload) => {
       console.log('[AgentStart]', payload.sessionId, payload.turnId);
-      startAgentTurn(payload.turnId, payload.sessionId);
-      clearToolActivities(); // Fresh turn = fresh tool activities
       addActiveAgentLoop(payload.sessionId, payload.turnId);
+      // Only manage turn state for the currently active session
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        startAgentTurn(payload.turnId, payload.sessionId);
+        clearToolActivities(); // Fresh turn = fresh tool activities
+      }
     });
 
     const offAgentDone = eventBus.onAgentDone((payload) => {
       console.log('[AgentDone]', payload.sessionId, payload.turnId);
-      finalizeAgentTurn();
       removeActiveAgentLoop(payload.sessionId);
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        finalizeAgentTurn();
+      }
     });
 
     const offContext = eventBus.onContext((payload) => {
-      setContext(payload.systemPrompt, payload.toolNames);
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setContext(payload.systemPrompt, payload.toolNames);
+      }
     });
 
     const offToolResult = eventBus.onToolResult((result) => {

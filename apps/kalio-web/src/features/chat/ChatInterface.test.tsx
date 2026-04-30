@@ -154,6 +154,7 @@ vi.mock('../../store/sessionStore', () => ({
         updateSession: vi.fn(),
         streamingChunks: {},
         thinkingChunks: {},
+        chunkSessionIds: {},
         finalizeChunk: vi.fn(),
         markAgentTurnError,
         removeLastAgentTurn,

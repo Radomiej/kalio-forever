@@ -102,6 +102,7 @@ window.parent.postMessage({ type: 'kalio_send_message', content: 'user answer' }
 - Never use empty `catch(() => {})` — always log with context and rethrow or handle
 - `this.logger.error('message', err)` — always pass the Error object as second arg
 - Use `instanceof Error ? err : new Error(String(err))` when wrapping unknown catches
+- React async handlers (`useEffect`, event callbacks, `.then` chains): always add `.catch((err: unknown) => console.error('[ComponentName] context', err instanceof Error ? err : new Error(String(err))))` — never leave async paths without error handling
 
 ### Database (Drizzle)
 - Schema source of truth: `apps/kalio-api/src/database/schema.ts`

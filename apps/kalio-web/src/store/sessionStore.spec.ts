@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { ChatMessage } from '@kalio/types';
 import { useSessionStore } from './sessionStore';
 
 describe('sessionStore.appendChunk — thinking phase clear', () => {
@@ -84,5 +85,131 @@ describe('sessionStore.flushThinkingChunks — tool-start regression', () => {
     // Should not throw or mutate anything
     useSessionStore.getState().flushThinkingChunks();
     expect(useSessionStore.getState().thinkingChunks).toEqual({});
+  });
+});
+
+// ─── REGRESSION: streaming content not lost on session switch ─────────────────
+describe('sessionStore — session-isolated streaming (REGRESSION)', () => {
+  beforeEach(() => {
+    useSessionStore.setState({
+      messages: [],
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+      activeSessionId: 'sess-A',
+      agentTurns: [],
+      activeTurnId: null,
+    });
+  });
+
+  it('chunks for non-active session accumulate in streamingChunks but do not touch messages', () => {
+    // First chunk for sess-A while active
+    useSessionStore.getState().appendChunk('msg-1', 'Hello', false, 'sess-A');
+    expect(useSessionStore.getState().messages.some((m) => m.id === 'msg-1')).toBe(true);
+
+    // Switch to sess-B
+    useSessionStore.setState({ activeSessionId: 'sess-B', messages: [] });
+
+    // More chunks for sess-A arrive while on sess-B
+    useSessionStore.getState().appendChunk('msg-1', ' world', false, 'sess-A');
+
+    // Session B messages should NOT contain msg-1
+    expect(useSessionStore.getState().messages.some((m) => m.id === 'msg-1')).toBe(false);
+    // streamingChunks accumulates both deltas
+    expect(useSessionStore.getState().streamingChunks['msg-1']).toBe('Hello world');
+    // chunkSessionIds tracks the session
+    expect(useSessionStore.getState().chunkSessionIds['msg-1']).toBe('sess-A');
+  });
+
+  it('setMessages merges with in-progress streaming messages for active session', () => {
+    useSessionStore.setState({
+      activeSessionId: 'sess-A',
+      streamingChunks: { 'msg-streaming': 'partial content' },
+      chunkSessionIds: { 'msg-streaming': 'sess-A' },
+      messages: [],
+    });
+
+    const historical: ChatMessage[] = [
+      { id: 'old-msg', sessionId: 'sess-A', role: 'user', content: 'Hello', createdAt: 1 },
+    ];
+    useSessionStore.getState().setMessages(historical);
+
+    const msgs = useSessionStore.getState().messages;
+    expect(msgs.some((m) => m.id === 'old-msg')).toBe(true);
+    expect(msgs.some((m) => m.id === 'msg-streaming' && m.streaming === true)).toBe(true);
+    expect(msgs.find((m) => m.id === 'msg-streaming')?.content).toBe('partial content');
+  });
+
+  it('setActiveSession restores pending streaming messages when switching back', () => {
+    useSessionStore.setState({
+      activeSessionId: 'sess-B',
+      messages: [],
+      streamingChunks: { 'msg-A': 'partial from A' },
+      chunkSessionIds: { 'msg-A': 'sess-A' },
+      agentTurns: [],
+      activeTurnId: null,
+    });
+
+    useSessionStore.getState().setActiveSession('sess-A');
+
+    const msgs = useSessionStore.getState().messages;
+    expect(msgs.some((m) => m.id === 'msg-A' && m.streaming === true)).toBe(true);
+    expect(msgs.find((m) => m.id === 'msg-A')?.content).toBe('partial from A');
+    // Should have created a synthetic agentTurn for the in-progress message
+    expect(useSessionStore.getState().agentTurns.length).toBe(1);
+    expect(useSessionStore.getState().activeTurnId).toBeTruthy();
+  });
+
+  it('setActiveSession creates no synthetic turn when no in-progress stream for target session', () => {
+    useSessionStore.setState({
+      activeSessionId: 'sess-B',
+      messages: [],
+      streamingChunks: { 'msg-A': 'some content' },
+      chunkSessionIds: { 'msg-A': 'sess-A' },
+      agentTurns: [],
+    });
+
+    // Switch to sess-C (not sess-A, so no pending chunks)
+    useSessionStore.getState().setActiveSession('sess-C');
+
+    expect(useSessionStore.getState().agentTurns.length).toBe(0);
+    expect(useSessionStore.getState().activeTurnId).toBeNull();
+    expect(useSessionStore.getState().messages.length).toBe(0);
+  });
+
+  it('finalizeChunk cleans up chunkSessionIds', () => {
+    useSessionStore.setState({
+      messages: [{ id: 'msg-1', sessionId: 'sess-A', role: 'assistant', content: '', streaming: true, createdAt: 1 }],
+      streamingChunks: { 'msg-1': 'done content' },
+      thinkingChunks: {},
+      chunkSessionIds: { 'msg-1': 'sess-A' },
+      activeSessionId: 'sess-A',
+    });
+
+    useSessionStore.getState().finalizeChunk('msg-1');
+
+    expect(useSessionStore.getState().chunkSessionIds['msg-1']).toBeUndefined();
+    expect(useSessionStore.getState().streamingChunks['msg-1']).toBeUndefined();
+    const msg = useSessionStore.getState().messages.find((m) => m.id === 'msg-1');
+    expect(msg?.content).toBe('done content');
+    expect(msg?.streaming).toBe(false);
+  });
+
+  it('finalizeChunk for non-active session does not touch messages but cleans up tracking', () => {
+    useSessionStore.setState({
+      activeSessionId: 'sess-B',
+      messages: [], // sess-B messages
+      streamingChunks: { 'msg-A': 'full content' },
+      thinkingChunks: {},
+      chunkSessionIds: { 'msg-A': 'sess-A' },
+    });
+
+    useSessionStore.getState().finalizeChunk('msg-A');
+
+    // Messages unchanged (no sess-A message to update)
+    expect(useSessionStore.getState().messages.length).toBe(0);
+    // Tracking cleaned up
+    expect(useSessionStore.getState().chunkSessionIds['msg-A']).toBeUndefined();
+    expect(useSessionStore.getState().streamingChunks['msg-A']).toBeUndefined();
   });
 });

@@ -17,12 +17,14 @@ const POLL_ONLINE_MS = 30_000;   // occasional keep-alive while things look fine
 const POLL_OFFLINE_BASE_MS = 2_000;
 const POLL_OFFLINE_MAX_MS = 30_000;
 const POLL_OFFLINE_JITTER = 0.2;
+const FAILURES_BEFORE_OFFLINE = 2;  // consecutive probe failures required before showing "offline"
 
 class BackendHealthService {
   private state: BackendHealthState = 'unknown';
   private listeners = new Set<BackendHealthListener>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private offlineAttempt = 0;
+  private consecutiveFailures = 0;
   private started = false;
 
   getState(): BackendHealthState {
@@ -65,6 +67,7 @@ class BackendHealthService {
 
   /** Externally signal that a recent API call succeeded. */
   reportSuccess(): void {
+    this.consecutiveFailures = 0;
     if (this.state !== 'online') this.setState('online');
     this.offlineAttempt = 0;
     this.scheduleNext();
@@ -82,9 +85,17 @@ class BackendHealthService {
   private async probe(): Promise<void> {
     try {
       await apiClient.get('/health');
+      this.consecutiveFailures = 0;
       this.reportSuccess();
     } catch {
-      this.reportFailure();
+      this.consecutiveFailures += 1;
+      // Only transition to 'offline' after consecutive failures — avoids false
+      // positives from brief REST hiccups while Socket.IO/LLM traffic is healthy.
+      if (this.consecutiveFailures >= FAILURES_BEFORE_OFFLINE) {
+        this.reportFailure();
+      } else {
+        this.scheduleNext();
+      }
     }
   }
 
