@@ -166,6 +166,7 @@ export function ObservabilityPage() {
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedTypes, setSelectedTypes] = useState<Set<AuditType>>(new Set(ALL_TYPES));
   const [timeRange, setTimeRange] = useState<TimeRange>('live');
@@ -200,11 +201,16 @@ export function ObservabilityPage() {
   const clearLogs = async () => {
     if (!window.confirm('Clear all audit log entries? This cannot be undone.')) return;
     setClearing(true);
+    setClearError(null);
     try {
-      await fetch('/api/audit-log?confirm=true', { method: 'DELETE' });
+      const res = await fetch('/api/audit-log?confirm=true', { method: 'DELETE' });
+      if (!res.ok) {
+        setClearError(`Failed to clear logs (HTTP ${res.status})`);
+        return;
+      }
       await load();
-    } catch {
-      // network error — silently ignore
+    } catch (err) {
+      setClearError(err instanceof Error ? err.message : 'Network error');
     } finally {
       setClearing(false);
     }
@@ -305,6 +311,9 @@ export function ObservabilityPage() {
         </div>
 
         {/* Row 2: time range pills */}
+        {clearError && (
+          <div className="text-error text-xs py-1 px-2 bg-error/10 rounded">{clearError}</div>
+        )}
         <div className="flex items-center gap-1.5 flex-wrap">
           {TIME_RANGES.map((r) => (
             <button

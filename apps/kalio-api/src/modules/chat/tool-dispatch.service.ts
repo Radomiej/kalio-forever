@@ -1,4 +1,5 @@
 import { Injectable, Inject, Optional, Logger } from '@nestjs/common';
+
 import { nanoid } from 'nanoid';
 import type { ToolMeta, ToolCallRequest, ToolResult, ToolConfirmationRequest } from '@kalio/types';
 import type { StreamContext } from './interfaces/stream-context.interface';
@@ -27,7 +28,7 @@ export class ToolDispatchService {
 
   constructor(
     @Inject(TOOL_REGISTRY) tools: ToolRegistryEntry[],
-    @Optional() private readonly mcpService: MCPService | null,
+    @Optional() @Inject(MCPService) private readonly mcpService: MCPService | null,
   ) {
     this.toolMap = new Map(tools.map(t => [t.meta.name, t]));
     this.logger.log(`Tool registry loaded: [${[...this.toolMap.keys()].join(', ')}]`);
@@ -59,6 +60,14 @@ export class ToolDispatchService {
       if (this.mcpService) {
         const mcpRef = this.mcpService.resolveToolName(toolName);
         if (mcpRef) {
+          // Check requiresConfirmation for MCP tools the same way native tools do
+          const mcpMeta = this.mcpService.getToolByName(toolName);
+          if (mcpMeta?.requiresConfirmation) {
+            const confirmed = await this.awaitConfirmation(callId, toolName, args, ctx);
+            if (!confirmed) {
+              return { callId, status: 'cancelled' };
+            }
+          }
           try {
             const data = await this.mcpService.callTool(mcpRef.serverId, mcpRef.originalName, args);
             return { callId, status: 'success', data };

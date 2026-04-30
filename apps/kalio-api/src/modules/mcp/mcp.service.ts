@@ -78,6 +78,12 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     return [...this.handles.values()].filter((h) => h.status === 'connected').flatMap((h) => h.tools);
   }
 
+  getToolByName(toolName: string): MCPTool | undefined {
+    const ref = this.toolNameMap.get(toolName);
+    if (!ref) return undefined;
+    return this.handles.get(ref.serverId)?.tools.find((t) => t.name === toolName);
+  }
+
   getToolsForServer(serverId: string): MCPTool[] {
     return this.handles.get(serverId)?.tools ?? [];
   }
@@ -219,18 +225,31 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async discoverTools(serverId: string, client: Client): Promise<MCPTool[]> {
-    const result = await client.listTools();
-    return result.tools.map((t) => {
-      const prefixed = `mcp_${serverId}_${t.name}`;
-      this.toolNameMap.set(prefixed, { serverId, originalName: t.name });
-      return {
-        name: prefixed,
-        description: t.description ?? '',
-        parameters: (t.inputSchema ?? {}) as Record<string, unknown>,
-        requiresConfirmation: false,
-        serverId,
-      } satisfies MCPTool;
-    });
+    const tools: MCPTool[] = [];
+    let cursor: string | undefined;
+    let iterations = 0;
+    const MAX_ITERATIONS = 100;
+    do {
+      const result = await client.listTools(cursor ? { cursor } : undefined);
+      for (const t of result.tools) {
+        const prefixed = `mcp_${serverId}_${t.name}`;
+        this.toolNameMap.set(prefixed, { serverId, originalName: t.name });
+        tools.push({
+          name: prefixed,
+          description: t.description ?? '',
+          parameters: (t.inputSchema ?? {}) as Record<string, unknown>,
+          requiresConfirmation: false,
+          serverId,
+        } satisfies MCPTool);
+      }
+      cursor = result.nextCursor;
+      iterations++;
+      if (iterations >= MAX_ITERATIONS) {
+        this.logger.warn(`[MCP] Tool discovery hit ${MAX_ITERATIONS}-iteration limit for ${serverId}, stopping pagination`);
+        break;
+      }
+    } while (cursor);
+    return tools;
   }
 
   private async healthCheckAll(): Promise<void> {

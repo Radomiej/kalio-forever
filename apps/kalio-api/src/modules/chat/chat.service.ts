@@ -98,7 +98,7 @@ export class ChatService {
 
       trackingEmit('chat:context', {
         sessionId,
-        systemPrompt,
+        systemPrompt: effectiveSystemPrompt,
         toolNames: toolMetas.map(t => t.name),
       });
 

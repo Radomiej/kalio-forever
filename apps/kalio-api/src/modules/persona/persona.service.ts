@@ -19,7 +19,7 @@ export class PersonaService implements OnApplicationBootstrap {
       await this.drizzle.db.insert(personas).values({
         id: 'default',
         name: 'Default',
-        systemPrompt: 'You are a helpful AI assistant. You have access to a set of tools — call `list_tools` at the start of complex tasks to review what you can do.',
+        systemPrompt: 'You are a helpful AI assistant. You have access to a set of tools — use them whenever they can help answer the user\'s request.',
         model: '',
         skills: [],
         createdAt: now,
