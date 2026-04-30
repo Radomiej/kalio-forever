@@ -361,21 +361,21 @@ export class RAAppVersioningService implements OnModuleInit {
     const group = this.groups.get(slug);
     if (!group) throw new Error(`No RA-App group found for slug: ${slug}`);
 
-    const slugDir = path.join(this.userDir, slug);
-    const histZip = path.join(slugDir, 'history', `${version}.zip`);
-
-    try {
-      await fs.access(histZip);
-    } catch {
+    // Use the in-memory zipPath rather than constructing the filename from the version string.
+    // History entries may have dedup-suffixed filenames (e.g. 1.0.0-{ts}.zip) when the same
+    // version was archived more than once. Constructing "history/1.0.0.zip" would miss them.
+    const histEntry = group.history.find((h) => h.version === version);
+    if (!histEntry) {
       throw new Error(`Version ${version} not found in history for slug: ${slug}`);
     }
 
+    const slugDir = path.join(this.userDir, slug);
     const draftZip = path.join(slugDir, 'draft.zip');
     if (fsSync.existsSync(draftZip)) {
       throw new Error(`Cannot rollback: a draft already exists for '${slug}'. Discard it first.`);
     }
 
-    await fs.copyFile(histZip, draftZip);
+    await fs.copyFile(histEntry.zipPath, draftZip);
     await this.loadGroupFromDir(slug, slugDir);
     this.logger.log(`rollback: '${slug}' v${version} promoted to draft`);
     return this.groups.get(slug)!;
@@ -414,8 +414,19 @@ export class RAAppVersioningService implements OnModuleInit {
       const zipPath = path.join(tmpDir, '_upload.zip');
       await fs.writeFile(zipPath, buffer);
       await extractZip(zipPath, { dir: tmpDir });
-      const raw = await fs.readFile(path.join(tmpDir, 'meta.yml'), 'utf-8');
-      return yaml.load(raw) as RAAppMeta;
+
+      let raw: string;
+      try {
+        raw = await fs.readFile(path.join(tmpDir, 'meta.yml'), 'utf-8');
+      } catch {
+        throw new Error('meta.yml not found at the ZIP root — every RA-App must include a meta.yml');
+      }
+
+      try {
+        return yaml.load(raw) as RAAppMeta;
+      } catch (err) {
+        throw new Error(`meta.yml is not valid YAML: ${(err as Error).message}`);
+      }
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {/* best effort */});
     }
@@ -456,6 +467,7 @@ export class RAAppVersioningService implements OnModuleInit {
    */
   private async patchVersionInZip(zipPath: string, newVersion: string): Promise<void> {
     const tmpDir = path.join(this.tmpDir, randomUUID());
+    const tmpZip = zipPath + '.tmp'; // declared outside try so finally can clean it up
     try {
       await ensureDir(tmpDir);
       await extractZip(zipPath, { dir: tmpDir });
@@ -466,7 +478,6 @@ export class RAAppVersioningService implements OnModuleInit {
       meta.version = newVersion;
       await fs.writeFile(metaPath, yaml.dump(meta), 'utf-8');
 
-      const tmpZip = zipPath + '.tmp';
       await new Promise<void>((resolve, reject) => {
         const output = fsSync.createWriteStream(tmpZip);
         const arc = archiver('zip', { zlib: { level: 6 } });
@@ -479,6 +490,9 @@ export class RAAppVersioningService implements OnModuleInit {
       await fs.rename(tmpZip, zipPath);
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {/* best effort */});
+      // Clean up the .tmp file if rename didn't happen (e.g. archiver error or rename failure).
+      // fs.rm with force:true is a no-op when the file doesn't exist, so this is always safe.
+      await fs.rm(tmpZip, { force: true }).catch(() => {/* best effort */});
     }
   }
 }

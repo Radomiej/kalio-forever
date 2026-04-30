@@ -1,8 +1,23 @@
 /**
- * Unit tests for RAAppVersioningService.
+ * Tests for RAAppVersioningService.
  *
  * Uses real filesystem with a per-test temp directory.
  * Builds minimal valid ZIPs using archiver (already a dep).
+ *
+ * Sections:
+ *  - semver helpers (unit)
+ *  - RAAppVersioningService (integration, real FS)
+ *    - saveAsDraft
+ *    - saveAsDraft validation (bug #4 — specific error messages)
+ *    - approveDraft  (incl. dedup trigger)
+ *    - rollback
+ *    - rollback with dedup history entries (bugs #1 & #2)
+ *    - discardDraft
+ *    - deleteGroup
+ *    - patchVersionInZip cleanup (bug #3 — no .tmp leak)
+ *    - migrateFlatZips
+ *    - getGroups
+ *  - Full lifecycle integration (end-to-end)
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
@@ -30,6 +45,21 @@ async function buildZip(meta: Record<string, unknown>, extraFiles?: Record<strin
       for (const [name, content] of Object.entries(extraFiles)) {
         arc.append(content, { name });
       }
+    }
+    void arc.finalize();
+  });
+}
+
+/** Builds a valid ZIP WITHOUT a meta.yml — used to test validation error messages. */
+async function buildZipNoMeta(files: Record<string, string>): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const arc = archiver('zip');
+    arc.on('error', reject);
+    arc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    arc.on('end', () => resolve(Buffer.concat(chunks)));
+    for (const [name, content] of Object.entries(files)) {
+      arc.append(content, { name });
     }
     void arc.finalize();
   });
@@ -105,7 +135,6 @@ describe('RAAppVersioningService', () => {
       expect(group.draft).toBeUndefined();
       expect(group.history).toHaveLength(0);
 
-      // current.zip exists on disk
       const zipPath = path.join(tmpBase, 'user', 'my-app', 'current.zip');
       expect(fsSync.existsSync(zipPath)).toBe(true);
     });
@@ -125,11 +154,48 @@ describe('RAAppVersioningService', () => {
       expect(fsSync.existsSync(draftPath)).toBe(true);
     });
 
-    it('throws on invalid ZIP (no meta.yml)', async () => {
-      const buf = await buildZip({ unrelated: true }, { 'other.txt': 'hello' });
-      // The zip won't have meta.yml at the expected path in a useful way — we manually break it
+    it('overwrites existing draft with new upload', async () => {
+      const buf1 = await buildZip({ id: 'app', name: 'App', version: '1.0.0' });
+      await service.saveAsDraft('app', buf1);
+      const buf2 = await buildZip({ id: 'app', name: 'App', version: '1.1.0' });
+      await service.saveAsDraft('app', buf2);
+      const buf3 = await buildZip({ id: 'app', name: 'App', version: '1.2.0' });
+      const group = await service.saveAsDraft('app', buf3);
+
+      expect(group.draft?.version).toBe('1.2.0');
+    });
+
+    it('throws on completely invalid (non-ZIP) buffer', async () => {
       const brokenBuf = Buffer.from('not a zip at all');
-      await expect(service.saveAsDraft('broken-app', brokenBuf)).rejects.toThrow();
+      await expect(service.saveAsDraft('broken-app', brokenBuf)).rejects.toThrow(/Invalid RA-App ZIP/);
+    });
+  });
+
+  // ── saveAsDraft validation (bug #4) ──────────────────────────────────────
+
+  describe('saveAsDraft validation — specific error messages (bug #4)', () => {
+    it('gives a clear error message when meta.yml is missing from an otherwise valid ZIP', async () => {
+      // Valid ZIP but no meta.yml inside it
+      const buf = await buildZipNoMeta({ 'index.html': '<html/>', 'app.js': 'console.log("hi")' });
+      await expect(service.saveAsDraft('no-meta', buf)).rejects.toThrow(/meta\.yml/);
+    });
+
+    it('error message for non-ZIP buffer mentions Invalid RA-App ZIP', async () => {
+      const buf = Buffer.from('this is plain text, not a zip');
+      await expect(service.saveAsDraft('not-zip', buf)).rejects.toThrow(/Invalid RA-App ZIP/);
+    });
+
+    it('gives a clear error for malformed YAML inside meta.yml', async () => {
+      const badYamlBuf = await new Promise<Buffer>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        const arc = archiver('zip');
+        arc.on('error', reject);
+        arc.on('data', (chunk: Buffer) => chunks.push(chunk));
+        arc.on('end', () => resolve(Buffer.concat(chunks)));
+        arc.append(': this: is: {{{{ broken yaml', { name: 'meta.yml' });
+        void arc.finalize();
+      });
+      await expect(service.saveAsDraft('bad-yaml', badYamlBuf)).rejects.toThrow(/Invalid RA-App ZIP/);
     });
   });
 
@@ -145,18 +211,15 @@ describe('RAAppVersioningService', () => {
 
       const approved = await service.approveDraft('my-app', 'minor');
 
-      // Version is bumped from old current (1.0.0) by 'minor' → 1.1.0
       expect(approved.current.version).toBe('1.1.0');
       expect(approved.draft).toBeUndefined();
       expect(approved.history).toHaveLength(1);
       expect(approved.history[0].version).toBe('1.0.0');
       expect(approved.history[0].status).toBe('archived');
 
-      // draft.zip is gone
       const draftPath = path.join(tmpBase, 'user', 'my-app', 'draft.zip');
       expect(fsSync.existsSync(draftPath)).toBe(false);
 
-      // history zip exists
       const histPath = path.join(tmpBase, 'user', 'my-app', 'history', '1.0.0.zip');
       expect(fsSync.existsSync(histPath)).toBe(true);
     });
@@ -169,6 +232,64 @@ describe('RAAppVersioningService', () => {
 
       const approved = await service.approveDraft('app', 'patch');
       expect(approved.current.version).toBe('2.0.1');
+    });
+
+    it('bumps version with major type', async () => {
+      const buf1 = await buildZip({ id: 'app', name: 'App', version: '1.5.3' });
+      await service.saveAsDraft('app', buf1);
+      const buf2 = await buildZip({ id: 'app', name: 'App', version: '1.5.4' });
+      await service.saveAsDraft('app', buf2);
+
+      const approved = await service.approveDraft('app', 'major');
+      expect(approved.current.version).toBe('2.0.0');
+    });
+
+    it('accumulates history entries across successive approvals', async () => {
+      await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.0.0' }));
+
+      for (const v of ['1.1.0', '1.2.0', '1.3.0']) {
+        await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: v }));
+        await service.approveDraft('app', 'minor');
+      }
+
+      const group = service.getGroupBySlug('app');
+      expect(group?.history).toHaveLength(3);
+      const versions = group!.history.map((h) => h.version);
+      expect(versions).toContain('1.0.0');
+      expect(versions).toContain('1.1.0');
+      expect(versions).toContain('1.2.0');
+    });
+
+    it('deduplicates history when same-version zip already exists', async () => {
+      // Set up: current=1.1.0 AND history/1.1.0.zip already present (crash/rollback edge case)
+      const slugDir = path.join(tmpBase, 'user', 'cycle-app');
+      await fs.mkdir(path.join(slugDir, 'history'), { recursive: true });
+
+      const currentBuf = await buildZip({ id: 'cycle-app', name: 'Cycle App', version: '1.1.0' });
+      await fs.writeFile(path.join(slugDir, 'current.zip'), currentBuf);
+
+      const histBuf = await buildZip({ id: 'cycle-app', name: 'Cycle App', version: '1.1.0' });
+      await fs.writeFile(path.join(slugDir, 'history', '1.1.0.zip'), histBuf);
+
+      const draftBuf = await buildZip({ id: 'cycle-app', name: 'Cycle App', version: '1.2.0' });
+      await fs.writeFile(path.join(slugDir, 'draft.zip'), draftBuf);
+
+      await fs.writeFile(
+        path.join(slugDir, '.manifest.json'),
+        JSON.stringify({ slug: 'cycle-app', currentVersion: '1.1.0', history: ['1.1.0'], createdAt: Date.now(), updatedAt: Date.now() }),
+      );
+
+      await service.init();
+
+      // Must NOT throw even though history/1.1.0.zip already exists
+      const approved = await service.approveDraft('cycle-app', 'minor');
+      expect(approved.current.version).toBe('1.2.0');
+
+      // A dedup file (1.1.0-{ts}.zip) should have been created
+      const histDir = path.join(slugDir, 'history');
+      const files = await fs.readdir(histDir);
+      const dedupEntry = files.find((f) => f.startsWith('1.1.0-') && f.endsWith('.zip'));
+      expect(dedupEntry).toBeDefined();
     });
 
     it('throws when no draft exists', async () => {
@@ -193,7 +314,6 @@ describe('RAAppVersioningService', () => {
       await service.saveAsDraft('app', buf2);
       await service.approveDraft('app', 'minor');
 
-      // Now rollback to 1.0.0
       const group = await service.rollback('app', '1.0.0');
 
       expect(group.draft).toBeDefined();
@@ -209,7 +329,7 @@ describe('RAAppVersioningService', () => {
       await service.approveDraft('app', 'minor');
 
       const buf3 = await buildZip({ id: 'app', name: 'App', version: '1.2.0' });
-      await service.saveAsDraft('app', buf3); // creates a draft
+      await service.saveAsDraft('app', buf3);
 
       await expect(service.rollback('app', '1.0.0')).rejects.toThrow('draft already exists');
     });
@@ -219,6 +339,81 @@ describe('RAAppVersioningService', () => {
       await service.saveAsDraft('app', buf);
 
       await expect(service.rollback('app', '0.9.0')).rejects.toThrow('not found in history');
+    });
+  });
+
+  // ── rollback with dedup history entries (bugs #1 & #2) ───────────────────
+
+  describe('rollback with dedup-named history entries (bugs #1 & #2)', () => {
+    it('rollback works when only a timestamp-dedup zip exists — not a plain version.zip (bug #1)', async () => {
+      // Simulate: approveDraft wrote "1.0.0-1746000000000.zip" because "1.0.0.zip" was already taken.
+      // The regular history/1.0.0.zip does NOT exist.
+      const slugDir = path.join(tmpBase, 'user', 'dedup-app');
+      await fs.mkdir(path.join(slugDir, 'history'), { recursive: true });
+
+      const currentBuf = await buildZip({ id: 'dedup-app', name: 'Dedup App', version: '2.0.0' });
+      await fs.writeFile(path.join(slugDir, 'current.zip'), currentBuf);
+
+      const histBuf = await buildZip({ id: 'dedup-app', name: 'Dedup App', version: '1.0.0' });
+      await fs.writeFile(path.join(slugDir, 'history', '1.0.0-1746000000000.zip'), histBuf);
+      // No history/1.0.0.zip — only the dedup'd file exists
+
+      await fs.writeFile(
+        path.join(slugDir, '.manifest.json'),
+        JSON.stringify({ slug: 'dedup-app', currentVersion: '2.0.0', history: ['1.0.0'], createdAt: Date.now(), updatedAt: Date.now() }),
+      );
+
+      await service.init();
+
+      // In-memory entry must store the actual (dedup) zipPath, not a constructed path (bug #2)
+      const loaded = service.getGroupBySlug('dedup-app');
+      expect(loaded?.history[0].version).toBe('1.0.0');
+      expect(loaded?.history[0].zipPath).toContain('1.0.0-1746000000000.zip');
+
+      // Rollback must use zipPath from in-memory group — not construct "history/1.0.0.zip"
+      const result = await service.rollback('dedup-app', '1.0.0');
+      expect(result.draft).toBeDefined();
+      expect(result.draft?.version).toBe('1.0.0');
+    });
+
+    it('history zipPath survives service re-init from disk (bug #2)', async () => {
+      const buf1 = await buildZip({ id: 'app', name: 'App', version: '1.0.0' });
+      await service.saveAsDraft('app', buf1);
+      await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.1.0' }));
+      await service.approveDraft('app', 'minor');
+
+      // Re-init simulates a server restart
+      await service.init();
+
+      const group = service.getGroupBySlug('app');
+      expect(group?.history).toHaveLength(1);
+      const entry = group!.history[0];
+      expect(fsSync.existsSync(entry.zipPath)).toBe(true);
+      expect(entry.zipPath).toContain('1.0.0.zip');
+    });
+
+    it('rollback after dedup-trigger cycle works end-to-end', async () => {
+      // Standard setup: get two versions into history
+      await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.0.0' }));
+      await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.1.0' }));
+      await service.approveDraft('app', 'minor'); // current=1.1.0, hist=[1.0.0.zip]
+
+      // Manually inject a 1.1.0.zip into history to force dedup on next approve
+      const slugDir = path.join(tmpBase, 'user', 'app');
+      const dupBuf = await buildZip({ id: 'app', name: 'App', version: '1.1.0' });
+      await fs.writeFile(path.join(slugDir, 'history', '1.1.0.zip'), dupBuf);
+
+      // Add draft and approve — this MUST create 1.1.0-{ts}.zip (dedup)
+      await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.2.0' }));
+      await service.init(); // reload to pick up injected file
+      const approved = await service.approveDraft('app', 'minor');
+      expect(approved.current.version).toBe('1.2.0');
+
+      // history now has 1.1.0.zip (original) and 1.1.0-{ts}.zip (dedup)
+      // Rollback to '1.1.0' must find ONE of them via zipPath and succeed
+      const rolled = await service.rollback('app', '1.1.0');
+      expect(rolled.draft).toBeDefined();
+      expect(rolled.draft?.version).toBe('1.1.0');
     });
   });
 
@@ -268,26 +463,48 @@ describe('RAAppVersioningService', () => {
     });
   });
 
+  // ── patchVersionInZip cleanup (bug #3) ────────────────────────────────────
+
+  describe('patchVersionInZip — no .tmp file leak (bug #3)', () => {
+    it('leaves no current.zip.tmp after a successful approveDraft', async () => {
+      await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.0.0' }));
+      await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.1.0' }));
+
+      await service.approveDraft('app', 'minor');
+
+      const currentZip = path.join(tmpBase, 'user', 'app', 'current.zip');
+      expect(fsSync.existsSync(currentZip + '.tmp')).toBe(false);
+    });
+
+    it('leaves no .tmp file across multiple sequential approvals', async () => {
+      await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.0.0' }));
+
+      for (let i = 1; i <= 3; i++) {
+        await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: `1.${i}.0` }));
+        await service.approveDraft('app', 'minor');
+
+        const currentZip = path.join(tmpBase, 'user', 'app', 'current.zip');
+        expect(fsSync.existsSync(currentZip + '.tmp'), `stale .tmp after approval #${i}`).toBe(false);
+      }
+    });
+  });
+
   // ── migration ─────────────────────────────────────────────────────────────
 
   describe('migrateFlatZips', () => {
     it('migrates a flat ZIP to versioned folder layout on init', async () => {
-      // Write a flat zip directly to userDir
       const userDir = path.join(tmpBase, 'user');
       await fs.mkdir(userDir, { recursive: true });
       const buf = await buildZip({ id: 'legacy-app', name: 'Legacy App', version: '1.0.0' });
       await fs.writeFile(path.join(userDir, 'legacy-app.zip'), buf);
 
-      // Re-init picks up the flat ZIP and migrates it
       await service.init();
 
       const group = service.getGroupBySlug('legacy-app');
       expect(group).toBeDefined();
       expect(group?.current.version).toBe('1.0.0');
 
-      // Flat ZIP is gone
       expect(fsSync.existsSync(path.join(userDir, 'legacy-app.zip'))).toBe(false);
-      // Versioned folder exists
       expect(fsSync.existsSync(path.join(userDir, 'legacy-app', 'current.zip'))).toBe(true);
     });
 
@@ -296,14 +513,12 @@ describe('RAAppVersioningService', () => {
       const buf = await buildZip({ id: 'app', name: 'App', version: '1.0.0' });
       await service.saveAsDraft('app', buf);
 
-      // Re-init twice — should not corrupt
       await service.init();
       await service.init();
 
       const group = service.getGroupBySlug('app');
       expect(group).toBeDefined();
       expect(group?.history).toHaveLength(0);
-      // Folder still has exactly one zip
       const slugDir = path.join(userDir, 'app');
       const files = await fs.readdir(slugDir);
       const zips = files.filter((f) => f.endsWith('.zip'));
@@ -327,3 +542,108 @@ describe('RAAppVersioningService', () => {
     });
   });
 });
+
+// ── Full lifecycle integration ────────────────────────────────────────────────
+
+describe('Full lifecycle integration', () => {
+  let tmpBase: string;
+  let service: RAAppVersioningService;
+
+  beforeEach(async () => {
+    tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), 'raapp-lifecycle-'));
+    service = await makeService(tmpBase);
+    await service.init();
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpBase, { recursive: true, force: true });
+  });
+
+  it('upload → approve → rollback → re-approve → delete', async () => {
+    // 1. Initial upload becomes current directly
+    const g1 = await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.0.0' }));
+    expect(g1.current.version).toBe('1.0.0');
+    expect(g1.draft).toBeUndefined();
+
+    // 2. First approve
+    await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.1.0' }));
+    const g2 = await service.approveDraft('app', 'minor');
+    expect(g2.current.version).toBe('1.1.0');
+    expect(g2.history).toHaveLength(1);
+    expect(g2.history[0].version).toBe('1.0.0');
+
+    // 3. Second approve
+    await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.2.0' }));
+    const g3 = await service.approveDraft('app', 'minor');
+    expect(g3.current.version).toBe('1.2.0');
+    expect(g3.history).toHaveLength(2);
+
+    // 4. Rollback to 1.0.0
+    const g4 = await service.rollback('app', '1.0.0');
+    expect(g4.draft?.version).toBe('1.0.0');
+    expect(g4.current.version).toBe('1.2.0'); // unchanged
+
+    // 5. Approve the rollback — bumps from old current (1.2.0) → 1.3.0
+    const g5 = await service.approveDraft('app', 'minor');
+    expect(g5.current.version).toBe('1.3.0');
+    expect(g5.history).toHaveLength(3);
+
+    // 6. Discard a subsequent draft (no promotion)
+    await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.4.0' }));
+    const g6 = await service.discardDraft('app');
+    expect(g6.draft).toBeUndefined();
+    expect(g6.current.version).toBe('1.3.0');
+
+    // 7. Delete group entirely
+    await service.deleteGroup('app');
+    expect(service.getGroupBySlug('app')).toBeUndefined();
+    expect(fsSync.existsSync(path.join(tmpBase, 'user', 'app'))).toBe(false);
+  });
+
+  it('state is fully recoverable after service re-init (simulated restart)', async () => {
+    await service.saveAsDraft('persist', await buildZip({ id: 'persist', name: 'Persist', version: '1.0.0' }));
+    await service.saveAsDraft('persist', await buildZip({ id: 'persist', name: 'Persist', version: '1.1.0' }));
+    await service.approveDraft('persist', 'minor');
+
+    await service.init(); // simulate restart
+
+    const group = service.getGroupBySlug('persist');
+    expect(group?.current.version).toBe('1.1.0');
+    expect(group?.history).toHaveLength(1);
+    expect(group?.history[0].version).toBe('1.0.0');
+    expect(fsSync.existsSync(group!.history[0].zipPath)).toBe(true);
+  });
+
+  it('concurrent saveAsDraft for different slugs are independent', async () => {
+    const [g1, g2, g3] = await Promise.all([
+      service.saveAsDraft('alpha', await buildZip({ id: 'alpha', name: 'Alpha', version: '1.0.0' })),
+      service.saveAsDraft('beta', await buildZip({ id: 'beta', name: 'Beta', version: '2.0.0' })),
+      service.saveAsDraft('gamma', await buildZip({ id: 'gamma', name: 'Gamma', version: '3.0.0' })),
+    ]);
+
+    expect(g1.slug).toBe('alpha');
+    expect(g2.slug).toBe('beta');
+    expect(g3.slug).toBe('gamma');
+    expect(service.getGroups()).toHaveLength(3);
+  });
+
+  it('rollback → re-approve produces correct semver and accumulated history', async () => {
+    await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.0.0' }));
+
+    for (const v of ['1.1.0', '1.2.0', '1.3.0']) {
+      await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: v }));
+      await service.approveDraft('app', 'minor');
+    }
+    // current=1.3.0, history=[1.0.0, 1.1.0, 1.2.0]
+
+    await service.rollback('app', '1.1.0');
+    const reapproved = await service.approveDraft('app', 'major'); // 1.3.0 → 2.0.0
+    expect(reapproved.current.version).toBe('2.0.0');
+    expect(reapproved.history).toHaveLength(4); // 1.0.0, 1.1.0, 1.2.0, 1.3.0
+
+    // All prior versions still accessible for rollback
+    const rolled = await service.rollback('app', '1.0.0');
+    expect(rolled.draft?.version).toBe('1.0.0');
+  });
+});
+
