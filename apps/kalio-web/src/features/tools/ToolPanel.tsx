@@ -1,7 +1,49 @@
 import { useEffect, useState, useCallback } from 'react';
-import { RefreshCw, Wrench, ShieldAlert } from 'lucide-react';
+import { RefreshCw, Wrench, Shield, ShieldOff } from 'lucide-react';
 import { apiClient } from '../../services/apiClient';
 import type { ToolMeta } from '@kalio/types';
+
+// ─── tool group definitions ───────────────────────────────────────────────────
+
+interface ToolGroup {
+  label: string;
+  match: (name: string) => boolean;
+}
+
+const TOOL_GROUPS: ToolGroup[] = [
+  { label: 'Agent',             match: (n) => n === 'run_subagent' },
+  { label: 'Virtual Filesystem', match: (n) => n.startsWith('vfs_') },
+  { label: 'Filesystem',        match: (n) => n.startsWith('fs_') },
+  { label: 'Key-Value Store',   match: (n) => n.startsWith('kv_') },
+  { label: 'Terminal',          match: (n) => n.startsWith('terminal_') },
+  { label: 'RA-Apps',           match: (n) => n.startsWith('raapp_') || n === 'run_raapp' || n === 'list_raapps' },
+  { label: 'Memory',            match: (n) => n.startsWith('memory_') },
+  { label: 'Search',            match: (n) => n === 'grep_search' || n === 'file_search' },
+  { label: 'Web',               match: (n) => n === 'web_search' },
+];
+
+export function groupToolsByPrefix(tools: ToolMeta[]): Array<{ label: string; tools: ToolMeta[] }> {
+  const groups: Array<{ label: string; tools: ToolMeta[] }> = [];
+  const assigned = new Set<string>();
+
+  for (const group of TOOL_GROUPS) {
+    const matched = tools.filter((t) => !assigned.has(t.name) && group.match(t.name));
+    if (matched.length > 0) {
+      matched.forEach((t) => assigned.add(t.name));
+      groups.push({ label: group.label, tools: matched });
+    }
+  }
+
+  // Catch-all for unmatched tools
+  const rest = tools.filter((t) => !assigned.has(t.name));
+  if (rest.length > 0) {
+    groups.push({ label: 'Other', tools: rest });
+  }
+
+  return groups;
+}
+
+// ─── panel ────────────────────────────────────────────────────────────────────
 
 export function ToolPanel() {
   const [tools, setTools] = useState<ToolMeta[]>([]);
@@ -12,13 +54,8 @@ export function ToolPanel() {
     setLoading(true);
     setError(null);
     try {
-      const [nativeRes, mcpRes] = await Promise.allSettled([
-        apiClient.get<ToolMeta[]>('/api/tools'),
-        apiClient.get<ToolMeta[]>('/api/mcp/tools'),
-      ]);
-      const native = nativeRes.status === 'fulfilled' ? nativeRes.value.data : [];
-      const mcp = mcpRes.status === 'fulfilled' ? mcpRes.value.data : [];
-      setTools([...native, ...mcp]);
+      const { data } = await apiClient.get<ToolMeta[]>('/api/tools');
+      setTools(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load tools');
     } finally {
@@ -27,6 +64,23 @@ export function ToolPanel() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  const handleToggleConfirmation = useCallback(async (toolName: string, current: boolean) => {
+    const updated = !current;
+    setTools((prev) =>
+      prev.map((t) => t.name === toolName ? { ...t, requiresConfirmation: updated } : t),
+    );
+    try {
+      await apiClient.patch(`/api/tools/${toolName}`, { requiresConfirmation: updated });
+    } catch {
+      // Revert on failure
+      setTools((prev) =>
+        prev.map((t) => t.name === toolName ? { ...t, requiresConfirmation: current } : t),
+      );
+    }
+  }, []);
+
+  const grouped = groupToolsByPrefix(tools);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -55,15 +109,22 @@ export function ToolPanel() {
             <span className="text-xs">No tools registered</span>
           </div>
         )}
-        {tools.map((tool) => (
-          <ToolRow key={tool.name} tool={tool} />
+        {grouped.map(({ label, tools: groupTools }) => (
+          <div key={label}>
+            <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-base-content/30 bg-base-200/50 border-b border-base-300/50 font-semibold">
+              {label}
+            </div>
+            {groupTools.map((tool) => (
+              <ToolRow key={tool.name} tool={tool} onToggleConfirmation={handleToggleConfirmation} />
+            ))}
+          </div>
         ))}
       </div>
     </div>
   );
 }
 
-function ToolRow({ tool }: { tool: ToolMeta }) {
+function ToolRow({ tool, onToggleConfirmation }: { tool: ToolMeta; onToggleConfirmation: (name: string, current: boolean) => void }) {
   const [expanded, setExpanded] = useState(false);
   const required: string[] = (() => {
     try {
@@ -75,35 +136,44 @@ function ToolRow({ tool }: { tool: ToolMeta }) {
   })();
 
   return (
-    <button
-      className="w-full text-left px-3 py-2 border-b border-base-300/50 hover:bg-base-200/50 transition-colors"
-      onClick={() => setExpanded((v) => !v)}
-    >
-      <div className="flex items-start gap-2">
-        <Wrench size={12} className="mt-1 shrink-0 text-base-content/40" />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="font-mono text-xs text-primary truncate">{tool.name}</span>
-            {tool.requiresConfirmation && (
-              <span title="Requires confirmation" className="text-warning">
-                <ShieldAlert size={10} />
-              </span>
-            )}
-          </div>
-          {expanded && (
-            <>
-              <p className="text-xs text-base-content/60 mt-0.5 whitespace-normal">{tool.description}</p>
-              {required.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {required.map((p) => (
-                    <span key={p} className="badge badge-xs badge-ghost font-mono">{p}</span>
-                  ))}
-                </div>
+    <div className="border-b border-base-300/50">
+      <div className="flex items-start gap-1">
+        <button
+          className="flex-1 text-left px-3 py-2 hover:bg-base-200/50 transition-colors"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <div className="flex items-start gap-2">
+            <Wrench size={12} className="mt-1 shrink-0 text-base-content/40" />
+            <div className="flex-1 min-w-0">
+              <span className="font-mono text-xs text-primary">{tool.name}</span>
+              {expanded && (
+                <>
+                  <p className="text-xs text-base-content/60 mt-0.5 whitespace-normal">{tool.description}</p>
+                  {required.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {required.map((p) => (
+                        <span key={p} className="badge badge-xs badge-ghost font-mono">{p}</span>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+        </button>
+        {/* requiresConfirmation toggle */}
+        <button
+          className={`shrink-0 mr-2 mt-2 p-1 rounded transition-colors ${
+            tool.requiresConfirmation
+              ? 'text-warning hover:text-warning/70'
+              : 'text-base-content/20 hover:text-base-content/50'
+          }`}
+          title={tool.requiresConfirmation ? 'Requires confirmation (click to disable)' : 'Auto-execute (click to require confirmation)'}
+          onClick={(e) => { e.stopPropagation(); void onToggleConfirmation(tool.name, tool.requiresConfirmation); }}
+        >
+          {tool.requiresConfirmation ? <Shield size={12} /> : <ShieldOff size={12} />}
+        </button>
       </div>
-    </button>
+    </div>
   );
 }

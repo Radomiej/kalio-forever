@@ -88,6 +88,18 @@ export class ToolRegistryService {
       .filter((meta) => allowed.has(meta.name));
   }
 
+  /**
+   * Update requiresConfirmation for a single tool in-memory.
+   * Because ToolDispatchService holds references to the same meta objects,
+   * this change is reflected immediately without a restart.
+   */
+  setOverride(toolName: string, requiresConfirmation: boolean): boolean {
+    const entry = this.entries.find((e) => e.meta.name === toolName);
+    if (!entry) return false;
+    entry.meta.requiresConfirmation = requiresConfirmation;
+    return true;
+  }
+
   private toEntry(tool: object): ToolEntry {
     const opts = this.reflector.get<ToolOptions>(TOOL_METADATA, tool.constructor as NewableFunction);
     return {

@@ -43,6 +43,8 @@ interface AgentState {
    * tool names for history chips when msg.toolCalls is not available in Zustand.
    */
   callIdToName: Record<string, string>;
+  /** Canvas panel open state — true when the canvas is visible */
+  canvasOpen: boolean;
 
   setStreaming: (streaming: boolean, messageId?: string) => void;
   setPendingConfirmation: (req: ToolConfirmationRequest | null) => void;
@@ -56,6 +58,8 @@ interface AgentState {
   clearLlmActivities: () => void;
   setContext: (systemPrompt: string, toolNames: string[]) => void;
   registerCallId: (callId: string, toolName: string) => void;
+  setCanvasOpen: (open: boolean) => void;
+  toggleCanvas: () => void;
 }
 
 export const useAgentStore = create<AgentState>((set) => ({
@@ -69,6 +73,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   systemPrompt: null,
   activeToolNames: [],
   callIdToName: {},
+  canvasOpen: false,
 
   setStreaming: (streaming, messageId = undefined) =>
     set({ isStreaming: streaming, streamingMessageId: messageId }),
@@ -115,4 +120,7 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   registerCallId: (callId, toolName) =>
     set((s) => ({ callIdToName: { ...s.callIdToName, [callId]: toolName } })),
+
+  setCanvasOpen: (open) => set({ canvasOpen: open }),
+  toggleCanvas: () => set((s) => ({ canvasOpen: !s.canvasOpen })),
 }));

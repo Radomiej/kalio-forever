@@ -15,11 +15,11 @@ import { RAAppManager } from './features/raapp/RAAppManager';
 import { SkillListPanel } from './features/skills/SkillListPanel';
 import { SkillEditorPanel } from './features/skills/SkillEditorPanel';
 import { MemoryPage } from './features/memory/MemoryPage';
-import { AgentLoopPanel } from './features/agentLoop/AgentLoopPanel';
 import { LandingPage } from './features/landing/LandingPage';
 import { BackendStatusBadge } from './components/ui/BackendStatusBadge';
 import { ObservabilityPage } from './features/observability/ObservabilityPage';
 import { useSessionStore } from './store/sessionStore';
+import { useAgentStore } from './store/agentStore';
 import { backendHealth } from './services/backendHealth';
 import { useSettingsStore } from './features/settings/settingsStore';
 
@@ -32,7 +32,7 @@ const NAV: { id: ActiveSection; icon: React.ReactNode; label: string }[] = [
   { id: 'observe', icon: <Activity size={18} />,      label: 'Observability' },
 ];
 
-type TalkTab = 'conversations' | 'agents' | 'loops';
+type TalkTab = 'conversations' | 'agents';
 type ToolsTab = 'native' | 'mcp' | 'raapps';
 type MindTab = 'memory' | 'files' | 'skills' | 'personas';
 
@@ -41,11 +41,11 @@ export function App() {
   const [talkTab, setTalkTab] = useState<TalkTab>('conversations');
   const [toolsTab, setToolsTab] = useState<ToolsTab>('native');
   const [mindTab, setMindTab] = useState<MindTab>('memory');
-  const [canvasOpen, setCanvasOpen] = useState(false);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
   const { sessions } = useSessionStore();
+  const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
 
   // Initialize on app mount
   useEffect(() => {
@@ -57,6 +57,13 @@ export function App() {
       })
       .catch(() => {/* non-fatal */});
   }, [setBackendConfig]);
+
+  // Close canvas when navigating away from talk
+  useEffect(() => {
+    if (activeSection !== 'talk') {
+      setCanvasOpen(false);
+    }
+  }, [activeSection, setCanvasOpen]);
 
   const goHome = () => {
     setActiveSection('landing');
@@ -146,7 +153,6 @@ export function App() {
                 {[
                   { id: 'conversations' as const, label: 'Conversations' },
                   { id: 'agents' as const, label: 'Active' },
-                  { id: 'loops' as const, label: 'Loops' },
                 ].map((t) => (
                   <button
                     key={t.id}
@@ -168,12 +174,15 @@ export function App() {
                 {talkTab === 'agents' && (
                   <ConversationManagerPanel onNavigate={() => setTalkTab('conversations')} />
                 )}
-                {talkTab === 'loops' && <AgentLoopPanel />}
               </div>
             </div>
-            {/* Right: chat area */}
-            <div className="flex-1 overflow-hidden">
+            {/* Chat area */}
+            <div className="flex-1 overflow-hidden min-w-0">
               <ChatInterface />
+            </div>
+            {/* Canvas — only rendered inside talk section, hidden when navigating away */}
+            <div className="relative flex">
+              <CanvasPanel />
             </div>
           </div>
 
@@ -262,11 +271,6 @@ export function App() {
         )}
 
       </main>
-
-      {/* ── Canvas panel (right) ── */}
-      <div className="relative flex">
-        <CanvasPanel open={canvasOpen} onToggle={() => setCanvasOpen((v) => !v)} />
-      </div>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 

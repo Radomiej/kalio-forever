@@ -13,8 +13,9 @@
  *   HistoryToolCallBubble — tool finished (tool_result ChatMessage)
  */
 import { useState, useEffect } from 'react';
-import { CheckCircle2, XCircle, Loader2, Clock, ChevronDown } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, Clock, ChevronDown, ExternalLink } from 'lucide-react';
 import type { ToolActivity } from '../../store/agentStore';
+import { useAgentStore } from '../../store/agentStore';
 import type { RAAppBlock, RaAppPendingApproval } from '@kalio/types';
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
 
@@ -166,6 +167,9 @@ export function HistoryToolCallBubble({
   isAnswered?: boolean;
   args?: Record<string, unknown>;
 }) {
+  const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
+  const isSubagent = toolName === 'run_subagent';
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -188,7 +192,20 @@ export function HistoryToolCallBubble({
       <Chip
         icon={<CheckCircle2 size={12} className="text-success shrink-0" />}
         toolName={toolName}
-        badge={isAnswered ? <span className="text-[10px] font-mono text-base-content/40 bg-base-200/60 rounded px-1">↩ answered</span> : undefined}
+        badge={
+          <>
+            {isAnswered && <span className="text-[10px] font-mono text-base-content/40 bg-base-200/60 rounded px-1">↩ answered</span>}
+            {isSubagent && (
+              <button
+                className="ml-1 text-[10px] text-sky-400/60 hover:text-sky-400 flex items-center gap-0.5"
+                title="View in canvas"
+                onClick={(e) => { e.stopPropagation(); setCanvasOpen(true); }}
+              >
+                <ExternalLink size={9} />
+              </button>
+            )}
+          </>
+        }
         expandable={expandable}
         open={open}
         onToggle={() => setOpen((v) => !v)}

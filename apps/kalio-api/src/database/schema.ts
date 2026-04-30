@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import type { LLMToolCall, AgentLoopConfig, AgentLoopStatus, AgentTaskStatus, ChatAttachment } from '@kalio/types';
+import type { LLMToolCall, ChatAttachment } from '@kalio/types';
 // ─── personas ─────────────────────────────────────────────────────────────────
 export const personas = sqliteTable('personas', {
   id:           text('id').primaryKey(),
@@ -102,52 +102,12 @@ export const skills = sqliteTable('skills', {
   updatedAt:   integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
-// ─── agent_loops ──────────────────────────────────────────────────────────────
-export const agentLoops = sqliteTable('agent_loops', {
-  id:            text('id').primaryKey(),
-  name:          text('name').notNull(),
-  personaId:     text('persona_id').notNull().references(() => personas.id, { onDelete: 'cascade' }),
-  systemPrompt:  text('system_prompt').notNull().default(''),
-  status:        text('status', {
-    enum: ['idle', 'running', 'paused', 'stopped', 'error', 'completed'],
-  }).notNull().default('idle').$type<AgentLoopStatus>(),
-  config:        text('config', { mode: 'json' }).$type<AgentLoopConfig>().notNull(),
-  currentTaskId: text('current_task_id'),
-  chatSessionId: text('chat_session_id'),
-  iterationCount: integer('iteration_count').notNull().default(0),
-  createdAt:     integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  updatedAt:     integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-});
-
-// ─── agent_tasks ──────────────────────────────────────────────────────────────
-export const agentTasks = sqliteTable('agent_tasks', {
-  id:            text('id').primaryKey(),
-  loopId:        text('loop_id').notNull().references(() => agentLoops.id, { onDelete: 'cascade' }),
-  title:         text('title').notNull(),
-  description:   text('description').notNull().default(''),
-  priority:      integer('priority').notNull().default(0),
-  status:        text('status', {
-    enum: ['pending', 'running', 'done', 'failed', 'skipped'],
-  }).notNull().default('pending').$type<AgentTaskStatus>(),
-  resultSummary: text('result_summary'),
-  orderIndex:    integer('order_index').notNull().default(0),
-  createdAt:     integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  updatedAt:     integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-});
-
-// ─── agent_iterations ─────────────────────────────────────────────────────────
-export const agentIterations = sqliteTable('agent_iterations', {
-  id:              text('id').primaryKey(),
-  loopId:          text('loop_id').notNull().references(() => agentLoops.id, { onDelete: 'cascade' }),
-  taskId:          text('task_id'),
-  iterationNumber: integer('iteration_number').notNull(),
-  action:          text('action', {
-    enum: ['execute_task', 'pause', 'resume', 'error', 'watchdog'],
-  }).notNull(),
-  promptUsed:      text('prompt_used').notNull().default(''),
-  resultSummary:   text('result_summary').notNull().default(''),
-  durationMs:      integer('duration_ms').notNull().default(0),
-  createdAt:       integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+// ─── tool_overrides ────────────────────────────────────────────────────────────
+// Persists user overrides for per-tool requiresConfirmation flag.
+export const toolOverrides = sqliteTable('tool_overrides', {
+  toolName:             text('tool_name').primaryKey(),
+  requiresConfirmation: integer('requires_confirmation', { mode: 'boolean' }).notNull(),
+  updatedAt:            integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
 // ─── allowed_paths ─────────────────────────────────────────────────────────────
@@ -196,9 +156,7 @@ export type PersonaKVRow       = typeof personaKV.$inferSelect;
 export type CredentialRow      = typeof credentials.$inferSelect;
 export type MCPServerRow       = typeof mcpServers.$inferSelect;
 export type SkillRow           = typeof skills.$inferSelect;
-export type AgentLoopRow       = typeof agentLoops.$inferSelect;
-export type AgentTaskRow       = typeof agentTasks.$inferSelect;
-export type AgentIterationRow  = typeof agentIterations.$inferSelect;
+export type ToolOverrideRow    = typeof toolOverrides.$inferSelect;
 export type AuditLogRow        = typeof auditLog.$inferSelect;
 export type AppSettingRow      = typeof appSettings.$inferSelect;
 export type AllowedPathRow     = typeof allowedPaths.$inferSelect;
@@ -211,9 +169,6 @@ export type InsertPersonaKV    = typeof personaKV.$inferInsert;
 export type InsertCredential   = typeof credentials.$inferInsert;
 export type InsertMCPServer    = typeof mcpServers.$inferInsert;
 export type InsertSkill        = typeof skills.$inferInsert;
-export type InsertAgentLoop    = typeof agentLoops.$inferInsert;
-export type InsertAgentTask    = typeof agentTasks.$inferInsert;
-export type InsertAgentIteration = typeof agentIterations.$inferInsert;
 export type InsertAllowedPath   = typeof allowedPaths.$inferInsert;
 export type EmbeddingCredentialRow    = typeof embeddingCredentials.$inferSelect;
 export type InsertEmbeddingCredential = typeof embeddingCredentials.$inferInsert;

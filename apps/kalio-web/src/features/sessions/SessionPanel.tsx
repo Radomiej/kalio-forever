@@ -69,9 +69,10 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
     }
   };
 
-  const visibleSessions = personaFilter === 'all'
+  const visibleSessions = (personaFilter === 'all'
     ? sessions
-    : sessions.filter((s) => s.personaId === personaFilter);
+    : sessions.filter((s) => s.personaId === personaFilter)
+  ).slice().sort((a, b) => b.updatedAt - a.updatedAt);
 
   const getPersonaName = (personaId: string): string | null => {
     const p = personas.find((p) => p.id === personaId);

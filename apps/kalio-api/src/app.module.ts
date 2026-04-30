@@ -13,7 +13,6 @@ import { SkillsModule } from './modules/skills/skills.module';
 import { MemoryModule } from './modules/memory/memory.module';
 import { AllowedPathsModule } from './modules/allowed-paths/allowed-paths.module';
 import { ChatModule } from './modules/chat/chat.module';
-import { AgentLoopModule } from './modules/agent-loop/agent-loop.module';
 import { SearchModule } from './modules/search/search.module';
 
 @Module({
@@ -35,7 +34,6 @@ import { SearchModule } from './modules/search/search.module';
     AllowedPathsModule,
     MemoryModule,
     ChatModule,
-    AgentLoopModule,
     SearchModule,
   ],
 })

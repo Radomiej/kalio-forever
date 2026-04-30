@@ -6,11 +6,6 @@ import {
 import { useAgentStore, type ToolActivity } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 
-interface CanvasPanelProps {
-  open: boolean;
-  onToggle: () => void;
-}
-
 function StatusIcon({ status }: { status: ToolActivity['status'] }) {
   switch (status) {
     case 'running':
@@ -128,20 +123,25 @@ function SessionStats() {
   );
 }
 
-export function CanvasPanel({ open, onToggle }: CanvasPanelProps) {
-  const { toolActivities, isStreaming } = useAgentStore();
+export function CanvasPanel() {
+  const { toolActivities, isStreaming, canvasOpen, toggleCanvas } = useAgentStore();
+  const open = canvasOpen;
+  // Show toggle only when agent has activity or canvas is already open
+  const showToggle = isStreaming || toolActivities.length > 0 || open;
 
   return (
     <>
-      {/* Toggle tab — always visible */}
-      <button
-        className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-5 h-12 bg-base-200 border border-base-300 rounded-l-lg hover:bg-base-300 transition-colors"
-        onClick={onToggle}
-        aria-label={open ? 'Close canvas' : 'Open canvas'}
-        data-testid="canvas-toggle"
-      >
-        {open ? <ArrowRightToLine size={12} /> : <ArrowLeftFromLine size={12} />}
-      </button>
+      {/* Toggle tab — only visible when agent is active or canvas is open */}
+      {showToggle && (
+        <button
+          className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-5 h-12 bg-base-200 border border-base-300 rounded-l-lg hover:bg-base-300 transition-colors"
+          onClick={toggleCanvas}
+          aria-label={open ? 'Close canvas' : 'Open canvas'}
+          data-testid="canvas-toggle"
+        >
+          {open ? <ArrowRightToLine size={12} /> : <ArrowLeftFromLine size={12} />}
+        </button>
+      )}
 
       {/* Panel */}
       <aside
