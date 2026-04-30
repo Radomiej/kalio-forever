@@ -49,6 +49,18 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
+// ─── embedding_credentials ────────────────────────────────────────────────────
+export const embeddingCredentials = sqliteTable('embedding_credentials', {
+  id:         text('id').primaryKey(),
+  name:       text('name').notNull(),
+  provider:   text('provider').notNull(),   // EmbeddingProviderType
+  apiKey:     text('api_key').notNull(),    // encrypt post-MVP: libsodium secretbox
+  baseUrl:    text('base_url').notNull(),
+  model:      text('model').notNull(),
+  dimensions: integer('dimensions').notNull().default(1536),
+  createdAt:  integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
 // ─── credentials ──────────────────────────────────────────────────────────────
 export const credentials = sqliteTable('credentials', {
   id:        text('id').primaryKey(),
@@ -203,3 +215,5 @@ export type InsertAgentLoop    = typeof agentLoops.$inferInsert;
 export type InsertAgentTask    = typeof agentTasks.$inferInsert;
 export type InsertAgentIteration = typeof agentIterations.$inferInsert;
 export type InsertAllowedPath   = typeof allowedPaths.$inferInsert;
+export type EmbeddingCredentialRow    = typeof embeddingCredentials.$inferSelect;
+export type InsertEmbeddingCredential = typeof embeddingCredentials.$inferInsert;

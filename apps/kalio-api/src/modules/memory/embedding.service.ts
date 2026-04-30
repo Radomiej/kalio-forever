@@ -1,7 +1,7 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+﻿import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EmbeddingStatus } from '@kalio/types';
-import { AppSettingsService } from '../../database/app-settings.service';
+import { EmbeddingCredentialsService } from './embedding-credentials.service';
 
 // ── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -132,182 +132,103 @@ export class MockEmbeddingProvider implements IEmbeddingProvider {
   }
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+function maskUrl(baseUrl: string): string {
+  try {
+    const u = new URL(baseUrl);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return baseUrl ? '(invalid URL)' : '(not set)';
+  }
+}
+
+function isOllamaUrl(baseUrl: string): boolean {
+  return baseUrl.includes('localhost:11434') || baseUrl.toLowerCase().includes('ollama');
+}
+
+function buildProvider(cfg: EmbeddingProviderConfig): IEmbeddingProvider {
+  if (isOllamaUrl(cfg.baseUrl)) {
+    return new OllamaEmbeddingProvider(cfg.baseUrl, cfg.model, cfg.dimensions);
+  }
+  return new OpenAICompatibleEmbeddingProvider(cfg);
+}
+
 // ── EmbeddingService ────────────────────────────────────────────────────────
 
 @Injectable()
 export class EmbeddingService implements OnModuleInit {
   private readonly logger = new Logger(EmbeddingService.name);
   private provider: IEmbeddingProvider | null = null;
-  /** Where the active provider config came from */
   private providerSource: 'db' | 'env' | 'mock' = 'mock';
-  /** Credential ID that this embedding config was sourced from (if any) */
-  private linkedCredentialId: string | null = null;
-  private linkedCredentialName: string | null = null;
+  private activeCredentialId: string | null = null;
+  private activeCredentialName: string | null = null;
+  private activeModel: string | null = null;
+  private activeBaseUrl: string | null = null;
+  private activeDimensions: number | null = null;
 
   constructor(
     private readonly config: ConfigService,
-    private readonly appSettings: AppSettingsService,
+    private readonly embeddingCredentials: EmbeddingCredentialsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
-    // Load persisted config from DB and initialise provider eagerly
-    await this.loadFromSettings();
+    await this.reloadFromCredential();
   }
 
-  private async loadFromSettings(): Promise<void> {
-    const storedKey = await this.appSettings.get('embedding.api_key');
-    const storedUrl = await this.appSettings.get('embedding.base_url');
-    const storedModel = await this.appSettings.get('embedding.model');
-    const storedDims = await this.appSettings.get('embedding.dimensions');
-    const storedCredId = await this.appSettings.get('embedding.credential_id');
-    const storedCredName = await this.appSettings.get('embedding.credential_name');
-
-    if (storedUrl && storedKey) {
-      const model = storedModel ?? 'text-embedding-3-small';
-      const dimensions = storedDims ? parseInt(storedDims, 10) : 1536;
-      this.provider = this.buildProvider(storedKey, storedUrl, model, dimensions);
+  /**
+   * Called on startup and after any credential CRUD to refresh the provider.
+   */
+  async reloadFromCredential(): Promise<void> {
+    const active = await this.embeddingCredentials.getActiveConfig();
+    if (active) {
+      this.provider = buildProvider({
+        apiKey: active.apiKey,
+        baseUrl: active.baseUrl,
+        model: active.model,
+        dimensions: active.dimensions,
+      });
       this.providerSource = 'db';
-      this.linkedCredentialId = storedCredId ?? null;
-      this.linkedCredentialName = storedCredName ?? null;
-      this.logger.log(`Embedding provider loaded from app_settings: ${model} @ ${storedUrl}${storedCredId ? ` (credential: ${storedCredName ?? storedCredId})` : ''}`);
-    }
-    // If no stored config, getProvider() will fall back to env vars lazily
-  }
-
-  private buildProvider(
-    apiKey: string,
-    baseUrl: string,
-    model: string,
-    dimensions: number,
-  ): IEmbeddingProvider {
-    const isOllama = baseUrl.includes('localhost:11434') || baseUrl.includes('ollama');
-    if (isOllama) {
-      this.logger.log(`Ollama embedding provider: ${model}`);
-      return new OllamaEmbeddingProvider(baseUrl, model, dimensions);
-    }
-    this.logger.log(`OpenAI-compatible embedding provider: ${model} @ ${baseUrl}`);
-    return new OpenAICompatibleEmbeddingProvider({ apiKey, baseUrl, model, dimensions });
-  }
-
-  /**
-   * Reconfigure the embedding provider at runtime and persist to DB.
-   * Pass null apiKey to leave existing key unchanged.
-   */
-  async reconfigure(cfg: {
-    baseUrl: string;
-    apiKey: string | null;
-    model: string;
-    dimensions: number;
-  }): Promise<void> {
-    await this.appSettings.set('embedding.base_url', cfg.baseUrl);
-    await this.appSettings.set('embedding.model', cfg.model);
-    await this.appSettings.set('embedding.dimensions', String(cfg.dimensions));
-    // Clear credential link — this is a manual config
-    await this.appSettings.delete('embedding.credential_id');
-    await this.appSettings.delete('embedding.credential_name');
-    this.linkedCredentialId = null;
-    this.linkedCredentialName = null;
-
-    const resolvedKey =
-      cfg.apiKey ??
-      (await this.appSettings.get('embedding.api_key')) ??
-      this.config.get<string>('EMBEDDING_API_KEY', '') ??
-      this.config.get<string>('LLM_API_KEY', '');
-
-    if (cfg.apiKey) {
-      await this.appSettings.set('embedding.api_key', cfg.apiKey);
+      this.activeCredentialId = active.id;
+      this.activeCredentialName = active.name;
+      this.activeModel = active.model;
+      this.activeBaseUrl = active.baseUrl;
+      this.activeDimensions = active.dimensions;
+      this.logger.log(`Embedding provider loaded from DB credential "${active.name}": ${active.model} @ ${active.baseUrl}`);
+      return;
     }
 
-    this.provider = this.buildProvider(resolvedKey, cfg.baseUrl, cfg.model, cfg.dimensions);
-    this.providerSource = 'db';
-    this.logger.log(`Embedding provider reconfigured: ${cfg.model} @ ${cfg.baseUrl}`);
-  }
-
-  /**
-   * Reconfigure the embedding provider from an existing LLM credential.
-   * The apiKey is sourced from the caller (credentials service) and not stored
-   * in plain text — only the credentialId reference is persisted.
-   */
-  async reconfigureFromCredential(cfg: {
-    credentialId: string;
-    credentialName: string;
-    apiKey: string;
-    baseUrl: string;
-    model: string;
-    dimensions: number;
-  }): Promise<void> {
-    await this.appSettings.set('embedding.base_url', cfg.baseUrl);
-    await this.appSettings.set('embedding.model', cfg.model);
-    await this.appSettings.set('embedding.dimensions', String(cfg.dimensions));
-    await this.appSettings.set('embedding.api_key', cfg.apiKey);
-    await this.appSettings.set('embedding.credential_id', cfg.credentialId);
-    await this.appSettings.set('embedding.credential_name', cfg.credentialName);
-    this.linkedCredentialId = cfg.credentialId;
-    this.linkedCredentialName = cfg.credentialName;
-
-    this.provider = this.buildProvider(cfg.apiKey, cfg.baseUrl, cfg.model, cfg.dimensions);
-    this.providerSource = 'db';
-    this.logger.log(`Embedding provider linked to credential "${cfg.credentialName}" (${cfg.credentialId}): ${cfg.model} @ ${cfg.baseUrl}`);
-  }
-
-  private getProvider(): IEmbeddingProvider {
-    if (this.provider) return this.provider;
-
-    // Dedicated embedding config takes priority; fall back to chat LLM config
+    // No DB credential — check env vars
     const apiKey = this.config.get<string>('EMBEDDING_API_KEY', '')
       || this.config.get<string>('LLM_API_KEY', '');
     const baseUrl = this.config.get<string>('EMBEDDING_BASE_URL', '')
       || this.config.get<string>('LLM_BASE_URL', '');
     const model = this.config.get<string>('EMBEDDING_MODEL', 'text-embedding-3-small');
-    const dimensions = this.config.get<number>('EMBEDDING_DIMENSIONS', 1536);
+    const dimensions = parseInt(this.config.get<string>('EMBEDDING_DIMENSIONS', '1536'), 10);
 
-    if (!apiKey || !baseUrl || apiKey === 'mock' || baseUrl === 'mock') {
-      this.logger.warn('Embedding provider not configured — using MockEmbeddingProvider (set EMBEDDING_BASE_URL + EMBEDDING_API_KEY for real embeddings)');
+    if (apiKey && baseUrl && apiKey !== 'mock' && baseUrl !== 'mock') {
+      this.provider = buildProvider({ apiKey, baseUrl, model, dimensions });
+      this.providerSource = 'env';
+      this.activeCredentialId = null;
+      this.activeCredentialName = null;
+      this.activeModel = model;
+      this.activeBaseUrl = baseUrl;
+      this.activeDimensions = dimensions;
+      this.logger.log(`Embedding provider initialized from env: ${model} @ ${baseUrl}`);
+    } else {
       this.provider = new MockEmbeddingProvider(dimensions);
       this.providerSource = 'mock';
-      return this.provider;
+      this.activeCredentialId = null;
+      this.activeCredentialName = null;
+      this.activeModel = null;
+      this.activeBaseUrl = null;
+      this.activeDimensions = null;
+      this.logger.warn('Embedding provider not configured — using MockEmbeddingProvider');
     }
-
-    // Warn if falling back to shared LLM config (many chat-only providers don't support /embeddings)
-    const explicitEmbedUrl = this.config.get<string>('EMBEDDING_BASE_URL', '');
-    if (!explicitEmbedUrl) {
-      this.logger.warn(
-        `EMBEDDING_BASE_URL not set — using LLM_BASE_URL (${baseUrl}) for embeddings. ` +
-        'Set EMBEDDING_BASE_URL if your chat provider does not support /embeddings.',
-      );
-    }
-    const explicitEmbedKey = this.config.get<string>('EMBEDDING_API_KEY', '');
-    if (!explicitEmbedKey) {
-      this.logger.warn(
-        'EMBEDDING_API_KEY not set — using LLM_API_KEY for embeddings. ' +
-        'Set EMBEDDING_API_KEY if your embedding provider uses a different key.',
-      );
-    }
-
-    const isOllama = baseUrl.includes('localhost:11434') || baseUrl.includes('ollama');
-
-    if (isOllama) {
-      this.provider = new OllamaEmbeddingProvider(baseUrl, model, dimensions);
-      this.logger.log(`Ollama embedding provider initialized: ${model}`);
-    } else {
-      this.provider = new OpenAICompatibleEmbeddingProvider({ apiKey, baseUrl, model, dimensions });
-      this.logger.log(`OpenAI-compatible embedding provider initialized: ${model} @ ${baseUrl}`);
-    }
-    this.providerSource = 'env';
-
-    return this.provider;
   }
 
   getStatus(): EmbeddingStatus {
-    // Trigger lazy init so providerSource is accurate before reading it
-    this.getProvider();
-
-    const baseUrlEnv = this.config.get<string>('EMBEDDING_BASE_URL', '')
-      || this.config.get<string>('LLM_BASE_URL', '');
-    const modelEnv = this.config.get<string>('EMBEDDING_MODEL', 'text-embedding-3-small');
-    const dimensionsEnv = this.config.get<number>('EMBEDDING_DIMENSIONS', 1536);
-
-    if (this.providerSource === 'mock') {
+    if (this.providerSource === 'mock' || !this.provider) {
       return {
         provider: 'mock',
         source: 'mock',
@@ -318,46 +239,19 @@ export class EmbeddingService implements OnModuleInit {
       };
     }
 
-    const baseUrl = baseUrlEnv;
-    const isOllama = baseUrl.includes('localhost:11434') || baseUrl.includes('ollama');
-
-    let baseUrlMasked = '';
-    try {
-      const u = new URL(baseUrl);
-      baseUrlMasked = `${u.protocol}//${u.host}`;
-    } catch {
-      baseUrlMasked = baseUrl ? '(invalid URL)' : '(not set)';
-    }
-
+    const baseUrl = this.activeBaseUrl ?? '';
     return {
-      provider: isOllama ? 'ollama' : 'openai-compatible',
+      provider: isOllamaUrl(baseUrl) ? 'ollama' : 'openai-compatible',
       source: this.providerSource,
-      model: modelEnv,
-      dimensions: dimensionsEnv,
-      baseUrlMasked,
+      model: this.activeModel ?? '',
+      dimensions: this.activeDimensions ?? this.provider.getDimensions(),
+      baseUrlMasked: maskUrl(baseUrl),
       configured: true,
-      ...(this.linkedCredentialId && {
-        credentialId: this.linkedCredentialId,
-        credentialName: this.linkedCredentialName ?? undefined,
+      ...(this.activeCredentialId && {
+        activeCredentialId: this.activeCredentialId,
+        activeCredentialName: this.activeCredentialName ?? undefined,
       }),
     };
-  }
-
-  /**
-   * Clear all persisted embedding config and revert to MockEmbeddingProvider.
-   */
-  async resetConfig(): Promise<void> {
-    await this.appSettings.delete('embedding.base_url');
-    await this.appSettings.delete('embedding.model');
-    await this.appSettings.delete('embedding.dimensions');
-    await this.appSettings.delete('embedding.api_key');
-    await this.appSettings.delete('embedding.credential_id');
-    await this.appSettings.delete('embedding.credential_name');
-    this.linkedCredentialId = null;
-    this.linkedCredentialName = null;
-    this.provider = new MockEmbeddingProvider();
-    this.providerSource = 'mock';
-    this.logger.log('Embedding provider config cleared — reset to MockEmbeddingProvider');
   }
 
   async embedOne(text: string): Promise<number[]> {
@@ -374,8 +268,15 @@ export class EmbeddingService implements OnModuleInit {
   }
 
   async getModelName(): Promise<string> {
-    const storedModel = await this.appSettings.get('embedding.model');
-    if (storedModel) return storedModel;
+    if (this.activeModel) return this.activeModel;
     return this.config.get<string>('EMBEDDING_MODEL', 'text-embedding-3-small');
+  }
+
+  private getProvider(): IEmbeddingProvider {
+    if (!this.provider) {
+      this.logger.warn('getProvider() called before onModuleInit — returning mock');
+      return new MockEmbeddingProvider();
+    }
+    return this.provider;
   }
 }

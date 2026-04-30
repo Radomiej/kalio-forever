@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { nanoid } from 'nanoid';
 import path from 'node:path';
@@ -15,27 +15,22 @@ const CHUNK_OVERLAP = 200;
 // ── MemoryService ───────────────────────────────────────────────────────────
 
 @Injectable()
-export class MemoryService implements OnModuleInit, OnModuleDestroy {
+export class MemoryService implements OnModuleDestroy {
   private readonly logger = new Logger(MemoryService.name);
-  private readonly embeddingService: EmbeddingService;
   private readonly stores = new Map<string, VectorStoreService>();
   private readonly dbBasePath: string;
 
   constructor(
     private readonly config: ConfigService,
     private readonly appSettings: AppSettingsService,
+    private readonly embeddingService: EmbeddingService,
   ) {
-    this.embeddingService = new EmbeddingService(config, appSettings);
     this.dbBasePath = this.config.get<string>('MEMORY_DB_PATH', './data/memory');
     this.logger.log(`MemoryService initialized: ${this.dbBasePath}`);
   }
 
   getEmbeddingService(): EmbeddingService {
     return this.embeddingService;
-  }
-
-  async onModuleInit(): Promise<void> {
-    await this.embeddingService.onModuleInit();
   }
 
   private getStore(personaId: string): VectorStoreService {

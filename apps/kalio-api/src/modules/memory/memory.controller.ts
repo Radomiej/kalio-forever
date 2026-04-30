@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
@@ -12,23 +12,21 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import type { MemoryIngestResult, MemorySearchResult, MemorySearchMode, EmbeddingStatus } from '@kalio/types';
+import type {
+  MemoryIngestResult,
+  MemorySearchResult,
+  MemorySearchMode,
+  EmbeddingStatus,
+  EmbeddingCredential,
+  CreateEmbeddingCredentialDto,
+} from '@kalio/types';
 import { MemoryService } from './memory.service';
-import { CredentialsService } from '../credentials/credentials.service';
+import { EmbeddingCredentialsService } from './embedding-credentials.service';
+import {
+  OpenAICompatibleEmbeddingProvider,
+  OllamaEmbeddingProvider,
+} from './embedding.service';
 import type { IngestDto, IngestConversationDto, SearchDto } from './dto';
-
-interface EmbeddingConfigDto {
-  baseUrl: string;
-  apiKey?: string;
-  model: string;
-  dimensions: number;
-}
-
-interface EmbeddingFromCredentialDto {
-  credentialId: string;
-  model: string;
-  dimensions: number;
-}
 
 @Controller('memory')
 export class MemoryController {
@@ -36,8 +34,10 @@ export class MemoryController {
 
   constructor(
     private readonly memoryService: MemoryService,
-    private readonly credentialsService: CredentialsService,
+    private readonly embeddingCredentials: EmbeddingCredentialsService,
   ) {}
+
+  // ── Memory CRUD ─────────────────────────────────────────────────────────
 
   @Post('ingest')
   async ingest(@Body() dto: IngestDto): Promise<MemoryIngestResult> {
@@ -57,7 +57,6 @@ export class MemoryController {
     @Query('mode') mode?: MemorySearchMode
   ): Promise<MemorySearchResult[]> {
     const parsedLimit = limit ? parseInt(limit, 10) : 5;
-
     switch (mode) {
       case 'vector':
         return this.memoryService.search(query, personaId, parsedLimit);
@@ -72,15 +71,6 @@ export class MemoryController {
   @Get(':personaId')
   async getAll(@Param('personaId') personaId: string): Promise<MemorySearchResult[]> {
     return this.memoryService.getAll(personaId);
-  }
-
-  // NOTE: This route must be declared before @Delete(':personaId') and @Delete(':personaId/:id')
-  // because 'config/embedding' is a two-segment path and would otherwise match ':personaId/:id'.
-  @Delete('config/embedding')
-  async clearEmbeddingConfig(): Promise<EmbeddingStatus> {
-    this.logger.log('Embedding config cleared via API — reverting to mock');
-    await this.memoryService.getEmbeddingService().resetConfig();
-    return this.memoryService.getEmbeddingService().getStatus();
   }
 
   @Delete(':personaId')
@@ -98,59 +88,76 @@ export class MemoryController {
     return { deleted };
   }
 
+  // ── Embedding status ─────────────────────────────────────────────────────
+
   @Get('status/embedding')
-  getEmbeddingStatus(): EmbeddingStatus {
+  async getEmbeddingStatus(): Promise<EmbeddingStatus> {
     return this.memoryService.getEmbeddingService().getStatus();
   }
 
-  @Put('config/embedding')
-  async setEmbeddingConfig(@Body() dto: EmbeddingConfigDto): Promise<EmbeddingStatus> {
-    this.logger.log(`Embedding config update via API: model=${dto.model} baseUrl=${dto.baseUrl} dimensions=${dto.dimensions}`);
-    await this.memoryService.getEmbeddingService().reconfigure({
-      baseUrl: dto.baseUrl,
-      apiKey: dto.apiKey ?? null,
-      model: dto.model,
-      dimensions: dto.dimensions,
-    });
+  // ── Embedding credentials CRUD ───────────────────────────────────────────
+
+  @Get('embedding-credentials')
+  async listEmbeddingCredentials(): Promise<EmbeddingCredential[]> {
+    return this.embeddingCredentials.findAll();
+  }
+
+  @Post('embedding-credentials')
+  async createEmbeddingCredential(
+    @Body() dto: CreateEmbeddingCredentialDto
+  ): Promise<EmbeddingCredential> {
+    this.logger.log(`Creating embedding credential "${dto.name}" (${dto.provider})`);
+    const created = await this.embeddingCredentials.create(dto);
+    return created;
+  }
+
+  @Delete('embedding-credentials/active')
+  async clearActiveEmbeddingCredential(): Promise<EmbeddingStatus> {
+    this.logger.log('Active embedding credential cleared');
+    await this.embeddingCredentials.clearActive();
+    await this.memoryService.getEmbeddingService().reloadFromCredential();
     return this.memoryService.getEmbeddingService().getStatus();
   }
 
-  @Put('config/embedding/from-credential')
-  async setEmbeddingFromCredential(@Body() dto: EmbeddingFromCredentialDto): Promise<EmbeddingStatus> {
-    const cred = (await this.credentialsService.findAll()).find((c) => c.id === dto.credentialId);
-    if (!cred) throw new NotFoundException(`Credential ${dto.credentialId} not found`);
-
-    const apiKey = await this.credentialsService.getApiKey(dto.credentialId);
-    if (!apiKey) throw new NotFoundException(`No API key found for credential ${dto.credentialId}`);
-
-    this.logger.log(`Embedding linked to credential "${cred.name}" (${cred.id}) via API: model=${dto.model} dimensions=${dto.dimensions}`);
-
-    const PROVIDER_BASE_URLS: Record<string, string> = {
-      openai:     'https://api.openai.com/v1',
-      xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
-      deepseek:   'https://api.deepseek.com/v1',
-      cometapi:   'https://api.cometapi.com/v1',
-      openrouter: 'https://openrouter.ai/api/v1',
-      ollama:     'http://localhost:11434/v1',
-    };
-    const baseUrl = cred.baseUrl ?? PROVIDER_BASE_URLS[cred.provider] ?? '';
-
-    await this.memoryService.getEmbeddingService().reconfigureFromCredential({
-      credentialId: cred.id,
-      credentialName: cred.name,
-      apiKey,
-      baseUrl,
-      model: dto.model,
-      dimensions: dto.dimensions,
-    });
+  // NOTE: this must be BEFORE @Delete('embedding-credentials/:id') to avoid
+  // NestJS treating 'active' as a credentialId.
+  @Put('embedding-credentials/active/:id')
+  async setActiveEmbeddingCredential(@Param('id') id: string): Promise<EmbeddingStatus> {
+    this.logger.log(`Setting active embedding credential: ${id}`);
+    await this.embeddingCredentials.setActive(id);
+    await this.memoryService.getEmbeddingService().reloadFromCredential();
     return this.memoryService.getEmbeddingService().getStatus();
   }
 
-  @Post('test/embedding')
+  @Delete('embedding-credentials/:id')
+  async removeEmbeddingCredential(@Param('id') id: string): Promise<EmbeddingStatus> {
+    this.logger.log(`Removing embedding credential: ${id}`);
+    await this.embeddingCredentials.remove(id);
+    await this.memoryService.getEmbeddingService().reloadFromCredential();
+    return this.memoryService.getEmbeddingService().getStatus();
+  }
+
+  @Post('embedding-credentials/:id/test')
   @HttpCode(HttpStatus.OK)
-  async testEmbedding(): Promise<{ ok: boolean; error?: string }> {
+  async testEmbeddingCredential(
+    @Param('id') id: string
+  ): Promise<{ ok: boolean; error?: string }> {
+    const cred = await this.embeddingCredentials.getConfigById(id);
+    if (!cred) throw new NotFoundException(`Embedding credential ${id} not found`);
+    const isOllama = cred.baseUrl.includes('localhost:11434') || cred.baseUrl.toLowerCase().includes('ollama');
     try {
-      await this.memoryService.getEmbeddingService().embedOne('test');
+      if (isOllama) {
+        const p = new OllamaEmbeddingProvider(cred.baseUrl, cred.model, cred.dimensions);
+        await p.embed(['test']);
+      } else {
+        const p = new OpenAICompatibleEmbeddingProvider({
+          apiKey: cred.apiKey,
+          baseUrl: cred.baseUrl,
+          model: cred.model,
+          dimensions: cred.dimensions,
+        });
+        await p.embed(['test']);
+      }
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
