@@ -1,12 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, Trash2, Pencil, Check, X } from 'lucide-react';
+import { Plus, Trash2, Pencil, Check, X, AlertTriangle } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
+import { useAgentStore } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 import type { ChatSession, ChatMessage, Persona } from '@kalio/types';
 import { formatRelativeTime } from './session.utils';
 
 export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
   const { sessions, activeSessionId, setSessions, setActiveSession, addSession, setMessages, removeSession, updateSession } = useSessionStore();
+  const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const [loading, setLoading] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -197,6 +199,14 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
                     <span className="flex-1 text-xs truncate">
                       {s.title || `Session ${s.id.slice(0, 6)}`}
                     </span>
+                    {pendingConfirmations[s.id] && (
+                      <AlertTriangle
+                        size={10}
+                        className="text-warning shrink-0"
+                        aria-label="Awaiting confirmation"
+                        data-testid={`session-pending-confirmation-${s.id}`}
+                      />
+                    )}
                     <button
                       className="btn btn-ghost btn-xs p-0 w-5 h-5 shrink-0 opacity-0 group-hover:opacity-100 text-base-content/40 hover:text-sky-400"
                       onClick={(e) => startRename(e, s)}

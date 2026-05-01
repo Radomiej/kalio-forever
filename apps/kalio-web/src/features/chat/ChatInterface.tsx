@@ -9,7 +9,6 @@ import { eventBus } from '../../services/eventBus';
 import { MessageBubble } from './MessageBubble';
 import { AgentTurnBubble } from './AgentTurnBubble';
 import { ChatInput } from './ChatInput';
-import { ConfirmationDialog } from './ConfirmationDialog';
 import { TokenBadge } from './TokenBadge';
 import { ContextStats } from './ContextStats';
 import { useContextUsage } from './hooks/useContextUsage';
@@ -29,7 +28,6 @@ export function ChatInterface() {
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
   const {
     isStreaming,
-    pendingConfirmation,
     toolActivities,
     systemPrompt,
     activeToolNames,
@@ -166,7 +164,7 @@ export function ChatInterface() {
     });
 
     const offConfirmation = eventBus.onToolConfirmation((req) => {
-      setPendingConfirmation(req);
+      setPendingConfirmation(req.sessionId, req);
       // Tool is awaiting confirmation — log it as an activity
       addToolActivity({
         callId: req.toolCallId,
@@ -414,23 +412,9 @@ export function ChatInterface() {
     handleSendRef.current(toSend, pendingSession?.personaId ?? 'default');
   }, [activeSessionId, setMessages, setAgentTurns]);
 
-  const handleConfirm = () => {
-    if (!pendingConfirmation || !activeSessionId) return;
-    updateToolActivity(pendingConfirmation.toolCallId, { status: 'running', startedAt: Date.now() });
-    eventBus.confirmTool({ requestId: pendingConfirmation.requestId, sessionId: activeSessionId });
-    setPendingConfirmation(null);
-  };
-
   const handleStop = () => {
     if (!activeSessionId) return;
     eventBus.stopTurn(activeSessionId);
-  };
-
-  const handleCancel = () => {
-    if (!pendingConfirmation || !activeSessionId) return;
-    updateToolActivity(pendingConfirmation.toolCallId, { status: 'cancelled', finishedAt: Date.now() });
-    eventBus.cancelTool({ requestId: pendingConfirmation.requestId, sessionId: activeSessionId });
-    setPendingConfirmation(null);
   };
 
   const handleCompactNow = () => {
@@ -601,14 +585,6 @@ export function ChatInterface() {
       </div>
 
       <ChatInput onSend={handleSend} disabled={isStreaming || !activeSessionId} isStreaming={isStreaming} onStop={handleStop} />
-
-      {pendingConfirmation && (
-        <ConfirmationDialog
-          request={pendingConfirmation}
-          onConfirm={handleConfirm}
-          onCancel={handleCancel}
-        />
-      )}
     </div>
   );
 }

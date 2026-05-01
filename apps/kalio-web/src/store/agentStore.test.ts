@@ -15,7 +15,7 @@ describe('agentStore - Tool Activity Status Mapping (REGRESSION TEST)', () => {
       toolActivities: [],
       isStreaming: false,
       streamingMessageId: undefined,
-      pendingConfirmation: null,
+      pendingConfirmations: {},
       availableTools: [],
     });
   });
@@ -143,7 +143,7 @@ describe('agentStore - LlmActivity', () => {
       llmActivities: [],
       isStreaming: false,
       streamingMessageId: undefined,
-      pendingConfirmation: null,
+      pendingConfirmations: {},
       availableTools: [],
     });
   });
@@ -208,7 +208,7 @@ describe('agentStore - Context (systemPrompt + activeToolNames)', () => {
       llmActivities: [],
       isStreaming: false,
       streamingMessageId: undefined,
-      pendingConfirmation: null,
+      pendingConfirmations: {},
       availableTools: [],
     });
   });

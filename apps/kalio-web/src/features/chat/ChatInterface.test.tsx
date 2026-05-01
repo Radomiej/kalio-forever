@@ -49,7 +49,12 @@ vi.mock('../../services/eventBus', () => ({
     onAgentStart: (h: (...args: unknown[]) => void) => capture('agent:start', h),
     onAgentDone: (h: (...args: unknown[]) => void) => capture('agent:done', h),
     onRaAppNativeResult: (h: (...args: unknown[]) => void) => capture('raapp:native_result', h),
+    onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
     sendMessage: mockSendMessage,
+    stopTurn: vi.fn(),
+    confirmTool: vi.fn(),
+    cancelTool: vi.fn(),
+    disconnect: vi.fn(),
   },
 }));
 
@@ -68,7 +73,7 @@ const removeActiveAgentLoop = vi.fn();
 
 const agentStoreState = {
   isStreaming: false,
-  pendingConfirmation: null,
+  pendingConfirmations: {} as Record<string, unknown>,
   toolActivities: [] as { callId: string; toolName: string }[],
   llmActivities: [],
   systemPrompt: null,
@@ -189,7 +194,6 @@ vi.mock('../../services/apiClient', () => ({
 vi.mock('./MessageBubble', () => ({ MessageBubble: () => null }));
 vi.mock('./ToolActivityRow', () => ({ ToolActivityRow: () => null }));
 vi.mock('./ChatInput', () => ({ ChatInput: () => null }));
-vi.mock('./ConfirmationDialog', () => ({ ConfirmationDialog: () => null }));
 vi.mock('./TokenBadge', () => ({ TokenBadge: () => null }));
 vi.mock('./ContextStats', () => ({ ContextStats: () => null }));
 vi.mock('../vfs/ConversationFilesBar', () => ({ ConversationFilesBar: () => null }));
@@ -275,6 +279,11 @@ describe('ChatInterface event wiring', () => {
     });
 
     expect(setPendingConfirmation).toHaveBeenCalledOnce();
+    expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      requestId: 'req-1',
+      toolCallId: 'call-4',
+      sessionId: 'session-1',
+    }));
     expect(addToolActivity).toHaveBeenCalledWith(
       expect.objectContaining({
         callId: 'call-4',

@@ -13,9 +13,11 @@
  *   HistoryToolCallBubble — tool finished (tool_result ChatMessage)
  */
 import { useState, useEffect } from 'react';
-import { CheckCircle2, XCircle, Loader2, Clock, ChevronDown, ExternalLink } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, ChevronDown, ExternalLink, AlertTriangle } from 'lucide-react';
 import type { ToolActivity } from '../../store/agentStore';
 import { useAgentStore } from '../../store/agentStore';
+import { useSessionStore } from '../../store/sessionStore';
+import { eventBus } from '../../services/eventBus';
 import type { RAAppBlock, RaAppPendingApproval, CLIAgentResult } from '@kalio/types';
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
 import { TerminalOutputBlock } from './TerminalOutputBlock';
@@ -119,6 +121,100 @@ function Chip({
   );
 }
 
+// ─── Inline confirmation bubble — shown inside tool chip when awaiting decision ─
+
+function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
+  const [argsOpen, setArgsOpen] = useState(false);
+  const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
+  const setPendingConfirmation = useAgentStore((s) => s.setPendingConfirmation);
+  const updateToolActivity = useAgentStore((s) => s.updateToolActivity);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const confirmation = pendingConfirmations[activeSessionId ?? ''];
+
+  // Only render full buttons when this activity matches the stored confirmation for this session
+  const isMatch = confirmation?.toolCallId === activity.callId;
+
+  const argEntries = Object.entries(activity.args);
+  const argPreview = argEntries.length === 0
+    ? null
+    : `${argEntries[0][0]}: ${formatArgValue(argEntries[0][1])}${argEntries.length > 1 ? ' …' : ''}`;
+
+  const handleConfirm = () => {
+    if (!confirmation || !activeSessionId) return;
+    updateToolActivity(activity.callId, { status: 'running', startedAt: Date.now() });
+    eventBus.confirmTool({ requestId: confirmation.requestId, sessionId: activeSessionId });
+    setPendingConfirmation(activeSessionId, null);
+  };
+
+  const handleCancel = () => {
+    if (!confirmation || !activeSessionId) return;
+    updateToolActivity(activity.callId, { status: 'cancelled', finishedAt: Date.now() });
+    eventBus.cancelTool({ requestId: confirmation.requestId, sessionId: activeSessionId });
+    setPendingConfirmation(activeSessionId, null);
+  };
+
+  return (
+    <div
+      data-testid="tool-call-bubble"
+      className="border-l-[3px] border-l-amber-400/70 pl-3 py-1.5 my-1"
+    >
+      <div data-testid="tool-call-chip" className="flex items-center gap-1.5 flex-wrap">
+        <AlertTriangle size={12} className="text-warning animate-pulse shrink-0" data-testid="awaiting-confirmation-icon" />
+        <span className="font-mono text-xs text-amber-400">{activity.toolName}</span>
+        <span className="text-[10px] font-mono text-warning/70 bg-warning/10 rounded px-1">awaiting confirmation</span>
+        {argPreview && (
+          <button
+            className="ml-auto text-base-content/30 hover:text-base-content/60 transition-colors"
+            onClick={() => setArgsOpen((v) => !v)}
+            aria-label="Toggle args"
+            data-testid="confirmation-args-toggle"
+          >
+            <ChevronDown size={11} className={`transition-transform duration-150 ${argsOpen ? 'rotate-180' : ''}`} />
+          </button>
+        )}
+      </div>
+
+      {/* Collapsed preview */}
+      {argPreview && !argsOpen && (
+        <div className="mt-1 font-mono text-[10px] text-base-content/30 truncate" data-testid="args-preview">
+          {argPreview}
+        </div>
+      )}
+
+      {/* Expanded scrollable args */}
+      {argsOpen && argEntries.length > 0 && (
+        <div className="mt-1.5 font-mono bg-base-200/60 rounded px-2 py-1 max-h-40 overflow-y-auto text-xs text-base-content/50" data-testid="args-expanded">
+          {argEntries.map(([k, v]) => (
+            <div key={k}>
+              <span className="text-base-content/40">{k}:</span> {formatArgValue(v)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Action buttons — only shown when this is the active session's pending confirmation */}
+      {isMatch && (
+        <div className="flex gap-2 mt-2" data-testid="confirmation-actions">
+          <button
+            data-testid="confirmation-confirm-btn"
+            className="btn btn-success btn-xs"
+            onClick={handleConfirm}
+          >
+            Confirm
+          </button>
+          <button
+            data-testid="confirmation-cancel-btn"
+            className="btn btn-ghost btn-xs"
+            onClick={handleCancel}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Live chip — running/awaiting/error from ToolActivity ─────────────────────
 // Widget is NEVER rendered here. It appears in HistoryToolCallBubble once the
 // tool_result ChatMessage lands in the session store.
@@ -127,11 +223,14 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
   const [open, setOpen] = useState(false);
   const elapsed = activity.finishedAt != null ? activity.finishedAt - activity.startedAt : null;
 
+  // Awaiting confirmation gets its own dedicated inline bubble with action buttons
+  if (activity.status === 'awaiting_confirmation') {
+    return <ConfirmationInlineBubble activity={activity} />;
+  }
+
   const icon =
     activity.status === 'running' ? (
       <Loader2 size={12} className="text-sky-400 animate-spin shrink-0" />
-    ) : activity.status === 'awaiting_confirmation' ? (
-      <Clock size={12} className="text-warning animate-pulse shrink-0" />
     ) : activity.status === 'success' ? (
       <CheckCircle2 size={12} className="text-success shrink-0" />
     ) : (

@@ -48,6 +48,8 @@ export function App() {
   const openSettings = (tab?: string) => { setSettingsInitialTab(tab); setSettingsOpen(true); };
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
   const { sessions } = useSessionStore();
+  const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
+  const hasPendingConfirmation = Object.keys(pendingConfirmations).length > 0;
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
 
   // Initialize on app mount
@@ -166,7 +168,16 @@ export function App() {
                     }`}
                     onClick={() => setTalkTab(t.id)}
                   >
-                    {t.label}
+                    <span className="relative inline-flex items-center gap-1">
+                      {t.label}
+                      {t.id === 'agents' && hasPendingConfirmation && (
+                        <span
+                          className="inline-block w-1.5 h-1.5 rounded-full bg-warning animate-pulse"
+                          data-testid="active-tab-pending-dot"
+                          title="Awaiting confirmation"
+                        />
+                      )}
+                    </span>
                   </button>
                 ))}
               </div>
