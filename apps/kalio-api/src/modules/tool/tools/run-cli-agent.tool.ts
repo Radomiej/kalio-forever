@@ -73,7 +73,7 @@ export class RunCliAgentTool {
     }
 
     this.logger.log(
-      `[run_cli_agent] agentId=${agentId} workdir=${workdir} timeout=${timeoutMs}ms prompt=${prompt.slice(0, 80)}…`,
+      `[run_cli_agent] agentId=${agentId} workdir=${workdir} timeout=${timeoutMs}ms`,
     );
 
     // Wire up progress streaming if the calling context provided an emitter

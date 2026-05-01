@@ -107,6 +107,13 @@ export class CLIAgentService implements OnApplicationBootstrap {
     }
 
     const agentConfig = await this.config.getConfig(agentId);
+
+    if (!agentConfig.enabled) {
+      throw new Error(
+        `CLI agent "${agentId}" is disabled. Enable it in Settings → CLI Agents.`,
+      );
+    }
+
     const effectiveTimeout = Math.min(timeoutMs ?? agentConfig.timeoutMs, MAX_TIMEOUT_MS);
 
     const platform = process.platform;
@@ -116,7 +123,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
     const allArgs = [...wrapperArgs, ...promptArgs];
 
     this.logger.log(
-      `[${agentId}] spawn: ${executable} ${allArgs.slice(0, 4).join(' ')}… (timeout=${effectiveTimeout}ms, cwd=${workdir})`,
+      `[${agentId}] spawn: ${executable} (timeout=${effectiveTimeout}ms, cwd=${workdir})`,
     );
 
     const startedAt = Date.now();
@@ -169,12 +176,16 @@ export class CLIAgentService implements OnApplicationBootstrap {
         if (proc.exitCode === null) {
           proc.kill('SIGTERM');
         }
+        proc.stdout.off('data', onData);
+        proc.stderr.off('data', onData);
         proc.removeListener('close', closeHandler);
         reject(new Error(`CLI agent "${agentId}" timed out after ${effectiveTimeout}ms`));
       }, effectiveTimeout);
 
       proc.on('error', (err) => {
         clearTimeout(timer);
+        proc.stdout.off('data', onData);
+        proc.stderr.off('data', onData);
         proc.removeListener('close', closeHandler);
         this.logger.error(`[${agentId}] spawn error: ${err.message}`);
         reject(err);

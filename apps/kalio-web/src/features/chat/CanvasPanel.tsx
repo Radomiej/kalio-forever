@@ -1,10 +1,60 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Wrench, CheckCircle2, XCircle, Clock, ChevronDown, ChevronRight,
-  Loader2, BrainCircuit, ArrowLeftFromLine, ArrowRightToLine, Info,
+  Loader2, BrainCircuit, ArrowLeftFromLine, ArrowRightToLine, Info, Terminal,
 } from 'lucide-react';
 import { useAgentStore, type ToolActivity } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
+import { AGENT_LABELS } from './cli-agent-labels';
+
+/** Live terminal block rendered inside ToolCard while run_cli_agent is in progress. */
+function CLIAgentLiveSection({ callId, agentId }: { callId: string; agentId: string }) {
+  const output = useAgentStore((s) => s.cliAgentOutput[callId] ?? '');
+  const scrollRef = useRef<HTMLPreElement>(null);
+
+  // Auto-scroll to bottom as new chunks arrive — mirrors CanvasDrawer.streamingBuffer pattern
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [output]);
+
+  return (
+    <div>
+      <p className="text-base-content/40 uppercase tracking-wide text-[10px] mb-1 flex items-center gap-1">
+        <Terminal size={9} />
+        {AGENT_LABELS[agentId] ?? agentId}
+      </p>
+      <pre
+        ref={scrollRef}
+        className="text-[11px] text-success/80 bg-neutral/80 rounded px-2 py-1.5 max-h-60 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed"
+      >
+        {output || <span className="opacity-40 text-base-content">Waiting for output…</span>}
+      </pre>
+    </div>
+  );
+}
+
+/** Terminal-styled result block for a completed run_cli_agent call. */
+function CLIAgentResult({ data }: { data: unknown }) {
+  const d = data as Record<string, unknown>;
+  const output = typeof d?.['output'] === 'string' ? d['output'] : JSON.stringify(data, null, 2);
+  const exitCode = typeof d?.['exitCode'] === 'number' ? d['exitCode'] : null;
+  const success = exitCode === null || exitCode === 0;
+
+  return (
+    <div>
+      {exitCode !== null && (
+        <p className={`text-[10px] mb-1 font-mono ${success ? 'text-success' : 'text-error'}`}>
+          exit {exitCode}
+        </p>
+      )}
+      <pre className="text-[11px] text-base-content/70 bg-neutral/60 rounded px-2 py-1.5 max-h-60 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed">
+        {output}
+      </pre>
+    </div>
+  );
+}
 
 function StatusIcon({ status }: { status: ToolActivity['status'] }) {
   switch (status) {
@@ -22,7 +72,9 @@ function StatusIcon({ status }: { status: ToolActivity['status'] }) {
 }
 
 function ToolCard({ activity }: { activity: ToolActivity }) {
-  const [open, setOpen] = useState(false);
+  const isCliAgent = activity.toolName === 'run_cli_agent';
+  // Auto-expand CLI agent cards so streaming output is immediately visible
+  const [open, setOpen] = useState(isCliAgent);
   const duration =
     activity.finishedAt && activity.startedAt
       ? `${((activity.finishedAt - activity.startedAt) / 1000).toFixed(2)}s`
@@ -50,15 +102,26 @@ function ToolCard({ activity }: { activity: ToolActivity }) {
               {JSON.stringify(activity.args, null, 2)}
             </pre>
           </div>
+          {/* CLI agent live output while running */}
+          {isCliAgent && activity.status === 'running' && (
+            <CLIAgentLiveSection
+              callId={activity.callId}
+              agentId={typeof activity.args['agentId'] === 'string' ? activity.args['agentId'] : 'copilot'}
+            />
+          )}
           {/* Result */}
           {activity.result && (
             <div>
               <p className="text-base-content/40 uppercase tracking-wide text-[10px] mb-1">Result</p>
-              <pre className="text-[11px] text-base-content/70 overflow-x-auto whitespace-pre-wrap break-all">
-                {activity.result.status === 'success'
-                  ? JSON.stringify(activity.result.data, null, 2)
-                  : activity.result.errorMessage ?? activity.result.errorCode}
-              </pre>
+              {isCliAgent && activity.result.status === 'success' ? (
+                <CLIAgentResult data={activity.result.data} />
+              ) : (
+                <pre className="text-[11px] text-base-content/70 overflow-x-auto whitespace-pre-wrap break-all">
+                  {activity.result.status === 'success'
+                    ? JSON.stringify(activity.result.data, null, 2)
+                    : activity.result.errorMessage ?? activity.result.errorCode}
+                </pre>
+              )}
             </div>
           )}
         </div>

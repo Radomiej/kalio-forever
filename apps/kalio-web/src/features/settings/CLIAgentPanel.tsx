@@ -138,6 +138,22 @@ function AdapterCard({ info }: AdapterCardProps) {
             />
           </div>
 
+          <div className="form-control gap-1">
+            <label className="label-text text-xs text-base-content/60">Extra args (one per line)</label>
+            <textarea
+              className="textarea textarea-bordered textarea-xs font-mono text-xs"
+              rows={2}
+              placeholder="e.g. --no-auto-commit"
+              value={(merged.extraArgs ?? []).join('\n')}
+              onChange={(e) =>
+                setDraft((d: ConfigDraft) => ({
+                  ...d,
+                  extraArgs: e.target.value ? e.target.value.split('\n').filter(Boolean) : [],
+                }))
+              }
+            />
+          </div>
+
           <div className="flex items-center gap-2">
             <button
               className="btn btn-xs btn-primary"

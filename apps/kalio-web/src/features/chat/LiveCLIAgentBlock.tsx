@@ -1,11 +1,5 @@
 import { useAgentStore } from '../../store/agentStore';
-
-/** Maps adapter id → display name for the live header */
-const AGENT_LABELS: Record<string, string> = {
-  copilot: 'GitHub Copilot CLI',
-  gemini: 'Google Gemini CLI',
-  claude: 'Claude Code',
-};
+import { AGENT_LABELS } from './cli-agent-labels';
 
 interface Props {
   callId: string;

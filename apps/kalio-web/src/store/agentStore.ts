@@ -26,7 +26,8 @@ export interface LlmActivity {
 interface AgentState {
   isStreaming: boolean;
   streamingMessageId: string | undefined;
-  pendingConfirmation: ToolConfirmationRequest | null;
+  /** Pending tool confirmations keyed by sessionId — one per session at most */
+  pendingConfirmations: Record<string, ToolConfirmationRequest>;
   availableTools: ToolMeta[];
   tools: ToolMeta[];
   /** Tool calls active in the current turn, in order */
@@ -52,7 +53,7 @@ interface AgentState {
   activeAgentLoops: Record<string, { sessionId: string; turnId: string; startedAt: number }>;
 
   setStreaming: (streaming: boolean, messageId?: string) => void;
-  setPendingConfirmation: (req: ToolConfirmationRequest | null) => void;
+  setPendingConfirmation: (sessionId: string, req: ToolConfirmationRequest | null) => void;
   setAvailableTools: (tools: ToolMeta[]) => void;
   setTools: (tools: ToolMeta[]) => void;
   addToolActivity: (activity: ToolActivity) => void;
@@ -76,7 +77,7 @@ interface AgentState {
 export const useAgentStore = create<AgentState>((set) => ({
   isStreaming: false,
   streamingMessageId: undefined,
-  pendingConfirmation: null,
+  pendingConfirmations: {},
   availableTools: [],
   tools: [],
   toolActivities: [],
@@ -90,7 +91,15 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   setStreaming: (streaming, messageId = undefined) =>
     set({ isStreaming: streaming, streamingMessageId: messageId }),
-  setPendingConfirmation: (req) => set({ pendingConfirmation: req }),
+  setPendingConfirmation: (sessionId, req) =>
+    set((s) => {
+      if (req === null) {
+        const next = { ...s.pendingConfirmations };
+        delete next[sessionId];
+        return { pendingConfirmations: next };
+      }
+      return { pendingConfirmations: { ...s.pendingConfirmations, [sessionId]: req } };
+    }),
   setAvailableTools: (tools) => set({ availableTools: tools }),
   setTools: (tools) => set({ tools }),
 
@@ -98,14 +107,17 @@ export const useAgentStore = create<AgentState>((set) => ({
     set((s) => {
       // If the same callId already exists (e.g. added by onToolConfirmation before tool:start fires),
       // replace it instead of appending — prevents duplicate React keys.
+      // Auto-open the Canvas when a CLI agent starts so streaming is immediately visible.
+      const autoOpen = activity.toolName === 'run_cli_agent' ? { canvasOpen: true } : {};
       if (s.toolActivities.some((a) => a.callId === activity.callId)) {
         return {
+          ...autoOpen,
           toolActivities: s.toolActivities.map((a) =>
             a.callId === activity.callId ? { ...a, ...activity } : a,
           ),
         };
       }
-      return { toolActivities: [...s.toolActivities, activity] };
+      return { ...autoOpen, toolActivities: [...s.toolActivities, activity] };
     }),
 
   updateToolActivity: (callId, patch) =>
