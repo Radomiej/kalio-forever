@@ -9,15 +9,24 @@ function formatDuration(ms: number): string {
   return `${m}m ${s}s`;
 }
 
+/** Maps adapter id → display name */
+const AGENT_LABELS: Record<string, string> = {
+  copilot: 'GitHub Copilot CLI',
+  gemini: 'Google Gemini CLI',
+  claude: 'Claude Code',
+};
+
 interface Props {
   result: CLIAgentResult;
   isExpanded: boolean;
   onToggle: () => void;
+  agentId?: string;
 }
 
-export function TerminalOutputBlock({ result, isExpanded, onToggle }: Props) {
+export function TerminalOutputBlock({ result, isExpanded, onToggle, agentId }: Props) {
   const { output, exitCode, durationMs } = result;
   const success = exitCode === 0;
+  const label = AGENT_LABELS[agentId ?? result.agentId ?? 'copilot'] ?? (agentId ?? 'CLI Agent');
 
   return (
     <div className="mt-1.5 border border-base-300/40 rounded overflow-hidden">
@@ -26,10 +35,10 @@ export function TerminalOutputBlock({ result, isExpanded, onToggle }: Props) {
         className="w-full flex items-center gap-2 px-3 py-1.5 bg-base-300/30 hover:bg-base-300/50 transition-colors text-left"
         onClick={onToggle}
         aria-expanded={isExpanded}
-        aria-label="Toggle Copilot CLI output"
+        aria-label="Toggle CLI agent output"
       >
         <Terminal size={11} className="text-base-content/50 shrink-0" />
-        <span className="font-mono text-xs text-base-content/70 flex-1">Copilot CLI</span>
+        <span className="font-mono text-xs text-base-content/70 flex-1">{label}</span>
         {success ? (
           <CheckCircle2 size={11} className="text-success shrink-0" />
         ) : (

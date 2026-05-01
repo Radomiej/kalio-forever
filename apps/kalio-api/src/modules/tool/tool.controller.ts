@@ -1,14 +1,10 @@
 import { Body, Controller, Get, NotFoundException, OnModuleInit, Optional, Param, Patch } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { ToolMeta } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { toolOverrides } from '../../database/schema';
 import { ToolRegistryService } from './tool-registry.service';
 import { MCPService } from '../mcp/mcp.service';
-
-const execFileAsync = promisify(execFile);
 
 @Controller('tools')
 export class ToolController implements OnModuleInit {
@@ -23,16 +19,6 @@ export class ToolController implements OnModuleInit {
     const rows = await this.drizzle.db.select().from(toolOverrides);
     for (const row of rows) {
       this.registry.setOverride(row.toolName, row.requiresConfirmation);
-    }
-  }
-
-  @Get('cli-agent/probe')
-  async probeCliAgent(): Promise<{ available: boolean; version: string | null }> {
-    try {
-      const { stdout } = await execFileAsync('copilot', ['--version'], { timeout: 5000 });
-      return { available: true, version: stdout.trim() || null };
-    } catch {
-      return { available: false, version: null };
     }
   }
 

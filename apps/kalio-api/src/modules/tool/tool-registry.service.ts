@@ -5,6 +5,7 @@ import { TOOL_METADATA, type ToolOptions } from '../../common/decorators/tool.de
 import { VFSWriteTool } from './tools/vfs-write.tool';
 import { VFSReadTool } from './tools/vfs-read.tool';
 import { VFSListTool } from './tools/vfs-list.tool';
+import { VFSGrepSearchTool, VFSFileSearchTool } from './tools/vfs-search.tools';
 import { SubagentTool } from './tools/subagent.tool';
 import { FsReadTool } from './tools/fs-read.tool';
 import { FsListTool } from './tools/fs-list.tool';
@@ -17,6 +18,7 @@ import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from
 import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
+import { RunCliAgentTool } from './tools/run-cli-agent.tool';
 
 /** Minimal registry entry shape — structurally compatible with chat module's ToolRegistryEntry. */
 export interface ToolEntry {
@@ -39,6 +41,8 @@ export class ToolRegistryService {
     private readonly vfsWrite: VFSWriteTool,
     private readonly vfsRead: VFSReadTool,
     private readonly vfsList: VFSListTool,
+    private readonly vfsGrepSearch: VFSGrepSearchTool,
+    private readonly vfsFileSearch: VFSFileSearchTool,
     private readonly subagent: SubagentTool,
     private readonly fsRead: FsReadTool,
     private readonly fsList: FsListTool,
@@ -63,9 +67,10 @@ export class ToolRegistryService {
     private readonly webSearch: WebSearchTool,
     private readonly listTools: ListToolsTool,
     private readonly getToolDetails: GetToolDetailsTool,
+    private readonly runCliAgent: RunCliAgentTool,
   ) {
     const all: object[] = [
-      vfsWrite, vfsRead, vfsList, subagent,
+      vfsWrite, vfsRead, vfsList, vfsGrepSearch, vfsFileSearch, subagent,
       fsRead, fsList, fsWrite,
       kvWrite, kvRead, kvList, kvDelete,
       grepSearch, fileSearch,
@@ -74,6 +79,7 @@ export class ToolRegistryService {
       memoryIngest, memorySearch, memoryIngestConversation,
       webSearch,
       listTools, getToolDetails,
+      runCliAgent,
     ];
     this.entries = all.map(t => this.toEntry(t));
   }

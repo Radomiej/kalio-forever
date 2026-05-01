@@ -1,19 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RunCliAgentTool } from './run-cli-agent.tool';
 import type { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
+import type { CLIAgentService } from '../../cli-agent/cli-agent.service';
 import type { ToolCallRequest } from '@kalio/types';
-
-// We mock node:child_process at the module level
-vi.mock('node:child_process', () => ({
-  execFile: vi.fn(),
-}));
-
-vi.mock('node:util', () => ({
-  promisify: (fn: unknown) => fn,
-}));
-
-import { execFile } from 'node:child_process';
-const execFileMock = execFile as unknown as ReturnType<typeof vi.fn>;
 
 function makeRequest(args: Record<string, unknown>): ToolCallRequest {
   return { callId: 'call-cli', sessionId: 'sess-1', toolName: 'run_cli_agent', args };
@@ -23,81 +12,91 @@ function makeAllowedPaths(isAllowed: boolean): AllowedPathsService {
   return { isAllowed: vi.fn().mockResolvedValue(isAllowed) } as unknown as AllowedPathsService;
 }
 
+function makeCLIAgentService(result?: Partial<{ output: string; exitCode: number; durationMs: number; agentId: string }>): CLIAgentService {
+  const defaults = { output: '', exitCode: 0, durationMs: 100, agentId: 'copilot' };
+  return {
+    run: vi.fn().mockResolvedValue({ ...defaults, ...result }),
+  } as unknown as CLIAgentService;
+}
+
 describe('RunCliAgentTool', () => {
   let tool: RunCliAgentTool;
   let allowedPaths: AllowedPathsService;
+  let cliAgent: CLIAgentService;
 
   beforeEach(() => {
     vi.clearAllMocks();
     allowedPaths = makeAllowedPaths(true);
-    tool = new RunCliAgentTool(allowedPaths);
+    cliAgent = makeCLIAgentService();
+    tool = new RunCliAgentTool(allowedPaths, cliAgent);
   });
 
   it('throws if workdir is not in AllowedPaths', async () => {
     allowedPaths = makeAllowedPaths(false);
-    tool = new RunCliAgentTool(allowedPaths);
+    tool = new RunCliAgentTool(allowedPaths, cliAgent);
 
     await expect(
       tool.execute(makeRequest({ prompt: 'do something', workdir: '/not/allowed' })),
     ).rejects.toThrow('ACCESS_DENIED');
   });
 
-  it('calls copilot with correct arguments', async () => {
-    execFileMock.mockResolvedValue({ stdout: 'done', stderr: '' });
+  it('defaults agentId to "copilot" when not provided', async () => {
+    await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app' }));
 
-    await tool.execute(makeRequest({ prompt: 'add tests', workdir: '/projects/myapp' }));
-
-    expect(execFileMock).toHaveBeenCalledWith(
+    expect(cliAgent.run).toHaveBeenCalledWith(
       'copilot',
-      ['-p', 'add tests', '--allow-all', '--add-dir', '/projects/myapp', '--silent', '--output-format', 'text'],
-      expect.objectContaining({ cwd: '/projects/myapp' }),
+      'task',
+      '/projects/app',
+      'call-cli',
+      'sess-1',
+      undefined,
+      600_000,
     );
   });
 
-  it('returns CLIAgentResult with exitCode=0 on success', async () => {
-    execFileMock.mockResolvedValue({ stdout: 'Files updated successfully.', stderr: '' });
+  it('passes explicit agentId through to CLIAgentService', async () => {
+    await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', agentId: 'gemini' }));
+
+    expect(cliAgent.run).toHaveBeenCalledWith(
+      'gemini',
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      expect.any(Number),
+    );
+  });
+
+  it('returns CLIAgentResult from CLIAgentService unchanged', async () => {
+    cliAgent = makeCLIAgentService({ output: 'Files updated.', exitCode: 0, durationMs: 1234, agentId: 'copilot' });
+    tool = new RunCliAgentTool(allowedPaths, cliAgent);
 
     const result = await tool.execute(makeRequest({ prompt: 'do task', workdir: '/projects/app' }));
 
     expect(result.exitCode).toBe(0);
-    expect(result.output).toBe('Files updated successfully.');
-    expect(typeof result.durationMs).toBe('number');
+    expect(result.output).toBe('Files updated.');
+    expect(result.durationMs).toBe(1234);
+    expect(result.agentId).toBe('copilot');
   });
 
-  it('returns CLIAgentResult with non-zero exitCode on failure (does not throw)', async () => {
-    const err = Object.assign(new Error('exit 1'), {
-      code: 1,
-      stdout: 'partial output',
-      stderr: 'error detail',
-      killed: false,
-    });
-    execFileMock.mockRejectedValue(err);
-
-    const result = await tool.execute(makeRequest({ prompt: 'bad task', workdir: '/projects/app' }));
-
-    expect(result.exitCode).toBe(1);
-    expect(result.output).toContain('partial output');
-    expect(typeof result.durationMs).toBe('number');
-  });
-
-  it('throws on timeout (does not return a result)', async () => {
-    const err = Object.assign(new Error('killed'), { killed: true, code: null, stdout: '', stderr: '' });
-    execFileMock.mockRejectedValue(err);
-
-    await expect(
-      tool.execute(makeRequest({ prompt: 'slow task', workdir: '/projects/app' })),
-    ).rejects.toThrow(/timed out/i);
-  });
-
-  it('caps timeoutMs at 1200000', async () => {
-    execFileMock.mockResolvedValue({ stdout: '', stderr: '' });
-
+  it('caps timeoutMs at 1 200 000 before passing to CLIAgentService', async () => {
     await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', timeoutMs: 9_999_999 }));
 
-    expect(execFileMock).toHaveBeenCalledWith(
-      'copilot',
-      expect.any(Array),
-      expect.objectContaining({ timeout: 1_200_000 }),
-    );
+    const call = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
+    expect(call[6]).toBe(1_200_000);
+  });
+
+  it('passes _emit from ToolCallRequest as progress emitter', async () => {
+    const emitFn = vi.fn();
+    const req: ToolCallRequest = { ...makeRequest({ prompt: 'task', workdir: '/projects/app' }), _emit: emitFn };
+
+    await tool.execute(req);
+
+    // The progress wrapper passed to cliAgent.run should call _emit
+    const progressFn = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0][5] as ((event: string, data: unknown) => void) | undefined;
+    expect(progressFn).toBeDefined();
+    progressFn!('cli_agent:progress', { callId: 'c', sessionId: 's', agentId: 'copilot', chunk: 'x' });
+    expect(emitFn).toHaveBeenCalledWith('cli_agent:progress', expect.objectContaining({ chunk: 'x' }));
   });
 });

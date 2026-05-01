@@ -44,6 +44,8 @@ export function ChatInterface() {
     registerCallId,
     addActiveAgentLoop,
     removeActiveAgentLoop,
+    appendCLIAgentChunk,
+    clearCLIAgentOutput,
   } = useAgentStore();
   const [error, setError] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -224,6 +226,8 @@ export function ChatInterface() {
         finishedAt: Date.now(),
         result,
       });
+      // Clear accumulated live output so the cliAgentOutput map doesn't grow unbounded
+      clearCLIAgentOutput(result.callId);
       // Refresh VFS file list after a successful vfs_write
       if (result.status === 'success') {
         const toolName = useAgentStore.getState().toolActivities.find((a) => a.callId === result.callId)?.toolName;
@@ -248,6 +252,10 @@ export function ChatInterface() {
       if (result.status === 'success') {
         setStreaming(true);
       }
+    });
+
+    const offCLIAgentProgress = eventBus.onCLIAgentProgress((payload) => {
+      appendCLIAgentChunk(payload.callId, payload.chunk);
     });
 
     const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
@@ -281,9 +289,10 @@ export function ChatInterface() {
       offAgentDone();
       offContext();
       offToolResult();
+      offCLIAgentProgress();
       offRaAppNative();
     };
-  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop]);
+  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput]);
 
   // Clear stale retry content when the user switches sessions.
   // Without this, clicking Retry after switching sessions would send the previous

@@ -6,18 +6,32 @@ import { TerminalService } from '../terminal.service';
 @Injectable()
 @Tool({
   name: 'terminal_spawn',
-  description: 'Spawn a long-running terminal process in the background. Returns a session ID to track output.',
+  description:
+    'Spawn a long-running terminal process in the background. ' +
+    'Returns a session ID — use terminal_output to read its stdout/stderr and terminal_kill to stop it. ' +
+    'IMPORTANT: cwd must be an absolute path inside an AllowedPaths-registered directory. ' +
+    'Split command and args: command="node", args=["server.js"] — NOT command="node server.js".',
   parameters: {
     type: 'object',
-    required: ['command'],
+    required: ['command', 'cwd'],
     properties: {
-      command: { type: 'string', description: 'Command to run (e.g. "node", "python").' },
+      command: {
+        type: 'string',
+        description:
+          'Executable name only, no arguments (e.g. "node", "python", "npm"). ' +
+          'Arguments go in the args array.',
+      },
       args: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Command arguments.',
+        description: 'Arguments to pass to the command (e.g. ["server.js"] or ["run", "dev"]).',
       },
-      cwd: { type: 'string', description: 'Working directory (optional).' },
+      cwd: {
+        type: 'string',
+        description:
+          'Absolute path to the working directory. Must be inside an AllowedPaths root. ' +
+          'Use fs_list first to confirm the path exists, or check allowed_paths.',
+      },
     },
   },
   requiresConfirmation: true,
@@ -29,6 +43,9 @@ export class TerminalSpawnTool {
     const command = request.args['command'] as string;
     const args = (request.args['args'] as string[]) ?? [];
     const cwd = request.args['cwd'] as string | undefined;
+    if (!cwd) {
+      throw new Error('MISSING_CWD: terminal_spawn requires a cwd inside an AllowedPaths root');
+    }
     const session = await this.terminals.spawn(command, args, cwd);
     return { id: session.id, pid: session.pid, command: session.command };
   }

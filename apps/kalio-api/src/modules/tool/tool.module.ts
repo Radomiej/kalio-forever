@@ -26,10 +26,11 @@ import { MemoryModule } from '../memory/memory.module';
 import { AllowedPathsModule } from '../allowed-paths/allowed-paths.module';
 import { MCPModule } from '../mcp/mcp.module';
 import { SearchModule } from '../search/search.module';
+import { CLIAgentModule } from '../cli-agent/cli-agent.module';
 import { ToolRegistryService } from './tool-registry.service';
 
 @Module({
-  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule],
+  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule],
   controllers: [ToolController],
   providers: [
     VFSWriteTool, VFSReadTool, VFSListTool, VFSGrepSearchTool, VFSFileSearchTool, SubagentTool,

@@ -18,6 +18,7 @@ export type ContextHandler = (payload: SocketEvents['chat:context']) => void;
 export type AgentStartHandler = (payload: SocketEvents['agent:start']) => void;
 export type AgentDoneHandler = (payload: SocketEvents['agent:done']) => void;
 export type RaAppNativeResultHandler = (payload: SocketEvents['raapp:native_result']) => void;
+export type CLIAgentProgressHandler = (payload: SocketEvents['cli_agent:progress']) => void;
 
 export interface KalioSDKOptions {
   wsUrl: string;
@@ -217,5 +218,13 @@ export class KalioSDK {
     };
     this.socket.on('agent:done', wrappedHandler);
     return () => this.socket.off('agent:done', wrappedHandler);
+  }
+
+  onCLIAgentProgress(handler: CLIAgentProgressHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['cli_agent:progress']) => {
+      handler(payload);
+    };
+    this.socket.on('cli_agent:progress', wrappedHandler);
+    return () => this.socket.off('cli_agent:progress', wrappedHandler);
   }
 }

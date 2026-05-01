@@ -19,6 +19,7 @@ import { useAgentStore } from '../../store/agentStore';
 import type { RAAppBlock, RaAppPendingApproval, CLIAgentResult } from '@kalio/types';
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
 import { TerminalOutputBlock } from './TerminalOutputBlock';
+import { LiveCLIAgentBlock } from './LiveCLIAgentBlock';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -55,7 +56,12 @@ function extractCLIAgentResult(data: unknown): CLIAgentResult | null {
     typeof d['exitCode'] === 'number' &&
     typeof d['durationMs'] === 'number'
   ) {
-    return { output: d['output'], exitCode: d['exitCode'], durationMs: d['durationMs'] };
+    return {
+      output: d['output'],
+      exitCode: d['exitCode'],
+      durationMs: d['durationMs'],
+      agentId: typeof d['agentId'] === 'string' ? d['agentId'] : 'copilot',
+    };
   }
   return null;
 }
@@ -134,7 +140,8 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
 
   const hasArgs = Object.keys(activity.args).length > 0;
   const hasNonRaappResult = activity.result?.data != null && extractRAAppBlock(activity.result.data) == null;
-  const expandable = hasArgs || hasNonRaappResult;
+  const isRunningCliAgent = activity.toolName === 'run_cli_agent' && activity.status === 'running';
+  const expandable = hasArgs || hasNonRaappResult || isRunningCliAgent;
 
   return (
     <Chip
@@ -145,6 +152,12 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
       open={open}
       onToggle={() => setOpen((v) => !v)}
     >
+      {isRunningCliAgent && (
+        <LiveCLIAgentBlock
+          callId={activity.callId}
+          agentId={(activity.args['agentId'] as string | undefined) ?? 'copilot'}
+        />
+      )}
       {hasArgs && (
         <div className="font-mono bg-base-200/60 rounded px-2 py-1 text-xs text-base-content/50">
           {Object.entries(activity.args).map(([k, v]) => (
@@ -246,6 +259,7 @@ export function HistoryToolCallBubble({
             result={cliResult}
             isExpanded={open}
             onToggle={() => setOpen((v) => !v)}
+            agentId={args?.['agentId'] as string | undefined}
           />
         )}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}

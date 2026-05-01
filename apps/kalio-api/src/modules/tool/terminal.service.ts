@@ -35,9 +35,11 @@ export class TerminalService implements OnModuleDestroy {
       throw new ForbiddenException(`ACCESS_DENIED: cwd is outside allowed roots: ${safeCwd}`);
     }
 
+    // On Windows most CLI tools are .cmd shims and won't resolve without a shell.
+    // shell:true is acceptable here — terminal_spawn already requires user confirmation.
     const proc = spawn(command, args, {
       cwd: safeCwd,
-      shell: false,
+      shell: process.platform === 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -112,15 +114,28 @@ export class TerminalService implements OnModuleDestroy {
     }
 
     return new Promise((resolve, reject) => {
+      // Attach listener FIRST, then check status — avoids a race where the process
+      // exits between the status check above and the listener registration.
+      const closeHandler = () => {
+        clearTimeout(timer);
+        s.proc.off('close', closeHandler);
+        resolve({ output: s.meta.output, exitCode: s.meta.exitCode ?? 0 });
+      };
+
+      s.proc.on('close', closeHandler);
+
+      // Re-check after attaching; if it already exited we'd miss the event
+      if (s.meta.status !== 'running') {
+        s.proc.off('close', closeHandler);
+        resolve({ output: s.meta.output, exitCode: s.meta.exitCode ?? 0 });
+        return;
+      }
+
       const timer = setTimeout(() => {
+        s.proc.off('close', closeHandler);
         s.proc.kill('SIGTERM');
         reject(new Error(`CLI agent timed out after ${timeoutMs}ms`));
       }, timeoutMs);
-
-      s.proc.on('close', () => {
-        clearTimeout(timer);
-        resolve({ output: s.meta.output, exitCode: s.meta.exitCode ?? 0 });
-      });
     });
   }
 

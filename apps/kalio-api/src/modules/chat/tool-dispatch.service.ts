@@ -100,6 +100,8 @@ export class ToolDispatchService {
         args,
         callId,
         availableTools: toolMetas,
+        // Pass the socket emitter so streaming tools can push progress events
+        _emit: ctx.emit as ToolCallRequest['_emit'],
       };
       const data = await entry.execute(req);
       return { callId, status: 'success', data };

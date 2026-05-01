@@ -67,6 +67,10 @@ interface AgentState {
   toggleCanvas: () => void;
   addActiveAgentLoop: (sessionId: string, turnId: string) => void;
   removeActiveAgentLoop: (sessionId: string) => void;
+  /** Accumulated CLI agent output per callId (populated by cli_agent:progress) */
+  cliAgentOutput: Record<string, string>;
+  appendCLIAgentChunk: (callId: string, chunk: string) => void;
+  clearCLIAgentOutput: (callId: string) => void;
 }
 
 export const useAgentStore = create<AgentState>((set) => ({
@@ -82,6 +86,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   callIdToName: {},
   canvasOpen: false,
   activeAgentLoops: {},
+  cliAgentOutput: {},
 
   setStreaming: (streaming, messageId = undefined) =>
     set({ isStreaming: streaming, streamingMessageId: messageId }),
@@ -145,4 +150,16 @@ export const useAgentStore = create<AgentState>((set) => ({
       const { [sessionId]: _removed, ...rest } = s.activeAgentLoops;
       return { activeAgentLoops: rest };
     }),
-}));
+  appendCLIAgentChunk: (callId, chunk) =>
+    set((s) => ({
+      cliAgentOutput: {
+        ...s.cliAgentOutput,
+        [callId]: (s.cliAgentOutput[callId] ?? '') + chunk,
+      },
+    })),
+
+  clearCLIAgentOutput: (callId) =>
+    set((s) => {
+      const { [callId]: _removed, ...rest } = s.cliAgentOutput;
+      return { cliAgentOutput: rest };
+    }),}));

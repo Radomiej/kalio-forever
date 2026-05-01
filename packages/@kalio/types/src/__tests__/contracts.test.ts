@@ -71,6 +71,7 @@ describe('@kalio/types — P0-T01 contract shape', () => {
       systemPrompt: 'You are helpful.',
       model: 'gpt-4o-mini',
       skills: ['vfs_write', 'web_search'],
+      mcpPolicy: 'allow_all',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };

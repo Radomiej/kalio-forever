@@ -144,6 +144,13 @@ export interface ToolCallRequest {
   args: Record<string, unknown>;
   callId: string;             // matches LLMToolCall.id
   availableTools?: ToolMeta[]; // persona-filtered set visible to the agent
+  /**
+   * Backend-only: typed emitter scoped to the originating socket client.
+   * Set by ToolDispatchService from StreamContext. Never serialized to wire.
+   * Tools that need real-time streaming (e.g. run_cli_agent) use this to push
+   * progress events before the final tool:result arrives.
+   */
+  readonly _emit?: <K extends keyof SocketEvents>(event: K, data: SocketEvents[K]) => void;
 }
 
 export interface ToolResult {
@@ -439,14 +446,41 @@ export interface SocketEvents {
   'session:created': ChatSession;
   'session:updated': Pick<ChatSession, 'id' | 'title' | 'updatedAt'>;
 
+  // CLI Agent streaming — server → client
+  'cli_agent:progress': { callId: ID; sessionId: ID; agentId: string; chunk: string };
+
 }
 
 // ─── CLI Agent ────────────────────────────────────────────────────────────────
-/** Result returned by the run_cli_agent tool after a Copilot CLI run completes. */
+/** Result returned by the run_cli_agent tool after a CLI agent run completes. */
 export interface CLIAgentResult {
-  output: string;       // combined stdout+stderr from the CLI process
+  output: string;       // combined stdout+stderr from the CLI process (possibly compressed)
   exitCode: number;     // 0 = success, non-zero = failure
   durationMs: number;   // wall-clock time of the CLI run
+  agentId: string;      // which adapter was used: 'copilot' | 'gemini' | 'claude' | …
+}
+
+/** Probe/availability info for a single CLI agent adapter. */
+export interface CLIAgentAdapterInfo {
+  id: string;
+  displayName: string;
+  installUrl: string;
+  available: boolean;
+  version: string | null;
+}
+
+/** Per-adapter configuration stored at ~/.kalio/cli-agents/{id}.json */
+export interface CLIAgentConfig {
+  /** Whether this agent is enabled. Default: true. */
+  enabled: boolean;
+  /** Override the executable path/name. Empty string = use adapter default. */
+  cliPath: string;
+  /** Max execution time in ms. Default: 600 000 (10 min). */
+  timeoutMs: number;
+  /** Max output chars kept for LLM history. Default: 16 000. */
+  maxOutputChars: number;
+  /** Extra CLI args appended after the adapter's default args. */
+  extraArgs: string[];
 }
 
 // ─── Memory (Hybrid: Vector + BM25) ─────────────────────────────────────────

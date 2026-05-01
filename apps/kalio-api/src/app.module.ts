@@ -14,6 +14,7 @@ import { MemoryModule } from './modules/memory/memory.module';
 import { AllowedPathsModule } from './modules/allowed-paths/allowed-paths.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { SearchModule } from './modules/search/search.module';
+import { CLIAgentModule } from './modules/cli-agent/cli-agent.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { SearchModule } from './modules/search/search.module';
     MemoryModule,
     ChatModule,
     SearchModule,
+    CLIAgentModule,
   ],
 })
 export class AppModule {}
