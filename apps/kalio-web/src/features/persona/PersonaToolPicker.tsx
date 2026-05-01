@@ -10,6 +10,7 @@ const GROUP_LABELS: Record<string, string> = {
   kv: 'KV Store',
   raapp: 'RA-Apps',
   agent: 'Agent',
+  websearch: 'Web Search',
   other: 'Other',
 };
 
@@ -20,7 +21,8 @@ function deriveGroup(name: string): string {
   if (name.startsWith('terminal_')) return 'terminal';
   if (name.startsWith('kv_')) return 'kv';
   if (name.startsWith('raapp_') || name === 'run_raapp' || name === 'list_raapps') return 'raapp';
-  if (name === 'run_subagent') return 'agent';
+  if (name === 'run_subagent' || name === 'run_cli_agent') return 'agent';
+  if (name === 'web_search') return 'websearch';
   return 'other';
 }
 
