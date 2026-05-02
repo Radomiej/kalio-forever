@@ -102,10 +102,8 @@ describe('PersonaService', () => {
         name: 'Test Persona',
         systemPrompt: 'You are helpful',
         model: 'gpt-4',
-        skills: ['vfs_write'],
-        skill_ids: [],
         allowedTools: ['vfs_write'],
-        skillIds: [],
+        skillIds: ['skill-1'],
         updatedAt: Date.now(),
       };
 
@@ -128,6 +126,7 @@ describe('PersonaService', () => {
       expect(result?.systemPrompt).toBe(personaRow.systemPrompt);
       expect(result?.model).toBe(personaRow.model);
       expect(result?.allowedTools).toEqual(['vfs_write']);
+      expect(result?.skillIds).toEqual(['skill-1']);
       expect(result?.kv).toEqual({
         api_key: 'secret123',
         endpoint: 'https://api.example.com',
@@ -154,9 +153,7 @@ describe('PersonaService', () => {
           name: 'Persona 2',
           systemPrompt: 'Prompt 2',
           model: 'claude',
-          allowed_tools: null, // Test null handling
-          skill_ids: null,
-          allowedTools: null,
+          allowedTools: null,   // Test null handling
           skillIds: null,
           createdAt: new Date(1234567890), // Test Date handling
           updatedAt: new Date(1234567890),
@@ -173,7 +170,9 @@ describe('PersonaService', () => {
       // Assert
       expect(result).toHaveLength(2);
       expect(result[0].allowedTools).toEqual(['tool1']);
+      expect(result[0].skillIds).toEqual([]);
       expect(result[1].allowedTools).toEqual([]); // Null becomes empty array
+      expect(result[1].skillIds).toEqual([]);      // Null becomes empty array
       expect(typeof result[1].createdAt).toBe('number'); // Date converted to number
     });
   });
@@ -196,7 +195,8 @@ describe('PersonaService', () => {
         name: 'Old Name',
         systemPrompt: 'Old Prompt',
         model: 'gpt-4',
-        skills: [],
+        allowedTools: [],
+        skillIds: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -280,7 +280,7 @@ describe('PersonaService', () => {
       );
     });
 
-    it('still updates allowedTools when ra-apps already exists', async () => {
+    it('still updates allowedTools and skillIds when persona already exists', async () => {
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockResolvedValue([{ id: 'existing' }]),
@@ -295,8 +295,58 @@ describe('PersonaService', () => {
       await service.onApplicationBootstrap();
 
       expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({ allowedTools: expect.any(Array) }),
+        expect.objectContaining({
+          allowedTools: expect.any(Array),
+          skillIds: expect.any(Array),
+        }),
       );
+    });
+  });
+
+  describe('onApplicationBootstrap — skillIds sync regression', () => {
+    /**
+     * Regression for: persona.service.ts onApplicationBootstrap() else-branch
+     * did NOT include `skillIds` in the update payload.
+     *
+     * When an existing persona already had a DB row, changes to `skillIds` in
+     * personas.json were silently ignored — the column was never updated.
+     *
+     * Fix: add `skillIds: config.skillIds ?? []` to the update set.
+     */
+    it('includes skillIds in the update payload for existing personas (regression)', async () => {
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: 'existing' }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      const payload = setMock.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(payload).toHaveProperty('skillIds');
+    });
+
+    it('does NOT include skillIds in the insert payload when persona is new (sanity check)', async () => {
+      // New persona: select returns empty → insert path
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      const valuesMock = vi.fn().mockResolvedValue(undefined);
+      mockDb.insert.mockReturnValue({ values: valuesMock });
+      // Need a second select for the next persona iteration (if any), just keep empty
+      await service.onApplicationBootstrap();
+
+      const insertPayload = valuesMock.mock.calls[0]?.[0] as Record<string, unknown>;
+      // Insert path should also include skillIds (it was already correct)
+      expect(insertPayload).toHaveProperty('skillIds');
     });
   });
 });

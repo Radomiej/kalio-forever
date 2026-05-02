@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import type { Skill, CreateSkillDto, UpdateSkillDto } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { skills } from '../../database/schema';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 
 @Injectable()
 export class SkillsService {
@@ -16,9 +16,8 @@ export class SkillsService {
 
   async findByIds(ids: string[]): Promise<Skill[]> {
     if (ids.length === 0) return [];
-    const all = await this.findAll();
-    const idSet = new Set(ids);
-    return all.filter((s) => idSet.has(s.id));
+    const rows = await this.drizzle.db.select().from(skills).where(inArray(skills.id, ids));
+    return rows.map(this.toSkill);
   }
 
   async findOne(id: string): Promise<Skill | null> {

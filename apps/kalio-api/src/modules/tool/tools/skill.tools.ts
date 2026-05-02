@@ -51,11 +51,11 @@ export class SkillReadTool {
   async execute(request: ToolCallRequest): Promise<{ id: string; name: string; description: string; prompt: string; source: string }> {
     const id = request.args['id'] as string | undefined;
     const name = request.args['name'] as string | undefined;
-    const all = await this.skillsService.findAll();
-    let skill = id ? all.find((s) => s.id === id) : undefined;
+    let skill = id ? await this.skillsService.findOne(id) : undefined;
     if (!skill && name) {
       const lower = name.toLowerCase();
-      skill = all.find((s) => s.name.toLowerCase() === lower);
+      const all = await this.skillsService.findAll();
+      skill = all.find((s) => s.name.toLowerCase() === lower) ?? null;
     }
     if (!skill) {
       throw new Error(`Skill not found: ${id ?? name ?? '(no id or name provided)'}`);

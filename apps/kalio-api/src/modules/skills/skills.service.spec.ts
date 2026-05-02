@@ -145,3 +145,61 @@ describe('SkillsService.remove()', () => {
     await expect(svc.remove('skill-id-1')).resolves.not.toThrow();
   });
 });
+
+// ─── findByIds() — regression: must use SQL inArray, NOT load-all + filter ───
+
+describe('SkillsService.findByIds()', () => {
+  it('returns empty array without hitting the DB when ids is empty', async () => {
+    const drizzle = makeDrizzle();
+    const svc = new SkillsService(drizzle);
+
+    const result = await svc.findByIds([]);
+
+    expect(result).toEqual([]);
+    expect(drizzle.db.select).not.toHaveBeenCalled();
+  });
+
+  it('queries the DB with a WHERE clause (not findAll) when ids are provided', async () => {
+    const drizzle = makeDrizzle();
+    const whereMock = vi.fn().mockResolvedValue([makeRow({ id: 'a' }), makeRow({ id: 'b' })]);
+    (drizzle.db.select as ReturnType<typeof vi.fn>).mockReturnValue({
+      from: vi.fn().mockReturnValue({ where: whereMock }),
+    });
+    const svc = new SkillsService(drizzle);
+
+    const result = await svc.findByIds(['a', 'b']);
+
+    // DB must have been queried exactly once with a WHERE filter
+    expect(drizzle.db.select).toHaveBeenCalledTimes(1);
+    expect(whereMock).toHaveBeenCalledTimes(1);
+    expect(result).toHaveLength(2);
+  });
+
+  it('does NOT call findAll (old load-all-then-filter approach)', async () => {
+    const drizzle = makeDrizzle();
+    (drizzle.db.select as ReturnType<typeof vi.fn>).mockReturnValue({
+      from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([makeRow()]) }),
+    });
+    const svc = new SkillsService(drizzle);
+    const findAllSpy = vi.spyOn(svc, 'findAll');
+
+    await svc.findByIds(['skill-id-1']);
+
+    // findAll must NOT be called — that was the old inefficient path
+    expect(findAllSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns mapped Skill objects (not raw DB rows)', async () => {
+    const drizzle = makeDrizzle();
+    (drizzle.db.select as ReturnType<typeof vi.fn>).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([makeRow({ id: 'x', name: 'Expert', prompt: 'Be expert' })]),
+      }),
+    });
+    const svc = new SkillsService(drizzle);
+
+    const result = await svc.findByIds(['x']);
+
+    expect(result[0]).toMatchObject({ id: 'x', name: 'Expert', prompt: 'Be expert' });
+  });
+});

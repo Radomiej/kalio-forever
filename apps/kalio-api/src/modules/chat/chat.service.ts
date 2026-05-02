@@ -303,14 +303,14 @@ export class ChatService {
     }
   }
 
-  private filterTools(tools: ToolMeta[], availableSkills?: string[], mcpPolicy: import('@kalio/types').MCPPolicy = 'allow_all'): ToolMeta[] {
+  private filterTools(tools: ToolMeta[], allowedTools?: string[], mcpPolicy: import('@kalio/types').MCPPolicy = 'allow_all'): ToolMeta[] {
     const nativeTools = tools.filter(t => !t.name.startsWith('mcp_'));
     const mcpTools = tools.filter(t => t.name.startsWith('mcp_'));
 
-    // Native tools: empty skills = all allowed; otherwise filter by name list
-    const filteredNative = !availableSkills || availableSkills.length === 0
+    // Native tools: empty allowedTools = all allowed; otherwise filter by name list
+    const filteredNative = !allowedTools || allowedTools.length === 0
       ? nativeTools
-      : nativeTools.filter(t => availableSkills.includes(t.name));
+      : nativeTools.filter(t => allowedTools.includes(t.name));
 
     // MCP tools: controlled by policy
     let filteredMcp: ToolMeta[];
@@ -319,9 +319,9 @@ export class ChatService {
     } else if (mcpPolicy === 'deny_all') {
       filteredMcp = [];
     } else {
-      // allow_list: specific mcp_* names stored in skills array
-      const skillSet = new Set(availableSkills ?? []);
-      filteredMcp = mcpTools.filter(t => skillSet.has(t.name));
+      // allow_list: specific mcp_* names stored in allowedTools array
+      const toolSet = new Set(allowedTools ?? []);
+      filteredMcp = mcpTools.filter(t => toolSet.has(t.name));
     }
 
     return [...filteredNative, ...filteredMcp];

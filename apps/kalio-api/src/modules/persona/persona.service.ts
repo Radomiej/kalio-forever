@@ -35,6 +35,7 @@ export class PersonaService implements OnApplicationBootstrap {
       } else {
         await this.drizzle.db.update(personas).set({
           allowedTools: config.allowedTools,
+          skillIds: config.skillIds ?? [],
           updatedAt: now,
         }).where(eq(personas.id, id));
         this.logger.log(`Updated ${id} persona`);
