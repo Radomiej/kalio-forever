@@ -70,6 +70,8 @@ const setContext = vi.fn();
 const registerCallId = vi.fn();
 const addActiveAgentLoop = vi.fn();
 const removeActiveAgentLoop = vi.fn();
+const appendCLIAgentChunk = vi.fn();
+const clearCLIAgentOutput = vi.fn();
 
 const agentStoreState = {
   isStreaming: false,
@@ -91,6 +93,8 @@ const agentStoreState = {
   registerCallId,
   addActiveAgentLoop,
   removeActiveAgentLoop,
+  appendCLIAgentChunk,
+  clearCLIAgentOutput,
 };
 
 vi.mock('../../store/agentStore', () => ({
@@ -140,6 +144,7 @@ vi.mock('../../store/sessionStore', () => ({
       clearAgentTurns,
       markAgentTurnError,
       removeLastAgentTurn,
+      flushThinkingChunks: vi.fn(),
     }),
     {
       getState: () => ({
@@ -266,6 +271,8 @@ describe('ChatInterface event wiring', () => {
 
   it('tool:confirmation_required creates an awaiting_confirmation activity', () => {
     render(<ChatInterface />);
+    // Clear the setup call from the activation effect before testing event-driven behaviour
+    setPendingConfirmation.mockClear();
 
     act(() => {
       fire('tool:confirmation_required', {
@@ -819,5 +826,54 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     );
 
     vi.unstubAllGlobals();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: pendingConfirmations not cleared on session switch / turn lifecycle
+//
+// Root cause: per-session pendingConfirmations were added but corresponding
+// cleanup was not added in session-switch effect, agent:start, and agent:done
+// handlers. Stale confirmations cause ConfirmationInlineBubble to reference a
+// tool activity that no longer exists (it was wiped by clearToolActivities).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('REGRESSION: pendingConfirmations cleared on session switch', () => {
+  it('activating a session clears its own pendingConfirmation', () => {
+    mockActiveSessionId = 'session-1';
+    const { rerender } = render(<ChatInterface />);
+    setPendingConfirmation.mockClear();
+
+    // Switch to session-2 — activation effect should clear confirmation for session-2
+    mockActiveSessionId = 'session-2';
+    rerender(<ChatInterface />);
+
+    expect(setPendingConfirmation).toHaveBeenCalledWith('session-2', null);
+  });
+});
+
+describe('REGRESSION: pendingConfirmations cleared on agent:start', () => {
+  it('agent:start for the active session clears its pendingConfirmation', () => {
+    render(<ChatInterface />);
+    setPendingConfirmation.mockClear();
+
+    act(() => {
+      fire('agent:start', { sessionId: 'session-1', turnId: 'turn-new' });
+    });
+
+    expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+  });
+});
+
+describe('REGRESSION: pendingConfirmations cleared on agent:done', () => {
+  it('agent:done for the active session clears its pendingConfirmation', () => {
+    render(<ChatInterface />);
+    setPendingConfirmation.mockClear();
+
+    act(() => {
+      fire('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
+    });
+
+    expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
   });
 });

@@ -19,6 +19,9 @@ import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
 import { RunCliAgentTool } from './tools/run-cli-agent.tool';
+import { ImageGenerateTool } from './tools/image-generate.tool';
+import { ImageEditTool } from './tools/image-edit.tool';
+import { ImageViewTool } from './tools/image-view.tool';
 import { VFSModule } from '../vfs/vfs.module';
 import { LLMModule } from '../llm/llm.module';
 import { RAAppModule } from '../raapp/raapp.module';
@@ -27,10 +30,11 @@ import { AllowedPathsModule } from '../allowed-paths/allowed-paths.module';
 import { MCPModule } from '../mcp/mcp.module';
 import { SearchModule } from '../search/search.module';
 import { CLIAgentModule } from '../cli-agent/cli-agent.module';
+import { ImageModule } from '../image/image.module';
 import { ToolRegistryService } from './tool-registry.service';
 
 @Module({
-  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule],
+  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule, ImageModule],
   controllers: [ToolController],
   providers: [
     VFSWriteTool, VFSReadTool, VFSListTool, VFSGrepSearchTool, VFSFileSearchTool, SubagentTool,
@@ -43,6 +47,7 @@ import { ToolRegistryService } from './tool-registry.service';
     WebSearchTool,
     ListToolsTool, GetToolDetailsTool,
     RunCliAgentTool,
+    ImageGenerateTool, ImageEditTool, ImageViewTool,
     ToolRegistryService,
   ],
   exports: [ToolRegistryService],

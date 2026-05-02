@@ -33,6 +33,9 @@ import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
 import { RunCliAgentTool } from './tools/run-cli-agent.tool';
+import { ImageGenerateTool } from './tools/image-generate.tool';
+import { ImageEditTool } from './tools/image-edit.tool';
+import { ImageViewTool } from './tools/image-view.tool';
 
 /** Create a stub whose constructor is the real class (so @Tool metadata is present) */
 function stub<T extends abstract new (...a: never[]) => object>(Cls: T): InstanceType<T> {
@@ -76,6 +79,9 @@ describe('ToolRegistryService — all tools registered', () => {
       stub(ListToolsTool),
       stub(GetToolDetailsTool),
       stub(RunCliAgentTool),
+      stub(ImageGenerateTool),
+      stub(ImageEditTool),
+      stub(ImageViewTool),
     );
   });
 
@@ -102,6 +108,8 @@ describe('ToolRegistryService — all tools registered', () => {
     'list_tools', 'get_tool_details',
     // CLI Agent
     'run_cli_agent',
+    // Image
+    'image_generate', 'image_edit', 'image_view',
   ];
 
   it('exposes every expected tool via getAllTools()', () => {

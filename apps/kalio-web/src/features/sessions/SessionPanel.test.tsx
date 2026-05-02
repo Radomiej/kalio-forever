@@ -52,6 +52,22 @@ vi.mock('../../services/apiClient', () => ({
   },
 }));
 
+// ── agentStore mock ───────────────────────────────────────────────────────────
+
+const mockSetPendingConfirmation = vi.hoisted(() => vi.fn());
+
+vi.mock('../../store/agentStore', () => ({
+  useAgentStore: Object.assign(
+    (selector?: (s: { pendingConfirmations: Record<string, unknown>; setPendingConfirmation: typeof mockSetPendingConfirmation }) => unknown) => {
+      const state = { pendingConfirmations: {}, setPendingConfirmation: mockSetPendingConfirmation };
+      return selector ? selector(state) : state;
+    },
+    {
+      getState: () => ({ pendingConfirmations: {}, setPendingConfirmation: mockSetPendingConfirmation }),
+    },
+  ),
+}));
+
 // ── formatRelativeTime unit tests ─────────────────────────────────────────────
 
 describe('formatRelativeTime', () => {
@@ -176,6 +192,36 @@ describe('SessionPanel', () => {
     fireEvent.click(items[0]!);
 
     await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: orphaned pendingConfirmations on session deletion
+//
+// Root cause: removeSession() removes the session from the list but does NOT
+// clean up the corresponding pendingConfirmations entry in agentStore. The
+// dangling entry leaks memory and could cause key errors if the session id is
+// ever reused or if the store is iterated.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('REGRESSION: pendingConfirmations cleaned up on session delete', () => {
+  it('deleting a session calls setPendingConfirmation(id, null)', async () => {
+    mockApiDelete.mockResolvedValue({});
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+
+    // Click delete on the first session (s2, sorted newest-first by updatedAt)
+    const deleteButtons = screen.getAllByTitle('Delete');
+    fireEvent.click(deleteButtons[0]!);
+
+    // Wait for the async delete + cleanup chain to finish
+    await waitFor(() => expect(mockSetPendingConfirmation).toHaveBeenCalledWith('s2', null));
   });
 });
 

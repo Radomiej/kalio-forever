@@ -82,6 +82,7 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
     try {
       await apiClient.delete(`/api/sessions/${id}`);
       removeSession(id);
+      useAgentStore.getState().setPendingConfirmation(id, null);
     } catch (err) {
       console.error('[SessionPanel] delete failed', err);
     }

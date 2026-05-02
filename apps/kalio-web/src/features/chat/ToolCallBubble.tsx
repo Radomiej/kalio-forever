@@ -22,6 +22,7 @@ import type { RAAppBlock, RaAppPendingApproval, CLIAgentResult } from '@kalio/ty
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
 import { TerminalOutputBlock } from './TerminalOutputBlock';
 import { LiveCLIAgentBlock } from './LiveCLIAgentBlock';
+import { ImageResultRenderer, type ImageResultData } from './ImageResultRenderer';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,15 @@ function extractCLIAgentResult(data: unknown): CLIAgentResult | null {
       durationMs: d['durationMs'],
       agentId: typeof d['agentId'] === 'string' ? d['agentId'] : 'copilot',
     };
+  }
+  return null;
+}
+
+function extractImageResult(data: unknown): ImageResultData | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (d['output_type'] === 'image' && typeof d['image_url'] === 'string') {
+    return d as unknown as ImageResultData;
   }
   return null;
 }
@@ -238,9 +248,10 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
     );
 
   const hasArgs = Object.keys(activity.args).length > 0;
-  const hasNonRaappResult = activity.result?.data != null && extractRAAppBlock(activity.result.data) == null;
+  const hasNonRaappResult = activity.result?.data != null && extractRAAppBlock(activity.result.data) == null && extractImageResult(activity.result.data) == null;
   const isRunningCliAgent = activity.toolName === 'run_cli_agent' && activity.status === 'running';
   const expandable = hasArgs || hasNonRaappResult || isRunningCliAgent;
+  const imageResult = activity.result?.data != null ? extractImageResult(activity.result.data) : null;
 
   return (
     <Chip
@@ -257,6 +268,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
           agentId={(activity.args['agentId'] as string | undefined) ?? 'copilot'}
         />
       )}
+      {imageResult && <ImageResultRenderer data={imageResult} />}
       {hasArgs && (
         <div className="font-mono bg-base-200/60 rounded px-2 py-1 text-xs text-base-content/50">
           {Object.entries(activity.args).map(([k, v]) => (
@@ -306,14 +318,15 @@ export function HistoryToolCallBubble({
 
   const raapp = extractRAAppBlock(parsed);
   const cliResult = isCliAgent ? extractCLIAgentResult(parsed) : null;
+  const imageResult = extractImageResult(parsed);
   const hasArgs = args != null && Object.keys(args).length > 0;
-  const [open, setOpen] = useState(() => (raapp != null && !isAnswered) || cliResult != null);
+  const [open, setOpen] = useState(() => (raapp != null && !isAnswered) || cliResult != null || imageResult != null);
   useEffect(() => {
     if (isAnswered) setOpen(false);
   }, [isAnswered]);
 
-  const hasResult = !raapp && !cliResult && content.length > 0;
-  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null;
+  const hasResult = !raapp && !cliResult && !imageResult && content.length > 0;
+  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || imageResult != null;
 
   return (
     <>
@@ -361,6 +374,7 @@ export function HistoryToolCallBubble({
             agentId={args?.['agentId'] as string | undefined}
           />
         )}
+        {imageResult && <ImageResultRenderer data={imageResult} />}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}
       </Chip>
       {raapp && isAnswered && (

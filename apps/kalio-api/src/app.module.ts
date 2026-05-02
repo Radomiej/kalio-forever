@@ -15,6 +15,7 @@ import { AllowedPathsModule } from './modules/allowed-paths/allowed-paths.module
 import { ChatModule } from './modules/chat/chat.module';
 import { SearchModule } from './modules/search/search.module';
 import { CLIAgentModule } from './modules/cli-agent/cli-agent.module';
+import { ImageModule } from './modules/image/image.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { CLIAgentModule } from './modules/cli-agent/cli-agent.module';
     ChatModule,
     SearchModule,
     CLIAgentModule,
+    ImageModule,
   ],
 })
 export class AppModule {}

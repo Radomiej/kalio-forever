@@ -19,6 +19,9 @@ import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
 import { RunCliAgentTool } from './tools/run-cli-agent.tool';
+import { ImageGenerateTool } from './tools/image-generate.tool';
+import { ImageEditTool } from './tools/image-edit.tool';
+import { ImageViewTool } from './tools/image-view.tool';
 
 /** Minimal registry entry shape — structurally compatible with chat module's ToolRegistryEntry. */
 export interface ToolEntry {
@@ -68,6 +71,9 @@ export class ToolRegistryService {
     private readonly listTools: ListToolsTool,
     private readonly getToolDetails: GetToolDetailsTool,
     private readonly runCliAgent: RunCliAgentTool,
+    private readonly imageGenerate: ImageGenerateTool,
+    private readonly imageEdit: ImageEditTool,
+    private readonly imageView: ImageViewTool,
   ) {
     const all: object[] = [
       vfsWrite, vfsRead, vfsList, vfsGrepSearch, vfsFileSearch, subagent,
@@ -80,6 +86,7 @@ export class ToolRegistryService {
       webSearch,
       listTools, getToolDetails,
       runCliAgent,
+      imageGenerate, imageEdit, imageView,
     ];
     this.entries = all.map(t => this.toEntry(t));
   }

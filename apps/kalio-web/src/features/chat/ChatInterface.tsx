@@ -200,6 +200,7 @@ export function ChatInterface() {
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
         startAgentTurn(payload.turnId, payload.sessionId);
         clearToolActivities(); // Fresh turn = fresh tool activities
+        setPendingConfirmation(payload.sessionId, null); // Clear any stale confirmation from previous turn
       }
     });
 
@@ -208,6 +209,7 @@ export function ChatInterface() {
       removeActiveAgentLoop(payload.sessionId);
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
         finalizeAgentTurn();
+        setPendingConfirmation(payload.sessionId, null); // Clear unanswered confirmations when turn ends
       }
     });
 
@@ -376,6 +378,7 @@ export function ChatInterface() {
     // Reset stale streaming state from any previous session
     setStreaming(false);
     clearToolActivities();
+    setPendingConfirmation(activeSessionId, null); // Clear stale confirmation — tool activities were just wiped
     // Note: agentTurns are cleared by setActiveSession in the store on real session switch.
     // Do NOT call clearAgentTurns here — this effect also fires on component remount
     // (e.g. navigating home and back), which would wipe an in-flight streaming turn.
