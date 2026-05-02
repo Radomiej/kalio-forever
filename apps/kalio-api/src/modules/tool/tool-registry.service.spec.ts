@@ -36,6 +36,8 @@ import { RunCliAgentTool } from './tools/run-cli-agent.tool';
 import { ImageGenerateTool } from './tools/image-generate.tool';
 import { ImageEditTool } from './tools/image-edit.tool';
 import { ImageViewTool } from './tools/image-view.tool';
+import { SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool } from './tools/skill.tools';
+import { PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool } from './tools/persona.tools';
 
 /** Create a stub whose constructor is the real class (so @Tool metadata is present) */
 function stub<T extends abstract new (...a: never[]) => object>(Cls: T): InstanceType<T> {
@@ -82,6 +84,15 @@ describe('ToolRegistryService — all tools registered', () => {
       stub(ImageGenerateTool),
       stub(ImageEditTool),
       stub(ImageViewTool),
+      stub(SkillListTool),
+      stub(SkillReadTool),
+      stub(SkillCreateTool),
+      stub(SkillUpdateTool),
+      stub(SkillDeleteTool),
+      stub(PersonaListTool),
+      stub(PersonaCreateTool),
+      stub(PersonaUpdateTool),
+      stub(PersonaDeleteTool),
     );
   });
 
@@ -110,6 +121,10 @@ describe('ToolRegistryService — all tools registered', () => {
     'run_cli_agent',
     // Image
     'image_generate', 'image_edit', 'image_view',
+    // Skills
+    'skill_list', 'skill_read', 'skill_create', 'skill_update', 'skill_delete',
+    // Personas
+    'persona_list', 'persona_create', 'persona_update', 'persona_delete',
   ];
 
   it('exposes every expected tool via getAllTools()', () => {

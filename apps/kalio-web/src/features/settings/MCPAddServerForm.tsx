@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { CreateMCPServerDto } from '@kalio/types';
+import { MCPImportJsonTab } from './MCPImportJsonTab';
 
 interface Props {
   onSubmit: (dto: CreateMCPServerDto) => Promise<void>;
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export function MCPAddServerForm({ onSubmit, onCancel }: Props) {
+  const [activeTab, setActiveTab] = useState<'manual' | 'json'>('manual');
   const [name, setName] = useState('');
   const [transport, setTransport] = useState<'http' | 'stdio'>('http');
   const [url, setUrl] = useState('');
@@ -64,6 +66,32 @@ export function MCPAddServerForm({ onSubmit, onCancel }: Props) {
       data-testid="mcp-add-form"
     >
       <h4 className="text-sm font-semibold">Add MCP Server</h4>
+
+      {/* Mode tabs */}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className={`btn btn-xs flex-1 ${activeTab === 'manual' ? 'btn-primary' : 'btn-ghost border border-base-300'}`}
+          onClick={() => setActiveTab('manual')}
+          data-testid="mcp-tab-manual"
+        >
+          Manual
+        </button>
+        <button
+          type="button"
+          className={`btn btn-xs flex-1 ${activeTab === 'json' ? 'btn-primary' : 'btn-ghost border border-base-300'}`}
+          onClick={() => setActiveTab('json')}
+          data-testid="mcp-tab-json"
+        >
+          Import JSON
+        </button>
+      </div>
+
+      {activeTab === 'json' && (
+        <MCPImportJsonTab onSubmit={onSubmit} onCancel={onCancel} />
+      )}
+
+      {activeTab === 'manual' && <>
 
       {/* Name */}
       <label className="form-control gap-1">
@@ -187,6 +215,7 @@ export function MCPAddServerForm({ onSubmit, onCancel }: Props) {
           Connect
         </button>
       </div>
+      </>}
     </form>
   );
 }

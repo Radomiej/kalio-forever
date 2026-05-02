@@ -5,9 +5,10 @@ import { LLMPanel } from './LLMPanel';
 import type { Credential } from '@kalio/types';
 
 // ── Store mock ─────────────────────────────────────────────────────────────────
+const mockSetBackendConfig = vi.hoisted(() => vi.fn());
 vi.mock('./settingsStore', () => ({
-  useSettingsStore: (selector: (s: { setBackendConfig: ReturnType<typeof vi.fn> }) => unknown) =>
-    selector({ setBackendConfig: vi.fn() }),
+  useSettingsStore: (selector: (s: { setBackendConfig: typeof mockSetBackendConfig }) => unknown) =>
+    selector({ setBackendConfig: mockSetBackendConfig }),
 }));
 
 // ── Helpers ────────────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import { SessionManagerService } from '../session-manager.service';
 import { AuditService } from '../audit.service';
 import { PersonaService } from '../../persona/persona.service';
 import { LLM_SOURCE, CHUNK_HANDLERS, STREAM_MIDDLEWARES, TOOL_REGISTRY } from '../chat.tokens';
+import { SkillsService } from '../../skills/skills.service';
 
 // ============================================================================
 // ISSUE 1: Race condition in interrupt handling
@@ -234,7 +235,13 @@ describe('ISSUE 2: MAX_ITERATIONS behavior', () => {
         {
           provide: PersonaService,
           useValue: {
-            getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }),
+            getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', allowedTools: [], skillIds: [], kv: {} }),
+          },
+        },
+        {
+          provide: SkillsService,
+          useValue: {
+            findByIds: vi.fn().mockResolvedValue([]),
           },
         },
         { provide: AuditService, useValue: { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) } },

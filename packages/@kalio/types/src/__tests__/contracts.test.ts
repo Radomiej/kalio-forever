@@ -64,18 +64,20 @@ describe('@kalio/types — P0-T01 contract shape', () => {
     expect(session.personaId).toBeDefined();
   });
 
-  it('Persona has skills array', () => {
+  it('Persona has allowedTools and skillIds arrays', () => {
     const persona: Persona = {
       id: 'p-1',
       name: 'Assistant',
       systemPrompt: 'You are helpful.',
       model: 'gpt-4o-mini',
-      skills: ['vfs_write', 'web_search'],
+      allowedTools: ['vfs_write', 'web_search'],
+      skillIds: [],
       mcpPolicy: 'allow_all',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    expect(Array.isArray(persona.skills)).toBe(true);
+    expect(Array.isArray(persona.allowedTools)).toBe(true);
+    expect(Array.isArray(persona.skillIds)).toBe(true);
   });
 
   it('ToolMeta includes requiresConfirmation flag', () => {

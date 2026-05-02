@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { ChatInput } from './ChatInput';
 
 vi.mock('../../store/sessionStore', () => ({
-  useSessionStore: () => ({ activeSessionId: 'session-1' }),
+  useSessionStore: () => ({ activeSessionId: 'session-1', sessions: [] }),
 }));
 
 describe('ChatInput', () => {

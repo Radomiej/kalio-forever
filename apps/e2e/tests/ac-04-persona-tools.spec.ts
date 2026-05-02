@@ -91,7 +91,7 @@ test.describe('AC-04: Persona Tool Picker', () => {
         name: 'AC04 Tools Badge',
         systemPrompt: 'test',
         model: 'mock',
-        skills: ['vfs_read', 'vfs_write', 'memory_search'],
+        allowedTools: ['vfs_read', 'vfs_write', 'memory_search'],
       },
     });
     const persona = await res.json();
@@ -112,7 +112,7 @@ test.describe('AC-04: Persona Tool Picker', () => {
         name: 'AC04 Tools Expanded',
         systemPrompt: 'test',
         model: 'mock',
-        skills: ['vfs_read', 'vfs_list', 'terminal_spawn'],
+        allowedTools: ['vfs_read', 'vfs_list', 'terminal_spawn'],
       },
     });
     const persona = await res.json();
@@ -150,10 +150,10 @@ test.describe('AC-04: Persona Tool Picker', () => {
 
     // Verify via API
     const list = await request.get(`${API_BASE}/personas`);
-    const personas: Array<{ id: string; name: string; skills: string[] }> = await list.json();
+    const personas: Array<{ id: string; name: string; allowedTools: string[] }> = await list.json();
     const created = personas.find((p) => p.name === 'AC04 Tools Persist');
     expect(created).toBeDefined();
-    expect(created!.skills).toContain('vfs_read');
+    expect(created!.allowedTools).toContain('vfs_read');
 
     if (created) await request.delete(`${API_BASE}/personas/${created.id}`);
   });

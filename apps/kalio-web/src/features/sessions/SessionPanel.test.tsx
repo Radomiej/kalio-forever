@@ -19,7 +19,7 @@ const mockSessions: ChatSession[] = [
 ];
 
 const mockPersonas: Persona[] = [
-  { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', skills: [], mcpPolicy: 'allow_all', createdAt: 0, updatedAt: 0 },
+  { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', allowedTools: [], skillIds: [], mcpPolicy: 'allow_all', createdAt: 0, updatedAt: 0 },
 ];
 
 const mockState = {
@@ -34,8 +34,13 @@ const mockState = {
 };
 
 vi.mock('../../store/sessionStore', () => ({
-  useSessionStore: (selector?: (s: typeof mockState) => unknown) =>
-    selector ? selector(mockState) : mockState,
+  useSessionStore: Object.assign(
+    (selector?: (s: typeof mockState) => unknown) =>
+      selector ? selector(mockState) : mockState,
+    {
+      getState: () => mockState,
+    },
+  ),
 }));
 
 const mockApiGet = vi.fn();
@@ -119,7 +124,7 @@ describe('SessionPanel', () => {
 
   it('shows persona badge for non-default persona', async () => {
     render(<SessionPanel />);
-    await waitFor(() => expect(screen.getByText('Dev Assistant')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('Dev Assistant').length).toBeGreaterThanOrEqual(1));
   });
 
   it('does not show badge for default persona (no name found)', async () => {
@@ -139,15 +144,8 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
 
-    // Filter row not visible initially
-    expect(screen.queryByText('All')).toBeNull();
-
-    // Click filter toggle
-    const filterBtn = screen.getByTitle('Filters');
-    fireEvent.click(filterBtn);
-
-    expect(screen.getByText('All')).toBeTruthy();
-    // 'Dev Assistant' appears in both filter chip and session badge
+    // Filter row is always visible when personas are available
+    await waitFor(() => expect(screen.getByText('All')).toBeTruthy());
     expect(screen.getAllByText('Dev Assistant').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -155,7 +153,6 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByTitle('Filters'));
     await waitFor(() => expect(screen.getAllByText('Dev Assistant').length).toBeGreaterThanOrEqual(1));
 
     // Click the filter chip button (not the persona badge span)

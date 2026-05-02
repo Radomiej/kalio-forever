@@ -7,6 +7,7 @@ import { ToolDispatchService } from '../tool-dispatch.service';
 import { SessionManagerService } from '../session-manager.service';
 import { AuditService } from '../audit.service';
 import { PersonaService } from '../../persona/persona.service';
+import { SkillsService } from '../../skills/skills.service';
 import { LLM_SOURCE } from '../chat.tokens';
 import type { LLMStreamChunk } from '@kalio/types';
 
@@ -17,6 +18,7 @@ describe('ChatService - Agent Loop Limits', () => {
   let mockSessionManager: SessionManagerService;
   let mockToolDispatch: ToolDispatchService;
   let mockPersonaService: PersonaService;
+  let mockSkillsService: SkillsService;
   let mockAudit: AuditService;
   let emittedEvents: Array<{ event: string; data: unknown }> = [];
 
@@ -48,7 +50,11 @@ describe('ChatService - Agent Loop Limits', () => {
     } as any;
 
     mockPersonaService = {
-      getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', availableSkills: [] }),
+      getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', allowedTools: [] }),
+    } as any;
+
+    mockSkillsService = {
+      findByIds: vi.fn().mockResolvedValue([]),
     } as any;
 
     mockAudit = {
@@ -62,6 +68,7 @@ describe('ChatService - Agent Loop Limits', () => {
       mockSessionManager,
       mockToolDispatch,
       mockPersonaService,
+      mockSkillsService,
       mockAudit,
     );
   });

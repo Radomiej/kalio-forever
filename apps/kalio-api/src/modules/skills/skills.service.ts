@@ -14,6 +14,13 @@ export class SkillsService {
     return rows.map(this.toSkill);
   }
 
+  async findByIds(ids: string[]): Promise<Skill[]> {
+    if (ids.length === 0) return [];
+    const all = await this.findAll();
+    const idSet = new Set(ids);
+    return all.filter((s) => idSet.has(s.id));
+  }
+
   async findOne(id: string): Promise<Skill | null> {
     const [row] = await this.drizzle.db.select().from(skills).where(eq(skills.id, id));
     return row ? this.toSkill(row) : null;

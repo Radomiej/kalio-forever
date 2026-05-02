@@ -6,6 +6,7 @@ import { SessionManagerService } from '../session-manager.service';
 import { ToolDispatchService } from '../tool-dispatch.service';
 import { AuditService } from '../audit.service';
 import { PersonaService } from '../../persona/persona.service';
+import { SkillsService } from '../../skills/skills.service';
 import { LLM_SOURCE, CHUNK_HANDLERS, STREAM_MIDDLEWARES, TOOL_REGISTRY } from '../chat.tokens';
 import { TextDeltaHandler } from '../handlers/text-delta.handler';
 import { ThinkingDeltaHandler } from '../handlers/thinking-delta.handler';
@@ -74,6 +75,7 @@ async function buildService(
         },
       },
       { provide: AuditService, useValue: { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) } },
+      { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
       { provide: LLM_SOURCE, useValue: llmSource },
       { provide: TOOL_REGISTRY, useValue: [] },
     ],

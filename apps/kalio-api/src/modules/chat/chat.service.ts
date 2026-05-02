@@ -11,6 +11,7 @@ import { AuditService } from './audit.service';
 import { LLM_SOURCE } from './chat.tokens';
 import { TurnErrorAlreadyEmitted } from './turn-error';
 import { PersonaService } from '../persona/persona.service';
+import { SkillsService } from '../skills/skills.service';
 
 /**
  * Orchestrates a single conversation turn:
@@ -34,6 +35,7 @@ export class ChatService {
     private readonly sessionManager: SessionManagerService,
     private readonly toolDispatch: ToolDispatchService,
     private readonly personaService: PersonaService,
+    private readonly skillsService: SkillsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -79,9 +81,19 @@ export class ChatService {
       const allToolMetas = this.toolDispatch.getToolMetas();
       const toolMetas = this.filterTools(
         allToolMetas,
-        personaConfig?.availableSkills,
+        personaConfig?.allowedTools,
         personaConfig?.mcpPolicy ?? 'allow_all',
       );
+
+      // Inject active skill prompts into system prompt
+      const skillIds = personaConfig?.skillIds ?? [];
+      const activeSkills = skillIds.length > 0
+        ? await this.skillsService.findByIds(skillIds)
+        : [];
+      const skillsSection = activeSkills.length > 0
+        ? `\n\n## Active skills\n` +
+          activeSkills.map((s) => `### ${s.name}\n${s.description}\n\n${s.prompt}`).join('\n\n')
+        : '';
 
       // Append a compact tool listing to the system prompt so the agent
       // knows what tools are available without calling list_tools first.
@@ -94,7 +106,7 @@ export class ChatService {
             return `- ${t.name}: ${desc}`;
           }).join('\n')
         : '';
-      const effectiveSystemPrompt = systemPrompt + toolsSection;
+      const effectiveSystemPrompt = systemPrompt + skillsSection + toolsSection;
 
       trackingEmit('chat:context', {
         sessionId,

@@ -60,10 +60,10 @@ describe('TerminalSpawnTool', () => {
       (terminals.spawn as ReturnType<typeof vi.fn>).mockResolvedValue(session);
 
       const result = await tool.execute(
-        makeRequest('terminal_spawn', { command: 'node', args: ['app.js'] }),
+        makeRequest('terminal_spawn', { command: 'node', args: ['app.js'], cwd: '/app' }),
       );
 
-      expect(terminals.spawn).toHaveBeenCalledWith('node', ['app.js'], undefined);
+      expect(terminals.spawn).toHaveBeenCalledWith('node', ['app.js'], '/app');
       expect(result).toEqual({ id: session.id, pid: session.pid, command: session.command });
     });
 
@@ -82,9 +82,9 @@ describe('TerminalSpawnTool', () => {
     it('defaults args to empty array when not provided', async () => {
       (terminals.spawn as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession({ command: 'bash' }));
 
-      await tool.execute(makeRequest('terminal_spawn', { command: 'bash' }));
+      await tool.execute(makeRequest('terminal_spawn', { command: 'bash', cwd: '/app' }));
 
-      expect(terminals.spawn).toHaveBeenCalledWith('bash', [], undefined);
+      expect(terminals.spawn).toHaveBeenCalledWith('bash', [], '/app');
     });
   });
 
@@ -103,7 +103,7 @@ describe('TerminalSpawnTool', () => {
       (terminals.spawn as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('ENOENT: command not found'));
 
       await expect(
-        tool.execute(makeRequest('terminal_spawn', { command: 'nonexistent_cmd' })),
+        tool.execute(makeRequest('terminal_spawn', { command: 'nonexistent_cmd', cwd: '/app' })),
       ).rejects.toThrow('ENOENT');
     });
   });

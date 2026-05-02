@@ -19,6 +19,7 @@ import type { ILLMSource } from '../interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../interfaces/llm-chunk.types';
 import type { EmitFn } from '../interfaces/stream-context.interface';
 import { PersonaService } from '../../persona/persona.service';
+import { SkillsService } from '../../skills/skills.service';
 
 async function* makeStream(chunks: InternalLLMChunk[]): AsyncIterable<InternalLLMChunk> {
   for (const chunk of chunks) yield chunk;
@@ -68,6 +69,7 @@ describe('ChatService — MAX_ITERATIONS', () => {
         { provide: SessionManagerService, useValue: sessionManager },
         { provide: ToolDispatchService, useValue: toolDispatch },
         { provide: PersonaService, useValue: personaService },
+        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
         { provide: AuditService, useValue: auditService },
         { provide: LLM_SOURCE, useValue: llmSource },
         { provide: CHUNK_HANDLERS, useValue: [] },

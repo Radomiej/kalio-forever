@@ -52,12 +52,12 @@ describe('ToolDispatchService', () => {
     it('calls execute with correct ToolCallRequest', async () => {
       const ctx = makeCtx();
       await service.dispatch('call-x', 'simple_tool', { a: 'b' }, ctx);
-      expect(entry.execute).toHaveBeenCalledWith({
+      expect(entry.execute).toHaveBeenCalledWith(expect.objectContaining({
         sessionId: 'sid',
         toolName: 'simple_tool',
         args: { a: 'b' },
         callId: 'call-x',
-      });
+      }));
     });
 
     it('returns error for unknown tool', async () => {

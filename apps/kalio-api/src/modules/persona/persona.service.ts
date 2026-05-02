@@ -26,14 +26,15 @@ export class PersonaService implements OnApplicationBootstrap {
           name: config.name,
           systemPrompt: config.systemPrompt,
           model: config.model,
-          skills: config.skills,
+          allowedTools: config.allowedTools,
+          skillIds: config.skillIds ?? [],
           createdAt: now,
           updatedAt: now,
         });
         this.logger.log(`Seeded ${id} persona`);
       } else {
         await this.drizzle.db.update(personas).set({
-          skills: config.skills,
+          allowedTools: config.allowedTools,
           updatedAt: now,
         }).where(eq(personas.id, id));
         this.logger.log(`Updated ${id} persona`);
@@ -41,7 +42,7 @@ export class PersonaService implements OnApplicationBootstrap {
     }
   }
 
-  private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model: string; skills: string[] }> {
+  private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model: string; allowedTools: string[]; skillIds?: string[] }> {
     try {
       const configPath = join(__dirname, '../../assets/personas.json');
       const configContent = readFileSync(configPath, 'utf-8');
@@ -95,7 +96,8 @@ export class PersonaService implements OnApplicationBootstrap {
     return {
       systemPrompt: persona.systemPrompt,
       model: persona.model,
-      availableSkills: persona.skills ?? [],
+      allowedTools: persona.allowedTools ?? [],
+      skillIds: persona.skillIds ?? [],
       mcpPolicy: persona.mcpPolicy ?? 'allow_all',
       kv,
     };
@@ -120,14 +122,15 @@ export class PersonaService implements OnApplicationBootstrap {
     return { id, personaId, key, value, updatedAt: nowMs };
   }
 
-  private mapRow(row: { id: string; name: string; systemPrompt: string; model: string; skills: string[] | null; mcpPolicy?: string | null; createdAt: number | Date; updatedAt: number | Date }): Persona {
+  private mapRow(row: { id: string; name: string; systemPrompt: string; model: string; allowedTools: string[] | null; skillIds?: string[] | null; mcpPolicy?: string | null; createdAt: number | Date; updatedAt: number | Date }): Persona {
     const toMs = (v: number | Date) => v instanceof Date ? v.getTime() : v;
     return {
       id: row.id,
       name: row.name,
       systemPrompt: row.systemPrompt,
       model: row.model,
-      skills: row.skills ?? [],
+      allowedTools: row.allowedTools ?? [],
+      skillIds: row.skillIds ?? [],
       mcpPolicy: (row.mcpPolicy as import('@kalio/types').MCPPolicy | null | undefined) ?? 'allow_all',
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),

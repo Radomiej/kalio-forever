@@ -56,9 +56,10 @@ export interface Persona {
   id: ID;
   name: string;
   systemPrompt: string;
-  model: string;        // e.g. "claude-sonnet-4-6", "gpt-4o", "qwen3:8b"
-  skills: string[];     // native tool names available to this persona
-  mcpPolicy: MCPPolicy; // how MCP tools are filtered for this persona
+  model: string;           // e.g. "claude-sonnet-4-6", "gpt-4o", "qwen3:8b"
+  allowedTools: string[];  // native tool names available to this persona (tool allowlist)
+  skillIds: string[];      // IDs of Skill entities whose prompts are injected into system prompt
+  mcpPolicy: MCPPolicy;    // how MCP tools are filtered for this persona
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -74,16 +75,18 @@ export interface PersonaKV {
 export interface PersonaSessionConfig {
   systemPrompt: string;
   model: string;
-  availableSkills: string[];    // filtered tool list for this session
-  mcpPolicy: MCPPolicy;         // how MCP tools are filtered for this session
-  kv: Record<string, string>;   // all KV entries for this persona
+  allowedTools: string[];  // filtered tool list for this session
+  skillIds: string[];      // Skill entity IDs whose prompts get injected
+  mcpPolicy: MCPPolicy;    // how MCP tools are filtered for this session
+  kv: Record<string, string>; // all KV entries for this persona
 }
 
 export interface CreatePersonaDto {
   name: string;
   systemPrompt: string;
   model: string;
-  skills: string[];
+  allowedTools: string[];
+  skillIds?: string[];
   mcpPolicy?: MCPPolicy;
 }
 
@@ -91,7 +94,8 @@ export interface UpdatePersonaDto {
   name?: string;
   systemPrompt?: string;
   model?: string;
-  skills?: string[];
+  allowedTools?: string[];
+  skillIds?: string[];
   mcpPolicy?: MCPPolicy;
 }
 

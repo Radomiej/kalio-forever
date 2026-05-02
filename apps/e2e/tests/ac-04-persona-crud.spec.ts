@@ -5,7 +5,7 @@ import { API_BASE } from './helpers/test-config';
 test.describe('AC-04: Persona CRUD', () => {
   test('user can create a new persona via API', async ({ request }) => {
     const res = await request.post(`${API_BASE}/personas`, {
-      data: { name: 'AC04 Test Persona', systemPrompt: 'You are a test assistant.', model: 'mock', skills: [] },
+      data: { name: 'AC04 Test Persona', systemPrompt: 'You are a test assistant.', model: 'mock', allowedTools: [] },
     });
     expect(res.ok()).toBeTruthy();
     const persona = await res.json();
@@ -17,7 +17,7 @@ test.describe('AC-04: Persona CRUD', () => {
 
   test('created persona appears in persona panel', async ({ page, request }) => {
     const createRes = await request.post(`${API_BASE}/personas`, {
-      data: { name: 'AC04 Panel Persona', systemPrompt: 'Test', model: 'mock', skills: [] },
+      data: { name: 'AC04 Panel Persona', systemPrompt: 'Test', model: 'mock', allowedTools: [] },
     });
     const persona = await createRes.json();
 

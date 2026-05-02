@@ -54,7 +54,7 @@ describe('PersonaController', () => {
         name: 'New Persona',
         systemPrompt: 'Be helpful',
         model: 'gpt-4o',
-        skills: [],
+        allowedTools: [],
       };
       const result = await controller.create(dto);
       expect(svc.create).toHaveBeenCalledWith(dto);

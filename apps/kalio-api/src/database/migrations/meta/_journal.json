@@ -43,6 +43,13 @@
       "when": 1746400000000,
       "tag": "0005_persona_mcp_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1746500000000,
+      "tag": "0006_persona_allowed_tools",
+      "breakpoints": true
     }
   ]
 }

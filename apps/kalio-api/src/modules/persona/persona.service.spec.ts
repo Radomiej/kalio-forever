@@ -103,7 +103,9 @@ describe('PersonaService', () => {
         systemPrompt: 'You are helpful',
         model: 'gpt-4',
         skills: ['vfs_write'],
-        createdAt: Date.now(),
+        skill_ids: [],
+        allowedTools: ['vfs_write'],
+        skillIds: [],
         updatedAt: Date.now(),
       };
 
@@ -125,7 +127,7 @@ describe('PersonaService', () => {
       expect(result).not.toBeNull();
       expect(result?.systemPrompt).toBe(personaRow.systemPrompt);
       expect(result?.model).toBe(personaRow.model);
-      expect(result?.availableSkills).toEqual(['vfs_write']);
+      expect(result?.allowedTools).toEqual(['vfs_write']);
       expect(result?.kv).toEqual({
         api_key: 'secret123',
         endpoint: 'https://api.example.com',
@@ -142,7 +144,8 @@ describe('PersonaService', () => {
           name: 'Persona 1',
           systemPrompt: 'Prompt 1',
           model: 'gpt-4',
-          skills: ['tool1'],
+          allowedTools: ['tool1'],
+          skillIds: [],
           createdAt: 1234567890,
           updatedAt: 1234567890,
         },
@@ -151,7 +154,10 @@ describe('PersonaService', () => {
           name: 'Persona 2',
           systemPrompt: 'Prompt 2',
           model: 'claude',
-          skills: null, // Test null handling
+          allowed_tools: null, // Test null handling
+          skill_ids: null,
+          allowedTools: null,
+          skillIds: null,
           createdAt: new Date(1234567890), // Test Date handling
           updatedAt: new Date(1234567890),
         },
@@ -166,8 +172,8 @@ describe('PersonaService', () => {
 
       // Assert
       expect(result).toHaveLength(2);
-      expect(result[0].skills).toEqual(['tool1']);
-      expect(result[1].skills).toEqual([]); // Null becomes empty array
+      expect(result[0].allowedTools).toEqual(['tool1']);
+      expect(result[1].allowedTools).toEqual([]); // Null becomes empty array
       expect(typeof result[1].createdAt).toBe('number'); // Date converted to number
     });
   });
@@ -274,7 +280,7 @@ describe('PersonaService', () => {
       );
     });
 
-    it('still updates skills when ra-apps already exists', async () => {
+    it('still updates allowedTools when ra-apps already exists', async () => {
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockResolvedValue([{ id: 'existing' }]),
@@ -289,7 +295,7 @@ describe('PersonaService', () => {
       await service.onApplicationBootstrap();
 
       expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({ skills: expect.any(Array) }),
+        expect.objectContaining({ allowedTools: expect.any(Array) }),
       );
     });
   });

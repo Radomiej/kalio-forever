@@ -6,7 +6,7 @@ test.describe('AC-11: Persona system prompt & tool access', () => {
   test('GET /api/personas returns default and ra-apps system personas', async ({ request }) => {
     const res = await request.get(`${API_BASE}/personas`);
     expect(res.ok()).toBeTruthy();
-    const personas = await res.json() as Array<{ id: string; name: string; skills: string[] }>;
+    const personas = await res.json() as Array<{ id: string; name: string; allowedTools: string[] }>;
     expect(Array.isArray(personas)).toBe(true);
 
     const ids = personas.map((p) => p.id);

@@ -25,6 +25,7 @@ import { ToolModule } from '../tool/tool.module';
 import { VFSModule } from '../vfs/vfs.module';
 import { RAAppModule } from '../raapp/raapp.module';
 import { MCPModule } from '../mcp/mcp.module';
+import { SkillsModule } from '../skills/skills.module';
 import { ToolRegistryService } from '../tool/tool-registry.service';
 import {
   CHUNK_HANDLERS,
@@ -46,7 +47,7 @@ import {
  *   TOOL_REGISTRY     → ToolRegistryService.getEntries() (from ToolModule)
  */
 @Module({
-  imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule],
+  imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule],
   controllers: [SessionsController, AuditLogController],
   providers: [
     // Handlers

@@ -21,15 +21,15 @@ interface EditForm {
   name: string;
   systemPrompt: string;
   model: string;
-  skills: string[];   // empty = all tools; otherwise explicit allowlist
+  allowedTools: string[];   // empty = all tools; otherwise explicit allowlist
 }
 
 function emptyForm(): EditForm {
-  return { name: '', systemPrompt: '', model: '', skills: [] };
+  return { name: '', systemPrompt: '', model: '', allowedTools: [] };
 }
 
 function personaToForm(p: Persona): EditForm {
-  return { name: p.name, systemPrompt: p.systemPrompt, model: p.model ?? '', skills: p.skills ?? [] };
+  return { name: p.name, systemPrompt: p.systemPrompt, model: p.model ?? '', allowedTools: p.allowedTools ?? [] };
 }
 
 // ─── Tool Toggle Row ────────────────────────────────────────────────────────
@@ -91,20 +91,20 @@ function PersonaEditPanel({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const allTools = form.skills.length === 0;
+  const allTools = form.allowedTools.length === 0;
 
   const setField = <K extends keyof EditForm>(k: K, v: EditForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const toggleAllTools = (on: boolean) => setField('skills', on ? [] : tools.map((t) => t.name));
+  const toggleAllTools = (on: boolean) => setField('allowedTools', on ? [] : tools.map((t) => t.name));
 
   const toggleTool = (name: string, on: boolean) => {
     if (on) {
-      setField('skills', [...form.skills, name]);
+      setField('allowedTools', [...form.allowedTools, name]);
     } else {
-      const next = form.skills.filter((s) => s !== name);
+      const next = form.allowedTools.filter((s) => s !== name);
       // If all tools end up selected explicitly, collapse back to []
-      setField('skills', next.length === tools.length ? [] : next);
+      setField('allowedTools', next.length === tools.length ? [] : next);
     }
   };
 
@@ -210,7 +210,7 @@ function PersonaEditPanel({
             <ToolRow
               key={t.name}
               tool={t}
-              checked={form.skills.includes(t.name)}
+              checked={form.allowedTools.includes(t.name)}
               allEnabled={allTools}
               onChange={toggleTool}
             />
@@ -219,7 +219,7 @@ function PersonaEditPanel({
         <p className="text-xs text-base-content/40">
           {allTools
             ? `All ${tools.length} tools available`
-            : `${form.skills.length} / ${tools.length} tools enabled`}
+            : `${form.allowedTools.length} / ${tools.length} tools enabled`}
         </p>
       </div>
 
@@ -363,9 +363,9 @@ export function PersonasPanel() {
                 {p.systemPrompt.slice(0, 80)}
               </p>
               <p className="text-xs text-base-content/30 mt-0.5">
-                {(p.skills ?? []).length === 0
+                {(p.allowedTools ?? []).length === 0
                   ? `All ${tools.length} tools`
-                  : `${(p.skills ?? []).length} tools`}
+                  : `${(p.allowedTools ?? []).length} tools`}
               </p>
             </div>
             <ChevronRight size={16} className="text-base-content/30 shrink-0" />

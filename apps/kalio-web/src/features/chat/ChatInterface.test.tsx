@@ -50,6 +50,8 @@ vi.mock('../../services/eventBus', () => ({
     onAgentDone: (h: (...args: unknown[]) => void) => capture('agent:done', h),
     onRaAppNativeResult: (h: (...args: unknown[]) => void) => capture('raapp:native_result', h),
     onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
+    onReconnect: vi.fn().mockReturnValue(vi.fn()),
+    identifySession: vi.fn(),
     sendMessage: mockSendMessage,
     stopTurn: vi.fn(),
     confirmTool: vi.fn(),
