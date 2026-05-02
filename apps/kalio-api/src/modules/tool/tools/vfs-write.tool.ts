@@ -21,7 +21,7 @@ export class VFSWriteTool {
   constructor(private readonly vfs: VFSService) {}
 
   async execute(request: ToolCallRequest): Promise<{ path: string; bytesWritten: number }> {
-    const { sessionId } = request;
+    const sessionId = request.vfsSessionId ?? request.sessionId;
     const filePath = request.args['filePath'] as string;
     const content = request.args['content'] as string;
     await this.vfs.writeFile({ sessionId, filePath, content });

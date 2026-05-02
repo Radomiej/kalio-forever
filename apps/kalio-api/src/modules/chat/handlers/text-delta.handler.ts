@@ -15,6 +15,7 @@ export class TextDeltaHandler implements ChunkHandler<TextDeltaChunk> {
       done: false,
       sessionId: ctx.sessionId,
       messageId: ctx.messageId,
+      agentRun: ctx.agentRun,
     });
   }
 }

@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { randomUUID } from 'node:crypto';
-import type { ToolCallRequest, ToolMeta } from '@kalio/types';
+import type { SubagentToolResult, ToolCallRequest, ToolMeta, VFSMode } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { LLMService } from '../../llm/llm.service';
 // eslint-disable-next-line import/no-cycle
 import { ToolRegistryService } from '../tool-registry.service';
+import { SUBAGENT_RUNTIME, type SubagentRuntimePort } from '../subagent-runtime.port';
 
 interface ToolRegistryLike {
   getEntries?: () => Array<{ meta: ToolMeta }>;
@@ -42,6 +43,19 @@ Reply with your result only — no preamble.`;
         items: { type: 'string' },
         description: 'Optional list of tool names to make available to the sub-agent. If not provided, all tools are available.',
       },
+      personaId: {
+        type: 'string',
+        description: 'Optional persona id for the sub-agent. Defaults to default.',
+      },
+      vfsMode: {
+        type: 'string',
+        enum: ['isolated', 'shared'],
+        description: 'VFS mode for the sub-agent. isolated = child VFS copied back; shared = writes directly to master VFS.',
+      },
+      copyOutputs: {
+        type: 'boolean',
+        description: 'When true, copy isolated child VFS files back into the master VFS. Default: true.',
+      },
     },
   },
 })
@@ -59,6 +73,24 @@ export class SubagentTool {
     // because ToolRegistryService and SubagentTool are in the same module but
     // the default strict lookup fails with a class-keyed provider.
     return this.moduleRef.get(ToolRegistryService, { strict: false });
+  }
+
+  private getRuntime(): SubagentRuntimePort | null {
+    try {
+      const candidate = this.moduleRef.get(SUBAGENT_RUNTIME, { strict: false }) as unknown;
+      if (this.isRuntime(candidate)) return candidate;
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.logger.debug(`[run_subagent] Runtime unavailable: ${error.message}`);
+    }
+    return null;
+  }
+
+  private isRuntime(value: unknown): value is SubagentRuntimePort {
+    return typeof value === 'object'
+      && value !== null
+      && 'runSubagent' in value
+      && typeof (value as { runSubagent?: unknown }).runSubagent === 'function';
   }
 
   private getTools(availableTools?: string[]): ToolMeta[] {
@@ -87,10 +119,14 @@ export class SubagentTool {
     throw new Error('ToolRegistryService does not expose a supported tool listing API');
   }
 
-  async execute(request: ToolCallRequest): Promise<{ result: string; taskId: string }> {
+  async execute(request: ToolCallRequest): Promise<SubagentToolResult> {
     const objective = request.args['objective'] as string;
     const rawTimeout = request.args['timeoutMs'] as number | undefined;
     const availableTools = request.args['availableTools'] as string[] | undefined;
+    const personaId = request.args['personaId'] as string | undefined;
+    const rawVfsMode = request.args['vfsMode'];
+    const vfsMode: VFSMode = rawVfsMode === 'shared' ? 'shared' : 'isolated';
+    const copyOutputs = request.args['copyOutputs'] !== false;
     const timeoutMs = Math.min(rawTimeout ?? 60_000, 180_000);
     const taskId = randomUUID();
     const sessionId = request.sessionId;
@@ -102,6 +138,21 @@ export class SubagentTool {
 
     // Get tools: use availableTools if provided, otherwise all tools
     const tools = this.getTools(availableTools);
+    const runtime = this.getRuntime();
+    if (runtime) {
+      return runtime.runSubagent({
+        parentSessionId: sessionId,
+        parentToolCallId: request.callId,
+        objective,
+        personaId,
+        availableTools: tools,
+        timeoutMs,
+        vfsMode,
+        copyOutputs,
+        emit: request._emit,
+        parentAgentRun: request.agentRun,
+      });
+    }
 
     const runPromise = this.llm.streamChat(
       [
@@ -127,6 +178,16 @@ export class SubagentTool {
     const result = chunks.join('').trim() || 'Sub-agent completed with no output.';
     this.logger.log(`[run_subagent] Done ${taskId}, length=${result.length}`);
 
-    return { result, taskId };
+    const childSessionId = `sub-${taskId}`;
+    return {
+      result,
+      taskId,
+      childSessionId,
+      parentSessionId: sessionId,
+      vfsMode,
+      vfsSessionId: vfsMode === 'shared' ? sessionId : childSessionId,
+      copiedFiles: [],
+      durationMs: 0,
+    };
   }
 }

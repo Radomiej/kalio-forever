@@ -1,11 +1,159 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Wrench, CheckCircle2, XCircle, Clock, ChevronDown, ChevronRight,
-  Loader2, BrainCircuit, ArrowLeftFromLine, ArrowRightToLine, Info, Terminal,
+  Loader2, BrainCircuit, ArrowLeftFromLine, ArrowRightToLine, Info, Terminal, MessageSquareText, FolderTree,
 } from 'lucide-react';
 import { useAgentStore, type ToolActivity } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { AGENT_LABELS } from './cli-agent-labels';
+import { apiClient } from '../../services/apiClient';
+import type { ChatMessage, SubagentCopiedFile, SubagentToolResult } from '@kalio/types';
+
+interface SubagentCanvasPreview {
+  sessionId: string;
+  label: string;
+  title: string;
+  copiedFiles: SubagentCopiedFile[];
+  summary: string | null;
+}
+
+function extractSubagentResultFromMessage(message: ChatMessage): SubagentToolResult | null {
+  if (message.role !== 'tool_result') return null;
+  try {
+    return extractSubagentResult(JSON.parse(message.content));
+  } catch {
+    return null;
+  }
+}
+
+function extractSubagentResult(data: unknown): SubagentToolResult | null {
+  if (!data || typeof data !== 'object') return null;
+  const candidate = data as Record<string, unknown>;
+  if (typeof candidate['childSessionId'] !== 'string' || typeof candidate['result'] !== 'string') return null;
+  return candidate as unknown as SubagentToolResult;
+}
+
+function buildSubagentPreviews(messages: ChatMessage[], toolActivities: ToolActivity[], activeAgentLoops: Record<string, { sessionId: string; turnId: string; startedAt: number; agentRun?: ToolActivity['agentRun'] }>, sessions: ReturnType<typeof useSessionStore.getState>['sessions']): SubagentCanvasPreview[] {
+  const previews = new Map<string, SubagentCanvasPreview>();
+
+  Object.values(activeAgentLoops)
+    .filter((loop) => loop.agentRun?.agentType === 'subagent')
+    .forEach((loop) => {
+      const session = sessions.find((item) => item.id === loop.sessionId);
+      previews.set(loop.sessionId, {
+        sessionId: loop.sessionId,
+        label: loop.agentRun?.label ?? 'Sub-agent',
+        title: session?.title ?? loop.agentRun?.label ?? 'Sub-agent',
+        copiedFiles: [],
+        summary: null,
+      });
+    });
+
+  toolActivities
+    .filter((activity) => activity.toolName === 'run_subagent' && activity.result?.status === 'success')
+    .forEach((activity) => {
+      const result = extractSubagentResult(activity.result?.data);
+      if (!result) return;
+      const session = sessions.find((item) => item.id === result.childSessionId);
+      const existing = previews.get(result.childSessionId);
+      previews.set(result.childSessionId, {
+        sessionId: result.childSessionId,
+        label: existing?.label ?? 'Sub-agent',
+        title: session?.title ?? existing?.title ?? `Sub-agent ${result.childSessionId.slice(0, 8)}`,
+        copiedFiles: result.copiedFiles,
+        summary: result.result,
+      });
+    });
+
+  messages
+    .map(extractSubagentResultFromMessage)
+    .filter((result): result is SubagentToolResult => result !== null)
+    .forEach((result) => {
+      const session = sessions.find((item) => item.id === result.childSessionId);
+      const existing = previews.get(result.childSessionId);
+      previews.set(result.childSessionId, {
+        sessionId: result.childSessionId,
+        label: existing?.label ?? 'Sub-agent',
+        title: session?.title ?? existing?.title ?? `Sub-agent ${result.childSessionId.slice(0, 8)}`,
+        copiedFiles: existing?.copiedFiles.length ? existing.copiedFiles : result.copiedFiles,
+        summary: existing?.summary ?? result.result,
+      });
+    });
+
+  return [...previews.values()];
+}
+
+function SubagentConversationCard({
+  preview,
+  transcript,
+  onOpen,
+}: {
+  preview: SubagentCanvasPreview;
+  transcript: ChatMessage[];
+  onOpen: () => void;
+}) {
+  const visibleMessages = transcript
+    .filter((message) => message.role === 'user' || message.role === 'assistant')
+    .slice(-2);
+
+  return (
+    <div className="border border-sky-500/20 bg-sky-500/5 rounded-xl px-3 py-2.5 text-xs space-y-2">
+      <div className="flex items-start gap-2">
+        <BrainCircuit size={12} className="text-sky-400 mt-0.5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sky-300 truncate">{preview.label}</p>
+          <p className="text-base-content/50 truncate">{preview.title}</p>
+        </div>
+        <button
+          className="btn btn-ghost btn-xs"
+          onClick={onOpen}
+          aria-label="Open sub-agent chat"
+        >
+          Open
+        </button>
+      </div>
+
+      {visibleMessages.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-1 flex items-center gap-1">
+            <MessageSquareText size={10} />
+            Chat
+          </p>
+          <div className="space-y-1">
+            {visibleMessages.map((message) => (
+              <div key={message.id} className="rounded bg-base-200/60 px-2 py-1">
+                <span className="text-base-content/35 mr-1">{message.role === 'user' ? 'User:' : 'Agent:'}</span>
+                <span className="text-base-content/70 whitespace-pre-wrap break-words">{message.content}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!visibleMessages.length && preview.summary && (
+        <div className="rounded bg-base-200/60 px-2 py-1 text-base-content/70 whitespace-pre-wrap break-words">
+          {preview.summary}
+        </div>
+      )}
+
+      {preview.copiedFiles.length > 0 && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-1 flex items-center gap-1">
+            <FolderTree size={10} />
+            VFS outputs
+          </p>
+          <div className="space-y-1">
+            {preview.copiedFiles.map((file) => (
+              <div key={file.toPath} className="rounded bg-base-200/60 px-2 py-1 font-mono text-[11px] text-base-content/55 break-all">
+                {file.toPath}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Live terminal block rendered inside ToolCard while run_cli_agent is in progress. */
 function CLIAgentLiveSection({ callId, agentId }: { callId: string; agentId: string }) {
@@ -187,10 +335,49 @@ function SessionStats() {
 }
 
 export function CanvasPanel() {
-  const { toolActivities, isStreaming, canvasOpen, toggleCanvas } = useAgentStore();
+  const { toolActivities, isStreaming, canvasOpen, toggleCanvas, activeAgentLoops } = useAgentStore();
+  const { messages, activeSessionId, sessions, setActiveSession } = useSessionStore();
+  const [subagentMessages, setSubagentMessages] = useState<Record<string, ChatMessage[]>>({});
   const open = canvasOpen;
+  const subagentLoops = Object.values(activeAgentLoops).filter((loop) => loop.agentRun?.agentType === 'subagent');
+  const masterActivities = toolActivities.filter((activity) => activity.agentRun?.agentType !== 'subagent');
+  const subagentActivities = toolActivities.filter((activity) => activity.agentRun?.agentType === 'subagent');
+  const subagentPreviews = buildSubagentPreviews(messages, toolActivities, activeAgentLoops, sessions);
   // Show toggle only when agent has activity or canvas is already open
-  const showToggle = isStreaming || toolActivities.length > 0 || open;
+  const showToggle = isStreaming || toolActivities.length > 0 || subagentLoops.length > 0 || subagentPreviews.length > 0 || open;
+
+  useEffect(() => {
+    let cancelled = false;
+    const missingSessionIds = subagentPreviews
+      .map((preview) => preview.sessionId)
+      .filter((sessionId) => subagentMessages[sessionId] === undefined && sessionId !== activeSessionId);
+
+    if (missingSessionIds.length === 0) return;
+
+    void Promise.all(
+      missingSessionIds.map(async (sessionId) => {
+        const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
+        return [sessionId, response.data] as const;
+      }),
+    )
+      .then((results) => {
+        if (cancelled) return;
+        setSubagentMessages((current) => {
+          const next = { ...current };
+          results.forEach(([sessionId, loadedMessages]) => {
+            next[sessionId] = loadedMessages;
+          });
+          return next;
+        });
+      })
+      .catch((err: unknown) => {
+        console.error('[CanvasPanel] failed to load subagent transcript', err instanceof Error ? err : new Error(String(err)));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, subagentMessages, subagentPreviews]);
 
   return (
     <>
@@ -229,13 +416,42 @@ export function CanvasPanel() {
             )}
 
             {/* Tool activities */}
-            {toolActivities.length > 0 && (
+            {subagentPreviews.length > 0 && (
+              <section>
+                <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-2">Sub-agents</p>
+                <div className="space-y-1.5">
+                  {subagentPreviews.map((preview) => (
+                    <SubagentConversationCard
+                      key={preview.sessionId}
+                      preview={preview}
+                      transcript={preview.sessionId === activeSessionId ? messages : (subagentMessages[preview.sessionId] ?? [])}
+                      onOpen={() => setActiveSession(preview.sessionId)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {subagentActivities.length > 0 && (
               <section>
                 <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-2">
-                  Tools ({toolActivities.length})
+                  Sub-agent tools ({subagentActivities.length})
                 </p>
                 <div className="space-y-1.5">
-                  {toolActivities.map((a) => (
+                  {subagentActivities.map((a) => (
+                    <ToolCard key={a.callId} activity={a} />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {masterActivities.length > 0 && (
+              <section>
+                <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-2">
+                  Tools ({masterActivities.length})
+                </p>
+                <div className="space-y-1.5">
+                  {masterActivities.map((a) => (
                     <ToolCard key={a.callId} activity={a} />
                   ))}
                 </div>

@@ -21,7 +21,7 @@ export { computeAnsweredCallIds } from './chatUtils';
 
 export function ChatInterface() {
   const {
-    messages, activeSessionId, sessions, addMessage, appendChunk, finalizeChunk, setMessages,
+    messages, activeSessionId, sessions, addMessage, addSession, appendChunk, finalizeChunk, setMessages,
     agentTurns, startAgentTurn, addTurnItem, finalizeAgentTurn,
     setAgentTurns, markAgentTurnError, removeLastAgentTurn, flushThinkingChunks, flushStreamingChunks,
   } = useSessionStore();
@@ -171,6 +171,8 @@ export function ChatInterface() {
         callId: req.toolCallId,
         toolName: req.toolName,
         args: req.args,
+        sessionId: req.sessionId,
+        agentRun: req.agentRun,
         status: 'awaiting_confirmation',
         startedAt: Date.now(),
       });
@@ -190,19 +192,24 @@ export function ChatInterface() {
         callId: payload.callId,
         toolName: payload.toolName,
         args: payload.args,
+        sessionId: payload.sessionId,
+        agentRun: payload.agentRun,
         status: 'running',
         startedAt: Date.now(),
       });
       // Add to active agent turn
-      addTurnItem({ kind: 'tool', callId: payload.callId });
+      const payloadSessionId = payload.sessionId ?? useSessionStore.getState().activeSessionId;
+      if (payloadSessionId === useSessionStore.getState().activeSessionId) {
+        addTurnItem({ kind: 'tool', callId: payload.callId });
+      }
     });
 
     const offAgentStart = eventBus.onAgentStart((payload) => {
       console.log('[AgentStart]', payload.sessionId, payload.turnId);
-      addActiveAgentLoop(payload.sessionId, payload.turnId);
+      addActiveAgentLoop(payload.sessionId, payload.turnId, payload.agentRun);
       // Only manage turn state for the currently active session
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
-        startAgentTurn(payload.turnId, payload.sessionId);
+        startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun);
         clearToolActivities(); // Fresh turn = fresh tool activities
         setPendingConfirmation(payload.sessionId, null); // Clear any stale confirmation from previous turn
       }
@@ -210,7 +217,7 @@ export function ChatInterface() {
 
     const offAgentDone = eventBus.onAgentDone((payload) => {
       console.log('[AgentDone]', payload.sessionId, payload.turnId);
-      removeActiveAgentLoop(payload.sessionId);
+      removeActiveAgentLoop(payload.sessionId, payload.agentRun);
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
         finalizeAgentTurn();
         setPendingConfirmation(payload.sessionId, null); // Clear unanswered confirmations when turn ends
@@ -235,12 +242,12 @@ export function ChatInterface() {
       // Refresh VFS file list after a successful vfs_write
       if (result.status === 'success') {
         const toolName = useAgentStore.getState().toolActivities.find((a) => a.callId === result.callId)?.toolName;
-        if (toolName === 'vfs_write') setVfsRefreshSignal((n) => n + 1);
+        if (toolName === 'vfs_write' || toolName === 'run_subagent') setVfsRefreshSignal((n) => n + 1);
       }
       // Persist tool result into message store so RAAppManager (and chat history) can see it
       if (result.status === 'success' && result.data !== undefined) {
-        const sid = useSessionStore.getState().activeSessionId;
-        if (sid) {
+        const sid = result.sessionId ?? useSessionStore.getState().activeSessionId;
+        if (sid && sid === useSessionStore.getState().activeSessionId) {
           const toolResultMsg: ChatMessage = {
             id: nanoid(),
             sessionId: sid,
@@ -260,6 +267,12 @@ export function ChatInterface() {
 
     const offCLIAgentProgress = eventBus.onCLIAgentProgress((payload) => {
       appendCLIAgentChunk(payload.callId, payload.chunk);
+    });
+
+    const offSessionCreated = eventBus.onSessionCreated((session) => {
+      if (!useSessionStore.getState().sessions.some((item) => item.id === session.id)) {
+        addSession(session);
+      }
     });
 
     const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
@@ -321,10 +334,11 @@ export function ChatInterface() {
       offContext();
       offToolResult();
       offCLIAgentProgress();
+      offSessionCreated();
       offRaAppNative();
       offReconnect();
     };
-  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput, clearToolActivities, backendHealth]);
+  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput, clearToolActivities, addSession, backendHealth]);
 
   // Clear stale retry content when the user switches sessions.
   // Without this, clicking Retry after switching sessions would send the previous

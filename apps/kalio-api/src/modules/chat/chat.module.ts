@@ -19,6 +19,7 @@ import { AuditLogController } from './audit-log.controller';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
 import { LLMServiceAdapter } from './llm-service.adapter';
 import { ImageHydratorService } from './image-hydrator.service';
+import { SubagentRuntimeService } from './subagent-runtime.service';
 import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
@@ -27,6 +28,7 @@ import { RAAppModule } from '../raapp/raapp.module';
 import { MCPModule } from '../mcp/mcp.module';
 import { SkillsModule } from '../skills/skills.module';
 import { ToolRegistryService } from '../tool/tool-registry.service';
+import { SUBAGENT_RUNTIME } from '../tool/subagent-runtime.port';
 import {
   CHUNK_HANDLERS,
   STREAM_MIDDLEWARES,
@@ -68,6 +70,7 @@ import {
     DrizzleMessageRepository,
     LLMServiceAdapter,
     ImageHydratorService,
+    SubagentRuntimeService,
 
     // CHUNK_HANDLERS: ordered array injected into StreamProcessorService
     {
@@ -100,12 +103,17 @@ import {
       useExisting: LLMServiceAdapter,
     },
 
+    {
+      provide: SUBAGENT_RUNTIME,
+      useExisting: SubagentRuntimeService,
+    },
+
     // MESSAGE_REPOSITORY: Drizzle-backed implementation
     {
       provide: MESSAGE_REPOSITORY,
       useExisting: DrizzleMessageRepository,
     },
   ],
-  exports: [ChatService, ChatGateway, ToolDispatchService, SessionManagerService, SessionsService],
+  exports: [ChatService, ChatGateway, ToolDispatchService, SessionManagerService, SessionsService, SubagentRuntimeService, SUBAGENT_RUNTIME],
 })
 export class ChatModule {}

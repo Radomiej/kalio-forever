@@ -1,4 +1,4 @@
-import type { SocketEvents } from '@kalio/types';
+import type { AgentRunContext, SocketEvents } from '@kalio/types';
 import type { TurnState } from '../turn-state';
 
 /**
@@ -13,8 +13,10 @@ export type EmitFn = <K extends keyof SocketEvents>(event: K, data: SocketEvents
  */
 export interface StreamContext {
   readonly sessionId: string;
+  readonly vfsSessionId?: string;
   readonly messageId: string;
   readonly abortSignal: AbortSignal;
   readonly state: TurnState;
   readonly emit: EmitFn;
+  readonly agentRun?: AgentRunContext;
 }

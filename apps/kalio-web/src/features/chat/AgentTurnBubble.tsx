@@ -84,9 +84,11 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
   return (
     <div data-testid="agent-turn-bubble" className="flex justify-start mb-2 w-full">
       <div className="min-w-0 w-full max-w-[min(100%,68rem)]">
-        <p className="text-xs text-base-content/50 mb-1 ml-1">Kalio</p>
+        <p className="text-xs text-base-content/50 mb-1 ml-1">
+          {turn.agentRun?.agentType === 'subagent' ? (turn.agentRun.label ?? 'Sub-agent') : 'Kalio'}
+        </p>
 
-        <div className="group relative rounded-2xl bg-base-300 text-base-content text-sm px-4 py-3 flex flex-col gap-2 w-full">
+        <div className={`group relative rounded-2xl text-base-content text-sm px-4 py-3 flex flex-col gap-2 w-full ${turn.agentRun?.agentType === 'subagent' ? 'bg-sky-500/10 border border-sky-500/20' : 'bg-base-300'}`}>
           {/* Loading indicator while turn is active but no items have arrived yet */}
           {!turn.done && turn.items.length === 0 && (
             <span data-testid="turn-loading-indicator" className="loading loading-dots loading-xs" />
@@ -135,7 +137,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
             
             // Use per-message streaming state: cursor blinks only while this message's
             // chunk is still live (disappears as soon as agent calls a tool / thinking / raapp).
-            const isStreaming = streamingChunks[messageId] !== undefined;
+            const isStreaming = streamingChunks[messageId] !== undefined || (!turn.done && msg.streaming === true);
             const displayContent = isStreaming ? (streamingChunks[messageId] ?? '') : msg.content;
 
             return (

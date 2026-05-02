@@ -123,6 +123,75 @@ describe('ToolDispatchService', () => {
       const result = await service.dispatch('c1', 'dangerous_tool', {}, ctx);
       expect(result.status).toBe('success');
     });
+
+    it('auto-approves isolated subagent VFS writes without HITL confirmation', async () => {
+      const entry = makeEntry('vfs_write', true, { path: 'index.html' });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'child-session',
+        vfsSessionId: 'child-session',
+        agentRun: {
+          agentRunId: 'sub-run-1',
+          agentType: 'subagent' as const,
+          parentSessionId: 'master-session',
+          vfsMode: 'isolated' as const,
+        },
+      };
+
+      const result = await scopedService.dispatch('c1', 'vfs_write', { filePath: 'index.html', content: '<h1>x</h1>' }, ctx);
+
+      expect(result.status).toBe('success');
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'child-session',
+        vfsSessionId: 'child-session',
+        agentRun: expect.objectContaining({ agentType: 'subagent', vfsMode: 'isolated' }),
+      }));
+    });
+
+    it('keeps HITL confirmation for shared-VFS subagent writes', async () => {
+      const entry = makeEntry('vfs_write', true, { path: 'index.html' });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'child-session',
+        vfsSessionId: 'master-session',
+        agentRun: {
+          agentRunId: 'sub-run-2',
+          agentType: 'subagent' as const,
+          parentSessionId: 'master-session',
+          vfsMode: 'shared' as const,
+        },
+      };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
+
+      const result = await scopedService.dispatch('c1', 'vfs_write', { filePath: 'index.html', content: '<h1>x</h1>' }, ctx);
+
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.objectContaining({
+        toolName: 'vfs_write',
+        sessionId: 'child-session',
+        agentRun: expect.objectContaining({ agentType: 'subagent', vfsMode: 'shared' }),
+      }));
+      expect(result.status).toBe('cancelled');
+      expect(entry.execute).not.toHaveBeenCalled();
+    });
   });
 
   describe('getToolMetas', () => {

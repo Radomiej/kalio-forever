@@ -16,7 +16,7 @@ export class VFSListTool {
   constructor(private readonly vfs: VFSService) {}
 
   async execute(request: ToolCallRequest): Promise<{ sessionId: string; files: { path: string; sizeBytes: number }[] }> {
-    const { sessionId } = request;
+    const sessionId = request.vfsSessionId ?? request.sessionId;
     const result = this.vfs.listFiles(sessionId);
     return {
       sessionId: result.sessionId,

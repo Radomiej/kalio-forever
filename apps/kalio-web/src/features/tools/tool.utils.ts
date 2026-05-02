@@ -19,6 +19,8 @@ const TOOL_GROUPS: ToolGroup[] = [
   { label: 'Web',                match: (n) => n === 'web_search' },
   { label: 'Tools',              match: (n) => n === 'list_tools' || n === 'get_tool_details' },
   { label: 'Images',             match: (n) => n.startsWith('image_') },
+  { label: 'Skills',             match: (n) => n.startsWith('skill_') },
+  { label: 'Persona',            match: (n) => n.startsWith('persona_') },
 ];
 
 export function groupToolsByPrefix(tools: ToolMeta[]): Array<{ label: string; tools: ToolMeta[] }> {

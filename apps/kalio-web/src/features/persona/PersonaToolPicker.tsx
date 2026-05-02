@@ -13,6 +13,8 @@ const GROUP_LABELS: Record<string, string> = {
   websearch: 'Web Search',
   tools: 'Tools',
   images: 'Images',
+  skills: 'Skills',
+  persona: 'Persona',
   other: 'Other',
 };
 
@@ -27,6 +29,8 @@ function deriveGroup(name: string): string {
   if (name === 'web_search') return 'websearch';
   if (name === 'list_tools' || name === 'get_tool_details') return 'tools';
   if (name.startsWith('image_')) return 'images';
+  if (name.startsWith('skill_')) return 'skills';
+  if (name.startsWith('persona_')) return 'persona';
   return 'other';
 }
 

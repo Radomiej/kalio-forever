@@ -8,6 +8,7 @@ import { TOOL_REGISTRY } from './chat.tokens';
 import { MCPService } from '../mcp/mcp.service';
 
 const HITL_TIMEOUT_MS = 30_000;
+const SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
 
 interface PendingConfirmation {
   resolve: () => void;
@@ -65,58 +66,60 @@ export class ToolDispatchService {
           if (mcpMeta?.requiresConfirmation) {
             const confirmed = await this.awaitConfirmation(callId, toolName, args, ctx);
             if (!confirmed) {
-              return { callId, status: 'cancelled' };
+              return this.withMeta({ callId, status: 'cancelled' }, toolName, ctx);
             }
           }
           try {
             const data = await this.mcpService.callTool(mcpRef.serverId, mcpRef.originalName, args);
-            return { callId, status: 'success', data };
+            return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             this.logger.error(`MCP tool [${toolName}] failed: ${message}`, err instanceof Error ? err.stack : undefined);
-            return { callId, status: 'error', errorCode: 'TOOL_EXECUTION_FAILED', errorMessage: message };
+            return this.withMeta({ callId, status: 'error', errorCode: 'TOOL_EXECUTION_FAILED', errorMessage: message }, toolName, ctx);
           }
         }
       }
-      return {
+      return this.withMeta({
         callId,
         status: 'error',
         errorCode: 'TOOL_NOT_FOUND',
         errorMessage: `Unknown tool: ${toolName}`,
-      };
+      }, toolName, ctx);
     }
 
-    if (entry.meta.requiresConfirmation) {
+    if (entry.meta.requiresConfirmation && !this.canAutoApprove(toolName, ctx)) {
       const confirmed = await this.awaitConfirmation(callId, toolName, args, ctx);
       if (!confirmed) {
-        return { callId, status: 'cancelled' };
+        return this.withMeta({ callId, status: 'cancelled' }, toolName, ctx);
       }
     }
 
     try {
       const req: ToolCallRequest = {
         sessionId: ctx.sessionId,
+        vfsSessionId: ctx.vfsSessionId,
         toolName,
         args,
         callId,
         availableTools: toolMetas,
+        agentRun: ctx.agentRun,
         // Pass the socket emitter so streaming tools can push progress events
         _emit: ctx.emit as ToolCallRequest['_emit'],
       };
       const data = await entry.execute(req);
-      return { callId, status: 'success', data };
+      return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
         `Tool [${toolName}] failed for session ${ctx.sessionId}: ${message}`,
         err instanceof Error ? err.stack : undefined,
       );
-      return {
+      return this.withMeta({
         callId,
         status: 'error',
         errorCode: 'TOOL_EXECUTION_FAILED',
         errorMessage: message,
-      };
+      }, toolName, ctx);
     }
   }
 
@@ -149,6 +152,7 @@ export class ToolDispatchService {
       toolName,
       args,
       timeoutMs: HITL_TIMEOUT_MS,
+      agentRun: ctx.agentRun,
     };
 
     ctx.emit('tool:confirmation_required', payload);
@@ -173,5 +177,22 @@ export class ToolDispatchService {
         },
       });
     });
+  }
+
+  private canAutoApprove(toolName: string, ctx: StreamContext): boolean {
+    return ctx.agentRun?.agentType === 'subagent'
+      && ctx.agentRun.vfsMode === 'isolated'
+      && ctx.vfsSessionId === ctx.sessionId
+      && SUBAGENT_AUTO_APPROVE_TOOLS.has(toolName);
+  }
+
+  private withMeta(result: ToolResult, toolName: string, ctx: StreamContext): ToolResult {
+    if (!ctx.agentRun) return result;
+    return {
+      ...result,
+      sessionId: ctx.sessionId,
+      toolName,
+      agentRun: ctx.agentRun,
+    };
   }
 }

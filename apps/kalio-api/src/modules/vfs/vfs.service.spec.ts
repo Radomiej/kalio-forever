@@ -214,6 +214,51 @@ describe('VFSService', () => {
     });
   });
 
+  describe('copySessionFiles', () => {
+    it('copies all child session files into a prefixed master directory', () => {
+      service.writeFile({ sessionId: 'child-session', filePath: 'site/index.html', content: '<h1>Hello</h1>' });
+      service.writeFile({ sessionId: 'child-session', filePath: 'site/style.css', content: 'body{}' });
+
+      const copied = service.copySessionFiles({
+        fromSessionId: 'child-session',
+        toSessionId: sessionId,
+        targetPrefix: 'sub-agents/child-session',
+      });
+
+      expect(copied.map((file) => file.toPath).sort()).toEqual([
+        'sub-agents/child-session/site/index.html',
+        'sub-agents/child-session/site/style.css',
+      ]);
+      expect(service.readFile(sessionId, 'sub-agents/child-session/site/index.html').content).toBe('<h1>Hello</h1>');
+    });
+
+    it('copies selected child files only', () => {
+      service.writeFile({ sessionId: 'child-session', filePath: 'a.txt', content: 'A' });
+      service.writeFile({ sessionId: 'child-session', filePath: 'b.txt', content: 'B' });
+
+      const copied = service.copySessionFiles({
+        fromSessionId: 'child-session',
+        toSessionId: sessionId,
+        targetPrefix: 'sub-agents/child-session',
+        filePaths: ['b.txt'],
+      });
+
+      expect(copied).toEqual([{ fromPath: 'b.txt', toPath: 'sub-agents/child-session/b.txt', sizeBytes: 1 }]);
+      expect(service.readFile(sessionId, 'sub-agents/child-session/b.txt').content).toBe('B');
+      expect(() => service.readFile(sessionId, 'sub-agents/child-session/a.txt')).toThrow();
+    });
+
+    it('rejects unsafe copy target prefixes', () => {
+      service.writeFile({ sessionId: 'child-session', filePath: 'a.txt', content: 'A' });
+
+      expect(() => service.copySessionFiles({
+        fromSessionId: 'child-session',
+        toSessionId: sessionId,
+        targetPrefix: '../escaped',
+      })).toThrow(/PATH_TRAVERSAL_DENIED/);
+    });
+  });
+
   describe('resolveSafe - invalid percent encoding', () => {
     it('falls back gracefully when decodeURIComponent throws (invalid percent encoding)', () => {
       // '%xyz' has invalid percent encoding - decodeURIComponent throws

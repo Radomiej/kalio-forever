@@ -349,4 +349,27 @@ describe('PersonaService', () => {
       expect(insertPayload).toHaveProperty('skillIds');
     });
   });
+
+  describe('onApplicationBootstrap — specialized persona seeding', () => {
+    it('seeds web-research and orchestrator personas from personas.json', async () => {
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      const valuesMock = vi.fn().mockResolvedValue(undefined);
+      mockDb.insert.mockReturnValue({ values: valuesMock });
+
+      await service.onApplicationBootstrap();
+
+      const seededIds = valuesMock.mock.calls
+        .map((call) => call[0] as { id?: string })
+        .map((payload) => payload.id)
+        .filter((id): id is string => typeof id === 'string');
+
+      expect(seededIds).toContain('web-research');
+      expect(seededIds).toContain('orchestrator');
+    });
+  });
 });

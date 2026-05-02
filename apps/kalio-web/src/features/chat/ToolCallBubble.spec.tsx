@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { LiveToolCallBubble } from './ToolCallBubble';
+import { HistoryToolCallBubble, LiveToolCallBubble } from './ToolCallBubble';
 import type { ToolActivity } from '../../store/agentStore';
 import type { ToolConfirmationRequest } from '@kalio/types';
 
@@ -173,5 +173,32 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
 
     expect(screen.queryByTestId('args-preview')).toBeNull();
     expect(screen.queryByTestId('confirmation-args-toggle')).toBeNull();
+  });
+});
+
+describe('HistoryToolCallBubble — run_subagent', () => {
+  it('shows child session, VFS mode, copied count, and copied file path after expanding', () => {
+    const content = JSON.stringify({
+      result: 'created index.html',
+      taskId: 'task-1',
+      childSessionId: 'sub-child-1',
+      parentSessionId: 'session-1',
+      vfsMode: 'isolated',
+      vfsSessionId: 'sub-child-1',
+      copiedFiles: [{ fromPath: 'index.html', toPath: 'sub-agents/sub-child-1/index.html', sizeBytes: 42 }],
+      durationMs: 12,
+    });
+
+    render(<HistoryToolCallBubble toolName="run_subagent" content={content} args={{ vfsMode: 'isolated' }} />);
+
+    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Toggle details' })); });
+
+    expect(screen.getByText('session')).toBeDefined();
+    expect(screen.getByText('sub-child-1')).toBeDefined();
+    expect(screen.getByText('vfs')).toBeDefined();
+    expect(screen.getAllByText('isolated').length).toBeGreaterThan(0);
+    expect(screen.getByText('copied')).toBeDefined();
+    expect(screen.getByText('1')).toBeDefined();
+    expect(screen.getByText('sub-agents/sub-child-1/index.html')).toBeDefined();
   });
 });

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ChatSession, ChatMessage, ID } from '@kalio/types';
+import type { AgentRunContext, ChatSession, ChatMessage, ID } from '@kalio/types';
 
 // ─── Agent Turn (unified chronological items per user prompt) ─────────────────
 export type AgentTurnItem =
@@ -10,6 +10,7 @@ export type AgentTurnItem =
 export interface AgentTurn {
   id: ID;              // turnId from agent:start
   sessionId: ID;
+  agentRun?: AgentRunContext;
   items: AgentTurnItem[];  // ordered, append-only
   done: boolean;
   /** Set when the turn ends with a chat:error that had content (mid-turn error). */
@@ -49,7 +50,7 @@ interface SessionState {
   dequeueUserAction: () => string | undefined;
 
   // Agent turn management
-  startAgentTurn: (turnId: ID, sessionId: ID) => void;
+  startAgentTurn: (turnId: ID, sessionId: ID, agentRun?: AgentRunContext) => void;
   addTurnItem: (item: AgentTurnItem) => void;
   finalizeAgentTurn: () => void;
   clearAgentTurns: () => void;
@@ -305,9 +306,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   // Agent turn management — unified chronological rendering per user prompt
-  startAgentTurn: (turnId, sessionId) =>
+  startAgentTurn: (turnId, sessionId, agentRun) =>
     set((s) => ({
-      agentTurns: [...s.agentTurns, { id: turnId, sessionId, items: [], done: false }],
+      agentTurns: [...s.agentTurns, { id: turnId, sessionId, agentRun, items: [], done: false }],
       activeTurnId: turnId,
     })),
 

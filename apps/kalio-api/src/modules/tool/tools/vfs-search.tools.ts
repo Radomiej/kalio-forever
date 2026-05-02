@@ -31,7 +31,7 @@ export class VFSGrepSearchTool {
   async execute(
     request: ToolCallRequest,
   ): Promise<{ matches: Array<{ file: string; line: number; text: string }>; total: number }> {
-    const { sessionId } = request;
+    const sessionId = request.vfsSessionId ?? request.sessionId;
     const query = request.args['query'] as string;
     const isRegexp = (request.args['isRegexp'] as boolean) ?? false;
     const includePattern = request.args['includePattern'] as string | undefined;
@@ -94,7 +94,7 @@ export class VFSFileSearchTool {
   constructor(private readonly vfs: VFSService) {}
 
   async execute(request: ToolCallRequest): Promise<{ files: string[]; total: number }> {
-    const { sessionId } = request;
+    const sessionId = request.vfsSessionId ?? request.sessionId;
     const pattern = request.args['pattern'] as string;
     const maxResults = (request.args['maxResults'] as number) ?? 100;
 

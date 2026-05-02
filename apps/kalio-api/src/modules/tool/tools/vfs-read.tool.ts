@@ -19,7 +19,7 @@ export class VFSReadTool {
   constructor(private readonly vfs: VFSService) {}
 
   async execute(request: ToolCallRequest): Promise<{ filePath: string; content: string }> {
-    const { sessionId } = request;
+    const sessionId = request.vfsSessionId ?? request.sessionId;
     const filePath = request.args['filePath'] as string;
     const result = this.vfs.readFile(sessionId, filePath);
     return { filePath: result.filePath, content: result.content };

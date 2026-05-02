@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
+import type { AgentRunContext, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
 
 export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled';
 
@@ -7,6 +7,8 @@ export interface ToolActivity {
   callId: string;
   toolName: string;
   args: Record<string, unknown>;
+  sessionId?: string;
+  agentRun?: AgentRunContext;
   status: ToolActivityStatus;
   startedAt: number;
   finishedAt?: number;
@@ -50,7 +52,7 @@ interface AgentState {
    * All agent loops currently active on the BE, keyed by sessionId.
    * Populated by agent:start / agent:done events across ALL sessions.
    */
-  activeAgentLoops: Record<string, { sessionId: string; turnId: string; startedAt: number }>;
+  activeAgentLoops: Record<string, { sessionId: string; turnId: string; startedAt: number; agentRun?: AgentRunContext }>;
 
   setStreaming: (streaming: boolean, messageId?: string) => void;
   setPendingConfirmation: (sessionId: string, req: ToolConfirmationRequest | null) => void;
@@ -66,8 +68,8 @@ interface AgentState {
   registerCallId: (callId: string, toolName: string) => void;
   setCanvasOpen: (open: boolean) => void;
   toggleCanvas: () => void;
-  addActiveAgentLoop: (sessionId: string, turnId: string) => void;
-  removeActiveAgentLoop: (sessionId: string) => void;
+  addActiveAgentLoop: (sessionId: string, turnId: string, agentRun?: AgentRunContext) => void;
+  removeActiveAgentLoop: (sessionId: string, agentRun?: AgentRunContext) => void;
   /** Accumulated CLI agent output per callId (populated by cli_agent:progress) */
   cliAgentOutput: Record<string, string>;
   appendCLIAgentChunk: (callId: string, chunk: string) => void;
@@ -108,7 +110,10 @@ export const useAgentStore = create<AgentState>((set) => ({
       // If the same callId already exists (e.g. added by onToolConfirmation before tool:start fires),
       // replace it instead of appending — prevents duplicate React keys.
       // Auto-open the Canvas when a CLI agent starts so streaming is immediately visible.
-      const autoOpen = activity.toolName === 'run_cli_agent' ? { canvasOpen: true } : {};
+      const shouldOpenCanvas = activity.toolName === 'run_cli_agent'
+        || activity.toolName === 'run_subagent'
+        || activity.agentRun?.agentType === 'subagent';
+      const autoOpen = shouldOpenCanvas ? { canvasOpen: true } : {};
       if (s.toolActivities.some((a) => a.callId === activity.callId)) {
         return {
           ...autoOpen,
@@ -149,17 +154,17 @@ export const useAgentStore = create<AgentState>((set) => ({
   setCanvasOpen: (open) => set({ canvasOpen: open }),
   toggleCanvas: () => set((s) => ({ canvasOpen: !s.canvasOpen })),
 
-  addActiveAgentLoop: (sessionId, turnId) =>
+  addActiveAgentLoop: (sessionId, turnId, agentRun) =>
     set((s) => ({
       activeAgentLoops: {
         ...s.activeAgentLoops,
-        [sessionId]: { sessionId, turnId, startedAt: Date.now() },
+        [agentRun?.agentRunId ?? sessionId]: { sessionId, turnId, startedAt: Date.now(), agentRun },
       },
     })),
 
-  removeActiveAgentLoop: (sessionId) =>
+  removeActiveAgentLoop: (sessionId, agentRun) =>
     set((s) => {
-      const { [sessionId]: _removed, ...rest } = s.activeAgentLoops;
+      const { [agentRun?.agentRunId ?? sessionId]: _removed, ...rest } = s.activeAgentLoops;
       return { activeAgentLoops: rest };
     }),
   appendCLIAgentChunk: (callId, chunk) =>

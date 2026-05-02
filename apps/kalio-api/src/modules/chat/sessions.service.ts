@@ -32,11 +32,20 @@ export class SessionsService {
   }
 
   async create(dto: CreateSessionDto): Promise<ChatSession> {
+    return this.createWithId(nanoid(), dto);
+  }
+
+  async createWithId(id: string, dto: CreateSessionDto): Promise<ChatSession> {
     const now = new Date();
     const row = {
-      id: nanoid(),
+      id,
       personaId: dto.personaId ?? 'default',
       title: dto.title ?? 'New Chat',
+      kind: dto.kind ?? 'chat',
+      parentSessionId: dto.parentSessionId ?? null,
+      parentTurnId: dto.parentTurnId ?? null,
+      parentToolCallId: dto.parentToolCallId ?? null,
+      interlocutorLabel: dto.interlocutorLabel ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -89,6 +98,11 @@ export class SessionsService {
     id: string;
     personaId: string;
     title: string;
+    kind?: 'chat' | 'subagent';
+    parentSessionId?: string | null;
+    parentTurnId?: string | null;
+    parentToolCallId?: string | null;
+    interlocutorLabel?: string | null;
     createdAt: number | Date;
     updatedAt: number | Date;
   }): ChatSession {
@@ -96,6 +110,11 @@ export class SessionsService {
       id: row.id,
       personaId: row.personaId,
       title: row.title,
+      kind: row.kind ?? 'chat',
+      parentSessionId: row.parentSessionId ?? undefined,
+      parentTurnId: row.parentTurnId ?? undefined,
+      parentToolCallId: row.parentToolCallId ?? undefined,
+      interlocutorLabel: row.interlocutorLabel ?? undefined,
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),
     };

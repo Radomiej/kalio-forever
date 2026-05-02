@@ -9,7 +9,7 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({ message }: MessageBubbleProps) {
-  const { streamingChunks, thinkingChunks } = useSessionStore();
+  const { streamingChunks, thinkingChunks, sessions } = useSessionStore();
   const [thinkingOpen, setThinkingOpen] = useState(false);
 
   const isUser = message.role === 'user';
@@ -32,10 +32,15 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   }, [isStreaming, hasThinking, thinkingOpen]);
 
   if (isUser) {
+    const session = sessions.find((item) => item.id === message.sessionId);
+    const userLabel = session?.kind === 'subagent' ? (session.interlocutorLabel ?? 'Master agent') : null;
     return (
       <div data-testid="message-bubble" data-role="user" className="flex justify-end">
-        <div className="max-w-[75%] rounded-2xl px-4 py-2 text-sm bg-primary text-primary-content">
-          <span data-testid="message-content">{displayContent}</span>
+        <div className="flex flex-col items-end max-w-[75%]">
+          {userLabel && <p className="text-xs text-base-content/50 mb-1 mr-1">{userLabel}</p>}
+          <div className="rounded-2xl px-4 py-2 text-sm bg-primary text-primary-content">
+            <span data-testid="message-content">{displayContent}</span>
+          </div>
         </div>
       </div>
     );

@@ -52,6 +52,25 @@ describe('SubagentTool', () => {
       expect(result.taskId).toMatch(/^[0-9a-f-]{36}$/);
     });
 
+    it('returns child session and VFS metadata for real subagent runs', async () => {
+      (llm.streamChat as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_messages, _tools, onChunk: (c: { done: boolean; thinking: boolean; delta: string }) => void) => {
+          onChunk({ done: false, thinking: false, delta: 'done' });
+        },
+      );
+
+      const result = await tool.execute(makeRequest({ objective: 'create a test site' }, 'master-session'));
+
+      expect(result).toMatchObject({
+        result: 'done',
+        parentSessionId: 'master-session',
+        vfsMode: 'isolated',
+      });
+      expect(result.childSessionId).toMatch(/^sub-/);
+      expect(result.vfsSessionId).toBe(result.childSessionId);
+      expect(result.copiedFiles).toEqual([]);
+    });
+
     it('joins multiple chunks into a single result string', async () => {
       (llm.streamChat as ReturnType<typeof vi.fn>).mockImplementation(
         async (_messages, _tools, onChunk: (c: { done: boolean; thinking: boolean; delta: string }) => void) => {

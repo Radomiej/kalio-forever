@@ -18,7 +18,7 @@ import type { ToolActivity } from '../../store/agentStore';
 import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
-import type { RAAppBlock, RaAppPendingApproval, CLIAgentResult } from '@kalio/types';
+import type { RAAppBlock, RaAppPendingApproval, CLIAgentResult, SubagentToolResult } from '@kalio/types';
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
 import { TerminalOutputBlock } from './TerminalOutputBlock';
 import { LiveCLIAgentBlock } from './LiveCLIAgentBlock';
@@ -76,6 +76,40 @@ function extractImageResult(data: unknown): ImageResultData | null {
     return d as unknown as ImageResultData;
   }
   return null;
+}
+
+function extractSubagentResult(data: unknown): SubagentToolResult | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d['childSessionId'] !== 'string' || typeof d['result'] !== 'string') return null;
+  return d as unknown as SubagentToolResult;
+}
+
+function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] font-mono text-base-content/60 bg-base-200/60 rounded px-2 py-1.5">
+        <span className="text-base-content/35">session</span>
+        <span className="truncate">{result.childSessionId}</span>
+        <span className="text-base-content/35">vfs</span>
+        <span>{result.vfsMode}</span>
+        <span className="text-base-content/35">copied</span>
+        <span>{result.copiedFiles.length}</span>
+      </div>
+      {result.result && (
+        <div className="text-xs text-base-content/60 bg-base-200/40 rounded px-2 py-1.5 whitespace-pre-wrap">
+          {result.result}
+        </div>
+      )}
+      {result.copiedFiles.length > 0 && (
+        <div className="font-mono text-[11px] text-base-content/50 bg-base-200/40 rounded px-2 py-1.5 max-h-32 overflow-y-auto">
+          {result.copiedFiles.map((file) => (
+            <div key={file.toPath} className="truncate">{file.toPath}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Chip chrome ─────────────────────────────────────────────────────────────
@@ -319,14 +353,15 @@ export function HistoryToolCallBubble({
   const raapp = extractRAAppBlock(parsed);
   const cliResult = isCliAgent ? extractCLIAgentResult(parsed) : null;
   const imageResult = extractImageResult(parsed);
+  const subagentResult = isSubagent ? extractSubagentResult(parsed) : null;
   const hasArgs = args != null && Object.keys(args).length > 0;
   const [open, setOpen] = useState(() => (raapp != null && !isAnswered) || cliResult != null || imageResult != null);
   useEffect(() => {
     if (isAnswered) setOpen(false);
   }, [isAnswered]);
 
-  const hasResult = !raapp && !cliResult && !imageResult && content.length > 0;
-  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || imageResult != null;
+  const hasResult = !raapp && !cliResult && !imageResult && !subagentResult && content.length > 0;
+  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || imageResult != null || subagentResult != null;
 
   return (
     <>
@@ -374,6 +409,7 @@ export function HistoryToolCallBubble({
             agentId={args?.['agentId'] as string | undefined}
           />
         )}
+        {subagentResult && <SubagentResultBlock result={subagentResult} />}
         {imageResult && <ImageResultRenderer data={imageResult} />}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}
       </Chip>

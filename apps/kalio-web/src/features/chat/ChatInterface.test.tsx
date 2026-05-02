@@ -48,6 +48,7 @@ vi.mock('../../services/eventBus', () => ({
     onContext: (h: (...args: unknown[]) => void) => capture('chat:context', h),
     onAgentStart: (h: (...args: unknown[]) => void) => capture('agent:start', h),
     onAgentDone: (h: (...args: unknown[]) => void) => capture('agent:done', h),
+    onSessionCreated: (h: (...args: unknown[]) => void) => capture('session:created', h),
     onRaAppNativeResult: (h: (...args: unknown[]) => void) => capture('raapp:native_result', h),
     onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
     onReconnect: vi.fn().mockReturnValue(vi.fn()),
@@ -63,6 +64,8 @@ vi.mock('../../services/eventBus', () => ({
 // ── agentStore mock ───────────────────────────────────────────────────────────
 const addToolActivity = vi.fn();
 const updateToolActivity = vi.fn();
+const addSession = vi.fn();
+const addMessage = vi.fn();
 const setStreaming = vi.fn();
 const setPendingConfirmation = vi.fn();
 const clearToolActivities = vi.fn();
@@ -114,6 +117,7 @@ const startAgentTurn = vi.fn();
 const finalizeAgentTurn = vi.fn();
 const addTurnItem = vi.fn();
 const clearAgentTurns = vi.fn();
+const flushStreamingChunks = vi.fn();
 
 // Mutable activeTurnId so tests can control what the store returns
 let mockActiveTurnId: string | null = null;
@@ -134,7 +138,8 @@ vi.mock('../../store/sessionStore', () => ({
         { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
         { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
       ],
-      addMessage: vi.fn(),
+      addMessage,
+      addSession,
       appendChunk: vi.fn(),
       finalizeChunk: vi.fn(),
       setMessages,
@@ -147,6 +152,7 @@ vi.mock('../../store/sessionStore', () => ({
       markAgentTurnError,
       removeLastAgentTurn,
       flushThinkingChunks: vi.fn(),
+      flushStreamingChunks,
     }),
     {
       getState: () => ({
@@ -160,6 +166,7 @@ vi.mock('../../store/sessionStore', () => ({
           { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
         ],
         pendingMessage: mockPendingMessage,
+        addSession,
         pendingRAAppId: null,
         setPendingMessage: mockSetPendingMessage,
         setPendingRAAppId: mockSetPendingRAAppId,
@@ -168,6 +175,7 @@ vi.mock('../../store/sessionStore', () => ({
         thinkingChunks: {},
         chunkSessionIds: {},
         finalizeChunk: vi.fn(),
+        flushStreamingChunks,
         markAgentTurnError,
         removeLastAgentTurn,
       }),
@@ -315,6 +323,61 @@ describe('ChatInterface event wiring', () => {
 
     expect(setContext).toHaveBeenCalledOnce();
     expect(setContext).toHaveBeenCalledWith('You are a test assistant.', ['vfs_read', 'vfs_write']);
+  });
+
+  it('subagent tool:start records session and agentRun metadata', () => {
+    render(<ChatInterface />);
+
+    act(() => {
+      fire('tool:start', {
+        callId: 'call-sub',
+        toolName: 'vfs_write',
+        args: { filePath: 'index.html' },
+        sessionId: 'child-session',
+        agentRun: { agentRunId: 'subagent-run-1', agentType: 'subagent', parentSessionId: 'session-1' },
+      });
+    });
+
+    expect(addToolActivity).toHaveBeenCalledWith(expect.objectContaining({
+      callId: 'call-sub',
+      sessionId: 'child-session',
+      agentRun: expect.objectContaining({ agentRunId: 'subagent-run-1' }),
+    }));
+  });
+
+  it('subagent tool:result does not append tool_result to active master session', () => {
+    render(<ChatInterface />);
+
+    act(() => {
+      fire('tool:result', {
+        callId: 'call-sub',
+        status: 'success',
+        data: { path: 'index.html' },
+        sessionId: 'child-session',
+        agentRun: { agentRunId: 'subagent-run-1', agentType: 'subagent', parentSessionId: 'session-1' },
+      });
+    });
+
+    expect(addMessage).not.toHaveBeenCalled();
+  });
+
+  it('session:created adds subagent session to the store', () => {
+    render(<ChatInterface />);
+
+    act(() => {
+      fire('session:created', {
+        id: 'child-session',
+        personaId: 'default',
+        title: 'Sub-agent: demo',
+        kind: 'subagent',
+        parentSessionId: 'session-1',
+        interlocutorLabel: 'Master agent',
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    });
+
+    expect(addSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'child-session', kind: 'subagent' }));
   });
 });
 

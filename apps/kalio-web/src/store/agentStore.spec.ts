@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useAgentStore } from './agentStore';
-import type { ToolConfirmationRequest } from '@kalio/types';
+import type { AgentRunContext, ToolConfirmationRequest } from '@kalio/types';
 
 function makeReq(sessionId: string, callId = 'call-1'): ToolConfirmationRequest {
   return {
@@ -125,6 +125,54 @@ describe('addToolActivity — Canvas auto-open for run_cli_agent', () => {
   it('leaves canvasOpen true if it was already open and another tool fires', () => {
     useAgentStore.setState({ canvasOpen: true, toolActivities: [] });
     useAgentStore.getState().addToolActivity(makeActivity('vfs_read'));
+    expect(useAgentStore.getState().canvasOpen).toBe(true);
+  });
+});
+
+describe('subagent run tracking', () => {
+  const subagentRun: AgentRunContext = {
+    agentRunId: 'subagent-run-1',
+    agentType: 'subagent',
+    parentSessionId: 'master-session',
+    vfsMode: 'isolated',
+    vfsSessionId: 'child-session',
+  };
+
+  beforeEach(() => {
+    useAgentStore.setState({ activeAgentLoops: {}, canvasOpen: false, toolActivities: [] });
+  });
+
+  it('keys active loops by agentRunId when metadata is present', () => {
+    useAgentStore.getState().addActiveAgentLoop('child-session', 'turn-1', subagentRun);
+
+    const state = useAgentStore.getState();
+    expect(state.activeAgentLoops['subagent-run-1']).toMatchObject({
+      sessionId: 'child-session',
+      turnId: 'turn-1',
+      agentRun: subagentRun,
+    });
+    expect(state.activeAgentLoops['child-session']).toBeUndefined();
+  });
+
+  it('removes active loops by agentRunId when metadata is present', () => {
+    const store = useAgentStore.getState();
+    store.addActiveAgentLoop('child-session', 'turn-1', subagentRun);
+    store.removeActiveAgentLoop('child-session', subagentRun);
+
+    expect(useAgentStore.getState().activeAgentLoops['subagent-run-1']).toBeUndefined();
+  });
+
+  it('opens canvas for subagent tool activity', () => {
+    useAgentStore.getState().addToolActivity({
+      callId: 'call-sub',
+      toolName: 'vfs_write',
+      args: {},
+      status: 'running',
+      startedAt: Date.now(),
+      sessionId: 'child-session',
+      agentRun: subagentRun,
+    });
+
     expect(useAgentStore.getState().canvasOpen).toBe(true);
   });
 });

@@ -6,6 +6,72 @@ import { apiClient } from '../../services/apiClient';
 import type { ChatSession, ChatMessage, Persona } from '@kalio/types';
 import { formatRelativeTime } from './session.utils';
 
+function sortSessionsForSidebar(sessions: ChatSession[]): ChatSession[] {
+  const sessionById = new Map(sessions.map((session) => [session.id, session]));
+  const depthById = new Map<string, number>();
+
+  const getRootSessionId = (session: ChatSession): string => {
+    let current = session;
+    const visited = new Set<string>();
+
+    while (current.parentSessionId) {
+      if (visited.has(current.id)) break;
+      visited.add(current.id);
+      const parent = sessionById.get(current.parentSessionId);
+      if (!parent) break;
+      current = parent;
+    }
+
+    return current.id;
+  };
+
+  const getDepth = (session: ChatSession): number => {
+    const cached = depthById.get(session.id);
+    if (cached !== undefined) return cached;
+
+    let depth = 0;
+    let current = session;
+    const visited = new Set<string>();
+
+    while (current.parentSessionId) {
+      if (visited.has(current.id)) break;
+      visited.add(current.id);
+      const parent = sessionById.get(current.parentSessionId);
+      if (!parent) break;
+      depth += 1;
+      current = parent;
+    }
+
+    depthById.set(session.id, depth);
+    return depth;
+  };
+
+  const groups = new Map<string, ChatSession[]>();
+  sessions.forEach((session) => {
+    const rootId = getRootSessionId(session);
+    groups.set(rootId, [...(groups.get(rootId) ?? []), session]);
+  });
+
+  return [...groups.entries()]
+    .map(([rootId, members]) => ({
+      rootId,
+      members,
+      sortUpdatedAt: Math.max(...members.map((member) => member.updatedAt)),
+    }))
+    .sort((left, right) => right.sortUpdatedAt - left.sortUpdatedAt)
+    .flatMap(({ rootId, members }) => members.slice().sort((left, right) => {
+      const leftIsRoot = left.id === rootId;
+      const rightIsRoot = right.id === rootId;
+
+      if (leftIsRoot !== rightIsRoot) return leftIsRoot ? -1 : 1;
+
+      const depthDiff = getDepth(left) - getDepth(right);
+      if (depthDiff !== 0) return depthDiff;
+
+      return right.updatedAt - left.updatedAt;
+    }));
+}
+
 export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
   const { sessions, activeSessionId, setSessions, setActiveSession, addSession, setMessages, removeSession, updateSession } = useSessionStore();
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
@@ -23,9 +89,9 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
       .get<ChatSession[]>('/api/sessions')
       .then((r) => {
         setSessions(r.data);
-        // Auto-select the most recent session on initial load (API returns updatedAt DESC)
-        if (!useSessionStore.getState().activeSessionId && r.data.length > 0) {
-          void selectSession(r.data[0].id);
+        const orderedSessions = sortSessionsForSidebar(r.data);
+        if (!useSessionStore.getState().activeSessionId && orderedSessions.length > 0) {
+          void selectSession(orderedSessions[0].id);
         }
       })
       .catch((err: unknown) => console.error('[SessionPanel] load failed', err))
@@ -67,10 +133,11 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
     }
   };
 
-  const visibleSessions = (personaFilter === 'all'
-    ? sessions
-    : sessions.filter((s) => s.personaId === personaFilter)
-  ).slice().sort((a, b) => b.updatedAt - a.updatedAt);
+  const visibleSessions = sortSessionsForSidebar(
+    personaFilter === 'all'
+      ? sessions
+      : sessions.filter((s) => s.personaId === personaFilter),
+  );
 
   const getPersonaName = (personaId: string): string | null => {
     const p = personas.find((p) => p.id === personaId);
@@ -166,10 +233,11 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
         )}
         {visibleSessions.map((s) => {
           const personaName = getPersonaName(s.personaId);
+          const isSubagent = s.kind === 'subagent';
           return (
             <div
               key={s.id}
-              className={`group flex items-start gap-1 px-3 py-2 cursor-pointer border-b border-base-300/40 last:border-0 hover:bg-base-200/50 transition-colors ${
+              className={`group flex items-start gap-1 px-3 py-2 cursor-pointer border-b border-base-300/40 last:border-0 hover:bg-base-200/50 transition-colors ${isSubagent ? 'pl-6 border-l border-l-sky-500/20' : ''} ${
                 activeSessionId === s.id ? 'bg-sky-500/10 border-l-2 border-l-sky-500' : ''
               }`}
               onClick={() => void selectSession(s.id)}
@@ -200,6 +268,14 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
                     <span className="flex-1 text-xs truncate">
                       {s.title || `Session ${s.id.slice(0, 6)}`}
                     </span>
+                    {isSubagent && (
+                      <span
+                        className="text-[9px] text-sky-300 bg-sky-500/10 border border-sky-500/20 rounded px-1 py-0.5 leading-none shrink-0"
+                        data-testid={`subagent-session-badge-${s.id}`}
+                      >
+                        Sub-agent
+                      </span>
+                    )}
                     {pendingConfirmations[s.id] && (
                       <AlertTriangle
                         size={10}
@@ -224,6 +300,11 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
                     </button>
                   </div>
                   <div className="flex items-center gap-1.5">
+                    {isSubagent && (
+                      <span className="text-[10px] text-sky-300/70 bg-base-300/40 rounded px-1 py-0.5 leading-none truncate max-w-[6rem]">
+                        {s.interlocutorLabel ?? 'Master agent'}
+                      </span>
+                    )}
                     {personaName && (
                       <span className="text-[10px] text-base-content/40 bg-base-300/50 rounded px-1 py-0.5 leading-none truncate max-w-[6rem]">
                         {personaName}

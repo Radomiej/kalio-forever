@@ -14,6 +14,7 @@ export class ThinkingDeltaHandler implements ChunkHandler<ThinkingDeltaChunk> {
       done: false,
       sessionId: ctx.sessionId,
       messageId: ctx.messageId,
+      agentRun: ctx.agentRun,
       thinking: true,
     });
   }

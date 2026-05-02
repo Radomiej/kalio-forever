@@ -17,6 +17,19 @@ import type { VFSWriteRequest, VFSReadResult, VFSListResult, VFSFile } from '@ka
 
 const PATH_TRAVERSAL_ERROR = 'PATH_TRAVERSAL_DENIED';
 
+export interface VFSCopySessionFilesRequest {
+  fromSessionId: string;
+  toSessionId: string;
+  targetPrefix: string;
+  filePaths?: string[];
+}
+
+export interface VFSCopiedFile {
+  fromPath: string;
+  toPath: string;
+  sizeBytes: number;
+}
+
 @Injectable()
 export class VFSService {
   private readonly logger = new Logger(VFSService.name);
@@ -104,6 +117,22 @@ export class VFSService {
     return { sessionId, files };
   }
 
+  copySessionFiles(req: VFSCopySessionFilesRequest): VFSCopiedFile[] {
+    const targetPrefix = this.normalizeRelativePath(req.targetPrefix);
+    const sourcePaths = req.filePaths?.length
+      ? req.filePaths.map((filePath) => this.normalizeRelativePath(filePath))
+      : this.listFiles(req.fromSessionId).files.map((file) => file.path);
+
+    const copied: VFSCopiedFile[] = [];
+    for (const fromPath of sourcePaths) {
+      const buffer = this.readBinary(req.fromSessionId, fromPath);
+      const toPath = `${targetPrefix}/${fromPath}`;
+      this.writeBinary(req.toSessionId, toPath, buffer);
+      copied.push({ fromPath, toPath, sizeBytes: buffer.length });
+    }
+    return copied;
+  }
+
   private walkDir(baseDir: string, currentDir: string, sessionId: string): VFSFile[] {
     const result: VFSFile[] = [];
     const entries = readdirSync(currentDir);
@@ -126,6 +155,22 @@ export class VFSService {
 
   private sessionDir(sessionId: string): string {
     return join(this.workspaceRoot, 'sessions', sessionId, 'files');
+  }
+
+  private normalizeRelativePath(filePath: string): string {
+    let decodedPath: string;
+    try {
+      decodedPath = decodeURIComponent(filePath);
+    } catch {
+      decodedPath = filePath;
+    }
+    const normalized = normalize(decodedPath).replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalized || normalized === '.' || normalized.split('/').some((part) => part === '..')) {
+      const err = new Error(`${PATH_TRAVERSAL_ERROR}: "${filePath}" escapes conversation sandbox`);
+      (err as NodeJS.ErrnoException).code = PATH_TRAVERSAL_ERROR;
+      throw err;
+    }
+    return normalized;
   }
 
   private resolveSafe(sessionId: string, filePath: string): string {

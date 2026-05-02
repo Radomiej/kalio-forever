@@ -29,6 +29,7 @@ export interface LLMStreamChunk {
   done: boolean;
   sessionId: ID;
   messageId: ID;
+  agentRun?: AgentRunContext;
   /** True when delta carries reasoning/thinking content (not final answer) */
   thinking?: boolean;
 }
@@ -125,6 +126,11 @@ export interface ChatSession {
   id: ID;
   personaId: ID;
   title: string;              // auto-generated from first message
+  kind?: 'chat' | 'subagent';
+  parentSessionId?: ID;
+  parentTurnId?: ID;
+  parentToolCallId?: ID;
+  interlocutorLabel?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -132,6 +138,11 @@ export interface ChatSession {
 export interface CreateSessionDto {
   personaId: ID;
   title?: string;
+  kind?: 'chat' | 'subagent';
+  parentSessionId?: ID;
+  parentTurnId?: ID;
+  parentToolCallId?: ID;
+  interlocutorLabel?: string;
 }
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
@@ -142,12 +153,45 @@ export interface ToolMeta {
   requiresConfirmation: boolean;        // HITL gate flag
 }
 
+export type AgentType = 'master' | 'subagent';
+export type VFSMode = 'isolated' | 'shared';
+
+export interface AgentRunContext {
+  agentRunId: ID;
+  agentType: AgentType;
+  parentSessionId?: ID;
+  parentTurnId?: ID;
+  parentToolCallId?: ID;
+  vfsMode?: VFSMode;
+  vfsSessionId?: ID;
+  label?: string;
+}
+
+export interface SubagentCopiedFile {
+  fromPath: string;
+  toPath: string;
+  sizeBytes: number;
+}
+
+export interface SubagentToolResult {
+  result: string;
+  taskId: string;
+  childSessionId: ID;
+  parentSessionId: ID;
+  vfsMode: VFSMode;
+  vfsSessionId: ID;
+  copiedFiles: SubagentCopiedFile[];
+  durationMs: number;
+}
+
 export interface ToolCallRequest {
   sessionId: ID;
+  vfsSessionId?: ID;
   toolName: string;
   args: Record<string, unknown>;
   callId: string;             // matches LLMToolCall.id
   availableTools?: ToolMeta[]; // persona-filtered set visible to the agent
+  agentRun?: AgentRunContext;
   /**
    * Backend-only: typed emitter scoped to the originating socket client.
    * Set by ToolDispatchService from StreamContext. Never serialized to wire.
@@ -160,6 +204,9 @@ export interface ToolCallRequest {
 export interface ToolResult {
   callId: string;
   status: 'success' | 'error' | 'cancelled';
+  sessionId?: ID;
+  toolName?: string;
+  agentRun?: AgentRunContext;
   data?: unknown;
   errorCode?: string;
   errorMessage?: string;
@@ -172,6 +219,7 @@ export interface ToolConfirmationRequest {
   toolName: string;
   args: Record<string, unknown>;
   timeoutMs: number;          // default 30000
+  agentRun?: AgentRunContext;
 }
 
 // ─── VFS ──────────────────────────────────────────────────────────────────────
@@ -403,12 +451,14 @@ export interface SocketEvents {
   'chat:complete': {
     sessionId: ID;
     messageId: ID;
+    agentRun?: AgentRunContext;
     usage?: { promptTokens: number; completionTokens: number };
   };
   'chat:error': {
     sessionId: ID;
     code: 'PROVIDER_NOT_CONFIGURED' | 'LLM_ERROR' | 'TOOL_ERROR' | 'INTERRUPTED' | 'QUEUE_FULL' | 'MAX_ITERATIONS_REACHED';
     message: string;
+    agentRun?: AgentRunContext;
     /** True if at least one `chat:chunk` was emitted before this error.
      *  FE uses this to decide whether to append the error to the existing
      *  response bubble (true) or roll back the empty bubble and show a
@@ -424,7 +474,7 @@ export interface SocketEvents {
   'tool:cancel': { requestId: string; sessionId: ID };
 
   // Tool execution lifecycle — server → client
-  'tool:start': { callId: ID; toolName: string; args: Record<string, unknown> };
+  'tool:start': { callId: ID; toolName: string; args: Record<string, unknown>; sessionId?: ID; agentRun?: AgentRunContext };
 
   // Tool result — server → client
   'tool:result': ToolResult;
@@ -437,8 +487,8 @@ export interface SocketEvents {
   'raapp:native_result': { toolCallId: string; sessionId: ID; results: RaAppNativeResult[] };
 
   // Agent loop lifecycle — server → client
-  'agent:start': { sessionId: ID; turnId: ID };
-  'agent:done': { sessionId: ID; turnId: ID };
+  'agent:start': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
+  'agent:done': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
 
   // MCP — server → client
   'mcp:server:status': { serverId: ID; serverName: string; status: string; toolCount: number; lastError?: string };

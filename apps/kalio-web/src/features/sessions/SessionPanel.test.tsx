@@ -16,6 +16,7 @@ const mockUpdateSession = vi.fn();
 const mockSessions: ChatSession[] = [
   { id: 's1', personaId: 'p1', title: 'Chat about React', createdAt: 1000, updatedAt: Date.now() - 2 * 60_000 },
   { id: 's2', personaId: 'default', title: 'New Chat', createdAt: 2000, updatedAt: Date.now() - 30_000 },
+  { id: 'sub-1', personaId: 'default', title: 'Sub-agent: Landing page', kind: 'subagent', parentSessionId: 's1', interlocutorLabel: 'Master agent', createdAt: 2500, updatedAt: Date.now() - 90_000 },
 ];
 
 const mockPersonas: Persona[] = [
@@ -138,6 +139,27 @@ describe('SessionPanel', () => {
   it('shows relative timestamps', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(screen.getAllByText('2m ago').length).toBeGreaterThan(0));
+  });
+
+  it('renders subagent sessions with a badge and master-agent interlocutor', async () => {
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
+
+    expect(screen.getByText('Sub-agent: Landing page')).toBeTruthy();
+    expect(screen.getByTestId('subagent-session-badge-sub-1')).toHaveTextContent('Sub-agent');
+    expect(screen.getByText('Master agent')).toBeTruthy();
+  });
+
+  it('keeps the master session above its grouped subagent sessions', async () => {
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
+
+    const orderedItems = screen.getAllByTestId('session-item').map((item) => item.textContent ?? '');
+    const masterIndex = orderedItems.findIndex((text) => text.includes('Chat about React'));
+    const subagentIndex = orderedItems.findIndex((text) => text.includes('Sub-agent: Landing page'));
+
+    expect(masterIndex).toBeGreaterThanOrEqual(0);
+    expect(subagentIndex).toBe(masterIndex + 1);
   });
 
   it('filter button toggles filter row', async () => {
