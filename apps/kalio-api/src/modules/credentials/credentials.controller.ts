@@ -62,6 +62,19 @@ export class CredentialsController {
     this.logger.log(`Context window size updated via API: ${body.size}`);
   }
 
+  @Get('settings/max-tool-attempts')
+  async getMaxToolAttempts(): Promise<{ size: number }> {
+    const size = await this.credentialsService.getMaxToolAttempts();
+    return { size };
+  }
+
+  @Put('settings/max-tool-attempts')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async setMaxToolAttempts(@Body() body: { size: number }): Promise<void> {
+    await this.credentialsService.setMaxToolAttempts(body.size);
+    this.logger.log(`Max tool attempts updated via API: ${body.size}`);
+  }
+
   // ─── Generation settings ─────────────────────────────────────────────────────
 
   @Get('settings/generation')

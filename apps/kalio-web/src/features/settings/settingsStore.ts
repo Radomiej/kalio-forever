@@ -10,6 +10,7 @@ export interface BackendLLMConfig {
   model: string;
   baseUrl: string;
   contextWindowSize: number;
+  maxToolAttempts: number;
 }
 
 interface SettingsState {

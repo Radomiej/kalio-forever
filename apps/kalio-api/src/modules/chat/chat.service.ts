@@ -12,6 +12,7 @@ import { LLM_SOURCE } from './chat.tokens';
 import { TurnErrorAlreadyEmitted } from './turn-error';
 import { PersonaService } from '../persona/persona.service';
 import { SkillsService } from '../skills/skills.service';
+import { CredentialsService } from '../credentials/credentials.service';
 
 /**
  * Orchestrates a single conversation turn:
@@ -36,6 +37,7 @@ export class ChatService {
     private readonly toolDispatch: ToolDispatchService,
     private readonly personaService: PersonaService,
     private readonly skillsService: SkillsService,
+    private readonly credentialsService: CredentialsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -115,9 +117,12 @@ export class ChatService {
       });
 
       // Agentic loop: keep calling LLM until it stops emitting tool calls
-      // or we hit MAX_ITERATIONS as a safety net.
-      const MAX_ITERATIONS = 8;
+      // or we hit maxToolAttempts as a safety net.
+      const maxToolAttempts = await this.credentialsService.getMaxToolAttempts();
+      const maxEmptyNoToolRetries = Math.max(5, maxToolAttempts * 2);
       let iteration = 0;
+      let emptyNoToolRetries = 0;
+      let emptyNoToolRetriesExhausted = false;
       // Declared outside the loop so that the MAX_ITERATIONS guard can read
       // the value from the last completed iteration.
       let iterationMessageId = firstMessageId;
@@ -125,9 +130,9 @@ export class ChatService {
       while (true) {
         if (controller.signal.aborted) break;
         iteration++;
-        if (iteration > MAX_ITERATIONS) {
+        if (iteration > maxToolAttempts) {
           this.logger.warn(
-            `Agent loop exceeded ${MAX_ITERATIONS} iterations for session ${sessionId}`,
+            `Agent loop exceeded ${maxToolAttempts} iterations for session ${sessionId}`,
           );
           lastMessageId = iterationMessageId;
           break;
@@ -204,6 +209,7 @@ export class ChatService {
         //   assistant(tool_calls) → tool:start → tool:result → tool_result row.
         // Reloading history then yields the canonical OpenAI/Vercel sequence.
         if (!controller.signal.aborted && state.toolCalls.length > 0) {
+          emptyNoToolRetries = 0;
           for (const tc of state.toolCalls) {
             if (controller.signal.aborted) break;
             trackingEmit('tool:start', { callId: tc.id, toolName: tc.name, args: tc.args });
@@ -247,6 +253,26 @@ export class ChatService {
 
         // No tool calls this iteration → final answer reached.
         if (state.toolCalls.length === 0) {
+          const hasAssistantOutput = state.text.trim().length > 0 || state.thinking.trim().length > 0;
+          if (!hasAssistantOutput) {
+            emptyNoToolRetries++;
+            if (emptyNoToolRetries <= maxEmptyNoToolRetries) {
+              this.logger.warn(
+                `Agent produced empty no-tool iteration for session ${sessionId} at iteration ${iteration}; retry ${emptyNoToolRetries}/${maxEmptyNoToolRetries}`,
+              );
+              // Empty completion retries are transport/provider recovery attempts,
+              // not true tool-loop progress, so they should not consume the
+              // user-configured max tool attempts budget.
+              iteration--;
+              continue;
+            }
+            this.logger.warn(
+              `Agent produced empty no-tool iteration for session ${sessionId} at iteration ${iteration}; empty retry budget exhausted`,
+            );
+            emptyNoToolRetriesExhausted = true;
+            break;
+          }
+          emptyNoToolRetries = 0;
           lastMessageId = iterationMessageId;
           break;
         }
@@ -262,11 +288,18 @@ export class ChatService {
           message: 'Turn interrupted by user',
           hadContent,
         });
-      } else if (iteration > MAX_ITERATIONS) {
+      } else if (iteration > maxToolAttempts) {
         trackingEmit('chat:error', {
           sessionId,
           code: 'MAX_ITERATIONS_REACHED',
-          message: `Agent loop exceeded ${MAX_ITERATIONS} iterations`,
+          message: `Agent loop exceeded ${maxToolAttempts} iterations`,
+          hadContent,
+        });
+      } else if (emptyNoToolRetriesExhausted) {
+        trackingEmit('chat:error', {
+          sessionId,
+          code: 'EMPTY_ASSISTANT_RETRY_EXHAUSTED',
+          message: `Agent produced empty output ${maxEmptyNoToolRetries} times in a row`,
           hadContent,
         });
       } else {

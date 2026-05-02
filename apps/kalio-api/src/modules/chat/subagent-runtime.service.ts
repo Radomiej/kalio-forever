@@ -14,7 +14,7 @@ import type { SubagentRuntimePort, RunSubagentRequest, RunSubagentResult } from 
 import { VFSService } from '../vfs/vfs.service';
 import { PersonaService } from '../persona/persona.service';
 
-const MAX_ITERATIONS = 8;
+const DEFAULT_MAX_ITERATIONS = 8;
 const MAX_SUBAGENT_NESTING_DEPTH = 1;
 
 const SUBAGENT_SYSTEM_PROMPT = `You are a focused sub-agent completing a single specific task.
@@ -141,6 +141,9 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
 
     const controller = new AbortController();
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const maxIterations = Number.isFinite(request.maxIterations)
+      ? Math.max(1, Math.min(100, Math.round(request.maxIterations as number)))
+      : DEFAULT_MAX_ITERATIONS;
 
     try {
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -159,6 +162,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           tools,
           vfsSessionId,
           agentRun,
+          maxIterations,
           emit: trackingEmit,
           abortSignal: controller.signal,
         }),
@@ -215,6 +219,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     tools: ToolMeta[];
     vfsSessionId: string;
     agentRun: AgentRunContext;
+    maxIterations: number;
     emit?: EmitFn;
     abortSignal: AbortSignal;
   }): Promise<{ finalText: string; lastMessageId: string }> {
@@ -224,7 +229,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     const personaConfig = await this.personaService.getSessionConfig(params.personaId);
     const systemPrompt = personaConfig?.systemPrompt ? `${personaConfig.systemPrompt}\n\n${SUBAGENT_SYSTEM_PROMPT}` : SUBAGENT_SYSTEM_PROMPT;
 
-    while (iteration < MAX_ITERATIONS) {
+    while (iteration < params.maxIterations) {
       if (params.abortSignal.aborted) {
         throw abortReason(params.abortSignal);
       }
@@ -284,7 +289,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       }
     }
 
-    this.logger.warn(`Subagent exceeded ${MAX_ITERATIONS} iterations session=${params.childSessionId}`);
+    this.logger.warn(`Subagent exceeded ${params.maxIterations} iterations session=${params.childSessionId}`);
     return { finalText: latestText, lastMessageId };
   }
 }

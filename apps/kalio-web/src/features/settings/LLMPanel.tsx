@@ -10,6 +10,7 @@ interface LLMConfigWithSource {
   model: string;
   baseUrl: string;
   contextWindowSize: number;
+  maxToolAttempts: number;
   source: 'db' | 'env';
 }
 
@@ -82,6 +83,7 @@ export function LLMPanel() {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [contextWindow, setContextWindow] = useState(32000);
+  const [maxToolAttempts, setMaxToolAttempts] = useState(8);
   const [envConfig, setEnvConfig] = useState<LLMConfigWithSource | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<AddForm>(emptyForm());
@@ -95,8 +97,9 @@ export function LLMPanel() {
 
   const refreshBackendConfig = useCallback(async () => {
     try {
-      const cfg = await apiFetch<{ provider: string; model: string; baseUrl: string; contextWindowSize: number }>('/llm/config');
+      const cfg = await apiFetch<{ provider: string; model: string; baseUrl: string; contextWindowSize: number; maxToolAttempts: number }>('/llm/config');
       setBackendConfig(cfg);
+      setMaxToolAttempts(cfg.maxToolAttempts ?? 8);
     } catch { /* non-fatal */ }
   }, [setBackendConfig]);
 
@@ -113,6 +116,7 @@ export function LLMPanel() {
       setActiveId(active.credentialId);
       setContextWindow(cw.size);
       setEnvConfig(llmCfg);
+      setMaxToolAttempts(llmCfg.maxToolAttempts ?? 8);
       setBackendConfig(llmCfg);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
@@ -216,6 +220,18 @@ export function LLMPanel() {
       await apiFetch('/credentials/settings/context-window', {
         method: 'PUT',
         body: JSON.stringify({ size }),
+      });
+      await refreshBackendConfig();
+    } catch { /* non-fatal */ }
+  };
+
+  const handleMaxToolAttemptsChange = async (size: number) => {
+    const normalized = Math.max(1, Math.min(100, Math.round(size)));
+    setMaxToolAttempts(normalized);
+    try {
+      await apiFetch('/credentials/settings/max-tool-attempts', {
+        method: 'PUT',
+        body: JSON.stringify({ size: normalized }),
       });
       await refreshBackendConfig();
     } catch { /* non-fatal */ }
@@ -416,6 +432,33 @@ export function LLMPanel() {
         />
         <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
           <span>4k</span><span>32k</span><span>128k</span><span>200k</span>
+        </div>
+      </div>
+
+      <div className="border-t border-base-300 pt-4">
+        <h3 className="text-sm font-semibold mb-1">Agent Loop Limit</h3>
+        <p className="text-xs text-base-content/60 mb-3">
+          Max tool-attempt loop iterations per turn before automatic stop.
+          Increase for complex test scenarios (for example 25).
+        </p>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-base-content/60">Max tool attempts</span>
+          <span className="badge badge-neutral font-mono text-xs" data-testid="max-tool-attempts-value">
+            {maxToolAttempts}
+          </span>
+        </div>
+        <input
+          type="range"
+          className="range range-sm range-primary w-full"
+          min={1}
+          max={100}
+          step={1}
+          value={maxToolAttempts}
+          onChange={(e) => void handleMaxToolAttemptsChange(parseInt(e.target.value, 10))}
+          data-testid="max-tool-attempts-slider"
+        />
+        <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
+          <span>1</span><span>8</span><span>25</span><span>100</span>
         </div>
       </div>
     </div>

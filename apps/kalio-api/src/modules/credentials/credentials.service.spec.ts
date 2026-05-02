@@ -149,6 +149,25 @@ describe('CredentialsService', () => {
     });
   });
 
+  describe('max tool attempts settings', () => {
+    it('returns 8 as default', async () => {
+      expect(await svc.getMaxToolAttempts()).toBe(8);
+    });
+
+    it('sets and retrieves max tool attempts', async () => {
+      await svc.setMaxToolAttempts(25);
+      expect(await svc.getMaxToolAttempts()).toBe(25);
+    });
+
+    it('clamps max tool attempts to [1, 100]', async () => {
+      await svc.setMaxToolAttempts(0);
+      expect(await svc.getMaxToolAttempts()).toBe(1);
+
+      await svc.setMaxToolAttempts(999);
+      expect(await svc.getMaxToolAttempts()).toBe(100);
+    });
+  });
+
   describe('updateModel()', () => {
     it('throws NotFoundException for nonexistent credential', async () => {
       await expect(svc.updateModel('nonexistent', 'gpt-4o')).rejects.toThrow();

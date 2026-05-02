@@ -240,4 +240,32 @@ export class CredentialsService {
       await this.drizzle.db.insert(appSettings).values({ key: 'context_window_size', value: String(size), updatedAt: now });
     }
   }
+
+  // ─── Agent loop settings ───────────────────────────────────────────────────
+
+  async getMaxToolAttempts(): Promise<number> {
+    const row = await this.drizzle.db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.key, 'max_tool_attempts'))
+      .then((r) => r[0]);
+    if (!row) return 8;
+    const parsed = parseInt(row.value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+  }
+
+  async setMaxToolAttempts(size: number): Promise<void> {
+    const normalized = Math.max(1, Math.min(100, Math.round(size)));
+    const now = new Date();
+    const existing = await this.drizzle.db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.key, 'max_tool_attempts'))
+      .then((r) => r[0]);
+    if (existing) {
+      await this.drizzle.db.update(appSettings).set({ value: String(normalized), updatedAt: now }).where(eq(appSettings.key, 'max_tool_attempts'));
+    } else {
+      await this.drizzle.db.insert(appSettings).values({ key: 'max_tool_attempts', value: String(normalized), updatedAt: now });
+    }
+  }
 }

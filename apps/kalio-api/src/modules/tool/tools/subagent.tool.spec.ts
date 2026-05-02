@@ -4,6 +4,7 @@ import type { ModuleRef } from '@nestjs/core';
 import type { AgentRunContext, ToolCallRequest, ToolMeta } from '@kalio/types';
 import { SUBAGENT_RUNTIME } from '../subagent-runtime.port';
 import type { PersonaService } from '../../persona/persona.service';
+import type { CredentialsService } from '../../credentials/credentials.service';
 
 function makeRequest(args: Record<string, unknown> = {}, sessionId = 'sess-sub'): ToolCallRequest {
   return { callId: 'call-1', sessionId, toolName: 'run_subagent', args };
@@ -31,6 +32,7 @@ describe('SubagentTool', () => {
   let registry: ReturnType<typeof makeRegistryMock>;
   let runtime: { runSubagent: ReturnType<typeof vi.fn> };
   let personaService: { getSessionConfig: ReturnType<typeof vi.fn> };
+  let credentialsService: { getMaxToolAttempts: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     registry = makeRegistryMock([makeTool('vfs_read'), makeTool('vfs_write')]);
@@ -58,6 +60,10 @@ describe('SubagentTool', () => {
       }),
     };
 
+    credentialsService = {
+      getMaxToolAttempts: vi.fn().mockResolvedValue(25),
+    };
+
     moduleRef = {
       get: vi.fn().mockImplementation((token: unknown) => {
         if (token === SUBAGENT_RUNTIME) return runtime;
@@ -65,7 +71,11 @@ describe('SubagentTool', () => {
       }),
     };
 
-    tool = new SubagentTool(moduleRef as ModuleRef, personaService as unknown as PersonaService);
+    tool = new SubagentTool(
+      moduleRef as ModuleRef,
+      personaService as unknown as PersonaService,
+      credentialsService as unknown as CredentialsService,
+    );
   });
 
   it('forwards childSessionId to the runtime so the master can continue an existing subagent chat', async () => {
@@ -109,6 +119,7 @@ describe('SubagentTool', () => {
       childSessionId: 'sub-existing',
       personaId: 'dev',
       timeoutMs: 600000,
+      maxIterations: 25,
       vfsMode: 'shared',
       copyOutputs: false,
       availableTools: [
@@ -182,7 +193,11 @@ describe('SubagentTool', () => {
         };
       }),
     };
-    tool = new SubagentTool(moduleRef as ModuleRef, personaService as unknown as PersonaService);
+    tool = new SubagentTool(
+      moduleRef as ModuleRef,
+      personaService as unknown as PersonaService,
+      credentialsService as unknown as CredentialsService,
+    );
 
     await expect(tool.execute(makeRequest({ objective: 'task' }))).resolves.toMatchObject({
       result: 'runtime result',
@@ -214,6 +229,7 @@ describe('SubagentTool', () => {
     const toolWithClassToken = new SubagentTool(
       stringRejectingModuleRef as unknown as ModuleRef,
       personaService as unknown as PersonaService,
+      credentialsService as unknown as CredentialsService,
     );
 
     await expect(
@@ -239,7 +255,11 @@ describe('SubagentTool', () => {
         return registry;
       }),
     };
-    tool = new SubagentTool(moduleRef as ModuleRef, personaService as unknown as PersonaService);
+    tool = new SubagentTool(
+      moduleRef as ModuleRef,
+      personaService as unknown as PersonaService,
+      credentialsService as unknown as CredentialsService,
+    );
 
     await expect(tool.execute(makeRequest({ objective: 'task' }))).rejects.toThrow(
       'Subagent runtime is unavailable',

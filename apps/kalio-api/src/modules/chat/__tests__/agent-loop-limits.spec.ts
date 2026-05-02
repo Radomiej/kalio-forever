@@ -8,6 +8,7 @@ import { SessionManagerService } from '../session-manager.service';
 import { AuditService } from '../audit.service';
 import { PersonaService } from '../../persona/persona.service';
 import { SkillsService } from '../../skills/skills.service';
+import { CredentialsService } from '../../credentials/credentials.service';
 import { LLM_SOURCE } from '../chat.tokens';
 import type { LLMStreamChunk } from '@kalio/types';
 
@@ -19,6 +20,7 @@ describe('ChatService - Agent Loop Limits', () => {
   let mockToolDispatch: ToolDispatchService;
   let mockPersonaService: PersonaService;
   let mockSkillsService: SkillsService;
+  let mockCredentialsService: CredentialsService;
   let mockAudit: AuditService;
   let emittedEvents: Array<{ event: string; data: unknown }> = [];
 
@@ -62,6 +64,10 @@ describe('ChatService - Agent Loop Limits', () => {
       update: vi.fn().mockResolvedValue(undefined),
     } as any;
 
+    mockCredentialsService = {
+      getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+    } as any;
+
     service = new ChatService(
       mockLLMSource as any,
       mockStreamProcessor,
@@ -69,6 +75,7 @@ describe('ChatService - Agent Loop Limits', () => {
       mockToolDispatch,
       mockPersonaService,
       mockSkillsService,
+      mockCredentialsService,
       mockAudit,
     );
   });
@@ -175,8 +182,12 @@ describe('ChatService - Agent Loop Limits', () => {
             name: 'test_tool',
             args: {},
           });
+          return;
         }
         // Second and subsequent iterations return no tool calls
+        if (chunk.done) {
+          ctx.state.text = 'done';
+        }
       });
 
       mockToolDispatch.dispatch = vi.fn().mockResolvedValue({ status: 'success', data: 'result' });
@@ -194,6 +205,81 @@ describe('ChatService - Agent Loop Limits', () => {
       
       expect(maxIterationError).toBeUndefined();
       expect(iterationCount).toBe(2); // First with tool call, second without
+    });
+
+    it('should continue when first no-tool iteration is empty after tool execution', async () => {
+      let iterationCount = 0;
+      mockLLMSource.stream = vi.fn().mockImplementation(async function* () {
+        iterationCount++;
+        yield { delta: '', done: false, sessionId: 'test', messageId: `msg-${iterationCount}` };
+        yield { delta: '', done: true, sessionId: 'test', messageId: `msg-${iterationCount}` };
+      });
+
+      mockStreamProcessor.process = vi.fn().mockImplementation(async (chunk: LLMStreamChunk, ctx: StreamContext) => {
+        if (!chunk.done) return;
+        if (iterationCount === 1) {
+          ctx.state.toolCalls.push({ id: 'call-1', name: 'test_tool', args: {} });
+          return;
+        }
+        if (iterationCount === 2) {
+          // Empty no-tool pass: this can happen with some providers and should not end the turn.
+          return;
+        }
+        ctx.state.text = 'Final answer';
+      });
+
+      mockToolDispatch.dispatch = vi.fn().mockResolvedValue({ status: 'success', data: 'result' });
+
+      await service.handleTurn('test-session', 'test message', 'default', (event, data) => {
+        emittedEvents.push({ event, data });
+      });
+
+      const completeEvents = emittedEvents.filter(e => e.event === 'chat:complete');
+      expect(completeEvents).toHaveLength(1);
+      expect(iterationCount).toBe(3);
+    });
+
+    it('should not consume max iterations for repeated empty no-tool retries', async () => {
+      mockCredentialsService.getMaxToolAttempts = vi.fn().mockResolvedValue(2);
+
+      let iterationCount = 0;
+      mockLLMSource.stream = vi.fn().mockImplementation(async function* () {
+        iterationCount++;
+        yield { delta: '', done: false, sessionId: 'test', messageId: `msg-${iterationCount}` };
+        yield { delta: '', done: true, sessionId: 'test', messageId: `msg-${iterationCount}` };
+      });
+
+      mockStreamProcessor.process = vi.fn().mockImplementation(async (chunk: LLMStreamChunk, ctx: StreamContext) => {
+        if (!chunk.done) return;
+        if (iterationCount === 1) {
+          ctx.state.toolCalls.push({ id: 'call-1', name: 'test_tool', args: {} });
+          return;
+        }
+
+        // Simulate flaky provider responses after tool execution.
+        if (iterationCount >= 2 && iterationCount <= 4) {
+          return;
+        }
+
+        ctx.state.text = 'Recovered final answer';
+      });
+
+      await service.handleTurn('test-session', 'test message', 'default', (event, data) => {
+        emittedEvents.push({ event, data });
+      });
+
+      const maxIterationError = emittedEvents.find(e =>
+        e.event === 'chat:error' &&
+        typeof e.data === 'object' &&
+        e.data !== null &&
+        'code' in e.data &&
+        e.data.code === 'MAX_ITERATIONS_REACHED'
+      );
+      const completeEvents = emittedEvents.filter(e => e.event === 'chat:complete');
+
+      expect(maxIterationError).toBeUndefined();
+      expect(completeEvents).toHaveLength(1);
+      expect(iterationCount).toBe(5);
     });
   });
 });

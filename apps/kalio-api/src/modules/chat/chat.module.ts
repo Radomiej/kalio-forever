@@ -27,6 +27,7 @@ import { VFSModule } from '../vfs/vfs.module';
 import { RAAppModule } from '../raapp/raapp.module';
 import { MCPModule } from '../mcp/mcp.module';
 import { SkillsModule } from '../skills/skills.module';
+import { CredentialsModule } from '../credentials/credentials.module';
 import { ToolRegistryService } from '../tool/tool-registry.service';
 import { SUBAGENT_RUNTIME } from '../tool/subagent-runtime.port';
 import {
@@ -49,7 +50,7 @@ import {
  *   TOOL_REGISTRY     → ToolRegistryService.getEntries() (from ToolModule)
  */
 @Module({
-  imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule],
+  imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule],
   controllers: [SessionsController, AuditLogController],
   providers: [
     // Handlers

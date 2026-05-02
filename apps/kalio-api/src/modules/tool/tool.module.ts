@@ -35,10 +35,11 @@ import { CLIAgentModule } from '../cli-agent/cli-agent.module';
 import { ImageModule } from '../image/image.module';
 import { SkillsModule } from '../skills/skills.module';
 import { PersonaModule } from '../persona/persona.module';
+import { CredentialsModule } from '../credentials/credentials.module';
 import { ToolRegistryService } from './tool-registry.service';
 
 @Module({
-  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule, ImageModule, SkillsModule, PersonaModule],
+  imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule, ImageModule, SkillsModule, PersonaModule, CredentialsModule],
   controllers: [ToolController],
   providers: [
     VFSWriteTool, VFSReadTool, VFSListTool, VFSGrepSearchTool, VFSFileSearchTool, SubagentTool, SpawnSubagentTool, MessageSubagentTool,

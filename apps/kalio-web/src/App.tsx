@@ -57,7 +57,7 @@ export function App() {
     backendHealth.start();
     void fetch('/api/llm/config')
       .then((r) => r.json())
-      .then((cfg: { provider: string; model: string; baseUrl: string; contextWindowSize: number }) => {
+      .then((cfg: { provider: string; model: string; baseUrl: string; contextWindowSize: number; maxToolAttempts: number }) => {
         setBackendConfig(cfg);
       })
       .catch(() => {/* non-fatal */});

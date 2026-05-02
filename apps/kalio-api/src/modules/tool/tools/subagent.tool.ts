@@ -7,6 +7,7 @@ import { Tool } from '../../../common/decorators/tool.decorator';
 import { ToolRegistryService } from '../tool-registry.service';
 import { SUBAGENT_RUNTIME, type SubagentRuntimePort } from '../subagent-runtime.port';
 import { PersonaService } from '../../persona/persona.service';
+import { CredentialsService } from '../../credentials/credentials.service';
 
 interface ToolRegistryLike {
   getEntries?: () => Array<{ meta: ToolMeta }>;
@@ -79,6 +80,7 @@ export class SubagentTool {
   constructor(
     private readonly moduleRef: ModuleRef,
     private readonly personaService: PersonaService,
+    private readonly credentialsService: CredentialsService,
   ) {}
 
   private getToolRegistry(): ToolRegistryLike {
@@ -161,6 +163,7 @@ export class SubagentTool {
     this.logger.log(`[run_subagent] Starting task ${taskId}: ${objective.slice(0, 80)}`);
 
     const tools = await this.getPersonaTools(personaId);
+    const maxIterations = await this.credentialsService.getMaxToolAttempts();
     const runtime = this.getRuntime();
     return runtime.runSubagent({
       parentSessionId: sessionId,
@@ -171,6 +174,7 @@ export class SubagentTool {
       personaId,
       availableTools: tools,
       timeoutMs,
+      maxIterations,
       vfsMode,
       copyOutputs,
       emit: request._emit,

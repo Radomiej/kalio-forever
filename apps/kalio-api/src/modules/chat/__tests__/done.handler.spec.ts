@@ -53,4 +53,12 @@ describe('DoneHandler', () => {
     await handler.handle({ type: 'done' }, ctx);
     expect(ctx.emit).not.toHaveBeenCalled();
   });
+
+  it('skips persisting when assistant payload is fully empty', async () => {
+    const ctx = makeCtx(new TurnState());
+
+    await handler.handle({ type: 'done' }, ctx);
+
+    expect(sessionManager.persistAssistantMessage).not.toHaveBeenCalled();
+  });
 });

@@ -57,12 +57,19 @@ function defaultMap(opts: {
   credentials?: Credential[];
   activeId?: string | null;
   contextWindow?: number;
+  maxToolAttempts?: number;
 } = {}): FetchMap {
   return {
     'GET /api/credentials': opts.credentials ?? [],
     'GET /api/credentials/active': { credentialId: opts.activeId ?? null },
     'GET /api/credentials/settings/context-window': { size: opts.contextWindow ?? 32000 },
-    'GET /api/llm/config': { provider: 'openai', model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1', contextWindowSize: 32000 },
+    'GET /api/llm/config': {
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      baseUrl: 'https://api.openai.com/v1',
+      contextWindowSize: 32000,
+      maxToolAttempts: opts.maxToolAttempts ?? 8,
+    },
   };
 }
 
@@ -206,7 +213,7 @@ describe('LLMPanel', () => {
     const map = {
       ...defaultMap({ credentials: [CRED], activeId: null }),
       [`PUT /api/credentials/active/${CRED.id}`]: 204 as const,
-      'GET /api/llm/config': { provider: 'openai', model: 'gpt-4o-mini', baseUrl: '', contextWindowSize: 32000 },
+      'GET /api/llm/config': { provider: 'openai', model: 'gpt-4o-mini', baseUrl: '', contextWindowSize: 32000, maxToolAttempts: 8 },
     };
     mockFetch(map);
     const user = userEvent.setup();
@@ -254,6 +261,21 @@ describe('LLMPanel', () => {
     fireEvent.change(slider, { target: { value: '128000' } });
     await waitFor(() =>
       expect(screen.getByTestId('context-window-value')).toHaveTextContent('128k'),
+    );
+  });
+
+  it('max tool attempts badge updates on slider change', async () => {
+    const map = {
+      ...defaultMap(),
+      'PUT /api/credentials/settings/max-tool-attempts': 204 as const,
+    };
+    mockFetch(map);
+    render(<LLMPanel />);
+    await waitFor(() => screen.getByTestId('max-tool-attempts-slider'));
+    const slider = screen.getByTestId('max-tool-attempts-slider');
+    fireEvent.change(slider, { target: { value: '25' } });
+    await waitFor(() =>
+      expect(screen.getByTestId('max-tool-attempts-value')).toHaveTextContent('25'),
     );
   });
 

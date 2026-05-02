@@ -5,6 +5,7 @@ import type { LLMConfig } from '@kalio/types';
 
 export interface LLMConfigResponse extends LLMConfig {
   contextWindowSize: number;
+  maxToolAttempts: number;
   /** Whether the active LLM config comes from a DB credential or .env fallback */
   source: 'db' | 'env';
 }
@@ -47,11 +48,12 @@ export class LLMController {
 
   @Get('config')
   async getConfig(): Promise<LLMConfigResponse> {
-    const [config, contextWindowSize] = await Promise.all([
+    const [config, contextWindowSize, maxToolAttempts] = await Promise.all([
       this.llm.getConfig(),
       this.credentials.getContextWindowSize(),
+      this.credentials.getMaxToolAttempts(),
     ]);
-    return { ...config, contextWindowSize };
+    return { ...config, contextWindowSize, maxToolAttempts };
   }
 
   @Get('models')

@@ -12,6 +12,7 @@ describe('LLMController', () => {
   };
   const mockCredentials = {
     getContextWindowSize: vi.fn(),
+    getMaxToolAttempts: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -37,11 +38,13 @@ describe('LLMController', () => {
         source: 'db',
       });
       mockCredentials.getContextWindowSize.mockResolvedValue(128000);
+      mockCredentials.getMaxToolAttempts.mockResolvedValue(25);
 
       const result = await controller.getConfig();
       expect(result.provider).toBe('openai');
       expect(result.model).toBe('gpt-4o');
       expect(result.contextWindowSize).toBe(128000);
+      expect(result.maxToolAttempts).toBe(25);
       expect(result.source).toBe('db');
     });
 
@@ -54,10 +57,12 @@ describe('LLMController', () => {
         source: 'env',
       });
       mockCredentials.getContextWindowSize.mockResolvedValue(8192);
+      mockCredentials.getMaxToolAttempts.mockResolvedValue(8);
 
       const result = await controller.getConfig();
       expect(result.source).toBe('env');
       expect(result.contextWindowSize).toBe(8192);
+      expect(result.maxToolAttempts).toBe(8);
     });
   });
 

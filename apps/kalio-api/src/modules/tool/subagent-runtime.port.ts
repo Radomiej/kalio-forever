@@ -13,6 +13,7 @@ export interface RunSubagentRequest {
   personaId?: string;
   availableTools: ToolMeta[];
   timeoutMs: number;
+  maxIterations?: number;
   vfsMode: VFSMode;
   copyOutputs: boolean;
   copyTargetPrefix?: string;

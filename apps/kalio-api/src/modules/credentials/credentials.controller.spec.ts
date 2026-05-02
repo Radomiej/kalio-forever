@@ -27,6 +27,8 @@ describe('CredentialsController', () => {
     clearActiveCredential: vi.fn(),
     getContextWindowSize: vi.fn(),
     setContextWindowSize: vi.fn(),
+    getMaxToolAttempts: vi.fn(),
+    setMaxToolAttempts: vi.fn(),
     getGenerationSettings: vi.fn(),
     setGenerationSettings: vi.fn(),
     getModelsForCredential: vi.fn(),
@@ -113,6 +115,22 @@ describe('CredentialsController', () => {
       mockService.setContextWindowSize.mockResolvedValue(undefined);
       await controller.setContextWindow({ size: 64000 });
       expect(mockService.setContextWindowSize).toHaveBeenCalledWith(64000);
+    });
+  });
+
+  describe('getMaxToolAttempts()', () => {
+    it('returns max tool attempts size', async () => {
+      mockService.getMaxToolAttempts.mockResolvedValue(25);
+      const result = await controller.getMaxToolAttempts();
+      expect(result).toEqual({ size: 25 });
+    });
+  });
+
+  describe('setMaxToolAttempts()', () => {
+    it('calls setMaxToolAttempts', async () => {
+      mockService.setMaxToolAttempts.mockResolvedValue(undefined);
+      await controller.setMaxToolAttempts({ size: 30 });
+      expect(mockService.setMaxToolAttempts).toHaveBeenCalledWith(30);
     });
   });
 
