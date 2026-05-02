@@ -81,4 +81,25 @@ describe('ChatGateway', () => {
       ],
     });
   });
+
+  describe('handleSessionIdentify', () => {
+    it('adds session to existing socket set', () => {
+      gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
+      const sessions = (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions;
+      expect(sessions.get(client.id)?.has('session-2')).toBe(true);
+    });
+
+    it('REGRESSION: creates Set and registers session when socket entry is missing', () => {
+      // Simulate edge case: socketSessions entry was removed (e.g. race with handleDisconnect)
+      const sessions = (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions;
+      sessions.delete(client.id);
+
+      // Must not silently fail — should create Set and register the session
+      gateway.handleSessionIdentify(client as never, { sessionId: 'session-reconnect' });
+
+      const registered = sessions.get(client.id);
+      expect(registered).toBeTruthy();
+      expect(registered?.has('session-reconnect')).toBe(true);
+    });
+  });
 });

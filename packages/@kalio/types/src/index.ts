@@ -446,6 +446,9 @@ export interface SocketEvents {
   'session:created': ChatSession;
   'session:updated': Pick<ChatSession, 'id' | 'title' | 'updatedAt'>;
 
+  // Session re-registration — client → server (sent after reconnect)
+  'session:identify': { sessionId: ID };
+
   // CLI Agent streaming — server → client
   'cli_agent:progress': { callId: ID; sessionId: ID; agentId: string; chunk: string };
 

@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AppModule } from './app.module';
+import { SocketIoAdapter } from './adapters/socket-io.adapter';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 
@@ -15,6 +16,7 @@ config({ path: resolve(projectRoot, envFile), override: true });
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   const logger = new Logger('Bootstrap');
+  app.useWebSocketAdapter(new SocketIoAdapter(app));
 
   const corsOrigins = (process.env['CORS_ORIGIN'] ?? '*').split(',').map((s) => s.trim());
   app.enableCors({ origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins });

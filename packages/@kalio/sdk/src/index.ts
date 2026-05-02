@@ -19,6 +19,8 @@ export type AgentStartHandler = (payload: SocketEvents['agent:start']) => void;
 export type AgentDoneHandler = (payload: SocketEvents['agent:done']) => void;
 export type RaAppNativeResultHandler = (payload: SocketEvents['raapp:native_result']) => void;
 export type CLIAgentProgressHandler = (payload: SocketEvents['cli_agent:progress']) => void;
+export type ReconnectHandler = () => void;
+export type DisconnectHandler = (reason: string) => void;
 
 export interface KalioSDKOptions {
   wsUrl: string;
@@ -226,5 +228,30 @@ export class KalioSDK {
     };
     this.socket.on('cli_agent:progress', wrappedHandler);
     return () => this.socket.off('cli_agent:progress', wrappedHandler);
+  }
+
+  /**
+   * Fires when the socket connects to a NEW server session (recovered === false).
+   * Skipped when Socket.IO connection state recovery successfully replays events.
+   */
+  onReconnect(handler: ReconnectHandler): () => void {
+    const wrappedHandler = () => {
+      if (this.socket.recovered) return;
+      handler();
+    };
+    this.socket.on('connect', wrappedHandler);
+    return () => this.socket.off('connect', wrappedHandler);
+  }
+
+  /** Fires on every socket disconnection. */
+  onDisconnect(handler: DisconnectHandler): () => void {
+    const wrappedHandler = (reason: string) => handler(reason);
+    this.socket.on('disconnect', wrappedHandler);
+    return () => this.socket.off('disconnect', wrappedHandler);
+  }
+
+  /** Re-register session ownership with the server after a reconnect. */
+  identifySession(sessionId: string): void {
+    this.socket.emit('session:identify', { sessionId });
   }
 }

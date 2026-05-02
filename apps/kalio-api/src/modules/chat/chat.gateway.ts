@@ -45,6 +45,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('session:identify')
+  handleSessionIdentify(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: SocketEvents['session:identify'],
+  ): void {
+    let sessions = this.socketSessions.get(client.id);
+    if (!sessions) {
+      sessions = new Set();
+      this.socketSessions.set(client.id, sessions);
+    }
+    sessions.add(payload.sessionId);
+    this.logger.log(`Session re-identified: ${payload.sessionId} for socket ${client.id}`);
+  }
+
   @SubscribeMessage('chat:send')
   async handleChatSend(
     @ConnectedSocket() client: Socket,

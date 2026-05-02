@@ -6,6 +6,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { useSettingsStore } from '../settings/settingsStore';
 import { eventBus } from '../../services/eventBus';
+import { backendHealth } from '../../services/backendHealth';
 import { MessageBubble } from './MessageBubble';
 import { AgentTurnBubble } from './AgentTurnBubble';
 import { ChatInput } from './ChatInput';
@@ -279,6 +280,33 @@ export function ChatInterface() {
       setMsgs(updated);
     });
 
+    const offReconnect = eventBus.onReconnect(() => {
+      console.log('[ChatInterface] socket reconnected — resetting streaming state');
+      backendHealth.reportSuccess();
+      setStreaming(false);
+      clearToolActivities();
+      const { activeSessionId: sid } = useSessionStore.getState();
+      if (sid) {
+        removeActiveAgentLoop(sid);
+        setPendingConfirmation(sid, null);
+        // Identify immediately so the server can abort if the socket drops again
+        eventBus.identifySession(sid);
+        fetch(`/api/sessions/${sid}/messages`)
+          .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+          .then((data: ChatMessage[]) => {
+            if (useSessionStore.getState().activeSessionId !== sid) return;
+            const { setMessages: doSetMessages, setAgentTurns: doSetAgentTurns } = useSessionStore.getState();
+            doSetMessages(data);
+            if (!useAgentStore.getState().activeAgentLoops[sid]) {
+              doSetAgentTurns(buildTurnsFromHistory(data, sid));
+            }
+          })
+          .catch((err: unknown) => {
+            console.error('[ChatInterface] reconnect history reload failed', err instanceof Error ? err : new Error(String(err)));
+          });
+      }
+    });
+
     return () => {
       offChunk();
       offComplete();
@@ -291,14 +319,26 @@ export function ChatInterface() {
       offToolResult();
       offCLIAgentProgress();
       offRaAppNative();
+      offReconnect();
     };
-  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput]);
+  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput, clearToolActivities, backendHealth]);
 
   // Clear stale retry content when the user switches sessions.
   // Without this, clicking Retry after switching sessions would send the previous
   // session's message into the new session.
   useEffect(() => {
     lastSentContentRef.current = '';
+  }, [activeSessionId]);
+
+  // Re-register session ownership with the server whenever the active session changes.
+  // This fixes the race condition where identifySession is called on reconnect but the
+  // user switches sessions before the history fetch completes — the server would be left
+  // owning the old session. Calling it here ensures the server always knows the current
+  // session regardless of reconnect timing.
+  useEffect(() => {
+    if (activeSessionId && eventBus.connected) {
+      eventBus.identifySession(activeSessionId);
+    }
   }, [activeSessionId]);
 
   useEffect(() => {
