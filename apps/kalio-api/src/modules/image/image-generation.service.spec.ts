@@ -243,3 +243,35 @@ describe('ImageGenerationService — error handling', () => {
     ).rejects.toThrow('No image data in response');
   });
 });
+
+describe('ImageGenerationService — mock stock mode', () => {
+  let service: ImageGenerationService;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    service = new ImageGenerationService();
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('downloads from a stock source when model=mock-stock and does not require paid API', async () => {
+    fetchMock.mockResolvedValueOnce(makeImageHttpResponse());
+
+    const result = await service.generate({
+      prompt: 'a fluffy cat portrait',
+      model: 'mock-stock',
+      provider: 'auto',
+      apiKey: '',
+      size: '1024x1024',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toContain('picsum.photos/seed/');
+    expect(url).toContain('/1024/1024');
+    expect(result.model).toBe('mock-stock');
+    expect(result.size).toBe('1024x1024');
+  });
+});

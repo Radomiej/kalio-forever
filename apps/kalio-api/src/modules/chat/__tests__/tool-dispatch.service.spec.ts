@@ -192,6 +192,57 @@ describe('ToolDispatchService', () => {
       expect(result.status).toBe('cancelled');
       expect(entry.execute).not.toHaveBeenCalled();
     });
+
+    it('does not auto-timeout HITL confirmation for subagent turns', async () => {
+      vi.useFakeTimers();
+      try {
+        const entry = makeEntry('dangerous_tool', true, { ok: true });
+        const moduleRef = await Test.createTestingModule({
+          providers: [
+            ToolDispatchService,
+            { provide: TOOL_REGISTRY, useValue: [entry] },
+          ],
+        }).compile();
+        const scopedService = moduleRef.get(ToolDispatchService);
+        const ctx = {
+          ...makeCtx(),
+          sessionId: 'sub-session',
+          vfsSessionId: 'sub-session',
+          agentRun: {
+            agentRunId: 'sub-run-hitl',
+            agentType: 'subagent' as const,
+            parentSessionId: 'master-session',
+            vfsMode: 'shared' as const,
+          },
+        };
+        let capturedRequestId: string | null = null;
+        ctx.emit.mockImplementation((event: string, data: Record<string, string | number>) => {
+          if (event === 'tool:confirmation_required') {
+            capturedRequestId = String(data['requestId']);
+            expect(data['timeoutMs']).toBe(0);
+          }
+        });
+
+        const dispatchPromise = scopedService.dispatch('c1', 'dangerous_tool', {}, ctx);
+
+        const settled: { done: boolean; status?: string } = { done: false };
+        void dispatchPromise.then((result) => {
+          settled.done = true;
+          settled.status = result.status;
+        });
+
+        await vi.advanceTimersByTimeAsync(700_000);
+        await Promise.resolve();
+        expect(settled.done).toBe(false);
+        expect(capturedRequestId).toBeTruthy();
+
+        scopedService.resolveConfirmation(capturedRequestId!);
+        const result = await dispatchPromise;
+        expect(result.status).toBe('success');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('getToolMetas', () => {

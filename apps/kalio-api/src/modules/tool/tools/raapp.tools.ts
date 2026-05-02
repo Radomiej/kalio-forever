@@ -59,12 +59,20 @@ export class RaAppCreateTool {
       };
     }
 
+    const saved = await this.raapp.saveGeneratedApp({
+      type,
+      content,
+      mode: mode as 'display' | 'interactive',
+      sessionId: request.sessionId,
+    });
+
     return {
       status: 'ready',
       type,
       mode,
       content,
       renderedContent: result.renderedContent,
+      storedAppId: saved.id,
     };
   }
 }

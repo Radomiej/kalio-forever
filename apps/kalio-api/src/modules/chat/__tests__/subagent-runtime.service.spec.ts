@@ -274,6 +274,56 @@ describe('SubagentRuntimeService nested subagents', () => {
     expect(result.result).toContain('/api/sessions/master/vfs/download?path=sub-agents%2Fsub-child%2Fimages%2Fcat-hero.png');
   });
 
+  it('copies requested attachments into isolated child VFS and prepends attachment hint in child prompt', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([{ type: 'text_delta', delta: 'done' }, { type: 'done' }])),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+    const vfs = {
+      copySessionFiles: vi.fn()
+        .mockReturnValueOnce([
+          { fromPath: 'images/cat.png', toPath: 'attachments/images/cat.png', sizeBytes: 10 },
+        ])
+        .mockReturnValueOnce([]),
+    };
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      vfs as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-attach',
+      objective: 'Inspect attachment',
+      attachments: ['images/cat.png'],
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+    });
+
+    expect(vfs.copySessionFiles).toHaveBeenCalledWith(expect.objectContaining({
+      fromSessionId: 'master',
+      toSessionId: expect.stringMatching(/^sub-/),
+      targetPrefix: 'attachments',
+      filePaths: ['images/cat.png'],
+    }));
+    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith(
+      expect.stringMatching(/^sub-/),
+      expect.stringContaining('attachments/images/cat.png'),
+    );
+  });
+
   it('lets a first-level subagent see run_subagent, but hides it at the nested-depth limit', async () => {
     const streamCalls: LLMSourceParams[] = [];
     const llmSource: ILLMSource = {

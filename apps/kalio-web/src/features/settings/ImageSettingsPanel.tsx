@@ -29,6 +29,7 @@ const PROVIDER_DEFAULT_MODELS: Record<ImageProviderType, string> = {
 /** Models available per provider (shown as quick-select suggestions) */
 const PROVIDER_MODELS: Record<ImageProviderType, Array<{ value: string; label: string }>> = {
   auto: [
+    { value: 'mock-stock',       label: 'mock-stock (free placeholder)' },
     { value: 'flux-schnell',      label: 'flux-schnell (fast)' },
     { value: 'flux-dev',          label: 'flux-dev (quality)' },
     { value: 'flux-1.1-pro',      label: 'flux-1.1-pro (best)' },
@@ -36,6 +37,7 @@ const PROVIDER_MODELS: Record<ImageProviderType, Array<{ value: string; label: s
     { value: 'gpt-image-1',       label: 'gpt-image-1' },
   ],
   cometapi: [
+    { value: 'mock-stock',       label: 'mock-stock (free placeholder)' },
     { value: 'flux-schnell',      label: 'flux-schnell (fast, cheap)' },
     { value: 'flux-dev',          label: 'flux-dev (quality)' },
     { value: 'flux-1.1-pro',      label: 'flux-1.1-pro (best)' },

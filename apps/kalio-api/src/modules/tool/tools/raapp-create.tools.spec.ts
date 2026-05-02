@@ -21,6 +21,7 @@ describe('RaAppCreateTool', () => {
   beforeEach(() => {
     raapp = {
       execute: vi.fn(),
+      saveGeneratedApp: vi.fn().mockResolvedValue({ id: 'generated-default' }),
     };
     tool = new RaAppCreateTool(raapp as RAAppService);
   });
@@ -73,6 +74,26 @@ describe('RaAppCreateTool', () => {
         mode: 'interactive',
         content: '<p>hi</p>',
       });
+    });
+
+    it('persists generated app in RA-App manager and returns storedAppId', async () => {
+      (raapp.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: 'ok',
+        renderedContent: '<html>hello</html>',
+      });
+      (raapp.saveGeneratedApp as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'generated-cats' });
+
+      const result = await tool.execute(
+        makeRequest('raapp_create', { type: 'html', content: '<html>hello</html>', mode: 'display' }),
+      ) as Record<string, unknown>;
+
+      expect(raapp.saveGeneratedApp).toHaveBeenCalledWith({
+        type: 'html',
+        content: '<html>hello</html>',
+        mode: 'display',
+        sessionId: 'sess-ra',
+      });
+      expect(result.storedAppId).toBe('generated-cats');
     });
   });
 

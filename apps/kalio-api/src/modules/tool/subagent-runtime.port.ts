@@ -8,6 +8,7 @@ export interface RunSubagentRequest {
   parentSessionId: string;
   parentToolCallId: string;
   objective: string;
+  attachments?: string[];
   childSessionId?: string;
   personaId?: string;
   availableTools: ToolMeta[];

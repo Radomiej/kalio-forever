@@ -22,6 +22,7 @@ Act immediately. Use available tools when needed. Return a concise final result.
 When delegating to a known specialist, respect the assigned persona and use the tools you were given.
 After using tools, always finish with one plain-language final answer before stopping.
 If you created or modified files, include the exact VFS paths in that final answer.
+If a tool returns a "parent_download_url" field, that is the URL that works in the parent session — always include it in your final answer instead of the regular download_url. Format: "parent_download_url: <url> (path: <path>)".
 If a tool returns download URLs or other directly usable URLs for created artifacts, include those exact URLs in that final answer with the matching file paths.
 If a tool partially succeeds (for example, it saves a file but its textual result is weak), inspect the VFS if needed and still produce a final summary.
 Do not ask clarifying questions. Work autonomously end-to-end.`;
@@ -41,6 +42,12 @@ function appendCopiedOutputLinks(baseText: string, parentSessionId: string, copi
   });
 
   return `${baseText}\n\nCopied outputs:\n${lines.join('\n')}`;
+}
+
+function buildAttachmentHint(attachmentPaths: string[]): string {
+  if (attachmentPaths.length === 0) return '';
+  const lines = attachmentPaths.map((path) => `- ${path}`);
+  return `You have attached files available in VFS:\n${lines.join('\n')}\n\n`;
 }
 
 @Injectable()
@@ -102,6 +109,20 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       throw new Error(`Sub-agent session ${childSession.id} does not belong to parent session ${request.parentSessionId}`);
     }
 
+    const attachmentPaths = request.attachments ?? [];
+    const copiedAttachments = attachmentPaths.length > 0 && request.vfsMode === 'isolated'
+      ? this.vfs.copySessionFiles({
+          fromSessionId: request.parentSessionId,
+          toSessionId: childSessionId,
+          targetPrefix: 'attachments',
+          filePaths: attachmentPaths,
+        })
+      : [];
+    const effectiveAttachmentPaths = copiedAttachments.length > 0
+      ? copiedAttachments.map((file) => file.toPath)
+      : attachmentPaths;
+    const objectiveWithAttachmentHint = `${buildAttachmentHint(effectiveAttachmentPaths)}${request.objective}`;
+
     const emit = request.emit;
     let hadContent = false;
     const trackingEmit: EmitFn | undefined = emit
@@ -116,7 +137,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       trackingEmit?.('session:created', childSession);
     }
 
-    await this.sessionManager.persistUserMessage(childSessionId, request.objective);
+    await this.sessionManager.persistUserMessage(childSessionId, objectiveWithAttachmentHint);
 
     const controller = new AbortController();
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -133,7 +154,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       const loopResult = await Promise.race([
         this.runLoop({
           childSessionId,
-          objective: request.objective,
+          objective: objectiveWithAttachmentHint,
           personaId: request.personaId ?? childSession.personaId,
           tools,
           vfsSessionId,

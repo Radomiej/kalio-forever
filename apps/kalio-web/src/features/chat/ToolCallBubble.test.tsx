@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { HistoryToolCallBubble, LiveToolCallBubble } from './ToolCallBubble';
 import type { ToolActivity } from '../../store/agentStore';
+import { apiClient } from '../../services/apiClient';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,17 @@ vi.mock('../raapp/RAAppRenderer', () => ({
     <div data-testid="raapp-renderer" data-type={block.type}>RA-App Widget</div>
   ),
 }));
+
+vi.mock('../../services/apiClient', async () => {
+  const actual = await vi.importActual<typeof import('../../services/apiClient')>('../../services/apiClient');
+  return {
+    ...actual,
+    apiClient: {
+      ...actual.apiClient,
+      get: vi.fn(),
+    },
+  };
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -160,5 +172,45 @@ describe('HistoryToolCallBubble — tool input args display', () => {
     const toggle = screen.queryByRole('button', { name: /toggle details/i });
     if (toggle) act(() => toggle.click());
     expect(screen.queryByText('input')).not.toBeInTheDocument();
+  });
+});
+
+describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
+  it('loads child session messages and renders latest raapp_create result', async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({
+      data: [
+        {
+          id: 'tool-1',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-1',
+          content: JSON.stringify({
+            status: 'ready',
+            type: 'html',
+            mode: 'display',
+            content: '<!doctype html><html><body>hello</body></html>',
+          }),
+          createdAt: Date.now(),
+        },
+      ],
+    } as never);
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_subagent"
+        content={JSON.stringify({
+          childSessionId: 'sub-1',
+          parentSessionId: 'p-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'sub-1',
+          copiedFiles: [],
+          result: 'Completed',
+          taskId: 't-1',
+          durationMs: 1000,
+        })}
+      />,
+    );
+
+    expect(await screen.findByTestId('raapp-renderer')).toBeInTheDocument();
   });
 });

@@ -6,6 +6,7 @@ import { Tool } from '../../../common/decorators/tool.decorator';
 // eslint-disable-next-line import/no-cycle
 import { ToolRegistryService } from '../tool-registry.service';
 import { SUBAGENT_RUNTIME, type SubagentRuntimePort } from '../subagent-runtime.port';
+import { PersonaService } from '../../persona/persona.service';
 
 interface ToolRegistryLike {
   getEntries?: () => Array<{ meta: ToolMeta }>;
@@ -33,11 +34,15 @@ function buildDelegatedRequest(
     'Returns the sub-agent result as text.',
   parameters: {
     type: 'object',
-    required: ['objective'],
+    required: ['inputPrompt'],
     properties: {
+      inputPrompt: {
+        type: 'string',
+        description: 'Clear task prompt for the sub-agent. This is the only required input.',
+      },
       objective: {
         type: 'string',
-        description: 'Clear, specific task description for the sub-agent to complete.',
+        description: 'Deprecated alias for inputPrompt. Use inputPrompt instead.',
       },
       childSessionId: {
         type: 'string',
@@ -45,16 +50,16 @@ function buildDelegatedRequest(
       },
       timeoutMs: {
         type: 'integer',
-        description: 'Max execution time in milliseconds. Default: 60000. Max: 180000.',
-      },
-      availableTools: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Optional list of tool names to make available to the sub-agent. Omit this to give the child the full toolset. If you restrict it, include every required capability, such as vfs_write for file creation or image_view for image inspection.',
+        description: 'Max execution time in milliseconds. Default: 300000 (5 min). Max: 600000 (10 min).',
       },
       personaId: {
         type: 'string',
-        description: 'Optional specialist persona id for the sub-agent. Set this explicitly when delegating to a known specialist such as web-research, designer, or dev. Defaults to default.',
+        description: 'Persona used by the sub-agent. Allowed tools are resolved from this persona. Defaults to default.',
+      },
+      attachments: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional list of parent VFS paths to copy into the child VFS (isolated mode) before execution.',
       },
       vfsMode: {
         type: 'string',
@@ -71,7 +76,10 @@ function buildDelegatedRequest(
 export class SubagentTool {
   private readonly logger = new Logger(SubagentTool.name);
 
-  constructor(private readonly moduleRef: ModuleRef) {}
+  constructor(
+    private readonly moduleRef: ModuleRef,
+    private readonly personaService: PersonaService,
+  ) {}
 
   private getToolRegistry(): ToolRegistryLike {
     // Use the class as the DI token (not a string) so NestJS can resolve it.
@@ -99,55 +107,66 @@ export class SubagentTool {
       && typeof (value as { runSubagent?: unknown }).runSubagent === 'function';
   }
 
-  private getTools(availableTools?: string[]): ToolMeta[] {
+  private async getPersonaTools(personaId: string): Promise<ToolMeta[]> {
+    const personaConfig = await this.personaService.getSessionConfig(personaId);
+    if (!personaConfig) {
+      throw new Error(`Persona ${personaId} not found`);
+    }
+
     const registry = this.getToolRegistry();
+    const allowedTools = personaConfig.allowedTools ?? [];
 
-    if (availableTools && availableTools.length > 0) {
-      if (typeof registry.getToolsForSkills === 'function') {
-        return registry.getToolsForSkills(availableTools);
-      }
-      if (typeof registry.getEntries === 'function') {
-        const allowed = new Set(availableTools);
-        return registry
-          .getEntries()
-          .map((entry) => entry.meta)
-          .filter((meta) => allowed.has(meta.name));
-      }
+    if (allowedTools.length === 0) return [];
+
+    if (typeof registry.getToolsForSkills === 'function') {
+      return registry.getToolsForSkills(allowedTools);
     }
 
-    if (typeof registry.getAllTools === 'function') {
-      return registry.getAllTools();
-    }
     if (typeof registry.getEntries === 'function') {
-      return registry.getEntries().map((entry) => entry.meta);
+      const allowed = new Set(allowedTools);
+      return registry
+        .getEntries()
+        .map((entry) => entry.meta)
+        .filter((meta) => allowed.has(meta.name));
     }
 
     throw new Error('ToolRegistryService does not expose a supported tool listing API');
   }
 
   async execute(request: ToolCallRequest): Promise<SubagentToolResult> {
-    const objective = request.args['objective'] as string;
+    const inputPrompt = request.args['inputPrompt'];
+    const deprecatedObjective = request.args['objective'];
+    const objective = typeof inputPrompt === 'string' && inputPrompt.trim().length > 0
+      ? inputPrompt
+      : (typeof deprecatedObjective === 'string' ? deprecatedObjective : '');
+    if (!objective) {
+      throw new Error('run_subagent requires inputPrompt');
+    }
     const childSessionId = typeof request.args['childSessionId'] === 'string'
       ? request.args['childSessionId']
       : undefined;
     const rawTimeout = request.args['timeoutMs'] as number | undefined;
-    const availableTools = request.args['availableTools'] as string[] | undefined;
-    const personaId = request.args['personaId'] as string | undefined;
+    const personaId = typeof request.args['personaId'] === 'string' && request.args['personaId'].trim().length > 0
+      ? request.args['personaId'] as string
+      : 'default';
+    const attachments = Array.isArray(request.args['attachments'])
+      ? (request.args['attachments'] as unknown[]).filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      : undefined;
     const rawVfsMode = request.args['vfsMode'];
     const vfsMode: VFSMode = rawVfsMode === 'shared' ? 'shared' : 'isolated';
     const copyOutputs = request.args['copyOutputs'] !== false;
-    const timeoutMs = Math.min(rawTimeout ?? 60_000, 180_000);
+    const timeoutMs = Math.min(rawTimeout ?? 300_000, 600_000);
     const taskId = randomUUID();
     const sessionId = request.sessionId;
     this.logger.log(`[run_subagent] Starting task ${taskId}: ${objective.slice(0, 80)}`);
 
-    // Get tools: use availableTools if provided, otherwise all tools
-    const tools = this.getTools(availableTools);
+    const tools = await this.getPersonaTools(personaId);
     const runtime = this.getRuntime();
     return runtime.runSubagent({
       parentSessionId: sessionId,
       parentToolCallId: request.callId,
       objective,
+      attachments,
       childSessionId,
       personaId,
       availableTools: tools,
@@ -168,24 +187,28 @@ export class SubagentTool {
     'Use this when you want an explicit new child session rather than continuing an existing one.',
   parameters: {
     type: 'object',
-    required: ['objective'],
+    required: ['inputPrompt'],
     properties: {
+      inputPrompt: {
+        type: 'string',
+        description: 'Clear task prompt for the new sub-agent.',
+      },
       objective: {
         type: 'string',
-        description: 'Clear, specific task description for the new sub-agent to complete.',
+        description: 'Deprecated alias for inputPrompt. Use inputPrompt instead.',
       },
       timeoutMs: {
         type: 'integer',
-        description: 'Max execution time in milliseconds. Default: 60000. Max: 180000.',
-      },
-      availableTools: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Optional list of tool names to make available to the sub-agent. Omit this to give the child the full toolset. If you restrict it, include every required capability, such as vfs_write for file creation or image_view for image inspection.',
+        description: 'Max execution time in milliseconds. Default: 300000 (5 min). Max: 600000 (10 min).',
       },
       personaId: {
         type: 'string',
-        description: 'Optional specialist persona id for the new sub-agent. Set this explicitly when delegating to a known specialist such as web-research, designer, or dev. Defaults to default.',
+        description: 'Persona used by the sub-agent. Allowed tools are resolved from this persona.',
+      },
+      attachments: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional parent VFS paths copied into the child VFS before execution.',
       },
       vfsMode: {
         type: 'string',
@@ -216,11 +239,15 @@ export class SpawnSubagentTool {
     'Use this when you already have a childSessionId and want that same child to continue.',
   parameters: {
     type: 'object',
-    required: ['objective', 'childSessionId'],
+    required: ['inputPrompt', 'childSessionId'],
     properties: {
+      inputPrompt: {
+        type: 'string',
+        description: 'Follow-up prompt for the existing sub-agent chat.',
+      },
       objective: {
         type: 'string',
-        description: 'Clear, specific follow-up message for the existing sub-agent chat.',
+        description: 'Deprecated alias for inputPrompt. Use inputPrompt instead.',
       },
       childSessionId: {
         type: 'string',
@@ -228,16 +255,16 @@ export class SpawnSubagentTool {
       },
       timeoutMs: {
         type: 'integer',
-        description: 'Max execution time in milliseconds. Default: 60000. Max: 180000.',
-      },
-      availableTools: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Optional list of tool names to make available to the sub-agent. Omit this to give the child the full toolset. If you restrict it, include every required capability, such as vfs_write for file creation or image_view for image inspection.',
+        description: 'Max execution time in milliseconds. Default: 300000 (5 min). Max: 600000 (10 min).',
       },
       personaId: {
         type: 'string',
-        description: 'Optional specialist persona override for the continued sub-agent turn. Set this explicitly when delegating to a known specialist such as web-research, designer, or dev.',
+        description: 'Optional persona override for the continued sub-agent turn.',
+      },
+      attachments: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional parent VFS paths copied into the child VFS before execution.',
       },
       vfsMode: {
         type: 'string',

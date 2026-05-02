@@ -7,7 +7,7 @@ import type { ToolRegistryEntry } from './interfaces/tool-registry-entry.interfa
 import { TOOL_REGISTRY } from './chat.tokens';
 import { MCPService } from '../mcp/mcp.service';
 
-const HITL_TIMEOUT_MS = 30_000;
+const HITL_TIMEOUT_MS = 600_000;
 const SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
 
 interface PendingConfirmation {
@@ -144,6 +144,7 @@ export class ToolDispatchService {
     ctx: StreamContext,
   ): Promise<boolean> {
     const requestId = nanoid();
+    const timeoutMs = ctx.agentRun?.agentType === 'subagent' ? 0 : HITL_TIMEOUT_MS;
 
     const payload: ToolConfirmationRequest = {
       requestId,
@@ -151,28 +152,30 @@ export class ToolDispatchService {
       sessionId: ctx.sessionId,
       toolName,
       args,
-      timeoutMs: HITL_TIMEOUT_MS,
+      timeoutMs,
       agentRun: ctx.agentRun,
     };
 
     ctx.emit('tool:confirmation_required', payload);
 
     return new Promise<boolean>(resolve => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(requestId);
-        this.logger.warn(
-          `HITL confirmation timed out for tool [${toolName}] session=${ctx.sessionId}`,
-        );
-        resolve(false);
-      }, HITL_TIMEOUT_MS);
+      const timeout = timeoutMs > 0
+        ? setTimeout(() => {
+            this.pending.delete(requestId);
+            this.logger.warn(
+              `HITL confirmation timed out for tool [${toolName}] session=${ctx.sessionId}`,
+            );
+            resolve(false);
+          }, timeoutMs)
+        : null;
 
       this.pending.set(requestId, {
         resolve: () => {
-          clearTimeout(timeout);
+          if (timeout) clearTimeout(timeout);
           resolve(true);
         },
         reject: () => {
-          clearTimeout(timeout);
+          if (timeout) clearTimeout(timeout);
           resolve(false);
         },
       });

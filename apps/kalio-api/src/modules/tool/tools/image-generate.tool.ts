@@ -13,7 +13,7 @@ const SUPPORTED_IMAGE_PROVIDERS = ['cometapi', 'openai', 'openrouter', 'replicat
   description: `Generate an image using AI (CometAPI, OpenAI, or OpenRouter-compatible).
 The image is saved to the session VFS under the images/ folder and returned inline.
 
-Supported models: flux-schnell (default, fast/cheap), flux-pro, gpt-image-1, dall-e-3, kling-image.
+Supported models: flux-schnell (default, fast/cheap), flux-pro, gpt-image-1, dall-e-3, kling-image, mock-stock (free stock placeholder, no API key).
 Quality: low (fast/cheap), medium, high (slow/expensive).
 
 Use edit_image instead when the user provides existing reference images from the VFS for character/style consistency.`,
@@ -53,8 +53,9 @@ export class ImageGenerateTool {
     const output_format = (request.args['output_format'] as 'png' | 'jpeg' | 'webp' | undefined) ?? 'png';
 
     const apiKey = await this.imageConfig.getApiKey();
+    const isMockStockModel = model.trim().toLowerCase().startsWith('mock-stock');
 
-    if (!apiKey) {
+    if (!apiKey && !isMockStockModel) {
       throw new Error('No API key configured for image generation. Go to Settings → Image Generation to add a key.');
     }
 
@@ -72,7 +73,7 @@ export class ImageGenerateTool {
         quality,
         output_format,
         provider,
-        apiKey,
+        apiKey: apiKey ?? '',
         baseUrl: cfg.baseUrl,
       });
 
@@ -84,6 +85,15 @@ export class ImageGenerateTool {
 
       this.logger.log(`[image_generate] Saved ${vfsPath} (${result.buffer.length} bytes) for VFS session ${vfsSessionId}`);
 
+      // When running inside an isolated sub-agent, also compute the parent-session URL so the
+      // child LLM can include it directly in its answer. This avoids the child reporting a
+      // child-session URL that is unreachable from the parent after copy-back.
+      const agentRun = request.agentRun;
+      const parentDownloadUrl =
+        agentRun?.vfsMode === 'isolated' && agentRun.parentSessionId && agentRun.vfsSessionId
+          ? `/api/sessions/${agentRun.parentSessionId}/vfs/download?path=${encodeURIComponent(`sub-agents/${agentRun.vfsSessionId}/${vfsPath}`)}`
+          : undefined;
+
       return {
         image_url: result.dataUrl,
         path: vfsPath,
@@ -91,7 +101,10 @@ export class ImageGenerateTool {
         size: result.size,
         format: result.format,
         download_url: `/api/sessions/${vfsSessionId}/vfs/download?path=${encodeURIComponent(vfsPath)}`,
-        message: `Image generated and saved to ${vfsPath}.`,
+        ...(parentDownloadUrl ? { parent_download_url: parentDownloadUrl } : {}),
+        message: parentDownloadUrl
+          ? `Image generated and saved to ${vfsPath}. Use parent_download_url for embedding in the final page.`
+          : `Image generated and saved to ${vfsPath}.`,
         output_type: 'image',
       };
     } catch (err) {

@@ -111,6 +111,30 @@ function detectModelFamily(modelName: string): ImageModelFamily {
   return 'openai-standard';
 }
 
+function isMockStockModel(modelName: string): boolean {
+  return modelName.trim().toLowerCase().startsWith('mock-stock');
+}
+
+function parseSize(size: string): { width: number; height: number } {
+  const [rawW, rawH] = size.split('x').map(Number);
+  const width = Number.isFinite(rawW) && rawW > 0 ? rawW : 1024;
+  const height = Number.isFinite(rawH) && rawH > 0 ? rawH : 1024;
+  return { width, height };
+}
+
+function buildMockStockUrl(prompt: string, size: string): string {
+  const { width, height } = parseSize(size);
+  const seedBase = prompt.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 64);
+  const seed = seedBase.length > 0 ? seedBase : 'kalio-mock-image';
+  return `https://picsum.photos/seed/${encodeURIComponent(seed)}/${width}/${height}`;
+}
+
+function formatFromMimeType(mimeType: string): string {
+  if (mimeType.includes('png')) return 'png';
+  if (mimeType.includes('webp')) return 'webp';
+  return 'jpeg';
+}
+
 function getModelConfig(
   modelName: string,
   baseUrl: string,
@@ -410,10 +434,25 @@ export class ImageGenerationService {
 
   async generate(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
     const model = req.model ?? 'flux-schnell';
-    const baseUrl = resolveBaseUrl(req.provider, req.baseUrl, model);
     const size = req.size ?? '1024x1024';
     const quality = req.quality ?? 'low';
     const outputFormat = req.output_format ?? 'png';
+
+    if (isMockStockModel(model)) {
+      const stockUrl = buildMockStockUrl(req.prompt, size);
+      this.logger.log(`[ImageGen] mock-stock -> ${stockUrl}`);
+      const fetched = await fetchAndConvertImage(stockUrl);
+      return {
+        buffer: fetched.buffer,
+        mimeType: fetched.mimeType,
+        dataUrl: fetched.dataUrl,
+        model,
+        size,
+        format: formatFromMimeType(fetched.mimeType),
+      };
+    }
+
+    const baseUrl = resolveBaseUrl(req.provider, req.baseUrl, model);
 
     this.logger.log(`[ImageGen] ${model} @ ${baseUrl} (quality=${quality}, provider=${req.provider ?? 'auto'})`);
 

@@ -3,6 +3,7 @@ import { MessageSubagentTool, SpawnSubagentTool, SubagentTool } from './subagent
 import type { ModuleRef } from '@nestjs/core';
 import type { AgentRunContext, ToolCallRequest, ToolMeta } from '@kalio/types';
 import { SUBAGENT_RUNTIME } from '../subagent-runtime.port';
+import type { PersonaService } from '../../persona/persona.service';
 
 function makeRequest(args: Record<string, unknown> = {}, sessionId = 'sess-sub'): ToolCallRequest {
   return { callId: 'call-1', sessionId, toolName: 'run_subagent', args };
@@ -29,6 +30,7 @@ describe('SubagentTool', () => {
   let moduleRef: Partial<ModuleRef>;
   let registry: ReturnType<typeof makeRegistryMock>;
   let runtime: { runSubagent: ReturnType<typeof vi.fn> };
+  let personaService: { getSessionConfig: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     registry = makeRegistryMock([makeTool('vfs_read'), makeTool('vfs_write')]);
@@ -45,6 +47,17 @@ describe('SubagentTool', () => {
       }),
     };
 
+    personaService = {
+      getSessionConfig: vi.fn().mockResolvedValue({
+        systemPrompt: '',
+        model: 'test',
+        allowedTools: ['vfs_read', 'vfs_write'],
+        skillIds: [],
+        mcpPolicy: 'allow_all',
+        kv: {},
+      }),
+    };
+
     moduleRef = {
       get: vi.fn().mockImplementation((token: unknown) => {
         if (token === SUBAGENT_RUNTIME) return runtime;
@@ -52,7 +65,7 @@ describe('SubagentTool', () => {
       }),
     };
 
-    tool = new SubagentTool(moduleRef as ModuleRef);
+    tool = new SubagentTool(moduleRef as ModuleRef, personaService as unknown as PersonaService);
   });
 
   it('forwards childSessionId to the runtime so the master can continue an existing subagent chat', async () => {
@@ -82,8 +95,7 @@ describe('SubagentTool', () => {
 
   it('forwards the resolved tool list and execution options into the runtime', async () => {
     await tool.execute(makeRequest({
-      objective: 'What is 6 times 7?',
-      availableTools: ['vfs_read', 'vfs_write'],
+      inputPrompt: 'What is 6 times 7?',
       timeoutMs: 999_999,
       vfsMode: 'shared',
       copyOutputs: false,
@@ -96,7 +108,7 @@ describe('SubagentTool', () => {
       objective: 'What is 6 times 7?',
       childSessionId: 'sub-existing',
       personaId: 'dev',
-      timeoutMs: 180000,
+      timeoutMs: 600000,
       vfsMode: 'shared',
       copyOutputs: false,
       availableTools: [
@@ -104,6 +116,7 @@ describe('SubagentTool', () => {
         expect.objectContaining({ name: 'vfs_write' }),
       ],
     }));
+    expect(personaService.getSessionConfig).toHaveBeenCalledWith('dev');
   });
 
   it('returns the runtime result verbatim', async () => {
@@ -148,20 +161,11 @@ describe('SubagentTool', () => {
     }));
   });
 
-  it('calls getAllTools when no availableTools are provided', async () => {
-    await tool.execute(makeRequest({ objective: 'task' }));
+  it('resolves child tools from persona allowedTools', async () => {
+    await tool.execute(makeRequest({ objective: 'task', personaId: 'default' }));
 
-    expect(registry.getAllTools).toHaveBeenCalled();
-    expect(registry.getToolsForSkills).not.toHaveBeenCalled();
-  });
-
-  it('calls getToolsForSkills when availableTools list is provided', async () => {
-    await tool.execute(
-      makeRequest({ objective: 'task', availableTools: ['vfs_read', 'vfs_write'] }),
-    );
-
+    expect(personaService.getSessionConfig).toHaveBeenCalledWith('default');
     expect(registry.getToolsForSkills).toHaveBeenCalledWith(['vfs_read', 'vfs_write']);
-    expect(registry.getAllTools).not.toHaveBeenCalled();
   });
 
   it('works with the public ToolRegistryService API that exposes getEntries()', async () => {
@@ -178,7 +182,7 @@ describe('SubagentTool', () => {
         };
       }),
     };
-    tool = new SubagentTool(moduleRef as ModuleRef);
+    tool = new SubagentTool(moduleRef as ModuleRef, personaService as unknown as PersonaService);
 
     await expect(tool.execute(makeRequest({ objective: 'task' }))).resolves.toMatchObject({
       result: 'runtime result',
@@ -189,16 +193,10 @@ describe('SubagentTool', () => {
     }));
   });
 
-  it('caps timeoutMs at 180000 before calling the runtime', async () => {
+  it('caps timeoutMs at 600000 before calling the runtime', async () => {
     await tool.execute(makeRequest({ objective: 'test cap', timeoutMs: 999_999_999 }));
 
-    expect(runtime.runSubagent).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 180000 }));
-  });
-
-  it('uses empty availableTools list correctly (falls back to getAllTools)', async () => {
-    await tool.execute(makeRequest({ objective: 'task', availableTools: [] }));
-
-    expect(registry.getAllTools).toHaveBeenCalled();
+    expect(runtime.runSubagent).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 600000 }));
   });
 
   it('resolves registry when moduleRef.get is called with class token instead of a string token', async () => {
@@ -215,6 +213,7 @@ describe('SubagentTool', () => {
     };
     const toolWithClassToken = new SubagentTool(
       stringRejectingModuleRef as unknown as ModuleRef,
+      personaService as unknown as PersonaService,
     );
 
     await expect(
@@ -240,7 +239,7 @@ describe('SubagentTool', () => {
         return registry;
       }),
     };
-    tool = new SubagentTool(moduleRef as ModuleRef);
+    tool = new SubagentTool(moduleRef as ModuleRef, personaService as unknown as PersonaService);
 
     await expect(tool.execute(makeRequest({ objective: 'task' }))).rejects.toThrow(
       'Subagent runtime is unavailable',
@@ -251,6 +250,34 @@ describe('SubagentTool', () => {
     runtime.runSubagent.mockRejectedValue(new Error('SUBAGENT_FAILED'));
 
     await expect(tool.execute(makeRequest({ objective: 'failing task' }))).rejects.toThrow('SUBAGENT_FAILED');
+  });
+
+  it('accepts inputPrompt and forwards it as objective', async () => {
+    await tool.execute(makeRequest({ inputPrompt: 'build landing page' }));
+
+    expect(runtime.runSubagent).toHaveBeenCalledWith(expect.objectContaining({
+      objective: 'build landing page',
+    }));
+  });
+
+  it('forwards attachments into runtime request', async () => {
+    await tool.execute(makeRequest({ objective: 'analyze files', attachments: ['images/cat.png', 'notes/todo.md'] }));
+
+    expect(runtime.runSubagent).toHaveBeenCalledWith(expect.objectContaining({
+      attachments: ['images/cat.png', 'notes/todo.md'],
+    }));
+  });
+
+  it('ignores availableTools from request and does not use it to narrow child toolset', async () => {
+    await tool.execute(makeRequest({ objective: 'task', availableTools: ['vfs_read'] }));
+
+    expect(registry.getToolsForSkills).toHaveBeenCalledWith(['vfs_read', 'vfs_write']);
+    expect(runtime.runSubagent).toHaveBeenCalledWith(expect.objectContaining({
+      availableTools: [
+        expect.objectContaining({ name: 'vfs_read' }),
+        expect.objectContaining({ name: 'vfs_write' }),
+      ],
+    }));
   });
 });
 

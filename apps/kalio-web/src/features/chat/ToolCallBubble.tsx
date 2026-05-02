@@ -18,7 +18,8 @@ import type { ToolActivity } from '../../store/agentStore';
 import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
-import type { RAAppBlock, RaAppPendingApproval, CLIAgentResult, SubagentToolResult } from '@kalio/types';
+import { apiClient } from '../../services/apiClient';
+import type { ChatMessage, RAAppBlock, RaAppPendingApproval, CLIAgentResult, SubagentToolResult } from '@kalio/types';
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
 import { TerminalOutputBlock } from './TerminalOutputBlock';
 import { LiveCLIAgentBlock } from './LiveCLIAgentBlock';
@@ -85,7 +86,42 @@ function extractSubagentResult(data: unknown): SubagentToolResult | null {
   return d as unknown as SubagentToolResult;
 }
 
+function extractLatestRAAppFromMessages(messages: ChatMessage[]): RAAppBlock | null {
+  for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
+    const msg = messages[idx];
+    if (!msg || msg.role !== 'tool_result') continue;
+    try {
+      const parsed = JSON.parse(msg.content);
+      const raapp = extractRAAppBlock(parsed);
+      if (raapp) return raapp;
+    } catch {
+      // ignore invalid JSON payloads in history lookup
+    }
+  }
+  return null;
+}
+
 function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
+  const [childRaapp, setChildRaapp] = useState<RAAppBlock | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setChildRaapp(null);
+
+    void apiClient.get<ChatMessage[]>(`/api/sessions/${result.childSessionId}/messages`)
+      .then((response) => {
+        if (cancelled) return;
+        setChildRaapp(extractLatestRAAppFromMessages(response.data));
+      })
+      .catch((err: unknown) => {
+        console.error('[ToolCallBubble] failed to load subagent messages for RAApp preview', err instanceof Error ? err : new Error(String(err)));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [result.childSessionId]);
+
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] font-mono text-base-content/60 bg-base-200/60 rounded px-2 py-1.5">
@@ -108,6 +144,7 @@ function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
           ))}
         </div>
       )}
+      {childRaapp && <RAAppRenderer block={childRaapp} />}
     </div>
   );
 }
@@ -355,7 +392,7 @@ export function HistoryToolCallBubble({
   const imageResult = extractImageResult(parsed);
   const subagentResult = isSubagent ? extractSubagentResult(parsed) : null;
   const hasArgs = args != null && Object.keys(args).length > 0;
-  const [open, setOpen] = useState(() => (raapp != null && !isAnswered) || cliResult != null || imageResult != null);
+  const [open, setOpen] = useState(() => (raapp != null && !isAnswered) || cliResult != null || imageResult != null || subagentResult != null);
   useEffect(() => {
     if (isAnswered) setOpen(false);
   }, [isAnswered]);

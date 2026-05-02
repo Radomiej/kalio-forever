@@ -66,4 +66,20 @@ describe('ImageGenerateTool', () => {
 
     await expect(tool.execute(makeRequest())).rejects.toThrow('Image generation failed: no available channel');
   });
+
+  it('allows mock stock model without API key and still saves the image', async () => {
+    mockGetConfig.mockResolvedValue({ provider: 'auto', model: 'mock-stock', baseUrl: '' });
+    mockGetApiKey.mockResolvedValue(null);
+
+    const result = await tool.execute(makeRequest({ model: 'mock-stock', filename: 'mock-cat.png' }));
+
+    expect(mockGenerate).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'mock-stock',
+    }));
+    expect(mockWriteBinary).toHaveBeenCalledWith('shared-session', 'images/mock-cat.png', expect.any(Buffer));
+    expect(result).toMatchObject({
+      path: 'images/mock-cat.png',
+      download_url: '/api/sessions/shared-session/vfs/download?path=images%2Fmock-cat.png',
+    });
+  });
 });

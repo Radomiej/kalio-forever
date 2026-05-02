@@ -1,9 +1,11 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import extractZip from 'extract-zip';
+import archiver from 'archiver';
 import yaml from 'js-yaml';
 import type { RAAppBlock, RAAppResult } from '@kalio/types';
 import { RAAppSandboxService } from './raapp-sandbox.service';
@@ -39,6 +41,13 @@ export interface LoadedRAApp {
   appMode: 'display' | 'interactive';
   createdAt: number;
   updatedAt: number;
+}
+
+export interface SaveGeneratedAppInput {
+  type: 'html' | 'gui';
+  content: string;
+  mode: 'display' | 'interactive';
+  sessionId: string;
 }
 
 @Injectable()
@@ -139,6 +148,54 @@ export class RAAppService implements OnModuleInit {
     const zipPath = path.join(this.userDir, `${id}.zip`);
     await fs.writeFile(zipPath, buffer);
     return this.loadZip(zipPath, 'user');
+  }
+
+  async saveGeneratedApp(input: SaveGeneratedAppInput): Promise<LoadedRAApp> {
+    const sessionPart = input.sessionId.trim().slice(0, 8) || 'session';
+    const appId = `generated-${sessionPart}-${randomUUID().slice(0, 8)}`;
+    const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
+    const zipPath = path.join(this.userDir, `${appId}.zip`);
+
+    try {
+      await fs.mkdir(tmpDir, { recursive: true });
+
+      const meta: RAAppMeta = {
+        id: appId,
+        name: `Generated ${input.type.toUpperCase()} ${new Date().toISOString()}`,
+        description: 'Auto-saved by raapp_create tool',
+        version: '1.0.0',
+        tags: ['generated', 'raapp-create'],
+        expose_as_tool: false,
+        execution: {
+          render_as: input.mode,
+        },
+      };
+
+      await fs.writeFile(path.join(tmpDir, 'meta.yml'), yaml.dump(meta), 'utf-8');
+
+      if (input.type === 'gui') {
+        await fs.writeFile(path.join(tmpDir, 'ui.gui'), input.content, 'utf-8');
+      } else {
+        await fs.writeFile(path.join(tmpDir, 'main.html'), input.content, 'utf-8');
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        const output = fsSync.createWriteStream(zipPath);
+        const arc = archiver('zip', { zlib: { level: 6 } });
+        output.on('close', resolve);
+        output.on('error', reject);
+        arc.on('error', reject);
+        arc.pipe(output);
+        arc.directory(tmpDir, false);
+        void arc.finalize();
+      });
+
+      const loaded = await this.loadZip(zipPath, 'user');
+      this.logger.log(`[RAAppService] Saved generated app ${loaded.id} (${input.type}, mode=${input.mode})`);
+      return loaded;
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   }
 
   async delete(id: string): Promise<void> {
