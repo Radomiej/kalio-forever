@@ -10,6 +10,7 @@ describe('ChatGateway', () => {
   let pipeline: SessionPipelineService;
   let raappHITL: RAAppHITLService;
   let client: { id: string; emit: ReturnType<typeof vi.fn> };
+  let observer: { id: string; emit: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     toolDispatch = {
@@ -32,12 +33,38 @@ describe('ChatGateway', () => {
       id: 'socket-1',
       emit: vi.fn(),
     };
+    observer = {
+      id: 'socket-2',
+      emit: vi.fn(),
+    };
 
     gateway = new ChatGateway(toolDispatch, pipeline, raappHITL);
     gateway.handleConnection(client as never);
+    gateway.handleConnection(observer as never);
     (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
       .get(client.id)
       ?.add('session-1');
+  });
+
+  it('broadcasts child-session stream events to sockets that identified that child session', async () => {
+    gateway.handleSessionIdentify(observer as never, { sessionId: 'child-session' });
+    (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
+      emit('chat:chunk', {
+        sessionId: 'child-session',
+        messageId: 'msg-child-1',
+        delta: 'child says hello',
+        done: false,
+      });
+    });
+
+    await gateway.handleChatSend(client as never, {
+      sessionId: 'session-1',
+      content: 'delegate this task',
+      personaId: 'default',
+    });
+
+    expect(client.emit).toHaveBeenCalledWith('chat:chunk', expect.objectContaining({ sessionId: 'child-session' }));
+    expect(observer.emit).toHaveBeenCalledWith('chat:chunk', expect.objectContaining({ sessionId: 'child-session' }));
   });
 
   it('emits cancelled RA-App results with the original toolCallId and system metadata', async () => {

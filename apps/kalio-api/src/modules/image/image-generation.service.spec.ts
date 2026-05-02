@@ -40,9 +40,9 @@ function pollingFlow(predictionId = 'pred-123', imageUrl = 'https://cdn.example.
   };
 }
 
-// ── CometAPI FLUX: Replicate-style polling ─────────────────────────────────────
+// ── CometAPI FLUX: standard endpoint ───────────────────────────────────────────
 
-describe('ImageGenerationService — CometAPI FLUX (Replicate-proxy polling)', () => {
+describe('ImageGenerationService — CometAPI FLUX (standard endpoint)', () => {
   let service: ImageGenerationService;
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -53,12 +53,10 @@ describe('ImageGenerationService — CometAPI FLUX (Replicate-proxy polling)', (
   });
   afterEach(() => { vi.unstubAllGlobals(); });
 
-  it('FLUX on CometAPI POSTs to /replicate/v1/models/.../predictions and polls', async () => {
-    const { init, poll } = pollingFlow();
-    fetchMock
-      .mockResolvedValueOnce(makeJsonResponse(init))
-      .mockResolvedValueOnce(makeJsonResponse(poll))
-      .mockResolvedValueOnce(makeImageHttpResponse());
+  it('FLUX on CometAPI uses /v1/images/generations without polling', async () => {
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({
+      data: [{ b64_json: Buffer.from('img').toString('base64') }],
+    }));
 
     await service.generate({
       prompt: 'a red fox',
@@ -68,34 +66,32 @@ describe('ImageGenerationService — CometAPI FLUX (Replicate-proxy polling)', (
       baseUrl: 'https://api.cometapi.com/v1',
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3); // POST + poll + image
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const [postUrl, postInit] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(postUrl).toContain('/replicate/v1/models/black-forest-labs/flux-schnell/predictions');
-    expect(postUrl).not.toContain('/images/generations');
+    expect(postUrl).toContain('/v1/images/generations');
+    expect(postUrl).not.toContain('/predictions');
     const body = JSON.parse(postInit.body as string) as Record<string, unknown>;
-    expect(body).toHaveProperty('input'); // Replicate-style payload uses input wrapper
+    expect(body['model']).toBe('flux-schnell');
+    expect(body).toHaveProperty('width');
+    expect(body).toHaveProperty('height');
   });
 
-  it('FLUX on CometAPI with no explicit provider also uses polling', async () => {
-    const { init, poll } = pollingFlow();
-    fetchMock
-      .mockResolvedValueOnce(makeJsonResponse(init))
-      .mockResolvedValueOnce(makeJsonResponse(poll))
-      .mockResolvedValueOnce(makeImageHttpResponse());
+  it('FLUX on CometAPI with no explicit provider also uses the standard endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({
+      data: [{ b64_json: Buffer.from('img').toString('base64') }],
+    }));
 
     await service.generate({ prompt: 'test', model: 'flux-schnell', apiKey: 'k' });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const [postUrl] = fetchMock.mock.calls[0] as [string];
-    expect(postUrl).toContain('cometapi.com/replicate/v1/models/black-forest-labs/flux-schnell/predictions');
+    expect(postUrl).toContain('cometapi.com/v1/images/generations');
   });
 
-  it('FLUX on unknown proxy URL also uses Replicate-style polling', async () => {
-    const { init, poll } = pollingFlow('xyz', 'https://cdn.custom.com/img.png');
-    fetchMock
-      .mockResolvedValueOnce(makeJsonResponse(init))
-      .mockResolvedValueOnce(makeJsonResponse(poll))
-      .mockResolvedValueOnce(makeImageHttpResponse());
+  it('FLUX on unknown /v1 proxy URL also uses the standard endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({
+      data: [{ b64_json: Buffer.from('img').toString('base64') }],
+    }));
 
     await service.generate({
       prompt: 'test',
@@ -104,9 +100,10 @@ describe('ImageGenerationService — CometAPI FLUX (Replicate-proxy polling)', (
       baseUrl: 'https://my-custom-proxy.example.com/v1',
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const [postUrl] = fetchMock.mock.calls[0] as [string];
-    expect(postUrl).toContain('/replicate/v1/models/black-forest-labs/flux-dev/predictions');
+    expect(postUrl).toContain('/v1/images/generations');
+    expect(postUrl).not.toContain('/predictions');
   });
 });
 

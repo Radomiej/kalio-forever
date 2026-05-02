@@ -24,14 +24,12 @@ export function ChatInterface() {
     messages, activeSessionId, sessions, addMessage, addSession, appendChunk, finalizeChunk, setMessages,
     agentTurns, startAgentTurn, addTurnItem, finalizeAgentTurn,
     setAgentTurns, markAgentTurnError, removeLastAgentTurn, flushThinkingChunks, flushStreamingChunks,
+    getSessionActiveTurnId, getSessionAgentTurns,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
   const {
     isStreaming,
-    toolActivities,
-    systemPrompt,
-    activeToolNames,
     setStreaming,
     setPendingConfirmation,
     addToolActivity,
@@ -45,7 +43,12 @@ export function ChatInterface() {
     removeActiveAgentLoop,
     appendCLIAgentChunk,
     clearCLIAgentOutput,
+    getToolActivitiesForSession,
+    getContextForSession,
+    hasActiveLoopForSession,
   } = useAgentStore();
+  const activeToolActivities = getToolActivitiesForSession(activeSessionId);
+  const activeContext = getContextForSession(activeSessionId);
   const [error, setError] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
   const lastSentContentRef = useRef<string>('');
@@ -82,22 +85,22 @@ export function ChatInterface() {
     if (!eventBus.connected) eventBus.connect();
 
     const offChunk = eventBus.onChunk((chunk) => {
+      const targetSessionId = chunk.sessionId ?? useSessionStore.getState().activeSessionId;
+
       if (!chunk.done) {
         appendChunk(chunk.messageId, chunk.delta, chunk.thinking, chunk.sessionId);
 
-        // Only manage turn items for the currently active session
-        if (chunk.sessionId === useSessionStore.getState().activeSessionId) {
-          // Add to active turn for unified rendering
-          // Read activeTurnId from store (not closure) to avoid stale reference
-          const { activeTurnId: currentTurnId, agentTurns, addTurnItem } = useSessionStore.getState();
+        if (targetSessionId) {
+          const { getSessionActiveTurnId: getTurnId, getSessionAgentTurns: getTurns, addTurnItem: addItem } = useSessionStore.getState();
+          const currentTurnId = getTurnId(targetSessionId);
           if (currentTurnId) {
-            const turn = agentTurns.find((t) => t.id === currentTurnId);
+            const turn = getTurns(targetSessionId).find((t) => t.id === currentTurnId);
             if (turn) {
               const hasItem = turn.items.some(
                 (item) => item.kind === (chunk.thinking ? 'thinking' : 'text') && item.messageId === chunk.messageId
               );
               if (!hasItem) {
-                addTurnItem({ kind: chunk.thinking ? 'thinking' : 'text', messageId: chunk.messageId });
+                addItem({ kind: chunk.thinking ? 'thinking' : 'text', messageId: chunk.messageId }, targetSessionId);
               }
             }
           }
@@ -147,20 +150,26 @@ export function ChatInterface() {
       console.error('[EventBus] chat:error', payload);
       setStreaming(false);
       removeActiveAgentLoop(payload.sessionId);
-      const { activeTurnId } = useSessionStore.getState();
+      const { activeSessionId: currentActiveSessionId, getSessionActiveTurnId: getTurnId } = useSessionStore.getState();
+      const targetSessionId = payload.sessionId ?? currentActiveSessionId;
+      const activeTurnId = getTurnId(targetSessionId);
       if (!activeTurnId) {
         // Error before agent turn opened (e.g. QUEUE_FULL) → floating banner
-        setError(payload.message);
+        if (targetSessionId === currentActiveSessionId) {
+          setError(payload.message);
+        }
       } else if (payload.hadContent) {
         // Error after content was streamed → mark the turn bubble with an error indicator
-        markAgentTurnError(activeTurnId, { code: payload.code, message: payload.message });
+        markAgentTurnError(activeTurnId, { code: payload.code, message: payload.message }, targetSessionId);
       } else if (payload.code === 'INTERRUPTED') {
         // User stopped before any content — silently remove the empty bubble
-        removeLastAgentTurn();
+        removeLastAgentTurn(targetSessionId);
       } else {
         // Early failure (LLM down, session deleted, not configured) — remove empty bubble, show error banner
-        removeLastAgentTurn();
-        setError(payload.message);
+        removeLastAgentTurn(targetSessionId);
+        if (targetSessionId === currentActiveSessionId) {
+          setError(payload.message);
+        }
       }
     });
 
@@ -180,54 +189,54 @@ export function ChatInterface() {
 
     const offToolStart = eventBus.onToolStart((payload) => {
       console.log('[ToolStart]', payload.toolName, 'callId:', payload.callId, 'args:', payload.args);
+      const payloadSessionId = payload.sessionId ?? useSessionStore.getState().activeSessionId;
       // Thinking is over once the agent calls a tool — flush any live thinkingChunks
       // so the ThinkingBlock stops animating (isThinkingStreaming → false).
-      flushThinkingChunks();
+      flushThinkingChunks(payloadSessionId);
       // Text streaming is over too — flush any live streamingChunks
       // so the text cursor stops blinking (isStreaming → false).
-      flushStreamingChunks();
+      flushStreamingChunks(payloadSessionId);
       // Persist this mapping permanently so older turns can still resolve tool names
       registerCallId(payload.callId, payload.toolName);
       addToolActivity({
         callId: payload.callId,
         toolName: payload.toolName,
         args: payload.args,
-        sessionId: payload.sessionId,
+        sessionId: payloadSessionId ?? undefined,
         agentRun: payload.agentRun,
         status: 'running',
         startedAt: Date.now(),
       });
-      // Add to active agent turn
-      const payloadSessionId = payload.sessionId ?? useSessionStore.getState().activeSessionId;
-      if (payloadSessionId === useSessionStore.getState().activeSessionId) {
-        addTurnItem({ kind: 'tool', callId: payload.callId });
+      if (payloadSessionId) {
+        const { getSessionActiveTurnId: getTurnId, getSessionAgentTurns: getTurns, addTurnItem: addItem } = useSessionStore.getState();
+        const currentTurnId = getTurnId(payloadSessionId);
+        if (currentTurnId) {
+          const turn = getTurns(payloadSessionId).find((item) => item.id === currentTurnId);
+          const hasItem = turn?.items.some((item) => item.kind === 'tool' && item.callId === payload.callId) ?? false;
+          if (!hasItem) {
+            addItem({ kind: 'tool', callId: payload.callId }, payloadSessionId);
+          }
+        }
       }
     });
 
     const offAgentStart = eventBus.onAgentStart((payload) => {
       console.log('[AgentStart]', payload.sessionId, payload.turnId);
       addActiveAgentLoop(payload.sessionId, payload.turnId, payload.agentRun);
-      // Only manage turn state for the currently active session
-      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
-        startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun);
-        clearToolActivities(); // Fresh turn = fresh tool activities
-        setPendingConfirmation(payload.sessionId, null); // Clear any stale confirmation from previous turn
-      }
+      startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun);
+      clearToolActivities(payload.sessionId); // Fresh turn = fresh tool activities
+      setPendingConfirmation(payload.sessionId, null); // Clear any stale confirmation from previous turn
     });
 
     const offAgentDone = eventBus.onAgentDone((payload) => {
       console.log('[AgentDone]', payload.sessionId, payload.turnId);
       removeActiveAgentLoop(payload.sessionId, payload.agentRun);
-      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
-        finalizeAgentTurn();
-        setPendingConfirmation(payload.sessionId, null); // Clear unanswered confirmations when turn ends
-      }
+      finalizeAgentTurn(payload.sessionId);
+      setPendingConfirmation(payload.sessionId, null); // Clear unanswered confirmations when turn ends
     });
 
     const offContext = eventBus.onContext((payload) => {
-      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
-        setContext(payload.systemPrompt, payload.toolNames);
-      }
+      setContext(payload.systemPrompt, payload.toolNames, payload.sessionId);
     });
 
     const offToolResult = eventBus.onToolResult((result) => {
@@ -247,7 +256,7 @@ export function ChatInterface() {
       // Persist tool result into message store so RAAppManager (and chat history) can see it
       if (result.status === 'success' && result.data !== undefined) {
         const sid = result.sessionId ?? useSessionStore.getState().activeSessionId;
-        if (sid && sid === useSessionStore.getState().activeSessionId) {
+        if (sid) {
           const toolResultMsg: ChatMessage = {
             id: nanoid(),
             sessionId: sid,
@@ -313,7 +322,7 @@ export function ChatInterface() {
             if (useSessionStore.getState().activeSessionId !== sid) return;
             const { setMessages: doSetMessages, setAgentTurns: doSetAgentTurns } = useSessionStore.getState();
             doSetMessages(data);
-            if (!useAgentStore.getState().activeAgentLoops[sid]) {
+            if (!useAgentStore.getState().hasActiveLoopForSession(sid)) {
               doSetAgentTurns(buildTurnsFromHistory(data, sid));
             }
           })
@@ -338,7 +347,7 @@ export function ChatInterface() {
       offRaAppNative();
       offReconnect();
     };
-  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput, clearToolActivities, addSession, backendHealth]);
+  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput, clearToolActivities, addSession, backendHealth, getSessionActiveTurnId, getSessionAgentTurns, hasActiveLoopForSession]);
 
   // Clear stale retry content when the user switches sessions.
   // Without this, clicking Retry after switching sessions would send the previous
@@ -360,7 +369,7 @@ export function ChatInterface() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, toolActivities]);
+  }, [messages, activeToolActivities]);
 
   // Flush queued RA-App user actions when agent finishes streaming
   const prevStreamingRef = useRef(isStreaming);
@@ -397,7 +406,7 @@ export function ChatInterface() {
     setError(null);
     setRetryError(null);
     lastSentContentRef.current = content;
-    clearToolActivities();
+    clearToolActivities(activeSessionId);
 
     // Auto-generate title from first message if session still has default title
     const { sessions, updateSession } = useSessionStore.getState();
@@ -434,7 +443,7 @@ export function ChatInterface() {
     if (!activeSessionId) return;
     // Reset stale streaming state from any previous session
     setStreaming(false);
-    clearToolActivities();
+    clearToolActivities(activeSessionId);
     setPendingConfirmation(activeSessionId, null); // Clear stale confirmation — tool activities were just wiped
     // Note: agentTurns are cleared by setActiveSession in the store on real session switch.
     // Do NOT call clearAgentTurns here — this effect also fires on component remount
@@ -455,7 +464,7 @@ export function ChatInterface() {
         // This race happens when: session activates → pendingMessage auto-sent →
         // agent:start fires → fetch resolves with empty history and clobbers the
         // live turn that was just created.
-        if (!useAgentStore.getState().activeAgentLoops[activeSessionId]) {
+        if (!useAgentStore.getState().hasActiveLoopForSession(activeSessionId)) {
           setAgentTurns(buildTurnsFromHistory(data, activeSessionId));
         }
       })
@@ -549,8 +558,8 @@ export function ChatInterface() {
                 tokenCount={tokenCount}
                 onCompactNow={needsCompact ? handleCompactNow : undefined}
                 onClose={() => setShowContextStats(false)}
-                systemPrompt={systemPrompt}
-                activeToolNames={activeToolNames}
+                systemPrompt={activeContext.systemPrompt}
+                activeToolNames={activeContext.activeToolNames}
               />
             )}
           </div>
@@ -623,7 +632,7 @@ export function ChatInterface() {
                 <AgentTurnBubble
                   key={agentTurns[i].id}
                   turn={agentTurns[i]}
-                  toolActivities={toolActivities}
+                  toolActivities={activeToolActivities}
                   answeredCallIds={answeredCallIds}
                 />,
               );
@@ -633,7 +642,7 @@ export function ChatInterface() {
         })()}
 
         {/* Generic streaming indicator when streaming with no messages yet */}
-        {isStreaming && toolActivities.length === 0 && messages.length === 0 && (
+        {isStreaming && activeToolActivities.length === 0 && messages.length === 0 && (
           <div className="flex justify-start">
             <div className="bg-base-300 rounded-2xl px-4 py-2">
               <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />

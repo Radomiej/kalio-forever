@@ -22,6 +22,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // Track per-socket sessions for disconnect cleanup
   private readonly socketSessions = new Map<string, Set<string>>();
+  private readonly clients = new Map<string, Socket>();
+  private readonly sessionSubscribers = new Map<string, Set<string>>();
 
   constructor(
     private readonly toolDispatch: ToolDispatchService,
@@ -31,6 +33,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   handleConnection(client: Socket): void {
     this.logger.log(`Client connected: ${client.id}`);
+    this.clients.set(client.id, client);
     this.socketSessions.set(client.id, new Set());
   }
 
@@ -38,11 +41,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(`Client disconnected: ${client.id}`);
     const sessions = this.socketSessions.get(client.id);
     if (sessions) {
-      // Abort any in-flight turns and drop queued items so they don't try
-      // to emit to a dead socket.
-      sessions.forEach((sid) => this.pipeline.abortAll(sid));
+      sessions.forEach((sid) => this.unsubscribeSocketFromSession(client.id, sid));
       this.socketSessions.delete(client.id);
     }
+    this.clients.delete(client.id);
   }
 
   @SubscribeMessage('session:identify')
@@ -50,12 +52,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SocketEvents['session:identify'],
   ): void {
-    let sessions = this.socketSessions.get(client.id);
-    if (!sessions) {
-      sessions = new Set();
-      this.socketSessions.set(client.id, sessions);
-    }
-    sessions.add(payload.sessionId);
+    this.subscribeSocketToSession(client.id, payload.sessionId);
     this.logger.log(`Session re-identified: ${payload.sessionId} for socket ${client.id}`);
   }
 
@@ -65,9 +62,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: SocketEvents['chat:send'],
   ): Promise<void> {
     const emit: EmitFn = (event, data) => {
-      client.emit(event, data);
+      this.emitToInitiatorAndSessionSubscribers(client.id, payload.sessionId, event, data);
     };
-    this.socketSessions.get(client.id)?.add(payload.sessionId);
+    this.subscribeSocketToSession(client.id, payload.sessionId);
     await this.pipeline.submit(payload, emit);
   }
 
@@ -172,5 +169,54 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         hadContent: true,
       } satisfies SocketEvents['chat:error']);
     }
+  }
+
+  private subscribeSocketToSession(socketId: string, sessionId: string): void {
+    let sessions = this.socketSessions.get(socketId);
+    if (!sessions) {
+      sessions = new Set();
+      this.socketSessions.set(socketId, sessions);
+    }
+    sessions.add(sessionId);
+
+    const subscribers = this.sessionSubscribers.get(sessionId) ?? new Set<string>();
+    subscribers.add(socketId);
+    this.sessionSubscribers.set(sessionId, subscribers);
+  }
+
+  private unsubscribeSocketFromSession(socketId: string, sessionId: string): void {
+    const subscribers = this.sessionSubscribers.get(sessionId);
+    if (!subscribers) return;
+    subscribers.delete(socketId);
+    if (subscribers.size === 0) {
+      this.sessionSubscribers.delete(sessionId);
+      return;
+    }
+    this.sessionSubscribers.set(sessionId, subscribers);
+  }
+
+  private emitToInitiatorAndSessionSubscribers<K extends keyof SocketEvents>(
+    initiatorSocketId: string,
+    fallbackSessionId: string,
+    event: K,
+    data: SocketEvents[K],
+  ): void {
+    const initiator = this.clients.get(initiatorSocketId);
+    initiator?.emit(event, data);
+
+    const targetSessionId = this.getEventSessionId(data) ?? fallbackSessionId;
+    const subscribers = this.sessionSubscribers.get(targetSessionId);
+    if (!subscribers) return;
+
+    subscribers.forEach((socketId) => {
+      if (socketId === initiatorSocketId) return;
+      this.clients.get(socketId)?.emit(event, data);
+    });
+  }
+
+  private getEventSessionId(payload: unknown): string | undefined {
+    if (!payload || typeof payload !== 'object') return undefined;
+    const candidate = payload as { sessionId?: unknown };
+    return typeof candidate.sessionId === 'string' ? candidate.sessionId : undefined;
   }
 }

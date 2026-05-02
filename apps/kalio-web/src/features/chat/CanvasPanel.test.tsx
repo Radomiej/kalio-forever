@@ -37,12 +37,15 @@ interface MockAgentState {
 
 interface MockSessionState {
   messages: ChatMessage[];
+  sessionMessages: Record<string, ChatMessage[]>;
   sessions: ChatSession[];
   activeSessionId: string;
   thinkingChunks: Record<string, string>;
   streamingChunks: Record<string, string>;
   chunkSessionIds: Record<string, string>;
   setActiveSession: ReturnType<typeof vi.fn>;
+  getSessionMessages: (sessionId: string | null) => ChatMessage[];
+  setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
 }
 
 const agentState: MockAgentState = {
@@ -94,6 +97,9 @@ const agentState: MockAgentState = {
 
 const sessionState: MockSessionState = {
   messages: [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }],
+  sessionMessages: {
+    'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }],
+  },
   sessions: [
     { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
     { id: 'sub-session-1', personaId: 'default', title: 'Sub-agent: demo', kind: 'subagent', createdAt: 2, updatedAt: 2 },
@@ -103,14 +109,63 @@ const sessionState: MockSessionState = {
   streamingChunks: {},
   chunkSessionIds: {},
   setActiveSession: vi.fn(),
+  getSessionMessages: (sessionId) => {
+    if (!sessionId) return [];
+    const baseMessages = sessionState.sessionMessages[sessionId] ?? (sessionId === sessionState.activeSessionId ? sessionState.messages : []);
+    const nextMessages = [...baseMessages];
+    const indexById = new Map(nextMessages.map((message, index) => [message.id, index]));
+
+    Object.entries(sessionState.chunkSessionIds)
+      .filter(([, chunkSessionId]) => chunkSessionId === sessionId)
+      .forEach(([messageId]) => {
+        const content = sessionState.streamingChunks[messageId] ?? '';
+        const existingIndex = indexById.get(messageId);
+
+        if (existingIndex !== undefined) {
+          const existing = nextMessages[existingIndex];
+          nextMessages[existingIndex] = { ...existing, content: content || existing.content, streaming: true };
+          return;
+        }
+
+        nextMessages.push({
+          id: messageId,
+          sessionId,
+          role: 'assistant',
+          content,
+          streaming: true,
+          createdAt: Date.now(),
+        });
+      });
+
+    return nextMessages;
+  },
+  setMessages: (messages, sessionId) => {
+    const targetSessionId = sessionId ?? sessionState.activeSessionId;
+    if (!targetSessionId) return;
+    sessionState.sessionMessages[targetSessionId] = messages;
+    if (targetSessionId === sessionState.activeSessionId) {
+      sessionState.messages = messages;
+    }
+  },
 };
 
 const { mockApiGet } = vi.hoisted(() => ({
   mockApiGet: vi.fn(),
 }));
 
+const { mockIdentifySession } = vi.hoisted(() => ({
+  mockIdentifySession: vi.fn(),
+}));
+
 vi.mock('../../services/apiClient', () => ({
   apiClient: { get: mockApiGet },
+}));
+
+vi.mock('../../services/eventBus', () => ({
+  eventBus: {
+    connected: true,
+    identifySession: mockIdentifySession,
+  },
 }));
 
 vi.mock('../../store/agentStore', () => ({
@@ -165,6 +220,9 @@ describe('CanvasPanel subagent grouping', () => {
       },
     };
     sessionState.messages = [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }];
+    sessionState.sessionMessages = {
+      'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }],
+    };
     mockApiGet.mockResolvedValue({
       data: [
         { id: 'u1', sessionId: 'sub-session-1', role: 'user', content: 'build a page', createdAt: 1 },
@@ -236,5 +294,32 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.getByText('created index.html')).toBeDefined();
     expect(screen.getByText('sub-agents/sub-session-1/index.html')).toBeDefined();
     expect(screen.getByRole('button', { name: 'Open sub-agent chat' })).toBeDefined();
+  });
+
+  it('subscribes to child sessions and shows live streamed child responses before REST history catches up', async () => {
+    sessionState.streamingChunks = { 'live-child-msg': 'streaming child draft' };
+    sessionState.chunkSessionIds = { 'live-child-msg': 'sub-session-1' };
+    mockApiGet.mockResolvedValue({
+      data: [{ id: 'u1', sessionId: 'sub-session-1', role: 'user', content: 'build a page', createdAt: 1 }],
+    });
+
+    render(<CanvasPanel />);
+
+    await waitFor(() => expect(mockIdentifySession).toHaveBeenCalledWith('sub-session-1'));
+    expect(screen.getByText('streaming child draft')).toBeDefined();
+  });
+
+  it('keeps the latest child transcript from session state when REST history is stale', async () => {
+    sessionState.sessionMessages['sub-session-1'] = [
+      { id: 'u1', sessionId: 'sub-session-1', role: 'user', content: 'build a page', createdAt: 1 },
+      { id: 'a1', sessionId: 'sub-session-1', role: 'assistant', content: 'final child transcript answer', createdAt: 2 },
+    ];
+    mockApiGet.mockResolvedValue({
+      data: [{ id: 'u1', sessionId: 'sub-session-1', role: 'user', content: 'build a page', createdAt: 1 }],
+    });
+
+    render(<CanvasPanel />);
+
+    await waitFor(() => expect(screen.getByText('final child transcript answer')).toBeDefined());
   });
 });

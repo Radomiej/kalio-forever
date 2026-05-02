@@ -4,8 +4,15 @@ import { useSessionStore } from './sessionStore';
 function resetStore() {
   useSessionStore.setState({
     agentTurns: [],
+    sessionAgentTurns: {},
     activeTurnId: null,
+    sessionActiveTurnIds: {},
     activeSessionId: null,
+    messages: [],
+    sessionMessages: {},
+    streamingChunks: {},
+    thinkingChunks: {},
+    chunkSessionIds: {},
   });
 }
 

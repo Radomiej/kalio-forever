@@ -153,6 +153,7 @@ export class ImageEditTool {
   async execute(request: ToolCallRequest): Promise<object> {
     const start = Date.now();
     const { sessionId } = request;
+    const vfsSessionId = request.vfsSessionId ?? sessionId;
 
     const outputPath = request.args['outputPath'] as string;
     const refs = request.args['refs'] as ImageRef[];
@@ -164,12 +165,12 @@ export class ImageEditTool {
     const iterationOf = request.args['iterationOf'] as string | undefined;
 
     if (refs.length > MAX_REFS) {
-      return { error: `Too many references: ${refs.length}. Maximum is ${MAX_REFS}.` };
+      throw new Error(`Too many references: ${refs.length}. Maximum is ${MAX_REFS}.`);
     }
 
     const apiKey = await this.imageConfig.getApiKey();
     if (!apiKey) {
-      return { error: 'No API key configured for image editing. Go to Settings → Image Generation to add a key.' };
+      throw new Error('No API key configured for image editing. Go to Settings → Image Generation to add a key.');
     }
 
     const cfg = await this.imageConfig.getConfig();
@@ -183,11 +184,11 @@ export class ImageEditTool {
     for (const ref of refs) {
       let buffer: Buffer;
       try {
-        buffer = this.vfs.readBinary(sessionId, ref.vfsPath);
+        buffer = this.vfs.readBinary(vfsSessionId, ref.vfsPath);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code === 'VFS_FILE_NOT_FOUND' || code === 'ENOENT') {
-          return { error: `Ref not found in VFS: "${ref.vfsPath}". Upload or generate it first.` };
+          throw new Error(`Ref not found in VFS: "${ref.vfsPath}". Upload or generate it first.`);
         }
         throw err;
       }
@@ -199,7 +200,7 @@ export class ImageEditTool {
     }
 
     // List existing VFS files for versioning
-    const existingFiles = this.vfs.listFiles(sessionId);
+    const existingFiles = this.vfs.listFiles(vfsSessionId);
     const vfsPath = resolveVersionedPath(existingFiles.files.map((f) => f.path), outputPath);
 
     const structuredPrompt = buildStructuredPrompt(refs, prompt, iterationOf);
@@ -217,15 +218,15 @@ export class ImageEditTool {
       });
     } catch (err) {
       this.logger.error('[image_edit] Network error', err instanceof Error ? err : new Error(String(err)));
-      return { error: `Network error: ${err instanceof Error ? err.message : String(err)}` };
+      throw new Error(`Network error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     if (!response.ok) {
       const errBody = await response.text().catch(() => 'unknown');
       if (response.status === 429) {
-        return { error: 'Image generation rate limit reached. Please wait a moment and try again.' };
+        throw new Error('Image generation rate limit reached. Please wait a moment and try again.');
       }
-      return { error: `Image generation failed (HTTP ${response.status}): ${errBody.slice(0, 200)}` };
+      throw new Error(`Image generation failed (HTTP ${response.status}): ${errBody.slice(0, 200)}`);
     }
 
     const data = await response.json() as {
@@ -240,7 +241,7 @@ export class ImageEditTool {
     const imagePart = parts.find((p) => p.inlineData?.data);
     if (!imagePart?.inlineData) {
       this.logger.error('[image_edit] No image in Gemini response', { parts: parts.map((p) => Object.keys(p)) });
-      return { error: 'Gemini returned no image data. Try adjusting your prompt or references.' };
+      throw new Error('Gemini returned no image data. Try adjusting your prompt or references.');
     }
 
     const imageBase64 = imagePart.inlineData.data;
@@ -248,14 +249,14 @@ export class ImageEditTool {
     const dataUrl = `data:${imageMime};base64,${imageBase64}`;
     const binaryBuf = Buffer.from(imageBase64, 'base64');
     try {
-      this.vfs.writeBinary(sessionId, vfsPath, binaryBuf);
+      this.vfs.writeBinary(vfsSessionId, vfsPath, binaryBuf);
     } catch (err) {
       this.logger.error('[image_edit] VFS write failed', err instanceof Error ? err : new Error(String(err)));
-      return { error: `Failed to save image to VFS: ${err instanceof Error ? err.message : String(err)}` };
+      throw new Error(`Failed to save image to VFS: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     const durationMs = Date.now() - start;
-    this.logger.log(`[image_edit] Generated ${vfsPath} in ${durationMs}ms for session ${sessionId}`);
+    this.logger.log(`[image_edit] Generated ${vfsPath} in ${durationMs}ms for VFS session ${vfsSessionId}`);
 
     return {
       image_url: dataUrl,
@@ -263,7 +264,7 @@ export class ImageEditTool {
       model: modelId,
       refCount: refs.length,
       durationMs,
-      download_url: `/api/session-vfs/${sessionId}/download?path=${encodeURIComponent(vfsPath)}`,
+      download_url: `/api/sessions/${vfsSessionId}/vfs/download?path=${encodeURIComponent(vfsPath)}`,
       message: `Image generated and saved to ${vfsPath}. ${iterationOf ? `Iterated from ${iterationOf}. ` : ''}Used ${refs.length} reference(s).`,
       ...(iterationOf ? { iteratedFrom: iterationOf } : {}),
       output_type: 'image',

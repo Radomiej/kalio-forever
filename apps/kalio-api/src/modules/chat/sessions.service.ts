@@ -53,6 +53,11 @@ export class SessionsService {
     return this.toChatSession(row);
   }
 
+  async get(id: string): Promise<ChatSession> {
+    const row = await this.getRow(id);
+    return this.toChatSession(row);
+  }
+
   async getMessages(sessionId: string): Promise<ChatMessage[]> {
     await this.assertExists(sessionId);
     return this.repo.loadHistory(sessionId);
@@ -86,12 +91,28 @@ export class SessionsService {
   }
 
   private async assertExists(id: string): Promise<void> {
+    await this.getRow(id);
+  }
+
+  private async getRow(id: string): Promise<{
+    id: string;
+    personaId: string;
+    title: string;
+    kind?: 'chat' | 'subagent';
+    parentSessionId?: string | null;
+    parentTurnId?: string | null;
+    parentToolCallId?: string | null;
+    interlocutorLabel?: string | null;
+    createdAt: number | Date;
+    updatedAt: number | Date;
+  }> {
     const [row] = await this.drizzle.db
       .select()
       .from(sessions)
       .where(eq(sessions.id, id))
       .limit(1);
     if (!row) throw new NotFoundException(`Session not found: ${id}`);
+    return row;
   }
 
   private toChatSession(row: {

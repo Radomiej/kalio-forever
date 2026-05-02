@@ -176,3 +176,39 @@ describe('subagent run tracking', () => {
     expect(useAgentStore.getState().canvasOpen).toBe(true);
   });
 });
+
+describe('per-session tool activities (REGRESSION)', () => {
+  const makeSessionAwareStore = () => useAgentStore.getState();
+
+  beforeEach(() => {
+    useAgentStore.setState({ canvasOpen: false, toolActivities: [] });
+  });
+
+  it('clearToolActivities(sessionId) preserves other sessions', () => {
+    const store = makeSessionAwareStore();
+
+    store.addToolActivity({
+      callId: 'call-parent',
+      toolName: 'vfs_write',
+      args: {},
+      status: 'running',
+      startedAt: 1,
+      sessionId: 'sess-parent',
+    });
+    store.addToolActivity({
+      callId: 'call-child',
+      toolName: 'run_subagent',
+      args: {},
+      status: 'running',
+      startedAt: 2,
+      sessionId: 'sess-child',
+    });
+
+    store.clearToolActivities('sess-parent');
+
+    expect(store.getToolActivitiesForSession('sess-parent')).toEqual([]);
+    expect(store.getToolActivitiesForSession('sess-child')).toEqual([
+      expect.objectContaining({ callId: 'call-child' }),
+    ]);
+  });
+});

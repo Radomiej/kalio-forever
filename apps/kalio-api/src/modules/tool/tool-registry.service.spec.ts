@@ -20,7 +20,7 @@ import { VFSWriteTool } from './tools/vfs-write.tool';
 import { VFSReadTool } from './tools/vfs-read.tool';
 import { VFSListTool } from './tools/vfs-list.tool';
 import { VFSGrepSearchTool, VFSFileSearchTool } from './tools/vfs-search.tools';
-import { SubagentTool } from './tools/subagent.tool';
+import { MessageSubagentTool, SpawnSubagentTool, SubagentTool } from './tools/subagent.tool';
 import { FsReadTool } from './tools/fs-read.tool';
 import { FsListTool } from './tools/fs-list.tool';
 import { FsWriteTool } from './tools/fs-write.tool';
@@ -57,6 +57,8 @@ describe('ToolRegistryService — all tools registered', () => {
       stub(VFSGrepSearchTool),
       stub(VFSFileSearchTool),
       stub(SubagentTool),
+      stub(SpawnSubagentTool),
+      stub(MessageSubagentTool),
       stub(FsReadTool),
       stub(FsListTool),
       stub(FsWriteTool),
@@ -100,7 +102,7 @@ describe('ToolRegistryService — all tools registered', () => {
     // VFS
     'vfs_write', 'vfs_read', 'vfs_list', 'vfs_grep_search', 'vfs_file_search',
     // Subagent
-    'run_subagent',
+    'run_subagent', 'spawn_subagent', 'message_subagent',
     // FS
     'fs_read', 'fs_list', 'fs_write',
     // KV

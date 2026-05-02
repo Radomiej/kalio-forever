@@ -19,9 +19,29 @@ const MAX_SUBAGENT_NESTING_DEPTH = 1;
 
 const SUBAGENT_SYSTEM_PROMPT = `You are a focused sub-agent completing a single specific task.
 Act immediately. Use available tools when needed. Return a concise final result.
+When delegating to a known specialist, respect the assigned persona and use the tools you were given.
+After using tools, always finish with one plain-language final answer before stopping.
+If you created or modified files, include the exact VFS paths in that final answer.
+If a tool returns download URLs or other directly usable URLs for created artifacts, include those exact URLs in that final answer with the matching file paths.
+If a tool partially succeeds (for example, it saves a file but its textual result is weak), inspect the VFS if needed and still produce a final summary.
 Do not ask clarifying questions. Work autonomously end-to-end.`;
 
 type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number };
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error('Sub-agent execution aborted');
+}
+
+function appendCopiedOutputLinks(baseText: string, parentSessionId: string, copiedFiles: SubagentCopiedFile[]): string {
+  if (copiedFiles.length === 0) return baseText;
+
+  const lines = copiedFiles.map((file) => {
+    const downloadUrl = `/api/sessions/${parentSessionId}/vfs/download?path=${encodeURIComponent(file.toPath)}`;
+    return `- ${file.toPath} -> ${downloadUrl}`;
+  });
+
+  return `${baseText}\n\nCopied outputs:\n${lines.join('\n')}`;
+}
 
 @Injectable()
 export class SubagentRuntimeService implements SubagentRuntimePort {
@@ -40,7 +60,10 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
   async runSubagent(request: RunSubagentRequest): Promise<RunSubagentResult> {
     const startedAt = performance.now();
     const taskId = randomUUID();
-    const childSessionId = `sub-${taskId}`;
+    const requestedChildSessionId = typeof request.childSessionId === 'string' && request.childSessionId.trim().length > 0
+      ? request.childSessionId.trim()
+      : undefined;
+    const childSessionId = requestedChildSessionId ?? `sub-${taskId}`;
     const vfsSessionId = request.vfsMode === 'shared' ? request.parentSessionId : childSessionId;
     const turnId = nanoid();
     const parentDepth = request.parentAgentRun && typeof (request.parentAgentRun as AgentRunWithDepth).subagentDepth === 'number'
@@ -61,56 +84,107 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       subagentDepth,
     };
 
-    const childSession = await this.sessions.createWithId(childSessionId, {
-      personaId: request.personaId ?? 'default',
-      title: `Sub-agent: ${request.objective.slice(0, 54)}`,
-      kind: 'subagent',
-      parentSessionId: request.parentSessionId,
-      parentToolCallId: request.parentToolCallId,
-      interlocutorLabel: 'Master agent',
-    });
+    const childSession = requestedChildSessionId
+      ? await this.sessions.get(requestedChildSessionId)
+      : await this.sessions.createWithId(childSessionId, {
+          personaId: request.personaId ?? 'default',
+          title: `Sub-agent: ${request.objective.slice(0, 54)}`,
+          kind: 'subagent',
+          parentSessionId: request.parentSessionId,
+          parentToolCallId: request.parentToolCallId,
+          interlocutorLabel: 'Master agent',
+        });
+
+    if (childSession.kind !== 'subagent') {
+      throw new Error(`Session ${childSession.id} is not a sub-agent session`);
+    }
+    if (childSession.parentSessionId !== request.parentSessionId) {
+      throw new Error(`Sub-agent session ${childSession.id} does not belong to parent session ${request.parentSessionId}`);
+    }
 
     const emit = request.emit;
-    emit?.('agent:start', { sessionId: childSessionId, turnId, agentRun });
-    emit?.('session:created', childSession);
+    let hadContent = false;
+    const trackingEmit: EmitFn | undefined = emit
+      ? (event, data) => {
+          if (event === 'chat:chunk') hadContent = true;
+          emit(event, data);
+        }
+      : undefined;
+
+    trackingEmit?.('agent:start', { sessionId: childSessionId, turnId, agentRun });
+    if (!requestedChildSessionId) {
+      trackingEmit?.('session:created', childSession);
+    }
 
     await this.sessionManager.persistUserMessage(childSessionId, request.objective);
 
-    const finalText = await this.runLoop({
-      childSessionId,
-      objective: request.objective,
-      personaId: request.personaId ?? 'default',
-      tools,
-      vfsSessionId,
-      agentRun,
-      emit,
-    });
+    const controller = new AbortController();
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
-    const copiedFiles = request.copyOutputs && request.vfsMode === 'isolated'
-      ? this.vfs.copySessionFiles({
-          fromSessionId: childSessionId,
-          toSessionId: request.parentSessionId,
-          targetPrefix: request.copyTargetPrefix ?? `sub-agents/${childSessionId}`,
-        }) as SubagentCopiedFile[]
-      : [];
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          const error = new Error(`Sub-agent timed out after ${request.timeoutMs}ms`);
+          controller.abort(error);
+          reject(error);
+        }, request.timeoutMs);
+      });
 
-    emit?.('chat:complete', {
-      sessionId: childSessionId,
-      messageId: childSessionId,
-      agentRun,
-    });
-    emit?.('agent:done', { sessionId: childSessionId, turnId, agentRun });
+      const loopResult = await Promise.race([
+        this.runLoop({
+          childSessionId,
+          objective: request.objective,
+          personaId: request.personaId ?? childSession.personaId,
+          tools,
+          vfsSessionId,
+          agentRun,
+          emit: trackingEmit,
+          abortSignal: controller.signal,
+        }),
+        timeoutPromise,
+      ]);
 
-    return {
-      result: finalText || 'Sub-agent completed with no output.',
-      taskId,
-      childSessionId,
-      parentSessionId: request.parentSessionId,
-      vfsMode: request.vfsMode,
-      vfsSessionId,
-      copiedFiles,
-      durationMs: Math.round(performance.now() - startedAt),
-    };
+      const copiedFiles = request.copyOutputs && request.vfsMode === 'isolated'
+        ? this.vfs.copySessionFiles({
+            fromSessionId: childSessionId,
+            toSessionId: request.parentSessionId,
+            targetPrefix: request.copyTargetPrefix ?? `sub-agents/${childSessionId}`,
+          }) as SubagentCopiedFile[]
+        : [];
+
+      trackingEmit?.('chat:complete', {
+        sessionId: childSessionId,
+        messageId: loopResult.lastMessageId,
+        agentRun,
+      });
+      trackingEmit?.('agent:done', { sessionId: childSessionId, turnId, agentRun });
+
+      const baseResultText = loopResult.finalText || 'Sub-agent completed with no output.';
+
+      return {
+        result: appendCopiedOutputLinks(baseResultText, request.parentSessionId, copiedFiles),
+        taskId,
+        childSessionId,
+        parentSessionId: request.parentSessionId,
+        vfsMode: request.vfsMode,
+        vfsSessionId,
+        copiedFiles,
+        durationMs: Math.round(performance.now() - startedAt),
+      };
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      trackingEmit?.('chat:error', {
+        sessionId: childSessionId,
+        code: 'LLM_ERROR',
+        message: error.message,
+        hadContent,
+        agentRun,
+      });
+      trackingEmit?.('agent:done', { sessionId: childSessionId, turnId, agentRun });
+      throw error;
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
   }
 
   private async runLoop(params: {
@@ -121,22 +195,27 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     vfsSessionId: string;
     agentRun: AgentRunContext;
     emit?: EmitFn;
-  }): Promise<string> {
-    const controller = new AbortController();
+    abortSignal: AbortSignal;
+  }): Promise<{ finalText: string; lastMessageId: string }> {
     let iteration = 0;
     let latestText = '';
+    let lastMessageId = `subagent-${params.agentRun.agentRunId}`;
     const personaConfig = await this.personaService.getSessionConfig(params.personaId);
     const systemPrompt = personaConfig?.systemPrompt ? `${personaConfig.systemPrompt}\n\n${SUBAGENT_SYSTEM_PROMPT}` : SUBAGENT_SYSTEM_PROMPT;
 
     while (iteration < MAX_ITERATIONS) {
+      if (params.abortSignal.aborted) {
+        throw abortReason(params.abortSignal);
+      }
       iteration++;
       const state = new TurnState();
       const messageId = iteration === 1 ? `subagent-${params.agentRun.agentRunId}` : nanoid();
+      lastMessageId = messageId;
       const ctx: StreamContext = {
         sessionId: params.childSessionId,
         vfsSessionId: params.vfsSessionId,
         messageId,
-        abortSignal: controller.signal,
+        abortSignal: params.abortSignal,
         state,
         emit: params.emit ?? (() => undefined),
         agentRun: params.agentRun,
@@ -150,16 +229,22 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         sessionId: params.childSessionId,
         messageId,
       })) {
+        if (params.abortSignal.aborted) {
+          throw abortReason(params.abortSignal);
+        }
         await this.streamProcessor.process(chunk, ctx);
       }
 
       if (state.text.trim()) latestText = state.text.trim();
 
       if (state.toolCalls.length === 0) {
-        return latestText;
+        return { finalText: latestText, lastMessageId };
       }
 
       for (const toolCall of state.toolCalls) {
+        if (params.abortSignal.aborted) {
+          throw abortReason(params.abortSignal);
+        }
         params.emit?.('tool:start', {
           callId: toolCall.id,
           toolName: toolCall.name,
@@ -179,6 +264,6 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     }
 
     this.logger.warn(`Subagent exceeded ${MAX_ITERATIONS} iterations session=${params.childSessionId}`);
-    return latestText;
+    return { finalText: latestText, lastMessageId };
   }
 }

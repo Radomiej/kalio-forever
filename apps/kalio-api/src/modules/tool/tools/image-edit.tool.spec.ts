@@ -1,8 +1,9 @@
 /**
  * Regression tests for ImageEditTool.
  *
- * Focus: VFS write failure inside execute() must be caught and returned as
- * { error: '...' } instead of propagating as an unhandled exception.
+ * Focus: image_edit must throw on operational failures so ToolDispatchService
+ * can surface a real error result, and it must honor request.vfsSessionId
+ * for shared/isolated subagent VFS routing.
  *
  * Bug: this.vfs.writeBinary() was called outside any try/catch block.
  * If writeFileSync threw (e.g. ENOSPC, permission denied), the error would
@@ -39,6 +40,7 @@ function makeRequest(overrides: Partial<ToolCallRequest['args']> = {}): ToolCall
     callId: 'call-test',
     toolName: 'image_edit',
     sessionId: 'session-1',
+    vfsSessionId: 'vfs-shared',
     args: {
       outputPath: 'images/result.png',
       refs: [{ vfsPath: 'images/base.png', role: 'base', label: 'base' }],
@@ -50,7 +52,7 @@ function makeRequest(overrides: Partial<ToolCallRequest['args']> = {}): ToolCall
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
-describe('ImageEditTool — VFS write error handling', () => {
+describe('ImageEditTool', () => {
   let tool: ImageEditTool;
 
   beforeEach(() => {
@@ -83,24 +85,27 @@ describe('ImageEditTool — VFS write error handling', () => {
     vi.unstubAllGlobals();
   });
 
-  it('REGRESSION: VFS write failure returns { error } instead of throwing', async () => {
+  it('REGRESSION: VFS write failure throws so ToolDispatchService can emit status=error', async () => {
     mockWriteBinary.mockImplementation(() => {
       throw new Error('ENOSPC: no space left on device');
     });
 
-    const result = await tool.execute(makeRequest());
-
-    expect(result).toHaveProperty('error');
-    expect((result as { error: string }).error).toContain('ENOSPC');
+    await expect(tool.execute(makeRequest())).rejects.toThrow('ENOSPC');
   });
 
-  it('successful VFS write returns image metadata', async () => {
+  it('uses vfsSessionId for reads, versioning, writes, and download URLs', async () => {
+    mockListFiles.mockReturnValue({ files: [{ path: 'images/result-v1.png' }] });
     mockWriteBinary.mockReturnValue(undefined); // success
 
     const result = await tool.execute(makeRequest());
 
     expect(result).toHaveProperty('image_url');
-    expect(result).toHaveProperty('path');
-    expect(mockWriteBinary).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      path: 'images/result-v2.png',
+      download_url: '/api/sessions/vfs-shared/vfs/download?path=images%2Fresult-v2.png',
+    });
+    expect(mockReadBinary).toHaveBeenCalledWith('vfs-shared', 'images/base.png');
+    expect(mockListFiles).toHaveBeenCalledWith('vfs-shared');
+    expect(mockWriteBinary).toHaveBeenCalledWith('vfs-shared', 'images/result-v2.png', expect.any(Buffer));
   });
 });

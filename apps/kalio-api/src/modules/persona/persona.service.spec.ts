@@ -177,6 +177,26 @@ describe('PersonaService', () => {
     });
   });
 
+  describe('seeded personas config', () => {
+    it('keeps vfs_write visible to the orchestrator persona for file-producing delegations', () => {
+      const config = (
+        service as unknown as { loadPersonasConfig(): Record<string, { allowedTools: string[] }> }
+      ).loadPersonasConfig();
+
+      expect(config['orchestrator']?.allowedTools).toEqual(expect.arrayContaining(['vfs_write']));
+    });
+
+    it('teaches the orchestrator to honor explicit tool limits and reuse generated image download URLs', () => {
+      const config = (
+        service as unknown as { loadPersonasConfig(): Record<string, { systemPrompt: string }> }
+      ).loadPersonasConfig();
+
+      expect(config['orchestrator']?.systemPrompt).toContain('If the user explicitly limits the functional tools for a task');
+      expect(config['orchestrator']?.systemPrompt).toContain('download_url');
+      expect(config['orchestrator']?.systemPrompt).toContain('distinct filenames');
+    });
+  });
+
   describe('CRUD Operations', () => {
     it('findOne should throw NotFoundException for non-existent persona', async () => {
       mockDb.select.mockReturnValue({
@@ -370,6 +390,27 @@ describe('PersonaService', () => {
 
       expect(seededIds).toContain('web-research');
       expect(seededIds).toContain('orchestrator');
+    });
+
+    it('includes image tools in the seeded orchestrator persona', async () => {
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      const valuesMock = vi.fn().mockResolvedValue(undefined);
+      mockDb.insert.mockReturnValue({ values: valuesMock });
+
+      await service.onApplicationBootstrap();
+
+      const orchestratorPayload = valuesMock.mock.calls
+        .map((call) => call[0] as { id?: string; allowedTools?: string[] })
+        .find((payload) => payload.id === 'orchestrator');
+
+      expect(orchestratorPayload?.allowedTools).toEqual(
+        expect.arrayContaining(['image_generate', 'image_edit', 'image_view']),
+      );
     });
   });
 });

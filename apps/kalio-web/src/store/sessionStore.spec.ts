@@ -6,8 +6,10 @@ describe('sessionStore.appendChunk — thinking phase clear', () => {
   beforeEach(() => {
     useSessionStore.setState({
       messages: [],
+      sessionMessages: {},
       streamingChunks: {},
       thinkingChunks: {},
+      chunkSessionIds: {},
       activeSessionId: 'sess-1',
     });
   });
@@ -43,8 +45,10 @@ describe('sessionStore.flushThinkingChunks — tool-start regression', () => {
   beforeEach(() => {
     useSessionStore.setState({
       messages: [],
+      sessionMessages: {},
       streamingChunks: {},
       thinkingChunks: {},
+      chunkSessionIds: {},
       activeSessionId: 'sess-1',
     });
   });
@@ -93,13 +97,87 @@ describe('sessionStore — session-isolated streaming (REGRESSION)', () => {
   beforeEach(() => {
     useSessionStore.setState({
       messages: [],
+      sessionMessages: {},
       streamingChunks: {},
       thinkingChunks: {},
       chunkSessionIds: {},
       activeSessionId: 'sess-A',
       agentTurns: [],
+      sessionAgentTurns: {},
+      activeTurnId: null,
+      sessionActiveTurnIds: {},
+    });
+  });
+
+  it('restores non-active child turn items when switching into that session mid-stream', () => {
+    useSessionStore.setState({
+      activeSessionId: 'sess-parent',
+      messages: [],
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+      agentTurns: [],
       activeTurnId: null,
     });
+
+    const store = useSessionStore.getState() as typeof useSessionStore.getState extends () => infer T
+      ? T & {
+          addTurnItem: (item: { kind: 'tool'; callId: string } | { kind: 'text'; messageId: string }, sessionId?: string) => void;
+        }
+      : never;
+
+    store.startAgentTurn('child-turn-1', 'sess-child');
+    store.addTurnItem({ kind: 'tool', callId: 'call-child-1' }, 'sess-child');
+    store.addTurnItem({ kind: 'text', messageId: 'child-msg-1' }, 'sess-child');
+    store.appendChunk('child-msg-1', 'child draft', false, 'sess-child');
+
+    useSessionStore.getState().setActiveSession('sess-child');
+
+    expect(useSessionStore.getState().messages.find((message) => message.id === 'child-msg-1')?.content).toBe('child draft');
+    expect(useSessionStore.getState().activeTurnId).toBe('child-turn-1');
+    expect(useSessionStore.getState().agentTurns).toEqual([
+      expect.objectContaining({
+        id: 'child-turn-1',
+        sessionId: 'sess-child',
+        done: false,
+        items: [
+          { kind: 'tool', callId: 'call-child-1' },
+          { kind: 'text', messageId: 'child-msg-1' },
+        ],
+      }),
+    ]);
+  });
+
+  it('restores non-active child tool_result messages when switching into that session', () => {
+    useSessionStore.setState({
+      activeSessionId: 'sess-parent',
+      messages: [],
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+      agentTurns: [],
+      activeTurnId: null,
+    });
+
+    useSessionStore.getState().addMessage({
+      id: 'tool-result-child',
+      sessionId: 'sess-child',
+      role: 'tool_result',
+      content: '{"ok":true}',
+      toolCallId: 'call-child-1',
+      createdAt: 1,
+    });
+
+    useSessionStore.getState().setActiveSession('sess-child');
+
+    expect(useSessionStore.getState().messages).toEqual([
+      expect.objectContaining({
+        id: 'tool-result-child',
+        sessionId: 'sess-child',
+        role: 'tool_result',
+        toolCallId: 'call-child-1',
+      }),
+    ]);
   });
 
   it('chunks for non-active session accumulate in streamingChunks but do not touch messages', () => {

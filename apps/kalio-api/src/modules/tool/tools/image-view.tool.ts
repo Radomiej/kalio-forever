@@ -27,16 +27,17 @@ export class ImageViewTool {
   async execute(request: ToolCallRequest): Promise<object> {
     const start = Date.now();
     const { sessionId } = request;
+    const vfsSessionId = request.vfsSessionId ?? sessionId;
     const filePath = request.args['path'] as string;
     const quality = (request.args['quality'] as string | undefined) ?? 'low';
 
     let buffer: Buffer;
     try {
-      buffer = this.vfs.readBinary(sessionId, filePath);
+      buffer = this.vfs.readBinary(vfsSessionId, filePath);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'VFS_FILE_NOT_FOUND' || code === 'ENOENT') {
-        return { error: `Image not found: ${filePath}` };
+        throw new Error(`Image not found: ${filePath}`);
       }
       throw err;
     }
@@ -49,12 +50,12 @@ export class ImageViewTool {
     const mimeType = mimeMap[ext] ?? 'image/png';
 
     if (!mimeType.startsWith('image/')) {
-      return { error: `File is not an image: ${filePath}` };
+      throw new Error(`File is not an image: ${filePath}`);
     }
 
     const dataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
 
-    this.logger.debug(`[image_view] Loaded ${filePath} (${buffer.length} bytes) for session ${sessionId}`);
+    this.logger.debug(`[image_view] Loaded ${filePath} (${buffer.length} bytes) for VFS session ${vfsSessionId}`);
 
     return {
       image_url: dataUrl,

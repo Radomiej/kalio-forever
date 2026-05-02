@@ -248,6 +248,31 @@ describe('VFSService', () => {
       expect(() => service.readFile(sessionId, 'sub-agents/child-session/a.txt')).toThrow();
     });
 
+    it('skips files that disappear after listing and still copies the remaining files', () => {
+      service.writeFile({ sessionId: 'child-session', filePath: 'a.txt', content: 'A' });
+      service.writeFile({ sessionId: 'child-session', filePath: 'b.txt', content: 'B' });
+
+      const originalReadBinary = service.readBinary.bind(service);
+      vi.spyOn(service, 'readBinary').mockImplementation((copySessionId: string, filePath: string) => {
+        if (copySessionId === 'child-session' && filePath === 'a.txt') {
+          const error = new Error('VFS_FILE_NOT_FOUND: a.txt not found in session child-session');
+          (error as NodeJS.ErrnoException).code = 'VFS_FILE_NOT_FOUND';
+          throw error;
+        }
+        return originalReadBinary(copySessionId, filePath);
+      });
+
+      const copied = service.copySessionFiles({
+        fromSessionId: 'child-session',
+        toSessionId: sessionId,
+        targetPrefix: 'sub-agents/child-session',
+      });
+
+      expect(copied).toEqual([{ fromPath: 'b.txt', toPath: 'sub-agents/child-session/b.txt', sizeBytes: 1 }]);
+      expect(service.readFile(sessionId, 'sub-agents/child-session/b.txt').content).toBe('B');
+      expect(() => service.readFile(sessionId, 'sub-agents/child-session/a.txt')).toThrow();
+    });
+
     it('rejects unsafe copy target prefixes', () => {
       service.writeFile({ sessionId: 'child-session', filePath: 'a.txt', content: 'A' });
 

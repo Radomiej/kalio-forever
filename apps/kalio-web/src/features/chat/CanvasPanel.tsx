@@ -7,6 +7,7 @@ import { useAgentStore, type ToolActivity } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { AGENT_LABELS } from './cli-agent-labels';
 import { apiClient } from '../../services/apiClient';
+import { eventBus } from '../../services/eventBus';
 import type { ChatMessage, SubagentCopiedFile, SubagentToolResult } from '@kalio/types';
 
 interface SubagentCanvasPreview {
@@ -81,6 +82,33 @@ function buildSubagentPreviews(messages: ChatMessage[], toolActivities: ToolActi
     });
 
   return [...previews.values()];
+}
+
+function mergeFetchedMessages(currentMessages: ChatMessage[], loadedMessages: ChatMessage[]): ChatMessage[] {
+  const merged = new Map<string, ChatMessage>();
+
+  loadedMessages.forEach((message) => {
+    merged.set(message.id, message);
+  });
+
+  currentMessages.forEach((message) => {
+    const existing = merged.get(message.id);
+    if (!existing) {
+      merged.set(message.id, message);
+      return;
+    }
+
+    merged.set(message.id, {
+      ...existing,
+      ...message,
+      content: message.content || existing.content,
+      thinking: message.thinking ?? existing.thinking,
+      streaming: message.streaming ?? existing.streaming,
+      toolCallId: message.toolCallId ?? existing.toolCallId,
+    });
+  });
+
+  return [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
 }
 
 function SubagentConversationCard({
@@ -336,8 +364,8 @@ function SessionStats() {
 
 export function CanvasPanel() {
   const { toolActivities, isStreaming, canvasOpen, toggleCanvas, activeAgentLoops } = useAgentStore();
-  const { messages, activeSessionId, sessions, setActiveSession } = useSessionStore();
-  const [subagentMessages, setSubagentMessages] = useState<Record<string, ChatMessage[]>>({});
+  const { messages, activeSessionId, sessions, setActiveSession, getSessionMessages, setMessages } = useSessionStore();
+  const [hydratedSubagentSessions, setHydratedSubagentSessions] = useState<Record<string, true>>({});
   const open = canvasOpen;
   const subagentLoops = Object.values(activeAgentLoops).filter((loop) => loop.agentRun?.agentType === 'subagent');
   const masterActivities = toolActivities.filter((activity) => activity.agentRun?.agentType !== 'subagent');
@@ -347,10 +375,19 @@ export function CanvasPanel() {
   const showToggle = isStreaming || toolActivities.length > 0 || subagentLoops.length > 0 || subagentPreviews.length > 0 || open;
 
   useEffect(() => {
+    if (!eventBus.connected) return;
+    subagentPreviews.forEach((preview) => {
+      if (preview.sessionId !== activeSessionId) {
+        eventBus.identifySession(preview.sessionId);
+      }
+    });
+  }, [activeSessionId, subagentPreviews]);
+
+  useEffect(() => {
     let cancelled = false;
     const missingSessionIds = subagentPreviews
       .map((preview) => preview.sessionId)
-      .filter((sessionId) => subagentMessages[sessionId] === undefined && sessionId !== activeSessionId);
+      .filter((sessionId) => !hydratedSubagentSessions[sessionId] && sessionId !== activeSessionId);
 
     if (missingSessionIds.length === 0) return;
 
@@ -362,10 +399,14 @@ export function CanvasPanel() {
     )
       .then((results) => {
         if (cancelled) return;
-        setSubagentMessages((current) => {
+        results.forEach(([sessionId, loadedMessages]) => {
+          const currentMessages = getSessionMessages(sessionId);
+          setMessages(mergeFetchedMessages(currentMessages, loadedMessages), sessionId);
+        });
+        setHydratedSubagentSessions((current) => {
           const next = { ...current };
-          results.forEach(([sessionId, loadedMessages]) => {
-            next[sessionId] = loadedMessages;
+          results.forEach(([sessionId]) => {
+            next[sessionId] = true;
           });
           return next;
         });
@@ -377,7 +418,7 @@ export function CanvasPanel() {
     return () => {
       cancelled = true;
     };
-  }, [activeSessionId, subagentMessages, subagentPreviews]);
+  }, [activeSessionId, getSessionMessages, hydratedSubagentSessions, setMessages, subagentPreviews]);
 
   return (
     <>
@@ -424,7 +465,7 @@ export function CanvasPanel() {
                     <SubagentConversationCard
                       key={preview.sessionId}
                       preview={preview}
-                      transcript={preview.sessionId === activeSessionId ? messages : (subagentMessages[preview.sessionId] ?? [])}
+                      transcript={getSessionMessages(preview.sessionId)}
                       onOpen={() => setActiveSession(preview.sessionId)}
                     />
                   ))}

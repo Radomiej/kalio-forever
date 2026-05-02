@@ -3,7 +3,6 @@ import { ModuleRef } from '@nestjs/core';
 import { randomUUID } from 'node:crypto';
 import type { SubagentToolResult, ToolCallRequest, ToolMeta, VFSMode } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
-import { LLMService } from '../../llm/llm.service';
 // eslint-disable-next-line import/no-cycle
 import { ToolRegistryService } from '../tool-registry.service';
 import { SUBAGENT_RUNTIME, type SubagentRuntimePort } from '../subagent-runtime.port';
@@ -14,10 +13,16 @@ interface ToolRegistryLike {
   getToolsForSkills?: (skills: string[]) => ToolMeta[];
 }
 
-const SUBAGENT_SYSTEM_PROMPT = `You are a focused sub-agent completing a single specific task.
-Act immediately — call tools if available, return a clear result.
-Do NOT ask clarifying questions. Work autonomously end-to-end.
-Reply with your result only — no preamble.`;
+function buildDelegatedRequest(
+  request: ToolCallRequest,
+  args: Record<string, unknown>,
+): ToolCallRequest {
+  return {
+    ...request,
+    toolName: 'run_subagent',
+    args,
+  };
+}
 
 @Injectable()
 @Tool({
@@ -34,6 +39,10 @@ Reply with your result only — no preamble.`;
         type: 'string',
         description: 'Clear, specific task description for the sub-agent to complete.',
       },
+      childSessionId: {
+        type: 'string',
+        description: 'Optional existing sub-agent session id. When provided, send the objective as the next user message into that chat instead of creating a new one.',
+      },
       timeoutMs: {
         type: 'integer',
         description: 'Max execution time in milliseconds. Default: 60000. Max: 180000.',
@@ -41,16 +50,16 @@ Reply with your result only — no preamble.`;
       availableTools: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Optional list of tool names to make available to the sub-agent. If not provided, all tools are available.',
+        description: 'Optional list of tool names to make available to the sub-agent. Omit this to give the child the full toolset. If you restrict it, include every required capability, such as vfs_write for file creation or image_view for image inspection.',
       },
       personaId: {
         type: 'string',
-        description: 'Optional persona id for the sub-agent. Defaults to default.',
+        description: 'Optional specialist persona id for the sub-agent. Set this explicitly when delegating to a known specialist such as web-research, designer, or dev. Defaults to default.',
       },
       vfsMode: {
         type: 'string',
         enum: ['isolated', 'shared'],
-        description: 'VFS mode for the sub-agent. isolated = child VFS copied back; shared = writes directly to master VFS.',
+        description: 'VFS mode for the sub-agent. isolated = private child VFS copied back on completion; shared = child reads and writes the parent VFS directly. Use shared when the child must inspect or modify files already present in the parent VFS or produced by earlier child agents.',
       },
       copyOutputs: {
         type: 'boolean',
@@ -62,10 +71,7 @@ Reply with your result only — no preamble.`;
 export class SubagentTool {
   private readonly logger = new Logger(SubagentTool.name);
 
-  constructor(
-    private readonly llm: LLMService,
-    private readonly moduleRef: ModuleRef,
-  ) {}
+  constructor(private readonly moduleRef: ModuleRef) {}
 
   private getToolRegistry(): ToolRegistryLike {
     // Use the class as the DI token (not a string) so NestJS can resolve it.
@@ -75,7 +81,7 @@ export class SubagentTool {
     return this.moduleRef.get(ToolRegistryService, { strict: false });
   }
 
-  private getRuntime(): SubagentRuntimePort | null {
+  private getRuntime(): SubagentRuntimePort {
     try {
       const candidate = this.moduleRef.get(SUBAGENT_RUNTIME, { strict: false }) as unknown;
       if (this.isRuntime(candidate)) return candidate;
@@ -83,7 +89,7 @@ export class SubagentTool {
       const error = err instanceof Error ? err : new Error(String(err));
       this.logger.debug(`[run_subagent] Runtime unavailable: ${error.message}`);
     }
-    return null;
+    throw new Error('Subagent runtime is unavailable');
   }
 
   private isRuntime(value: unknown): value is SubagentRuntimePort {
@@ -121,6 +127,9 @@ export class SubagentTool {
 
   async execute(request: ToolCallRequest): Promise<SubagentToolResult> {
     const objective = request.args['objective'] as string;
+    const childSessionId = typeof request.args['childSessionId'] === 'string'
+      ? request.args['childSessionId']
+      : undefined;
     const rawTimeout = request.args['timeoutMs'] as number | undefined;
     const availableTools = request.args['availableTools'] as string[] | undefined;
     const personaId = request.args['personaId'] as string | undefined;
@@ -130,64 +139,133 @@ export class SubagentTool {
     const timeoutMs = Math.min(rawTimeout ?? 60_000, 180_000);
     const taskId = randomUUID();
     const sessionId = request.sessionId;
-    const messageId = `subagent-${taskId}`;
-
     this.logger.log(`[run_subagent] Starting task ${taskId}: ${objective.slice(0, 80)}`);
-
-    const chunks: string[] = [];
 
     // Get tools: use availableTools if provided, otherwise all tools
     const tools = this.getTools(availableTools);
     const runtime = this.getRuntime();
-    if (runtime) {
-      return runtime.runSubagent({
-        parentSessionId: sessionId,
-        parentToolCallId: request.callId,
-        objective,
-        personaId,
-        availableTools: tools,
-        timeoutMs,
-        vfsMode,
-        copyOutputs,
-        emit: request._emit,
-        parentAgentRun: request.agentRun,
-      });
+    return runtime.runSubagent({
+      parentSessionId: sessionId,
+      parentToolCallId: request.callId,
+      objective,
+      childSessionId,
+      personaId,
+      availableTools: tools,
+      timeoutMs,
+      vfsMode,
+      copyOutputs,
+      emit: request._emit,
+      parentAgentRun: request.agentRun,
+    });
+  }
+}
+
+@Injectable()
+@Tool({
+  name: 'spawn_subagent',
+  description:
+    'Spawn a new focused sub-agent chat for a specific task. ' +
+    'Use this when you want an explicit new child session rather than continuing an existing one.',
+  parameters: {
+    type: 'object',
+    required: ['objective'],
+    properties: {
+      objective: {
+        type: 'string',
+        description: 'Clear, specific task description for the new sub-agent to complete.',
+      },
+      timeoutMs: {
+        type: 'integer',
+        description: 'Max execution time in milliseconds. Default: 60000. Max: 180000.',
+      },
+      availableTools: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional list of tool names to make available to the sub-agent. Omit this to give the child the full toolset. If you restrict it, include every required capability, such as vfs_write for file creation or image_view for image inspection.',
+      },
+      personaId: {
+        type: 'string',
+        description: 'Optional specialist persona id for the new sub-agent. Set this explicitly when delegating to a known specialist such as web-research, designer, or dev. Defaults to default.',
+      },
+      vfsMode: {
+        type: 'string',
+        enum: ['isolated', 'shared'],
+        description: 'VFS mode for the sub-agent. isolated = private child VFS copied back on completion; shared = child reads and writes the parent VFS directly. Use shared when the child must inspect or modify files already present in the parent VFS or produced by earlier child agents.',
+      },
+      copyOutputs: {
+        type: 'boolean',
+        description: 'When true, copy isolated child VFS files back into the master VFS. Default: true.',
+      },
+    },
+  },
+})
+export class SpawnSubagentTool {
+  constructor(private readonly subagentTool: SubagentTool) {}
+
+  async execute(request: ToolCallRequest): Promise<SubagentToolResult> {
+    const { childSessionId: _ignored, ...restArgs } = request.args;
+    return this.subagentTool.execute(buildDelegatedRequest(request, restArgs));
+  }
+}
+
+@Injectable()
+@Tool({
+  name: 'message_subagent',
+  description:
+    'Send the next message into an existing focused sub-agent chat. ' +
+    'Use this when you already have a childSessionId and want that same child to continue.',
+  parameters: {
+    type: 'object',
+    required: ['objective', 'childSessionId'],
+    properties: {
+      objective: {
+        type: 'string',
+        description: 'Clear, specific follow-up message for the existing sub-agent chat.',
+      },
+      childSessionId: {
+        type: 'string',
+        description: 'Existing sub-agent session id to continue.',
+      },
+      timeoutMs: {
+        type: 'integer',
+        description: 'Max execution time in milliseconds. Default: 60000. Max: 180000.',
+      },
+      availableTools: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional list of tool names to make available to the sub-agent. Omit this to give the child the full toolset. If you restrict it, include every required capability, such as vfs_write for file creation or image_view for image inspection.',
+      },
+      personaId: {
+        type: 'string',
+        description: 'Optional specialist persona override for the continued sub-agent turn. Set this explicitly when delegating to a known specialist such as web-research, designer, or dev.',
+      },
+      vfsMode: {
+        type: 'string',
+        enum: ['isolated', 'shared'],
+        description: 'VFS mode for the sub-agent. isolated = private child VFS copied back on completion; shared = child reads and writes the parent VFS directly. Use shared when the child must inspect or modify files already present in the parent VFS or produced by earlier child agents.',
+      },
+      copyOutputs: {
+        type: 'boolean',
+        description: 'When true, copy isolated child VFS files back into the master VFS. Default: true.',
+      },
+    },
+  },
+})
+export class MessageSubagentTool {
+  constructor(private readonly subagentTool: SubagentTool) {}
+
+  async execute(request: ToolCallRequest): Promise<SubagentToolResult> {
+    const childSessionId = typeof request.args['childSessionId'] === 'string'
+      ? request.args['childSessionId'].trim()
+      : '';
+
+    if (!childSessionId) {
+      throw new Error('message_subagent requires childSessionId');
     }
 
-    const runPromise = this.llm.streamChat(
-      [
-        { role: 'system', content: SUBAGENT_SYSTEM_PROMPT },
-        { role: 'user', content: objective },
-      ],
-      tools,
-      (chunk) => {
-        if (!chunk.done && !chunk.thinking) {
-          chunks.push(chunk.delta);
-        }
-      },
-      sessionId,
-      messageId,
-    );
-
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Sub-agent timed out after ${timeoutMs}ms`)), timeoutMs),
-    );
-
-    await Promise.race([runPromise, timeoutPromise]);
-
-    const result = chunks.join('').trim() || 'Sub-agent completed with no output.';
-    this.logger.log(`[run_subagent] Done ${taskId}, length=${result.length}`);
-
-    const childSessionId = `sub-${taskId}`;
-    return {
-      result,
-      taskId,
+    return this.subagentTool.execute(buildDelegatedRequest(request, {
+      ...request.args,
       childSessionId,
-      parentSessionId: sessionId,
-      vfsMode,
-      vfsSessionId: vfsMode === 'shared' ? sessionId : childSessionId,
-      copiedFiles: [],
-      durationMs: 0,
-    };
+    }));
   }
 }

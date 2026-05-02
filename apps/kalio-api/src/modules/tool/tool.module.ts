@@ -4,7 +4,7 @@ import { VFSWriteTool } from './tools/vfs-write.tool';
 import { VFSReadTool } from './tools/vfs-read.tool';
 import { VFSListTool } from './tools/vfs-list.tool';
 import { VFSGrepSearchTool, VFSFileSearchTool } from './tools/vfs-search.tools';
-import { SubagentTool } from './tools/subagent.tool';
+import { MessageSubagentTool, SpawnSubagentTool, SubagentTool } from './tools/subagent.tool';
 import { FsReadTool } from './tools/fs-read.tool';
 import { FsListTool } from './tools/fs-list.tool';
 import { FsWriteTool } from './tools/fs-write.tool';
@@ -41,7 +41,7 @@ import { ToolRegistryService } from './tool-registry.service';
   imports: [VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule, ImageModule, SkillsModule, PersonaModule],
   controllers: [ToolController],
   providers: [
-    VFSWriteTool, VFSReadTool, VFSListTool, VFSGrepSearchTool, VFSFileSearchTool, SubagentTool,
+    VFSWriteTool, VFSReadTool, VFSListTool, VFSGrepSearchTool, VFSFileSearchTool, SubagentTool, SpawnSubagentTool, MessageSubagentTool,
     FsReadTool, FsListTool, FsWriteTool,
     KVStoreService, KVWriteTool, KVReadTool, KVListTool, KVDeleteTool,
     GrepSearchTool, FileSearchTool,

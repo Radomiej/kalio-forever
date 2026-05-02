@@ -43,6 +43,7 @@ export class ImageGenerateTool {
   async execute(request: ToolCallRequest): Promise<object> {
     const start = Date.now();
     const { sessionId } = request;
+    const vfsSessionId = request.vfsSessionId ?? sessionId;
 
     const prompt = request.args['prompt'] as string;
     const cfg = await this.imageConfig.getConfig();
@@ -54,9 +55,7 @@ export class ImageGenerateTool {
     const apiKey = await this.imageConfig.getApiKey();
 
     if (!apiKey) {
-      return {
-        error: 'No API key configured for image generation. Go to Settings → Image Generation to add a key.',
-      };
+      throw new Error('No API key configured for image generation. Go to Settings → Image Generation to add a key.');
     }
 
     let provider = cfg.provider === 'auto' ? 'cometapi' : cfg.provider;
@@ -81,9 +80,9 @@ export class ImageGenerateTool {
       const rawFilename = (request.args['filename'] as string | undefined) ?? `image-${Date.now()}.${ext}`;
       const vfsPath = rawFilename.startsWith('images/') ? rawFilename : `images/${rawFilename}`;
 
-      this.vfs.writeBinary(sessionId, vfsPath, result.buffer);
+      this.vfs.writeBinary(vfsSessionId, vfsPath, result.buffer);
 
-      this.logger.log(`[image_generate] Saved ${vfsPath} (${result.buffer.length} bytes) for session ${sessionId}`);
+      this.logger.log(`[image_generate] Saved ${vfsPath} (${result.buffer.length} bytes) for VFS session ${vfsSessionId}`);
 
       return {
         image_url: result.dataUrl,
@@ -91,13 +90,13 @@ export class ImageGenerateTool {
         model: result.model,
         size: result.size,
         format: result.format,
-        download_url: `/api/sessions/${sessionId}/vfs/download?path=${encodeURIComponent(vfsPath)}`,
+        download_url: `/api/sessions/${vfsSessionId}/vfs/download?path=${encodeURIComponent(vfsPath)}`,
         message: `Image generated and saved to ${vfsPath}.`,
         output_type: 'image',
       };
     } catch (err) {
       this.logger.error('[image_generate] Failed', err instanceof Error ? err : new Error(String(err)));
-      return { error: err instanceof Error ? err.message : String(err) };
+      throw (err instanceof Error ? err : new Error(String(err)));
     }
   }
 }

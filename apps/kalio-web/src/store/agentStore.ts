@@ -34,12 +34,14 @@ interface AgentState {
   tools: ToolMeta[];
   /** Tool calls active in the current turn, in order */
   toolActivities: ToolActivity[];
+  sessionToolActivities: Record<string, ToolActivity[]>;
   /** Auxiliary LLM sub-calls (title-gen, suggestions, etc.) */
   llmActivities: LlmActivity[];
   /** System prompt sent to LLM for the active session turn */
   systemPrompt: string | null;
   /** Tool names available in the active session turn */
   activeToolNames: string[];
+  sessionContexts: Record<string, { systemPrompt: string | null; activeToolNames: string[] }>;
   /**
    * Persistent callId → toolName lookup across ALL turns in the current page session.
    * Populated on tool:start, never cleared. Used by AgentTurnBubble to resolve
@@ -58,34 +60,45 @@ interface AgentState {
   setPendingConfirmation: (sessionId: string, req: ToolConfirmationRequest | null) => void;
   setAvailableTools: (tools: ToolMeta[]) => void;
   setTools: (tools: ToolMeta[]) => void;
+  getToolActivitiesForSession: (sessionId: string | null) => ToolActivity[];
   addToolActivity: (activity: ToolActivity) => void;
   updateToolActivity: (callId: string, patch: Partial<ToolActivity>) => void;
-  clearToolActivities: () => void;
+  clearToolActivities: (sessionId?: string) => void;
   addLlmActivity: (activity: LlmActivity) => void;
   updateLlmActivity: (id: string, patch: Partial<LlmActivity>) => void;
   clearLlmActivities: () => void;
-  setContext: (systemPrompt: string, toolNames: string[]) => void;
+  getContextForSession: (sessionId: string | null) => { systemPrompt: string | null; activeToolNames: string[] };
+  setContext: (systemPrompt: string, toolNames: string[], sessionId?: string) => void;
   registerCallId: (callId: string, toolName: string) => void;
   setCanvasOpen: (open: boolean) => void;
   toggleCanvas: () => void;
   addActiveAgentLoop: (sessionId: string, turnId: string, agentRun?: AgentRunContext) => void;
   removeActiveAgentLoop: (sessionId: string, agentRun?: AgentRunContext) => void;
+  hasActiveLoopForSession: (sessionId: string | null) => boolean;
   /** Accumulated CLI agent output per callId (populated by cli_agent:progress) */
   cliAgentOutput: Record<string, string>;
   appendCLIAgentChunk: (callId: string, chunk: string) => void;
   clearCLIAgentOutput: (callId: string) => void;
 }
 
-export const useAgentStore = create<AgentState>((set) => ({
+function upsertActivity(list: ToolActivity[], activity: ToolActivity): ToolActivity[] {
+  return list.some((item) => item.callId === activity.callId)
+    ? list.map((item) => (item.callId === activity.callId ? { ...item, ...activity } : item))
+    : [...list, activity];
+}
+
+export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   isStreaming: false,
   streamingMessageId: undefined,
   pendingConfirmations: {},
   availableTools: [],
   tools: [],
   toolActivities: [],
+  sessionToolActivities: {},
   llmActivities: [],
   systemPrompt: null,
   activeToolNames: [],
+  sessionContexts: {},
   callIdToName: {},
   canvasOpen: false,
   activeAgentLoops: {},
@@ -104,6 +117,10 @@ export const useAgentStore = create<AgentState>((set) => ({
     }),
   setAvailableTools: (tools) => set({ availableTools: tools }),
   setTools: (tools) => set({ tools }),
+  getToolActivitiesForSession: (sessionId) => {
+    if (!sessionId) return [];
+    return get().sessionToolActivities[sessionId] ?? [];
+  },
 
   addToolActivity: (activity) =>
     set((s) => {
@@ -114,25 +131,46 @@ export const useAgentStore = create<AgentState>((set) => ({
         || activity.toolName === 'run_subagent'
         || activity.agentRun?.agentType === 'subagent';
       const autoOpen = shouldOpenCanvas ? { canvasOpen: true } : {};
-      if (s.toolActivities.some((a) => a.callId === activity.callId)) {
-        return {
-          ...autoOpen,
-          toolActivities: s.toolActivities.map((a) =>
-            a.callId === activity.callId ? { ...a, ...activity } : a,
-          ),
-        };
-      }
-      return { ...autoOpen, toolActivities: [...s.toolActivities, activity] };
+      const nextToolActivities = upsertActivity(s.toolActivities, activity);
+      const nextSessionToolActivities = activity.sessionId
+        ? {
+            ...s.sessionToolActivities,
+            [activity.sessionId]: upsertActivity(s.sessionToolActivities[activity.sessionId] ?? [], activity),
+          }
+        : s.sessionToolActivities;
+
+      return {
+        ...autoOpen,
+        toolActivities: nextToolActivities,
+        sessionToolActivities: nextSessionToolActivities,
+      };
     }),
 
   updateToolActivity: (callId, patch) =>
     set((s) => ({
-      toolActivities: s.toolActivities.map((a) =>
-        a.callId === callId ? { ...a, ...patch } : a,
+      toolActivities: s.toolActivities.map((activity) =>
+        activity.callId === callId ? { ...activity, ...patch } : activity,
+      ),
+      sessionToolActivities: Object.fromEntries(
+        Object.entries(s.sessionToolActivities).map(([sessionId, activities]) => [
+          sessionId,
+          activities.map((activity) => (activity.callId === callId ? { ...activity, ...patch } : activity)),
+        ]),
       ),
     })),
 
-  clearToolActivities: () => set({ toolActivities: [] }),
+  clearToolActivities: (sessionId) =>
+    set((s) => {
+      if (!sessionId) {
+        return { toolActivities: [], sessionToolActivities: {} };
+      }
+
+      const { [sessionId]: _removed, ...rest } = s.sessionToolActivities;
+      return {
+        toolActivities: s.toolActivities.filter((activity) => activity.sessionId !== sessionId),
+        sessionToolActivities: rest,
+      };
+    }),
 
   addLlmActivity: (activity) =>
     set((s) => ({ llmActivities: [...s.llmActivities, activity] })),
@@ -146,7 +184,26 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   clearLlmActivities: () => set({ llmActivities: [] }),
 
-  setContext: (systemPrompt, toolNames) => set({ systemPrompt, activeToolNames: toolNames }),
+  getContextForSession: (sessionId) => {
+    if (!sessionId) {
+      const state = get();
+      return { systemPrompt: state.systemPrompt, activeToolNames: state.activeToolNames };
+    }
+
+    return get().sessionContexts[sessionId] ?? { systemPrompt: null, activeToolNames: [] };
+  },
+
+  setContext: (systemPrompt, toolNames, sessionId) =>
+    set((s) => ({
+      systemPrompt,
+      activeToolNames: toolNames,
+      sessionContexts: sessionId
+        ? {
+            ...s.sessionContexts,
+            [sessionId]: { systemPrompt, activeToolNames: toolNames },
+          }
+        : s.sessionContexts,
+    })),
 
   registerCallId: (callId, toolName) =>
     set((s) => ({ callIdToName: { ...s.callIdToName, [callId]: toolName } })),
@@ -167,6 +224,10 @@ export const useAgentStore = create<AgentState>((set) => ({
       const { [agentRun?.agentRunId ?? sessionId]: _removed, ...rest } = s.activeAgentLoops;
       return { activeAgentLoops: rest };
     }),
+  hasActiveLoopForSession: (sessionId) => {
+    if (!sessionId) return false;
+    return Object.values(get().activeAgentLoops).some((loop) => loop.sessionId === sessionId);
+  },
   appendCLIAgentChunk: (callId, chunk) =>
     set((s) => ({
       cliAgentOutput: {
@@ -179,4 +240,5 @@ export const useAgentStore = create<AgentState>((set) => ({
     set((s) => {
       const { [callId]: _removed, ...rest } = s.cliAgentOutput;
       return { cliAgentOutput: rest };
-    }),}));
+    }),
+}));

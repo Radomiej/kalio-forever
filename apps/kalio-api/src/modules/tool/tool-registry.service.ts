@@ -6,7 +6,7 @@ import { VFSWriteTool } from './tools/vfs-write.tool';
 import { VFSReadTool } from './tools/vfs-read.tool';
 import { VFSListTool } from './tools/vfs-list.tool';
 import { VFSGrepSearchTool, VFSFileSearchTool } from './tools/vfs-search.tools';
-import { SubagentTool } from './tools/subagent.tool';
+import { MessageSubagentTool, SpawnSubagentTool, SubagentTool } from './tools/subagent.tool';
 import { FsReadTool } from './tools/fs-read.tool';
 import { FsListTool } from './tools/fs-list.tool';
 import { FsWriteTool } from './tools/fs-write.tool';
@@ -49,6 +49,8 @@ export class ToolRegistryService {
     private readonly vfsGrepSearch: VFSGrepSearchTool,
     private readonly vfsFileSearch: VFSFileSearchTool,
     private readonly subagent: SubagentTool,
+    private readonly spawnSubagent: SpawnSubagentTool,
+    private readonly messageSubagent: MessageSubagentTool,
     private readonly fsRead: FsReadTool,
     private readonly fsList: FsListTool,
     private readonly fsWrite: FsWriteTool,
@@ -87,7 +89,7 @@ export class ToolRegistryService {
     private readonly personaDelete: PersonaDeleteTool,
   ) {
     const all: object[] = [
-      vfsWrite, vfsRead, vfsList, vfsGrepSearch, vfsFileSearch, subagent,
+      vfsWrite, vfsRead, vfsList, vfsGrepSearch, vfsFileSearch, subagent, spawnSubagent, messageSubagent,
       fsRead, fsList, fsWrite,
       kvWrite, kvRead, kvList, kvDelete,
       grepSearch, fileSearch,

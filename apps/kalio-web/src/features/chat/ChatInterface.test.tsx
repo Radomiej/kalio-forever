@@ -95,9 +95,21 @@ const agentStoreState = {
   addLlmActivity,
   updateLlmActivity,
   setContext,
+  getToolActivitiesForSession: (sessionId: string | null) =>
+    sessionId
+      ? agentStoreState.toolActivities.filter((activity) => (activity as { sessionId?: string }).sessionId === sessionId)
+      : [],
+  getContextForSession: () => ({
+    systemPrompt: agentStoreState.systemPrompt,
+    activeToolNames: agentStoreState.activeToolNames,
+  }),
   registerCallId,
   addActiveAgentLoop,
   removeActiveAgentLoop,
+  hasActiveLoopForSession: (sessionId: string | null) =>
+    sessionId
+      ? Object.values(agentStoreState.activeAgentLoops).some((loop) => loop.sessionId === sessionId)
+      : false,
   appendCLIAgentChunk,
   clearCLIAgentOutput,
 };
@@ -149,6 +161,8 @@ vi.mock('../../store/sessionStore', () => ({
       addTurnItem,
       finalizeAgentTurn,
       clearAgentTurns,
+      getSessionActiveTurnId: () => mockActiveTurnId,
+      getSessionAgentTurns: () => [],
       markAgentTurnError,
       removeLastAgentTurn,
       flushThinkingChunks: vi.fn(),
@@ -176,6 +190,8 @@ vi.mock('../../store/sessionStore', () => ({
         chunkSessionIds: {},
         finalizeChunk: vi.fn(),
         flushStreamingChunks,
+        getSessionActiveTurnId: () => mockActiveTurnId,
+        getSessionAgentTurns: () => [],
         markAgentTurnError,
         removeLastAgentTurn,
       }),
@@ -217,6 +233,11 @@ vi.mock('./AgentTurnBubble', () => ({ AgentTurnBubble: () => null }));
 // ─────────────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
+  vi.unstubAllGlobals();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([]) })),
+  );
   Object.keys(handlers).forEach((k) => delete handlers[k]);
   mockActiveTurnId = null;
   mockActiveSessionId = 'session-1';
@@ -322,7 +343,7 @@ describe('ChatInterface event wiring', () => {
     });
 
     expect(setContext).toHaveBeenCalledOnce();
-    expect(setContext).toHaveBeenCalledWith('You are a test assistant.', ['vfs_read', 'vfs_write']);
+    expect(setContext).toHaveBeenCalledWith('You are a test assistant.', ['vfs_read', 'vfs_write'], 'session-1');
   });
 
   it('subagent tool:start records session and agentRun metadata', () => {
@@ -345,7 +366,7 @@ describe('ChatInterface event wiring', () => {
     }));
   });
 
-  it('subagent tool:result does not append tool_result to active master session', () => {
+  it('subagent tool:result persists the child tool_result under the child session id', () => {
     render(<ChatInterface />);
 
     act(() => {
@@ -358,7 +379,11 @@ describe('ChatInterface event wiring', () => {
       });
     });
 
-    expect(addMessage).not.toHaveBeenCalled();
+    expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'child-session',
+      role: 'tool_result',
+      toolCallId: 'call-sub',
+    }));
   });
 
   it('session:created adds subagent session to the store', () => {
@@ -573,7 +598,7 @@ describe('chat:error two-path dispatch', () => {
     expect(markAgentTurnError).toHaveBeenCalledWith('turn-abc', {
       code: 'INTERRUPTED',
       message: 'Turn interrupted by user',
-    });
+    }, 'session-1');
     expect(removeLastAgentTurn).not.toHaveBeenCalled();
   });
 

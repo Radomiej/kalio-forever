@@ -125,7 +125,20 @@ export class VFSService {
 
     const copied: VFSCopiedFile[] = [];
     for (const fromPath of sourcePaths) {
-      const buffer = this.readBinary(req.fromSessionId, fromPath);
+      let buffer: Buffer;
+      try {
+        buffer = this.readBinary(req.fromSessionId, fromPath);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'VFS_FILE_NOT_FOUND' || code === 'ENOENT') {
+          const error = err instanceof Error ? err : new Error(String(err));
+          this.logger.warn(
+            `[VFSService] Skipping missing file during copy from ${req.fromSessionId}: ${fromPath} (${error.message})`,
+          );
+          continue;
+        }
+        throw err;
+      }
       const toPath = `${targetPrefix}/${fromPath}`;
       this.writeBinary(req.toSessionId, toPath, buffer);
       copied.push({ fromPath, toPath, sizeBytes: buffer.length });
