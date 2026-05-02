@@ -45,12 +45,12 @@ export class ImageGenerateTool {
     const { sessionId } = request;
 
     const prompt = request.args['prompt'] as string;
-    const model = (request.args['model'] as string | undefined) ?? 'flux-schnell';
+    const cfg = await this.imageConfig.getConfig();
+    const model = (request.args['model'] as string | undefined) ?? cfg.model ?? 'flux-schnell';
     const size = (request.args['size'] as string | undefined) ?? '1024x1024';
     const quality = (request.args['quality'] as 'low' | 'medium' | 'high' | undefined) ?? 'low';
     const output_format = (request.args['output_format'] as 'png' | 'jpeg' | 'webp' | undefined) ?? 'png';
 
-    const cfg = await this.imageConfig.getConfig();
     const apiKey = await this.imageConfig.getApiKey();
 
     if (!apiKey) {
@@ -91,7 +91,7 @@ export class ImageGenerateTool {
         model: result.model,
         size: result.size,
         format: result.format,
-        download_url: `/api/session-vfs/${sessionId}/download?path=${encodeURIComponent(vfsPath)}`,
+        download_url: `/api/sessions/${sessionId}/vfs/download?path=${encodeURIComponent(vfsPath)}`,
         message: `Image generated and saved to ${vfsPath}.`,
         output_type: 'image',
       };
