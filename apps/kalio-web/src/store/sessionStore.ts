@@ -40,6 +40,7 @@ interface SessionState {
   appendChunk: (messageId: string, delta: string, thinking?: boolean, chunkSessionId?: string) => void;
   finalizeChunk: (messageId: string) => void;
   flushThinkingChunks: () => void;
+  flushStreamingChunks: () => void;
   removeSession: (id: string) => void;
   updateSession: (id: string, patch: Partial<ChatSession>) => void;
   setPendingMessage: (message: string | null) => void;
@@ -251,6 +252,27 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         messages: s.messages.map((m) => {
           const thinkingContent = updates.find(([id]) => id === m.id)?.[1];
           return thinkingContent !== undefined ? { ...m, thinking: thinkingContent } : m;
+        }),
+      };
+    }),
+
+  // Called on tool:start — text streaming is done once the agent invokes a tool.
+  // Without this, streamingChunks stay populated (and the text cursor keeps blinking)
+  // when the LLM writes text then immediately calls a tool in the same response.
+  flushStreamingChunks: () =>
+    set((s) => {
+      if (Object.keys(s.streamingChunks).length === 0) return s;
+      const updates = Object.entries(s.streamingChunks);
+      const activeSessionId = s.activeSessionId;
+      return {
+        streamingChunks: {},
+        messages: s.messages.map((m) => {
+          const streamContent = updates.find(([id]) => id === m.id)?.[1];
+          // Only update messages belonging to the active session to avoid cross-session mutation
+          if (streamContent !== undefined && m.sessionId === activeSessionId) {
+            return { ...m, content: streamContent, streaming: false };
+          }
+          return m;
         }),
       };
     }),

@@ -133,7 +133,9 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
             const msg = messages.find((m) => m.id === messageId);
             if (!msg) return null;
             
-            const isStreaming = !turn.done;
+            // Use per-message streaming state: cursor blinks only while this message's
+            // chunk is still live (disappears as soon as agent calls a tool / thinking / raapp).
+            const isStreaming = streamingChunks[messageId] !== undefined;
             const displayContent = isStreaming ? (streamingChunks[messageId] ?? '') : msg.content;
 
             return (
