@@ -11,6 +11,8 @@ const GROUP_LABELS: Record<string, string> = {
   raapp: 'RA-Apps',
   agent: 'Agent',
   websearch: 'Web Search',
+  tools: 'Tools',
+  images: 'Images',
   other: 'Other',
 };
 
@@ -23,6 +25,8 @@ function deriveGroup(name: string): string {
   if (name.startsWith('raapp_') || name === 'run_raapp' || name === 'list_raapps') return 'raapp';
   if (name === 'run_subagent' || name === 'run_cli_agent') return 'agent';
   if (name === 'web_search') return 'websearch';
+  if (name === 'list_tools' || name === 'get_tool_details') return 'tools';
+  if (name.startsWith('image_')) return 'images';
   return 'other';
 }
 
