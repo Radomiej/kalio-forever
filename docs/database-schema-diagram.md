@@ -1,42 +1,44 @@
-# Kalio Database Schema - Entity Relationship Diagram
+# Database Schema Diagram
+
+Kalio uses **SQLite** via **Drizzle ORM**. Schema source of truth: `apps/kalio-api/src/database/schema.ts`.  
+All migrations live in `apps/kalio-api/src/database/migrations/`.
+
+---
+
+## Entity Relationship Diagram
 
 ```mermaid
 erDiagram
-    personas ||--o{ sessions : "persona_id (cascade)"
-    personas ||--o{ persona_kv : "persona_id (cascade)"
-    personas ||--o{ agent_loops : "persona_id (cascade)"
-    sessions ||--o{ messages : "session_id (cascade)"
-    agent_loops ||--o{ agent_tasks : "loop_id (cascade)"
-    agent_loops ||--o{ agent_iterations : "loop_id (cascade)"
 
     personas {
         text id PK
         text name
         text system_prompt
         text model
-        text skills "JSON"
-        integer created_at "timestamp_ms"
-        integer updated_at "timestamp_ms"
+        json skills
+        text mcp_policy
+        integer created_at
+        integer updated_at
     }
 
     sessions {
         text id PK
         text persona_id FK
         text title
-        integer created_at "timestamp_ms"
-        integer updated_at "timestamp_ms"
+        integer created_at
+        integer updated_at
     }
 
     messages {
         text id PK
         text session_id FK
-        text role "enum: user|assistant|tool_result|system"
+        text role
         text content
         text thinking
-        text tool_calls "JSON"
+        json tool_calls
         text tool_call_id
-        text attachments "JSON"
-        integer created_at "timestamp_ms"
+        json attachments
+        integer created_at
     }
 
     persona_kv {
@@ -44,24 +46,13 @@ erDiagram
         text persona_id FK
         text key
         text value
-        integer updated_at "timestamp_ms"
+        integer updated_at
     }
 
     app_settings {
         text key PK
         text value
-        integer updated_at "timestamp_ms"
-    }
-
-    embedding_credentials {
-        text id PK
-        text name
-        text provider
-        text api_key
-        text base_url
-        text model
-        integer dimensions "default: 1536"
-        integer created_at "timestamp_ms"
+        integer updated_at
     }
 
     credentials {
@@ -71,23 +62,34 @@ erDiagram
         text api_key
         text base_url
         text model
-        integer created_at "timestamp_ms"
+        integer created_at
+    }
+
+    embedding_credentials {
+        text id PK
+        text name
+        text provider
+        text api_key
+        text base_url
+        text model
+        integer dimensions
+        integer created_at
     }
 
     mcp_servers {
         text id PK
         text name
-        text transport "enum: stdio|http"
+        text transport
         text url
         text command
-        text args "JSON"
-        text env_vars "JSON"
-        text headers "JSON"
-        integer enabled "boolean"
-        text status "enum: connecting|connected|disconnected|error|stopped"
+        json args
+        json env_vars
+        json headers
+        integer enabled
+        text status
         integer tool_count
         text last_error
-        integer created_at "timestamp_ms"
+        integer created_at
     }
 
     skills {
@@ -95,121 +97,103 @@ erDiagram
         text name
         text description
         text prompt
-        text source "enum: user|agent"
-        integer created_at "timestamp_ms"
-        integer updated_at "timestamp_ms"
+        text source
+        integer created_at
+        integer updated_at
     }
 
-    agent_loops {
-        text id PK
-        text name
-        text persona_id FK
-        text system_prompt
-        text status "enum: idle|running|paused|stopped|error|completed"
-        text config "JSON"
-        text current_task_id
-        text chat_session_id
-        integer iteration_count
-        integer created_at "timestamp_ms"
-        integer updated_at "timestamp_ms"
-    }
-
-    agent_tasks {
-        text id PK
-        text loop_id FK
-        text title
-        text description
-        integer priority
-        text status "enum: pending|running|done|failed|skipped"
-        text result_summary
-        integer order_index
-        integer created_at "timestamp_ms"
-        integer updated_at "timestamp_ms"
-    }
-
-    agent_iterations {
-        text id PK
-        text loop_id FK
-        text task_id
-        integer iteration_number
-        text action "enum: execute_task|pause|resume|error|watchdog"
-        text prompt_used
-        text result_summary
-        integer duration_ms
-        integer created_at "timestamp_ms"
+    tool_overrides {
+        text tool_name PK
+        integer requires_confirmation
+        integer updated_at
     }
 
     allowed_paths {
         text id PK
         text path
-        integer created_at "timestamp_ms"
+        integer created_at
     }
 
     raapp_pending_approvals {
         text id PK
-        text session_id
+        text session_id FK
         text tool_call_id
         text system
-        text args "JSON"
+        json args
         text output_path
         text display_label
-        text status "enum: pending|approved|cancelled|executed|error"
-        text result "JSON"
-        integer created_at "timestamp_ms"
+        text status
+        json result
+        integer created_at
     }
 
     audit_log {
         text id PK
         text session_id
-        text type "enum: llm_request|llm_response|tool_call|tool_result|error|raapp_native_call|raapp_native_approved"
+        text type
         text label
-        text data "JSON"
+        json data
         integer duration_ms
-        integer created_at "timestamp_ms"
+        integer chunk_count
+        integer created_at
     }
+
+    personas ||--o{ sessions : "has"
+    sessions ||--o{ messages : "contains"
+    personas ||--o{ persona_kv : "stores"
+    sessions ||--o{ raapp_pending_approvals : "generates"
 ```
 
-## Schema Overview
+---
 
-The Kalio database consists of 15 tables organized into the following functional groups:
+## Table Reference
 
-### Core Chat System
-- **personas**: AI agent configurations with system prompts, models, and skills
-- **sessions**: Chat sessions linked to personas
-- **messages**: Individual messages within sessions with role, content, and optional tool calls
+### `personas`
+Stores AI personas. Each persona defines a system prompt, a default model, an MCP access policy, and an optional list of allowed skills.
 
-### Agent Automation
-- **agent_loops**: Long-running agent processes with status tracking
-- **agent_tasks**: Individual tasks within agent loops
-- **agent_iterations**: Execution history of agent loop iterations
+### `sessions`
+Chat sessions. Each session belongs to one persona. Scopes all messages, VFS files (`sessions/{id}/files/`), and KV state (`sessions/{id}/_kv.json`).
 
-### Configuration & Credentials
-- **credentials**: LLM provider credentials
-- **embedding_credentials**: Embedding provider credentials (separate from LLM credentials)
-- **mcp_servers**: Model Context Protocol server configurations
-- **skills**: Reusable skill prompts that can be attached to personas
-- **app_settings**: Global application key-value settings
-- **allowed_paths**: Filesystem paths the agent is permitted to access
+### `messages`
+Ordered turn history per session. `role` can be `user`, `assistant`, `tool_result`, or `system`. Stores tool call metadata and file attachments.
 
-### Persona Metadata
-- **persona_kv**: Key-value storage for persona-specific data
+### `persona_kv`
+Key-value store per persona. Used by the `kv_*` tools (LLM-writable persistent state).
 
-### Audit & Approval
-- **audit_log**: System event logging (LLM requests, tool calls, errors, etc.)
-- **raapp_pending_approvals**: Pending approval requests for native system calls
+### `app_settings`
+Single-table key-value config store. Used for persisting global settings (e.g. default model).
 
-## Foreign Key Relationships
+### `credentials`
+LLM provider API keys + base URLs. Referenced when building LLM clients for chat sessions.
 
-| Child Table | Foreign Key | Parent Table | On Delete |
-|-------------|-------------|--------------|-----------|
-| sessions | persona_id | personas | CASCADE |
-| persona_kv | persona_id | personas | CASCADE |
-| agent_loops | persona_id | personas | CASCADE |
-| messages | session_id | sessions | CASCADE |
-| agent_tasks | loop_id | agent_loops | CASCADE |
-| agent_iterations | loop_id | agent_loops | CASCADE |
+### `embedding_credentials`
+Embedding provider API keys (OpenAI, custom). Used by `MemoryModule` for vector storage.
 
-## Indexes
+### `mcp_servers`
+MCP server configs. `MCPService` reads this on boot and connects to all `enabled` servers.  
+`status` is live-updated and broadcast via Socket.IO events.
 
-- `raapp_pending_approvals(session_id)`
-- `raapp_pending_approvals(status)`
+### `skills`
+User- or agent-defined prompt snippets injected into the system prompt. Also used as an `allow_list` filter for native and MCP tools.
+
+### `tool_overrides`
+Per-tool overrides for the `requiresConfirmation` flag (primary key: `tool_name`). Allows users to disable HITL for specific tools or enable it for safe-by-default ones.
+
+### `allowed_paths`
+Filesystem roots the agent can access via `fs_*` tools. Enforced by `AllowedPathsService` before any read/write.
+
+### `raapp_pending_approvals`
+Stores `call_native` approval requests that require explicit user confirmation before the tool executes. Status transitions: `pending → approved | cancelled | executed | error`.
+
+### `audit_log`
+Full audit trail per session. Records every LLM request/response, tool call, tool result, and error with timing and token data.  
+`type` enum: `llm_request`, `llm_response`, `tool_call`, `tool_result`, `error`, `raapp_native_call`, `raapp_native_approved`.
+
+---
+
+## Notes
+
+- All timestamps use `integer({ mode: 'timestamp_ms' })` — Unix milliseconds stored as integers.
+- `api_key` fields are stored in plaintext in the MVP. Post-MVP plan: `libsodium` secretbox encryption.
+- `sessions` and `messages` cascade-delete: removing a persona removes all its sessions and messages.
+- There is no `workspaceId` — session is the unit of isolation.

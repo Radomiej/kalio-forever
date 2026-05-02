@@ -35,10 +35,9 @@ graph TB
         BaseProvider["BaseOpenAICompatibleProvider"]
         MockProvider["MockLLMProvider"]
         OpenRouter["OpenRouterProvider"]
-        CometAPI["CometAPIProvider"]
         OpenAI["OpenAIProvider"]
         Ollama["OllamaProvider"]
-        XiaomiMiMo["XiaomiMiMoProvider"]
+        Perplexity["PerplexityProvider"]
     end
 
     subgraph Tools["Tool Implementations"]
@@ -87,10 +86,9 @@ graph TB
     ILLMProvider --> BaseProvider
     ILLMProvider --> MockProvider
     ILLMProvider --> OpenRouter
-    ILLMProvider --> CometAPI
     ILLMProvider --> OpenAI
     ILLMProvider --> Ollama
-    ILLMProvider --> XiaomiMiMo
+    ILLMProvider --> Perplexity
 
     %% Tool Registry & Dispatch
     ToolRegistry --> ToolDispatch
@@ -131,7 +129,7 @@ graph TB
 
     class ChatInterface,ChatInput,MessageBubble,AgentTurnBubble,ToolCallBubble,EventBus,SessionStore,AgentStore frontend
     class ChatGateway,ChatService,LLMService,ToolRegistry,ToolDispatch,MCPService,ForeverAgent,AgentLoopService backend
-    class ILLMProvider,BaseProvider,MockProvider,OpenRouter,CometAPI,OpenAI,Ollama,XiaomiMiMo providers
+    class ILLMProvider,BaseProvider,MockProvider,OpenRouter,OpenAI,Ollama,Perplexity providers
     class VFS,FS,KV,Search,Terminal,RAApp,Memory,Subagent tools
     class MCPClient,MCPTools,MCPService mcp
     class Sessions,Messages,AgentLoops,AgentTasks,MCPServers database

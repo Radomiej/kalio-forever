@@ -1,84 +1,140 @@
+<div align="center">
+
 # Kalio
 
-> Local-first AI workspace. Chat with agents that have memory, tools, and a real filesystem.
+**Local-first AI workspace — chat with agents that have real memory, real tools, and a real filesystem.**
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)](https://nestjs.com/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![pnpm](https://img.shields.io/badge/pnpm-9-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
+
+</div>
 
 ---
 
-## What is Kalio?
+Kalio is a **self-hosted AI agent workspace** that connects a streaming React chat interface to a NestJS backend capable of executing real tools: reading and writing files, calling external APIs, running subprocesses, querying a vector memory store, and rendering interactive mini-applications — all with a Human-in-the-Loop confirmation gate for destructive operations.
 
-Kalio is a local-first AI workspace where you delegate tasks to LLM-powered agents through a real-time chat interface. Agents can:
+Every chat session gets its own sandboxed filesystem. Every persona has isolated system prompts, tool access rules, and semantic memory. Any MCP (Model Context Protocol) server can be connected and its tools appear in the agent's toolbox instantly.
 
-- **Stream responses** with sub-second chunk latency
-- **Execute tools** with a Human-in-the-Loop (HITL) confirmation gate
-- **Read and write files** via a sandboxed Virtual File System (VFS)
-- **Switch personas** — isolated system prompts, model configs, and tool sets
-- **Discover new tools** dynamically via MCP (Model Context Protocol)
-- **Render interactive mini-apps** with a built-in GUI DSL (RA-App)
-- **Remember context** using per-persona vector memory (semantic + episodic)
-- **Attach images** for multimodal conversations
-
-All LLM traffic stays local — no cloud relay, no data leaving your machine except the LLM API call itself.
+> **No cloud relay.** LLM traffic goes directly from your backend to the API. Nothing else leaves your machine.
 
 ---
 
-## Tech Stack
+## Features
 
-| Layer | Technology |
-|---|---|
-| **Monorepo** | Turborepo + pnpm workspaces |
-| **Backend** | NestJS 11 + Socket.IO + Drizzle ORM |
-| **Database** | SQLite (better-sqlite3) + sqlite-vec for semantic memory |
-| **Frontend** | React 19 + Vite 6 + TailwindCSS 4 + daisyUI 5 |
-| **State** | Zustand 5 |
-| **Testing** | Vitest (unit/integration) + Playwright (E2E) |
-| **Contracts** | `@kalio/types` — single source of truth for all BE↔FE types |
+<table>
+<tr>
+<td width="50%">
+
+**🤖 Agentic loop**  
+Up to 8 tool-call hops per turn. The LLM plans, calls tools, reads results, and iterates until it's done — or asks you.
+
+**⚡ Sub-second streaming**  
+Every token arrives live via Socket.IO. The first chunk appears before the full response is generated.
+
+**🛡️ Human-in-the-Loop (HITL)**  
+Destructive tools (`fs_delete`, `terminal_exec`, `raapp_call_native`, …) pause and prompt for confirmation before executing.
+
+**📁 Virtual File System**  
+Each session gets a sandboxed workspace at `sessions/{id}/files/`. Agents read, write, list, and search files without ever leaving the sandbox.
+
+**🧠 Semantic memory**  
+Per-persona vector store powered by `sqlite-vec`. Agents embed episodic memories and retrieve them by meaning, not just keyword.
+
+</td>
+<td width="50%">
+
+**🎭 Personas**  
+Fully isolated system prompts, default models, MCP policies, skills, and tool access per persona.
+
+**🔌 MCP — dynamic tool discovery**  
+Connect any Model Context Protocol server (stdio or HTTP). Tools appear in the agent's toolset immediately with automatic prefixing and HITL inheritance.
+
+**📺 RA-App renderer**  
+Agents can produce interactive mini-apps: raw HTML iframes with `postMessage` bridge back to chat, or a declarative GUI DSL that renders as structured UI.
+
+**🖼️ Image generation + vision**  
+Attach images to messages. Generate images via any compatible API. Agents can inspect and describe image content.
+
+**🤖 CLI agent runner**  
+Invoke Copilot, Claude Code, Gemini CLI, or any subprocess-based agent directly from chat. Live streaming output captured in real time.
+
+</td>
+</tr>
+</table>
 
 ---
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────┐
-│  kalio-web (React 19 + Vite 6)              │
-│  ├─ Chat (streaming, attachments, turns)     │
-│  ├─ Canvas (tool output, CLI live view)      │
-│  ├─ Persona selector                         │
-│  ├─ VFS explorer                             │
-│  ├─ MCP server panel                         │
-│  ├─ RA-App renderer (GUI DSL + HTML)         │
-│  ├─ Memory & Observability pages             │
-│  └─ Settings / HITL confirmation dialogs     │
-└──────────────┬──────────────────────────────┘
-               │ Socket.IO  (@kalio/sdk)
-┌──────────────▼──────────────────────────────┐
-│  kalio-api (NestJS 11)                      │
-│  ├─ ChatModule   (sessions, agentic loop)    │
-│  ├─ LLMModule    (OpenAI-compatible / Mock)  │
-│  ├─ ToolModule   (registry, HITL gate)       │
-│  ├─ VFSModule    (per-session filesystem)    │
-│  ├─ PersonaModule(prompts, models, skills)   │
-│  ├─ MCPModule    (dynamic tool discovery)    │
-│  ├─ RAAppModule  (DSL executor, sandbox)     │
-│  ├─ MemoryModule (vector + episodic)         │
-│  ├─ ImageModule  (generation + viewing)      │
-│  ├─ CLIAgentModule (subprocess runner)       │
-│  └─ CredentialsModule (API key vault)        │
-└─────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/kalio_module_architecture.svg" alt="Kalio module architecture — Frontend thin client communicates with NestJS backend via Socket.IO" width="700"/>
+</p>
 
-Socket event flow: `chat:send` → `chat:context` → `chat:chunk` → `tool:start` → `tool:result` → `chat:complete`
+The frontend is a **thin client** — it renders state, dispatches events, and never runs business logic. All intelligence, tool execution, memory, and I/O live in the backend.
 
 ---
 
-## Data Storage
+## How It Works — Streaming Event Flow
 
-| Storage | Purpose | Default path |
-|---|---|---|
-| **Relational DB** | Sessions, messages, personas, credentials, audit log | `./data/kalio.db` |
-| **Vector memory** | Per-persona semantic embeddings (RAG) | `./data/memory/{personaId}.db` |
-| **VFS** | Per-session sandboxed file workspace | `./data/workspaces/sessions/{sessionId}/files/` |
+Every user message triggers this pipeline:
 
-All paths are configurable via `.env`.
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FE as Frontend
+    participant GW as ChatGateway
+    participant CS as ChatService
+    participant LLM as LLMService
+    participant T as ToolModule
+
+    U->>FE: type + send message
+    FE->>GW: chat:send {sessionId, content, attachments}
+    GW-->>FE: chat:context {systemPrompt, toolNames}
+
+    GW->>CS: handleTurn()
+    CS->>LLM: streamChat(messages, toolMetas)
+
+    loop streaming tokens
+        LLM-->>CS: text_delta
+        CS-->>GW: chat:chunk {delta, done=false}
+        GW-->>FE: chat:chunk (live render)
+    end
+
+    note over CS,T: LLM decides to call a tool
+
+    CS-->>GW: tool:start {callId, toolName, args}
+    GW-->>FE: tool:start (spinner appears)
+
+    CS->>T: dispatch(toolName, args)
+
+    alt requiresConfirmation = true
+        T-->>FE: hitl:confirm_request
+        FE-->>T: hitl:confirm_response (approve / cancel)
+    end
+
+    T-->>CS: ToolResult {status, data}
+    CS-->>GW: tool:result {callId, status, data}
+    GW-->>FE: tool:result (expand card)
+
+    CS->>LLM: continue stream with tool result
+    LLM-->>CS: final tokens
+    CS-->>GW: chat:complete
+    GW-->>FE: chat:complete
+```
+
+---
+
+## Human-in-the-Loop Gate
+
+<p align="center">
+  <img src="docs/kalio_hitl_gate_flow.svg" alt="HITL confirmation gate flow" width="600"/>
+</p>
+
+Tools marked `requiresConfirmation: true` are paused before execution. The user sees a confirmation dialog with the tool name, arguments, and a clear approve/cancel choice. The agent waits. If cancelled, `TOOL_CANCELLED` is injected into the conversation context.
 
 ---
 
@@ -86,12 +142,14 @@ All paths are configurable via `.env`.
 
 ### Requirements
 
-- Node.js >= 22
-- pnpm >= 9
+- Node.js ≥ 22
+- pnpm ≥ 9
 
 ### 1. Install
 
 ```bash
+git clone https://github.com/your-org/kalio-forever.git
+cd kalio-forever
 pnpm install
 ```
 
@@ -99,51 +157,66 @@ pnpm install
 
 ```bash
 cp .env.example .env
-# Edit .env — set LLM_PROVIDER and LLM_API_KEY
-# Use LLM_PROVIDER=mock to run fully offline (no API key needed)
 ```
+
+Open `.env` and set at minimum:
+
+```env
+LLM_PROVIDER=openai          # or: mock | openrouter | ollama | perplexity
+LLM_API_KEY=sk-...
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+WORKSPACE_ROOT=./data
+```
+
+> Use `LLM_PROVIDER=mock` to run fully offline with no API key — great for development and testing.
 
 ### 3. Run
 
 ```bash
-# Windows
+# Windows (starts both API :3016 and Web :5188)
 .\start-dev.ps1
 
-# or manually (two terminals)
-cd apps/kalio-api && pnpm start:dev
+# macOS / Linux
+cd apps/kalio-api && pnpm start:dev &
 cd apps/kalio-web && pnpm dev
 ```
 
-- API: http://localhost:3016
-- Web: http://localhost:5188
+Open **http://localhost:5188** and start chatting.
 
-### 4. Test
+### 4. Run Tests
 
 ```bash
-pnpm test        # unit + integration tests (Vitest)
-pnpm test:e2e    # end-to-end tests (Playwright — requires running servers)
+pnpm test           # unit + integration (Vitest)
+pnpm test:e2e       # end-to-end (Playwright — servers must be running)
 ```
 
 ---
 
 ## LLM Providers
 
-Any OpenAI-compatible endpoint works. Set in `.env`:
+Any OpenAI-compatible endpoint works out of the box.
 
-```env
-LLM_PROVIDER=openai
-LLM_API_KEY=sk-...
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
-```
-
-| Provider | `LLM_PROVIDER` value | Notes |
+| Provider | `LLM_PROVIDER` | Notes |
 |---|---|---|
-| **Mock** | `mock` | Fully offline, ideal for dev/tests |
-| **OpenAI** | `openai` | Standard GPT models |
-| **OpenRouter** | `openrouter` | 200+ models via one API |
-| **Ollama** | `ollama` | Local models (llama3, qwen3, etc.) |
-| **Perplexity** | `perplexity` | Search-augmented models |
+| **Mock** | `mock` | Fully offline. Echoes back messages. Ideal for tests. |
+| **OpenAI** | `openai` | GPT-4o, GPT-4.1, o3-mini, … |
+| **OpenRouter** | `openrouter` | 200+ models via one key. Set `LLM_BASE_URL=https://openrouter.ai/api/v1`. |
+| **Ollama** | `ollama` | Local models (llama3, qwen3, deepseek-r2, …). Set `LLM_BASE_URL=http://localhost:11434/v1`. |
+| **Perplexity** | `perplexity` | Search-augmented sonar models. |
+
+For image generation, set `IMAGE_PROVIDER` and `IMAGE_API_KEY` separately (same format).
+
+---
+
+## Data Storage
+
+| Storage | Purpose | Default path |
+|---|---|---|
+| `kalio.db` | Sessions, messages, personas, credentials, audit log | `$WORKSPACE_ROOT/kalio.db` |
+| `memory/{personaId}.db` | Vector embeddings per persona (sqlite-vec RAG) | `$WORKSPACE_ROOT/memory/` |
+| `sessions/{id}/files/` | Per-session sandboxed file workspace | `$WORKSPACE_ROOT/sessions/` |
+| `sessions/{id}/_kv.json` | Agent-writable key-value store | (same root) |
 
 ---
 
@@ -153,61 +226,81 @@ LLM_MODEL=gpt-4o-mini
 kalio-forever/
 ├── apps/
 │   ├── kalio-api/          # NestJS 11 backend
+│   │   └── src/
+│   │       ├── modules/    # one folder per domain (chat, persona, vfs, tool, …)
+│   │       └── database/   # schema.ts + migrations/
 │   ├── kalio-web/          # React 19 frontend
+│   │   └── src/
+│   │       ├── features/   # React feature folders
+│   │       ├── store/      # Zustand stores
+│   │       └── services/   # eventBus, apiClient
 │   └── e2e/                # Playwright E2E tests
 ├── packages/
 │   ├── @kalio/types/       # Shared type contracts (DTOs, Socket events)
 │   └── @kalio/sdk/         # Socket.IO client wrapper
-├── docs/
-│   ├── sessions/           # Development session logs (agentic history)
-│   ├── spec/               # Design specs
-│   └── assets/             # Screenshots & GIFs
-├── scripts/
-│   └── code-audit/         # Automated architecture health report
+├── docs/                   # Architecture diagrams and specs
+├── scripts/code-audit/     # Automated LOC and architecture health audit
 ├── AGENTS.md               # Architecture rules for AI coding agents
-├── .env.example            # Environment template (no real keys)
-└── turbo.json              # Turborepo pipeline config
+├── CONTRIBUTING.md         # Developer guide
+├── CODE_OF_CONDUCT.md
+└── .env.example
 ```
 
 ---
 
-## Contributing
+## Documentation
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full guide. Quick summary:
-
-1. Read `AGENTS.md` — architecture rules enforced by CI
-2. TDD: write the failing test first, then make it pass
-3. 500 LOC hard limit per file (tests exempt)
-4. Zero cross-module imports — use `@kalio/types` for all shared contracts
-5. No `any` in TypeScript — use `unknown` + narrowing
+| Doc | What it covers |
+|---|---|
+| [AGENTS.md](./AGENTS.md) | Architecture invariants enforced in every PR (AI-readable) |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Setup, TDD workflow, tool registration, PR checklist |
+| [docs/chat-streaming-tools-architecture.md](./docs/chat-streaming-tools-architecture.md) | LLM streaming + tool dispatch deep-dive |
+| [docs/chat-message-flow.md](./docs/chat-message-flow.md) | Socket.IO event flow diagram |
+| [docs/mcp-architecture.md](./docs/mcp-architecture.md) | MCP integration: discovery, lifecycle, per-persona policy |
+| [docs/database-schema-diagram.md](./docs/database-schema-diagram.md) | Full ERD with all 13 tables |
+| [docs/tool-architecture.md](./docs/tool-architecture.md) | Tool registration pattern and dispatch pipeline |
+| [docs/cli-agent-module-architecture.md](./docs/cli-agent-module-architecture.md) | CLI agent module: adapters, config schema, output streaming |
 
 ---
 
 ## Roadmap
 
-- [x] Core chat + streaming (Socket.IO, sub-second latency)
-- [x] Tool system with HITL confirmation gate
+- [x] Streaming chat with sub-second latency (Socket.IO)
+- [x] Agentic loop with tool execution (up to 8 hops)
+- [x] Human-in-the-Loop confirmation gate
 - [x] Virtual File System (per-session sandboxed)
-- [x] Persona system (prompts, model configs, skills)
-- [x] MCP dynamic tool discovery
-- [x] RA-App renderer (GUI DSL + HTML iframes)
-- [x] Semantic memory (sqlite-vec RAG)
-- [x] Image generation + multimodal input
-- [x] CLI agent subprocess runner
-- [x] Observability (audit log, token usage)
-- [ ] Auth / JWT (post-MVP)
-- [ ] PostgreSQL migration (Drizzle adapter ready)
+- [x] Persona system (system prompts, model configs, skills)
+- [x] MCP dynamic tool discovery (stdio + HTTP transport)
+- [x] RA-App renderer (HTML iframes + GUI DSL)
+- [x] Semantic memory (sqlite-vec RAG + episodic)
+- [x] Image generation and multimodal input
+- [x] CLI agent subprocess runner (Copilot, Claude Code, …)
+- [x] Full audit log with token usage and timing
+- [ ] Auth / JWT session management (post-MVP)
+- [ ] PostgreSQL migration path (Drizzle adapter ready)
 - [ ] Remote VFS / S3 offload
-- [ ] Multi-user / team features
+- [ ] Multi-user / team workspace features
+
+---
+
+## Contributing
+
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a PR. Key rules:
+
+1. **TDD** — write a failing test that reproduces the bug, then fix it
+2. **500 LOC hard limit** per file (tests exempt)
+3. **Zero cross-module imports** — all shared contracts go through `@kalio/types`
+4. **No `any`** in TypeScript — use `unknown` + narrowing
+5. **No empty catch blocks** — always log with context
 
 ---
 
 ## License
 
-MIT
+[MIT](./LICENSE)
 
 ---
 
 ## Code of Conduct
 
-See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
+See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md). We follow the Contributor Covenant 2.1.

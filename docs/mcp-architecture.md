@@ -1,24 +1,24 @@
 # MCP Architecture
 
-Dokument opisuje jak działa integracja MCP (Model Context Protocol) w kalio-forever v2 — od konfiguracji serwerów przez discovery narzędzi aż po wywołanie ich przez LLM.
+This document describes how MCP (Model Context Protocol) integration works in Kalio — from server configuration and tool discovery through to LLM-driven tool invocation.
 
 ---
 
-## Moduły i serwisy
+## Modules and Services
 
-| Serwis / klasa | Lokalizacja | Odpowiedzialność |
+| Service / Class | Location | Responsibility |
 |---|---|---|
-| `MCPService` | `modules/mcp/mcp.service.ts` | Lifecycle serwerów MCP: connect, reconnect, health-check, discovery |
+| `MCPService` | `modules/mcp/mcp.service.ts` | MCP server lifecycle: connect, reconnect, health-check, tool discovery |
 | `MCPController` | `modules/mcp/mcp.controller.ts` | REST API: `GET/POST /mcp/servers`, `DELETE /mcp/servers/:id`, `POST /mcp/servers/:id/restart`, `GET /mcp/tools` |
-| `MCPModule` | `modules/mcp/mcp.module.ts` | NestJS moduł; eksportuje `MCPService` |
-| `MCPWatchdogService` | `modules/mcp/mcp-watchdog.service.ts` | Stub watchdog (Phase 8) |
-| `ToolDispatchService` | `modules/chat/tool-dispatch.service.ts` | Łączy narzędzia natywne + MCP w jeden `getToolMetas()`; routuje `dispatch()` do natywnych lub MCP |
-| `ChatService` | `modules/chat/chat.service.ts` | Orkiestruje turę: filtruje narzędzia wg `MCPPolicy` persony, buduje `effectiveSystemPrompt` |
-| `ChatModule` | `modules/chat/chat.module.ts` | Importuje `MCPModule` — umożliwia `@Optional()` wstrzyknięcie `MCPService` do `ToolDispatchService` |
+| `MCPModule` | `modules/mcp/mcp.module.ts` | NestJS module; exports `MCPService` |
+| `MCPWatchdogService` | `modules/mcp/mcp-watchdog.service.ts` | Watchdog stub (planned Phase 8) |
+| `ToolDispatchService` | `modules/chat/tool-dispatch.service.ts` | Merges native + MCP tools into a single `getToolMetas()` call; routes `dispatch()` to either native tools or MCP servers |
+| `ChatService` | `modules/chat/chat.service.ts` | Orchestrates each turn: filters tools per `MCPPolicy`, builds `effectiveSystemPrompt` |
+| `ChatModule` | `modules/chat/chat.module.ts` | Imports `MCPModule` — enables `@Optional()` injection of `MCPService` into `ToolDispatchService` |
 
 ---
 
-## Typy danych (wire contracts — `@kalio/types`)
+## Wire Types (`@kalio/types`)
 
 ```ts
 type MCPPolicy = 'allow_all' | 'deny_all' | 'allow_list';
@@ -36,7 +36,7 @@ interface MCPServer {
 }
 
 interface MCPTool {
-  name: string;          // prefixowane: "mcp_{serverId}_{originalName}"
+  name: string;          // prefixed: "mcp_{serverId}_{originalName}"
   description: string;
   serverId: ID;
   requiresConfirmation: boolean;
@@ -46,65 +46,65 @@ interface MCPTool {
 interface CreateMCPServerDto {
   name: string;
   transport: 'stdio' | 'http';
-  url?: string;          // dla http
-  command?: string;      // dla stdio
+  url?: string;          // for http transport
+  command?: string;      // for stdio transport
   args?: string[];
   env?: Record<string, string>;
   headers?: Record<string, string>;
 }
 ```
 
-### Schemat bazy danych (`mcp_servers`)
+### Database Schema (`mcp_servers`)
 
-| Kolumna | Typ | Opis |
+| Column | Type | Description |
 |---|---|---|
-| `id` | TEXT PK | nanoid nadawany przy `addServer()` |
-| `name` | TEXT | Nazwa przyjazna (wyświetlana w UI) |
-| `transport` | `'stdio'\|'http'` | Typ transportu |
-| `url` | TEXT | URL dla http transport (np. `http://localhost:3000/mcp`) |
-| `command` | TEXT | Komenda dla stdio (np. `docker`) |
-| `args` | JSON | Argumenty komendy stdio |
-| `env_vars` | JSON | Zmienne środowiskowe (stdio) |
-| `headers` | JSON | Dodatkowe nagłówki HTTP |
-| `enabled` | BOOLEAN | Czy serwer łączyć przy starcie |
-| `status` | TEXT | Ostatnio znany status |
-| `tool_count` | INTEGER | Liczba wykrytych narzędzi |
-| `last_error` | TEXT | Ostatni błąd |
-| `created_at` | INTEGER | Unix ms |
+| `id` | TEXT PK | nanoid assigned at `addServer()` |
+| `name` | TEXT | Display name shown in UI |
+| `transport` | `'stdio'\|'http'` | Transport type |
+| `url` | TEXT | URL for http transport (e.g. `http://localhost:3000/mcp`) |
+| `command` | TEXT | Command for stdio transport (e.g. `docker`) |
+| `args` | JSON | stdio command arguments |
+| `env_vars` | JSON | Environment variables for stdio transport |
+| `headers` | JSON | Extra HTTP headers |
+| `enabled` | BOOLEAN | Whether to connect on startup |
+| `status` | TEXT | Last known connection status |
+| `tool_count` | INTEGER | Number of discovered tools |
+| `last_error` | TEXT | Last error message |
+| `created_at` | INTEGER | Unix timestamp (ms) |
 
 ---
 
-## Strategie dostępu MCP per-persona
+## Per-Persona MCP Access Strategy
 
-`personas.mcp_policy` (dodane w migracji `0005`) kontroluje jakie narzędzia MCP widzi LLM w danej sesji:
+`personas.mcp_policy` controls which MCP tools are visible to the LLM in any given session:
 
-| Wartość | Zachowanie |
+| Value | Behavior |
 |---|---|
-| `allow_all` | LLM widzi wszystkie narzędzia ze wszystkich połączonych serwerów MCP |
-| `deny_all` | LLM nie widzi żadnych narzędzi MCP |
-| `allow_list` | LLM widzi tylko te narzędzia MCP, których nazwy są w `persona.skills[]` |
+| `allow_all` | LLM sees all tools from all connected MCP servers |
+| `deny_all` | LLM sees no MCP tools |
+| `allow_list` | LLM sees only MCP tools whose names appear in `persona.skills[]` |
 
 ---
 
-## Konwencja nazewnictwa narzędzi
+## Tool Naming Convention
 
-Narzędzia MCP są **prefixowane** przy discovery:
+MCP tools are **prefixed** during discovery:
 
 ```
 mcp_{serverId}_{originalName}
 ```
 
-Przykład: serwer `abc123` z narzędziem `run_container` → `mcp_abc123_run_container`
+Example: server `abc123` with tool `run_container` → `mcp_abc123_run_container`
 
-Odwzorowanie przechowywane w `MCPService.toolNameMap: Map<prefixed, {serverId, originalName}>`.
+The mapping is stored in `MCPService.toolNameMap: Map<prefixedName, { serverId, originalName }>`.
 
-Przy wywołaniu: `dispatch("mcp_abc123_run_container", ...)` → `resolveToolName()` → `callTool("abc123", "run_container", args)`.
+At dispatch time: `dispatch("mcp_abc123_run_container", ...)` → `resolveToolName()` → `callTool("abc123", "run_container", args)`.
 
 ---
 
-## Diagramy
+## Diagrams
 
-### Startup — discovery narzędzi
+### Startup — tool discovery
 
 ```mermaid
 flowchart TD
@@ -118,12 +118,12 @@ flowchart TD
     H -- fail --> I[status = error\npersistStatus\nattemptRestart]
     H -- ok --> J[discoverTools\nclient.listTools]
     J --> K[prefix each tool\nmcp_serverId_name\nstore in toolNameMap]
-    K --> L[status = connected\npersistStatus\nemitStatus via Socket.IO]
+    K --> L[status = connected\npersistStatus\nemit status via Socket.IO]
     L --> M[healthTimer every 30s\nclient.listTools as ping]
     M -- fail --> I
 ```
 
-### Per-turn — od wiadomości do wywołania narzędzia
+### Per-turn — from message to tool call
 
 ```mermaid
 sequenceDiagram
@@ -137,14 +137,14 @@ sequenceDiagram
 
     FE->>GW: chat:send {sessionId, content, personaId}
     GW->>CS: handleTurn()
-    CS->>CS: getSessionConfig(personaId)\n→ systemPrompt, mcpPolicy, availableSkills
+    CS->>CS: getSessionConfig(personaId)\n→ systemPrompt, mcpPolicy, skills
     CS->>TD: getToolMetas()
     TD->>TD: static tools from toolMap
-    TD->>MCP: getAllTools()\n[connected servers only]
+    TD->>MCP: getAllTools() [connected servers only]
     MCP-->>TD: MCPTool[]
     TD-->>CS: ToolMeta[] (native + MCP merged)
-    CS->>CS: filterTools(mcpPolicy)\n allow_all / deny_all / allow_list
-    CS->>CS: build effectiveSystemPrompt\n+ ## Available tools section
+    CS->>CS: filterTools(mcpPolicy)\nallow_all / deny_all / allow_list
+    CS->>CS: build effectiveSystemPrompt\n+ Available tools section
     CS->>GW: emit chat:context {systemPrompt, toolNames}
     GW->>FE: chat:context
     CS->>LLM: stream({messages, tools: toolMetas})
@@ -177,17 +177,17 @@ sequenceDiagram
     GW->>FE: tool:result
 ```
 
-### Filtrowanie narzędzi per-persona
+### Per-persona tool filtering
 
 ```mermaid
 flowchart LR
-    ALL[Wszystkie narzędzia\nnative + MCP] --> SPLIT{split}
+    ALL[All tools\nnative + MCP] --> SPLIT{split}
     SPLIT --> NAT[Native tools\nnot startsWith mcp_]
     SPLIT --> MCPT[MCP tools\nstartsWith mcp_]
 
     NAT --> NS{skills == empty?}
-    NS -- Yes → all native --> MERGE
-    NS -- No → filter by skills[] --> MERGE
+    NS -- "Yes → all native" --> MERGE
+    NS -- "No → filter by skills[]" --> MERGE
 
     MCPT --> MP{mcpPolicy}
     MP -- allow_all --> MERGE
@@ -195,78 +195,5 @@ flowchart LR
     MP -- allow_list --> MF["filter: name in skills[]"]
     MF --> MERGE
 
-    MERGE[Filtered ToolMeta[]] --> LLM[LLM sees these tools]
+    MERGE["Filtered ToolMeta[]"] --> LLM[LLM sees these tools]
 ```
-
----
-
-## Znane ograniczenia i potencjalne problemy
-
-### 1. Brak paginacji w `discoverTools()`
-
-`client.listTools()` zwraca paginowane wyniki (pole `nextCursor`). Obecny kod wywołuje je raz:
-
-```ts
-const result = await client.listTools();  // tylko pierwsza strona!
-```
-
-Jeśli serwer MCP zwraca >N narzędzi (limit zależy od implementacji serwera, często 50–100), **pozostałe narzędzia nigdy nie są odkrywane**.
-
-Docker MCP Gateway ma 110 narzędzi — jeśli limit strony to ≤110, narzędzia mogą być pokazane w pełni. Ale przy dodaniu kolejnych serwerów lub wzroście liczby narzędzi problem się ujawni.
-
-**Fix**: Zapętlić `listTools()` i podążać za `nextCursor` aż `nextCursor === undefined`.
-
-### 2. Race condition na starcie
-
-`onModuleInit` łączy się z serwerami **asynchronicznie w tle** (`void Promise.allSettled(...)`). Jeśli pierwsze zapytanie chat trafi do API zanim serwery MCP się połączą, `getToolMetas()` zwróci pustą listę narzędzi MCP — agent ich nie zobaczy.
-
-**Fix**: Dla krytycznych serwerów można dodać flagę `awaitOnStartup` i await ich połączenia w `onModuleInit`.
-
-### 3. `requiresConfirmation` nie jest sprawdzane dla narzędzi MCP
-
-Narzędzia natywne przechodzą przez HITL check:
-```ts
-if (entry.meta.requiresConfirmation) { await this.awaitConfirmation(...) }
-```
-
-Narzędzia MCP **omijają ten check** — wywołują się natychmiast nawet jeśli `MCPTool.requiresConfirmation === true`.
-
-### 4. `chat:context` emituje oryginalny `systemPrompt` zamiast `effectiveSystemPrompt`
-
-```ts
-// chat.service.ts
-trackingEmit('chat:context', {
-  sessionId,
-  systemPrompt,         // ← brakuje sekcji ## Available tools
-  toolNames: toolMetas.map(t => t.name),
-});
-```
-
-Frontend nie widzi które narzędzia zostały dodane do promptu — utrudnia to debugowanie.
-
-### 5. Docker MCP Gateway — potencjalne przyczyny niewidoczności narzędzi
-
-Docker MCP Gateway to **agregujący serwer MCP** — wystawia narzędzia wszystkich swoich podłączonych serwerów jako jeden endpoint. Możliwe przyczyny problemów:
-
-| Przyczyna | Diagnoza | Rozwiązanie |
-|---|---|---|
-| Paginacja (>100 narzędzi) | `toolCount` w UI < rzeczywista liczba | Fix #1: paginacja |
-| Race na starcie | Narzędzia nie pokazują się po restarcie API | Fix #2: await connect |
-| `mcpPolicy: deny_all` na personie | Narzędzia widoczne w MCP tab ale nie w chacie | Sprawdzić persona settings |
-| Narzędzia MCP nie mają `requiresConfirmation` i HITL blokuje | Narzędzie nie wykonuje się | Fix #3 |
-| Transport auth | Gateway wymaga nagłówków / Bearer token | Dodać `headers` w konfiguracji serwera |
-
-**Szybka diagnoza**: po stronie API sprawdź `GET /api/mcp/tools` — jeśli zwraca 110 narzędzi, discovery działa. Następnie sprawdź `GET /api/tools` — powinien też zwracać te 110 jako MCP tools. Jeśli tak, problem leży w persona `mcpPolicy`.
-
----
-
-## REST API reference
-
-| Endpoint | Metoda | Opis |
-|---|---|---|
-| `/api/mcp/servers` | GET | Lista wszystkich skonfigurowanych serwerów |
-| `/api/mcp/servers` | POST | Dodaj serwer (`CreateMCPServerDto`) |
-| `/api/mcp/servers/:id` | DELETE | Usuń serwer i rozłącz |
-| `/api/mcp/servers/:id/restart` | POST | Reconnect serwera |
-| `/api/mcp/tools` | GET | Lista wszystkich odkrytych narzędzi (wszystkich serwerów) |
-| `/api/tools` | GET | Lista narzędzi NATYWNYCH + MCP merged (używane przez LLM) |

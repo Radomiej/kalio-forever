@@ -8,7 +8,7 @@ interface ToolGroup {
 }
 
 const TOOL_GROUPS: ToolGroup[] = [
-  { label: 'Agent',              match: (n) => n === 'run_subagent' },
+  { label: 'Agent',              match: (n) => n === 'run_subagent' || n === 'run_cli_agent' },
   { label: 'Virtual Filesystem', match: (n) => n.startsWith('vfs_') },
   { label: 'Filesystem',         match: (n) => n.startsWith('fs_') },
   { label: 'Key-Value Store',    match: (n) => n.startsWith('kv_') },
@@ -17,6 +17,8 @@ const TOOL_GROUPS: ToolGroup[] = [
   { label: 'Memory',             match: (n) => n.startsWith('memory_') },
   { label: 'Search',             match: (n) => n === 'grep_search' || n === 'file_search' },
   { label: 'Web',                match: (n) => n === 'web_search' },
+  { label: 'Tools',              match: (n) => n === 'list_tools' || n === 'get_tool_details' },
+  { label: 'Images',             match: (n) => n.startsWith('image_') },
 ];
 
 export function groupToolsByPrefix(tools: ToolMeta[]): Array<{ label: string; tools: ToolMeta[] }> {

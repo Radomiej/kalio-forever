@@ -2,10 +2,10 @@
  * ImageGenerationService — CometAPI / OpenAI-compatible multi-model image generation.
  * Supports: OpenAI standard (DALL-E, gpt-image), FLUX, Kling, Doubao, Qwen.
  *
- * Key design decision: CometAPI, OpenRouter and other OpenAI-compatible proxies
- * expose FLUX and Kling via the standard /v1/images/generations endpoint (no polling).
- * Replicate-style async prediction polling is ONLY used when provider='replicate'
- * (direct Replicate API).
+ * FLUX routing:
+ *   - CometAPI and unknown proxies → /replicate/v1/models/.../predictions (async polling)
+ *   - Native Replicate (api.replicate.com) → /v1/models/.../predictions (async polling)
+ *   - OpenRouter / OpenAI → /v1/images/generations (standard, no polling)
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { fetchAndConvertImage } from './image-utils';
@@ -68,16 +68,19 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   replicate:  'https://api.replicate.com/v1',
 };
 
+/** True when talking directly to api.replicate.com (not a proxy). */
+function isNativeReplicate(baseUrl: string, provider?: string): boolean {
+  return provider === 'replicate' || baseUrl.toLowerCase().includes('api.replicate.com');
+}
+
 /**
- * Returns true for providers that expose every model (including FLUX/Kling)
- * via the OpenAI-compatible /v1/images/generations endpoint, without async polling.
+ * True for providers that expose FLUX via the standard /v1/images/generations
+ * endpoint without async prediction polling (e.g. OpenRouter, OpenAI).
  */
-function isOpenAICompatProxy(baseUrl: string, provider?: string): boolean {
-  if (provider === 'replicate') return false;
-  const lower = (baseUrl ?? '').toLowerCase();
-  if (lower.includes('api.replicate.com')) return false;
-  // Any /v1-based URL is considered OpenAI-compatible
-  return lower.endsWith('/v1') || lower.includes('/v1/');
+function usesStandardEndpointForFlux(baseUrl: string, provider?: string): boolean {
+  if (provider === 'openrouter' || provider === 'openai') return true;
+  const lower = baseUrl.toLowerCase();
+  return lower.includes('openrouter.ai') || lower.includes('api.openai.com');
 }
 
 function inferProviderFromModel(modelName: string): string {
@@ -115,21 +118,25 @@ function getModelConfig(
 ): ImageModelConfig {
   const rawFamily = detectModelFamily(modelName);
 
-  // OpenAI-compatible proxies (CometAPI, OpenRouter, etc.) expose all models — including
-  // FLUX and Kling — via the standard /v1/images/generations endpoint without polling.
-  // Only use Replicate-native async predictions when talking to api.replicate.com directly.
+  // FLUX/Kling on OpenRouter or OpenAI → use standard /v1/images/generations (no polling).
+  // CometAPI and unknown proxies → use Replicate-style prediction polling.
   const family: ImageModelFamily =
-    (rawFamily === 'flux' || rawFamily === 'kling') && isOpenAICompatProxy(baseUrl, provider)
+    (rawFamily === 'flux' || rawFamily === 'kling') && usesStandardEndpointForFlux(baseUrl, provider)
       ? 'openai-standard'
       : rawFamily;
 
   switch (family) {
     case 'flux': {
-      // Replicate native — async predictions with polling
       const fluxModel = modelName.replace('black-forest-labs/', '');
+      // Native Replicate: /v1/models/... (no extra prefix, we're already on replicate.com)
+      // CometAPI and others: /replicate/v1/models/... (CometAPI proxies Replicate under this path)
+      const base = baseUrl.replace(/\/v1$/, '');
+      const endpoint = isNativeReplicate(baseUrl, provider)
+        ? `${base}/v1/models/black-forest-labs/${fluxModel}/predictions`
+        : `${base}/replicate/v1/models/black-forest-labs/${fluxModel}/predictions`;
       return {
         family,
-        endpoint: `${baseUrl.replace(/\/v1$/, '')}/v1/models/black-forest-labs/${fluxModel}/predictions`,
+        endpoint,
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
