@@ -76,7 +76,7 @@ function tryExtractHtmlTitle(content: string): string | null {
 }
 
 function tryExtractGuiTitle(content: string): string | null {
-  const titleAssignment = content.match(/(^|\n)\s*title\s*=\s*"([^"]+)"/i);
+  const titleAssignment = content.match(/(^|\n)\s*title\s*=\s*["']([^"']+)["']/i);
   if (titleAssignment?.[2]) {
     const cleaned = cleanTitle(titleAssignment[2]);
     if (cleaned.length > 0) return cleaned;
@@ -85,7 +85,7 @@ function tryExtractGuiTitle(content: string): string | null {
 }
 
 export function deriveGeneratedAppName(input: SaveGeneratedAppInput): string {
-  const explicit = input.title ? cleanTitle(input.title) : '';
+  const explicit = typeof input.title === 'string' ? cleanTitle(input.title) : '';
   const extracted =
     input.type === 'html'
       ? tryExtractHtmlTitle(input.content)

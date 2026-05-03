@@ -1,5 +1,5 @@
 /**
- * RAAppCoreCard — read-only card for core (git-tracked) RA-Apps.
+ * RAAppCoreCard — read-only catalog card for RA-Apps.
  * Shows name, version, description, tags and a Run button.
  */
 import { Play } from 'lucide-react';
@@ -7,14 +7,14 @@ import type { RAAppSummary } from '@kalio/types';
 
 export interface RAAppCoreCardProps {
   app: RAAppSummary;
-  onRun: (id: string) => void;
+  onRun: (name: string) => void;
 }
 
 export function RAAppCoreCard({ app, onRun }: RAAppCoreCardProps) {
   return (
     <div
       className="bg-base-200 rounded-lg p-3 flex flex-col gap-2"
-      data-testid={`raapp-core-${app.id}`}
+      data-testid={`raapp-catalog-${app.id}`}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -36,8 +36,8 @@ export function RAAppCoreCard({ app, onRun }: RAAppCoreCardProps) {
       <div className="pt-1 border-t border-base-300">
         <button
           className="btn btn-xs btn-primary w-full gap-1"
-          onClick={() => onRun(app.id)}
-          data-testid={`raapp-core-run-${app.id}`}
+          onClick={() => onRun(app.name)}
+          data-testid={`raapp-catalog-run-${app.id}`}
         >
           <Play size={10} />
           Run

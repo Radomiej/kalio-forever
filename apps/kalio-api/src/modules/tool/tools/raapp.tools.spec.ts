@@ -219,9 +219,11 @@ describe('REGRESSION: ra-apps persona skills include run_raapp and list_raapps',
 
 describe('RaAppCreateTool', () => {
   it('forwards optional title when saving generated app', async () => {
+    const execute = vi.fn().mockResolvedValue({ status: 'ready', renderedContent: '<html></html>' });
+    const saveGeneratedApp = vi.fn().mockResolvedValue({ id: 'generated-1' });
     const raapp = {
-      execute: vi.fn().mockResolvedValue({ status: 'ready', renderedContent: '<html></html>' }),
-      saveGeneratedApp: vi.fn().mockResolvedValue({ id: 'generated-1' }),
+      execute,
+      saveGeneratedApp,
     } as unknown as RAAppService;
     const tool = new RaAppCreateTool(raapp);
 
@@ -237,10 +239,18 @@ describe('RaAppCreateTool', () => {
       },
     });
 
-    expect((raapp as { saveGeneratedApp: ReturnType<typeof vi.fn> }).saveGeneratedApp).toHaveBeenCalledWith(
+    expect(execute).toHaveBeenCalledWith({
+      type: 'html',
+      mode: 'display',
+      content: '<html><head><title>Koty</title></head></html>',
+    });
+
+    expect(saveGeneratedApp).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Kocia Strona',
       }),
     );
+
+    expect(execute.mock.invocationCallOrder[0]).toBeLessThan(saveGeneratedApp.mock.invocationCallOrder[0]);
   });
 });

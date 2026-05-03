@@ -4,7 +4,8 @@ import { AppTile } from './AppTile';
 import { QuickChatWidget } from './QuickChatWidget';
 import { useTileIcons } from './useTileIcons';
 import { useSessionStore } from '../../store/sessionStore';
-import { apiClient } from '../../services/apiClient';
+import { apiClient, getRAApps, getRAAppGroups } from '../../services/apiClient';
+import { bucketCatalogApps } from '../raapp/catalog.utils';
 import type { ChatSession } from '@kalio/types';
 
 interface TileItem {
@@ -27,9 +28,45 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
 
   useEffect(() => {
     setLoading(true);
-    fetch('/api/ra-apps')
-      .then((r) => r.json())
-      .then((data: TileItem[]) => setTiles(data))
+    Promise.all([
+      getRAAppGroups().catch(() => []),
+      getRAApps().catch(() => []),
+    ])
+      .then(([groups, flatApps]) => {
+        const buckets = bucketCatalogApps(flatApps, groups);
+
+        const byId = new Map(flatApps.map((app) => [app.id, app]));
+        const groupedCurrent: TileItem[] = groups.map((group) => {
+          const currentId = group.current.meta.id;
+          const fromFlat = byId.get(currentId);
+          return {
+            id: currentId,
+            name: group.current.meta.name,
+            description: group.current.meta.description ?? fromFlat?.description ?? '',
+          };
+        });
+
+        const coreTiles: TileItem[] = buckets.coreApps.map((app) => ({
+          id: app.id,
+          name: app.name,
+          description: app.description,
+        }));
+
+        const userStandaloneTiles: TileItem[] = buckets.userStandaloneApps.map((app) => ({
+          id: app.id,
+          name: app.name,
+          description: app.description,
+        }));
+
+        const seen = new Set<string>();
+        const merged = [...groupedCurrent, ...coreTiles, ...userStandaloneTiles].filter((tile) => {
+          if (seen.has(tile.id)) return false;
+          seen.add(tile.id);
+          return true;
+        });
+
+        setTiles(merged);
+      })
       .catch(() => setTiles([]))
       .finally(() => setLoading(false));
   }, []);

@@ -69,7 +69,7 @@ export class RaAppCreateTool {
       content,
       mode: mode as 'display' | 'interactive',
       sessionId: request.sessionId,
-      title,
+      ...(title !== undefined && { title }),
     });
 
     return {

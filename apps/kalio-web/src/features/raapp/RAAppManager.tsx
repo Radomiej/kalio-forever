@@ -240,11 +240,11 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
         ))}
 
         {coreApps.map((app) => (
-          <RAAppCoreCard key={app.id} app={app} onRun={() => handleRun(app.name)} />
+          <RAAppCoreCard key={app.id} app={app} onRun={handleRun} />
         ))}
 
         {userStandaloneApps.map((app) => (
-          <RAAppCoreCard key={app.id} app={app} onRun={() => handleRun(app.name)} />
+          <RAAppCoreCard key={app.id} app={app} onRun={handleRun} />
         ))}
 
         {!catalogLoading && groups.length === 0 && coreApps.length === 0 && userStandaloneApps.length === 0 && (

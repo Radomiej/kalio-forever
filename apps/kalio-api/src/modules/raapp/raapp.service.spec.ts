@@ -46,6 +46,17 @@ describe('RAAppService', () => {
       expect(name).toBe('All About Cats');
     });
 
+    it('falls back to html <h1> when <title> is missing', () => {
+      const name = deriveGeneratedAppName({
+        type: 'html',
+        content: '<html><body><h1>Cat H1 Title</h1></body></html>',
+        mode: 'display',
+        sessionId: 'sid',
+      });
+
+      expect(name).toBe('Cat H1 Title');
+    });
+
     it('extracts title from gui DSL assignment', () => {
       const name = deriveGeneratedAppName({
         type: 'gui',
@@ -55,6 +66,52 @@ describe('RAAppService', () => {
       });
 
       expect(name).toBe('Koty - Dashboard');
+    });
+
+    it('falls back to extracted html title when explicit title is blank', () => {
+      const name = deriveGeneratedAppName({
+        type: 'html',
+        content: '<html><head><title>Real Title</title></head><body></body></html>',
+        mode: 'display',
+        sessionId: 'sid',
+        title: '   ',
+      });
+
+      expect(name).toBe('Real Title');
+    });
+
+    it('extracts title from gui DSL when using single quotes', () => {
+      const name = deriveGeneratedAppName({
+        type: 'gui',
+        content: "title = 'Koty - Single Quote'\nvbox { label { text = 'hello' } }",
+        mode: 'display',
+        sessionId: 'sid',
+      });
+
+      expect(name).toBe('Koty - Single Quote');
+    });
+
+    it('ignores non-string explicit title and falls back to extracted html title', () => {
+      const name = deriveGeneratedAppName({
+        type: 'html',
+        content: '<html><head><title>Fallback Title</title></head><body></body></html>',
+        mode: 'display',
+        sessionId: 'sid',
+        title: { bad: true } as unknown as string,
+      });
+
+      expect(name).toBe('Fallback Title');
+    });
+
+    it('returns generated fallback when nothing can be extracted', () => {
+      const name = deriveGeneratedAppName({
+        type: 'gui',
+        content: 'vbox { label { text = "no title" } }',
+        mode: 'display',
+        sessionId: 'sid',
+      });
+
+      expect(name).toMatch(/^Generated GUI /);
     });
   });
 

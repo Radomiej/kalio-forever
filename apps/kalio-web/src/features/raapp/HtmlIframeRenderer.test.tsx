@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { HtmlIframeRenderer } from './HtmlIframeRenderer';
 
 // ── sessionStore mock ───────────────────────────────────────────────────────
@@ -36,13 +36,15 @@ describe('HtmlIframeRenderer', () => {
     render(<HtmlIframeRenderer html="<p>Hello</p>" />);
     const iframe = screen.getByTestId('raapp-iframe');
     expect(iframe).toBeInTheDocument();
-    expect(iframe).toHaveAttribute('srcDoc', '<p>Hello</p>');
+    const srcDoc = iframe.getAttribute('srcDoc') ?? '';
+    expect(srcDoc).toContain('<p>Hello</p>');
+    expect(srcDoc).toContain("type:'raapp_resize'");
   });
 
-  it('has sandbox attribute allowing scripts and same-origin', () => {
+  it('has sandbox attribute allowing scripts and modals', () => {
     render(<HtmlIframeRenderer html="<div></div>" />);
     const iframe = screen.getByTestId('raapp-iframe');
-    expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin');
+    expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-modals');
   });
 
   it('sets initial height to minHeight prop', () => {
@@ -55,5 +57,56 @@ describe('HtmlIframeRenderer', () => {
     render(<HtmlIframeRenderer html="<p>Test</p>" title="My App" />);
     const btn = screen.getByLabelText('Download HTML');
     expect(btn).toBeInTheDocument();
+  });
+
+  it('does not grow endlessly when resize events echo current iframe height', () => {
+    render(<HtmlIframeRenderer html="<p>Loop Guard</p>" minHeight={200} />);
+
+    const iframe = screen.getByTestId('raapp-iframe') as HTMLIFrameElement;
+    const source = iframe.contentWindow;
+
+    if (!source) {
+      throw new Error('Expected iframe contentWindow to be available in test environment');
+    }
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source,
+        data: { type: 'raapp_resize', height: 200 },
+      }),
+    );
+    expect(iframe.style.height).toBe('200px');
+
+    // A feedback loop would repost the same/near-same viewport height repeatedly.
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source,
+        data: { type: 'raapp_resize', height: 200 },
+      }),
+    );
+    expect(iframe.style.height).toBe('200px');
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source,
+        data: { type: 'raapp_resize', height: 201 },
+      }),
+    );
+    expect(iframe.style.height).toBe('200px');
+  });
+
+  it('opens and closes fullscreen modal', () => {
+    render(<HtmlIframeRenderer html="<p>Fullscreen</p>" title="My App" />);
+
+    const openBtn = screen.getByLabelText('Open fullscreen');
+    fireEvent.click(openBtn);
+
+    expect(screen.getByLabelText('RA-App fullscreen modal')).toBeInTheDocument();
+    expect(screen.getByTestId('raapp-iframe-fullscreen')).toBeInTheDocument();
+
+    const closeBtn = screen.getByLabelText('Close fullscreen');
+    fireEvent.click(closeBtn);
+
+    expect(screen.queryByTestId('raapp-iframe-fullscreen')).not.toBeInTheDocument();
   });
 });
