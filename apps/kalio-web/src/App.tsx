@@ -207,7 +207,7 @@ export function App() {
               {[
                 { id: 'native' as const, label: 'Native' },
                 { id: 'mcp' as const, label: 'MCP' },
-                { id: 'raapps' as const, label: 'RA-Apps' },
+                  { id: 'raapps' as const, label: 'RaConsierge' },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -229,7 +229,7 @@ export function App() {
               {toolsTab === 'mcp' && <MCPPanel onOpenSettings={() => openSettings('mcp')} />}
               {toolsTab === 'raapps' && (
                 <RAAppManager
-                  onOpenVFS={() => {/* RA-Apps catalog has no VFS */}}
+                  onOpenVFS={() => {/* RaConsierge catalog has no VFS */}}
                   onRunWithAgent={() => setActiveSection('talk')}
                 />
               )}
@@ -246,7 +246,7 @@ export function App() {
                 { id: 'files' as const, label: 'Files' },
                 { id: 'skills' as const, label: 'Skills' },
                 { id: 'personas' as const, label: 'Personas' },
-              ].map((t) => (
+                ].map((t) => (
                 <button
                   key={t.id}
                   data-testid={`mind-tab-${t.id}`}

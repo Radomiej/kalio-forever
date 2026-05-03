@@ -1,5 +1,5 @@
 /**
- * RAAppManager — dual-source RA-App browser.
+ * RAAppManager — dual-source RaConsierge browser.
  *
  * Two sections:
  *  1. Catalog  — stored apps fetched from /api/ra-apps (core + versioned user)
@@ -264,7 +264,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
       {sessionApps.length === 0 && (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center p-4">
           <RefreshCw size={24} className="text-base-content/20" />
-          <p className="text-sm text-base-content/40">No RA-Apps in current session</p>
+          <p className="text-sm text-base-content/40">No RaConsierge apps in current session</p>
           <p className="text-xs text-base-content/30">Ask the assistant to create an HTML or GUI app</p>
         </div>
       )}

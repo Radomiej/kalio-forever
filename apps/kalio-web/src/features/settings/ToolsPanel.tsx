@@ -106,7 +106,7 @@ export function ToolsPanel() {
           {probe?.available && (
             <div className="bg-base-200/60 rounded-md px-3 py-2 text-xs text-base-content/60 leading-relaxed space-y-1">
               <p>
-                Use the <strong>Dev</strong> persona to access <code className="font-mono">run_cli_agent</code>.
+                Use the <strong>Fullstack Dev</strong> persona to access <code className="font-mono">run_cli_agent</code>.
                 The tool requires a project directory registered in{' '}
                 <span className="text-sky-400 font-medium">Settings → Allowed Paths</span>.
               </p>

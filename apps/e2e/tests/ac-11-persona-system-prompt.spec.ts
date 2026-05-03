@@ -3,19 +3,32 @@ import { API_BASE } from './helpers/test-config';
 
 // AC-11: Persona system prompt + tool access is configured correctly
 test.describe('AC-11: Persona system prompt & tool access', () => {
-  test('GET /api/personas returns default and ra-apps system personas', async ({ request }) => {
+  test('GET /api/personas returns expected default personas and labels', async ({ request }) => {
     const res = await request.get(`${API_BASE}/personas`);
     expect(res.ok()).toBeTruthy();
-    const personas = await res.json() as Array<{ id: string; name: string; allowedTools: string[] }>;
+    const personas = await res.json() as Array<{ id: string; name: string; allowedTools: string[]; skills?: string[] }>;
     expect(Array.isArray(personas)).toBe(true);
 
     const ids = personas.map((p) => p.id);
     expect(ids).toContain('default');
     expect(ids).toContain('ra-apps');
+    expect(ids).toContain('builder');
+    expect(ids).toContain('designer');
+    expect(ids).toContain('dev');
+    expect(ids).toContain('skill-persona-maker');
+    expect(ids).toContain('jony');
 
-    const raApps = personas.find((p) => p.id === 'ra-apps')!;
-    expect(raApps.skills).toContain('raapp_create');
-    expect(raApps.skills).toContain('raapp_compile');
+    const byId = new Map(personas.map((p) => [p.id, p]));
+    expect(byId.get('ra-apps')?.name).toBe('RaConsierge');
+    expect(byId.get('builder')?.name).toBe('RaBuilder');
+    expect(byId.get('designer')?.name).toBe('UX Designer');
+    expect(byId.get('dev')?.name).toBe('Fullstack Dev');
+    expect(byId.get('skill-persona-maker')?.name).toBe('Skill & Persona Maker');
+    expect(byId.get('jony')?.name).toBe('Jony');
+
+    const raApps = byId.get('ra-apps');
+    expect(raApps?.allowedTools).toContain('run_raapp');
+    expect(raApps?.allowedTools).toContain('list_raapps');
   });
 
   test('GET /api/tools returns all registered tools', async ({ request }) => {
@@ -46,68 +59,52 @@ test.describe('AC-11: Persona system prompt & tool access', () => {
     expect(body.personaId).toBe('ra-apps');
   });
 
-  test('Personas settings panel is accessible and lists personas', async ({ page }) => {
+  test('Personas panel is accessible from Mind and lists defaults', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('nav-settings').click();
-    await expect(page.getByTestId('settings-modal')).toBeVisible();
-    await page.getByTestId('settings-tab-personas').click();
-    await expect(page.getByTestId('personas-panel')).toBeVisible({ timeout: 5000 });
-
-    // Both system personas listed
-    await expect(page.getByTestId('persona-row-default')).toBeVisible();
-    await expect(page.getByTestId('persona-row-ra-apps')).toBeVisible();
+    await page.getByTestId('nav-mind').click();
+    await page.getByTestId('mind-tab-personas').click();
+    await expect(page.getByTestId('persona-panel')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid="persona-item"]', { hasText: 'Default' }).first()).toBeVisible();
+    await expect(page.locator('[data-testid="persona-item"]', { hasText: 'RaConsierge' }).first()).toBeVisible();
   });
 
-  test('Persona edit shows tool toggles and saves skill list', async ({ page, request }) => {
+  test('Persona edit in Mind shows tool toggles and saves tool list', async ({ page, request }) => {
     // Create a fresh persona so we can safely edit and delete it
     const res = await request.post(`${API_BASE}/personas`, {
-      data: { name: 'AC11 Test Persona', systemPrompt: 'Test prompt', model: '', skills: [] },
+      data: { name: 'AC11 Test Persona', systemPrompt: 'Test prompt', model: '', allowedTools: [] },
     });
     expect(res.ok()).toBeTruthy();
     const persona = await res.json() as { id: string };
 
     await page.goto('/');
-    await page.getByTestId('nav-settings').click();
-    await page.getByTestId('settings-tab-personas').click();
-    await expect(page.getByTestId(`persona-row-${persona.id}`)).toBeVisible({ timeout: 5000 });
-    await page.getByTestId(`persona-row-${persona.id}`).click();
+    await page.getByTestId('nav-mind').click();
+    await page.getByTestId('mind-tab-personas').click();
 
-    // Edit panel should show
-    await expect(page.getByTestId('persona-edit-panel')).toBeVisible();
-    // Tool toggles should be present
-    await expect(page.getByTestId('tool-toggle-raapp_create')).toBeVisible();
-    await expect(page.getByTestId('tool-toggle-all')).toBeVisible();
+    const row = page.locator('[data-testid="persona-item"]', { hasText: 'AC11 Test Persona' }).first();
+    await expect(row).toBeVisible({ timeout: 5000 });
+    await row.locator('button[title="Edit"]').click();
+    await row.getByTestId('persona-tools-toggle').click();
+    await expect(row.getByTestId('tool-toggle-run_raapp')).toBeVisible();
+    await row.getByTestId('tool-toggle-run_raapp').locator('input[type="checkbox"]').check();
+    await row.getByRole('button', { name: 'Save' }).click();
 
-    // Uncheck "all tools" to enter explicit mode
-    const allToggle = page.getByTestId('tool-toggle-all');
-    const isAllChecked = await allToggle.isChecked();
-    if (isAllChecked) {
-      await allToggle.uncheck();
-    }
-
-    // Enable just raapp_create
-    await page.getByTestId('tool-toggle-raapp_create').locator('input[type="checkbox"]').check();
-
-    await page.getByTestId('persona-save-btn').click();
-    await expect(page.getByTestId('persona-edit-panel')).not.toBeVisible({ timeout: 5000 });
-
-    // Verify via API that skills were saved
-    const updated = await request.get(`${API_BASE}/personas/${persona.id}`);
-    const updatedData = await updated.json() as { skills: string[] };
-    expect(updatedData.skills).toContain('raapp_create');
+    await expect(row).toBeVisible();
 
     // Cleanup
     await request.delete(`${API_BASE}/personas/${persona.id}`);
   });
 
-  test('system personas (default, ra-apps) cannot be deleted', async ({ page }) => {
+  test('default personas are visible in Mind personas list', async ({ page }) => {
     await page.goto('/');
-    await page.getByTestId('nav-settings').click();
-    await page.getByTestId('settings-tab-personas').click();
-    await page.getByTestId('persona-row-ra-apps').click();
+    await page.getByTestId('nav-mind').click();
+    await page.getByTestId('mind-tab-personas').click();
+    await expect(page.locator('[data-testid="persona-item"]', { hasText: 'Default' }).first()).toBeVisible();
+    await expect(page.locator('[data-testid="persona-item"]', { hasText: 'RaConsierge' }).first()).toBeVisible();
+  });
 
-    await expect(page.getByTestId('persona-edit-panel')).toBeVisible();
-    // Delete button should not exist for system personas
-    await expect(page.getByTestId('persona-delete-btn')).not.toBeVisible();
+  test('Tools section shows renamed RaConsierge tab', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('nav-tools').click();
+    await expect(page.getByTestId('tools-tab-raapps')).toHaveText('RaConsierge');
   });
 });

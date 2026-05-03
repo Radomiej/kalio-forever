@@ -8,7 +8,7 @@ const GROUP_LABELS: Record<string, string> = {
   memory: 'Memory',
   terminal: 'Terminal',
   kv: 'KV Store',
-  raapp: 'RA-Apps',
+  raapp: 'RaConsierge',
   agent: 'Agent',
   websearch: 'Web Search',
   tools: 'Tools',

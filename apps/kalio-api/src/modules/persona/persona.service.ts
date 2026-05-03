@@ -34,6 +34,7 @@ export class PersonaService implements OnApplicationBootstrap {
         this.logger.log(`Seeded ${id} persona`);
       } else {
         await this.drizzle.db.update(personas).set({
+          name: config.name,
           allowedTools: config.allowedTools,
           skillIds: config.skillIds ?? [],
           updatedAt: now,

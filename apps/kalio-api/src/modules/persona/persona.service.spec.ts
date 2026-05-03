@@ -316,6 +316,7 @@ describe('PersonaService', () => {
 
       expect(setMock).toHaveBeenCalledWith(
         expect.objectContaining({
+          name: expect.any(String),
           allowedTools: expect.any(Array),
           skillIds: expect.any(Array),
         }),
@@ -411,6 +412,38 @@ describe('PersonaService', () => {
       expect(orchestratorPayload?.allowedTools).toEqual(
         expect.arrayContaining(['image_generate', 'image_edit', 'image_view']),
       );
+    });
+
+    it('seeds the skill/persona maker and jony personas from personas.json', async () => {
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      const valuesMock = vi.fn().mockResolvedValue(undefined);
+      mockDb.insert.mockReturnValue({ values: valuesMock });
+
+      await service.onApplicationBootstrap();
+
+      const seededIds = valuesMock.mock.calls
+        .map((call) => call[0] as { id?: string })
+        .map((payload) => payload.id)
+        .filter((id): id is string => typeof id === 'string');
+
+      expect(seededIds).toContain('skill-persona-maker');
+      expect(seededIds).toContain('jony');
+    });
+
+    it('uses renamed display names for default specialist personas', () => {
+      const config = (
+        service as unknown as { loadPersonasConfig(): Record<string, { name: string }> }
+      ).loadPersonasConfig();
+
+      expect(config['ra-apps']?.name).toBe('RaConsierge');
+      expect(config['builder']?.name).toBe('RaBuilder');
+      expect(config['designer']?.name).toBe('UX Designer');
+      expect(config['dev']?.name).toBe('Fullstack Dev');
     });
   });
 });

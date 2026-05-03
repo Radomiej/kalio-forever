@@ -13,7 +13,7 @@ const TOOL_GROUPS: ToolGroup[] = [
   { label: 'Filesystem',         match: (n) => n.startsWith('fs_') },
   { label: 'Key-Value Store',    match: (n) => n.startsWith('kv_') },
   { label: 'Terminal',           match: (n) => n.startsWith('terminal_') },
-  { label: 'RA-Apps',            match: (n) => n.startsWith('raapp_') || n === 'run_raapp' || n === 'list_raapps' },
+  { label: 'RaConsierge',        match: (n) => n.startsWith('raapp_') || n === 'run_raapp' || n === 'list_raapps' },
   { label: 'Memory',             match: (n) => n.startsWith('memory_') },
   { label: 'Search',             match: (n) => n === 'grep_search' || n === 'file_search' },
   { label: 'Web',                match: (n) => n === 'web_search' },
