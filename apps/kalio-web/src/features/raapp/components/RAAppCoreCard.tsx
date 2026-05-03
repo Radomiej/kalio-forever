@@ -20,7 +20,7 @@ export function RAAppCoreCard({ app, onRun }: RAAppCoreCardProps) {
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-xs font-semibold text-base-content truncate">{app.name}</p>
           <span className="badge badge-xs badge-ghost text-[10px]">v{app.version}</span>
-          <span className="badge badge-xs badge-ghost text-[10px]">core</span>
+          <span className="badge badge-xs badge-ghost text-[10px]">{app.source}</span>
         </div>
         {app.description && (
           <p className="text-xs text-base-content/50 line-clamp-2 mt-0.5">{app.description}</p>

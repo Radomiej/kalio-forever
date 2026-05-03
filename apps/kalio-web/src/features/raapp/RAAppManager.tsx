@@ -11,6 +11,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { RAAppRenderer } from './RAAppRenderer';
 import { RAAppGroupCard } from './components/RAAppGroupCard';
 import { RAAppCoreCard } from './components/RAAppCoreCard';
+import { bucketCatalogApps } from './catalog.utils';
 import {
   getRAApps,
   getRAAppGroups,
@@ -34,6 +35,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
   // ── Catalog state ────────────────────────────────────────────────────────
   const [groups, setGroups] = useState<RAAppGroup[]>([]);
   const [coreApps, setCoreApps] = useState<RAAppSummary[]>([]);
+  const [userStandaloneApps, setUserStandaloneApps] = useState<RAAppSummary[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -80,9 +82,9 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
         getRAApps().catch((): RAAppSummary[] => []),
       ]);
       setGroups(groupData);
-      // Core apps (from git-tracked ZIPs) are never stored in the versioning service,
-      // so we simply show all flat apps with source === 'core'.
-      setCoreApps(flatData.filter((a) => a.source === 'core'));
+      const buckets = bucketCatalogApps(flatData, groupData);
+      setCoreApps(buckets.coreApps);
+      setUserStandaloneApps(buckets.userStandaloneApps);
     } catch (err) {
       setCatalogError(`Failed to load catalog: ${(err as Error).message}`);
     } finally {
@@ -177,7 +179,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
       <div className="px-3 py-2 border-b border-base-300 shrink-0 flex items-center justify-between">
         <span className="text-xs font-semibold text-base-content/60 uppercase tracking-wider flex items-center gap-1.5">
           <Package size={12} />
-          Catalog ({groups.length + coreApps.length})
+          Catalog ({groups.length + coreApps.length + userStandaloneApps.length})
         </span>
         <div className="flex items-center gap-1">
           <button
@@ -218,7 +220,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
       )}
 
       <div className="overflow-y-auto shrink-0 max-h-72 p-2 flex flex-col gap-2">
-        {catalogLoading && groups.length === 0 && coreApps.length === 0 && (
+        {catalogLoading && groups.length === 0 && coreApps.length === 0 && userStandaloneApps.length === 0 && (
           <p className="text-xs text-base-content/30 text-center py-2">Loading catalog…</p>
         )}
 
@@ -241,7 +243,11 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
           <RAAppCoreCard key={app.id} app={app} onRun={() => handleRun(app.name)} />
         ))}
 
-        {!catalogLoading && groups.length === 0 && coreApps.length === 0 && (
+        {userStandaloneApps.map((app) => (
+          <RAAppCoreCard key={app.id} app={app} onRun={() => handleRun(app.name)} />
+        ))}
+
+        {!catalogLoading && groups.length === 0 && coreApps.length === 0 && userStandaloneApps.length === 0 && (
           <p className="text-xs text-base-content/30 text-center py-2">
             No apps in catalog — upload a .zip to get started
           </p>

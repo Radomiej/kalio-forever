@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { RAAppService } from './raapp.service';
+import { deriveGeneratedAppName } from './raapp.service';
 import { RAAppSandboxService } from './raapp-sandbox.service';
 
 // AC-13: RA-App DSL parse error is returned inline (not thrown), with code DSL_PARSE_ERROR
@@ -19,6 +20,42 @@ describe('RAAppService', () => {
     }).compile();
 
     service = moduleRef.get<RAAppService>(RAAppService);
+  });
+
+  describe('deriveGeneratedAppName', () => {
+    it('prefers explicit title when provided', () => {
+      const name = deriveGeneratedAppName({
+        type: 'html',
+        content: '<html><head><title>Ignored</title></head></html>',
+        mode: 'display',
+        sessionId: 'sid',
+        title: '  Cat Landing Page  ',
+      });
+
+      expect(name).toBe('Cat Landing Page');
+    });
+
+    it('extracts title from html <title> tag', () => {
+      const name = deriveGeneratedAppName({
+        type: 'html',
+        content: '<html><head><title>All About Cats</title></head><body></body></html>',
+        mode: 'display',
+        sessionId: 'sid',
+      });
+
+      expect(name).toBe('All About Cats');
+    });
+
+    it('extracts title from gui DSL assignment', () => {
+      const name = deriveGeneratedAppName({
+        type: 'gui',
+        content: 'title = "Koty - Dashboard"\nvbox { label { text = "hello" } }',
+        mode: 'display',
+        sessionId: 'sid',
+      });
+
+      expect(name).toBe('Koty - Dashboard');
+    });
   });
 
   describe('parse — AC-13: DSL parse errors are inline, not thrown', () => {

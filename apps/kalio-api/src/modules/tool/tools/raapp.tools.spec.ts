@@ -8,7 +8,7 @@
  * - list_raapps returns all available apps with id/name/description
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RunRaAppTool, ListRaAppsTool } from './raapp.tools';
+import { RunRaAppTool, ListRaAppsTool, RaAppCreateTool } from './raapp.tools';
 import type { RAAppService } from '../../raapp/raapp.service';
 import type { LoadedRAApp } from '../../raapp/raapp.service';
 import type { ToolCallRequest } from '@kalio/types';
@@ -214,5 +214,33 @@ describe('REGRESSION: ra-apps persona skills include run_raapp and list_raapps',
     const mod = await import('./raapp.tools');
     expect(typeof mod.RunRaAppTool).toBe('function');
     expect(typeof mod.ListRaAppsTool).toBe('function');
+  });
+});
+
+describe('RaAppCreateTool', () => {
+  it('forwards optional title when saving generated app', async () => {
+    const raapp = {
+      execute: vi.fn().mockResolvedValue({ status: 'ready', renderedContent: '<html></html>' }),
+      saveGeneratedApp: vi.fn().mockResolvedValue({ id: 'generated-1' }),
+    } as unknown as RAAppService;
+    const tool = new RaAppCreateTool(raapp);
+
+    await tool.execute({
+      callId: 'call-1',
+      sessionId: 'sid-1',
+      toolName: 'raapp_create',
+      args: {
+        type: 'html',
+        content: '<html><head><title>Koty</title></head></html>',
+        mode: 'display',
+        title: 'Kocia Strona',
+      },
+    });
+
+    expect((raapp as { saveGeneratedApp: ReturnType<typeof vi.fn> }).saveGeneratedApp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Kocia Strona',
+      }),
+    );
   });
 });

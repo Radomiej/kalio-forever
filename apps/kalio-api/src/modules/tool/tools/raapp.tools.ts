@@ -34,6 +34,10 @@ import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
         enum: ['display', 'interactive'],
         description: 'Render mode. Defaults to "display".',
       },
+      title: {
+        type: 'string',
+        description: 'Optional human-readable app title to store in catalog metadata.',
+      },
     },
   },
   requiresConfirmation: false,
@@ -47,6 +51,7 @@ export class RaAppCreateTool {
     const type = request.args['type'] as 'html' | 'gui';
     const content = request.args['content'] as string;
     const mode = (request.args['mode'] as string | undefined) ?? 'display';
+    const title = request.args['title'] as string | undefined;
 
     const result = await this.raapp.execute({ type, mode: mode as 'display' | 'interactive', content });
 
@@ -64,6 +69,7 @@ export class RaAppCreateTool {
       content,
       mode: mode as 'display' | 'interactive',
       sessionId: request.sessionId,
+      title,
     });
 
     return {
