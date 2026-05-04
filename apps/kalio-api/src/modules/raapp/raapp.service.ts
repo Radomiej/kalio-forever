@@ -129,14 +129,27 @@ export class RAAppService implements OnModuleInit {
 
   private async loadFromDir(dir: string, source: 'core' | 'user'): Promise<void> {
     try {
-      const entries = await fs.readdir(dir);
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      let count = 0;
       for (const entry of entries) {
-        if (!entry.endsWith('.zip')) continue;
-        await this.loadZip(path.join(dir, entry), source).catch((err) =>
-          this.logger.warn(`Failed to load RA-App ${entry}: ${String(err)}`),
-        );
+        if (entry.isFile() && entry.name.endsWith('.zip')) {
+          await this.loadZip(path.join(dir, entry.name), source).catch((err) =>
+            this.logger.warn(`Failed to load RA-App ${entry.name}: ${String(err)}`),
+          );
+          count++;
+        } else if (entry.isDirectory()) {
+          // versioned user apps live in {slug}/current.zip after migration
+          const currentZip = path.join(dir, entry.name, 'current.zip');
+          try {
+            await fs.access(currentZip);
+            await this.loadZip(currentZip, source).catch((err) =>
+              this.logger.warn(`Failed to load versioned RA-App ${entry.name}/current.zip: ${String(err)}`),
+            );
+            count++;
+          } catch { /* no current.zip in this subdir — skip */ }
+        }
       }
-      this.logger.log(`Loaded ${source} RA-Apps (${entries.filter((e) => e.endsWith('.zip')).length})`);
+      this.logger.log(`Loaded ${source} RA-Apps (${count})`);
     } catch {
       this.logger.log(`${source} RA-Apps dir empty or not found: ${dir}`);
     }

@@ -6,6 +6,7 @@ export type SearchProvider = 'perplexity' | 'perplexity-openrouter';
 
 const PERPLEXITY_URL = 'https://api.perplexity.ai/chat/completions';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const WEB_SEARCH_TIMEOUT_MS = 120_000;
 
 export interface SearchResult {
   answer: string;
@@ -78,7 +79,7 @@ export class WebSearchService {
         ],
         max_tokens: 2048,
       }),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(WEB_SEARCH_TIMEOUT_MS),
     });
 
     if (!response.ok) {

@@ -140,5 +140,24 @@ describe('WebSearchService', () => {
       expect(result.citations).toEqual([]);
       vi.unstubAllGlobals();
     });
+
+    it('uses at least 2-minute timeout for web search request', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          choices: [{ message: { content: 'answer text' } }],
+          citations: [],
+          model: 'sonar',
+        }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await svc.search('long web query');
+
+      expect(timeoutSpy).toHaveBeenCalledWith(120_000);
+      vi.unstubAllGlobals();
+      timeoutSpy.mockRestore();
+    });
   });
 });
