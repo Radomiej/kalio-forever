@@ -58,11 +58,19 @@ function defaultMap(opts: {
   activeId?: string | null;
   contextWindow?: number;
   maxToolAttempts?: number;
+  webSearchTimeoutMs?: number;
+  providerLocalTimeoutMs?: number;
+  providerRemoteTimeoutMs?: number;
 } = {}): FetchMap {
   return {
     'GET /api/credentials': opts.credentials ?? [],
     'GET /api/credentials/active': { credentialId: opts.activeId ?? null },
     'GET /api/credentials/settings/context-window': { size: opts.contextWindow ?? 32000 },
+    'GET /api/credentials/settings/tool-timeouts': {
+      webSearchTimeoutMs: opts.webSearchTimeoutMs ?? 120000,
+      providerLocalTimeoutMs: opts.providerLocalTimeoutMs ?? 3000,
+      providerRemoteTimeoutMs: opts.providerRemoteTimeoutMs ?? 15000,
+    },
     'GET /api/llm/config': {
       provider: 'openai',
       model: 'gpt-4o-mini',
@@ -80,6 +88,14 @@ beforeEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe('LLMPanel', () => {
+  it('renders a generic LLM settings heading', async () => {
+    mockFetch(defaultMap());
+    render(<LLMPanel />);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'LLM Settings' })).toBeInTheDocument(),
+    );
+  });
+
   it('shows loading spinner initially', () => {
     // Never resolves so loading stays visible
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
@@ -277,6 +293,78 @@ describe('LLMPanel', () => {
     await waitFor(() =>
       expect(screen.getByTestId('max-tool-attempts-value')).toHaveTextContent('25'),
     );
+  });
+
+  it('renders tool timeout controls with backend values', async () => {
+    mockFetch(defaultMap({
+      webSearchTimeoutMs: 180000,
+      providerLocalTimeoutMs: 5000,
+      providerRemoteTimeoutMs: 45000,
+    }));
+    render(<LLMPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('web-search-timeout-slider')).toBeInTheDocument());
+
+    expect((screen.getByTestId('web-search-timeout-slider') as HTMLInputElement).value).toBe('180000');
+    expect((screen.getByTestId('provider-local-timeout-slider') as HTMLInputElement).value).toBe('5000');
+    expect((screen.getByTestId('provider-remote-timeout-slider') as HTMLInputElement).value).toBe('45000');
+  });
+
+  it('updates web search timeout badge on slider change', async () => {
+    const map = {
+      ...defaultMap(),
+      'PUT /api/credentials/settings/tool-timeouts': 204 as const,
+    };
+    mockFetch(map);
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('web-search-timeout-slider'));
+    fireEvent.change(screen.getByTestId('web-search-timeout-slider'), { target: { value: '180000' } });
+
+    await waitFor(() => expect(screen.getByTestId('web-search-timeout-value')).toHaveTextContent('180s'));
+  });
+
+  it('does not persist tool timeout slider until release', async () => {
+    const map = {
+      ...defaultMap(),
+      'PUT /api/credentials/settings/tool-timeouts': 204 as const,
+    };
+    mockFetch(map);
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('web-search-timeout-slider'));
+    const slider = screen.getByTestId('web-search-timeout-slider');
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+
+    fireEvent.change(slider, { target: { value: '180000' } });
+
+    expect(screen.getByTestId('web-search-timeout-value')).toHaveTextContent('180s');
+    expect(
+      fetchMock.mock.calls.some(([url, opts]) => url === '/api/credentials/settings/tool-timeouts' && (opts as RequestInit | undefined)?.method === 'PUT'),
+    ).toBe(false);
+
+    fireEvent.mouseUp(slider);
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url, opts]) => url === '/api/credentials/settings/tool-timeouts' && (opts as RequestInit | undefined)?.method === 'PUT'),
+      ).toBe(true),
+    );
+  });
+
+  it('shows an error and restores the previous timeout when save fails', async () => {
+    mockFetch(defaultMap());
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('web-search-timeout-slider'));
+    const slider = screen.getByTestId('web-search-timeout-slider');
+
+    fireEvent.change(slider, { target: { value: '180000' } });
+    fireEvent.mouseUp(slider);
+
+    await waitFor(() => expect(screen.getByText(/failed to update tool timeout/i)).toBeInTheDocument());
+    expect(screen.getByTestId('web-search-timeout-value')).toHaveTextContent('120s');
+    expect((screen.getByTestId('web-search-timeout-slider') as HTMLInputElement).value).toBe('120000');
   });
 
   it('shows error banner when initial load fails', async () => {

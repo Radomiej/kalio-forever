@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { CredentialsController } from './credentials.controller';
 import { CredentialsService } from './credentials.service';
+import { TimeoutSettingsService } from './timeout-settings.service';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 
 function makeCredential(overrides: Partial<Credential> = {}): Credential {
@@ -35,15 +36,29 @@ describe('CredentialsController', () => {
     updateModel: vi.fn(),
     getApiKey: vi.fn(),
   };
+  const mockTimeoutSettings = {
+    getTimeoutSettings: vi.fn(),
+    setTimeoutSettings: vi.fn(),
+    getProviderTimeoutMs: vi.fn(),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CredentialsController],
-      providers: [{ provide: CredentialsService, useValue: mockService }],
+      providers: [
+        { provide: CredentialsService, useValue: mockService },
+        { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
+      ],
     }).compile();
 
     controller = module.get(CredentialsController);
     vi.clearAllMocks();
+    mockTimeoutSettings.getTimeoutSettings.mockResolvedValue({
+      webSearchTimeoutMs: 120000,
+      providerLocalTimeoutMs: 3000,
+      providerRemoteTimeoutMs: 15000,
+    });
+    mockTimeoutSettings.getProviderTimeoutMs.mockResolvedValue(15000);
   });
 
   describe('findAll()', () => {
@@ -134,6 +149,36 @@ describe('CredentialsController', () => {
     });
   });
 
+  describe('tool timeout settings', () => {
+    it('returns current timeout settings', async () => {
+      mockTimeoutSettings.getTimeoutSettings.mockResolvedValue({
+        webSearchTimeoutMs: 120000,
+        providerLocalTimeoutMs: 3000,
+        providerRemoteTimeoutMs: 15000,
+      });
+
+      await expect(controller.getToolTimeouts()).resolves.toEqual({
+        webSearchTimeoutMs: 120000,
+        providerLocalTimeoutMs: 3000,
+        providerRemoteTimeoutMs: 15000,
+      });
+    });
+
+    it('updates tool timeout settings', async () => {
+      mockTimeoutSettings.setTimeoutSettings.mockResolvedValue(undefined);
+
+      await controller.setToolTimeouts({ webSearchTimeoutMs: 180000 });
+
+      expect(mockTimeoutSettings.setTimeoutSettings).toHaveBeenCalledWith({
+        webSearchTimeoutMs: 180000,
+      });
+    });
+
+    it('rejects empty tool timeout updates', async () => {
+      await expect(controller.setToolTimeouts({})).rejects.toThrow();
+    });
+  });
+
   describe('getGenerationSettings()', () => {
     it('returns generation settings', async () => {
       const settings = { temperature: 0.7, maxTokens: 4096 };
@@ -187,17 +232,23 @@ describe('CredentialsController', () => {
     });
 
     it('returns ok=false on fetch failure', async () => {
-      const cred = makeCredential();
+      const cred = {
+        ...makeCredential(),
+        provider: 'custom',
+        baseUrl: 'http://localhost:1234',
+      } as unknown as Credential;
       mockService.findAll.mockResolvedValue([cred]);
       mockService.getApiKey.mockResolvedValue('sk-test');
+      const originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn().mockRejectedValue(new Error('network error'));
 
       try {
         const result = await controller.testById('cred-1');
         expect(result.ok).toBe(false);
         expect(result.error).toContain('network error');
+        expect(mockTimeoutSettings.getProviderTimeoutMs).toHaveBeenCalledWith(true);
       } finally {
-        (globalThis as Record<string, unknown>).fetch = undefined;
+        globalThis.fetch = originalFetch;
       }
     });
   });

@@ -6,6 +6,9 @@ import { credentials } from '../../database/schema';
 describe('CredentialsService - Edge Cases', () => {
   let service: CredentialsService;
   let mockDrizzle: any;
+  const timeoutSettings = {
+    getProviderTimeoutMs: vi.fn().mockResolvedValue(15_000),
+  };
 
   beforeEach(() => {
     mockDrizzle = {
@@ -16,7 +19,7 @@ describe('CredentialsService - Edge Cases', () => {
         delete: vi.fn(),
       },
     };
-    service = new CredentialsService(mockDrizzle);
+    service = new CredentialsService(mockDrizzle, timeoutSettings as never);
   });
 
 

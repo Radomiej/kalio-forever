@@ -16,7 +16,7 @@ export interface SettingsBlock {
 }
 
 export const SETTINGS_BLOCKS: SettingsBlock[] = [
-  { id: 'llm',          label: 'LLM Providers',    icon: <Bot size={16} />,      component: LLMPanel },
+  { id: 'llm',          label: 'LLM Settings',     icon: <Bot size={16} />,      component: LLMPanel },
   { id: 'embeddings',   label: 'Embeddings',        icon: <Database size={16} />, component: EmbeddingsPanel },
   { id: 'web-search',   label: 'Web Search',        icon: <Search size={16} />,   component: WebSearchPanel },
   { id: 'image',        label: 'Image Generation',  icon: <Image size={16} />,    component: ImageSettingsPanel },

@@ -35,10 +35,15 @@ function makeTestDrizzle(): DrizzleService {
 
 describe('CredentialsService', () => {
   let svc: CredentialsService;
+  let drizzleSvc: DrizzleService;
+  const timeoutSettings = {
+    getProviderTimeoutMs: vi.fn(async (isLocal: boolean) => (isLocal ? 3_000 : 15_000)),
+  };
 
   beforeEach(() => {
-    const drizzleSvc = makeTestDrizzle();
-    svc = new CredentialsService(drizzleSvc);
+    drizzleSvc = makeTestDrizzle();
+    timeoutSettings.getProviderTimeoutMs.mockImplementation(async (isLocal: boolean) => (isLocal ? 3_000 : 15_000));
+    svc = new CredentialsService(drizzleSvc, timeoutSettings as never);
   });
 
   describe('CRUD', () => {
@@ -269,6 +274,25 @@ describe('CredentialsService', () => {
       const c = await svc.create({ name: 'OpenAI', provider: 'openai', apiKey: 'key' });
       const result = await svc.getModelsForCredential(c.id);
       expect(result).toEqual([]);
+      vi.unstubAllGlobals();
+    });
+
+    it('uses local timeout for custom credential pointing to localhost', async () => {
+      await drizzleSvc.db.insert(schema.credentials).values({
+        id: 'custom-local',
+        name: 'Custom Local',
+        provider: 'custom',
+        apiKey: 'key',
+        baseUrl: 'http://localhost:1234',
+        model: null,
+        createdAt: new Date(),
+      });
+      const fetchMock = vi.fn().mockResolvedValue({ ok: false });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await svc.getModelsForCredential('custom-local');
+
+      expect(timeoutSettings.getProviderTimeoutMs).toHaveBeenCalledWith(true);
       vi.unstubAllGlobals();
     });
   });

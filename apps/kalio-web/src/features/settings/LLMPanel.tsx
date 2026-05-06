@@ -1,9 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Loader2, AlertCircle, Zap, Info } from 'lucide-react';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { useSettingsStore } from './settingsStore';
 import { ProviderCard } from './ProviderCard';
 import { ModelSettingsSection } from './ModelSettingsSection';
+import { ToolTimeoutsSection } from './ToolTimeoutsSection';
+import {
+  DEFAULT_TOOL_TIMEOUT_SETTINGS,
+  normalizeToolTimeout,
+  type ToolTimeoutKey,
+  type ToolTimeoutSettings,
+} from './tool-timeout-settings';
 
 interface LLMConfigWithSource {
   provider: string;
@@ -84,6 +91,7 @@ export function LLMPanel() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [contextWindow, setContextWindow] = useState(32000);
   const [maxToolAttempts, setMaxToolAttempts] = useState(8);
+  const [toolTimeouts, setToolTimeouts] = useState<ToolTimeoutSettings>(DEFAULT_TOOL_TIMEOUT_SETTINGS);
   const [envConfig, setEnvConfig] = useState<LLMConfigWithSource | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<AddForm>(emptyForm());
@@ -92,8 +100,17 @@ export function LLMPanel() {
   const [syncing, setSyncing] = useState<string | null>(null);
   const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
   const [testError, setTestError] = useState<string | null>(null);
+  const persistedContextWindow = useRef(32000);
+  const persistedMaxToolAttempts = useRef(8);
+  const persistedToolTimeouts = useRef<ToolTimeoutSettings>({ ...DEFAULT_TOOL_TIMEOUT_SETTINGS });
 
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
+
+  const reportUpdateError = useCallback((message: string, err: unknown) => {
+    const error = err instanceof Error ? err : new Error(String(err));
+    console.error(`[LLMPanel] ${message}`, error);
+    setError(message);
+  }, []);
 
   const refreshBackendConfig = useCallback(async () => {
     try {
@@ -106,17 +123,22 @@ export function LLMPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [creds, active, cw, llmCfg] = await Promise.all([
+      const [creds, active, cw, toolTimeouts, llmCfg] = await Promise.all([
         apiFetch<Credential[]>('/credentials'),
         apiFetch<{ credentialId: string | null }>('/credentials/active'),
         apiFetch<{ size: number }>('/credentials/settings/context-window'),
+        apiFetch<ToolTimeoutSettings>('/credentials/settings/tool-timeouts'),
         apiFetch<LLMConfigWithSource>('/llm/config'),
       ]);
       setCredentials(creds);
       setActiveId(active.credentialId);
       setContextWindow(cw.size);
+      persistedContextWindow.current = cw.size;
+      setToolTimeouts(toolTimeouts);
+      persistedToolTimeouts.current = toolTimeouts;
       setEnvConfig(llmCfg);
       setMaxToolAttempts(llmCfg.maxToolAttempts ?? 8);
+      persistedMaxToolAttempts.current = llmCfg.maxToolAttempts ?? 8;
       setBackendConfig(llmCfg);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
@@ -215,35 +237,67 @@ export function LLMPanel() {
   };
 
   const handleContextWindowChange = async (size: number) => {
+    const previousValue = persistedContextWindow.current;
     setContextWindow(size);
     try {
       await apiFetch('/credentials/settings/context-window', {
         method: 'PUT',
         body: JSON.stringify({ size }),
       });
+      persistedContextWindow.current = size;
       await refreshBackendConfig();
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      reportUpdateError('Failed to update context window', err);
+      setContextWindow(previousValue);
+    }
   };
 
   const handleMaxToolAttemptsChange = async (size: number) => {
     const normalized = Math.max(1, Math.min(100, Math.round(size)));
+    const previousValue = persistedMaxToolAttempts.current;
     setMaxToolAttempts(normalized);
     try {
       await apiFetch('/credentials/settings/max-tool-attempts', {
         method: 'PUT',
         body: JSON.stringify({ size: normalized }),
       });
+      persistedMaxToolAttempts.current = normalized;
       await refreshBackendConfig();
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      reportUpdateError('Failed to update max tool attempts', err);
+      setMaxToolAttempts(previousValue);
+    }
+  };
+
+  const handleToolTimeoutInputChange = (key: ToolTimeoutKey, value: number) => {
+    const normalized = normalizeToolTimeout(key, value);
+    setToolTimeouts((current) => ({ ...current, [key]: normalized }));
+  };
+
+  const commitToolTimeoutChange = async (key: ToolTimeoutKey, value: number) => {
+    const normalized = normalizeToolTimeout(key, value);
+    const previousValue = persistedToolTimeouts.current[key];
+    if (normalized === previousValue) return;
+
+    try {
+      await apiFetch('/credentials/settings/tool-timeouts', {
+        method: 'PUT',
+        body: JSON.stringify({ [key]: normalized }),
+      });
+      persistedToolTimeouts.current = { ...persistedToolTimeouts.current, [key]: normalized };
+    } catch (err) {
+      reportUpdateError('Failed to update tool timeout', err);
+      setToolTimeouts((current) => ({ ...current, [key]: previousValue }));
+    }
   };
 
   return (
     <div className="flex flex-col gap-5" data-testid="llm-panel">
       <div>
-        <h2 className="text-base font-semibold mb-1">LLM Providers</h2>
+        <h2 className="text-base font-semibold mb-1">LLM Settings</h2>
         <p className="text-xs text-base-content/60">
-          Configure one or more API credentials. The active provider is stored in the database.
-          API keys are write-only and never returned.
+          Configure model behavior, runtime limits, and provider credentials.
+          Active provider selection is stored in the database, and API keys remain write-only.
         </p>
       </div>
 
@@ -461,6 +515,12 @@ export function LLMPanel() {
           <span>1</span><span>8</span><span>25</span><span>100</span>
         </div>
       </div>
+
+      <ToolTimeoutsSection
+        values={toolTimeouts}
+        onInputChange={handleToolTimeoutInputChange}
+        onCommit={(key, value) => void commitToolTimeoutChange(key, value)}
+      />
     </div>
   );
 }

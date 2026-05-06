@@ -1,13 +1,18 @@
-import { Controller, Get, Post, Put, Patch, Delete, Param, Body, HttpCode, HttpStatus, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, HttpCode, HttpStatus, Logger, BadRequestException } from '@nestjs/common';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { CredentialsService } from './credentials.service';
 import { createLLMProvider } from '../llm/providers/provider-factory';
+import { TimeoutSettingsService, type ToolTimeoutSettings } from './timeout-settings.service';
+import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
 
 @Controller('credentials')
 export class CredentialsController {
   private readonly logger = new Logger(CredentialsController.name);
 
-  constructor(private readonly credentialsService: CredentialsService) {}
+  constructor(
+    private readonly credentialsService: CredentialsService,
+    private readonly timeoutSettings: TimeoutSettingsService,
+  ) {}
 
   @Get()
   findAll(): Promise<Credential[]> {
@@ -75,6 +80,28 @@ export class CredentialsController {
     this.logger.log(`Max tool attempts updated via API: ${body.size}`);
   }
 
+  @Get('settings/tool-timeouts')
+  async getToolTimeouts(): Promise<ToolTimeoutSettings> {
+    return this.timeoutSettings.getTimeoutSettings();
+  }
+
+  @Put('settings/tool-timeouts')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async setToolTimeouts(@Body() body: Partial<ToolTimeoutSettings>): Promise<void> {
+    if (
+      body.webSearchTimeoutMs === undefined &&
+      body.providerLocalTimeoutMs === undefined &&
+      body.providerRemoteTimeoutMs === undefined
+    ) {
+      throw new BadRequestException('At least one tool timeout setting must be provided');
+    }
+
+    await this.timeoutSettings.setTimeoutSettings(body);
+    this.logger.log(
+      `Tool timeout settings updated via API: web_search=${body.webSearchTimeoutMs ?? '—'} local=${body.providerLocalTimeoutMs ?? '—'} remote=${body.providerRemoteTimeoutMs ?? '—'}`,
+    );
+  }
+
   // ─── Generation settings ─────────────────────────────────────────────────────
 
   @Get('settings/generation')
@@ -134,10 +161,10 @@ export class CredentialsController {
         bitnet:     'http://localhost:8080/v1',
       };
 
-      const isLocal = ['ollama', 'bitnet'].includes(cred.provider);
+      const isLocal = isLocalLlmProvider(cred.provider, cred.baseUrl ?? undefined);
       const resolvedBase = (cred.baseUrl ?? PROVIDER_BASE_URLS[cred.provider] ?? '').replace(/\/$/, '');
       const endpoint = `${resolvedBase}/models`;
-      const timeoutMs = isLocal ? 3_000 : 15_000;
+      const timeoutMs = await this.timeoutSettings.getProviderTimeoutMs(isLocal);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 

@@ -4,6 +4,7 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import { LLMController } from './llm.controller';
 import { LLMService } from './llm.service';
 import { CredentialsService } from '../credentials/credentials.service';
+import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
 
 describe('LLMController', () => {
   let controller: LLMController;
@@ -14,6 +15,9 @@ describe('LLMController', () => {
     getContextWindowSize: vi.fn(),
     getMaxToolAttempts: vi.fn(),
   };
+  const mockTimeoutSettings = {
+    getProviderTimeoutMs: vi.fn(),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -21,11 +25,13 @@ describe('LLMController', () => {
       providers: [
         { provide: LLMService, useValue: mockLLMService },
         { provide: CredentialsService, useValue: mockCredentials },
+        { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
       ],
     }).compile();
 
     controller = module.get(LLMController);
     vi.clearAllMocks();
+    mockTimeoutSettings.getProviderTimeoutMs.mockResolvedValue(15_000);
   });
 
   describe('getConfig()', () => {
@@ -114,23 +120,45 @@ describe('LLMController', () => {
   });
 
   describe('getModels() — successful fetch', () => {
+    it('uses configured remote provider timeout', async () => {
+      const timeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+      mockTimeoutSettings.getProviderTimeoutMs.mockResolvedValue(42_000);
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ id: 'gpt-4o' }] }),
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mockFetch;
+
+      try {
+        await controller.getModels('openai', 'sk-test-key', undefined);
+        expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 42_000);
+      } finally {
+        timeoutSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it('returns model list from provider', async () => {
+      mockTimeoutSettings.getProviderTimeoutMs.mockResolvedValue(15_000);
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: () => Promise.resolve({ data: [{ id: 'gpt-4o' }, { id: 'gpt-3.5-turbo' }] }),
       });
+      const originalFetch = globalThis.fetch;
       globalThis.fetch = mockFetch;
 
       try {
         const result = await controller.getModels('openai', 'sk-test-key', undefined);
         expect(Array.isArray((result as { data: unknown[] }).data)).toBe(true);
       } finally {
-        // restore after test
-        (globalThis as Record<string, unknown>).fetch = undefined;
+        globalThis.fetch = originalFetch;
       }
     });
 
     it('throws HttpException on non-ok response', async () => {
+      mockTimeoutSettings.getProviderTimeoutMs.mockResolvedValue(15_000);
+      const originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 401,
@@ -140,7 +168,7 @@ describe('LLMController', () => {
       try {
         await expect(controller.getModels('openai', 'bad-key', undefined)).rejects.toThrow(HttpException);
       } finally {
-        (globalThis as Record<string, unknown>).fetch = undefined;
+        globalThis.fetch = originalFetch;
       }
     });
   });

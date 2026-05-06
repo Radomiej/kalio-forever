@@ -1,13 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppSettingsService } from '../../database/app-settings.service';
+import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
 
 export type SearchProvider = 'perplexity' | 'perplexity-openrouter';
 
 const PERPLEXITY_URL = 'https://api.perplexity.ai/chat/completions';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const WEB_SEARCH_TIMEOUT_MS = 120_000;
-
 export interface SearchResult {
   answer: string;
   citations: string[];
@@ -28,6 +27,7 @@ export class WebSearchService {
   constructor(
     private readonly configService: ConfigService,
     private readonly appSettings: AppSettingsService,
+    private readonly timeoutSettings: TimeoutSettingsService,
   ) {}
 
   async getConfig(): Promise<{ provider: SearchProvider; apiKey: string | null }> {
@@ -58,6 +58,7 @@ export class WebSearchService {
 
     const url = provider === 'perplexity-openrouter' ? OPENROUTER_URL : PERPLEXITY_URL;
     const model = provider === 'perplexity-openrouter' ? 'perplexity/sonar' : 'sonar';
+    const timeoutMs = await this.timeoutSettings.getWebSearchTimeoutMs();
 
     this.logger.debug(`[web_search] query=${query.slice(0, 80)} provider=${provider}`);
 
@@ -79,7 +80,7 @@ export class WebSearchService {
         ],
         max_tokens: 2048,
       }),
-      signal: AbortSignal.timeout(WEB_SEARCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {

@@ -6,6 +6,7 @@ function makeService(
   dbApiKey: string | null,
   envProvider = 'perplexity',
   envApiKey = '',
+  webSearchTimeoutMs = 120_000,
 ) {
   const appSettings = {
     get: vi.fn().mockImplementation((key: string) => {
@@ -21,7 +22,10 @@ function makeService(
       return def ?? '';
     }),
   };
-  return new WebSearchService(configService as never, appSettings as never);
+  const timeoutSettings = {
+    getWebSearchTimeoutMs: vi.fn().mockResolvedValue(webSearchTimeoutMs),
+  };
+  return new WebSearchService(configService as never, appSettings as never, timeoutSettings as never);
 }
 
 describe('WebSearchService', () => {
@@ -141,7 +145,7 @@ describe('WebSearchService', () => {
       vi.unstubAllGlobals();
     });
 
-    it('uses at least 2-minute timeout for web search request', async () => {
+    it('uses configured web search timeout', async () => {
       const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
@@ -152,10 +156,11 @@ describe('WebSearchService', () => {
         }),
       });
       vi.stubGlobal('fetch', fetchMock);
+      const timeoutSvc = makeService('perplexity', 'test-api-key', 'perplexity', '', 180_000);
 
-      await svc.search('long web query');
+      await timeoutSvc.search('long web query');
 
-      expect(timeoutSpy).toHaveBeenCalledWith(120_000);
+      expect(timeoutSpy).toHaveBeenCalledWith(180_000);
       vi.unstubAllGlobals();
       timeoutSpy.mockRestore();
     });

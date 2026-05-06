@@ -5,12 +5,17 @@ import { DrizzleService } from '../../database/drizzle.service';
 import { credentials, appSettings } from '../../database/schema';
 import { eq } from 'drizzle-orm';
 import type { ProviderConfig } from '../llm/llm.types';
+import { TimeoutSettingsService } from './timeout-settings.service';
+import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
 
 @Injectable()
 export class CredentialsService {
   private readonly logger = new Logger(CredentialsService.name);
 
-  constructor(private readonly drizzle: DrizzleService) {}
+  constructor(
+    private readonly drizzle: DrizzleService,
+    private readonly timeoutSettings: TimeoutSettingsService,
+  ) {}
 
   async findAll(): Promise<Credential[]> {
     const rows = await this.drizzle.db.select().from(credentials);
@@ -188,12 +193,12 @@ export class CredentialsService {
       bitnet:     'http://localhost:8080/v1',
     };
 
-    const isLocal = ['ollama', 'bitnet'].includes(row.provider);
+    const isLocal = isLocalLlmProvider(row.provider, row.baseUrl ?? undefined);
     const resolvedBase = (row.baseUrl ?? PROVIDER_BASE_URLS[row.provider] ?? '').replace(/\/$/, '');
     if (!resolvedBase) return [];
 
     const endpoint = `${resolvedBase}/models`;
-    const timeoutMs = isLocal ? 3_000 : 15_000;
+    const timeoutMs = await this.timeoutSettings.getProviderTimeoutMs(isLocal);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 

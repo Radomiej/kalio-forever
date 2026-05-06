@@ -1,7 +1,9 @@
 import { Controller, Get, Query, HttpException, HttpStatus } from '@nestjs/common';
 import { LLMService } from './llm.service';
 import { CredentialsService } from '../credentials/credentials.service';
+import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
 import type { LLMConfig } from '@kalio/types';
+import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
 
 export interface LLMConfigResponse extends LLMConfig {
   contextWindowSize: number;
@@ -20,20 +22,6 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   bitnet:     'http://localhost:8080/v1',
 };
 
-const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', 'host.docker.internal']);
-
-function isLocalBaseUrl(baseUrl?: string): boolean {
-  if (!baseUrl || baseUrl.trim().length === 0) return false;
-  const raw = baseUrl.trim();
-  const normalized = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
-  try {
-    const { hostname } = new URL(normalized);
-    return LOCAL_HOSTNAMES.has(hostname) || hostname.endsWith('.local');
-  } catch {
-    return false;
-  }
-}
-
 function resolveBaseUrl(provider: string, baseUrl?: string): string {
   if (baseUrl) return baseUrl.replace(/\/$/, '');
   return PROVIDER_BASE_URLS[provider] ?? 'https://api.openai.com/v1';
@@ -44,6 +32,7 @@ export class LLMController {
   constructor(
     private readonly llm: LLMService,
     private readonly credentials: CredentialsService,
+    private readonly timeoutSettings: TimeoutSettingsService,
   ) {}
 
   @Get('config')
@@ -67,7 +56,7 @@ export class LLMController {
     }
 
     const resolvedBase = resolveBaseUrl(provider, baseUrl);
-    const isLocal = provider === 'ollama' || provider === 'bitnet' || (provider === 'custom' && isLocalBaseUrl(resolvedBase));
+    const isLocal = isLocalLlmProvider(provider, resolvedBase);
     const allowsKeyless = isLocal;
 
     if (!apiKey && !allowsKeyless) {
@@ -78,7 +67,7 @@ export class LLMController {
     }
 
     const endpoint = `${resolvedBase}/models`;
-    const timeoutMs = isLocal ? 3_000 : 15_000;
+    const timeoutMs = await this.timeoutSettings.getProviderTimeoutMs(isLocal);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
