@@ -26,6 +26,11 @@ function makeTestDrizzle(): DrizzleService {
       id TEXT PRIMARY KEY,
       persona_id TEXT NOT NULL REFERENCES personas(id) ON DELETE CASCADE,
       title TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'chat',
+      parent_session_id TEXT,
+      parent_turn_id TEXT,
+      parent_tool_call_id TEXT,
+      interlocutor_label TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );

@@ -32,6 +32,15 @@ const TARGETS = [
   path.join('packages', '@kalio', 'sdk', 'src'),
 ];
 
+const GOVERNANCE_DOCS = [
+  'README.md',
+  'CONTRIBUTING.md',
+  'CODE_OF_CONDUCT.md',
+  'AGENTS.md',
+  '.github/copilot-instructions.md',
+  '.copilot-instructions.md',
+];
+
 const NPX_CMD = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 
 /**
@@ -68,6 +77,10 @@ async function writeRaw(name, content) {
   const file = path.join(RAW_DIR, name);
   await writeFile(file, content, 'utf8');
   console.log(`  → ${path.relative(REPO_ROOT, file)} (${content.length} B)`);
+}
+
+function lineCount(text) {
+  return text.split(/\r?\n/).length;
 }
 
 /** Recursively walk a directory, returning *.ts / *.tsx files (skip tests, node_modules, dist). */
@@ -128,6 +141,185 @@ async function fileStats(files) {
   return { rows, silentCatchHits, anyHits };
 }
 
+async function governanceDocStats() {
+  const docs = {};
+  const findings = [];
+
+  for (const relPath of GOVERNANCE_DOCS) {
+    const absPath = path.join(REPO_ROOT, relPath);
+    try {
+      const text = await readFile(absPath, 'utf8');
+      docs[relPath] = {
+        exists: true,
+        lines: lineCount(text),
+        text,
+      };
+    } catch {
+      docs[relPath] = {
+        exists: false,
+        lines: 0,
+        text: '',
+      };
+      findings.push({
+        severity: '🟡 HIGH',
+        target: relPath,
+        check: 'missing-required-doc',
+        message: `Required governance or agent-instruction file is missing: ${relPath}`,
+        fix: 'Restore the file or remove the dependency on it from project guidance',
+      });
+    }
+  }
+
+  const readme = docs['README.md']?.text ?? '';
+  const contributing = docs['CONTRIBUTING.md']?.text ?? '';
+  const codeOfConduct = docs['CODE_OF_CONDUCT.md']?.text ?? '';
+  const agents = docs['AGENTS.md']?.text ?? '';
+  const repoCopilot = docs['.github/copilot-instructions.md']?.text ?? '';
+  const rootCopilot = docs['.copilot-instructions.md']?.text ?? '';
+
+  if (readme) {
+    for (const linkedDoc of ['CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'AGENTS.md']) {
+      if (!readme.includes(linkedDoc)) {
+        findings.push({
+          severity: '🟢 MEDIUM',
+          target: 'README.md',
+          check: 'missing-governance-link',
+          message: `README.md does not link ${linkedDoc}`,
+          fix: 'Link core contributor and governance docs from the README',
+        });
+      }
+    }
+  }
+
+  if (contributing) {
+    const contributingChecks = [
+      {
+        ok: /AGENTS\.md/.test(contributing),
+        check: 'missing-agents-link',
+        message: 'CONTRIBUTING.md should point contributors to AGENTS.md',
+        fix: 'Link AGENTS.md from CONTRIBUTING.md',
+      },
+      {
+        ok: /CODE_OF_CONDUCT\.md/.test(contributing),
+        check: 'missing-code-of-conduct-link',
+        message: 'CONTRIBUTING.md should point contributors to CODE_OF_CONDUCT.md',
+        fix: 'Link CODE_OF_CONDUCT.md from CONTRIBUTING.md',
+      },
+      {
+        ok: /pnpm\s+audit(?::report)?/.test(contributing),
+        check: 'missing-audit-command',
+        message: 'CONTRIBUTING.md does not mention the audit command',
+        fix: 'Document pnpm audit / pnpm audit:report in CONTRIBUTING.md',
+      },
+    ];
+
+    for (const item of contributingChecks) {
+      if (!item.ok) {
+        findings.push({
+          severity: '🟢 MEDIUM',
+          target: 'CONTRIBUTING.md',
+          check: item.check,
+          message: item.message,
+          fix: item.fix,
+        });
+      }
+    }
+  }
+
+  if (codeOfConduct) {
+    const cocChecks = [
+      {
+        ok: /##\s+Enforcement Responsibilities/i.test(codeOfConduct),
+        check: 'missing-enforcement-responsibilities',
+        message: 'CODE_OF_CONDUCT.md is missing an enforcement responsibilities section',
+      },
+      {
+        ok: /##\s+Scope/i.test(codeOfConduct),
+        check: 'missing-scope-section',
+        message: 'CODE_OF_CONDUCT.md is missing a scope section',
+      },
+      {
+        ok: /privacy and security of the reporter/i.test(codeOfConduct),
+        check: 'missing-reporter-privacy-language',
+        message: 'CODE_OF_CONDUCT.md does not state reporter privacy expectations',
+      },
+    ];
+
+    for (const item of cocChecks) {
+      if (!item.ok) {
+        findings.push({
+          severity: '🟡 HIGH',
+          target: 'CODE_OF_CONDUCT.md',
+          check: item.check,
+          message: item.message,
+          fix: 'Adopt the missing Contributor Covenant 2.1 section',
+        });
+      }
+    }
+  }
+
+  if (agents) {
+    const agentLines = docs['AGENTS.md'].lines;
+    if (agentLines > 300) {
+      findings.push({
+        severity: '🟡 HIGH',
+        target: 'AGENTS.md',
+        check: 'oversized-agent-doc',
+        message: `AGENTS.md is ${agentLines} lines; large root instruction files are harder to keep current`,
+        fix: 'Prune the root file or move details into nested docs/skills where appropriate',
+      });
+    } else if (agentLines > 220) {
+      findings.push({
+        severity: '🟢 MEDIUM',
+        target: 'AGENTS.md',
+        check: 'long-agent-doc',
+        message: `AGENTS.md is ${agentLines} lines; review for stale or duplicated instructions`,
+        fix: 'Trim generic boilerplate and keep root instructions focused on repo-specific rules',
+      });
+    }
+  }
+
+  if (repoCopilot && rootCopilot) {
+    const rootCopilotLines = docs['.copilot-instructions.md'].lines;
+    if (rootCopilotLines > 40) {
+      findings.push({
+        severity: '🟡 HIGH',
+        target: '.copilot-instructions.md',
+        check: 'duplicate-copilot-instructions',
+        message: `Root .copilot-instructions.md is ${rootCopilotLines} lines while .github/copilot-instructions.md also exists`,
+        fix: 'Keep the root file as a short compatibility shim that points to the canonical .github copy',
+      });
+    }
+
+    if (!/\.github\/copilot-instructions\.md/.test(rootCopilot)) {
+      findings.push({
+        severity: '🟡 HIGH',
+        target: '.copilot-instructions.md',
+        check: 'missing-canonical-pointer',
+        message: 'Root .copilot-instructions.md does not point to .github/copilot-instructions.md',
+        fix: 'Point the root file at the canonical .github/copilot-instructions.md to avoid drift',
+      });
+    }
+  }
+
+  if (repoCopilot && !/AGENTS\.md/.test(repoCopilot)) {
+    findings.push({
+      severity: '🟢 MEDIUM',
+      target: '.github/copilot-instructions.md',
+      check: 'missing-agents-reference',
+      message: '.github/copilot-instructions.md should explicitly point agents to AGENTS.md',
+      fix: 'Add a short pointer to AGENTS.md near the top of the file',
+    });
+  }
+
+  return {
+    docs: Object.fromEntries(
+      Object.entries(docs).map(([relPath, meta]) => [relPath, { exists: meta.exists, lines: meta.lines }]),
+    ),
+    findings,
+  };
+}
+
 async function step(title, fn) {
   console.log(`\n▶ ${title}`);
   const t0 = Date.now();
@@ -157,6 +349,11 @@ async function main() {
     }
     const s = await fileStats(allFiles);
     await writeRaw('file-stats.json', JSON.stringify(s, null, 2));
+  });
+
+  await step('Scanning governance and agent docs', async () => {
+    const governanceStats = await governanceDocStats();
+    await writeRaw('docs-governance.json', JSON.stringify(governanceStats, null, 2));
   });
 
   // 2. madge — circular deps

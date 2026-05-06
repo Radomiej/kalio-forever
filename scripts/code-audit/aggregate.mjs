@@ -74,6 +74,7 @@ function mdTable(headers, rows) {
 
 async function main() {
   const fileStats = await readJson('file-stats.json', { rows: [], silentCatchHits: [], anyHits: [] });
+  const governance = await readJson('docs-governance.json', { docs: {}, findings: [] });
   
   // Merge all madge outputs
   const madgeFiles = await readdir(RAW_DIR);
@@ -174,15 +175,26 @@ async function main() {
     ...knipRows(knipReports['packages-kalio-sdk'], '@kalio/sdk'),
   ].slice(0, 40);
 
+  // --- Governance and agent docs -------------------------------------------
+  const governanceRows = (governance.findings ?? []).map((item) => ({
+    Severity: item.severity,
+    Target: item.target,
+    Check: item.check,
+    Message: item.message,
+    Fix: item.fix,
+  }));
+
   // --- Summary ---------------------------------------------------------------
   const counts = {
     critical: godRows.filter((r) => r.Severity.includes('CRITICAL')).length
             + silentRows.filter((r) => r.Severity.includes('CRITICAL')).length
-            + circularRows.filter((r) => r.Severity.includes('CRITICAL')).length,
+            + circularRows.filter((r) => r.Severity.includes('CRITICAL')).length
+            + governanceRows.filter((r) => r.Severity.includes('CRITICAL')).length,
     high: godRows.filter((r) => r.Severity.includes('HIGH')).length
         + silentRows.filter((r) => r.Severity.includes('HIGH')).length
-        + circularRows.filter((r) => r.Severity.includes('HIGH')).length,
-    medium: anyRows.filter((r) => r.Severity.includes('MEDIUM')).length + dupRows.length + deadRows.filter((r) => r.Severity.includes('MEDIUM')).length,
+        + circularRows.filter((r) => r.Severity.includes('HIGH')).length
+        + governanceRows.filter((r) => r.Severity.includes('HIGH')).length,
+    medium: anyRows.filter((r) => r.Severity.includes('MEDIUM')).length + dupRows.length + deadRows.filter((r) => r.Severity.includes('MEDIUM')).length + governanceRows.filter((r) => r.Severity.includes('MEDIUM')).length,
     low: anyRows.filter((r) => r.Severity.includes('LOW')).length + deadRows.filter((r) => r.Severity.includes('LOW')).length,
   };
 
@@ -228,9 +240,21 @@ async function main() {
       Fix: r.Fix,
     });
   }
+  for (const r of governanceRows.filter((x) => x.Severity.includes('CRITICAL') || x.Severity.includes('HIGH'))) {
+    prio.push({
+      '#': prio.length + 1,
+      Severity: r.Severity,
+      Target: r.Target,
+      Type: 'governance',
+      Metric: r.Check,
+      Limit: 'n/a',
+      Principle: 'Contributor / agent guidance',
+      Fix: r.Fix,
+    });
+  }
 
   // --- Write JSON ------------------------------------------------------------
-  const jsonOut = { date, counts, godRows, silentRows, anyRows, circularRows, dupRows, deadRows, prio };
+  const jsonOut = { date, counts, godRows, silentRows, anyRows, circularRows, dupRows, deadRows, governanceRows, prio };
   await writeFile(path.join(OUT_DIR, `${date}-report.json`), JSON.stringify(jsonOut, null, 2));
 
   // --- Write Markdown --------------------------------------------------------
@@ -283,6 +307,10 @@ ${dupRows.length ? mdTable(['Severity', 'A', 'B', 'Lines', 'Fix'], dupRows) : '_
 ## Dead code (knip)
 
 ${deadRows.length ? mdTable(['Severity', 'Package', 'Kind', 'Item'], deadRows) : '_No dead code detected (or knip not run)._'}
+
+## Governance and agent docs
+
+${governanceRows.length ? mdTable(['Severity', 'Target', 'Check', 'Message', 'Fix'], governanceRows) : '_No governance or agent-doc drift detected._'}
 
 ## Next actions (suggested order)
 

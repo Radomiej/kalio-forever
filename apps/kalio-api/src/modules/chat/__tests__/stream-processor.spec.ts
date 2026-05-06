@@ -96,8 +96,9 @@ describe('StreamProcessorService', () => {
     expect(toolDispatch.dispatch).not.toHaveBeenCalled();
   });
 
-  it('routes done chunk to DoneHandler (persists, no chat:complete)', async () => {
+  it('routes done chunk to DoneHandler when assistant payload exists (persists, no chat:complete)', async () => {
     const ctx = makeCtx();
+    ctx.state.appendText('hello');
     await processor.process({ type: 'done' }, ctx);
     expect(sessionManager.persistAssistantMessage).toHaveBeenCalled();
     // chat:complete is emitted by ChatService at the end of the agent loop, not here

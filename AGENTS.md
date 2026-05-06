@@ -163,6 +163,7 @@ Boris Cherny (creator of Claude Code) keeps his team's file around 100 lines. Un
 - Test (e2e): `pnpm turbo run test:e2e`
 - Lint: `pnpm turbo run lint`
 - Typecheck: `pnpm turbo run typecheck`
+- Audit report: `pnpm audit:report`
 - Run locally: `.\start-dev.ps1` (starts both API on port 3016 and web on port 5188)
 
 Prefer single-file or single-test runs during iteration. Full suites are for the final verification pass.
@@ -199,7 +200,9 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 
 When the user corrects your approach, append a one-line rule here before ending the session. Write it concretely ("Always use X for Y"), never abstractly ("be careful with Y"). If an existing line already covers the correction, tighten it instead of adding a new one. Remove lines when the underlying issue goes away (model upgrades, refactors, process changes).
 
-- (empty)
+- Do not add net-new behavior to files already over the hard size limit without extracting or shrinking the touched slice in the same change.
+- When frontend and backend intentionally duplicate a runtime rule, update both sides in the same change and keep the sync note aligned.
+- In Vitest, shared mock refs used inside `vi.mock()` factories should come from `vi.hoisted()`; Zustand mocks used outside React must expose `.getState()`.
 
 ---
 

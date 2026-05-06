@@ -1,5 +1,11 @@
 # Kalio-Forever — Copilot Instructions
 
+## Required Reading
+
+- Read `AGENTS.md` first. It is the cross-agent source of truth for repo rules.
+- Treat `.github/copilot-instructions.md` as the canonical Copilot-specific file.
+- Keep the root `.copilot-instructions.md` as a short compatibility shim only; do not duplicate this file there.
+
 ## Stack
 
 - **Backend**: NestJS 11, TypeScript 5.8 strict, Drizzle ORM + SQLite, Socket.IO
@@ -14,6 +20,7 @@ pnpm install                      # install from root
 pnpm turbo run build              # build all
 pnpm turbo run test               # unit tests all
 pnpm turbo run typecheck          # tsc --noEmit all
+pnpm audit:report                 # static audit + prioritized report
 .\start-dev.ps1                   # API :3016 + web :5188
 ```
 
@@ -64,6 +71,7 @@ export class MyTool {
 ```
 - Register in `ToolDispatchService` constructor injection + `executors` map
 - Register in `ToolModule` providers array
+- Prefer `@ConfirmedTool(...)` for mutating or persistent tools so confirmation policy stays consistent
 - `requiresConfirmation: true` for destructive operations (delete, exec, overwrite)
 
 ### Socket.IO event flow
@@ -110,6 +118,10 @@ window.parent.postMessage({ type: 'kalio_send_message', content: 'user answer' }
 - All DB access through `DrizzleService` — no raw SQLite calls
 - Timestamps: `integer({ mode: 'timestamp_ms' })` → always `Date.now()` (Unix ms)
 
+### Shared runtime rules
+- `TimeoutSettingsService` is the source of truth for stored timeout defaults and max tool attempts
+- Local-provider detection is intentionally mirrored between `apps/kalio-api/src/common/utils/local-llm-provider.util.ts` and `apps/kalio-web/src/features/settings/llm-provider-settings.ts`; update both together and keep the sync comments aligned
+
 ### Frontend state
 - Session state: `useSessionStore` (Zustand) — messages, activeSessionId, sessions
 - Agent/tool state: `useAgentStore` — streaming, toolActivities, llmActivities, context
@@ -134,6 +146,8 @@ window.parent.postMessage({ type: 'kalio_send_message', content: 'user answer' }
 - Mock LLM: always use `MockLLMProvider` — never call real API in tests
 - E2E: Playwright in `apps/e2e/`, start server with `.\start-dev.ps1` before running
 - Pre-existing failing test: `raapp.service.spec.ts` — 7 failures due to missing `ConfigService` mock — do NOT fix unless specifically asked
+- Shared refs used inside `vi.mock()` factories should come from `vi.hoisted()`
+- Zustand mocks touched from callbacks or services must expose `.getState()` to match runtime usage
 
 ### Test-driven bug fixes & review changes
 

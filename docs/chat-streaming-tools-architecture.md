@@ -176,6 +176,11 @@ WebSocket gateway that:
 - Handles `agentLoop:start/pause/stop` events
 - Broadcasts events to connected clients
 
+**Important:** confirmation events are session-bound. The gateway validates that
+the socket resolving a pending confirmation currently owns that `sessionId`.
+This closes the old gap where a different connected client could attempt to
+confirm or cancel a tool request for another session.
+
 #### ChatService
 Core chat orchestration service that:
 - Manages agent loop (LLM → tools → repeat)
@@ -204,6 +209,25 @@ Tool execution dispatcher:
 - Handles MCP tool calls via MCPService
 - Executes native tools
 - Returns standardized ToolResult
+
+It also owns the Human-in-the-Loop wait state for confirmed tools:
+- pending confirmations are stored per request and tied to the originating session
+- `tool:confirm` and `tool:cancel` must echo the same `sessionId`
+- destructive tools should use `requiresConfirmation: true`, preferably via the generic `@ConfirmedTool(...)` wrapper
+
+## Tool Confirmation Flow
+
+For tools marked `requiresConfirmation: true`, the turn pauses after the model
+emits a tool call and before the executor runs:
+
+1. `ChatService` emits `tool:start`
+2. `ToolDispatchService` registers a pending confirmation for the current session
+3. Frontend shows the inline confirmation UI for that same session
+4. `ChatGateway` accepts `tool:confirm` / `tool:cancel` only from the socket that owns the session
+5. The tool either resumes execution or returns a cancelled result back into the turn
+
+This keeps HITL approval aligned with the same session isolation rules as VFS,
+KV state, and subagent session ownership.
 
 #### MCPService
 Model Context Protocol service:

@@ -2,11 +2,17 @@
 
 Thank you for your interest in contributing. This document explains how the project works and what's expected.
 
+Documentation, tests, UI polish, and AI-assisted changes are all valid contributions here.
+
 ---
 
 ## Before you start
 
 Read **[AGENTS.md](./AGENTS.md)** — it is the canonical operating guide for all contributors (human and AI). The architecture rules there are enforced, not advisory.
+
+- For any non-trivial change, open or reference an issue/discussion before coding so scope and direction are visible.
+- Keep design and review discussion public unless the topic is security-sensitive or a private conduct matter.
+- Read **[CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)** before participating in issues, reviews, or discussions.
 
 ---
 
@@ -48,6 +54,12 @@ pnpm turbo run test
 pnpm turbo run typecheck
 ```
 
+### Existing test-suite patterns
+
+- Use `vi.hoisted()` when a mocked module factory and the test body both need the same mock reference.
+- Zustand mocks used outside React hooks must expose `.getState()` so event-bus and callback paths behave like the real store.
+- If a runtime rule is intentionally duplicated across frontend and backend, update both sides in the same PR and keep the sync note/comment aligned.
+
 ### Architecture rules (enforced)
 
 | Rule | Detail |
@@ -57,7 +69,8 @@ pnpm turbo run typecheck
 | **500 LOC limit** | Hard limit per file (tests exempt). Split before adding |
 | **No empty catch** | Always log with context. Never `.catch(() => {})` |
 | **Shared types in one place** | All BE↔FE contracts in `packages/@kalio/types/src/index.ts` |
-| **Destructive tools need confirmation** | `requiresConfirmation: true` on any tool that deletes or overwrites |
+| **Destructive tools need confirmation** | Prefer `@ConfirmedTool(...)`; otherwise set `requiresConfirmation: true` on any tool that deletes, overwrites, or persists risky state |
+| **Do not expand files already over hard limit** | Extract or split the touched slice before adding more behavior |
 
 ### Code audit
 
@@ -73,6 +86,8 @@ Review all 🔴 CRITICAL items before opening a PR.
 ---
 
 ## Adding a new backend tool
+
+For mutating or persistent tools, prefer `@ConfirmedTool(...)`; use plain `@Tool(...)` for read-only or otherwise safe operations.
 
 ```ts
 @Injectable()
@@ -104,10 +119,14 @@ Then:
 ## Pull requests
 
 - One logical change per PR
+- Open or reference an issue/discussion first for non-trivial changes
 - PR description must explain *why*, not just *what*
 - All tests must pass (`pnpm turbo run test`)
 - No TypeScript errors (`pnpm turbo run typecheck`)
 - No new 🔴 CRITICAL items in the audit report
+- Run `pnpm audit:report` when you touch architecture rules, contributor docs, or shared tooling
+- Include screenshots or a short recording for UI changes
+- AI-assisted contributions are welcome, but the submitter owns the final diff and verification
 
 ---
 

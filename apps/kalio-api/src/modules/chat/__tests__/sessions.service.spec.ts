@@ -9,6 +9,11 @@ interface FakeRow {
   id: string;
   personaId: string;
   title: string;
+  kind?: 'chat' | 'subagent';
+  parentSessionId?: string | null;
+  parentTurnId?: string | null;
+  parentToolCallId?: string | null;
+  interlocutorLabel?: string | null;
   createdAt: number | Date;
   updatedAt: number | Date;
 }
@@ -102,7 +107,18 @@ describe('SessionsService', () => {
       });
       const result = await service.list();
       expect(result).toEqual([
-        { id: 's1', personaId: 'p1', title: 'Hello', createdAt: 1000, updatedAt: 2000 },
+        {
+          id: 's1',
+          personaId: 'p1',
+          title: 'Hello',
+          kind: 'chat',
+          parentSessionId: undefined,
+          parentTurnId: undefined,
+          parentToolCallId: undefined,
+          interlocutorLabel: undefined,
+          createdAt: 1000,
+          updatedAt: 2000,
+        },
       ]);
     });
   });

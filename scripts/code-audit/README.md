@@ -1,8 +1,8 @@
 # KALIO v2 Code Audit
 
 Static-analysis pipeline that produces a prioritized tech-debt report for
-`kalio-api`, `kalio-web`, and packages using industry-standard JS/TS libs
-(no bespoke shell scripts).
+`kalio-api`, `kalio-web`, packages, and core contributor/agent docs using
+industry-standard JS/TS libs plus a small built-in governance scanner.
 
 ## Usage
 
@@ -20,6 +20,7 @@ slow (downloads to npm cache), subsequent runs are fast.
 | Tool | Purpose | Raw output |
 |---|---|---|
 | built-in scanner | file sizes, silent catches, `any` types | `file-stats.json` |
+| governance scanner | README / CONTRIBUTING / CODE_OF_CONDUCT / agent-doc drift | `docs-governance.json` |
 | `madge` | circular dependencies | `madge-circular.json` |
 | `jscpd` | copy/paste detection | `jscpd/jscpd-report.json` |
 | `knip` | unused files/exports/deps | `knip-<pkg>.json` |
@@ -30,6 +31,16 @@ slow (downloads to npm cache), subsequent runs are fast.
 - `docs/audit/<YYYY-MM-DD>-report.json` — machine-readable aggregated report.
 - `docs/audit/<YYYY-MM-DD>-report.md` — human-readable prioritized refactor queue
   following AGENTS.md architecture rules.
+
+## Governance checks
+
+The governance scanner currently flags:
+
+- missing required top-level contributor or agent-doc files
+- README / CONTRIBUTING links missing for core governance docs
+- incomplete Contributor Covenant sections in `CODE_OF_CONDUCT.md`
+- drift risk between `.github/copilot-instructions.md` and root `.copilot-instructions.md`
+- overly long root `AGENTS.md` files that are more likely to drift
 
 ## Severity rules
 

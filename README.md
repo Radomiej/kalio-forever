@@ -186,12 +186,52 @@ cd apps/kalio-web && pnpm dev
 
 Open **http://localhost:5188** and start chatting.
 
-### 4. Run Tests
+### 4. What success looks like
+
+After `./start-dev.ps1` boots cleanly you should have:
+
+- API listening on `http://localhost:3016`
+- Web UI ready on `http://localhost:5188`
+- a working Settings page where you can add or activate an LLM provider
+- the ability to create a session and send a first message without reloading
+
+### 5. Run Tests
 
 ```bash
 pnpm test           # unit + integration (Vitest)
 pnpm test:e2e       # end-to-end (Playwright — servers must be running)
 ```
+
+---
+
+## Daily Use
+
+1. Start the stack with `./start-dev.ps1`.
+2. Open `http://localhost:5188`.
+3. Go to Settings once and either:
+  use `mock` for offline development, or
+  add a real provider key and activate it.
+4. Create a session, pick a persona, and send a message.
+5. Approve destructive tool calls when the HITL prompt appears.
+6. Inspect results directly in chat: files, tool output, RA-Apps, images, and memory hits all show up inline.
+
+### Where To Change Things
+
+- Persona prompts and policies: `apps/kalio-api/src/modules/persona/`
+- Native tools: `apps/kalio-api/src/modules/tool/tools/`
+- Chat orchestration and streaming: `apps/kalio-api/src/modules/chat/`
+- Runtime settings UI: `apps/kalio-web/src/features/settings/`
+- Memory UI: `apps/kalio-web/src/features/memory/`
+
+### Troubleshooting
+
+| Problem | What to check |
+|---|---|
+| API does not start | Confirm Node 22+, `pnpm install`, and that port `3016` is free |
+| Web cannot reach backend | Confirm API is on `http://localhost:3016` and the browser opened `http://localhost:5188` |
+| Provider saves fail | Check `CREDENTIALS_MASTER_KEY` and the provider base URL/API key in Settings |
+| Secrets cannot be decrypted in production | Set `CREDENTIALS_MASTER_KEY` explicitly; dev fallback keys are only for local development |
+| Socket events seem stuck | Check browser console, API logs, and whether the current session was recreated after a restart |
 
 ---
 
@@ -228,6 +268,8 @@ For image generation, set `IMAGE_PROVIDER` and `IMAGE_API_KEY` separately (same 
 
 Provider secrets stored in `kalio.db` and image provider settings are encrypted at rest with `CREDENTIALS_MASTER_KEY`. This is field-level secret encryption, not a password on the SQLite database file itself.
 
+Each session sandbox is isolated. Agents can only read and write inside `WORKSPACE_ROOT/sessions/{sessionId}/` and the KV namespace attached to that session/persona boundary.
+
 ---
 
 ## Project Structure
@@ -260,12 +302,16 @@ kalio-forever/
 
 ## Documentation
 
+If you're contributing code or using an AI coding agent, start with [CONTRIBUTING.md](./CONTRIBUTING.md) and [AGENTS.md](./AGENTS.md) before changing implementation details.
+
 | Doc | What it covers |
 |---|---|
 | [AGENTS.md](./AGENTS.md) | Architecture invariants enforced in every PR (AI-readable) |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Setup, TDD workflow, tool registration, PR checklist |
+| [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Community expectations, moderation scope, and reporting path |
+| [scripts/code-audit/README.md](./scripts/code-audit/README.md) | What the automated audit checks and how to run it |
+| [docs/sessions/](./docs/sessions/) | Chronological engineering session logs and implementation decisions |
 | [docs/chat-streaming-tools-architecture.md](./docs/chat-streaming-tools-architecture.md) | LLM streaming + tool dispatch deep-dive |
-| [docs/chat-message-flow.md](./docs/chat-message-flow.md) | Socket.IO event flow diagram |
 | [docs/mcp-architecture.md](./docs/mcp-architecture.md) | MCP integration: discovery, lifecycle, per-persona policy |
 | [docs/database-schema-diagram.md](./docs/database-schema-diagram.md) | Full ERD with all 13 tables |
 | [docs/tool-architecture.md](./docs/tool-architecture.md) | Tool registration pattern and dispatch pipeline |
@@ -302,6 +348,8 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a PR. Key rules:
 3. **Zero cross-module imports** — all shared contracts go through `@kalio/types`
 4. **No `any`** in TypeScript — use `unknown` + narrowing
 5. **No empty catch blocks** — always log with context
+6. **Run `pnpm audit:report`** when you touch shared tooling, contributor docs, or architecture guidance
+7. **Do not grow existing god objects** — if a file is already past its hard limit, extract or split the touched slice before adding more behavior
 
 ---
 

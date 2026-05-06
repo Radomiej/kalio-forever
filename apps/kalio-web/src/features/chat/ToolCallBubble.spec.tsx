@@ -43,10 +43,20 @@ const { mockConfirmTool, mockCancelTool } = vi.hoisted(() => ({
   mockCancelTool: vi.fn(),
 }));
 
+const { mockApiGet } = vi.hoisted(() => ({
+  mockApiGet: vi.fn().mockResolvedValue({ data: [] }),
+}));
+
 vi.mock('../../services/eventBus', () => ({
   eventBus: {
     confirmTool: mockConfirmTool,
     cancelTool: mockCancelTool,
+  },
+}));
+
+vi.mock('../../services/apiClient', () => ({
+  apiClient: {
+    get: mockApiGet,
   },
 }));
 
@@ -82,6 +92,7 @@ beforeEach(() => {
   mockPendingConfirmations = {};
   mockActiveSessionId = 'session-1';
   vi.clearAllMocks();
+  mockApiGet.mockResolvedValue({ data: [] });
 });
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -177,7 +188,7 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
 });
 
 describe('HistoryToolCallBubble — run_subagent', () => {
-  it('shows child session, VFS mode, copied count, and copied file path after expanding', () => {
+  it('shows child session, VFS mode, copied count, and copied file path by default', () => {
     const content = JSON.stringify({
       result: 'created index.html',
       taskId: 'task-1',
@@ -190,8 +201,6 @@ describe('HistoryToolCallBubble — run_subagent', () => {
     });
 
     render(<HistoryToolCallBubble toolName="run_subagent" content={content} args={{ vfsMode: 'isolated' }} />);
-
-    act(() => { fireEvent.click(screen.getByRole('button', { name: 'Toggle details' })); });
 
     expect(screen.getByText('session')).toBeDefined();
     expect(screen.getByText('sub-child-1')).toBeDefined();

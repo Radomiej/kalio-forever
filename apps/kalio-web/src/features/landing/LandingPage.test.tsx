@@ -110,9 +110,9 @@ describe('LandingPage', () => {
       expect(getRAAppGroups).toHaveBeenCalledTimes(1);
     });
 
-    expect(screen.getByTestId('tile-cats-suite-current')).toBeInTheDocument();
-    expect(screen.getByTestId('tile-core-calc')).toBeInTheDocument();
-    expect(screen.getByTestId('tile-standalone-user')).toBeInTheDocument();
+    expect(await screen.findByTestId('tile-cats-suite-current')).toBeInTheDocument();
+    expect(await screen.findByTestId('tile-core-calc')).toBeInTheDocument();
+    expect(await screen.findByTestId('tile-standalone-user')).toBeInTheDocument();
   });
 
   it('opens chat flow after tile click and sets pending run prompt', async () => {

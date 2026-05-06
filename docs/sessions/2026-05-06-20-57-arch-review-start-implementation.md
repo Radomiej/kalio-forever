@@ -243,3 +243,59 @@ This session implemented the first high-priority fixes from the architecture rev
 2. Migrate existing `requiresConfirmation: true` mutators to `ConfirmedTool` for consistency, even where policy is already correct.
 3. Decide whether `session:identify` should stay trust-based or move behind a stronger session/auth model.
 4. Tackle the next architecture hotspots from the review: oversized files and backend module boundary drift.
+
+## Follow-up: audit, test-suite repair, README/docs cleanup
+
+### Audit
+
+- Ran `pnpm audit:report` from repo root.
+- Latest report written to `docs/audit/2026-05-06-report.md`.
+- Current static-analysis debt remains structural, not release-blocking:
+  - 13 critical oversized files
+  - 13 high-severity oversized/coupling findings
+  - 1 circular dependency (`tool-registry.service.ts` ↔ `subagent.tool.ts`)
+- No silent catches detected and no `any` hotspots reported.
+
+### Test-suite fixes
+
+- Repaired multiple stale spec harnesses after `ChatService` gained `CredentialsService` and after agent-loop semantics changed around empty no-tool retries.
+- Updated backend specs for:
+  - `chat.service.spec.ts`
+  - `chat.service.event-ordering.spec.ts`
+  - `chat-max-iterations.spec.ts`
+  - `issues-verification.spec.ts`
+  - `stream-processor.spec.ts`
+  - `sessions.service.spec.ts`
+  - `kv-store.service.spec.ts`
+- Updated frontend specs for:
+  - `sessionStore.test.ts`
+  - `ToolCallBubble.spec.tsx`
+  - `LandingPage.test.tsx`
+- Removed noisy JSDOM network activity from `ToolCallBubble.spec.tsx` by mocking the subagent-history fetch.
+
+### Final verification
+
+- Final root run: `pnpm test`
+- Result:
+  - `kalio-api`: 93 files passing, 1073 tests passing
+  - `kalio-web`: 29 files passing, 309 tests passing
+  - repo overall green
+
+### Documentation cleanup
+
+- Simplified `README.md` with:
+  - a short daily-use flow
+  - success criteria after startup
+  - a troubleshooting quick reference
+  - a task-oriented "Where To Change Things" section
+  - an explicit session-isolation statement in storage docs
+- Updated `docs/chat-streaming-tools-architecture.md` to document:
+  - session-bound `tool:confirm` / `tool:cancel`
+  - pending confirmation ownership in `ToolDispatchService`
+  - the generic confirmed-tool flow
+- Removed redundant `docs/chat-message-flow.md` because the same flow already lives in `README.md`.
+
+### Remaining debt after this batch
+
+- Audit-driven large-file refactors were not attempted here; they are still the main cleanup backlog.
+- Some web tests still print React `act(...)` warnings and expected error-path console output, but the suite is green and those warnings were not part of the requested bug-fix scope.

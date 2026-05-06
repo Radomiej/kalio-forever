@@ -22,7 +22,8 @@ describe('sessionStore — AgentTurn actions', () => {
   describe('startAgentTurn', () => {
     it('appends a new turn and sets activeTurnId', () => {
       useSessionStore.getState().startAgentTurn('t1', 's1');
-      const { agentTurns, activeTurnId } = useSessionStore.getState();
+      const agentTurns = useSessionStore.getState().getSessionAgentTurns('s1');
+      const activeTurnId = useSessionStore.getState().getSessionActiveTurnId('s1');
       expect(agentTurns).toHaveLength(1);
       expect(agentTurns[0]).toMatchObject({ id: 't1', sessionId: 's1', items: [], done: false });
       expect(activeTurnId).toBe('t1');
@@ -32,8 +33,9 @@ describe('sessionStore — AgentTurn actions', () => {
   describe('finalizeAgentTurn', () => {
     it('marks the active turn as done and clears activeTurnId', () => {
       useSessionStore.getState().startAgentTurn('t1', 's1');
-      useSessionStore.getState().finalizeAgentTurn();
-      const { agentTurns, activeTurnId } = useSessionStore.getState();
+      useSessionStore.getState().finalizeAgentTurn('s1');
+      const agentTurns = useSessionStore.getState().getSessionAgentTurns('s1');
+      const activeTurnId = useSessionStore.getState().getSessionActiveTurnId('s1');
       expect(agentTurns[0].done).toBe(true);
       expect(activeTurnId).toBeNull();
     });
@@ -42,29 +44,29 @@ describe('sessionStore — AgentTurn actions', () => {
   describe('markAgentTurnError', () => {
     it('sets error on the matching turn without changing other turns', () => {
       useSessionStore.getState().startAgentTurn('t1', 's1');
-      useSessionStore.getState().finalizeAgentTurn();
+      useSessionStore.getState().finalizeAgentTurn('s1');
       useSessionStore.getState().startAgentTurn('t2', 's1');
 
-      useSessionStore.getState().markAgentTurnError('t1', { code: 'INTERRUPTED', message: 'Interrupted' });
+      useSessionStore.getState().markAgentTurnError('t1', { code: 'INTERRUPTED', message: 'Interrupted' }, 's1');
 
-      const { agentTurns } = useSessionStore.getState();
+      const agentTurns = useSessionStore.getState().getSessionAgentTurns('s1');
       expect(agentTurns[0].error).toEqual({ code: 'INTERRUPTED', message: 'Interrupted' });
       expect(agentTurns[1].error).toBeUndefined();
     });
 
     it('is a no-op for an unknown turnId', () => {
       useSessionStore.getState().startAgentTurn('t1', 's1');
-      useSessionStore.getState().markAgentTurnError('unknown', { code: 'LLM_ERROR', message: 'fail' });
+      useSessionStore.getState().markAgentTurnError('unknown', { code: 'LLM_ERROR', message: 'fail' }, 's1');
 
-      const { agentTurns } = useSessionStore.getState();
+      const agentTurns = useSessionStore.getState().getSessionAgentTurns('s1');
       expect(agentTurns[0].error).toBeUndefined();
     });
 
     it('does not change activeTurnId', () => {
       useSessionStore.getState().startAgentTurn('t1', 's1');
-      useSessionStore.getState().markAgentTurnError('t1', { code: 'MAX_ITERATIONS_REACHED', message: 'too many' });
+      useSessionStore.getState().markAgentTurnError('t1', { code: 'MAX_ITERATIONS_REACHED', message: 'too many' }, 's1');
 
-      expect(useSessionStore.getState().activeTurnId).toBe('t1');
+      expect(useSessionStore.getState().getSessionActiveTurnId('s1')).toBe('t1');
     });
   });
 

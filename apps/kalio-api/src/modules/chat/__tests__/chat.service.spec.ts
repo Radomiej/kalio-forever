@@ -13,6 +13,7 @@ import type { EmitFn } from '../interfaces/stream-context.interface';
 import type { LLMMessage } from '@kalio/types';
 import { PersonaService } from '../../persona/persona.service';
 import { SkillsService } from '../../skills/skills.service';
+import { CredentialsService } from '../../credentials/credentials.service';
 
 async function* makeStream(chunks: InternalLLMChunk[]): AsyncIterable<InternalLLMChunk> {
   for (const chunk of chunks) {
@@ -35,6 +36,7 @@ describe('ChatService', () => {
   };
   let toolDispatch: { getToolMetas: ReturnType<typeof vi.fn>; dispatch: ReturnType<typeof vi.fn> };
   let personaService: Partial<PersonaService>;
+  let credentialsService: Pick<CredentialsService, 'getMaxToolAttempts'>;
   let auditService: Partial<AuditService>;
   let emit: ReturnType<typeof vi.fn>;
 
@@ -56,6 +58,9 @@ describe('ChatService', () => {
     personaService = {
       getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }),
     };
+    credentialsService = {
+      getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+    };
     auditService = {
       log: vi.fn().mockResolvedValue('audit-id'),
       update: vi.fn().mockResolvedValue(undefined),
@@ -66,15 +71,33 @@ describe('ChatService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         ChatService,
-        // StreamProcessor with no-op pipeline
         {
           provide: StreamProcessorService,
-          useValue: { process: vi.fn().mockResolvedValue(undefined), onModuleInit: vi.fn() },
+          useValue: {
+            process: vi.fn().mockImplementation(async (chunk: InternalLLMChunk, ctx: { state: { appendText: (delta: string) => void; addToolCall: (toolCall: { id: string; name: string; args: object }) => void }; emit: EmitFn; sessionId: string; messageId: string }) => {
+              if (chunk.type === 'text_delta') {
+                ctx.state.appendText(chunk.delta);
+                ctx.emit('chat:chunk', {
+                  sessionId: ctx.sessionId,
+                  messageId: ctx.messageId,
+                  delta: chunk.delta,
+                  done: false,
+                });
+                return;
+              }
+
+              if (chunk.type === 'tool_call') {
+                ctx.state.addToolCall({ id: chunk.callId, name: chunk.name, args: chunk.args });
+              }
+            }),
+            onModuleInit: vi.fn(),
+          },
         },
         { provide: SessionManagerService, useValue: sessionManager },
         { provide: ToolDispatchService, useValue: toolDispatch },
         { provide: PersonaService, useValue: personaService },
         { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
+        { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
         { provide: LLM_SOURCE, useValue: llmSource },
         // Unused in this test but required by processors
@@ -191,7 +214,7 @@ describe('ChatService', () => {
   });
 
   it('emits chat:complete exactly once at end of agent loop', async () => {
-    const llmSource = makeLLMSource([{ type: 'done' }]);
+    const llmSource = makeLLMSource([{ type: 'text_delta', delta: 'done' }, { type: 'done' }]);
     await buildService(llmSource);
     await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
     const completeCalls = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -207,11 +230,14 @@ describe('ChatService', () => {
     };
 
     const processor = {
-      // Use call count: first invocation populates a tool call, subsequent ones don't.
+      // First iteration requests a tool, second produces the final assistant text.
       process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { state: { addToolCall: (tc: unknown) => void } }) => {
         if ((processor.process as ReturnType<typeof vi.fn>).mock.calls.length === 1) {
           ctx.state.addToolCall({ id: 'c1', name: 't', args: {} });
+          return;
         }
+
+        (ctx.state as { text: string }).text = 'final answer';
       }),
       onModuleInit: vi.fn(),
     };
@@ -224,6 +250,7 @@ describe('ChatService', () => {
         { provide: ToolDispatchService, useValue: toolDispatch },
         { provide: PersonaService, useValue: personaService },
         { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
+        { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
         { provide: LLM_SOURCE, useValue: llmSource },
         { provide: CHUNK_HANDLERS, useValue: [] },
@@ -309,6 +336,7 @@ describe('ChatService', () => {
         { provide: ToolDispatchService, useValue: toolDispatch },
         { provide: PersonaService, useValue: personaService },
         { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
+        { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
         { provide: LLM_SOURCE, useValue: llmSource },
         { provide: CHUNK_HANDLERS, useValue: [] },
@@ -348,6 +376,7 @@ describe('ChatService', () => {
         { provide: ToolDispatchService, useValue: toolDispatch },
         { provide: PersonaService, useValue: personaService },
         { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
+        { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
         { provide: LLM_SOURCE, useValue: llmSource },
         { provide: CHUNK_HANDLERS, useValue: [] },
@@ -387,6 +416,7 @@ describe('ChatService', () => {
         { provide: ToolDispatchService, useValue: toolDispatch },
         { provide: PersonaService, useValue: personaService },
         { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
+        { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
         { provide: LLM_SOURCE, useValue: llmSource },
         { provide: CHUNK_HANDLERS, useValue: [] },
@@ -426,6 +456,7 @@ describe('ChatService', () => {
         { provide: ToolDispatchService, useValue: toolDispatch },
         { provide: PersonaService, useValue: personaService },
         { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
+        { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
         { provide: LLM_SOURCE, useValue: llmSource },
         { provide: CHUNK_HANDLERS, useValue: [] },
