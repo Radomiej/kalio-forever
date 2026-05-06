@@ -47,7 +47,16 @@ export interface LLMConfig {
   baseUrl: string;
 }
 
-export type LLMProviderType = 'openai' | 'openrouter' | 'cometapi' | 'xiaomimimo' | 'ollama' | 'mock';
+export type LLMProviderType =
+  | 'openai'
+  | 'openrouter'
+  | 'cometapi'
+  | 'xiaomimimo'
+  | 'ollama'
+  | 'deepseek'
+  | 'bitnet'
+  | 'custom'
+  | 'mock';
 
 // ─── Persona ──────────────────────────────────────────────────────────────────
 /** Controls which MCP tools a persona can access. */
@@ -265,6 +274,12 @@ export interface CreateCredentialDto {
   apiKey: string;             // write-only, never returned
   baseUrl?: string;
   model?: string;
+}
+
+export interface ToolTimeoutSettings {
+  webSearchTimeoutMs: number;
+  providerLocalTimeoutMs: number;
+  providerRemoteTimeoutMs: number;
 }
 
 // ─── Allowed Paths ──────────────────────────────────────────────────────────────

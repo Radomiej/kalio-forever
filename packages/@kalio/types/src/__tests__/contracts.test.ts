@@ -25,6 +25,7 @@ import type {
   VFSListResult,
   Credential,
   CreateCredentialDto,
+  ToolTimeoutSettings,
   MCPServer,
   MCPTool,
   RAAppBlock,
@@ -165,13 +166,38 @@ describe('@kalio/types — P0-T01 contract shape', () => {
 
   it('LLMConfig has provider, model, apiKey, baseUrl', () => {
     const config: LLMConfig = {
-      provider: 'openai',
+      provider: 'bitnet',
       model: 'gpt-4o-mini',
       apiKey: 'sk-test',
       baseUrl: 'https://api.openai.com/v1',
     };
     expect(config.model).toBeDefined();
     expect(config.provider).toBeDefined();
+  });
+
+  it('LLMProviderType includes all supported runtime providers', () => {
+    const providers: LLMProviderType[] = [
+      'openai',
+      'openrouter',
+      'cometapi',
+      'xiaomimimo',
+      'ollama',
+      'deepseek',
+      'bitnet',
+      'custom',
+      'mock',
+    ];
+    expect(providers).toContain('bitnet');
+    expect(providers).toContain('custom');
+  });
+
+  it('ToolTimeoutSettings is exported as a shared contract', () => {
+    const settings: ToolTimeoutSettings = {
+      webSearchTimeoutMs: 120000,
+      providerLocalTimeoutMs: 3000,
+      providerRemoteTimeoutMs: 15000,
+    };
+    expect(settings.webSearchTimeoutMs).toBe(120000);
   });
 
   it('SocketEvents chat:send has required fields', () => {

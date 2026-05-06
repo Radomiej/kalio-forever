@@ -1,8 +1,6 @@
-export interface ToolTimeoutSettings {
-  webSearchTimeoutMs: number;
-  providerLocalTimeoutMs: number;
-  providerRemoteTimeoutMs: number;
-}
+import type { ToolTimeoutSettings } from '@kalio/types';
+
+export type { ToolTimeoutSettings } from '@kalio/types';
 
 export type ToolTimeoutKey = keyof ToolTimeoutSettings;
 

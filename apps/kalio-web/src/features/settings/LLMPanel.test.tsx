@@ -168,6 +168,24 @@ describe('LLMPanel', () => {
     expect(nameInput.value).toBe('Custom');
   });
 
+  it('supports bitnet in the add-provider form', async () => {
+    mockFetch(defaultMap());
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByRole('button', { name: 'BitNet' }));
+
+    const nameInput = screen.getByRole('textbox', { name: /name/i }) as HTMLInputElement;
+    const modelInput = screen.getByTestId('add-provider-model') as HTMLInputElement;
+    const baseUrlInput = screen.getByRole('textbox', { name: /base url/i }) as HTMLInputElement;
+
+    expect(nameInput.value).toBe('BitNet');
+    expect(modelInput.value).toBe('bitnet-b1.58-2b-4t');
+    expect(baseUrlInput.value).toBe('http://localhost:8080/v1');
+  });
+
   it('test button is disabled when API key is empty', async () => {
     mockFetch(defaultMap());
     const user = userEvent.setup();

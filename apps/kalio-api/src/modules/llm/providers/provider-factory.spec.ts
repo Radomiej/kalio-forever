@@ -6,6 +6,7 @@ import { OpenRouterProvider } from './openrouter.provider';
 import { CometAPIProvider } from './cometapi.provider';
 import { XiaomiMiMoProvider } from './xiaomimimo.provider';
 import { OllamaProvider } from './ollama.provider';
+import { BaseOpenAICompatibleProvider } from './base-openai-compatible.provider';
 
 // Regression test for: Provider factory silent fallback to OpenAI for unknown providers
 // Issue: Unknown provider types silently default to OpenAI instead of throwing an error
@@ -227,6 +228,15 @@ describe('createLLMProvider', () => {
         model: 'deepseek-chat',
       });
       expect(provider).toBeDefined();
+    });
+
+    it('should return BaseOpenAICompatibleProvider for bitnet', () => {
+      const provider = createLLMProvider({
+        provider: 'bitnet',
+        apiKey: 'ignored-for-local',
+        model: 'bitnet-b1.58-2b-4t',
+      });
+      expect(provider).toBeInstanceOf(BaseOpenAICompatibleProvider);
     });
   });
 });

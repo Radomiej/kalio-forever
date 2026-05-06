@@ -251,6 +251,25 @@ describe('CredentialsController', () => {
         globalThis.fetch = originalFetch;
       }
     });
+
+    it('uses remote timeout for remote providers', async () => {
+      const cred = makeCredential({
+        provider: 'openai',
+        baseUrl: 'https://api.openai.com/v1',
+      });
+      mockService.findAll.mockResolvedValue([cred]);
+      mockService.getApiKey.mockResolvedValue('sk-test');
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('network error'));
+
+      try {
+        const result = await controller.testById('cred-1');
+        expect(result.ok).toBe(false);
+        expect(mockTimeoutSettings.getProviderTimeoutMs).toHaveBeenCalledWith(false);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
   });
 
   describe('testConnection()', () => {

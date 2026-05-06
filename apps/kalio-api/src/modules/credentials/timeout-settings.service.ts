@@ -1,11 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import type { ToolTimeoutSettings } from '@kalio/types';
 import { AppSettingsService } from '../../database/app-settings.service';
-
-export interface ToolTimeoutSettings {
-  webSearchTimeoutMs: number;
-  providerLocalTimeoutMs: number;
-  providerRemoteTimeoutMs: number;
-}
 
 const DEFAULT_TIMEOUT_SETTINGS: ToolTimeoutSettings = {
   webSearchTimeoutMs: 120_000,

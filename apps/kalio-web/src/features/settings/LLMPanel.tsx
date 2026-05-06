@@ -28,6 +28,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   cometapi:   'CometAPI',
   openrouter: 'OpenRouter',
   ollama:     'Ollama',
+  bitnet:     'BitNet',
   custom:     'Custom',
 };
 
@@ -38,6 +39,7 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   cometapi:   'https://api.cometapi.com/v1',
   openrouter: 'https://openrouter.ai/api/v1',
   ollama:     'http://localhost:11434/v1',
+  bitnet:     'http://localhost:8080/v1',
   custom:     '',
 };
 
@@ -48,10 +50,11 @@ const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   cometapi:   'gpt-4o-mini',
   openrouter: 'openai/gpt-4o-mini',
   ollama:     'llama3.2',
+  bitnet:     'bitnet-b1.58-2b-4t',
   custom:     '',
 };
 
-const ALL_PROVIDER_TYPES = ['openai', 'xiaomimimo', 'deepseek', 'cometapi', 'openrouter', 'ollama', 'custom'];
+const ALL_PROVIDER_TYPES = ['openai', 'xiaomimimo', 'deepseek', 'cometapi', 'openrouter', 'ollama', 'bitnet', 'custom'];
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {

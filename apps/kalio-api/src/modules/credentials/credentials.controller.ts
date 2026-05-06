@@ -1,8 +1,8 @@
 import { Controller, Get, Post, Put, Patch, Delete, Param, Body, HttpCode, HttpStatus, Logger, BadRequestException } from '@nestjs/common';
-import type { Credential, CreateCredentialDto } from '@kalio/types';
+import type { Credential, CreateCredentialDto, ToolTimeoutSettings } from '@kalio/types';
 import { CredentialsService } from './credentials.service';
 import { createLLMProvider } from '../llm/providers/provider-factory';
-import { TimeoutSettingsService, type ToolTimeoutSettings } from './timeout-settings.service';
+import { TimeoutSettingsService } from './timeout-settings.service';
 import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
 
 @Controller('credentials')

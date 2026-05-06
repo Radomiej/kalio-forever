@@ -37,7 +37,9 @@ export function createLLMProvider(config: ProviderConfig): ILLMProvider {
       return new BaseOpenAICompatibleProvider('custom', apiKey, model, baseUrl);
     case 'deepseek':
       return new BaseOpenAICompatibleProvider('deepseek', apiKey, model, baseUrl ?? 'https://api.deepseek.com/v1');
+    case 'bitnet':
+      return new BaseOpenAICompatibleProvider('bitnet', apiKey, model, baseUrl ?? 'http://localhost:8080/v1');
     default:
-      throw new Error(`Unknown LLM provider: "${provider}". Supported: openai, openrouter, cometapi, xiaomimimo, ollama, deepseek, custom`);
+      throw new Error(`Unknown LLM provider: "${provider}". Supported: openai, openrouter, cometapi, xiaomimimo, ollama, deepseek, bitnet, custom`);
   }
 }
