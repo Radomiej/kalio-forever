@@ -14,6 +14,11 @@ export const envSchema = Joi.object({
   // Web search (Perplexity) — optional, can be configured via Settings UI
   PERPLEXITY_API_KEY:  Joi.string().optional(),
   PERPLEXITY_PROVIDER: Joi.string().valid('perplexity', 'perplexity-openrouter').optional(),
+  CREDENTIALS_MASTER_KEY: Joi.string().when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().required(),
+    otherwise: Joi.string().optional(),
+  }),
   LLM_API_KEY:         Joi.string().when('NODE_ENV', {
     is: 'test',
     then: Joi.string().optional().default('mock'),

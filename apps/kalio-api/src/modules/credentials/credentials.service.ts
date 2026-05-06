@@ -1,4 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { nanoid } from 'nanoid';
 import type { Credential, CreateCredentialDto, LLMProviderType } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
@@ -8,13 +10,19 @@ import type { ProviderConfig } from '../llm/llm.types';
 import { TimeoutSettingsService } from './timeout-settings.service';
 import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
 
+const CREDENTIALS_CIPHER_PREFIX = 'kalio-enc-v1';
+const CREDENTIALS_MASTER_KEY_ENV = 'CREDENTIALS_MASTER_KEY';
+const DEV_FALLBACK_CREDENTIALS_MASTER_KEY = 'kalio-dev-credentials-master-key-not-for-production';
+
 @Injectable()
 export class CredentialsService {
   private readonly logger = new Logger(CredentialsService.name);
+  private hasWarnedAboutFallbackMasterKey = false;
 
   constructor(
     private readonly drizzle: DrizzleService,
     private readonly timeoutSettings: TimeoutSettingsService,
+    private readonly config: ConfigService,
   ) {}
 
   async findAll(): Promise<Credential[]> {
@@ -33,7 +41,7 @@ export class CredentialsService {
       id,
       name: dto.name,
       provider: dto.provider,
-      apiKey: dto.apiKey,
+      apiKey: this.encryptApiKey(dto.apiKey ?? ''),
       baseUrl: dto.baseUrl ?? null,
       model: dto.model ?? null,
       createdAt: new Date(),
@@ -58,7 +66,10 @@ export class CredentialsService {
 
   async getApiKey(credentialId: string): Promise<string | null> {
     const row = await this.drizzle.db.select().from(credentials).where(eq(credentials.id, credentialId)).then((r) => r[0]);
-    return row?.apiKey ?? null;
+    if (!row || typeof row.apiKey !== 'string') {
+      return null;
+    }
+    return this.decryptApiKey(row.apiKey);
   }
 
   // ─── Active credential management ────────────────────────────────────────────
@@ -117,7 +128,7 @@ export class CredentialsService {
     if (!row) return null;
     return {
       provider: row.provider as LLMProviderType,
-      apiKey: row.apiKey,
+      apiKey: this.decryptApiKey(row.apiKey),
       model: row.model ?? '',
       baseUrl: row.baseUrl ?? undefined,
     };
@@ -201,9 +212,10 @@ export class CredentialsService {
     const timeoutMs = await this.timeoutSettings.getProviderTimeoutMs(isLocal);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const apiKey = this.decryptApiKey(row.apiKey);
 
     try {
-      const authHeaders: Record<string, string> = row.apiKey ? { Authorization: `Bearer ${row.apiKey}` } : {};
+      const authHeaders: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
       if (row.provider === 'xiaomimimo') {
         authHeaders['HTTP-Referer'] = 'https://github.com/RooVetGit/Roo-Cline';
         authHeaders['X-Title'] = 'Roo Code';
@@ -257,6 +269,68 @@ export class CredentialsService {
     if (!row) return 8;
     const parsed = parseInt(row.value, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+  }
+
+  private encryptApiKey(apiKey: string): string {
+    if (!apiKey) return '';
+
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.getEncryptionKey(), iv);
+    const encrypted = Buffer.concat([cipher.update(apiKey, 'utf8'), cipher.final()]);
+    const authTag = cipher.getAuthTag();
+
+    return [
+      CREDENTIALS_CIPHER_PREFIX,
+      iv.toString('base64'),
+      authTag.toString('base64'),
+      encrypted.toString('base64'),
+    ].join(':');
+  }
+
+  private decryptApiKey(storedValue: string): string {
+    if (!storedValue || !storedValue.startsWith(`${CREDENTIALS_CIPHER_PREFIX}:`)) {
+      return storedValue;
+    }
+
+    const [prefix, ivBase64, authTagBase64, payloadBase64] = storedValue.split(':');
+    if (!prefix || !ivBase64 || !authTagBase64 || !payloadBase64) {
+      throw new Error('Stored credential is malformed and cannot be decrypted');
+    }
+
+    const decipher = createDecipheriv('aes-256-gcm', this.getEncryptionKey(), Buffer.from(ivBase64, 'base64'));
+    decipher.setAuthTag(Buffer.from(authTagBase64, 'base64'));
+
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(payloadBase64, 'base64')),
+      decipher.final(),
+    ]);
+
+    return decrypted.toString('utf8');
+  }
+
+  private getEncryptionKey(): Buffer {
+    return scryptSync(this.getMasterKey(), CREDENTIALS_CIPHER_PREFIX, 32);
+  }
+
+  private getMasterKey(): string {
+    const configured = this.config.get<string>(CREDENTIALS_MASTER_KEY_ENV, '');
+    if (configured) {
+      return configured;
+    }
+
+    const nodeEnv = this.config.get<string>('NODE_ENV', 'development');
+    if (nodeEnv === 'production') {
+      throw new Error(`${CREDENTIALS_MASTER_KEY_ENV} must be configured in production`);
+    }
+
+    if (nodeEnv !== 'test' && !this.hasWarnedAboutFallbackMasterKey) {
+      this.hasWarnedAboutFallbackMasterKey = true;
+      this.logger.warn(
+        `${CREDENTIALS_MASTER_KEY_ENV} is not set; using the development fallback key. Set it explicitly outside local dev.`,
+      );
+    }
+
+    return DEV_FALLBACK_CREDENTIALS_MASTER_KEY;
   }
 
   async setMaxToolAttempts(size: number): Promise<void> {

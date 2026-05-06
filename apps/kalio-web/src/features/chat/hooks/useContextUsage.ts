@@ -39,7 +39,7 @@ export interface ContextUsageResult {
 }
 
 export function useContextUsage(): ContextUsageResult {
-  const tools = useAgentStore((s: any) => s.tools);
+  const tools = useAgentStore((s) => s.tools);
   const { activeSessionId, messages } = useSessionStore();
   const contextLimit = 32000; // Default context window
 
@@ -48,7 +48,7 @@ export function useContextUsage(): ContextUsageResult {
     const basePromptText = getCoreOsPrompt();
 
     const toolsText = tools.length > 0
-      ? tools.map((t: any) => {
+      ? tools.map((t) => {
           const desc = t.description.length > 120
             ? t.description.slice(0, 119) + '…'
             : t.description;

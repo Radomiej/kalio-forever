@@ -14,3 +14,11 @@ export const Tool = (options: ToolOptions): ClassDecorator =>
     ...options,
     requiresConfirmation: options.requiresConfirmation ?? false,
   });
+
+export type ConfirmedToolOptions = Omit<ToolOptions, 'requiresConfirmation'>;
+
+export const ConfirmedTool = (options: ConfirmedToolOptions): ClassDecorator =>
+  Tool({
+    ...options,
+    requiresConfirmation: true,
+  });

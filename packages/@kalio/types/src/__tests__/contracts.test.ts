@@ -210,12 +210,22 @@ describe('@kalio/types — P0-T01 contract shape', () => {
     expect(event.content).toBeDefined();
   });
 
-  it('CreateCredentialDto has apiKey (write-only)', () => {
+  it('CreateCredentialDto keeps apiKey for remote providers', () => {
     const dto: CreateCredentialDto = {
       name: 'Test',
       provider: 'OpenRouter',
       apiKey: 'sk-test',
     };
     expect(dto.apiKey).toBeDefined();
+  });
+
+  it('CreateCredentialDto allows omitted apiKey for local providers', () => {
+    const dto: CreateCredentialDto = {
+      name: 'Local BitNet',
+      provider: 'bitnet',
+      baseUrl: 'http://localhost:8080/v1',
+      model: 'bitnet-b1.58-2b-4t',
+    };
+    expect(dto.apiKey).toBeUndefined();
   });
 });

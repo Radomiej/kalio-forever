@@ -15,7 +15,7 @@ import { KVStoreService } from '../kv-store.service';
       value: { type: 'string', description: 'String value to store.' },
     },
   },
-  requiresConfirmation: false,
+  requiresConfirmation: true,
 })
 export class KVWriteTool {
   constructor(private readonly kv: KVStoreService) {}
@@ -80,7 +80,7 @@ export class KVListTool {
       key: { type: 'string', description: 'Key to delete.' },
     },
   },
-  requiresConfirmation: false,
+  requiresConfirmation: true,
 })
 export class KVDeleteTool {
   constructor(private readonly kv: KVStoreService) {}

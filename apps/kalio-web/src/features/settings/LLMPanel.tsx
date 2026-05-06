@@ -6,6 +6,13 @@ import { ProviderCard } from './ProviderCard';
 import { ModelSettingsSection } from './ModelSettingsSection';
 import { ToolTimeoutsSection } from './ToolTimeoutsSection';
 import {
+  ALL_PROVIDER_TYPES,
+  isLocalLlmProviderConfig,
+  PROVIDER_BASE_URLS,
+  PROVIDER_DEFAULT_MODELS,
+  PROVIDER_LABELS,
+} from './llm-provider-settings';
+import {
   DEFAULT_TOOL_TIMEOUT_SETTINGS,
   normalizeToolTimeout,
   type ToolTimeoutKey,
@@ -21,40 +28,36 @@ interface LLMConfigWithSource {
   source: 'db' | 'env';
 }
 
-const PROVIDER_LABELS: Record<string, string> = {
-  openai:     'OpenAI',
-  xiaomimimo: 'Xiaomi MiMo',
-  deepseek:   'DeepSeek',
-  cometapi:   'CometAPI',
-  openrouter: 'OpenRouter',
-  ollama:     'Ollama',
-  bitnet:     'BitNet',
-  custom:     'Custom',
-};
+async function readResponseErrorMessage(res: Response, context: string): Promise<string> {
+  const body = await res.text();
+  if (!body) {
+    return res.statusText ? `HTTP ${res.status}: ${res.statusText}` : `HTTP ${res.status}`;
+  }
 
-const PROVIDER_BASE_URLS: Record<string, string> = {
-  openai:     'https://api.openai.com/v1',
-  xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
-  deepseek:   'https://api.deepseek.com/v1',
-  cometapi:   'https://api.cometapi.com/v1',
-  openrouter: 'https://openrouter.ai/api/v1',
-  ollama:     'http://localhost:11434/v1',
-  bitnet:     'http://localhost:8080/v1',
-  custom:     '',
-};
+  const contentType = res.headers.get('content-type') ?? '';
+  const looksLikeJson = contentType.toLowerCase().includes('application/json');
 
-const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
-  openai:     'gpt-4o-mini',
-  xiaomimimo: 'mimo-v2-omni',
-  deepseek:   'deepseek-reasoner',
-  cometapi:   'gpt-4o-mini',
-  openrouter: 'openai/gpt-4o-mini',
-  ollama:     'llama3.2',
-  bitnet:     'bitnet-b1.58-2b-4t',
-  custom:     '',
-};
+  if (!looksLikeJson) {
+    return `HTTP ${res.status}: ${body}`;
+  }
 
-const ALL_PROVIDER_TYPES = ['openai', 'xiaomimimo', 'deepseek', 'cometapi', 'openrouter', 'ollama', 'bitnet', 'custom'];
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+    if (typeof parsed.error === 'string' && parsed.error.trim().length > 0) {
+      return parsed.error;
+    }
+    if (typeof parsed.message === 'string' && parsed.message.trim().length > 0) {
+      return parsed.message;
+    }
+  } catch (err) {
+    console.error(
+      `[LLMPanel] Failed to parse ${context} error body`,
+      err instanceof Error ? err : new Error(String(err)),
+    );
+  }
+
+  return `HTTP ${res.status}: ${body}`;
+}
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -62,8 +65,7 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
     ...opts,
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status}: ${text}`);
+    throw new Error(await readResponseErrorMessage(res, `apiFetch(${path})`));
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -108,6 +110,7 @@ export function LLMPanel() {
   const persistedToolTimeouts = useRef<ToolTimeoutSettings>({ ...DEFAULT_TOOL_TIMEOUT_SETTINGS });
 
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
+  const allowsKeylessAuth = isLocalLlmProviderConfig(form.provider, form.baseUrl);
 
   const reportUpdateError = useCallback((message: string, err: unknown) => {
     const error = err instanceof Error ? err : new Error(String(err));
@@ -173,8 +176,7 @@ export function LLMPanel() {
       if (form.baseUrl) params.set('baseUrl', form.baseUrl);
       const res = await fetch(`/api/llm/models?${params.toString()}`);
       if (!res.ok) {
-        const errJson = await res.json().catch(() => null) as { error?: string } | null;
-        throw new Error(errJson?.error ?? `HTTP ${res.status}`);
+        throw new Error(await readResponseErrorMessage(res, 'provider test'));
       }
       const json = await res.json() as { data?: unknown[]; models?: unknown[] };
       const count = (json.data ?? json.models ?? []).length;
@@ -193,7 +195,7 @@ export function LLMPanel() {
       const dto: CreateCredentialDto = {
         name: form.name,
         provider: form.provider,
-        apiKey: form.apiKey,
+        apiKey: form.apiKey || undefined,
         baseUrl: form.baseUrl || undefined,
         model: form.model || undefined,
       };
@@ -392,15 +394,17 @@ export function LLMPanel() {
               </div>
 
               <label className="form-control gap-1">
-                <span className="text-xs text-base-content/60">API Key</span>
+                <span className="text-xs text-base-content/60">
+                  API Key {allowsKeylessAuth ? <span className="text-base-content/40">(optional for local providers)</span> : null}
+                </span>
                 <input
                   className="input input-bordered input-sm font-mono"
                   type="password"
-                  placeholder="sk-…"
+                  placeholder={allowsKeylessAuth ? 'Optional for local endpoint' : 'sk-…'}
                   value={form.apiKey}
                   onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
                   data-testid="add-provider-apikey"
-                  required
+                  required={!allowsKeylessAuth}
                 />
               </label>
 
@@ -434,7 +438,7 @@ export function LLMPanel() {
                   type="button"
                   className={`btn btn-ghost btn-xs gap-1 ${testState === 'ok' ? 'text-success' : testState === 'error' ? 'text-error' : 'text-base-content/60'}`}
                   onClick={() => void handleTest()}
-                  disabled={!form.apiKey || testState === 'testing'}
+                  disabled={(!allowsKeylessAuth && !form.apiKey) || testState === 'testing'}
                   data-testid="add-provider-test"
                 >
                   {testState === 'testing' ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}

@@ -2,6 +2,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Loader2, AlertCircle, Folder, Trash2 } from 'lucide-react';
 import type { AllowedPath, CreateAllowedPathDto } from '@kalio/types';
 
+interface DirectoryPickerHandle {
+  name: string;
+}
+
+type DirectoryPickerWindow = Window & {
+  showDirectoryPicker?: () => Promise<DirectoryPickerHandle>;
+};
+
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -69,19 +77,23 @@ export function AllowedPathsPanel() {
   };
 
   const handlePickFolder = async () => {
-    if (!('showDirectoryPicker' in window)) {
+    const pickerWindow = window as DirectoryPickerWindow;
+    if (!pickerWindow.showDirectoryPicker) {
       setError('Native folder picker is not available in this browser. Please type the path manually.');
       inputRef.current?.focus();
       return;
     }
     try {
-      const dirHandle = await (window as any).showDirectoryPicker();
+      const dirHandle = await pickerWindow.showDirectoryPicker();
       // We can't get the absolute path from File System Access API for privacy reasons,
       // so we ask the user to type or paste it after selecting a folder name as a hint
       setInputPath(dirHandle.name);
       inputRef.current?.focus();
-    } catch {
-      // user cancelled
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        return;
+      }
+      setError(err instanceof Error ? err.message : 'Failed to open directory picker');
     }
   };
 

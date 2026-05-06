@@ -1,12 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Reflector } from '@nestjs/core';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './memory.tools';
 import type { MemoryService } from '../../memory/memory.service';
 import type { DrizzleService } from '../../../database/drizzle.service';
 import type { ToolCallRequest } from '@kalio/types';
+import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
 function makeRequest(toolName: string, args: Record<string, unknown> = {}, sessionId = 'sess-mem'): ToolCallRequest {
   return { callId: 'call-1', sessionId, toolName, args };
 }
+
+const reflector = new Reflector();
 
 /** Creates a mock DrizzleService whose session lookup returns the given personaId. */
 function makeDrizzleMock(personaId = 'persona-1'): DrizzleService {
@@ -35,6 +39,12 @@ describe('MemoryIngestTool', () => {
   beforeEach(() => {
     memory = { ingest: vi.fn() };
     tool = new MemoryIngestTool(memory as MemoryService, makeDrizzleMock('persona-1'));
+  });
+
+  it('REGRESSION: requires confirmation because it writes long-term memory', () => {
+    const metadata = reflector.get(TOOL_METADATA, MemoryIngestTool);
+
+    expect(metadata.requiresConfirmation).toBe(true);
   });
 
   describe('positive scenarios', () => {
@@ -177,6 +187,12 @@ describe('MemoryIngestConversationTool', () => {
   beforeEach(() => {
     memory = { ingestConversation: vi.fn() };
     tool = new MemoryIngestConversationTool(memory as MemoryService, makeDrizzleMock('persona-1'));
+  });
+
+  it('REGRESSION: requires confirmation because it writes long-term memory blocks', () => {
+    const metadata = reflector.get(TOOL_METADATA, MemoryIngestConversationTool);
+
+    expect(metadata.requiresConfirmation).toBe(true);
   });
 
   describe('positive scenarios', () => {

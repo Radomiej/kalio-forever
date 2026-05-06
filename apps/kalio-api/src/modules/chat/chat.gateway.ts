@@ -82,13 +82,29 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('tool:confirm')
-  handleToolConfirm(@MessageBody() payload: SocketEvents['tool:confirm']): void {
-    this.toolDispatch.resolveConfirmation(payload.requestId);
+  handleToolConfirm(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: SocketEvents['tool:confirm'],
+  ): void {
+    const socketSessions = this.socketSessions.get(client.id);
+    if (!socketSessions?.has(payload.sessionId)) {
+      this.logger.warn(`tool:confirm rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
+      return;
+    }
+    this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId);
   }
 
   @SubscribeMessage('tool:cancel')
-  handleToolCancel(@MessageBody() payload: SocketEvents['tool:cancel']): void {
-    this.toolDispatch.cancelConfirmation(payload.requestId);
+  handleToolCancel(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: SocketEvents['tool:cancel'],
+  ): void {
+    const socketSessions = this.socketSessions.get(client.id);
+    if (!socketSessions?.has(payload.sessionId)) {
+      this.logger.warn(`tool:cancel rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
+      return;
+    }
+    this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId);
   }
 
   @SubscribeMessage('raapp:approve')

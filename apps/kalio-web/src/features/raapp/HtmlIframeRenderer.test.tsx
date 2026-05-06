@@ -41,6 +41,16 @@ describe('HtmlIframeRenderer', () => {
     expect(srcDoc).toContain("type:'raapp_resize'");
   });
 
+  it('REGRESSION: injected resize bridge logs sendHeight failures instead of swallowing them', () => {
+    render(<HtmlIframeRenderer html="<p>Hello</p>" />);
+
+    const iframe = screen.getByTestId('raapp-iframe');
+    const srcDoc = iframe.getAttribute('srcDoc') ?? '';
+
+    expect(srcDoc).toContain("console.error('[RAApp:Bridge] sendHeight failed',e);");
+    expect(srcDoc).not.toContain('}catch(e){}');
+  });
+
   it('has sandbox attribute allowing scripts and modals', () => {
     render(<HtmlIframeRenderer html="<div></div>" />);
     const iframe = screen.getByTestId('raapp-iframe');

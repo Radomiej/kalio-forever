@@ -52,7 +52,7 @@ export class PersonaListTool {
       },
     },
   },
-  requiresConfirmation: false,
+  requiresConfirmation: true,
 })
 export class PersonaCreateTool {
   constructor(private readonly personaService: PersonaService) {}

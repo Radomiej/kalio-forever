@@ -43,6 +43,9 @@ function mockFetch(map: FetchMap) {
       if (value === 204) {
         return Promise.resolve(new Response(null, { status: 204 }));
       }
+      if (value instanceof Response) {
+        return Promise.resolve(value);
+      }
       return Promise.resolve(
         new Response(JSON.stringify(value), {
           status: 200,
@@ -195,6 +198,56 @@ describe('LLMPanel', () => {
     expect(screen.getByTestId('add-provider-test')).toBeDisabled();
   });
 
+  it('allows local providers to be tested without an API key', async () => {
+    const map = {
+      ...defaultMap(),
+      'GET /api/llm/models': { data: [{ id: 'bitnet-b1.58-2b-4t' }] },
+    };
+    mockFetch(map);
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByRole('button', { name: 'BitNet' }));
+
+    expect(screen.getByTestId('add-provider-apikey')).not.toBeRequired();
+    expect(screen.getByTestId('add-provider-test')).toBeEnabled();
+
+    await user.click(screen.getByTestId('add-provider-test'));
+
+    await waitFor(() => expect(screen.getByTestId('add-provider-test')).toHaveTextContent('Connected!'));
+  });
+
+  it('allows saving local providers without an API key', async () => {
+    const created: Credential = {
+      id: 'c-bitnet',
+      name: 'Local BitNet',
+      provider: 'bitnet',
+      baseUrl: 'http://localhost:8080/v1',
+      model: 'bitnet-b1.58-2b-4t',
+      createdAt: 1704067200000,
+    };
+    const map = {
+      ...defaultMap(),
+      'POST /api/credentials': created,
+    };
+    mockFetch(map);
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByRole('button', { name: 'BitNet' }));
+
+    const nameInput = screen.getByRole('textbox', { name: /name/i });
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Local BitNet');
+    await user.click(screen.getByTestId('add-provider-submit'));
+
+    await waitFor(() => expect(screen.getByTestId('provider-row-c-bitnet')).toBeInTheDocument());
+  });
+
   it('test button shows "Connected!" on successful test', async () => {
     const map = {
       ...defaultMap(),
@@ -220,6 +273,27 @@ describe('LLMPanel', () => {
     await user.type(screen.getByTestId('add-provider-apikey'), 'bad-key');
     await user.click(screen.getByTestId('add-provider-test'));
     await waitFor(() => expect(screen.getByTestId('add-provider-test')).toHaveTextContent('Failed'));
+  });
+
+  it('surfaces plain-text provider test errors without swallowing the response parse failure', async () => {
+    const map = {
+      ...defaultMap(),
+      'GET /api/llm/models': new Response('Upstream timeout', {
+        status: 502,
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    };
+    mockFetch(map);
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+    await user.type(screen.getByTestId('add-provider-apikey'), 'sk-test-key');
+    await user.click(screen.getByTestId('add-provider-test'));
+
+    await waitFor(() => expect(screen.getByTestId('add-provider-test')).toHaveTextContent('Failed'));
+    expect(screen.getByText('HTTP 502: Upstream timeout')).toBeInTheDocument();
   });
 
   it('submitting add form adds the credential to the list', async () => {

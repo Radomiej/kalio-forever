@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { SkillReadTool, SkillListTool } from './skill.tools';
+import { Reflector } from '@nestjs/core';
+import { SkillReadTool, SkillListTool, SkillCreateTool } from './skill.tools';
 import type { SkillsService } from '../../skills/skills.service';
 import type { Skill } from '@kalio/types';
+import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
 function makeSkill(overrides: Partial<Skill> = {}): Skill {
   return {
@@ -19,6 +21,8 @@ function makeSkill(overrides: Partial<Skill> = {}): Skill {
 function makeRequest(args: Record<string, unknown>) {
   return { sessionId: 's1', toolName: 'skill_read', callId: 'c1', args } as Parameters<SkillReadTool['execute']>[0];
 }
+
+const reflector = new Reflector();
 
 // ─── SkillReadTool — regression: must use findOne(id), NOT findAll() ──────────
 
@@ -140,5 +144,13 @@ describe('SkillListTool.execute()', () => {
     const result = await tool.execute(makeRequest({}));
 
     expect(result.skills[0]).not.toHaveProperty('prompt');
+  });
+});
+
+describe('SkillCreateTool metadata', () => {
+  it('REGRESSION: requires confirmation because it creates persistent skill state', () => {
+    const metadata = reflector.get(TOOL_METADATA, SkillCreateTool);
+
+    expect(metadata.requiresConfirmation).toBe(true);
   });
 });

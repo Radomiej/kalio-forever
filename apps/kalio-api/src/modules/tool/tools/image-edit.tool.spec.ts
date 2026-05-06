@@ -10,8 +10,10 @@
  * escape execute() rather than being logged and returned gracefully.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Reflector } from '@nestjs/core';
 import { ImageEditTool } from './image-edit.tool';
 import type { ToolCallRequest } from '@kalio/types';
+import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
@@ -54,6 +56,7 @@ function makeRequest(overrides: Partial<ToolCallRequest['args']> = {}): ToolCall
 
 describe('ImageEditTool', () => {
   let tool: ImageEditTool;
+  const reflector = new Reflector();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -83,6 +86,12 @@ describe('ImageEditTool', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('REGRESSION: requires HITL confirmation because it writes edited files to VFS', () => {
+    const metadata = reflector.get(TOOL_METADATA, ImageEditTool);
+
+    expect(metadata.requiresConfirmation).toBe(true);
   });
 
   it('REGRESSION: VFS write failure throws so ToolDispatchService can emit status=error', async () => {

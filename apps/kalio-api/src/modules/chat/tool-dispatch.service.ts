@@ -11,6 +11,7 @@ const HITL_TIMEOUT_MS = 600_000;
 const SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
 
 interface PendingConfirmation {
+  sessionId: string;
   resolve: () => void;
   reject: (err: Error) => void;
 }
@@ -123,16 +124,28 @@ export class ToolDispatchService {
     }
   }
 
-  resolveConfirmation(requestId: string): void {
+  resolveConfirmation(requestId: string, sessionId?: string): void {
     const pending = this.pending.get(requestId);
     if (!pending) return;
+    if (sessionId && pending.sessionId !== sessionId) {
+      this.logger.warn(
+        `Ignoring tool confirmation for request ${requestId}: session mismatch (${sessionId} !== ${pending.sessionId})`,
+      );
+      return;
+    }
     this.pending.delete(requestId);
     pending.resolve();
   }
 
-  cancelConfirmation(requestId: string): void {
+  cancelConfirmation(requestId: string, sessionId?: string): void {
     const pending = this.pending.get(requestId);
     if (!pending) return;
+    if (sessionId && pending.sessionId !== sessionId) {
+      this.logger.warn(
+        `Ignoring tool cancellation for request ${requestId}: session mismatch (${sessionId} !== ${pending.sessionId})`,
+      );
+      return;
+    }
     this.pending.delete(requestId);
     pending.reject(new Error('User cancelled tool confirmation'));
   }
@@ -170,6 +183,7 @@ export class ToolDispatchService {
         : null;
 
       this.pending.set(requestId, {
+        sessionId: ctx.sessionId,
         resolve: () => {
           if (timeout) clearTimeout(timeout);
           resolve(true);

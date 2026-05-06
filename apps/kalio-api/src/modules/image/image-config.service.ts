@@ -1,8 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { AppSettingsService } from '../../database/app-settings.service';
 import type { ImageProviderConfig, ImageConfigResponse, UpdateImageConfigDto } from '@kalio/types';
 
 const SETTINGS_KEY = 'image_config';
+const CREDENTIALS_CIPHER_PREFIX = 'kalio-enc-v1';
+const CREDENTIALS_MASTER_KEY_ENV = 'CREDENTIALS_MASTER_KEY';
+const DEV_FALLBACK_CREDENTIALS_MASTER_KEY = 'kalio-dev-credentials-master-key-not-for-production';
 
 const DEFAULT_CONFIG: ImageConfigResponse = {
   provider: 'auto',
@@ -13,8 +18,12 @@ const DEFAULT_CONFIG: ImageConfigResponse = {
 @Injectable()
 export class ImageConfigService {
   private readonly logger = new Logger(ImageConfigService.name);
+  private hasWarnedAboutFallbackMasterKey = false;
 
-  constructor(private readonly settings: AppSettingsService) {}
+  constructor(
+    private readonly settings: AppSettingsService,
+    private readonly config: ConfigService,
+  ) {}
 
   async getConfig(): Promise<ImageConfigResponse> {
     const raw = await this.settings.get(SETTINGS_KEY);
@@ -47,7 +56,11 @@ export class ImageConfigService {
 
     const updated: Record<string, unknown> = { ...current };
     if (dto.provider !== undefined) updated['provider'] = dto.provider;
-    if (dto.apiKey !== undefined) updated['apiKey'] = dto.apiKey;
+    if (dto.apiKey !== undefined) {
+      updated['apiKey'] = this.encryptApiKey(dto.apiKey);
+    } else if (typeof current['apiKey'] === 'string') {
+      updated['apiKey'] = this.encryptApiKey(this.decryptApiKey(current['apiKey']));
+    }
     if (dto.baseUrl !== undefined) updated['baseUrl'] = dto.baseUrl;
     if (dto.model !== undefined) updated['model'] = dto.model;
     if (dto.compression !== undefined) updated['compression'] = dto.compression;
@@ -63,9 +76,71 @@ export class ImageConfigService {
     try {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       const key = parsed['apiKey'];
-      return typeof key === 'string' && key.length > 0 ? key : null;
+      return typeof key === 'string' && key.length > 0 ? this.decryptApiKey(key) : null;
     } catch {
       return null;
     }
+  }
+
+  private encryptApiKey(apiKey: string): string {
+    if (!apiKey) return '';
+
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.getEncryptionKey(), iv);
+    const encrypted = Buffer.concat([cipher.update(apiKey, 'utf8'), cipher.final()]);
+    const authTag = cipher.getAuthTag();
+
+    return [
+      CREDENTIALS_CIPHER_PREFIX,
+      iv.toString('base64'),
+      authTag.toString('base64'),
+      encrypted.toString('base64'),
+    ].join(':');
+  }
+
+  private decryptApiKey(storedValue: string): string {
+    if (!storedValue || !storedValue.startsWith(`${CREDENTIALS_CIPHER_PREFIX}:`)) {
+      return storedValue;
+    }
+
+    const [prefix, ivBase64, authTagBase64, payloadBase64] = storedValue.split(':');
+    if (!prefix || !ivBase64 || !authTagBase64 || !payloadBase64) {
+      throw new Error('Stored image credential is malformed and cannot be decrypted');
+    }
+
+    const decipher = createDecipheriv('aes-256-gcm', this.getEncryptionKey(), Buffer.from(ivBase64, 'base64'));
+    decipher.setAuthTag(Buffer.from(authTagBase64, 'base64'));
+
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(payloadBase64, 'base64')),
+      decipher.final(),
+    ]);
+
+    return decrypted.toString('utf8');
+  }
+
+  private getEncryptionKey(): Buffer {
+    return scryptSync(this.getMasterKey(), CREDENTIALS_CIPHER_PREFIX, 32);
+  }
+
+  private getMasterKey(): string {
+    const configured = this.config.get<string>(CREDENTIALS_MASTER_KEY_ENV, '');
+    if (configured) {
+      return configured;
+    }
+
+    const nodeEnv = this.config.get<string>('NODE_ENV', 'development');
+    if (nodeEnv === 'production') {
+      throw new Error(`${CREDENTIALS_MASTER_KEY_ENV} must be configured in production`);
+    }
+
+    if (nodeEnv !== 'test' && !this.hasWarnedAboutFallbackMasterKey) {
+      this.hasWarnedAboutFallbackMasterKey = true;
+      this.logger.warn(
+        `${CREDENTIALS_MASTER_KEY_ENV} is not set; using the development fallback key. Set it explicitly outside local dev.`,
+      );
+    }
+
+    return DEV_FALLBACK_CREDENTIALS_MASTER_KEY;
   }
 }

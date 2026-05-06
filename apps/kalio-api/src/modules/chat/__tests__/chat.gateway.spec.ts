@@ -4,6 +4,8 @@ import type { ToolDispatchService } from '../tool-dispatch.service';
 import type { SessionPipelineService } from '../session-pipeline.service';
 import type { RAAppHITLService, SavedApproval } from '../../raapp/raapp-hitl.service';
 
+type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string }) => void;
+
 describe('ChatGateway', () => {
   let gateway: ChatGateway;
   let toolDispatch: ToolDispatchService;
@@ -127,6 +129,40 @@ describe('ChatGateway', () => {
       const registered = sessions.get(client.id);
       expect(registered).toBeTruthy();
       expect(registered?.has('session-reconnect')).toBe(true);
+    });
+  });
+
+  describe('tool confirmations', () => {
+    it('rejects tool confirm when socket does not own the session', () => {
+      const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
+
+      handleToolConfirm(observer as never, { requestId: 'req-1', sessionId: 'session-1' });
+
+      expect(toolDispatch.resolveConfirmation).not.toHaveBeenCalled();
+    });
+
+    it('passes tool confirm through for an owned session', () => {
+      const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
+
+      handleToolConfirm(client as never, { requestId: 'req-1', sessionId: 'session-1' });
+
+      expect(toolDispatch.resolveConfirmation).toHaveBeenCalledWith('req-1', 'session-1');
+    });
+
+    it('rejects tool cancel when socket does not own the session', () => {
+      const handleToolCancel = (gateway as unknown as { handleToolCancel: ConfirmHandler }).handleToolCancel.bind(gateway);
+
+      handleToolCancel(observer as never, { requestId: 'req-1', sessionId: 'session-1' });
+
+      expect(toolDispatch.cancelConfirmation).not.toHaveBeenCalled();
+    });
+
+    it('passes tool cancel through for an owned session', () => {
+      const handleToolCancel = (gateway as unknown as { handleToolCancel: ConfirmHandler }).handleToolCancel.bind(gateway);
+
+      handleToolCancel(client as never, { requestId: 'req-1', sessionId: 'session-1' });
+
+      expect(toolDispatch.cancelConfirmation).toHaveBeenCalledWith('req-1', 'session-1');
     });
   });
 });

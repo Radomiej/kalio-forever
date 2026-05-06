@@ -77,7 +77,7 @@ export class SkillReadTool {
       prompt: { type: 'string', description: 'The prompt text injected into the system prompt when this skill is active.' },
     },
   },
-  requiresConfirmation: false,
+  requiresConfirmation: true,
 })
 export class SkillCreateTool {
   constructor(private readonly skillsService: SkillsService) {}

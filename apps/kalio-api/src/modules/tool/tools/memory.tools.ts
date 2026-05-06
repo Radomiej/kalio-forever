@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { ToolCallRequest } from '@kalio/types';
-import { Tool } from '../../../common/decorators/tool.decorator';
+import { Tool, ConfirmedTool } from '../../../common/decorators/tool.decorator';
 import { MemoryService } from '../../memory/memory.service';
 import { DrizzleService } from '../../../database/drizzle.service';
 import { sessions } from '../../../database/schema';
@@ -18,7 +18,7 @@ async function resolvePersonaId(drizzle: DrizzleService, sessionId: string): Pro
 }
 
 @Injectable()
-@Tool({
+@ConfirmedTool({
   name: 'memory_ingest',
   description:
     'Store a text passage in the long-term memory for the active persona. ' +
@@ -39,7 +39,6 @@ async function resolvePersonaId(drizzle: DrizzleService, sessionId: string): Pro
       },
     },
   },
-  requiresConfirmation: false,
 })
 export class MemoryIngestTool {
   private readonly logger = new Logger(MemoryIngestTool.name);
@@ -105,7 +104,7 @@ export class MemorySearchTool {
 }
 
 @Injectable()
-@Tool({
+@ConfirmedTool({
   name: 'memory_ingest_conversation',
   description:
     'Ingest an entire conversation (list of messages) into long-term memory for the active persona. ' +
@@ -129,7 +128,6 @@ export class MemorySearchTool {
       },
     },
   },
-  requiresConfirmation: false,
 })
 export class MemoryIngestConversationTool {
   private readonly logger = new Logger(MemoryIngestConversationTool.name);

@@ -231,6 +231,29 @@ describe('CredentialsController', () => {
       expect(result.error).toContain('API key not available');
     });
 
+    it('allows local providers to be tested without an apiKey', async () => {
+      const cred = makeCredential({
+        provider: 'bitnet',
+        baseUrl: 'http://localhost:8080/v1',
+      });
+      mockService.findAll.mockResolvedValue([cred]);
+      mockService.getApiKey.mockResolvedValue(null);
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ id: 'bitnet-b1.58-2b-4t' }] }),
+      });
+
+      try {
+        const result = await controller.testById('cred-1');
+        expect(result.ok).toBe(true);
+        expect(result.modelCount).toBe(1);
+        expect(mockTimeoutSettings.getProviderTimeoutMs).toHaveBeenCalledWith(true);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it('returns ok=false on fetch failure', async () => {
       const cred = {
         ...makeCredential(),

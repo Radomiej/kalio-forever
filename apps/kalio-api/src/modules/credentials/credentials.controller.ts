@@ -146,8 +146,10 @@ export class CredentialsController {
         return { ok: false, latencyMs: Date.now() - start, error: 'Credential not found' };
       }
 
+      const isLocal = isLocalLlmProvider(cred.provider, cred.baseUrl ?? undefined);
+
       const apiKey = await this.credentialsService.getApiKey(id);
-      if (!apiKey) {
+      if (!apiKey && !isLocal) {
         return { ok: false, latencyMs: Date.now() - start, error: 'API key not available' };
       }
 
@@ -161,7 +163,6 @@ export class CredentialsController {
         bitnet:     'http://localhost:8080/v1',
       };
 
-      const isLocal = isLocalLlmProvider(cred.provider, cred.baseUrl ?? undefined);
       const resolvedBase = (cred.baseUrl ?? PROVIDER_BASE_URLS[cred.provider] ?? '').replace(/\/$/, '');
       const endpoint = `${resolvedBase}/models`;
       const timeoutMs = await this.timeoutSettings.getProviderTimeoutMs(isLocal);

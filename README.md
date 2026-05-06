@@ -162,14 +162,16 @@ cp .env.example .env
 Open `.env` and set at minimum:
 
 ```env
-LLM_PROVIDER=openai          # or: mock | openrouter | ollama | perplexity
+LLM_PROVIDER=openai          # or: mock | openai | openrouter | cometapi | xiaomimimo | deepseek | ollama | bitnet | custom
 LLM_API_KEY=sk-...
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
 WORKSPACE_ROOT=./data
+CREDENTIALS_MASTER_KEY=replace-with-a-long-random-secret   # required in production to decrypt stored secrets
 ```
 
 > Use `LLM_PROVIDER=mock` to run fully offline with no API key — great for development and testing.
+> `CREDENTIALS_MASTER_KEY` is used to encrypt stored provider secrets at rest. In local development, Kalio falls back to a dev-only key if this variable is missing; in production it must be set explicitly.
 
 ### 3. Run
 
@@ -201,9 +203,15 @@ Any OpenAI-compatible endpoint works out of the box.
 |---|---|---|
 | **Mock** | `mock` | Fully offline. Echoes back messages. Ideal for tests. |
 | **OpenAI** | `openai` | GPT-4o, GPT-4.1, o3-mini, … |
+| **CometAPI** | `cometapi` | OpenAI-compatible aggregator. Set `LLM_BASE_URL=https://api.cometapi.com/v1` if needed. |
+| **Xiaomi MiMo** | `xiaomimimo` | MiMo reasoning/chat models. Default base URL is `https://token-plan-ams.xiaomimimo.com/v1`. |
+| **DeepSeek** | `deepseek` | OpenAI-compatible DeepSeek endpoint. Default base URL is `https://api.deepseek.com/v1`. |
 | **OpenRouter** | `openrouter` | 200+ models via one key. Set `LLM_BASE_URL=https://openrouter.ai/api/v1`. |
 | **Ollama** | `ollama` | Local models (llama3, qwen3, deepseek-r2, …). Set `LLM_BASE_URL=http://localhost:11434/v1`. |
-| **Perplexity** | `perplexity` | Search-augmented sonar models. |
+| **BitNet** | `bitnet` | Local BitNet-compatible OpenAI endpoint. Default base URL is `http://localhost:8080/v1`. |
+| **Custom** | `custom` | Any OpenAI-compatible endpoint. Set `LLM_BASE_URL` to your server URL. |
+
+Local providers (`ollama`, `bitnet`, and `custom` endpoints on `localhost` / `.local`) can be saved and tested without an API key. Remote providers still require one.
 
 For image generation, set `IMAGE_PROVIDER` and `IMAGE_API_KEY` separately (same format).
 
@@ -217,6 +225,8 @@ For image generation, set `IMAGE_PROVIDER` and `IMAGE_API_KEY` separately (same 
 | `memory/{personaId}.db` | Vector embeddings per persona (sqlite-vec RAG) | `$WORKSPACE_ROOT/memory/` |
 | `sessions/{id}/files/` | Per-session sandboxed file workspace | `$WORKSPACE_ROOT/sessions/` |
 | `sessions/{id}/_kv.json` | Agent-writable key-value store | (same root) |
+
+Provider secrets stored in `kalio.db` and image provider settings are encrypted at rest with `CREDENTIALS_MASTER_KEY`. This is field-level secret encryption, not a password on the SQLite database file itself.
 
 ---
 

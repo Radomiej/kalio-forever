@@ -4,6 +4,7 @@ import { DrizzleService } from '../../database/drizzle.service';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import * as schema from '../../database/schema';
+import { eq } from 'drizzle-orm';
 
 /** Build an in-memory SQLite DB with the required tables for testing */
 function makeTestDrizzle(): DrizzleService {
@@ -39,11 +40,18 @@ describe('CredentialsService', () => {
   const timeoutSettings = {
     getProviderTimeoutMs: vi.fn(async (isLocal: boolean) => (isLocal ? 3_000 : 15_000)),
   };
+  const config = {
+    get: (key: string, defaultValue = '') => {
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'CREDENTIALS_MASTER_KEY') return 'unit-test-credentials-master-key';
+      return defaultValue;
+    },
+  };
 
   beforeEach(() => {
     drizzleSvc = makeTestDrizzle();
     timeoutSettings.getProviderTimeoutMs.mockImplementation(async (isLocal: boolean) => (isLocal ? 3_000 : 15_000));
-    svc = new CredentialsService(drizzleSvc, timeoutSettings as never);
+    svc = new CredentialsService(drizzleSvc, timeoutSettings as never, config as never);
   });
 
   describe('CRUD', () => {
@@ -62,6 +70,19 @@ describe('CredentialsService', () => {
       expect((created as unknown as Record<string, unknown>)['apiKey']).toBeUndefined();
     });
 
+    it('creates a local provider credential when apiKey is omitted', async () => {
+      const created = await svc.create({
+        name: 'Local BitNet',
+        provider: 'bitnet',
+        baseUrl: 'http://localhost:8080/v1',
+        model: 'bitnet-b1.58-2b-4t',
+      });
+
+      expect(created.name).toBe('Local BitNet');
+      expect(created.provider).toBe('bitnet');
+      expect(await svc.getApiKey(created.id)).toBe('');
+    });
+
     it('returns all credentials without apiKey', async () => {
       await svc.create({ name: 'A', provider: 'openai', apiKey: 'key1' });
       await svc.create({ name: 'B', provider: 'cometapi', apiKey: 'key2' });
@@ -76,6 +97,24 @@ describe('CredentialsService', () => {
       const created = await svc.create({ name: 'A', provider: 'openai', apiKey: 'sk-abc' });
       const key = await svc.getApiKey(created.id);
       expect(key).toBe('sk-abc');
+    });
+
+    it('REGRESSION: encrypts apiKey at rest while preserving read access through the service', async () => {
+      const created = await svc.create({ name: 'Encrypted', provider: 'openai', apiKey: 'sk-top-secret' });
+
+      const stored = await drizzleSvc.db
+        .select()
+        .from(schema.credentials)
+        .where(eq(schema.credentials.id, created.id))
+        .then((rows) => rows[0]);
+
+      expect(stored).toBeDefined();
+      expect(stored?.apiKey).not.toBe('sk-top-secret');
+      expect(await svc.getApiKey(created.id)).toBe('sk-top-secret');
+
+      await svc.setActiveCredential(created.id);
+      const config = await svc.getActiveProviderConfig();
+      expect(config?.apiKey).toBe('sk-top-secret');
     });
 
     it('removes a credential', async () => {

@@ -29,7 +29,7 @@ Use edit_image instead when the user provides existing reference images from the
       filename:      { type: 'string',  description: 'Optional filename (e.g. "dragon.png"). Auto-generated if omitted.' },
     },
   },
-  requiresConfirmation: false,
+  requiresConfirmation: true,
 })
 export class ImageGenerateTool {
   private readonly logger = new Logger(ImageGenerateTool.name);

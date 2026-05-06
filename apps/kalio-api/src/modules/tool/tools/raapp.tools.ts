@@ -1,13 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { ToolCallRequest } from '@kalio/types';
-import { Tool } from '../../../common/decorators/tool.decorator';
+import { Tool, ConfirmedTool } from '../../../common/decorators/tool.decorator';
 import { RAAppService } from '../../raapp/raapp.service';
 import { RAAppSandboxService } from '../../raapp/raapp-sandbox.service';
 import { EffectsProcessorService } from '../../raapp/effects-processor.service';
 import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
 
 @Injectable()
-@Tool({
+@ConfirmedTool({
   name: 'raapp_create',
   description:
     'Create an RA-App block from HTML or GUI DSL content and validate it. ' +
@@ -40,7 +40,6 @@ import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
       },
     },
   },
-  requiresConfirmation: false,
 })
 export class RaAppCreateTool {
   private readonly logger = new Logger(RaAppCreateTool.name);

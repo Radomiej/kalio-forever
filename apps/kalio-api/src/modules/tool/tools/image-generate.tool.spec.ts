@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Reflector } from '@nestjs/core';
 import { ImageGenerateTool } from './image-generate.tool';
 import type { ToolCallRequest } from '@kalio/types';
+import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
 const mockGenerate = vi.fn();
 const mockGetConfig = vi.fn();
@@ -36,6 +38,7 @@ function makeRequest(args: Partial<ToolCallRequest['args']> = {}): ToolCallReque
 
 describe('ImageGenerateTool', () => {
   let tool: ImageGenerateTool;
+  const reflector = new Reflector();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -49,6 +52,12 @@ describe('ImageGenerateTool', () => {
       size: '1024x1024',
       format: 'png',
     });
+  });
+
+  it('REGRESSION: requires HITL confirmation because it writes generated files to VFS', () => {
+    const metadata = reflector.get(TOOL_METADATA, ImageGenerateTool);
+
+    expect(metadata.requiresConfirmation).toBe(true);
   });
 
   it('uses vfsSessionId when saving generated images and building download URLs', async () => {

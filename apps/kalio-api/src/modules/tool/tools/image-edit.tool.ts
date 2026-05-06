@@ -140,7 +140,7 @@ Each output is auto-versioned in VFS (never overwrites existing files).`,
       iterationOf:   { type: 'string',  description: 'VFS path of the source image when editing. Required when role="base".' },
     },
   },
-  requiresConfirmation: false,
+  requiresConfirmation: true,
 })
 export class ImageEditTool {
   private readonly logger = new Logger(ImageEditTool.name);

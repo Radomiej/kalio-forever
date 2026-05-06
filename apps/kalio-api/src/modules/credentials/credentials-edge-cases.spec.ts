@@ -5,9 +5,23 @@ import { credentials } from '../../database/schema';
 
 describe('CredentialsService - Edge Cases', () => {
   let service: CredentialsService;
-  let mockDrizzle: any;
+  let mockDrizzle: {
+    db: {
+      select: ReturnType<typeof vi.fn>;
+      insert: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+      delete: ReturnType<typeof vi.fn>;
+    };
+  };
   const timeoutSettings = {
     getProviderTimeoutMs: vi.fn().mockResolvedValue(15_000),
+  };
+  const config = {
+    get: (key: string, defaultValue = '') => {
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'CREDENTIALS_MASTER_KEY') return 'unit-test-credentials-master-key';
+      return defaultValue;
+    },
   };
 
   beforeEach(() => {
@@ -19,7 +33,7 @@ describe('CredentialsService - Edge Cases', () => {
         delete: vi.fn(),
       },
     };
-    service = new CredentialsService(mockDrizzle, timeoutSettings as never);
+    service = new CredentialsService(mockDrizzle as unknown as DrizzleService, timeoutSettings as never, config as never);
   });
 
 

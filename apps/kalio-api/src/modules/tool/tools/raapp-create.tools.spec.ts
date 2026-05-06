@@ -3,14 +3,18 @@
  * run_raapp and list_raapps are covered in raapp.tools.spec.ts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Reflector } from '@nestjs/core';
 import { RaAppCreateTool, RaAppCompileTool } from './raapp.tools';
 import type { RAAppService } from '../../raapp/raapp.service';
 import type { RAAppSandboxService } from '../../raapp/raapp-sandbox.service';
 import type { ToolCallRequest } from '@kalio/types';
+import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
 function makeRequest(toolName: string, args: Record<string, unknown> = {}): ToolCallRequest {
   return { callId: 'call-1', sessionId: 'sess-ra', toolName, args };
 }
+
+const reflector = new Reflector();
 
 // ── RaAppCreateTool ───────────────────────────────────────────────────────────
 
@@ -24,6 +28,12 @@ describe('RaAppCreateTool', () => {
       saveGeneratedApp: vi.fn().mockResolvedValue({ id: 'generated-default' }),
     };
     tool = new RaAppCreateTool(raapp as RAAppService);
+  });
+
+  it('REGRESSION: requires confirmation because it persists generated RA-Apps', () => {
+    const metadata = reflector.get(TOOL_METADATA, RaAppCreateTool);
+
+    expect(metadata.requiresConfirmation).toBe(true);
   });
 
   describe('positive scenarios', () => {

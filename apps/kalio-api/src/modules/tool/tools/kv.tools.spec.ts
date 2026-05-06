@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Reflector } from '@nestjs/core';
 import { KVWriteTool, KVReadTool, KVListTool, KVDeleteTool } from './kv.tools';
 import type { KVStoreService } from '../kv-store.service';
 import type { ToolCallRequest } from '@kalio/types';
+import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
 function makeRequest(toolName: string, args: Record<string, unknown> = {}, sessionId = 'sess-kv'): ToolCallRequest {
   return { callId: 'call-1', sessionId, toolName, args };
@@ -16,6 +18,8 @@ function makeKVService(): Partial<KVStoreService> {
   };
 }
 
+const reflector = new Reflector();
+
 // ── KVWriteTool ───────────────────────────────────────────────────────────────
 
 describe('KVWriteTool', () => {
@@ -25,6 +29,14 @@ describe('KVWriteTool', () => {
   beforeEach(() => {
     kv = makeKVService();
     tool = new KVWriteTool(kv as KVStoreService);
+  });
+
+  describe('@Tool() decorator (REGRESSION)', () => {
+    it('MUST have requiresConfirmation=true for persistent KV writes', () => {
+      const metadata = reflector.get(TOOL_METADATA, KVWriteTool);
+
+      expect(metadata.requiresConfirmation).toBe(true);
+    });
   });
 
   describe('positive scenarios', () => {
@@ -176,6 +188,14 @@ describe('KVDeleteTool', () => {
   beforeEach(() => {
     kv = makeKVService();
     tool = new KVDeleteTool(kv as KVStoreService);
+  });
+
+  describe('@Tool() decorator (REGRESSION)', () => {
+    it('MUST have requiresConfirmation=true for persistent KV deletes', () => {
+      const metadata = reflector.get(TOOL_METADATA, KVDeleteTool);
+
+      expect(metadata.requiresConfirmation).toBe(true);
+    });
   });
 
   describe('positive scenarios', () => {

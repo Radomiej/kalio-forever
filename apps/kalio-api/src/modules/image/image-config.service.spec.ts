@@ -13,6 +13,7 @@ import * as schema from '../../database/schema';
 import { DrizzleService } from '../../database/drizzle.service';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { ImageConfigService } from './image-config.service';
+import { eq } from 'drizzle-orm';
 
 // ── Test DB setup ──────────────────────────────────────────────────────────────
 
@@ -30,7 +31,14 @@ function createTestDb(): { db: BetterSQLite3Database<typeof schema>; close: () =
 function createServices(db: BetterSQLite3Database<typeof schema>): ImageConfigService {
   const drizzleService = { db } as unknown as DrizzleService;
   const settingsService = new AppSettingsService(drizzleService);
-  return new ImageConfigService(settingsService);
+  const configService = {
+    get: (key: string, defaultValue = '') => {
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'CREDENTIALS_MASTER_KEY') return 'unit-test-credentials-master-key';
+      return defaultValue;
+    },
+  };
+  return new ImageConfigService(settingsService, configService as never);
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -76,6 +84,18 @@ describe('ImageConfigService — persistence', () => {
   it('getApiKey returns the saved key', async () => {
     const key = await service.getApiKey();
     expect(key).toBe('sk-test-key');
+  });
+
+  it('REGRESSION: stores image apiKey encrypted at rest while preserving tool access', async () => {
+    const row = await testDb.db
+      .select()
+      .from(schema.appSettings)
+      .where(eq(schema.appSettings.key, 'image_config'))
+      .then((rows) => rows[0]);
+
+    expect(row).toBeDefined();
+    expect(row?.value).not.toContain('sk-test-key');
+    expect(await service.getApiKey()).toBe('sk-test-key');
   });
 
   it('saves baseUrl and exposes it in config', async () => {

@@ -124,6 +124,62 @@ describe('ToolDispatchService', () => {
       expect(result.status).toBe('success');
     });
 
+    it('ignores confirmation attempts from a different session', async () => {
+      const ctx = makeCtx();
+      let requestId: string | null = null;
+
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          requestId = data['requestId'];
+        }
+      });
+
+      const dispatchPromise = service.dispatch('c1', 'dangerous_tool', {}, ctx);
+      const settled = { done: false };
+      void dispatchPromise.finally(() => {
+        settled.done = true;
+      });
+
+      expect(requestId).toBeTruthy();
+
+      service.resolveConfirmation(requestId!, 'other-session');
+      await Promise.resolve();
+
+      expect(settled.done).toBe(false);
+
+      service.resolveConfirmation(requestId!, 'sid');
+      const result = await dispatchPromise;
+      expect(result.status).toBe('success');
+    });
+
+    it('ignores cancellation attempts from a different session', async () => {
+      const ctx = makeCtx();
+      let requestId: string | null = null;
+
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          requestId = data['requestId'];
+        }
+      });
+
+      const dispatchPromise = service.dispatch('c1', 'dangerous_tool', {}, ctx);
+      const settled = { done: false };
+      void dispatchPromise.finally(() => {
+        settled.done = true;
+      });
+
+      expect(requestId).toBeTruthy();
+
+      service.cancelConfirmation(requestId!, 'other-session');
+      await Promise.resolve();
+
+      expect(settled.done).toBe(false);
+
+      service.cancelConfirmation(requestId!, 'sid');
+      const result = await dispatchPromise;
+      expect(result.status).toBe('cancelled');
+    });
+
     it('auto-approves isolated subagent VFS writes without HITL confirmation', async () => {
       const entry = makeEntry('vfs_write', true, { path: 'index.html' });
       const moduleRef = await Test.createTestingModule({

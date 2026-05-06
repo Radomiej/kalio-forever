@@ -164,7 +164,7 @@ Key-value store per persona. Used by the `kv_*` tools (LLM-writable persistent s
 Single-table key-value config store. Used for persisting global settings (e.g. default model).
 
 ### `credentials`
-LLM provider API keys + base URLs. Referenced when building LLM clients for chat sessions.
+LLM provider API keys + base URLs. Local providers may persist an empty `api_key` while still storing `base_url` and `model`. Referenced when building LLM clients for chat sessions.
 
 ### `embedding_credentials`
 Embedding provider API keys (OpenAI, custom). Used by `MemoryModule` for vector storage.

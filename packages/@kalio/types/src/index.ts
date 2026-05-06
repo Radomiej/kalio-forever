@@ -271,7 +271,7 @@ export interface Credential {
 export interface CreateCredentialDto {
   name: string;
   provider: string;
-  apiKey: string;             // write-only, never returned
+  apiKey?: string;            // write-only, never returned; optional for local providers/endpoints
   baseUrl?: string;
   model?: string;
 }
