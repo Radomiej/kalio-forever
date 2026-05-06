@@ -49,7 +49,8 @@ export class ImageConfigService {
     if (existing) {
       try {
         current = JSON.parse(existing) as Record<string, unknown>;
-      } catch {
+      } catch (err) {
+        this.logger.error('Failed to parse existing image config during update', err instanceof Error ? err : new Error(String(err)));
         current = {};
       }
     }
@@ -59,7 +60,7 @@ export class ImageConfigService {
     if (dto.apiKey !== undefined) {
       updated['apiKey'] = this.encryptApiKey(dto.apiKey);
     } else if (typeof current['apiKey'] === 'string') {
-      updated['apiKey'] = this.encryptApiKey(this.decryptApiKey(current['apiKey']));
+      updated['apiKey'] = current['apiKey'];
     }
     if (dto.baseUrl !== undefined) updated['baseUrl'] = dto.baseUrl;
     if (dto.model !== undefined) updated['model'] = dto.model;
@@ -76,8 +77,12 @@ export class ImageConfigService {
     try {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       const key = parsed['apiKey'];
-      return typeof key === 'string' && key.length > 0 ? this.decryptApiKey(key) : null;
-    } catch {
+      if (typeof key !== 'string' || key.length === 0) {
+        return null;
+      }
+      return this.tryDecryptApiKey(key);
+    } catch (err) {
+      this.logger.error('Failed to read image apiKey from DB', err instanceof Error ? err : new Error(String(err)));
       return null;
     }
   }
@@ -117,6 +122,15 @@ export class ImageConfigService {
     ]);
 
     return decrypted.toString('utf8');
+  }
+
+  private tryDecryptApiKey(storedValue: string): string | null {
+    try {
+      return this.decryptApiKey(storedValue);
+    } catch (err) {
+      this.logger.error('Failed to decrypt stored image apiKey', err instanceof Error ? err : new Error(String(err)));
+      return null;
+    }
   }
 
   private getEncryptionKey(): Buffer {

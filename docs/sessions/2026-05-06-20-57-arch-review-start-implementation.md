@@ -63,6 +63,21 @@ This session implemented the first high-priority fixes from the architecture rev
 **`apps/kalio-api/src/modules/tool/tools/raapp.tools.ts`**
 - Changed `raapp_create` to require confirmation because it persists generated RA-App archives to storage.
 
+**`apps/kalio-api/src/modules/credentials/credentials.service.ts`**
+- Wrapped credential secret decryption behind safe logging/null-return paths so malformed encrypted values no longer crash reads, active-provider resolution, or model listing.
+- Added explicit logging for model-fetch failures instead of silently returning an empty list.
+
+**`apps/kalio-api/src/modules/image/image-config.service.ts`**
+- Preserved the existing encrypted image API key on partial updates instead of decrypting and re-encrypting it unnecessarily.
+- Added explicit logging for malformed stored image secrets and malformed persisted config during update.
+
+**`apps/kalio-web/src/features/settings/LLMPanel.tsx`**
+- Replaced the remaining non-fatal empty catch in `refreshBackendConfig()` with contextual error logging.
+
+**`apps/kalio-api/src/common/utils/local-llm-provider.util.ts`**
+**`apps/kalio-web/src/features/settings/llm-provider-settings.ts`**
+- Added sync comments documenting the intentional duplication in local-provider detection until it can move to a shared runtime-safe package.
+
 ### Frontend
 
 **`apps/kalio-web/src/features/settings/LLMPanel.tsx`**
@@ -117,6 +132,16 @@ This session implemented the first high-priority fixes from the architecture rev
 - `apps/kalio-api/src/modules/tool/tools/raapp-create.tools.spec.ts`
   - added regression coverage asserting `raapp_create` requires confirmation because it persists generated apps
 
+- `apps/kalio-api/src/modules/credentials/credentials.service.spec.ts`
+  - added regression coverage for malformed encrypted credentials returning `null` instead of crashing
+  - added regression coverage for logging model-fetch failures instead of failing silently
+
+- `apps/kalio-api/src/modules/image/image-config.service.spec.ts`
+  - added regression coverage asserting partial config updates preserve the existing encrypted image apiKey value
+
+- `apps/kalio-web/src/features/settings/LLMPanel.test.tsx`
+  - added regression coverage asserting backend-config refresh failures are logged as non-fatal after activation
+
 **Frontend**
 - `apps/kalio-web/src/features/settings/LLMPanel.test.tsx`
   - added regression test for plain-text provider test failures (non-JSON response body)
@@ -147,6 +172,13 @@ This session implemented the first high-priority fixes from the architecture rev
 - `memory.tools.spec.ts` — passing
 - `raapp-create.tools.spec.ts` — passing
 - Combined confirmation-wrapper batch: 35 tests passing
+
+### Review-followup batch
+- `credentials.service.spec.ts` — passing
+- `image-config.service.spec.ts` — passing
+- `LLMPanel.test.tsx` — passing
+- `credentials-edge-cases.spec.ts` — passing
+- Combined review-followup validation: 52 tests passing across focused runs
 
 ### Frontend focused batch
 - `LLMPanel.test.tsx` — passing
@@ -184,10 +216,12 @@ This session implemented the first high-priority fixes from the architecture rev
 - `apps/kalio-api/src/modules/tool/tools/memory.tools.spec.ts`
 - `apps/kalio-api/src/modules/tool/tools/raapp.tools.ts`
 - `apps/kalio-api/src/modules/tool/tools/raapp-create.tools.spec.ts`
+- `apps/kalio-api/src/common/utils/local-llm-provider.util.ts`
 - `.env.example`
 - `README.md`
 - `apps/kalio-web/src/features/settings/LLMPanel.tsx`
 - `apps/kalio-web/src/features/settings/LLMPanel.test.tsx`
+- `apps/kalio-web/src/features/settings/llm-provider-settings.ts`
 - `apps/kalio-web/src/features/chat/hooks/useContextUsage.ts`
 - `apps/kalio-web/src/features/settings/AllowedPathsPanel.tsx`
 - `apps/kalio-web/src/features/raapp/HtmlIframeRenderer.tsx`
@@ -200,6 +234,8 @@ This session implemented the first high-priority fixes from the architecture rev
 - The new at-rest encryption currently covers `credentials` and the image provider secret inside `image_config`, but not every stored secret yet.
 - The production deployment path now depends on `CREDENTIALS_MASTER_KEY` being configured before stored secret reads/writes are exercised.
 - Tool confirmation is now easier to apply consistently via `ConfirmedTool`, but older mutating tools still use the raw `Tool` decorator and can be migrated opportunistically.
+- The timeout parsing review note is already obsolete: `TimeoutSettingsService` now validates stored values with a full-digit regex before parsing.
+- Most of the older `LLMPanel` empty-catch review comments were already fixed before this pass; the last remaining non-fatal catch is now logged.
 
 ## Next Steps
 

@@ -331,6 +331,72 @@ describe('LLMPanel', () => {
     await waitFor(() => expect(screen.getByText('active')).toBeInTheDocument());
   });
 
+  it('logs a non-fatal error when backend config refresh fails after activation', async () => {
+    let llmConfigReads = 0;
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, opts?: RequestInit) => {
+        const method = opts?.method?.toUpperCase() ?? 'GET';
+
+        if (method === 'GET' && url === '/api/credentials') {
+          return Promise.resolve(new Response(JSON.stringify([CRED]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/active') {
+          return Promise.resolve(new Response(JSON.stringify({ credentialId: null }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/context-window') {
+          return Promise.resolve(new Response(JSON.stringify({ size: 32000 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/tool-timeouts') {
+          return Promise.resolve(new Response(JSON.stringify({
+            webSearchTimeoutMs: 120000,
+            providerLocalTimeoutMs: 3000,
+            providerRemoteTimeoutMs: 15000,
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/llm/config') {
+          llmConfigReads += 1;
+          if (llmConfigReads === 1) {
+            return Promise.resolve(new Response(JSON.stringify({
+              provider: 'openai',
+              model: 'gpt-4o-mini',
+              baseUrl: 'https://api.openai.com/v1',
+              contextWindowSize: 32000,
+              maxToolAttempts: 8,
+              source: 'db',
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+          }
+
+          return Promise.resolve(new Response('refresh failed', { status: 500 }));
+        }
+
+        if (method === 'PUT' && url === `/api/credentials/active/${CRED.id}`) {
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId(`provider-activate-${CRED.id}`));
+    await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
+
+    await waitFor(() => expect(screen.getByText('active')).toBeInTheDocument());
+    expect(consoleError).toHaveBeenCalledWith(
+      '[LLMPanel] Failed to refresh backend config',
+      expect.any(Error),
+    );
+  });
+
   it('clicking delete removes the credential row', async () => {
     const map = {
       ...defaultMap({ credentials: [CRED] }),

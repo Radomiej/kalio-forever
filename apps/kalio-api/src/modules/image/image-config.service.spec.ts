@@ -14,6 +14,7 @@ import { DrizzleService } from '../../database/drizzle.service';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { ImageConfigService } from './image-config.service';
 import { eq } from 'drizzle-orm';
+import type { ConfigService } from '@nestjs/config';
 
 // ── Test DB setup ──────────────────────────────────────────────────────────────
 
@@ -31,14 +32,14 @@ function createTestDb(): { db: BetterSQLite3Database<typeof schema>; close: () =
 function createServices(db: BetterSQLite3Database<typeof schema>): ImageConfigService {
   const drizzleService = { db } as unknown as DrizzleService;
   const settingsService = new AppSettingsService(drizzleService);
-  const configService = {
+  const configService: Pick<ConfigService, 'get'> = {
     get: (key: string, defaultValue = '') => {
       if (key === 'NODE_ENV') return 'test';
       if (key === 'CREDENTIALS_MASTER_KEY') return 'unit-test-credentials-master-key';
       return defaultValue;
     },
   };
-  return new ImageConfigService(settingsService, configService as never);
+  return new ImageConfigService(settingsService, configService as ConfigService);
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -111,6 +112,28 @@ describe('ImageConfigService — persistence', () => {
     expect(cfg.provider).toBe('cometapi');
     expect(cfg.model).toBe('flux-1.1-pro');
     expect(await service.getApiKey()).toBe('sk-test-key');
+  });
+
+  it('REGRESSION: partial updates preserve the existing encrypted apiKey value', async () => {
+    const before = await testDb.db
+      .select()
+      .from(schema.appSettings)
+      .where(eq(schema.appSettings.key, 'image_config'))
+      .then((rows) => rows[0]);
+
+    await service.updateConfig({ model: 'flux-1.2-pro' });
+
+    const after = await testDb.db
+      .select()
+      .from(schema.appSettings)
+      .where(eq(schema.appSettings.key, 'image_config'))
+      .then((rows) => rows[0]);
+
+    const beforeConfig = JSON.parse(before?.value ?? '{}') as { apiKey?: string };
+    const afterConfig = JSON.parse(after?.value ?? '{}') as { apiKey?: string };
+
+    expect(beforeConfig.apiKey).toBeDefined();
+    expect(afterConfig.apiKey).toBe(beforeConfig.apiKey);
   });
 
   it('saves replicate provider', async () => {

@@ -1,3 +1,5 @@
+// Keep this logic in sync with apps/kalio-api/src/common/utils/local-llm-provider.util.ts
+// until it can be extracted into a shared runtime-safe package.
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', 'host.docker.internal']);
 
 export const PROVIDER_LABELS: Record<string, string> = {

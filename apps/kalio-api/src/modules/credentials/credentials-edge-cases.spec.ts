@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { ConfigService } from '@nestjs/config';
 import { CredentialsService } from './credentials.service';
 import { DrizzleService } from '../../database/drizzle.service';
 import { credentials } from '../../database/schema';
+import type { TimeoutSettingsService } from './timeout-settings.service';
 
 describe('CredentialsService - Edge Cases', () => {
   let service: CredentialsService;
@@ -13,10 +15,10 @@ describe('CredentialsService - Edge Cases', () => {
       delete: ReturnType<typeof vi.fn>;
     };
   };
-  const timeoutSettings = {
+  const timeoutSettings: Pick<TimeoutSettingsService, 'getProviderTimeoutMs'> = {
     getProviderTimeoutMs: vi.fn().mockResolvedValue(15_000),
   };
-  const config = {
+  const config: Pick<ConfigService, 'get'> = {
     get: (key: string, defaultValue = '') => {
       if (key === 'NODE_ENV') return 'test';
       if (key === 'CREDENTIALS_MASTER_KEY') return 'unit-test-credentials-master-key';
@@ -33,7 +35,11 @@ describe('CredentialsService - Edge Cases', () => {
         delete: vi.fn(),
       },
     };
-    service = new CredentialsService(mockDrizzle as unknown as DrizzleService, timeoutSettings as never, config as never);
+    service = new CredentialsService(
+      mockDrizzle as unknown as DrizzleService,
+      timeoutSettings as TimeoutSettingsService,
+      config as ConfigService,
+    );
   });
 
 

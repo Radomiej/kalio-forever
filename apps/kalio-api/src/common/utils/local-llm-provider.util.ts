@@ -1,3 +1,5 @@
+// Keep this logic in sync with apps/kalio-web/src/features/settings/llm-provider-settings.ts
+// until it can be extracted into a shared runtime-safe package.
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', 'host.docker.internal']);
 
 export function isLocalBaseUrl(baseUrl?: string): boolean {

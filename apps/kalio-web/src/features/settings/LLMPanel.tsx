@@ -123,7 +123,12 @@ export function LLMPanel() {
       const cfg = await apiFetch<{ provider: string; model: string; baseUrl: string; contextWindowSize: number; maxToolAttempts: number }>('/llm/config');
       setBackendConfig(cfg);
       setMaxToolAttempts(cfg.maxToolAttempts ?? 8);
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.error(
+        '[LLMPanel] Failed to refresh backend config',
+        err instanceof Error ? err : new Error(String(err)),
+      );
+    }
   }, [setBackendConfig]);
 
   const load = useCallback(async () => {

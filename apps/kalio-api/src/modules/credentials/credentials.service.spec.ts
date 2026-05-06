@@ -1,10 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { CredentialsService } from './credentials.service';
 import { DrizzleService } from '../../database/drizzle.service';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import * as schema from '../../database/schema';
 import { eq } from 'drizzle-orm';
+import type { TimeoutSettingsService } from './timeout-settings.service';
+import type { ConfigService } from '@nestjs/config';
 
 /** Build an in-memory SQLite DB with the required tables for testing */
 function makeTestDrizzle(): DrizzleService {
@@ -37,10 +40,10 @@ function makeTestDrizzle(): DrizzleService {
 describe('CredentialsService', () => {
   let svc: CredentialsService;
   let drizzleSvc: DrizzleService;
-  const timeoutSettings = {
+  const timeoutSettings: Pick<TimeoutSettingsService, 'getProviderTimeoutMs'> = {
     getProviderTimeoutMs: vi.fn(async (isLocal: boolean) => (isLocal ? 3_000 : 15_000)),
   };
-  const config = {
+  const config: Pick<ConfigService, 'get'> = {
     get: (key: string, defaultValue = '') => {
       if (key === 'NODE_ENV') return 'test';
       if (key === 'CREDENTIALS_MASTER_KEY') return 'unit-test-credentials-master-key';
@@ -51,7 +54,7 @@ describe('CredentialsService', () => {
   beforeEach(() => {
     drizzleSvc = makeTestDrizzle();
     timeoutSettings.getProviderTimeoutMs.mockImplementation(async (isLocal: boolean) => (isLocal ? 3_000 : 15_000));
-    svc = new CredentialsService(drizzleSvc, timeoutSettings as never, config as never);
+    svc = new CredentialsService(drizzleSvc, timeoutSettings as TimeoutSettingsService, config as ConfigService);
   });
 
   describe('CRUD', () => {
@@ -97,6 +100,26 @@ describe('CredentialsService', () => {
       const created = await svc.create({ name: 'A', provider: 'openai', apiKey: 'sk-abc' });
       const key = await svc.getApiKey(created.id);
       expect(key).toBe('sk-abc');
+    });
+
+    it('REGRESSION: returns null and logs when a stored credential secret is malformed', async () => {
+      const loggerError = vi.spyOn((svc as unknown as { logger: Logger }).logger, 'error').mockImplementation(() => undefined);
+
+      await drizzleSvc.db.insert(schema.credentials).values({
+        id: 'broken-secret',
+        name: 'Broken',
+        provider: 'openai',
+        apiKey: 'kalio-enc-v1:broken',
+        baseUrl: null,
+        model: 'gpt-4o-mini',
+        createdAt: new Date(),
+      });
+
+      await expect(svc.getApiKey('broken-secret')).resolves.toBeNull();
+      expect(loggerError).toHaveBeenCalledWith(
+        'Failed to decrypt API key for credential broken-secret',
+        expect.any(Error),
+      );
     });
 
     it('REGRESSION: encrypts apiKey at rest while preserving read access through the service', async () => {
@@ -173,6 +196,31 @@ describe('CredentialsService', () => {
       expect(config?.apiKey).toBe('sk-mimo');
       expect(config?.model).toBe('mimo-v2-omni');
       expect(config?.baseUrl).toBe('https://token-plan-ams.xiaomimimo.com/v1');
+    });
+
+    it('REGRESSION: returns null and logs when the active credential secret is malformed', async () => {
+      const loggerError = vi.spyOn((svc as unknown as { logger: Logger }).logger, 'error').mockImplementation(() => undefined);
+
+      await drizzleSvc.db.insert(schema.credentials).values({
+        id: 'broken-active',
+        name: 'Broken Active',
+        provider: 'openai',
+        apiKey: 'kalio-enc-v1:broken',
+        baseUrl: null,
+        model: 'gpt-4o-mini',
+        createdAt: new Date(),
+      });
+      await drizzleSvc.db.insert(schema.appSettings).values({
+        key: 'active_llm_credential',
+        value: 'broken-active',
+        updatedAt: new Date(),
+      });
+
+      await expect(svc.getActiveProviderConfig()).resolves.toBeNull();
+      expect(loggerError).toHaveBeenCalledWith(
+        'Failed to decrypt active credential secret for broken-active',
+        expect.any(Error),
+      );
     });
   });
 
@@ -286,12 +334,37 @@ describe('CredentialsService', () => {
     });
 
     it('returns empty array when fetch fails', async () => {
+      const loggerError = vi.spyOn((svc as unknown as { logger: Logger }).logger, 'error').mockImplementation(() => undefined);
       const fetchMock = vi.fn().mockRejectedValue(new Error('network error'));
       vi.stubGlobal('fetch', fetchMock);
       const c = await svc.create({ name: 'OpenAI', provider: 'openai', apiKey: 'key', model: 'gpt-4' });
       const result = await svc.getModelsForCredential(c.id);
       expect(result).toEqual([]);
+      expect(loggerError).toHaveBeenCalledWith(
+        `Failed to fetch models for credential ${c.id}`,
+        expect.any(Error),
+      );
       vi.unstubAllGlobals();
+    });
+
+    it('returns empty array and logs when the credential secret cannot be decrypted', async () => {
+      const loggerError = vi.spyOn((svc as unknown as { logger: Logger }).logger, 'error').mockImplementation(() => undefined);
+
+      await drizzleSvc.db.insert(schema.credentials).values({
+        id: 'broken-model-fetch',
+        name: 'Broken Models',
+        provider: 'openai',
+        apiKey: 'kalio-enc-v1:broken',
+        baseUrl: null,
+        model: 'gpt-4o-mini',
+        createdAt: new Date(),
+      });
+
+      await expect(svc.getModelsForCredential('broken-model-fetch')).resolves.toEqual([]);
+      expect(loggerError).toHaveBeenCalledWith(
+        'Failed to decrypt credential secret while fetching models for broken-model-fetch',
+        expect.any(Error),
+      );
     });
 
     it('returns model list from successful fetch', async () => {

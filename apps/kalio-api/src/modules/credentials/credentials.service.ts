@@ -69,7 +69,7 @@ export class CredentialsService {
     if (!row || typeof row.apiKey !== 'string') {
       return null;
     }
-    return this.decryptApiKey(row.apiKey);
+    return this.tryDecryptApiKey(row.apiKey, `Failed to decrypt API key for credential ${credentialId}`);
   }
 
   // ─── Active credential management ────────────────────────────────────────────
@@ -126,9 +126,13 @@ export class CredentialsService {
       .where(eq(credentials.id, activeId))
       .then((r) => r[0]);
     if (!row) return null;
+    const apiKey = this.tryDecryptApiKey(row.apiKey, `Failed to decrypt active credential secret for ${activeId}`);
+    if (apiKey === null) {
+      return null;
+    }
     return {
       provider: row.provider as LLMProviderType,
-      apiKey: this.decryptApiKey(row.apiKey),
+      apiKey,
       model: row.model ?? '',
       baseUrl: row.baseUrl ?? undefined,
     };
@@ -212,7 +216,14 @@ export class CredentialsService {
     const timeoutMs = await this.timeoutSettings.getProviderTimeoutMs(isLocal);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const apiKey = this.decryptApiKey(row.apiKey);
+    const apiKey = this.tryDecryptApiKey(
+      row.apiKey,
+      `Failed to decrypt credential secret while fetching models for ${id}`,
+    );
+    if (row.apiKey.length > 0 && apiKey === null) {
+      clearTimeout(timer);
+      return [];
+    }
 
     try {
       const authHeaders: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
@@ -226,7 +237,8 @@ export class CredentialsService {
       const json = await res.json() as { data?: { id: string }[]; models?: { id: string }[] };
       const items = json.data ?? json.models ?? [];
       return items.map((m) => (typeof m === 'string' ? m : m.id)).filter(Boolean);
-    } catch {
+    } catch (err) {
+      this.logger.error(`Failed to fetch models for credential ${id}`, err instanceof Error ? err : new Error(String(err)));
       return [];
     } finally {
       clearTimeout(timer);
@@ -306,6 +318,15 @@ export class CredentialsService {
     ]);
 
     return decrypted.toString('utf8');
+  }
+
+  private tryDecryptApiKey(storedValue: string, message: string): string | null {
+    try {
+      return this.decryptApiKey(storedValue);
+    } catch (err) {
+      this.logger.error(message, err instanceof Error ? err : new Error(String(err)));
+      return null;
+    }
   }
 
   private getEncryptionKey(): Buffer {
