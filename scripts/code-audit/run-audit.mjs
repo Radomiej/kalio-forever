@@ -24,6 +24,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const RAW_DIR = path.join(REPO_ROOT, 'docs', 'audit', 'raw');
+// Governance thresholds are intentionally stricter than the general file-size
+// rules because these files act as root-level coordination docs. Once they get
+// too large, agents and humans both drift from them more easily.
+const AGENTS_DOC_HIGH_LINE_LIMIT = 300;
+const AGENTS_DOC_MEDIUM_LINE_LIMIT = 220;
+const ROOT_COPILOT_SHIM_MAX_LINES = 40;
 
 const TARGETS = [
   path.join('apps', 'kalio-api', 'src'),
@@ -260,7 +266,7 @@ async function governanceDocStats() {
 
   if (agents) {
     const agentLines = docs['AGENTS.md'].lines;
-    if (agentLines > 300) {
+    if (agentLines > AGENTS_DOC_HIGH_LINE_LIMIT) {
       findings.push({
         severity: '🟡 HIGH',
         target: 'AGENTS.md',
@@ -268,7 +274,7 @@ async function governanceDocStats() {
         message: `AGENTS.md is ${agentLines} lines; large root instruction files are harder to keep current`,
         fix: 'Prune the root file or move details into nested docs/skills where appropriate',
       });
-    } else if (agentLines > 220) {
+    } else if (agentLines > AGENTS_DOC_MEDIUM_LINE_LIMIT) {
       findings.push({
         severity: '🟢 MEDIUM',
         target: 'AGENTS.md',
@@ -281,7 +287,7 @@ async function governanceDocStats() {
 
   if (repoCopilot && rootCopilot) {
     const rootCopilotLines = docs['.copilot-instructions.md'].lines;
-    if (rootCopilotLines > 40) {
+    if (rootCopilotLines > ROOT_COPILOT_SHIM_MAX_LINES) {
       findings.push({
         severity: '🟡 HIGH',
         target: '.copilot-instructions.md',

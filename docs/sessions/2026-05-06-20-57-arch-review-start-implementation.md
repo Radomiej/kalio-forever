@@ -299,3 +299,24 @@ This session implemented the first high-priority fixes from the architecture rev
 
 - Audit-driven large-file refactors were not attempted here; they are still the main cleanup backlog.
 - Some web tests still print React `act(...)` warnings and expected error-path console output, but the suite is green and those warnings were not part of the requested bug-fix scope.
+
+## Follow-up: review fixes, warning cleanup, and first sessionStore extraction
+
+### What changed
+
+- Re-checked the latest pasted review against current code instead of applying it blindly.
+- Fixed the real session-scoped assertion drift in `apps/kalio-web/src/store/sessionStore.test.ts`.
+- Added explicit tool-only done coverage in `apps/kalio-api/src/modules/chat/__tests__/stream-processor.spec.ts` to document that tool-only assistant iterations are persisted.
+- Added named governance threshold constants plus rationale in `scripts/code-audit/run-audit.mjs` and documented those thresholds in `scripts/code-audit/README.md`.
+- Reduced React `act(...)` warning noise in the warning-heavy `ChatInterface.test.tsx` slices by introducing async render/event helpers and converting the warning-producing tests to use them.
+- Started the first real `sessionStore.ts` refactor slice by extracting pure session projection helpers into `apps/kalio-web/src/store/sessionStore.helpers.ts` without changing the store API.
+
+### Validation
+
+- `pnpm test -- src/modules/chat/__tests__/stream-processor.spec.ts` in `apps/kalio-api` — passing
+- `pnpm test -- src/store/sessionStore.test.ts src/features/chat/ChatInterface.test.tsx` in `apps/kalio-web` — passing
+- `pnpm audit:report` from repo root — passing, report regenerated
+
+### Remaining note
+
+- The targeted `ChatInterface.test.tsx` warnings were reduced for the touched blocks, but expected error-path console output still appears and broader warning cleanup remains a separate follow-up if you want the whole file normalized.

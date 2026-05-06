@@ -42,6 +42,16 @@ The governance scanner currently flags:
 - drift risk between `.github/copilot-instructions.md` and root `.copilot-instructions.md`
 - overly long root `AGENTS.md` files that are more likely to drift
 
+Current governance thresholds:
+
+- `AGENTS.md` > 300 lines: `HIGH`
+- `AGENTS.md` 221-300 lines: `MEDIUM`
+- root `.copilot-instructions.md` > 40 lines when `.github/copilot-instructions.md` exists: `HIGH`
+
+Rationale: these root instruction files are coordination entry points. Once they
+grow beyond these limits, they tend to accumulate duplicated policy and drift
+from the canonical nested docs.
+
 ## Severity rules
 
 Aligned with AGENTS.md architecture rules:

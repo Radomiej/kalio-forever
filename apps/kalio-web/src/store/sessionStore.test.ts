@@ -74,12 +74,12 @@ describe('sessionStore — AgentTurn actions', () => {
     it('removes the last turn from agentTurns', () => {
       useSessionStore.setState({ activeSessionId: 's1' });
       useSessionStore.getState().startAgentTurn('t1', 's1');
-      useSessionStore.getState().finalizeAgentTurn();
+      useSessionStore.getState().finalizeAgentTurn('s1');
       useSessionStore.getState().startAgentTurn('t2', 's1');
 
       useSessionStore.getState().removeLastAgentTurn();
 
-      const { agentTurns } = useSessionStore.getState();
+      const agentTurns = useSessionStore.getState().getSessionAgentTurns('s1');
       expect(agentTurns).toHaveLength(1);
       expect(agentTurns[0].id).toBe('t1');
     });
@@ -89,19 +89,29 @@ describe('sessionStore — AgentTurn actions', () => {
       useSessionStore.getState().startAgentTurn('t1', 's1');
       useSessionStore.getState().removeLastAgentTurn();
 
-      expect(useSessionStore.getState().activeTurnId).toBeNull();
+      expect(useSessionStore.getState().getSessionActiveTurnId('s1')).toBeNull();
     });
 
     it('is a no-op when agentTurns is empty (does not throw)', () => {
       useSessionStore.setState({ activeSessionId: 's1' });
       expect(() => useSessionStore.getState().removeLastAgentTurn()).not.toThrow();
-      expect(useSessionStore.getState().agentTurns).toHaveLength(0);
+      expect(useSessionStore.getState().getSessionAgentTurns('s1')).toHaveLength(0);
     });
 
     it('only removes the last turn for the active session, leaves other-session turns intact', () => {
       // s1 has two turns, s2 has one turn
       useSessionStore.setState({
         activeSessionId: 's1',
+        sessionAgentTurns: {
+          s1: [
+            { id: 'a1', sessionId: 's1', items: [], done: true },
+            { id: 'a2', sessionId: 's1', items: [], done: false },
+          ],
+          s2: [
+            { id: 'b1', sessionId: 's2', items: [], done: true },
+          ],
+        },
+        sessionActiveTurnIds: { s1: 'a2', s2: null },
         agentTurns: [
           { id: 'a1', sessionId: 's1', items: [], done: true },
           { id: 'b1', sessionId: 's2', items: [], done: true },
@@ -112,14 +122,23 @@ describe('sessionStore — AgentTurn actions', () => {
 
       useSessionStore.getState().removeLastAgentTurn();
 
-      const { agentTurns, activeTurnId } = useSessionStore.getState();
-      expect(agentTurns.map((t) => t.id)).toEqual(['a1', 'b1']);
+      const agentTurns = useSessionStore.getState().getSessionAgentTurns('s1');
+      const activeTurnId = useSessionStore.getState().getSessionActiveTurnId('s1');
+      expect(agentTurns.map((t) => t.id)).toEqual(['a1']);
+      expect(useSessionStore.getState().getSessionAgentTurns('s2').map((t) => t.id)).toEqual(['b1']);
       expect(activeTurnId).toBeNull();
     });
 
     it('does not touch turns from another session when active session has no turns', () => {
       useSessionStore.setState({
         activeSessionId: 's2',
+        sessionAgentTurns: {
+          s1: [
+            { id: 'a1', sessionId: 's1', items: [], done: true },
+          ],
+          s2: [],
+        },
+        sessionActiveTurnIds: { s1: null, s2: null },
         agentTurns: [
           { id: 'a1', sessionId: 's1', items: [], done: true },
         ],
@@ -128,7 +147,7 @@ describe('sessionStore — AgentTurn actions', () => {
 
       useSessionStore.getState().removeLastAgentTurn();
 
-      expect(useSessionStore.getState().agentTurns).toHaveLength(1);
+      expect(useSessionStore.getState().getSessionAgentTurns('s1')).toHaveLength(1);
     });
   });
 });

@@ -5,6 +5,9 @@
 **Local-first AI workspace — chat with agents that have real memory, real tools, and a real filesystem.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Backend CI](https://github.com/Radomiej/kalio-forever/actions/workflows/backend-ci.yml/badge.svg?branch=main)](https://github.com/Radomiej/kalio-forever/actions/workflows/backend-ci.yml)
+[![Frontend CI](https://github.com/Radomiej/kalio-forever/actions/workflows/frontend-ci.yml/badge.svg?branch=main)](https://github.com/Radomiej/kalio-forever/actions/workflows/frontend-ci.yml)
+[![Audit](https://github.com/Radomiej/kalio-forever/actions/workflows/audit.yml/badge.svg?branch=main)](https://github.com/Radomiej/kalio-forever/actions/workflows/audit.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)](https://nestjs.com/)

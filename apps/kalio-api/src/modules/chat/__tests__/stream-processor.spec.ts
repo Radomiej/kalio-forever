@@ -105,6 +105,13 @@ describe('StreamProcessorService', () => {
     expect(ctx.emit).not.toHaveBeenCalledWith('chat:complete', expect.anything());
   });
 
+  it('routes done chunk to DoneHandler for tool-only iterations', async () => {
+    const ctx = makeCtx();
+    ctx.state.addToolCall({ id: 'c1', name: 'my_tool', args: { x: 1 } });
+    await processor.process({ type: 'done' }, ctx);
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalled();
+  });
+
   it('skips handler when abort signal is set (abortCheckMiddleware)', async () => {
     const ctx = makeCtx(true);
     await processor.process({ type: 'text_delta', delta: 'x' }, ctx);

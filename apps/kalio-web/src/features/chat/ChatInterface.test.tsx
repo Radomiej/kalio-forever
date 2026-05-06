@@ -31,6 +31,35 @@ function fire(event: string, payload: unknown) {
   (handlers[event] ?? []).forEach((h) => h(payload));
 }
 
+async function flushReactEffects(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function renderChatInterface() {
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(<ChatInterface />);
+    await flushReactEffects();
+  });
+  return view;
+}
+
+async function rerenderChatInterface(rerender: ReturnType<typeof render>['rerender']) {
+  await act(async () => {
+    rerender(<ChatInterface />);
+    await flushReactEffects();
+  });
+}
+
+async function emitEvent(event: string, payload: unknown) {
+  await act(async () => {
+    fire(event, payload);
+    await flushReactEffects();
+  });
+}
+
 // Spies declared via vi.hoisted() so they're initialized before vi.mock factories run
 const mockSendMessage = vi.hoisted(() => vi.fn());
 
@@ -247,16 +276,14 @@ beforeEach(() => {
 });
 
 describe('ChatInterface event wiring', () => {
-  it('REGRESSION: tool:start creates a running activity in agentStore', () => {
-    render(<ChatInterface />);
+  it('REGRESSION: tool:start creates a running activity in agentStore', async () => {
+    await renderChatInterface();
 
-    act(() => {
-      fire('tool:start', {
+    await emitEvent('tool:start', {
         callId: 'call-1',
         toolName: 'fs_list',
         args: { path: '/tmp' },
       });
-    });
 
     expect(addToolActivity).toHaveBeenCalledOnce();
     expect(addToolActivity).toHaveBeenCalledWith(
@@ -268,15 +295,11 @@ describe('ChatInterface event wiring', () => {
     );
   });
 
-  it('tool:result updates an existing activity to success', () => {
-    render(<ChatInterface />);
+  it('tool:result updates an existing activity to success', async () => {
+    await renderChatInterface();
 
-    act(() => {
-      fire('tool:start', { callId: 'call-2', toolName: 'fs_read', args: {} });
-    });
-    act(() => {
-      fire('tool:result', { callId: 'call-2', status: 'success', data: 'content' });
-    });
+    await emitEvent('tool:start', { callId: 'call-2', toolName: 'fs_read', args: {} });
+    await emitEvent('tool:result', { callId: 'call-2', status: 'success', data: 'content' });
 
     expect(updateToolActivity).toHaveBeenCalledWith(
       'call-2',
@@ -284,15 +307,11 @@ describe('ChatInterface event wiring', () => {
     );
   });
 
-  it('tool:result updates an existing activity to error', () => {
-    render(<ChatInterface />);
+  it('tool:result updates an existing activity to error', async () => {
+    await renderChatInterface();
 
-    act(() => {
-      fire('tool:start', { callId: 'call-3', toolName: 'fs_list', args: {} });
-    });
-    act(() => {
-      fire('tool:result', { callId: 'call-3', status: 'error', errorCode: 'TOOL_NOT_FOUND', errorMessage: 'not found' });
-    });
+    await emitEvent('tool:start', { callId: 'call-3', toolName: 'fs_list', args: {} });
+    await emitEvent('tool:result', { callId: 'call-3', status: 'error', errorCode: 'TOOL_NOT_FOUND', errorMessage: 'not found' });
 
     expect(updateToolActivity).toHaveBeenCalledWith(
       'call-3',
@@ -300,13 +319,12 @@ describe('ChatInterface event wiring', () => {
     );
   });
 
-  it('tool:confirmation_required creates an awaiting_confirmation activity', () => {
-    render(<ChatInterface />);
+  it('tool:confirmation_required creates an awaiting_confirmation activity', async () => {
+    await renderChatInterface();
     // Clear the setup call from the activation effect before testing event-driven behaviour
     setPendingConfirmation.mockClear();
 
-    act(() => {
-      fire('tool:confirmation_required', {
+    await emitEvent('tool:confirmation_required', {
         requestId: 'req-1',
         toolCallId: 'call-4',
         sessionId: 'session-1',
@@ -314,7 +332,6 @@ describe('ChatInterface event wiring', () => {
         args: { path: '/tmp/file' },
         timeoutMs: 30000,
       });
-    });
 
     expect(setPendingConfirmation).toHaveBeenCalledOnce();
     expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', expect.objectContaining({
@@ -331,33 +348,29 @@ describe('ChatInterface event wiring', () => {
     );
   });
 
-  it('chat:context event calls setContext with systemPrompt and toolNames', () => {
-    render(<ChatInterface />);
+  it('chat:context event calls setContext with systemPrompt and toolNames', async () => {
+    await renderChatInterface();
 
-    act(() => {
-      fire('chat:context', {
+    await emitEvent('chat:context', {
         sessionId: 'session-1',
         systemPrompt: 'You are a test assistant.',
         toolNames: ['vfs_read', 'vfs_write'],
       });
-    });
 
     expect(setContext).toHaveBeenCalledOnce();
     expect(setContext).toHaveBeenCalledWith('You are a test assistant.', ['vfs_read', 'vfs_write'], 'session-1');
   });
 
-  it('subagent tool:start records session and agentRun metadata', () => {
-    render(<ChatInterface />);
+  it('subagent tool:start records session and agentRun metadata', async () => {
+    await renderChatInterface();
 
-    act(() => {
-      fire('tool:start', {
+    await emitEvent('tool:start', {
         callId: 'call-sub',
         toolName: 'vfs_write',
         args: { filePath: 'index.html' },
         sessionId: 'child-session',
         agentRun: { agentRunId: 'subagent-run-1', agentType: 'subagent', parentSessionId: 'session-1' },
       });
-    });
 
     expect(addToolActivity).toHaveBeenCalledWith(expect.objectContaining({
       callId: 'call-sub',
@@ -366,18 +379,16 @@ describe('ChatInterface event wiring', () => {
     }));
   });
 
-  it('subagent tool:result persists the child tool_result under the child session id', () => {
-    render(<ChatInterface />);
+  it('subagent tool:result persists the child tool_result under the child session id', async () => {
+    await renderChatInterface();
 
-    act(() => {
-      fire('tool:result', {
+    await emitEvent('tool:result', {
         callId: 'call-sub',
         status: 'success',
         data: { path: 'index.html' },
         sessionId: 'child-session',
         agentRun: { agentRunId: 'subagent-run-1', agentType: 'subagent', parentSessionId: 'session-1' },
       });
-    });
 
     expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'child-session',
@@ -386,11 +397,10 @@ describe('ChatInterface event wiring', () => {
     }));
   });
 
-  it('session:created adds subagent session to the store', () => {
-    render(<ChatInterface />);
+  it('session:created adds subagent session to the store', async () => {
+    await renderChatInterface();
 
-    act(() => {
-      fire('session:created', {
+    await emitEvent('session:created', {
         id: 'child-session',
         personaId: 'default',
         title: 'Sub-agent: demo',
@@ -400,37 +410,30 @@ describe('ChatInterface event wiring', () => {
         createdAt: 1,
         updatedAt: 1,
       });
-    });
 
     expect(addSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'child-session', kind: 'subagent' }));
   });
 });
 
 describe('REGRESSION: tool name resolution persists across turns', () => {
-  it('tool:start calls registerCallId so name survives clearToolActivities', () => {
-    render(<ChatInterface />);
+  it('tool:start calls registerCallId so name survives clearToolActivities', async () => {
+    await renderChatInterface();
 
-    act(() => {
-      fire('tool:start', {
+    await emitEvent('tool:start', {
         callId: 'call_abc123',
         toolName: 'raapp_create',
         args: { type: 'html', content: '<div/>' },
       });
-    });
 
     // registerCallId must be called with the exact callId and toolName
     expect(registerCallId).toHaveBeenCalledWith('call_abc123', 'raapp_create');
   });
 
-  it('tool:start for a second turn also registers its callId', () => {
-    render(<ChatInterface />);
+  it('tool:start for a second turn also registers its callId', async () => {
+    await renderChatInterface();
 
-    act(() => {
-      fire('tool:start', { callId: 'call_turn1', toolName: 'raapp_create', args: {} });
-    });
-    act(() => {
-      fire('tool:start', { callId: 'call_turn2', toolName: 'run_raapp', args: { id: 'interactive-qa' } });
-    });
+    await emitEvent('tool:start', { callId: 'call_turn1', toolName: 'raapp_create', args: {} });
+    await emitEvent('tool:start', { callId: 'call_turn2', toolName: 'run_raapp', args: { id: 'interactive-qa' } });
 
     expect(registerCallId).toHaveBeenCalledWith('call_turn1', 'raapp_create');
     expect(registerCallId).toHaveBeenCalledWith('call_turn2', 'run_raapp');
@@ -525,14 +528,14 @@ describe('REGRESSION: computeAnsweredCallIds freezes old RA-App widgets', () => 
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('REGRESSION: timeline interleaving preserves chronological order', () => {
-  it('renders user[0] → agent[0] → user[1] → agent[1] pattern', () => {
+  it('renders user[0] → agent[0] → user[1] → agent[1] pattern', async () => {
     // The timeline logic in ChatInterface uses a simple for loop that interleaves:
     // for i in range(max(userMsgs.length, agentTurns.length)):
     //   if i < userMsgs.length: render user[i]
     //   if i < agentTurns.length: render agent[i]
     // This test verifies the component renders with the mock state
     
-    const { container } = render(<ChatInterface />);
+    const { container } = await renderChatInterface();
     // With default mock (empty messages, empty agentTurns), should render nothing
     const bubbles = container.querySelectorAll('[data-testid="message-bubble"], [data-testid="agent-turn-bubble"]');
     expect(bubbles).toHaveLength(0);
@@ -582,18 +585,16 @@ describe('REGRESSION: timeline interleaving preserves chronological order', () =
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('chat:error two-path dispatch', () => {
-  it('chat:error with active turn and hadContent=true calls markAgentTurnError', () => {
+  it('chat:error with active turn and hadContent=true calls markAgentTurnError', async () => {
     mockActiveTurnId = 'turn-abc';
-    render(<ChatInterface />);
+    await renderChatInterface();
 
-    act(() => {
-      fire('chat:error', {
+    await emitEvent('chat:error', {
         sessionId: 'session-1',
         code: 'INTERRUPTED',
         message: 'Turn interrupted by user',
         hadContent: true,
       });
-    });
 
     expect(markAgentTurnError).toHaveBeenCalledWith('turn-abc', {
       code: 'INTERRUPTED',
@@ -602,52 +603,46 @@ describe('chat:error two-path dispatch', () => {
     expect(removeLastAgentTurn).not.toHaveBeenCalled();
   });
 
-  it('chat:error with active turn, hadContent=false and non-INTERRUPTED code removes bubble and sets retry', () => {
+  it('chat:error with active turn, hadContent=false and non-INTERRUPTED code removes bubble and sets retry', async () => {
     mockActiveTurnId = 'turn-abc';
-    render(<ChatInterface />);
+    await renderChatInterface();
 
-    act(() => {
-      fire('chat:error', {
+    await emitEvent('chat:error', {
         sessionId: 'session-1',
         code: 'LLM_ERROR',
         message: 'LLM unavailable',
         hadContent: false,
       });
-    });
 
     expect(removeLastAgentTurn).toHaveBeenCalledOnce();
     expect(markAgentTurnError).not.toHaveBeenCalled();
   });
 
-  it('chat:error with active turn, hadContent=false and INTERRUPTED silently removes bubble', () => {
+  it('chat:error with active turn, hadContent=false and INTERRUPTED silently removes bubble', async () => {
     mockActiveTurnId = 'turn-abc';
-    render(<ChatInterface />);
+    await renderChatInterface();
 
-    act(() => {
-      fire('chat:error', {
+    await emitEvent('chat:error', {
         sessionId: 'session-1',
         code: 'INTERRUPTED',
         message: 'Turn interrupted by user',
         hadContent: false,
       });
-    });
 
     expect(removeLastAgentTurn).toHaveBeenCalledOnce();
     expect(markAgentTurnError).not.toHaveBeenCalled();
   });
 
-  it('chat:error QUEUE_FULL with no active turn calls setStreaming(false) only (floating banner path)', () => {
+  it('chat:error QUEUE_FULL with no active turn calls setStreaming(false) only (floating banner path)', async () => {
     // activeTurnId remains null
-    render(<ChatInterface />);
+    await renderChatInterface();
 
-    act(() => {
-      fire('chat:error', {
+    await emitEvent('chat:error', {
         sessionId: 'session-1',
         code: 'QUEUE_FULL',
         message: 'Queue is full',
         hadContent: false,
       });
-    });
 
     // Neither turn action should be called — floating banner handles it
     expect(markAgentTurnError).not.toHaveBeenCalled();
@@ -663,26 +658,24 @@ describe('chat:error two-path dispatch', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Retry stale ref: session switch clears lastSentContentRef', () => {
-  it('does not show retry banner after switching sessions (ref is cleared)', () => {
+  it('does not show retry banner after switching sessions (ref is cleared)', async () => {
     // Start on session-1 and receive an LLM error that would offer retry
     mockActiveSessionId = 'session-1';
     mockActiveTurnId = 'turn-1';
-    const { rerender } = render(<ChatInterface />);
+    const { rerender } = await renderChatInterface();
 
     // LLM fails on session-1 without content → retry banner should appear
-    act(() => {
-      fire('chat:error', {
+    await emitEvent('chat:error', {
         sessionId: 'session-1',
         code: 'LLM_ERROR',
         message: 'LLM down',
         hadContent: false,
       });
-    });
 
     // Switch to session-2 (simulates user clicking another session)
     mockActiveSessionId = 'session-2';
     mockActiveTurnId = null;
-    rerender(<ChatInterface />);
+    await rerenderChatInterface(rerender);
 
     // Re-render with new session causes the useEffect to fire and clear the ref.
     // The retry banner itself depends on `retryError` state which is reset separately,
@@ -691,21 +684,19 @@ describe('Retry stale ref: session switch clears lastSentContentRef', () => {
     expect(removeLastAgentTurn).toHaveBeenCalledOnce();
   });
 
-  it('retry banner does not appear for the new session after switching', () => {
+  it('retry banner does not appear for the new session after switching', async () => {
     // After switching to session-2, errors on that session remove the empty bubble
     // via removeLastAgentTurn — same path as session-1, no cross-contamination.
     mockActiveSessionId = 'session-2';
     mockActiveTurnId = 'turn-2';
-    render(<ChatInterface />);
+    await renderChatInterface();
 
-    act(() => {
-      fire('chat:error', {
+    await emitEvent('chat:error', {
         sessionId: 'session-2',
         code: 'LLM_ERROR',
         message: 'error on session-2',
         hadContent: false,
       });
-    });
 
     // session-2's own turn is removed — not a stale session-1 turn
     expect(removeLastAgentTurn).toHaveBeenCalledOnce();
@@ -721,33 +712,33 @@ describe('Retry stale ref: session switch clears lastSentContentRef', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('auto-send pending message uses session personaId (not hardcoded default)', () => {
-  it('sends with the session stored personaId when pendingMessage is set', () => {
+  it('sends with the session stored personaId when pendingMessage is set', async () => {
     mockActiveSessionId = 'session-raapp';
     mockPendingMessage = 'Run the My RA App RA-App for me. Launch it immediately.';
 
-    render(<ChatInterface />);
+    await renderChatInterface();
 
     expect(mockSendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ personaId: 'ra-apps' }),
     );
   });
 
-  it('never sends with hardcoded default personaId for ra-apps sessions', () => {
+  it('never sends with hardcoded default personaId for ra-apps sessions', async () => {
     mockActiveSessionId = 'session-raapp';
     mockPendingMessage = 'Run the My RA App RA-App for me. Launch it immediately.';
 
-    render(<ChatInterface />);
+    await renderChatInterface();
 
     expect(mockSendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ personaId: 'default' }),
     );
   });
 
-  it('falls back to default personaId when session is not found', () => {
+  it('falls back to default personaId when session is not found', async () => {
     mockActiveSessionId = 'unknown-session-id';
     mockPendingMessage = 'Some pending message';
 
-    render(<ChatInterface />);
+    await renderChatInterface();
 
     // session not in list → falls back to 'default'
     expect(mockSendMessage).toHaveBeenCalledWith(
@@ -770,29 +761,29 @@ describe('auto-send pending message uses session personaId (not hardcoded defaul
 // setActiveSession in the store clears agentTurns on a real session switch.
 // ─────────────────────────────────────────────────────────────────────────────
 describe('REGRESSION: remount with same session must not clear agent turns', () => {
-  it('unmounting and remounting with the same activeSessionId does not call clearAgentTurns', () => {
-    const { unmount } = render(<ChatInterface />);
+  it('unmounting and remounting with the same activeSessionId does not call clearAgentTurns', async () => {
+    const { unmount } = await renderChatInterface();
     // clearAgentTurns is called once on initial mount (part of activation effect)
     vi.clearAllMocks();
 
     // Simulate navigating to landing (unmounts ChatInterface) and back (remounts)
     unmount();
-    render(<ChatInterface />);
+    await renderChatInterface();
 
     // BUG: clearAgentTurns was called again, wiping any in-flight streaming turn.
     // After fix: clearAgentTurns lives in setActiveSession (store), not here.
     expect(clearAgentTurns).not.toHaveBeenCalled();
   });
 
-  it('chat:chunk after remount still calls appendChunk (streaming channel intact)', () => {
+  it('chat:chunk after remount still calls appendChunk (streaming channel intact)', async () => {
     // Pull appendChunk from the useSessionStore mock so we can spy on it
     // after remount. The mock returns fresh vi.fn() per call, but we can
     // check via the handler capture that the event bus re-registered listeners.
-    const { unmount } = render(<ChatInterface />);
+    const { unmount } = await renderChatInterface();
     vi.clearAllMocks();
 
     unmount();
-    render(<ChatInterface />);
+    await renderChatInterface();
 
     // Fire a chunk AFTER remount — with the bug the listener may not be
     // registered, but more critically the activation effect wipes streaming state.
@@ -865,7 +856,7 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
       'session-1': { sessionId: 'session-1', turnId: 'turn-live', startedAt: Date.now() },
     };
 
-    render(<ChatInterface />);
+    await renderChatInterface();
     // useEffect fired during render; fetch is pending. Clear any setup-time calls.
     setAgentTurns.mockClear();
 
@@ -892,22 +883,24 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
       content: 'Previous answer',
       createdAt: 0,
     };
+    let resolveMessages!: (messages: unknown) => void;
+    const deferredMessages = new Promise((resolve) => {
+      resolveMessages = resolve;
+    });
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([historyMsg]) })),
+      vi.fn(() => Promise.resolve({ ok: true, json: () => deferredMessages })),
     );
 
     agentStoreState.activeAgentLoops = {}; // no active loop
 
-    render(<ChatInterface />);
+    await renderChatInterface();
     setAgentTurns.mockClear();
 
     await act(async () => {
-      // flush the fetch + .json() + .then() microtask chain
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      resolveMessages([historyMsg]);
+      await deferredMessages;
+      await flushReactEffects();
     });
 
     // With no active loop, setAgentTurns SHOULD be called with the history turns
@@ -929,40 +922,36 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('REGRESSION: pendingConfirmations cleared on session switch', () => {
-  it('activating a session clears its own pendingConfirmation', () => {
+  it('activating a session clears its own pendingConfirmation', async () => {
     mockActiveSessionId = 'session-1';
-    const { rerender } = render(<ChatInterface />);
+    const { rerender } = await renderChatInterface();
     setPendingConfirmation.mockClear();
 
     // Switch to session-2 — activation effect should clear confirmation for session-2
     mockActiveSessionId = 'session-2';
-    rerender(<ChatInterface />);
+    await rerenderChatInterface(rerender);
 
     expect(setPendingConfirmation).toHaveBeenCalledWith('session-2', null);
   });
 });
 
 describe('REGRESSION: pendingConfirmations cleared on agent:start', () => {
-  it('agent:start for the active session clears its pendingConfirmation', () => {
-    render(<ChatInterface />);
+  it('agent:start for the active session clears its pendingConfirmation', async () => {
+    await renderChatInterface();
     setPendingConfirmation.mockClear();
 
-    act(() => {
-      fire('agent:start', { sessionId: 'session-1', turnId: 'turn-new' });
-    });
+    await emitEvent('agent:start', { sessionId: 'session-1', turnId: 'turn-new' });
 
     expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
   });
 });
 
 describe('REGRESSION: pendingConfirmations cleared on agent:done', () => {
-  it('agent:done for the active session clears its pendingConfirmation', () => {
-    render(<ChatInterface />);
+  it('agent:done for the active session clears its pendingConfirmation', async () => {
+    await renderChatInterface();
     setPendingConfirmation.mockClear();
 
-    act(() => {
-      fire('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
-    });
+    await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
 
     expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
   });
