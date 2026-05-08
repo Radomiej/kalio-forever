@@ -155,6 +155,31 @@ describe('FsReadTool', () => {
         tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/f.ts`, startLine: 5 })),
       ).rejects.toThrow('LINE_OUT_OF_RANGE');
     });
+
+    it.each([
+      { label: 'startLine is zero', args: { path: `${ALLOWED_DIR}/f.ts`, startLine: 0 } },
+      { label: 'startLine is negative', args: { path: `${ALLOWED_DIR}/f.ts`, startLine: -1 } },
+      { label: 'endLine is zero', args: { path: `${ALLOWED_DIR}/f.ts`, endLine: 0 } },
+      { label: 'endLine is negative', args: { path: `${ALLOWED_DIR}/f.ts`, endLine: -2 } },
+      { label: 'startLine is fractional', args: { path: `${ALLOWED_DIR}/f.ts`, startLine: 1.5 } },
+      { label: 'endLine is fractional', args: { path: `${ALLOWED_DIR}/f.ts`, endLine: 1.5 } },
+    ])('rejects invalid line bounds when $label (REGRESSION)', async ({ args }) => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isFile: () => true, size: 50 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('line1\nline2\nline3');
+
+      await expect(tool.execute(makeRequest('fs_read', args))).rejects.toThrow('LINE_OUT_OF_RANGE');
+    });
+
+    it('rejects a line range when endLine is before startLine (REGRESSION)', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isFile: () => true, size: 50 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('line1\nline2\nline3');
+
+      await expect(
+        tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/f.ts`, startLine: 3, endLine: 2 })),
+      ).rejects.toThrow('LINE_OUT_OF_RANGE');
+    });
   });
 });
 
@@ -242,6 +267,21 @@ describe('FsListTool', () => {
         tool.execute(makeRequest('fs_list', { path: `${ALLOWED_DIR}/file.ts` })),
       ).rejects.toThrow('NOT_A_DIRECTORY');
     });
+
+    it.each([
+      { label: 'recursive is string false', recursive: 'false' },
+      { label: 'recursive is string true', recursive: 'true' },
+      { label: 'recursive is numeric one', recursive: 1 },
+      { label: 'recursive is numeric zero', recursive: 0 },
+    ])('rejects non-boolean recursive flag when $label (REGRESSION)', async ({ recursive }) => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockReturnValue({ isDirectory: () => true } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readdirSync).mockReturnValue([] as unknown as ReturnType<typeof nodefs.readdirSync>);
+
+      await expect(
+        tool.execute(makeRequest('fs_list', { path: ALLOWED_DIR, recursive })),
+      ).rejects.toThrow('INVALID_RECURSIVE');
+    });
   });
 });
 
@@ -328,6 +368,36 @@ describe('FsWriteTool', () => {
       } catch {
         // expected
       }
+
+      expect(nodefs.writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: 'path is empty', path: '' },
+      { label: 'path is whitespace', path: '   ' },
+    ])('rejects blank target path when $label (REGRESSION)', async ({ path }) => {
+      vi.mocked(nodefs.mkdirSync).mockReturnValue(undefined);
+      vi.mocked(nodefs.writeFileSync).mockReturnValue(undefined);
+
+      await expect(
+        tool.execute(makeRequest('fs_write', { path, content: 'hello' })),
+      ).rejects.toThrow('INVALID_PATH');
+
+      expect(nodefs.writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: 'content is undefined', content: undefined },
+      { label: 'content is null', content: null },
+      { label: 'content is an object', content: { hello: 'world' } },
+      { label: 'content is numeric', content: 123 },
+    ])('rejects non-string content when $label (REGRESSION)', async ({ content }) => {
+      vi.mocked(nodefs.mkdirSync).mockReturnValue(undefined);
+      vi.mocked(nodefs.writeFileSync).mockReturnValue(undefined);
+
+      await expect(
+        tool.execute(makeRequest('fs_write', { path: `${ALLOWED_DIR}/out.txt`, content })),
+      ).rejects.toThrow('INVALID_CONTENT');
 
       expect(nodefs.writeFileSync).not.toHaveBeenCalled();
     });

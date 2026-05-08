@@ -7,6 +7,25 @@ import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 
 const MAX_BYTES = 512 * 1024; // 512 KB safety cap
 
+function getPathArg(args: ToolCallRequest['args']): string {
+  const rawPath = args['path'];
+  if (typeof rawPath !== 'string' || rawPath.trim().length === 0) {
+    throw new Error('INVALID_PATH: path must be a non-empty string');
+  }
+  return rawPath.trim();
+}
+
+function getLineArg(args: ToolCallRequest['args'], key: 'startLine' | 'endLine'): number | undefined {
+  const rawValue = args[key];
+  if (rawValue === undefined) {
+    return undefined;
+  }
+  if (typeof rawValue !== 'number' || !Number.isInteger(rawValue) || rawValue < 1) {
+    throw new Error(`LINE_OUT_OF_RANGE: ${key} must be a positive integer`);
+  }
+  return rawValue;
+}
+
 @Injectable()
 @Tool({
   name: 'fs_read',
@@ -26,9 +45,9 @@ export class FsReadTool {
   constructor(private readonly allowedPaths: AllowedPathsService) {}
 
   async execute(request: ToolCallRequest): Promise<{ path: string; content: string; lines: number }> {
-    const rawPath = request.args['path'] as string;
-    const startLine = request.args['startLine'] as number | undefined;
-    const endLine = request.args['endLine'] as number | undefined;
+    const rawPath = getPathArg(request.args);
+    const startLine = getLineArg(request.args, 'startLine');
+    const endLine = getLineArg(request.args, 'endLine');
 
     const absPath = resolve(rawPath);
     const allowed = await this.allowedPaths.isAllowed(absPath);
@@ -48,6 +67,9 @@ export class FsReadTool {
     if (startLine !== undefined || endLine !== undefined) {
       const s = (startLine ?? 1) - 1;
       const e = endLine ?? total;
+      if (e < s + 1) {
+        throw new Error(`LINE_OUT_OF_RANGE: endLine ${endLine} is before startLine ${startLine ?? 1}`);
+      }
       if (s >= total) {
         throw new Error(`LINE_OUT_OF_RANGE: startLine ${startLine ?? 1} exceeds file length (${total} lines)`);
       }

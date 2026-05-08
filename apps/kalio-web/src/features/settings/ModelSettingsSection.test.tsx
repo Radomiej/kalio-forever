@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ModelSettingsSection } from './ModelSettingsSection';
 import type { Credential } from '@kalio/types';
@@ -112,6 +112,87 @@ describe('ModelSettingsSection', () => {
       const body = JSON.parse((putCall![1]?.body as string) ?? '{}') as { temperature: number; maxTokens: number };
       expect(body.temperature).toBeDefined();
       expect(body.maxTokens).toBeDefined();
+    });
+  });
+
+  it.each([
+    { label: 'temperature is a string', response: { temperature: 'hot', maxTokens: 4096 } },
+    { label: 'temperature is null', response: { temperature: null, maxTokens: 4096 } },
+  ])('falls back to defaults when $label in generation settings response (REGRESSION)', async ({ response }) => {
+    mockFetch({
+      'GET /api/credentials/settings/generation': response,
+    });
+
+    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('gen-temperature-value')).toHaveTextContent('0.70'));
+  });
+
+  it('keeps the last valid temperature when slider emits an empty value (REGRESSION)', async () => {
+    mockFetch({
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+    });
+
+    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
+
+    const slider = await screen.findByTestId('gen-temperature');
+    fireEvent.change(slider, { target: { value: '' } });
+
+    expect(screen.getByTestId('gen-temperature-value')).toHaveTextContent('0.70');
+  });
+
+  it('keeps the last valid maxTokens when slider emits an empty value (REGRESSION)', async () => {
+    mockFetch({
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+    });
+
+    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
+
+    const slider = await screen.findByTestId('gen-max-tokens');
+    fireEvent.change(slider, { target: { value: '' } });
+
+    expect(screen.getByText('4,096')).toBeInTheDocument();
+  });
+
+  it('does not serialize empty temperature slider input as null (REGRESSION)', async () => {
+    mockFetch({
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+      'PUT /api/credentials/settings/generation': 204,
+    });
+    const user = userEvent.setup();
+
+    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
+
+    fireEvent.change(await screen.findByTestId('gen-temperature'), { target: { value: '' } });
+    await user.click(screen.getByTestId('gen-save'));
+
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
+      const putCall = calls.find(([url, opts]) => url === '/api/credentials/settings/generation' && opts?.method === 'PUT');
+      expect(putCall).toBeDefined();
+      const body = JSON.parse((putCall![1]?.body as string) ?? '{}') as { temperature: number };
+      expect(body.temperature).toBe(0.7);
+    });
+  });
+
+  it('does not serialize empty maxTokens slider input as null (REGRESSION)', async () => {
+    mockFetch({
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+      'PUT /api/credentials/settings/generation': 204,
+    });
+    const user = userEvent.setup();
+
+    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
+
+    fireEvent.change(await screen.findByTestId('gen-max-tokens'), { target: { value: '' } });
+    await user.click(screen.getByTestId('gen-save'));
+
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
+      const putCall = calls.find(([url, opts]) => url === '/api/credentials/settings/generation' && opts?.method === 'PUT');
+      expect(putCall).toBeDefined();
+      const body = JSON.parse((putCall![1]?.body as string) ?? '{}') as { maxTokens: number };
+      expect(body.maxTokens).toBe(4096);
     });
   });
 });

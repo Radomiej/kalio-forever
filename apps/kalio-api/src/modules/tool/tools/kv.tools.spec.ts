@@ -80,6 +80,31 @@ describe('KVWriteTool', () => {
 
       await expect(tool.execute(makeRequest('kv_write', { key: 'x', value: 'y' }))).rejects.toThrow('KV_WRITE_FAILED');
     });
+
+    it.each([
+      { label: 'key is empty', key: '' },
+      { label: 'key is whitespace', key: '   ' },
+      { label: 'key is null', key: null },
+      { label: 'key is numeric', key: 123 },
+      { label: 'key is object', key: { nested: 'value' } },
+    ])('rejects invalid key when $label (REGRESSION)', async ({ key }) => {
+      (kv.set as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+      await expect(tool.execute(makeRequest('kv_write', { key, value: 'y' }))).rejects.toThrow('INVALID_KEY');
+      expect(kv.set).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: 'value is undefined', value: undefined },
+      { label: 'value is null', value: null },
+      { label: 'value is numeric', value: 123 },
+      { label: 'value is object', value: { nested: 'value' } },
+    ])('rejects invalid value when $label (REGRESSION)', async ({ value }) => {
+      (kv.set as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+      await expect(tool.execute(makeRequest('kv_write', { key: 'x', value }))).rejects.toThrow('INVALID_VALUE');
+      expect(kv.set).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -127,6 +152,19 @@ describe('KVReadTool', () => {
       (kv.get as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('KV_IO_ERROR'));
 
       await expect(tool.execute(makeRequest('kv_read', { key: 'x' }))).rejects.toThrow('KV_IO_ERROR');
+    });
+
+    it.each([
+      { label: 'key is empty', key: '' },
+      { label: 'key is whitespace', key: '   ' },
+      { label: 'key is null', key: null },
+      { label: 'key is numeric', key: 123 },
+      { label: 'key is object', key: { nested: 'value' } },
+    ])('rejects invalid lookup key when $label (REGRESSION)', async ({ key }) => {
+      (kv.get as ReturnType<typeof vi.fn>).mockResolvedValue('ignored');
+
+      await expect(tool.execute(makeRequest('kv_read', { key }))).rejects.toThrow('INVALID_KEY');
+      expect(kv.get).not.toHaveBeenCalled();
     });
   });
 });
@@ -231,6 +269,19 @@ describe('KVDeleteTool', () => {
       (kv.delete as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('KV_DELETE_ERROR'));
 
       await expect(tool.execute(makeRequest('kv_delete', { key: 'x' }))).rejects.toThrow('KV_DELETE_ERROR');
+    });
+
+    it.each([
+      { label: 'key is empty', key: '' },
+      { label: 'key is whitespace', key: '   ' },
+      { label: 'key is null', key: null },
+      { label: 'key is numeric', key: 123 },
+      { label: 'key is object', key: { nested: 'value' } },
+    ])('rejects invalid delete key when $label (REGRESSION)', async ({ key }) => {
+      (kv.delete as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+
+      await expect(tool.execute(makeRequest('kv_delete', { key }))).rejects.toThrow('INVALID_KEY');
+      expect(kv.delete).not.toHaveBeenCalled();
     });
   });
 });

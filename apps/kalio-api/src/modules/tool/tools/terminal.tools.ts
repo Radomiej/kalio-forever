@@ -3,6 +3,44 @@ import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { TerminalService } from '../terminal.service';
 
+function getCommandArg(args: ToolCallRequest['args']): string {
+  const rawCommand = args['command'];
+  if (typeof rawCommand !== 'string' || rawCommand.trim().length === 0) {
+    throw new Error('INVALID_COMMAND: command must be a non-empty string');
+  }
+  return rawCommand.trim();
+}
+
+function getArgsArg(args: ToolCallRequest['args']): string[] {
+  const rawArgs = args['args'];
+  if (rawArgs === undefined) {
+    return [];
+  }
+  if (!Array.isArray(rawArgs) || rawArgs.some((arg) => typeof arg !== 'string')) {
+    throw new Error('INVALID_ARGS: args must be an array of strings');
+  }
+  return rawArgs;
+}
+
+function getCwdArg(args: ToolCallRequest['args']): string {
+  const rawCwd = args['cwd'];
+  if (rawCwd === undefined) {
+    throw new Error('MISSING_CWD: terminal_spawn requires a cwd inside an AllowedPaths root');
+  }
+  if (typeof rawCwd !== 'string' || rawCwd.trim().length === 0) {
+    throw new Error('INVALID_CWD: cwd must be a non-empty string');
+  }
+  return rawCwd.trim();
+}
+
+function getIdArg(args: ToolCallRequest['args']): string {
+  const rawId = args['id'];
+  if (typeof rawId !== 'string' || rawId.trim().length === 0) {
+    throw new Error('INVALID_ID: id must be a non-empty string');
+  }
+  return rawId.trim();
+}
+
 @Injectable()
 @Tool({
   name: 'terminal_spawn',
@@ -40,12 +78,9 @@ export class TerminalSpawnTool {
   constructor(private readonly terminals: TerminalService) {}
 
   async execute(request: ToolCallRequest) {
-    const command = request.args['command'] as string;
-    const args = (request.args['args'] as string[]) ?? [];
-    const cwd = request.args['cwd'] as string | undefined;
-    if (!cwd) {
-      throw new Error('MISSING_CWD: terminal_spawn requires a cwd inside an AllowedPaths root');
-    }
+    const command = getCommandArg(request.args);
+    const args = getArgsArg(request.args);
+    const cwd = getCwdArg(request.args);
     const session = await this.terminals.spawn(command, args, cwd);
     return { id: session.id, pid: session.pid, command: session.command };
   }
@@ -86,7 +121,7 @@ export class TerminalOutputTool {
   constructor(private readonly terminals: TerminalService) {}
 
   async execute(request: ToolCallRequest) {
-    const id = request.args['id'] as string;
+    const id = getIdArg(request.args);
     const session = this.terminals.get(id);
     if (!session) throw new Error(`Terminal session not found: ${id}`);
     return {
@@ -115,7 +150,7 @@ export class TerminalKillTool {
   constructor(private readonly terminals: TerminalService) {}
 
   async execute(request: ToolCallRequest) {
-    const id = request.args['id'] as string;
+    const id = getIdArg(request.args);
     const killed = this.terminals.kill(id);
     return { killed, id };
   }

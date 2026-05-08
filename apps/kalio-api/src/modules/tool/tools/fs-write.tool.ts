@@ -5,6 +5,22 @@ import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 
+function getPathArg(args: ToolCallRequest['args']): string {
+  const rawPath = args['path'];
+  if (typeof rawPath !== 'string' || rawPath.trim().length === 0) {
+    throw new Error('INVALID_PATH: path must be a non-empty string');
+  }
+  return rawPath.trim();
+}
+
+function getContentArg(args: ToolCallRequest['args']): string {
+  const rawContent = args['content'];
+  if (typeof rawContent !== 'string') {
+    throw new Error('INVALID_CONTENT: content must be a string');
+  }
+  return rawContent;
+}
+
 @Injectable()
 @Tool({
   name: 'fs_write',
@@ -23,8 +39,8 @@ export class FsWriteTool {
   constructor(private readonly allowedPaths: AllowedPathsService) {}
 
   async execute(request: ToolCallRequest): Promise<{ path: string; bytesWritten: number }> {
-    const rawPath = request.args['path'] as string;
-    const content = request.args['content'] as string;
+    const rawPath = getPathArg(request.args);
+    const content = getContentArg(request.args);
 
     const absPath = resolve(rawPath);
     const allowed = await this.allowedPaths.isAllowed(absPath);

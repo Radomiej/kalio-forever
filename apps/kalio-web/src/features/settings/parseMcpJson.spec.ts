@@ -127,4 +127,47 @@ describe('parseMcpJson', () => {
     const result = parseMcpJson(json);
     expect(result[0].dto.headers).toBeUndefined();
   });
+
+  it.each([
+    {
+      label: 'type=http is missing url',
+      invalid: { type: 'http' },
+    },
+    {
+      label: 'type=sse is missing url',
+      invalid: { type: 'sse' },
+    },
+    {
+      label: 'http url is blank',
+      invalid: { type: 'http', url: '' },
+    },
+    {
+      label: 'http url is whitespace only',
+      invalid: { type: 'http', url: '   ' },
+    },
+    {
+      label: 'type=stdio is missing command',
+      invalid: { type: 'stdio' },
+    },
+    {
+      label: 'stdio command is blank',
+      invalid: { type: 'stdio', command: '' },
+    },
+    {
+      label: 'stdio command is whitespace only',
+      invalid: { type: 'stdio', command: '   ' },
+    },
+  ])('skips incomplete transport entries when $label (REGRESSION)', ({ invalid }) => {
+    const json = JSON.stringify({
+      servers: {
+        broken: invalid,
+        valid: { type: 'http', url: 'https://example.com/sse' },
+      },
+    });
+
+    const result = parseMcpJson(json);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].key).toBe('valid');
+  });
 });

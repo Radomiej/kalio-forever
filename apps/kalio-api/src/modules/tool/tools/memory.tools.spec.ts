@@ -107,6 +107,30 @@ describe('MemoryIngestTool', () => {
 
       await expect(toolNoSession.execute(makeRequest('memory_ingest', { text: 'x' }))).rejects.toThrow('not found');
     });
+
+    it.each([
+      { label: 'text is empty', text: '' },
+      { label: 'text is whitespace', text: '   ' },
+      { label: 'text is null', text: null },
+      { label: 'text is numeric', text: 123 },
+      { label: 'text is object', text: { body: 'x' } },
+    ])('rejects invalid ingest text when $label (REGRESSION)', async ({ text }) => {
+      (memory.ingest as ReturnType<typeof vi.fn>).mockResolvedValue({ ids: ['a'], count: 1 });
+
+      await expect(tool.execute(makeRequest('memory_ingest', { text }))).rejects.toThrow('INVALID_TEXT');
+      expect(memory.ingest).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: 'metadata is a string', metadata: 'source=web' },
+      { label: 'metadata is an array', metadata: ['source', 'web'] },
+      { label: 'metadata contains non-string values', metadata: { source: 123 } },
+    ])('rejects invalid metadata when $label (REGRESSION)', async ({ metadata }) => {
+      (memory.ingest as ReturnType<typeof vi.fn>).mockResolvedValue({ ids: ['a'], count: 1 });
+
+      await expect(tool.execute(makeRequest('memory_ingest', { text: 'fact', metadata }))).rejects.toThrow('INVALID_METADATA');
+      expect(memory.ingest).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -174,6 +198,31 @@ describe('MemorySearchTool', () => {
       const toolNoSession = new MemorySearchTool(memory as MemoryService, makeDrizzleNoSessionMock());
 
       await expect(toolNoSession.execute(makeRequest('memory_search', { query: 'x' }))).rejects.toThrow('not found');
+    });
+
+    it.each([
+      { label: 'query is empty', query: '' },
+      { label: 'query is whitespace', query: '   ' },
+      { label: 'query is null', query: null },
+      { label: 'query is numeric', query: 123 },
+      { label: 'query is object', query: { text: 'x' } },
+    ])('rejects invalid search query when $label (REGRESSION)', async ({ query }) => {
+      (memory.search as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      await expect(tool.execute(makeRequest('memory_search', { query }))).rejects.toThrow('INVALID_QUERY');
+      expect(memory.search).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: 'limit is zero', limit: 0 },
+      { label: 'limit is negative', limit: -1 },
+      { label: 'limit is fractional', limit: 1.5 },
+      { label: 'limit exceeds max', limit: 999 },
+    ])('rejects invalid search limit when $label (REGRESSION)', async ({ limit }) => {
+      (memory.search as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      await expect(tool.execute(makeRequest('memory_search', { query: 'fact', limit }))).rejects.toThrow('INVALID_LIMIT');
+      expect(memory.search).not.toHaveBeenCalled();
     });
   });
 });
@@ -262,6 +311,34 @@ describe('MemoryIngestConversationTool', () => {
       await expect(
         toolNoSession.execute(makeRequest('memory_ingest_conversation', { messages: [] })),
       ).rejects.toThrow('not found');
+    });
+
+    it.each([
+      { label: 'messages is null', messages: null },
+      { label: 'messages is object', messages: { role: 'user', content: 'x' } },
+      { label: 'messages is string', messages: 'hello' },
+    ])('rejects invalid conversation payload when $label (REGRESSION)', async ({ messages }) => {
+      (memory.ingestConversation as ReturnType<typeof vi.fn>).mockResolvedValue({ ids: [], count: 1 });
+
+      await expect(
+        tool.execute(makeRequest('memory_ingest_conversation', { messages })),
+      ).rejects.toThrow('INVALID_MESSAGES');
+      expect(memory.ingestConversation).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: 'message content is empty', messages: [{ role: 'user', content: '' }] },
+      { label: 'message content is whitespace', messages: [{ role: 'user', content: '   ' }] },
+      { label: 'message role is missing', messages: [{ content: 'x' }] },
+      { label: 'message content is missing', messages: [{ role: 'user' }] },
+      { label: 'message role is numeric', messages: [{ role: 1, content: 'x' }] },
+    ])('rejects invalid conversation entries when $label (REGRESSION)', async ({ messages }) => {
+      (memory.ingestConversation as ReturnType<typeof vi.fn>).mockResolvedValue({ ids: [], count: 1 });
+
+      await expect(
+        tool.execute(makeRequest('memory_ingest_conversation', { messages })),
+      ).rejects.toThrow('INVALID_MESSAGE');
+      expect(memory.ingestConversation).not.toHaveBeenCalled();
     });
   });
 });

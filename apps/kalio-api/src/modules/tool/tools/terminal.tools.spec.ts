@@ -106,6 +106,49 @@ describe('TerminalSpawnTool', () => {
         tool.execute(makeRequest('terminal_spawn', { command: 'nonexistent_cmd', cwd: '/app' })),
       ).rejects.toThrow('ENOENT');
     });
+
+    it.each([
+      { label: 'command is empty', command: '' },
+      { label: 'command is whitespace', command: '   ' },
+      { label: 'command is null', command: null },
+      { label: 'command is numeric', command: 123 },
+    ])('rejects invalid command when $label (REGRESSION)', async ({ command }) => {
+      (terminals.spawn as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession());
+
+      await expect(
+        tool.execute(makeRequest('terminal_spawn', { command, cwd: '/app' })),
+      ).rejects.toThrow('INVALID_COMMAND');
+
+      expect(terminals.spawn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: 'args is a string', args: '--watch --verbose' },
+      { label: 'args is an object', args: { flag: '--watch' } },
+      { label: 'args contains non-string values', args: ['--watch', 123] },
+    ])('rejects invalid args when $label (REGRESSION)', async ({ args }) => {
+      (terminals.spawn as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession());
+
+      await expect(
+        tool.execute(makeRequest('terminal_spawn', { command: 'node', args, cwd: '/app' })),
+      ).rejects.toThrow('INVALID_ARGS');
+
+      expect(terminals.spawn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: 'cwd is whitespace only', cwd: '   ' },
+      { label: 'cwd is numeric', cwd: 123 },
+      { label: 'cwd is object', cwd: { path: '/app' } },
+    ])('rejects invalid cwd when $label (REGRESSION)', async ({ cwd }) => {
+      (terminals.spawn as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession());
+
+      await expect(
+        tool.execute(makeRequest('terminal_spawn', { command: 'node', cwd })),
+      ).rejects.toThrow('INVALID_CWD');
+
+      expect(terminals.spawn).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -203,6 +246,18 @@ describe('TerminalOutputTool', () => {
         tool.execute(makeRequest('terminal_output', { id: 'nonexistent-id' })),
       ).rejects.toThrow('Terminal session not found: nonexistent-id');
     });
+
+    it.each([
+      { label: 'id is empty', id: '' },
+      { label: 'id is whitespace', id: '   ' },
+      { label: 'id is null', id: null },
+      { label: 'id is object', id: { id: 'term-abc' } },
+    ])('rejects invalid output session id when $label (REGRESSION)', async ({ id }) => {
+      (terminals.get as ReturnType<typeof vi.fn>).mockReturnValue(makeSession());
+
+      await expect(tool.execute(makeRequest('terminal_output', { id }))).rejects.toThrow('INVALID_ID');
+      expect(terminals.get).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -261,6 +316,18 @@ describe('TerminalKillTool', () => {
       });
 
       await expect(tool.execute(makeRequest('terminal_kill', { id: 'term-abc' }))).rejects.toThrow('KILL_ERROR');
+    });
+
+    it.each([
+      { label: 'id is empty', id: '' },
+      { label: 'id is whitespace', id: '   ' },
+      { label: 'id is null', id: null },
+      { label: 'id is object', id: { id: 'term-abc' } },
+    ])('rejects invalid kill session id when $label (REGRESSION)', async ({ id }) => {
+      (terminals.kill as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+      await expect(tool.execute(makeRequest('terminal_kill', { id }))).rejects.toThrow('INVALID_ID');
+      expect(terminals.kill).not.toHaveBeenCalled();
     });
   });
 });

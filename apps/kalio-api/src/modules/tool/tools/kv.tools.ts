@@ -3,6 +3,22 @@ import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { KVStoreService } from '../kv-store.service';
 
+function getKeyArg(args: ToolCallRequest['args']): string {
+  const rawKey = args['key'];
+  if (typeof rawKey !== 'string' || rawKey.trim().length === 0) {
+    throw new Error('INVALID_KEY: key must be a non-empty string');
+  }
+  return rawKey;
+}
+
+function getValueArg(args: ToolCallRequest['args']): string {
+  const rawValue = args['value'];
+  if (typeof rawValue !== 'string') {
+    throw new Error('INVALID_VALUE: value must be a string');
+  }
+  return rawValue;
+}
+
 @Injectable()
 @Tool({
   name: 'kv_write',
@@ -21,8 +37,8 @@ export class KVWriteTool {
   constructor(private readonly kv: KVStoreService) {}
 
   async execute(request: ToolCallRequest): Promise<{ key: string; ok: true }> {
-    const key = request.args['key'] as string;
-    const value = request.args['value'] as string;
+    const key = getKeyArg(request.args);
+    const value = getValueArg(request.args);
     await this.kv.set(request.sessionId, key, value);
     return { key, ok: true };
   }
@@ -45,7 +61,7 @@ export class KVReadTool {
   constructor(private readonly kv: KVStoreService) {}
 
   async execute(request: ToolCallRequest): Promise<{ key: string; value: string | null }> {
-    const key = request.args['key'] as string;
+    const key = getKeyArg(request.args);
     const value = (await this.kv.get(request.sessionId, key)) ?? null;
     return { key, value };
   }
@@ -86,7 +102,7 @@ export class KVDeleteTool {
   constructor(private readonly kv: KVStoreService) {}
 
   async execute(request: ToolCallRequest): Promise<{ key: string; deleted: boolean }> {
-    const key = request.args['key'] as string;
+    const key = getKeyArg(request.args);
     const deleted = await this.kv.delete(request.sessionId, key);
     return { key, deleted };
   }

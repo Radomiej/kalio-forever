@@ -6,6 +6,72 @@ import { MemoryService } from '../../memory/memory.service';
 import { DrizzleService } from '../../../database/drizzle.service';
 import { sessions } from '../../../database/schema';
 
+function getTextArg(args: ToolCallRequest['args']): string {
+  const rawText = args['text'];
+  if (typeof rawText !== 'string' || rawText.trim().length === 0) {
+    throw new Error('INVALID_TEXT: text must be a non-empty string');
+  }
+  return rawText;
+}
+
+function getMetadataArg(args: ToolCallRequest['args']): Record<string, string> {
+  const rawMetadata = args['metadata'];
+  if (rawMetadata === undefined) {
+    return {};
+  }
+  if (
+    rawMetadata === null ||
+    typeof rawMetadata !== 'object' ||
+    Array.isArray(rawMetadata) ||
+    Object.values(rawMetadata).some((value) => typeof value !== 'string')
+  ) {
+    throw new Error('INVALID_METADATA: metadata must be an object with string values');
+  }
+  return rawMetadata as Record<string, string>;
+}
+
+function getQueryArg(args: ToolCallRequest['args']): string {
+  const rawQuery = args['query'];
+  if (typeof rawQuery !== 'string' || rawQuery.trim().length === 0) {
+    throw new Error('INVALID_QUERY: query must be a non-empty string');
+  }
+  return rawQuery;
+}
+
+function getLimitArg(args: ToolCallRequest['args']): number {
+  const rawLimit = args['limit'];
+  if (rawLimit === undefined) {
+    return 5;
+  }
+  if (typeof rawLimit !== 'number' || !Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 20) {
+    throw new Error('INVALID_LIMIT: limit must be an integer between 1 and 20');
+  }
+  return rawLimit;
+}
+
+function getMessagesArg(args: ToolCallRequest['args']): Array<{ role: string; content: string }> {
+  const rawMessages = args['messages'];
+  if (!Array.isArray(rawMessages)) {
+    throw new Error('INVALID_MESSAGES: messages must be an array');
+  }
+
+  const messages = rawMessages as Array<Record<string, unknown>>;
+  for (const message of messages) {
+    if (
+      !message ||
+      typeof message !== 'object' ||
+      typeof message['role'] !== 'string' ||
+      message['role'].trim().length === 0 ||
+      typeof message['content'] !== 'string' ||
+      message['content'].trim().length === 0
+    ) {
+      throw new Error('INVALID_MESSAGE: each message must include non-empty string role and content');
+    }
+  }
+
+  return messages as Array<{ role: string; content: string }>;
+}
+
 /** Resolves the persona that owns the current chat session from the DB. */
 async function resolvePersonaId(drizzle: DrizzleService, sessionId: string): Promise<string> {
   const row = drizzle.db
@@ -49,8 +115,8 @@ export class MemoryIngestTool {
   ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
-    const text = request.args['text'] as string;
-    const metadata = (request.args['metadata'] as Record<string, string> | undefined) ?? {};
+    const text = getTextArg(request.args);
+    const metadata = getMetadataArg(request.args);
     const personaId = await resolvePersonaId(this.drizzle, request.sessionId);
 
     const result = await this.memory.ingest(text, personaId, metadata);
@@ -93,8 +159,8 @@ export class MemorySearchTool {
   ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
-    const query = request.args['query'] as string;
-    const limit = (request.args['limit'] as number | undefined) ?? 5;
+    const query = getQueryArg(request.args);
+    const limit = getLimitArg(request.args);
     const personaId = await resolvePersonaId(this.drizzle, request.sessionId);
 
     const results = await this.memory.search(query, personaId, limit);
@@ -138,7 +204,7 @@ export class MemoryIngestConversationTool {
   ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
-    const messages = request.args['messages'] as Array<{ role: string; content: string }>;
+    const messages = getMessagesArg(request.args);
     const personaId = await resolvePersonaId(this.drizzle, request.sessionId);
 
     const result = await this.memory.ingestConversation(messages, personaId);
