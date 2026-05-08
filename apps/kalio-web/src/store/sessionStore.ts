@@ -5,8 +5,11 @@ import {
   getStoredSessionActiveTurnId,
   getStoredSessionMessages,
   getStoredSessionTurns,
+  mergePendingMessages,
   resolveSessionSlice,
 } from './sessionStore.helpers';
+
+export type { AgentTurn, AgentTurnItem } from './sessionStore.helpers';
 
 interface SessionState {
   sessions: ChatSession[];

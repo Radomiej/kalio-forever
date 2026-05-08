@@ -27,7 +27,7 @@ export interface SessionProjectionState {
   sessionActiveTurnIds: Record<string, ID | null>;
 }
 
-function mergePendingMessages(
+export function mergePendingMessages(
   sessionId: string | null,
   baseMessages: ChatMessage[],
   streamingChunks: Record<string, string>,

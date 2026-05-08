@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace packages
+        run: pnpm --filter @kalio/types --filter @kalio/sdk build
+
       - name: Backend typecheck
         run: pnpm --filter kalio-api typecheck
 
