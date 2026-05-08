@@ -195,9 +195,25 @@ export class VFSService {
     } catch {
       decodedPath = filePath;
     }
-    const resolved = resolve(base, normalize(decodedPath));
 
-    if (!resolved.startsWith(resolve(base) + sep) && resolved !== resolve(base)) {
+    // Treat "\" as a separator on POSIX too, blocking Windows-style traversal payloads.
+    const canonical = decodedPath.replace(/\\/g, '/');
+
+    // Normalize using POSIX semantics so "/" is the only separator we reason about.
+    const normalized = normalize(canonical).replace(/\\/g, '/');
+
+    // Reject absolute paths and any segment that is ".." after normalization.
+    const stripped = normalized.replace(/^\/+/, '');
+    if (!stripped || stripped === '.' || stripped.split('/').some((p) => p === '..')) {
+      const err = new Error(`${PATH_TRAVERSAL_ERROR}: "${filePath}" escapes conversation sandbox`);
+      (err as NodeJS.ErrnoException).code = PATH_TRAVERSAL_ERROR;
+      throw err;
+    }
+
+    const resolved = resolve(base, stripped);
+    const baseResolved = resolve(base);
+
+    if (!resolved.startsWith(baseResolved + sep) && resolved !== baseResolved) {
       const err = new Error(`${PATH_TRAVERSAL_ERROR}: "${filePath}" escapes conversation sandbox`);
       (err as NodeJS.ErrnoException).code = PATH_TRAVERSAL_ERROR;
       throw err;
