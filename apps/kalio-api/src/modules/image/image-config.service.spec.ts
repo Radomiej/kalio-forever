@@ -32,11 +32,11 @@ function createTestDb(): { db: BetterSQLite3Database<typeof schema>; close: () =
 function createServices(db: BetterSQLite3Database<typeof schema>): ImageConfigService {
   const drizzleService = { db } as unknown as DrizzleService;
   const settingsService = new AppSettingsService(drizzleService);
-  const configService: Pick<ConfigService, 'get'> = {
-    get: (key: string, defaultValue = '') => {
+  const configService = {
+    get: (key: string | symbol, defaultValueOrOptions?: unknown) => {
       if (key === 'NODE_ENV') return 'test';
       if (key === 'CREDENTIALS_MASTER_KEY') return 'unit-test-credentials-master-key';
-      return defaultValue;
+      return typeof defaultValueOrOptions === 'string' ? defaultValueOrOptions : undefined;
     },
   };
   return new ImageConfigService(settingsService, configService as ConfigService);

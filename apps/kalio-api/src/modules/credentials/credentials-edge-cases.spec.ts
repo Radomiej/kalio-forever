@@ -15,14 +15,14 @@ describe('CredentialsService - Edge Cases', () => {
       delete: ReturnType<typeof vi.fn>;
     };
   };
-  const timeoutSettings: Pick<TimeoutSettingsService, 'getProviderTimeoutMs'> = {
+  const timeoutSettings = {
     getProviderTimeoutMs: vi.fn().mockResolvedValue(15_000),
   };
-  const config: Pick<ConfigService, 'get'> = {
-    get: (key: string, defaultValue = '') => {
+  const config = {
+    get: (key: string | symbol, defaultValueOrOptions?: unknown) => {
       if (key === 'NODE_ENV') return 'test';
       if (key === 'CREDENTIALS_MASTER_KEY') return 'unit-test-credentials-master-key';
-      return defaultValue;
+      return typeof defaultValueOrOptions === 'string' ? defaultValueOrOptions : undefined;
     },
   };
 
@@ -37,7 +37,7 @@ describe('CredentialsService - Edge Cases', () => {
     };
     service = new CredentialsService(
       mockDrizzle as unknown as DrizzleService,
-      timeoutSettings as TimeoutSettingsService,
+      timeoutSettings as unknown as TimeoutSettingsService,
       config as ConfigService,
     );
   });

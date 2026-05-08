@@ -40,21 +40,21 @@ function makeTestDrizzle(): DrizzleService {
 describe('CredentialsService', () => {
   let svc: CredentialsService;
   let drizzleSvc: DrizzleService;
-  const timeoutSettings: Pick<TimeoutSettingsService, 'getProviderTimeoutMs'> = {
+  const timeoutSettings = {
     getProviderTimeoutMs: vi.fn(async (isLocal: boolean) => (isLocal ? 3_000 : 15_000)),
   };
-  const config: Pick<ConfigService, 'get'> = {
-    get: (key: string, defaultValue = '') => {
+  const config = {
+    get: (key: string | symbol, defaultValueOrOptions?: unknown) => {
       if (key === 'NODE_ENV') return 'test';
       if (key === 'CREDENTIALS_MASTER_KEY') return 'unit-test-credentials-master-key';
-      return defaultValue;
+      return typeof defaultValueOrOptions === 'string' ? defaultValueOrOptions : undefined;
     },
   };
 
   beforeEach(() => {
     drizzleSvc = makeTestDrizzle();
     timeoutSettings.getProviderTimeoutMs.mockImplementation(async (isLocal: boolean) => (isLocal ? 3_000 : 15_000));
-    svc = new CredentialsService(drizzleSvc, timeoutSettings as TimeoutSettingsService, config as ConfigService);
+    svc = new CredentialsService(drizzleSvc, timeoutSettings as unknown as TimeoutSettingsService, config as ConfigService);
   });
 
   describe('CRUD', () => {

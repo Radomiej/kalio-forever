@@ -231,13 +231,13 @@ describe('ChatService', () => {
 
     const processor = {
       // First iteration requests a tool, second produces the final assistant text.
-      process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { state: { addToolCall: (tc: unknown) => void } }) => {
+      process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { state: { addToolCall: (tc: unknown) => void; text: string } }) => {
         if ((processor.process as ReturnType<typeof vi.fn>).mock.calls.length === 1) {
           ctx.state.addToolCall({ id: 'c1', name: 't', args: {} });
           return;
         }
 
-        (ctx.state as { text: string }).text = 'final answer';
+        ctx.state.text = 'final answer';
       }),
       onModuleInit: vi.fn(),
     };

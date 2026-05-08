@@ -298,7 +298,7 @@ export class ChatService {
       } else if (emptyNoToolRetriesExhausted) {
         trackingEmit('chat:error', {
           sessionId,
-          code: 'EMPTY_ASSISTANT_RETRY_EXHAUSTED',
+          code: 'LLM_ERROR',
           message: `Agent produced empty output ${maxEmptyNoToolRetries} times in a row`,
           hadContent,
         });
