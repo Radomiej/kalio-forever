@@ -13,15 +13,6 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'package.json'
-  pull_request:
-    paths:
-      - '.github/workflows/frontend-ci.yml'
-      - 'apps/kalio-web/**'
-      - 'packages/@kalio/types/**'
-      - 'packages/@kalio/sdk/**'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'package.json'
 
 concurrency:
   group: frontend-ci-${{ github.ref }}

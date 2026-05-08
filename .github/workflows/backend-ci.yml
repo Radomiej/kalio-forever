@@ -12,14 +12,6 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'package.json'
-  pull_request:
-    paths:
-      - '.github/workflows/backend-ci.yml'
-      - 'apps/kalio-api/**'
-      - 'packages/@kalio/types/**'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'package.json'
 
 concurrency:
   group: backend-ci-${{ github.ref }}
