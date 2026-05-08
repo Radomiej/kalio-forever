@@ -4,6 +4,7 @@ import { VFSWriteTool } from './vfs-write.tool';
 import { VFSService } from '../../vfs/vfs.service';
 import { Reflector } from '@nestjs/core';
 import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
+import type { ToolCallRequest } from '@kalio/types';
 
 // Regression test for: VFS Write Tool Missing Required HITL Confirmation
 // Per AGENTS.md: "All tools that write, delete, or execute system commands MUST have requiresConfirmation: true"
@@ -31,6 +32,15 @@ describe('VFSWriteTool', () => {
     vfsService = moduleRef.get<VFSService>(VFSService);
     reflector = moduleRef.get<Reflector>(Reflector);
   });
+
+  function makeRequest(args: Record<string, unknown>): ToolCallRequest {
+    return {
+      sessionId: 'sess-123',
+      toolName: 'vfs_write',
+      args,
+      callId: 'call-789',
+    };
+  }
 
   describe('@Tool() decorator metadata (REGRESSION TEST)', () => {
     it('MUST have requiresConfirmation set to true for file write operations', () => {
@@ -109,6 +119,20 @@ describe('VFSWriteTool', () => {
 
       // Act & Assert
       await expect(tool.execute(request)).rejects.toThrow('Disk full');
+    });
+
+    it.each([
+      { label: 'missing filePath', args: { content: 'content' }, error: 'INVALID_FILE_PATH' },
+      { label: 'blank filePath', args: { filePath: '', content: 'content' }, error: 'INVALID_FILE_PATH' },
+      { label: 'whitespace filePath', args: { filePath: '   ', content: 'content' }, error: 'INVALID_FILE_PATH' },
+      { label: 'numeric filePath', args: { filePath: 123, content: 'content' }, error: 'INVALID_FILE_PATH' },
+      { label: 'missing content', args: { filePath: 'test.txt' }, error: 'INVALID_CONTENT' },
+      { label: 'null content', args: { filePath: 'test.txt', content: null }, error: 'INVALID_CONTENT' },
+      { label: 'numeric content', args: { filePath: 'test.txt', content: 42 }, error: 'INVALID_CONTENT' },
+      { label: 'object content', args: { filePath: 'test.txt', content: { text: 'x' } }, error: 'INVALID_CONTENT' },
+    ])('rejects invalid args when $label (REGRESSION)', async ({ args, error }) => {
+      await expect(tool.execute(makeRequest(args))).rejects.toThrow(error);
+      expect(vfsService.writeFile).not.toHaveBeenCalled();
     });
   });
 });

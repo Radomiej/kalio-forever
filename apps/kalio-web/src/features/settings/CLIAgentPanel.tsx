@@ -8,6 +8,31 @@ interface AdapterCardProps {
   info: CLIAgentAdapterInfo;
 }
 
+function normalizeOptionalText(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeCliPath(value: string): string {
+  return normalizeOptionalText(value) ?? '';
+}
+
+function normalizeNumberInput(value: string, fallback: number): number {
+  if (value.trim().length === 0) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeExtraArgs(value: string): string[] {
+  return value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 function AdapterCard({ info }: AdapterCardProps) {
   const [config, setConfig] = useState<CLIAgentConfig | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
@@ -34,10 +59,18 @@ function AdapterCard({ info }: AdapterCardProps) {
     setSaving(true);
     setSaveMsg(null);
     try {
+      const payload: CLIAgentConfig = {
+        ...config,
+        ...draft,
+        cliPath: normalizeCliPath(draft.cliPath ?? config.cliPath),
+        timeoutMs: typeof draft.timeoutMs === 'number' ? draft.timeoutMs : config.timeoutMs,
+        maxOutputChars: typeof draft.maxOutputChars === 'number' ? draft.maxOutputChars : config.maxOutputChars,
+        extraArgs: Array.isArray(draft.extraArgs) ? draft.extraArgs : config.extraArgs,
+      };
       const res = await fetch(`/api/cli-agents/${info.id}/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...config, ...draft }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
       const updated = await res.json() as CLIAgentConfig;
@@ -108,7 +141,10 @@ function AdapterCard({ info }: AdapterCardProps) {
               className="input input-bordered input-xs font-mono"
               placeholder="e.g. /usr/local/bin/copilot"
               value={merged.cliPath ?? ''}
-              onChange={(e) => setDraft((d: ConfigDraft) => ({ ...d, cliPath: e.target.value || undefined }))}
+              onChange={(e) => setDraft((d: ConfigDraft) => ({
+                ...d,
+                cliPath: normalizeCliPath(e.target.value),
+              }))}
             />
           </div>
 
@@ -121,7 +157,10 @@ function AdapterCard({ info }: AdapterCardProps) {
               max={1_200_000}
               step={10_000}
               value={merged.timeoutMs ?? 600_000}
-              onChange={(e) => setDraft((d: ConfigDraft) => ({ ...d, timeoutMs: Number(e.target.value) }))}
+              onChange={(e) => setDraft((d: ConfigDraft) => ({
+                ...d,
+                timeoutMs: normalizeNumberInput(e.target.value, merged.timeoutMs),
+              }))}
             />
           </div>
 
@@ -134,7 +173,10 @@ function AdapterCard({ info }: AdapterCardProps) {
               max={500_000}
               step={1_000}
               value={merged.maxOutputChars ?? 16_000}
-              onChange={(e) => setDraft((d: ConfigDraft) => ({ ...d, maxOutputChars: Number(e.target.value) }))}
+              onChange={(e) => setDraft((d: ConfigDraft) => ({
+                ...d,
+                maxOutputChars: normalizeNumberInput(e.target.value, merged.maxOutputChars),
+              }))}
             />
           </div>
 
@@ -148,7 +190,7 @@ function AdapterCard({ info }: AdapterCardProps) {
               onChange={(e) =>
                 setDraft((d: ConfigDraft) => ({
                   ...d,
-                  extraArgs: e.target.value ? e.target.value.split('\n').filter(Boolean) : [],
+                  extraArgs: normalizeExtraArgs(e.target.value),
                 }))
               }
             />

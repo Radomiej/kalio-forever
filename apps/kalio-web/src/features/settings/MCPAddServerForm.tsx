@@ -8,6 +8,40 @@ interface Props {
   onCancel: () => void;
 }
 
+function parseArgs(input: string): string[] | undefined {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  const tokens: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (const char of trimmed) {
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (/\s/.test(char) && !inQuotes) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+
+  return tokens.length > 0 ? tokens : undefined;
+}
+
 export function MCPAddServerForm({ onSubmit, onCancel }: Props) {
   const [activeTab, setActiveTab] = useState<'manual' | 'json'>('manual');
   const [name, setName] = useState('');
@@ -35,19 +69,38 @@ export function MCPAddServerForm({ onSubmit, onCancel }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    const trimmedName = name.trim();
+    const trimmedUrl = url.trim();
+    const trimmedCommand = command.trim();
+
+    if (trimmedName.length === 0) {
+      setError('Name is required');
+      return;
+    }
+
+    if (transport === 'http' && trimmedUrl.length === 0) {
+      setError('URL is required');
+      return;
+    }
+
+    if (transport === 'stdio' && trimmedCommand.length === 0) {
+      setError('Command is required');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const dto: CreateMCPServerDto = {
-        name: name.trim(),
+        name: trimmedName,
         transport,
         ...(transport === 'http'
           ? {
-              url: url.trim(),
+              url: trimmedUrl,
               headers: headersText.trim() ? parseKV(headersText) : undefined,
             }
           : {
-              command: command.trim(),
-              args: args.trim() ? args.trim().split(/\s+/) : undefined,
+              command: trimmedCommand,
+              args: parseArgs(args),
               env: envText.trim() ? parseKV(envText) : undefined,
             }),
       };

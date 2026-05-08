@@ -13,6 +13,24 @@ interface GenSettings {
   maxTokens: number;
 }
 
+const DEFAULT_GEN_SETTINGS: GenSettings = { temperature: 0.7, maxTokens: 4096 };
+
+function parseFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function sanitizeGenSettings(value: unknown): GenSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return DEFAULT_GEN_SETTINGS;
+  }
+
+  const raw = value as Record<string, unknown>;
+  return {
+    temperature: parseFiniteNumber(raw['temperature']) ?? DEFAULT_GEN_SETTINGS.temperature,
+    maxTokens: parseFiniteNumber(raw['maxTokens']) ?? DEFAULT_GEN_SETTINGS.maxTokens,
+  };
+}
+
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -34,7 +52,7 @@ export function ModelSettingsSection({ activeCredential, onModelChange }: Props)
   const [modelSaving, setModelSaving] = useState(false);
   const [modelSaved, setModelSaved] = useState(false);
 
-  const [genSettings, setGenSettings] = useState<GenSettings>({ temperature: 0.7, maxTokens: 4096 });
+  const [genSettings, setGenSettings] = useState<GenSettings>(DEFAULT_GEN_SETTINGS);
   const [genLoading, setGenLoading] = useState(true);
   const [genSaving, setGenSaving] = useState(false);
   const [genSaved, setGenSaved] = useState(false);
@@ -50,7 +68,7 @@ export function ModelSettingsSection({ activeCredential, onModelChange }: Props)
   useEffect(() => {
     setGenLoading(true);
     apiFetch<GenSettings>('/credentials/settings/generation')
-      .then((s) => { setGenSettings(s); })
+      .then((s) => { setGenSettings(sanitizeGenSettings(s)); })
       .catch(() => { /* use defaults */ })
       .finally(() => setGenLoading(false));
   }, []);
@@ -106,6 +124,22 @@ export function ModelSettingsSection({ activeCredential, onModelChange }: Props)
     } finally {
       setGenSaving(false);
     }
+  };
+
+  const handleTemperatureInput = (event: React.FormEvent<HTMLInputElement>) => {
+    const next = Number.parseFloat(event.currentTarget.value);
+    if (!Number.isFinite(next)) {
+      return;
+    }
+    setGenSettings((g) => ({ ...g, temperature: next }));
+  };
+
+  const handleMaxTokensInput = (event: React.FormEvent<HTMLInputElement>) => {
+    const next = Number.parseInt(event.currentTarget.value, 10);
+    if (!Number.isFinite(next)) {
+      return;
+    }
+    setGenSettings((g) => ({ ...g, maxTokens: next }));
   };
 
   return (
@@ -193,7 +227,8 @@ export function ModelSettingsSection({ activeCredential, onModelChange }: Props)
                 max={2}
                 step={0.05}
                 value={genSettings.temperature}
-                onChange={(e) => setGenSettings((g) => ({ ...g, temperature: parseFloat(e.target.value) }))}
+                onChange={() => undefined}
+                onInput={handleTemperatureInput}
                 data-testid="gen-temperature"
               />
               <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
@@ -205,7 +240,7 @@ export function ModelSettingsSection({ activeCredential, onModelChange }: Props)
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs text-base-content/60">Max Output Tokens</span>
-                <span className="badge badge-neutral font-mono text-xs">{genSettings.maxTokens.toLocaleString()}</span>
+                <span className="badge badge-neutral font-mono text-xs">{genSettings.maxTokens.toLocaleString('en-US')}</span>
               </div>
               <input
                 type="range"
@@ -214,7 +249,8 @@ export function ModelSettingsSection({ activeCredential, onModelChange }: Props)
                 max={16384}
                 step={256}
                 value={genSettings.maxTokens}
-                onChange={(e) => setGenSettings((g) => ({ ...g, maxTokens: parseInt(e.target.value, 10) }))}
+                onChange={() => undefined}
+                onInput={handleMaxTokensInput}
                 data-testid="gen-max-tokens"
               />
               <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">

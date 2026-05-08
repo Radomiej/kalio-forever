@@ -3,6 +3,14 @@ import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { VFSService } from '../../vfs/vfs.service';
 
+function getFilePathArg(args: ToolCallRequest['args']): string {
+  const rawFilePath = args['filePath'];
+  if (typeof rawFilePath !== 'string' || rawFilePath.trim().length === 0) {
+    throw new Error('INVALID_FILE_PATH: filePath must be a non-empty string');
+  }
+  return rawFilePath.trim();
+}
+
 @Injectable()
 @Tool({
   name: 'vfs_read',
@@ -20,7 +28,7 @@ export class VFSReadTool {
 
   async execute(request: ToolCallRequest): Promise<{ filePath: string; content: string }> {
     const sessionId = request.vfsSessionId ?? request.sessionId;
-    const filePath = request.args['filePath'] as string;
+    const filePath = getFilePathArg(request.args);
     const result = this.vfs.readFile(sessionId, filePath);
     return { filePath: result.filePath, content: result.content };
   }

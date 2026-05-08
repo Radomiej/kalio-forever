@@ -5,6 +5,15 @@ export interface ParsedMCPEntry {
   dto: CreateMCPServerDto;
 }
 
+function getNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 /**
  * Parse VS Code–style or Claude Desktop–style MCP JSON into CreateMCPServerDto entries.
  *
@@ -45,26 +54,28 @@ export function parseMcpJson(raw: string): ParsedMCPEntry[] {
 
     // Determine transport
     const typeField = entry['type'] as string | undefined;
+    const url = getNonEmptyString(entry['url']);
+    const command = getNonEmptyString(entry['command']);
     let transport: 'stdio' | 'http';
-    if (typeField === 'http' || typeField === 'sse') {
+    if ((typeField === 'http' || typeField === 'sse') && url) {
       transport = 'http';
-    } else if (typeField === 'stdio') {
+    } else if (typeField === 'stdio' && command) {
       transport = 'stdio';
-    } else if (typeof entry['url'] === 'string') {
+    } else if (url) {
       transport = 'http';
-    } else if (typeof entry['command'] === 'string') {
+    } else if (command) {
       transport = 'stdio';
     } else {
       // Cannot determine transport — skip
       continue;
     }
 
-    const name = typeof entry['name'] === 'string' ? entry['name'] : serverId;
+    const name = getNonEmptyString(entry['name']) ?? serverId;
 
     const dto: CreateMCPServerDto = { name, transport };
 
     if (transport === 'http') {
-      dto.url = entry['url'] as string;
+      dto.url = url;
 
       if (entry['headers'] && typeof entry['headers'] === 'object' && !Array.isArray(entry['headers'])) {
         const headers: Record<string, string> = {};
@@ -76,7 +87,7 @@ export function parseMcpJson(raw: string): ParsedMCPEntry[] {
     }
 
     if (transport === 'stdio') {
-      dto.command = entry['command'] as string;
+      dto.command = command;
 
       if (Array.isArray(entry['args'])) {
         dto.args = (entry['args'] as unknown[]).map(String);

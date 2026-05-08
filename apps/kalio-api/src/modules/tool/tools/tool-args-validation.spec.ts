@@ -5,106 +5,36 @@ import type { ToolCallRequest } from '@kalio/types';
 
 describe('Tool Arguments Validation', () => {
   let tool: VFSReadTool;
-  let mockVFSService: VFSService;
+  let mockVFSService: Pick<VFSService, 'readFile'>;
 
   beforeEach(() => {
     mockVFSService = {
       readFile: vi.fn().mockReturnValue({ filePath: 'test.txt', content: 'test content' }),
-    } as any;
+    };
 
-    tool = new VFSReadTool(mockVFSService);
+    tool = new VFSReadTool(mockVFSService as VFSService);
   });
 
-  describe('VFSReadTool - type coercion bugs BUG CONFIRMED', () => {
-    it('should handle missing filePath argument', async () => {
-      // Arrange: Tool call without required argument
+  describe('VFSReadTool - runtime validation (REGRESSION)', () => {
+    it.each([
+      { label: 'missing filePath argument', args: {} },
+      { label: 'null filePath argument', args: { filePath: null } },
+      { label: 'undefined filePath argument', args: { filePath: undefined } },
+      { label: 'empty filePath argument', args: { filePath: '' } },
+      { label: 'whitespace filePath argument', args: { filePath: '   ' } },
+      { label: 'numeric filePath argument', args: { filePath: 123 } },
+      { label: 'array filePath argument', args: { filePath: ['file.txt'] } },
+      { label: 'object filePath argument', args: { filePath: { path: 'file.txt' } } },
+    ])('rejects $label', async ({ args }) => {
       const request: ToolCallRequest = {
         toolName: 'vfs_read',
-        args: {},
+        args,
         sessionId: 'test-session',
         callId: 'call-1',
       };
 
-      // Act & Assert - BUG CONFIRMED: No validation, undefined passed to VFS
-      const result = await tool.execute(request);
-      expect(result).toBeDefined();
-      expect(mockVFSService.readFile).toHaveBeenCalledWith('test-session', undefined);
-    });
-
-    it('should handle null filePath argument', async () => {
-      // Arrange: Tool call with null argument
-      const request: ToolCallRequest = {
-        toolName: 'vfs_read',
-        args: { filePath: null as any },
-        sessionId: 'test-session',
-        callId: 'call-1',
-      };
-
-      // Act & Assert - BUG CONFIRMED: No validation, null passed to VFS
-      const result = await tool.execute(request);
-      expect(result).toBeDefined();
-      expect(mockVFSService.readFile).toHaveBeenCalledWith('test-session', null);
-    });
-
-    it('should handle undefined filePath argument', async () => {
-      // Arrange: Tool call with undefined argument
-      const request: ToolCallRequest = {
-        toolName: 'vfs_read',
-        args: { filePath: undefined as any },
-        sessionId: 'test-session',
-        callId: 'call-1',
-      };
-
-      // Act & Assert - BUG CONFIRMED: No validation, undefined passed to VFS
-      const result = await tool.execute(request);
-      expect(result).toBeDefined();
-      expect(mockVFSService.readFile).toHaveBeenCalledWith('test-session', undefined);
-    });
-
-    it('should handle wrong type for filePath (number)', async () => {
-      // Arrange: Tool call with number instead of string
-      const request: ToolCallRequest = {
-        toolName: 'vfs_read',
-        args: { filePath: 123 as any },
-        sessionId: 'test-session',
-        callId: 'call-1',
-      };
-
-      // Act & Assert - BUG CONFIRMED: Type coercion may cause unexpected behavior
-      const result = await tool.execute(request);
-      expect(result).toBeDefined();
-      // The number 123 gets coerced to string "123"
-      expect(mockVFSService.readFile).toHaveBeenCalledWith('test-session', 123);
-    });
-
-    it('should handle wrong type for filePath (array)', async () => {
-      // Arrange: Tool call with array instead of string
-      const request: ToolCallRequest = {
-        toolName: 'vfs_read',
-        args: { filePath: ['file.txt'] as any },
-        sessionId: 'test-session',
-        callId: 'call-1',
-      };
-
-      // Act & Assert - BUG CONFIRMED: Array gets coerced to string
-      const result = await tool.execute(request);
-      expect(result).toBeDefined();
-      expect(mockVFSService.readFile).toHaveBeenCalledWith('test-session', ['file.txt']);
-    });
-
-    it('should handle wrong type for filePath (object)', async () => {
-      // Arrange: Tool call with object instead of string
-      const request: ToolCallRequest = {
-        toolName: 'vfs_read',
-        args: { filePath: { path: 'file.txt' } as any },
-        sessionId: 'test-session',
-        callId: 'call-1',
-      };
-
-      // Act & Assert - BUG CONFIRMED: Object gets coerced to string "[object Object]"
-      const result = await tool.execute(request);
-      expect(result).toBeDefined();
-      expect(mockVFSService.readFile).toHaveBeenCalledWith('test-session', { path: 'file.txt' });
+      await expect(tool.execute(request)).rejects.toThrow('INVALID_FILE_PATH');
+      expect(mockVFSService.readFile).not.toHaveBeenCalled();
     });
   });
 
