@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { TerminalService } from './terminal.service';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 
-// Cross-platform short-lived command: node itself, idles until killed
-// NOTE: no arrow functions — Windows cmd.exe (shell:true) treats ">" as redirection
+// Cross-platform long-running command: node REPL reads from stdin pipe — stays alive
+// --interactive has no shell metacharacters → safe for cmd.exe (shell:true on Windows)
 const LONG_CMD = process.execPath;
-const LONG_ARGS = ['-e', 'setInterval(function(){},100)'];
+const LONG_ARGS = ['--interactive'];
 const SAFE_CWD = process.cwd();
 
 describe('TerminalService - Concurrency', () => {
@@ -78,6 +78,45 @@ describe('TerminalService - Concurrency', () => {
 
     it('should handle get on non-existent session gracefully', () => {
       expect(service.get('non-existent-id')).toBeNull();
+    });
+  });
+
+  describe('waitForExit and onModuleDestroy', () => {
+    it('waitForExit rejects for a non-existent session id', async () => {
+      await expect(service.waitForExit('no-such-id', 1000)).rejects.toThrow('Terminal session not found');
+    });
+
+    it('waitForExit resolves immediately for an already-killed session', async () => {
+      const s = await service.spawn(LONG_CMD, LONG_ARGS, SAFE_CWD);
+      spawned.push(s.id);
+      service.kill(s.id);
+      // Service returns exitCode ?? 0, so a SIGTERM'd session (null code) returns 0
+      const result = await service.waitForExit(s.id, 1000);
+      expect(result.exitCode).toBe(0);
+    });
+
+    it('waitForExit rejects after timeout and kills the process', async () => {
+      const s = await service.spawn(LONG_CMD, LONG_ARGS, SAFE_CWD);
+      spawned.push(s.id);
+      await expect(service.waitForExit(s.id, 50)).rejects.toThrow('timed out');
+    });
+
+    it('waitForExit resolves with exit code when process exits naturally', async () => {
+      // process.exitCode = N: assignment without parens — safe for cmd.exe shell:true on Windows
+      const s = await service.spawn(process.execPath, ['-e', 'process.exitCode = 42'], SAFE_CWD);
+      spawned.push(s.id);
+      const result = await service.waitForExit(s.id, 5000);
+      expect(result.exitCode).toBe(42);
+    });
+
+    it('onModuleDestroy kills all running sessions and clears the map', async () => {
+      const s1 = await service.spawn(LONG_CMD, LONG_ARGS, SAFE_CWD);
+      const s2 = await service.spawn(LONG_CMD, LONG_ARGS, SAFE_CWD);
+      // Don't track in spawned — onModuleDestroy is the cleanup
+      service.onModuleDestroy();
+      expect(service.list()).toHaveLength(0);
+      // Ensure afterEach kill calls are no-ops (already cleared)
+      spawned.push(s1.id, s2.id);
     });
   });
 

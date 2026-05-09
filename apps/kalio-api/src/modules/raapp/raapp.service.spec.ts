@@ -1,3 +1,6 @@
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs/promises';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
@@ -10,7 +13,7 @@ import { RAAppSandboxService } from './raapp-sandbox.service';
 describe('RAAppService', () => {
   let service: RAAppService;
 
-  beforeEach(async () => {
+  async function createService(): Promise<RAAppService> {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         RAAppService,
@@ -19,7 +22,32 @@ describe('RAAppService', () => {
       ],
     }).compile();
 
-    service = moduleRef.get<RAAppService>(RAAppService);
+    return moduleRef.get<RAAppService>(RAAppService);
+  }
+
+  beforeEach(async () => {
+    service = await createService();
+  });
+
+  describe('init — packaged core fallback', () => {
+    it('loads shipped core apps when runtime data directory is absent', async () => {
+      const originalCwd = process.cwd();
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-cwd-'));
+
+      try {
+        process.chdir(tempRoot);
+
+        const isolatedService = await createService();
+        await isolatedService.init();
+
+        const ids = isolatedService.getAll().map((app) => app.id);
+        expect(ids).toContain('qa-interactive');
+        expect(ids).toContain('visual-calculator');
+      } finally {
+        process.chdir(originalCwd);
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('deriveGeneratedAppName', () => {

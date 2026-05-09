@@ -1,7 +1,7 @@
 /**
  * Unit tests for agentStore — per-session pendingConfirmations map.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useAgentStore } from './agentStore';
 import type { AgentRunContext, ToolConfirmationRequest } from '@kalio/types';
 

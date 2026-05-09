@@ -1,0 +1,38 @@
+systems:
+  - id: calculate
+    effects:
+      - assign:
+          target: output.result
+          expression: >
+            input.operation == "add" ? input.a + input.b :
+            input.operation == "subtract" ? input.a - input.b :
+            input.operation == "multiply" ? input.a * input.b :
+            input.operation == "divide" && input.b != 0 ? input.a / input.b :
+            null
+      - assign:
+          target: output.error
+          expression: >
+            input.operation == "divide" && input.b == 0 ? "Cannot divide by zero" :
+            input.operation != "add" && input.operation != "subtract" && input.operation != "multiply" && input.operation != "divide" ? "Unknown operation" :
+            ""
+      - assign:
+          target: output.expression
+          expression: >
+            input.operation == "add" ? input.a + " + " + input.b :
+            input.operation == "subtract" ? input.a + " - " + input.b :
+            input.operation == "multiply" ? input.a + " × " + input.b :
+            input.operation == "divide" ? input.a + " ÷ " + input.b :
+            ""
+      - assign:
+          target: output.op_symbol
+          expression: >
+            input.operation == "add" ? "+" :
+            input.operation == "subtract" ? "-" :
+            input.operation == "multiply" ? "×" :
+            input.operation == "divide" ? "÷" : "?"
+      - assign:
+          target: output.a
+          expression: input.a
+      - assign:
+          target: output.b
+          expression: input.b

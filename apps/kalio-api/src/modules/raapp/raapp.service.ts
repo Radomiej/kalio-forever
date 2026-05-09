@@ -51,6 +51,20 @@ export interface SaveGeneratedAppInput {
   title?: string;
 }
 
+const DEFAULT_RUNTIME_RA_APPS_PATH = './data/ra-apps';
+
+function getPackagedRAAppsPath(): string {
+  return path.resolve(__dirname, '../../assets/ra-apps');
+}
+
+function hasCatalogEntries(dir: string): boolean {
+  try {
+    return fsSync.readdirSync(dir).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function cleanTitle(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
@@ -110,9 +124,18 @@ export class RAAppService implements OnModuleInit {
     private readonly sandbox: RAAppSandboxService,
     private readonly config: ConfigService,
   ) {
-    const base = this.config.get<string>('RA_APPS_PATH', './data/ra-apps');
-    this.coreDir = path.resolve(base, 'core');
-    this.userDir = path.resolve(base, 'user');
+    const configuredBase = this.config.get<string | undefined>('RA_APPS_PATH', undefined);
+    const runtimeBase = path.resolve(configuredBase ?? DEFAULT_RUNTIME_RA_APPS_PATH);
+
+    if (configuredBase) {
+      this.coreDir = path.resolve(runtimeBase, 'core');
+    } else {
+      const runtimeCoreDir = path.resolve(runtimeBase, 'core');
+      const packagedCoreDir = path.resolve(getPackagedRAAppsPath(), 'core');
+      this.coreDir = hasCatalogEntries(runtimeCoreDir) ? runtimeCoreDir : packagedCoreDir;
+    }
+
+    this.userDir = path.resolve(runtimeBase, 'user');
   }
 
   async onModuleInit(): Promise<void> {
@@ -138,8 +161,20 @@ export class RAAppService implements OnModuleInit {
           );
           count++;
         } else if (entry.isDirectory()) {
+          const appDir = path.join(dir, entry.name);
+          const metaPath = path.join(appDir, 'meta.yml');
+
+          try {
+            await fs.access(metaPath);
+            await this.loadDirectory(appDir, source).catch((err) =>
+              this.logger.warn(`Failed to load unpacked RA-App ${entry.name}: ${String(err)}`),
+            );
+            count++;
+            continue;
+          } catch { /* no unpacked RA-App in this subdir — try versioned zip */ }
+
           // versioned user apps live in {slug}/current.zip after migration
-          const currentZip = path.join(dir, entry.name, 'current.zip');
+          const currentZip = path.join(appDir, 'current.zip');
           try {
             await fs.access(currentZip);
             await this.loadZip(currentZip, source).catch((err) =>
@@ -155,43 +190,66 @@ export class RAAppService implements OnModuleInit {
     }
   }
 
+  private async loadDirectory(appDir: string, source: 'core' | 'user'): Promise<LoadedRAApp> {
+    return this.loadExtractedApp(appDir, appDir, source);
+  }
+
+  private async loadExtractedApp(
+    appDir: string,
+    originPath: string,
+    source: 'core' | 'user',
+  ): Promise<LoadedRAApp> {
+    const metaRaw = await fs.readFile(path.join(appDir, 'meta.yml'), 'utf-8');
+    const meta = yaml.load(metaRaw) as RAAppMeta;
+    const stats = await fs.stat(originPath);
+    const createdAt = stats.birthtimeMs > 0 ? Math.min(stats.birthtimeMs, stats.mtimeMs) : stats.mtimeMs;
+
+    let htmlContent: string | null = null;
+    for (const candidate of ['main.html', 'index.html']) {
+      try {
+        htmlContent = await fs.readFile(path.join(appDir, candidate), 'utf-8');
+        break;
+      } catch { /* not found, try next */ }
+    }
+
+    let guiContent: string | null = null;
+    try {
+      guiContent = await fs.readFile(path.join(appDir, 'ui.gui'), 'utf-8');
+    } catch { /* not found */ }
+
+    let systemsContent: string | null = null;
+    try {
+      systemsContent = await fs.readFile(path.join(appDir, 'systems.yml'), 'utf-8');
+    } catch { /* not found */ }
+
+    const renderAs = (meta.execution?.render_as as string | undefined) ?? (meta as { ui?: { render_as?: string } }).ui?.render_as;
+    const appMode: 'display' | 'interactive' = renderAs === 'interactive' ? 'interactive' : 'display';
+
+    const app: LoadedRAApp = {
+      id: meta.id,
+      zipPath: originPath,
+      meta,
+      source,
+      htmlContent,
+      guiContent,
+      systemsContent,
+      appMode,
+      createdAt,
+      updatedAt: stats.mtimeMs,
+    };
+
+    this.loaded.set(meta.id, app);
+    this.logger.log(
+      `RA-App loaded: ${meta.id} v${meta.version ?? '?'} (${source}) html=${htmlContent != null} gui=${guiContent != null}`,
+    );
+    return app;
+  }
+
   private async loadZip(zipPath: string, source: 'core' | 'user'): Promise<LoadedRAApp> {
     const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
     try {
       await extractZip(zipPath, { dir: tmpDir });
-      const metaRaw = await fs.readFile(path.join(tmpDir, 'meta.yml'), 'utf-8');
-      const meta = yaml.load(metaRaw) as RAAppMeta;
-      const stats = await fs.stat(zipPath);
-      const createdAt = stats.birthtimeMs > 0 ? Math.min(stats.birthtimeMs, stats.mtimeMs) : stats.mtimeMs;
-
-      // Try to read main.html (falling back to index.html)
-      let htmlContent: string | null = null;
-      for (const candidate of ['main.html', 'index.html']) {
-        try {
-          htmlContent = await fs.readFile(path.join(tmpDir, candidate), 'utf-8');
-          break;
-        } catch { /* not found, try next */ }
-      }
-
-      // Try to read ui.gui (GUI DSL)
-      let guiContent: string | null = null;
-      try {
-        guiContent = await fs.readFile(path.join(tmpDir, 'ui.gui'), 'utf-8');
-      } catch { /* not found */ }
-
-      // Try to read systems.yml (system effects for computed outputs)
-      let systemsContent: string | null = null;
-      try {
-        systemsContent = await fs.readFile(path.join(tmpDir, 'systems.yml'), 'utf-8');
-      } catch { /* not found */ }
-
-      const renderAs = (meta.execution?.render_as as string | undefined) ?? (meta as { ui?: { render_as?: string } }).ui?.render_as;
-      const appMode: 'display' | 'interactive' = renderAs === 'interactive' ? 'interactive' : 'display';
-
-      const app: LoadedRAApp = { id: meta.id, zipPath, meta, source, htmlContent, guiContent, systemsContent, appMode, createdAt, updatedAt: stats.mtimeMs };
-      this.loaded.set(meta.id, app);
-      this.logger.log(`RA-App loaded: ${meta.id} v${meta.version ?? '?'} (${source}) html=${htmlContent != null} gui=${guiContent != null}`);
-      return app;
+      return this.loadExtractedApp(tmpDir, zipPath, source);
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
