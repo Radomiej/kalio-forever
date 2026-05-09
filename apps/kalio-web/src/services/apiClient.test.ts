@@ -2,10 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RAAppGroup, RAAppSummary } from '@kalio/types';
 
 const { axiosCreate, mockGet, mockPost, mockDelete } = vi.hoisted(() => ({
-  axiosCreate: vi.fn(),
   mockGet: vi.fn(),
   mockPost: vi.fn(),
   mockDelete: vi.fn(),
+  axiosCreate: vi.fn(() => ({
+    get: mockGet,
+    post: mockPost,
+    delete: mockDelete,
+  })),
 }));
 
 vi.mock('axios', () => ({
@@ -28,11 +32,6 @@ import {
 describe('apiClient helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    axiosCreate.mockReturnValue({
-      get: mockGet,
-      post: mockPost,
-      delete: mockDelete,
-    });
   });
 
   it('creates the shared axios client with JSON defaults', async () => {

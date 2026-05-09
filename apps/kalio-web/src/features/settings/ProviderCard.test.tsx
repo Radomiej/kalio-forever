@@ -65,7 +65,7 @@ describe('ProviderCard', () => {
     fireEvent.click(screen.getByTestId('provider-test-cred-1'));
 
     expect(await screen.findByText(/Connected — 12 models available/i)).toBeInTheDocument();
-    expect(screen.getByText(/12 models/i)).toBeInTheDocument();
+    expect(screen.getByTestId('provider-test-cred-1')).toHaveTextContent('Connected');
   });
 
   it('shows backend and network errors from connection tests', async () => {

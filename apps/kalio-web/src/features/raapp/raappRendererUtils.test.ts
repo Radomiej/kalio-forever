@@ -22,8 +22,8 @@ describe('raappRendererUtils', () => {
     expect(findHtmlInData({ html: '"<div>embedded</div>"' })).toBe('<div>embedded</div>');
     expect(findHtmlInData({
       notes: 'x'.repeat(60),
-      rendered: '<table><tr><td>ok</td></tr></table>',
-    })).toBe('<table><tr><td>ok</td></tr></table>');
+      rendered: `<table><tr><td>${'ok'.repeat(30)}</td></tr></table>`,
+    })).toBe(`<table><tr><td>${'ok'.repeat(30)}</td></tr></table>`);
     expect(findHtmlInData({ html: 'not html' })).toBeNull();
   });
 

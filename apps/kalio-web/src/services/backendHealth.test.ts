@@ -82,14 +82,16 @@ describe('backendHealth', () => {
     const service = await loadBackendHealth();
 
     service.start();
+    await Promise.resolve();
+    await Promise.resolve();
     service.reportFailure();
 
     expect(service.getState()).toBe('offline');
 
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(4_000);
     expect(apiGet).toHaveBeenCalledTimes(2);
 
-    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.advanceTimersByTimeAsync(8_000);
     expect(apiGet).toHaveBeenCalledTimes(3);
   });
 
