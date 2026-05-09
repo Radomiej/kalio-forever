@@ -2,6 +2,28 @@ import { Injectable } from '@nestjs/common';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 
+function getToolNamesArg(args: ToolCallRequest['args']): string[] {
+  const toolNames = args['tool_names'];
+  if (!Array.isArray(toolNames)) {
+    throw new Error('INVALID_TOOL_NAMES: tool_names must be an array of non-empty strings');
+  }
+
+  const normalizedNames = toolNames.map((name) => {
+    if (typeof name !== 'string') {
+      throw new Error('INVALID_TOOL_NAMES: tool_names must be an array of non-empty strings');
+    }
+
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new Error('INVALID_TOOL_NAMES: tool_names must be an array of non-empty strings');
+    }
+
+    return trimmedName;
+  });
+
+  return normalizedNames;
+}
+
 @Injectable()
 @Tool({
   name: 'get_tool_details',
@@ -23,7 +45,7 @@ import { Tool } from '../../../common/decorators/tool.decorator';
 })
 export class GetToolDetailsTool {
   async execute(request: ToolCallRequest): Promise<{ details: string[]; errors: string[] }> {
-    const toolNames = request.args['tool_names'] as string[];
+    const toolNames = getToolNamesArg(request.args);
     const available = request.availableTools ?? [];
     const byName = new Map(available.map(t => [t.name, t]));
 

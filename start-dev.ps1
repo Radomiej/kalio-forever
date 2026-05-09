@@ -26,15 +26,16 @@ function Get-PortOwners {
     ) | Sort-Object -Unique
 }
 
-function Get-KalioNodeProcessIds {
-    try {
-        $marker = "kalio-forever"
-        @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -and $_.CommandLine -like "*$marker*" } |
-            Select-Object -ExpandProperty ProcessId | Sort-Object -Unique)
-    } catch {
-        @()
+# Recursively collect a PID and all its descendants
+function Get-ProcessTree {
+    param([int]$ParentId)
+    $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$ParentId" -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty ProcessId)
+    $all = @($ParentId)
+    foreach ($child in $children) {
+        $all += Get-ProcessTree -ParentId $child
     }
+    return $all | Sort-Object -Unique
 }
 
 function Stop-Processes {
@@ -49,54 +50,60 @@ function Stop-Processes {
     }
 }
 
-function Clear-KalioDevProcesses {
+# Stop only the tree rooted at a known PID, then verify ports are free
+function Stop-KalioStack {
+    param(
+        [System.Diagnostics.Process]$BeProcess,
+        [System.Diagnostics.Process]$FeProcess,
+        [int[]]$Ports,
+        [int]$TimeoutMs = 10000
+    )
+
+    foreach ($proc in @($BeProcess, $FeProcess)) {
+        if ($proc -and -not $proc.HasExited) {
+            $tree = @(Get-ProcessTree -ParentId $proc.Id)
+            Stop-Processes -ProcessIds $tree -Label 'kalio'
+        }
+    }
+
+    # Give OS a moment, then free any port stragglers
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+    do {
+        $portOwners = @(Get-PortOwners -Ports $Ports)
+        if ($portOwners.Count -eq 0) { return }
+        Stop-Processes -ProcessIds $portOwners -Label 'port owner'
+        Start-Sleep -Milliseconds 300
+    } while ([DateTime]::UtcNow -lt $deadline)
+}
+
+# Used only at startup to free ports left by a previous run
+function Clear-OccupiedPorts {
     param(
         [int[]]$Ports,
-        [int]$TimeoutMs = 15000
+        [int]$TimeoutMs = 10000
     )
 
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
 
     do {
         $portOwners = @(Get-PortOwners -Ports $Ports)
-        $kalioNodePids = @(Get-KalioNodeProcessIds)
-
-        if ($portOwners.Count -eq 0 -and $kalioNodePids.Count -eq 0) {
-            return $true
-        }
-
-        if ($portOwners.Count -gt 0) {
-            Stop-Processes -ProcessIds $portOwners -Label 'port owner'
-        }
-
-        if ($kalioNodePids.Count -gt 0) {
-            Stop-Processes -ProcessIds $kalioNodePids -Label 'kalio node'
-        }
-
+        if ($portOwners.Count -eq 0) { return $true }
+        Stop-Processes -ProcessIds $portOwners -Label 'port owner'
         Start-Sleep -Milliseconds 300
     } while ([DateTime]::UtcNow -lt $deadline)
 
-    $remainingPortOwners = @(Get-PortOwners -Ports $Ports)
-    $remainingKalioNodePids = @(Get-KalioNodeProcessIds)
-
-    if ($remainingPortOwners.Count -gt 0 -or $remainingKalioNodePids.Count -gt 0) {
-        Write-Host "  [FAIL] Could not clear previous Kalio processes/ports." -ForegroundColor Red
-        if ($remainingPortOwners.Count -gt 0) {
-            Write-Host "  Remaining port owners: $($remainingPortOwners -join ', ')" -ForegroundColor Red
-        }
-        if ($remainingKalioNodePids.Count -gt 0) {
-            Write-Host "  Remaining kalio node PIDs: $($remainingKalioNodePids -join ', ')" -ForegroundColor Red
-        }
+    $remaining = @(Get-PortOwners -Ports $Ports)
+    if ($remaining.Count -gt 0) {
+        Write-Host "  [FAIL] Could not free ports: $($Ports -join ', '). Remaining PIDs: $($remaining -join ', ')" -ForegroundColor Red
         return $false
     }
-
     return $true
 }
 
 # --- Kill any leftover processes on our ports ---
 Write-Host "KALIO Dev Stack" -ForegroundColor Cyan
 Write-Host "  Clearing ports $BE_PORT and $FE_PORT..." -ForegroundColor DarkYellow
-if (-not (Clear-KalioDevProcesses -Ports @($BE_PORT, $FE_PORT))) {
+if (-not (Clear-OccupiedPorts -Ports @($BE_PORT, $FE_PORT))) {
     exit 1
 }
 
@@ -121,7 +128,7 @@ while ($retries -lt $maxRetries) {
 
     if ($beProcess -and $beProcess.HasExited) {
         Write-Host "  [FAIL] Backend process exited unexpectedly (code $($beProcess.ExitCode))." -ForegroundColor Red
-        Clear-KalioDevProcesses -Ports @($BE_PORT, $FE_PORT) | Out-Null
+        Clear-OccupiedPorts -Ports @($BE_PORT, $FE_PORT) | Out-Null
         exit 1
     }
 
@@ -134,10 +141,7 @@ while ($retries -lt $maxRetries) {
 
 if ($retries -ge $maxRetries) {
     Write-Host "  [FAIL] Backend did not respond within 60s. Check output above." -ForegroundColor Red
-    if ($beProcess -and -not $beProcess.HasExited) {
-        Stop-Process -Id $beProcess.Id -Force -ErrorAction SilentlyContinue
-    }
-    Clear-KalioDevProcesses -Ports @($BE_PORT, $FE_PORT) | Out-Null
+    Stop-KalioStack -BeProcess $beProcess -FeProcess $null -Ports @($BE_PORT, $FE_PORT)
     exit 1
 }
 Write-Host "  Backend ready!" -ForegroundColor Green
@@ -171,12 +175,6 @@ try {
 } finally {
     Write-Host ""
     Write-Host "Stopping stack..." -ForegroundColor Yellow
-    if ($beProcess -and -not $beProcess.HasExited) {
-        Stop-Process -Id $beProcess.Id -Force -ErrorAction SilentlyContinue
-    }
-    if ($feProcess -and -not $feProcess.HasExited) {
-        Stop-Process -Id $feProcess.Id -Force -ErrorAction SilentlyContinue
-    }
-    Clear-KalioDevProcesses -Ports @($BE_PORT, $FE_PORT) | Out-Null
+    Stop-KalioStack -BeProcess $beProcess -FeProcess $feProcess -Ports @($BE_PORT, $FE_PORT)
     Write-Host "[OK] Stack stopped." -ForegroundColor Green
 }

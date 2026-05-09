@@ -192,3 +192,88 @@ describe('REGRESSION: setActiveSession clears in-flight agent state', () => {
     expect(useSessionStore.getState().messages).toHaveLength(0);
   });
 });
+
+describe('REGRESSION: session projections keep pending assistant state', () => {
+  beforeEach(resetStore);
+
+  it('merges pending streaming chunks when setMessages updates a session slice', () => {
+    const persistedMessage = {
+      id: 'm-stream',
+      sessionId: 'session-A',
+      role: 'assistant' as const,
+      content: 'persisted answer',
+      createdAt: 1,
+    };
+
+    useSessionStore.setState({
+      activeSessionId: 'session-A',
+      messages: [persistedMessage],
+      sessionMessages: {
+        'session-A': [persistedMessage],
+      },
+      streamingChunks: {
+        'm-stream': 'live answer',
+      },
+      thinkingChunks: {
+        'm-stream': 'live thinking',
+      },
+      chunkSessionIds: {
+        'm-stream': 'session-A',
+      },
+    });
+
+    useSessionStore.getState().setMessages([persistedMessage], 'session-A');
+
+    expect(useSessionStore.getState().getSessionMessages('session-A')).toMatchObject([
+      {
+        id: 'm-stream',
+        content: 'live answer',
+        thinking: 'live thinking',
+        streaming: true,
+      },
+    ]);
+    expect(useSessionStore.getState().messages).toMatchObject([
+      {
+        id: 'm-stream',
+        content: 'live answer',
+        thinking: 'live thinking',
+        streaming: true,
+      },
+    ]);
+  });
+
+  it('rebuilds an active turn from pending chunks when switching back to that session', () => {
+    useSessionStore.setState({
+      activeSessionId: 'session-A',
+      chunkSessionIds: {
+        'm-pending': 'session-B',
+      },
+      streamingChunks: {
+        'm-pending': 'partial answer',
+      },
+      sessionMessages: {
+        'session-B': [],
+      },
+    });
+
+    useSessionStore.getState().setActiveSession('session-B');
+
+    expect(useSessionStore.getState().messages).toMatchObject([
+      {
+        id: 'm-pending',
+        sessionId: 'session-B',
+        content: 'partial answer',
+        streaming: true,
+      },
+    ]);
+    expect(useSessionStore.getState().agentTurns).toEqual([
+      {
+        id: 'restoring-session-B',
+        sessionId: 'session-B',
+        items: [{ kind: 'text', messageId: 'm-pending' }],
+        done: false,
+      },
+    ]);
+    expect(useSessionStore.getState().activeTurnId).toBe('restoring-session-B');
+  });
+});

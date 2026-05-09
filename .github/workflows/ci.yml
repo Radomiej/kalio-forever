@@ -92,6 +92,8 @@ jobs:
       TEST_API_URL: http://127.0.0.1:3016/api
       LLM_PROVIDER: mock
       CREDENTIALS_MASTER_KEY: ci-test-master-key-32-chars-minimum
+      WORKSPACE_ROOT: /tmp/kalio-ci-workspace
+      PORT: 3016
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -108,11 +110,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace packages
+        run: pnpm --filter @kalio/types --filter @kalio/sdk build
+
+      - name: Build API
+        run: pnpm --filter kalio-api build
+
+      - name: Start API server
+        run: pnpm --filter kalio-api start &
+
+      - name: Start web dev server
+        run: pnpm --filter kalio-web dev &
+
+      - name: Wait for servers
+        run: |
+          npx wait-on http://127.0.0.1:3016/api/health http://localhost:5188 --timeout 60000
+
       - name: Install Playwright browsers
         run: pnpm --filter @kalio/e2e exec playwright install --with-deps chromium
 
       - name: Smoke E2E gate
-        run: pnpm --filter @kalio/e2e test:e2e -- --project=chromium
+        run: pnpm --filter @kalio/e2e exec playwright test --project=chromium
 
   quality-gate:
     runs-on: ubuntu-latest

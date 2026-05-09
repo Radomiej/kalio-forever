@@ -2,6 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { getCompactStrategy } from './compactStrategy';
 import type { ChatMessage } from '@kalio/types';
 
+function makeMsg(overrides: Partial<ChatMessage>): ChatMessage {
+  return {
+    id: 'msg-default',
+    sessionId: 's1',
+    role: 'assistant',
+    content: '12345678',
+    createdAt: 1,
+    ...overrides,
+  };
+}
+
 describe('compactStrategy', () => {
   describe('auto-trim strategy', () => {
     it('should remove old messages when approaching limit', () => {
@@ -44,6 +55,66 @@ describe('compactStrategy', () => {
       const compacted = strategy.compact(messages, 10000);
       
       expect(compacted).toEqual(messages);
+    });
+
+    it('removes tool_result messages before plain assistant replies (REGRESSION)', () => {
+      const strategy = getCompactStrategy('auto-trim');
+
+      const messages: ChatMessage[] = [
+        makeMsg({ id: 'u1', role: 'user' }),
+        makeMsg({ id: 'a1', role: 'assistant' }),
+        makeMsg({ id: 'u2', role: 'user' }),
+        makeMsg({ id: 'tr1', role: 'tool_result' }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ];
+
+      const compacted = strategy.compact(messages, 11);
+
+      expect(compacted.map((message) => message.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
+    });
+
+    it('preserves later user messages while assistant messages are still available to trim (REGRESSION)', () => {
+      const strategy = getCompactStrategy('auto-trim');
+
+      const messages: ChatMessage[] = [
+        makeMsg({ id: 'u1', role: 'user' }),
+        makeMsg({ id: 'u2', role: 'user' }),
+        makeMsg({ id: 'a1', role: 'assistant' }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+      ];
+
+      const compacted = strategy.compact(messages, 8);
+
+      expect(compacted.map((message) => message.id)).toEqual(['u1', 'u2', 'a2']);
+    });
+
+    it('still compacts assistant-only histories that exceed the limit (REGRESSION)', () => {
+      const strategy = getCompactStrategy('auto-trim');
+
+      const messages: ChatMessage[] = [
+        makeMsg({ id: 'a1', role: 'assistant' }),
+        makeMsg({ id: 'a2', role: 'assistant' }),
+        makeMsg({ id: 'a3', role: 'assistant' }),
+      ];
+
+      const compacted = strategy.compact(messages, 5);
+
+      expect(compacted.length).toBeLessThan(messages.length);
+    });
+
+    it('removes a tool_call assistant and its tool_result together, not one side only (REGRESSION)', () => {
+      const strategy = getCompactStrategy('auto-trim');
+
+      const messages: ChatMessage[] = [
+        makeMsg({ id: 'u1', role: 'user' }),
+        makeMsg({ id: 'a-tool', role: 'assistant', content: 'tool', toolCalls: [{ id: 'call-1', name: 'vfs_read', args: { path: '/tmp' } }] }),
+        makeMsg({ id: 'tr1', role: 'tool_result', toolCallId: 'call-1' }),
+        makeMsg({ id: 'a-final', role: 'assistant' }),
+      ];
+
+      const compacted = strategy.compact(messages, 8);
+
+      expect(compacted.map((message) => message.id)).toEqual(['u1', 'a-final']);
     });
   });
 

@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { VFSModule } from './vfs.module';
 import { VFSService } from './vfs.service';
 import { SessionVfsController } from './session-vfs.controller';

@@ -18,8 +18,12 @@ function makeMeta(name: string, description: string, params?: Record<string, unk
   };
 }
 
-function makeRequest(toolNames: string[], tools?: ToolMeta[]): ToolCallRequest {
+function makeRequest(toolNames: unknown, tools?: ToolMeta[]): ToolCallRequest {
   return { callId: 'c1', sessionId: 's1', toolName: 'get_tool_details', args: { tool_names: toolNames }, availableTools: tools };
+}
+
+function makeRawRequest(args: Record<string, unknown> = {}, tools?: ToolMeta[]): ToolCallRequest {
+  return { callId: 'c1', sessionId: 's1', toolName: 'get_tool_details', args, availableTools: tools };
 }
 
 describe('GetToolDetailsTool', () => {
@@ -113,5 +117,16 @@ describe('GetToolDetailsTool', () => {
     });
     const result = await tool.execute(makeRequest(['enum_tool'], [enumTool]));
     expect(result.details[0]).toContain('enum(fast|slow|medium)');
+  });
+
+  it.each([
+    { label: 'tool_names is missing', request: makeRawRequest({}, sampleTools) },
+    { label: 'tool_names is null', request: makeRequest(null, sampleTools) },
+    { label: 'tool_names is a string', request: makeRequest('vfs_read', sampleTools) },
+    { label: 'tool_names contains a blank string', request: makeRequest(['vfs_read', '   '], sampleTools) },
+    { label: 'tool_names contains a number', request: makeRequest(['vfs_read', 123], sampleTools) },
+    { label: 'tool_names contains an object', request: makeRequest(['vfs_read', { name: 'ghost' }], sampleTools) },
+  ])('rejects invalid tool_names when $label (REGRESSION)', async ({ request }) => {
+    await expect(tool.execute(request)).rejects.toThrow('INVALID_TOOL_NAMES');
   });
 });
