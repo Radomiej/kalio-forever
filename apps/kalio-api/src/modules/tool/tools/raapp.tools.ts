@@ -5,6 +5,7 @@ import { RAAppService } from '../../raapp/raapp.service';
 import { RAAppSandboxService } from '../../raapp/raapp-sandbox.service';
 import { EffectsProcessorService } from '../../raapp/effects-processor.service';
 import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
+import { EntityStore } from '../../raapp/entity-store';
 
 @Injectable()
 @ConfirmedTool({
@@ -142,12 +143,19 @@ export class RunRaAppTool {
       // Execute system effects (including call_native) to compute derived outputs
       let pendingApprovals: import('@kalio/types').RaAppPendingApproval[] = [];
       if (app.systemsContent) {
+        const entityStore = new EntityStore();
         const effectsResult = await this.effectsProcessor.processSystemsYaml(
           app.systemsContent,
           inputs,
           { sessionId },
+          entityStore,
         );
         Object.assign(outputData, effectsResult.output);
+
+        // Include ECS entity snapshot in data bindings (available as [entities[0].components...] in GUI DSL)
+        if (effectsResult.entities.length > 0) {
+          outputData['entities'] = effectsResult.entities;
+        }
 
         if (effectsResult.pendingApprovals.length > 0) {
           await this.hitl.savePendingApprovals(request.callId, sessionId, effectsResult.pendingApprovals);

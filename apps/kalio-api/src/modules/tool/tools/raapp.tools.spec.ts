@@ -58,7 +58,7 @@ describe('RunRaAppTool', () => {
       executeSystems: vi.fn().mockResolvedValue({}),
     };
     const mockEffectsProcessor = {
-      processSystemsYaml: vi.fn().mockResolvedValue({ output: {}, pendingApprovals: [] }),
+      processSystemsYaml: vi.fn().mockResolvedValue({ output: {}, pendingApprovals: [], entities: [] }),
     } as unknown as EffectsProcessorService;
     const mockHITL = {
       savePendingApprovals: vi.fn().mockResolvedValue([]),
@@ -150,7 +150,7 @@ describe('RunRaAppTool', () => {
     // effectsProcessor mock is set up in beforeEach to return { output: {}, pendingApprovals: [] }
     // Override with a result for this test
     const mockEffectsProcessor = {
-      processSystemsYaml: vi.fn().mockResolvedValue({ output: { result: 8 }, pendingApprovals: [] }),
+      processSystemsYaml: vi.fn().mockResolvedValue({ output: { result: 8 }, pendingApprovals: [], entities: [] }),
     } as unknown as EffectsProcessorService;
     const mockHITL = {
       savePendingApprovals: vi.fn().mockResolvedValue([]),
@@ -164,6 +164,7 @@ describe('RunRaAppTool', () => {
       app.systemsContent,
       { a: 5, b: 3 },
       expect.objectContaining({ sessionId: expect.any(String) }),
+      expect.any(Object), // EntityStore instance
     );
     expect(raapp.execute).toHaveBeenCalledWith(
       { type: 'gui', mode: 'display', content: app.guiContent },

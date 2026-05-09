@@ -14,6 +14,9 @@ import { KVWriteTool, KVReadTool, KVListTool, KVDeleteTool } from './tools/kv.to
 import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
 import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
 import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
+import { RaAppGetTool, RaAppEditTool, RaAppDeleteTool } from './tools/raapp-crud.tools';
+import { RaAppCreateDraftTool, RaAppExecuteDslTool } from './tools/raapp-draft.tools';
+import { RaAppTestTool } from './tools/raapp-test.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
@@ -68,6 +71,12 @@ export class ToolRegistryService {
     private readonly raappCompile: RaAppCompileTool,
     private readonly runRaApp: RunRaAppTool,
     private readonly listRaApps: ListRaAppsTool,
+    private readonly raappGet: RaAppGetTool,
+    private readonly raappEdit: RaAppEditTool,
+    private readonly raappDelete: RaAppDeleteTool,
+    private readonly raappCreateDraft: RaAppCreateDraftTool,
+    private readonly raappExecuteDsl: RaAppExecuteDslTool,
+    private readonly raappTest: RaAppTestTool,
     private readonly memoryIngest: MemoryIngestTool,
     private readonly memorySearch: MemorySearchTool,
     private readonly memoryIngestConversation: MemoryIngestConversationTool,
@@ -95,6 +104,9 @@ export class ToolRegistryService {
       grepSearch, fileSearch,
       terminalSpawn, terminalList, terminalOutput, terminalKill,
       raappCreate, raappCompile, runRaApp, listRaApps,
+      raappGet, raappEdit, raappDelete,
+      raappCreateDraft, raappExecuteDsl,
+      raappTest,
       memoryIngest, memorySearch, memoryIngestConversation,
       webSearch,
       listTools, getToolDetails,

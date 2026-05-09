@@ -326,6 +326,92 @@ export class RAAppService implements OnModuleInit {
     this.loaded.delete(id);
   }
 
+  /**
+   * Extract the source files from a stored RA-App ZIP and return them as
+   * a string record.  Only the well-known text files are included.
+   */
+  async getSourceFiles(id: string): Promise<Record<string, string>> {
+    const app = this.loaded.get(id);
+    if (!app) throw new Error(`RA-App not found: ${id}`);
+
+    const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
+    try {
+      if (app.zipPath.endsWith('.zip')) {
+        await extractZip(app.zipPath, { dir: tmpDir });
+      } else {
+        // Directory-based app — copy directly
+        await fs.cp(app.zipPath, tmpDir, { recursive: true });
+      }
+      const candidates = ['meta.yml', 'systems.yml', 'ui.gui', 'ui.yml', 'tests.yml', 'components.yml'];
+      const result: Record<string, string> = {};
+      for (const name of candidates) {
+        try {
+          result[name] = await fs.readFile(path.join(tmpDir, name), 'utf-8');
+        } catch { /* file absent — skip */ }
+      }
+      return result;
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * Update one or more source files in a stored RA-App, bump the patch
+   * version in meta.yml, and reload the app.
+   *
+   * @param id       The app ID to update (must exist and be a user app)
+   * @param updates  Map of filename → new content (partial; missing keys are unchanged)
+   */
+  async updateApp(id: string, updates: Record<string, string>): Promise<LoadedRAApp> {
+    const app = this.loaded.get(id);
+    if (!app) throw new Error(`RA-App not found: ${id}`);
+    if (app.source === 'core') throw new Error(`Cannot edit core RA-App: ${id}`);
+
+    const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
+    const zipPath = app.zipPath.endsWith('.zip') ? app.zipPath : `${app.zipPath}.zip`;
+    try {
+      if (app.zipPath.endsWith('.zip')) {
+        await extractZip(app.zipPath, { dir: tmpDir });
+      } else {
+        await fs.cp(app.zipPath, tmpDir, { recursive: true });
+      }
+
+      // Bump patch version in meta.yml before applying user updates
+      if (!updates['meta.yml']) {
+        try {
+          const metaRaw = await fs.readFile(path.join(tmpDir, 'meta.yml'), 'utf-8');
+          const meta = yaml.load(metaRaw) as RAAppMeta;
+          const [major, minor, patch] = (meta.version ?? '1.0.0').split('.').map(Number);
+          meta.version = `${major}.${minor}.${(patch ?? 0) + 1}`;
+          await fs.writeFile(path.join(tmpDir, 'meta.yml'), yaml.dump(meta), 'utf-8');
+        } catch { /* no meta.yml — skip */ }
+      }
+
+      // Apply updates
+      for (const [filename, content] of Object.entries(updates)) {
+        await fs.writeFile(path.join(tmpDir, filename), content, 'utf-8');
+      }
+
+      // Repack ZIP
+      await new Promise<void>((resolve, reject) => {
+        const output = fsSync.createWriteStream(zipPath);
+        const arc = archiver('zip', { zlib: { level: 6 } });
+        output.on('close', resolve);
+        output.on('error', reject);
+        arc.on('error', reject);
+        arc.pipe(output);
+        arc.directory(tmpDir, false);
+        void arc.finalize();
+      });
+
+      const loaded = await this.loadZip(zipPath, 'user');
+      this.logger.log(`[RAAppService] Updated app ${loaded.id} → v${loaded.meta.version ?? '?'}`);
+      return loaded;
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  }
+
   async executeSystems(systemsContent: string, inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
     try {
       const parsed = yaml.load(systemsContent) as {
