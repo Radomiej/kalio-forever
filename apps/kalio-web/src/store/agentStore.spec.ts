@@ -252,15 +252,45 @@ describe('agentStore input validation gaps (REGRESSION)', () => {
     expect(useAgentStore.getState().pendingConfirmations).toEqual({});
   });
 
+  it('does not notify subscribers when blank session keys are ignored', () => {
+    const listener = vi.fn();
+    const unsubscribe = useAgentStore.subscribe(listener);
+
+    useAgentStore.getState().setPendingConfirmation('', makeReq('session-A'));
+
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it('ignores blank callIds when registering tool names', () => {
     useAgentStore.getState().registerCallId('', 'run_raapp');
 
     expect(useAgentStore.getState().callIdToName).toEqual({});
   });
 
+  it('does not notify subscribers when blank callIds are ignored during registerCallId', () => {
+    const listener = vi.fn();
+    const unsubscribe = useAgentStore.subscribe(listener);
+
+    useAgentStore.getState().registerCallId('', 'run_raapp');
+
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it('ignores blank callIds when appending CLI agent output', () => {
     useAgentStore.getState().appendCLIAgentChunk('', 'partial output');
 
     expect(useAgentStore.getState().cliAgentOutput).toEqual({});
+  });
+
+  it('does not notify subscribers when blank callIds are ignored during appendCLIAgentChunk', () => {
+    const listener = vi.fn();
+    const unsubscribe = useAgentStore.subscribe(listener);
+
+    useAgentStore.getState().appendCLIAgentChunk('', 'partial output');
+
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
   });
 });

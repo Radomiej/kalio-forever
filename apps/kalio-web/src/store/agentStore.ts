@@ -113,7 +113,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   setPendingConfirmation: (sessionId, req) =>
     set((s) => {
       if (!sessionId.trim()) {
-        return {};
+        return s;
       }
 
       if (req === null) {
@@ -216,7 +216,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   registerCallId: (callId, toolName) =>
     set((s) => {
       if (!callId.trim()) {
-        return {};
+        return s;
       }
       return { callIdToName: { ...s.callIdToName, [callId]: toolName } };
     }),
@@ -244,7 +244,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   appendCLIAgentChunk: (callId, chunk) =>
     set((s) => {
       if (!callId.trim()) {
-        return {};
+        return s;
       }
       return {
         cliAgentOutput: {
