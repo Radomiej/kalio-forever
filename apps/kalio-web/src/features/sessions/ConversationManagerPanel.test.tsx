@@ -21,13 +21,17 @@ type SessionStateShape = {
 const { stopTurn, agentState, sessionState } = vi.hoisted(() => ({
   stopTurn: vi.fn(),
   agentState: {
-    isStreaming: false,
-    toolActivities: [],
-    llmActivities: [],
-    activeAgentLoops: {},
+    isStreaming: false as boolean,
+    toolActivities: [] as ToolActivity[],
+    llmActivities: [] as LlmActivity[],
+    activeAgentLoops: {} as Record<string, {
+      sessionId: string;
+      turnId: string;
+      startedAt: number;
+    }>,
   } satisfies AgentStateShape,
   sessionState: {
-    sessions: [],
+    sessions: [] as ChatSession[],
   } satisfies SessionStateShape,
 }));
 
