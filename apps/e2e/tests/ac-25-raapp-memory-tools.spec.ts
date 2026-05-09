@@ -20,7 +20,7 @@ test.describe('AC-25: RAApp and Memory tools registered', () => {
 
     const raappCreate = tools.find((t) => t.name === 'raapp_create');
     const raappCompile = tools.find((t) => t.name === 'raapp_compile');
-    expect(raappCreate?.requiresConfirmation).toBe(false);
+    expect(raappCreate?.requiresConfirmation).toBe(true);
     expect(raappCompile?.requiresConfirmation).toBe(false);
   });
 
@@ -37,9 +37,9 @@ test.describe('AC-25: RAApp and Memory tools registered', () => {
     const memorySearch = tools.find((t) => t.name === 'memory_search');
     const memoryIngestConv = tools.find((t) => t.name === 'memory_ingest_conversation');
 
-    expect(memoryIngest?.requiresConfirmation).toBe(false);
+    expect(memoryIngest?.requiresConfirmation).toBe(true);
     expect(memorySearch?.requiresConfirmation).toBe(false);
-    expect(memoryIngestConv?.requiresConfirmation).toBe(false);
+    expect(memoryIngestConv?.requiresConfirmation).toBe(true);
   });
 
   test('all 22 expected tool names are present', async ({ request }) => {

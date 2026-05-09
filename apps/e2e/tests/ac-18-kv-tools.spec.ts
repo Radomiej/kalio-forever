@@ -14,10 +14,10 @@ test.describe('AC-18: KV storage tools registration', () => {
     expect(names).toContain('kv_delete');
   });
 
-  test('kv_write does not require confirmation', async ({ request }) => {
+  test('kv_write requires confirmation', async ({ request }) => {
     const res = await request.get(`${API_BASE}/tools`);
     const tools: Array<{ name: string; requiresConfirmation: boolean }> = await res.json();
     const kvWrite = tools.find((t) => t.name === 'kv_write');
-    expect(kvWrite?.requiresConfirmation).toBe(false);
+    expect(kvWrite?.requiresConfirmation).toBe(true);
   });
 });

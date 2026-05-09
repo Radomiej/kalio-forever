@@ -1,9 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { API_BASE } from './helpers/test-config';
 
+const MOCK_LLM = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.LLM_PROVIDER === 'mock';
+
 // AC-11: Tool call chips appear inline during streaming and show results after completion
 test.describe('AC-11: Tool call visibility', () => {
   test('tool call chip appears and resolves during RA-App session', async ({ page, request }) => {
+    test.skip(MOCK_LLM, 'Mock LLM only echoes the latest prompt and never emits tool calls.');
+
     // Use a persona that has RA-Apps available
     const res = await request.post(`${API_BASE}/sessions`, {
       data: { title: 'AC11 Tool Call Test', personaId: 'ra-apps' },

@@ -3,6 +3,8 @@ import { API_BASE } from './helpers/test-config';
 
 // AC-20: Agent Loop CRUD + status transitions
 test.describe('AC-20: Agent Loop CRUD', () => {
+  test.skip(true, 'Agent loop CRUD endpoints were removed with migration 0003_loops_remove_tool_overrides.');
+
   test('full CRUD lifecycle', async ({ request }) => {
     // Create
     const createRes = await request.post(`${API_BASE}/agent-loops`, {
