@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { API_BASE } from './helpers/test-config';
 
+const LONG_STREAMING_PROMPT = `Repeat this text slowly: ${'HELLO '.repeat(120).trim()}`;
+
 // AC-13: Anti-spam — input disabled during streaming, multiple clicks don't send extra messages
 test.describe('AC-13: Anti-spam protection', () => {
   test('input disabled while streaming and multiple clicks blocked', async ({ page, request }) => {
@@ -28,7 +30,7 @@ test.describe('AC-13: Anti-spam protection', () => {
     await expect(chatInput).toBeEnabled({ timeout: 5000 });
 
     // Send first message
-    await chatInput.fill('Say HELLO slowly.');
+    await chatInput.fill(LONG_STREAMING_PROMPT);
     await sendBtn.click();
 
     // Input should be disabled immediately
@@ -73,7 +75,7 @@ test.describe('AC-13: Anti-spam protection', () => {
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });
 
-    await chatInput.fill('Count to 5 slowly.');
+    await chatInput.fill(LONG_STREAMING_PROMPT);
     await chatInput.press('Enter');
 
     // Spam Enter while streaming
