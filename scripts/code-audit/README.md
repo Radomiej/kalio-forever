@@ -1,0 +1,72 @@
+# KALIO v2 Code Audit
+
+Static-analysis pipeline that produces a prioritized tech-debt report for
+`kalio-api`, `kalio-web`, packages, and core contributor/agent docs using
+industry-standard JS/TS libs plus a small built-in governance scanner.
+
+## Usage
+
+```powershell
+# From repo root
+pnpm audit          # run all analyzers, write raw output to docs/audit/raw/
+pnpm audit:report   # run audit + aggregate into docs/audit/<date>-report.md
+```
+
+`npx` pulls each tool on-demand; nothing is installed globally. First run is
+slow (downloads to npm cache), subsequent runs are fast.
+
+## Tools
+
+| Tool | Purpose | Raw output |
+|---|---|---|
+| built-in scanner | file sizes, silent catches, `any` types | `file-stats.json` |
+| governance scanner | README / CONTRIBUTING / CODE_OF_CONDUCT / agent-doc drift | `docs-governance.json` |
+| `madge` | circular dependencies | `madge-circular.json` |
+| `jscpd` | copy/paste detection | `jscpd/jscpd-report.json` |
+| `knip` | unused files/exports/deps | `knip-<pkg>.json` |
+
+## Output
+
+- `docs/audit/raw/…` — raw tool JSON (overwritten each run).
+- `docs/audit/<YYYY-MM-DD>-report.json` — machine-readable aggregated report.
+- `docs/audit/<YYYY-MM-DD>-report.md` — human-readable prioritized refactor queue
+  following AGENTS.md architecture rules.
+
+## Governance checks
+
+The governance scanner currently flags:
+
+- missing required top-level contributor or agent-doc files
+- README / CONTRIBUTING links missing for core governance docs
+- incomplete Contributor Covenant sections in `CODE_OF_CONDUCT.md`
+- drift risk between `.github/copilot-instructions.md` and root `.copilot-instructions.md`
+- overly long root `AGENTS.md` files that are more likely to drift
+
+Current governance thresholds:
+
+- `AGENTS.md` > 300 lines: `HIGH`
+- `AGENTS.md` 221-300 lines: `MEDIUM`
+- root `.copilot-instructions.md` > 40 lines when `.github/copilot-instructions.md` exists: `HIGH`
+
+Rationale: these root instruction files are coordination entry points. Once they
+grow beyond these limits, they tend to accumulate duplicated policy and drift
+from the canonical nested docs.
+
+## Severity rules
+
+Aligned with AGENTS.md architecture rules:
+
+- 🔴 CRITICAL — file > hard limit (Controller 250, Service 400, Module 120, React 350), silent catch in critical path, circular dep > 3 modules
+- 🟡 HIGH     — file > soft limit (Controller 150, Service 300, Module 80, React 200), silent catch non-critical, circular dep
+- 🟢 MEDIUM   — `any` hotspot (≥ 5/file), duplicate clone, unused export
+- ⚪ LOW      — `any` ≥ 1
+
+## File limits (from AGENTS.md)
+
+| Type | Soft | Hard |
+|---|---|---|
+| Controller / Gateway | 150 | 250 |
+| Service | 300 | 400 |
+| Module | 80 | 120 |
+| Test file | 400 | 600 |
+| React Component | 200 | 350 |

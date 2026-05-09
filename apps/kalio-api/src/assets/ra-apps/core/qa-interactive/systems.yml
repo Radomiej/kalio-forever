@@ -1,0 +1,31 @@
+systems:
+  - id: prepare-qa
+    description: Prepares the Q&A data structure with individual option slots for GUI buttons
+    effects:
+      - assign:
+          target: output.question
+          expression: "input.question"
+      - assign:
+          target: output.options
+          expression: "input.options"
+      - assign:
+          target: output.allow_custom
+          expression: "input.allow_custom != null ? input.allow_custom : true"
+      - assign:
+          target: output.options_count
+          expression: "input.options.length"
+      - assign:
+          target: output.option_0
+          expression: "input.options[0] != null ? input.options[0] : ''"
+      - assign:
+          target: output.option_1
+          expression: "input.options[1] != null ? input.options[1] : ''"
+      - assign:
+          target: output.option_2
+          expression: "input.options[2] != null ? input.options[2] : ''"
+      - assign:
+          target: output.option_3
+          expression: "input.options[3] != null ? input.options[3] : ''"
+      - assign:
+          target: output.option_4
+          expression: "input.options[4] != null ? input.options[4] : ''"

@@ -1,0 +1,60 @@
+window {
+  id = qa_panel
+  class = "p-4 space-y-3 min-w-[280px] max-w-sm"
+
+  vbox {
+    class = "gap-1"
+    hbox {
+      class = "items-center gap-2"
+      icon { name = "message-circle-question" size = "18" class = "text-violet-400" }
+      label { text = "Interactive Q&A" class = "text-sm font-bold text-base-content" }
+    }
+    label { text = "Choose your answer below." class = "text-xs text-base-content/40" }
+  }
+
+  divider {}
+
+  vbox {
+    class = "gap-2 p-3 rounded-xl bg-violet-500/10 border border-violet-500/20"
+    label { text = "QUESTION" class = "text-[10px] font-bold uppercase tracking-widest text-violet-400" }
+    label { text = "[output.question]" class = "text-sm font-semibold text-base-content leading-snug" }
+  }
+
+  vbox {
+    class = "gap-2"
+    label { text = "OPTIONS" class = "text-[10px] font-bold uppercase tracking-widest text-base-content/40" }
+    vbox {
+      class = "gap-1.5"
+      button {
+        text = "[output.option_0]"
+        onclick = "I choose: [output.option_0]"
+        visible = "[output.option_0]"
+        class = "btn btn-sm btn-outline w-full text-left justify-start hover:btn-primary transition-all"
+      }
+      button {
+        text = "[output.option_1]"
+        onclick = "I choose: [output.option_1]"
+        visible = "[output.option_1]"
+        class = "btn btn-sm btn-outline w-full text-left justify-start hover:btn-primary transition-all"
+      }
+      button {
+        text = "[output.option_2]"
+        onclick = "I choose: [output.option_2]"
+        visible = "[output.option_2]"
+        class = "btn btn-sm btn-outline w-full text-left justify-start hover:btn-primary transition-all"
+      }
+      button {
+        text = "[output.option_3]"
+        onclick = "I choose: [output.option_3]"
+        visible = "[output.option_3]"
+        class = "btn btn-sm btn-outline w-full text-left justify-start hover:btn-primary transition-all"
+      }
+      button {
+        text = "[output.option_4]"
+        onclick = "I choose: [output.option_4]"
+        visible = "[output.option_4]"
+        class = "btn btn-sm btn-outline w-full text-left justify-start hover:btn-primary transition-all"
+      }
+    }
+  }
+}

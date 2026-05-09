@@ -1,0 +1,135 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+@layer base {
+  /* Thin sky-tinted scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(0.60 0.176 232.6 / 0.30);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.60 0.176 232.6 / 0.55);
+  }
+}
+
+/* Override daisyUI primary → sky-500 (Nekko identity).
+   Unlayered CSS beats ALL @layer rules including daisyUI plugin output,
+   regardless of specificity. */
+:root,
+[data-theme="dark"],
+[data-theme="light"] {
+  --color-primary: oklch(0.60 0.176 232.6);
+  --color-primary-content: oklch(0.98 0.01 232.6);
+}
+
+/* Animated orbiting border for running tools / RA-Apps */
+.running-border-orbit {
+  position: relative;
+  overflow: hidden;
+  border-color: transparent !important;
+}
+.running-border-orbit::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--orbit-angle, 0deg),
+    transparent 0%,
+    oklch(0.60 0.176 232.6 / 0.7) 25%,
+    oklch(0.60 0.176 232.6) 50%,
+    oklch(0.60 0.176 232.6 / 0.7) 75%,
+    transparent 100%
+  );
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  animation: border-orbit 2.5s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+@keyframes border-orbit {
+  to { --orbit-angle: 360deg; }
+}
+@property --orbit-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* LLM reasoning <think> blocks rendered as collapsible <details> */
+details.think-block {
+  margin: 0.5rem 0;
+  border-left: 3px solid oklch(0.60 0.176 232.6 / 0.3);
+  border-radius: 0.25rem;
+  background: oklch(0.60 0.176 232.6 / 0.05);
+}
+details.think-block > summary {
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: oklch(0.65 0.1 232.6);
+  user-select: none;
+}
+details.think-block > summary:hover {
+  color: oklch(0.70 0.15 232.6);
+}
+details.think-block[open] > summary {
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid oklch(0.60 0.176 232.6 / 0.15);
+}
+details.think-block > :not(summary) {
+  padding: 0 0.5rem 0.25rem;
+  font-size: 0.75rem;
+  color: oklch(0.55 0.05 232.6 / 0.7);
+  line-height: 1.5;
+}
+
+/* Vision analysis blocks (shown when vision model describes images for text-only primary model) */
+details.vision-block {
+  margin: 0.5rem 0;
+  border-left: 3px solid oklch(0.60 0.14 150 / 0.4);
+  border-radius: 0.25rem;
+  background: oklch(0.60 0.14 150 / 0.08);
+}
+details.vision-block > summary {
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: oklch(0.65 0.12 150);
+  user-select: none;
+}
+details.vision-block > summary:hover {
+  color: oklch(0.70 0.18 150);
+}
+details.vision-block[open] > summary {
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid oklch(0.60 0.14 150 / 0.2);
+}
+details.vision-block > :not(summary) {
+  padding: 0 0.5rem 0.25rem;
+  font-size: 0.75rem;
+  color: oklch(0.50 0.05 150 / 0.85);
+  line-height: 1.5;
+}
+
+/* Landing page tile entrance animation */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
