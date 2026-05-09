@@ -1,0 +1,453 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { AgentRunContext, ChatSession, ToolMeta, ToolResult } from '@kalio/types';
+import { SubagentRuntimeService } from '../subagent-runtime.service';
+import { TurnState } from '../turn-state';
+import type { ILLMSource, LLMSourceParams } from '../interfaces/llm-source.interface';
+import type { InternalLLMChunk } from '../interfaces/llm-chunk.types';
+import type { StreamContext } from '../interfaces/stream-context.interface';
+import type { StreamProcessorService } from '../stream-processor.service';
+import type { ToolDispatchService } from '../tool-dispatch.service';
+import type { SessionManagerService } from '../session-manager.service';
+import type { SessionsService } from '../sessions.service';
+import type { VFSService } from '../../vfs/vfs.service';
+import type { PersonaService } from '../../persona/persona.service';
+
+const tools: ToolMeta[] = [
+  { name: 'run_subagent', description: 'spawn child', parameters: {}, requiresConfirmation: false },
+  { name: 'vfs_write', description: 'write file', parameters: {}, requiresConfirmation: true },
+];
+
+async function* streamFrom(chunks: InternalLLMChunk[]): AsyncIterable<InternalLLMChunk> {
+  for (const chunk of chunks) yield chunk;
+}
+
+function neverStream(): AsyncIterable<InternalLLMChunk> {
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<InternalLLMChunk> {
+      return {
+        next: () => new Promise<IteratorResult<InternalLLMChunk>>(() => undefined),
+      };
+    },
+  };
+}
+
+function makeProcessor(sessionManager: Pick<SessionManagerService, 'persistAssistantMessage'>): Pick<StreamProcessorService, 'process'> {
+  return {
+    process: vi.fn(async (chunk: InternalLLMChunk, ctx: StreamContext) => {
+      if (chunk.type === 'text_delta') {
+        ctx.state.appendText(chunk.delta);
+        ctx.emit('chat:chunk', { sessionId: ctx.sessionId, messageId: ctx.messageId, delta: chunk.delta, done: false, agentRun: ctx.agentRun });
+      }
+      if (chunk.type === 'tool_call') {
+        ctx.state.addToolCall({ id: chunk.callId, name: chunk.name, args: chunk.args });
+      }
+      if (chunk.type === 'done') {
+        await sessionManager.persistAssistantMessage(ctx.sessionId, ctx.messageId, ctx.state as TurnState);
+      }
+    }),
+  };
+}
+
+function makeSession(id: string, parentSessionId?: string): ChatSession {
+  return {
+    id,
+    personaId: 'default',
+    title: `Sub-agent: ${id}`,
+    kind: 'subagent',
+    parentSessionId,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
+describe('SubagentRuntimeService nested subagents', () => {
+  it('rejects after timeoutMs and closes the child agent turn with chat:error', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const llmSource: ILLMSource = {
+        stream: vi.fn(() => neverStream()),
+      };
+      const sessionManager = {
+        persistUserMessage: vi.fn().mockResolvedValue(undefined),
+        persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+        saveToolResult: vi.fn().mockResolvedValue(undefined),
+        loadHistory: vi.fn().mockResolvedValue([]),
+      } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+      const emit = vi.fn();
+      const runtime = new SubagentRuntimeService(
+        llmSource,
+        makeProcessor(sessionManager) as StreamProcessorService,
+        { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+        sessionManager as unknown as SessionManagerService,
+        { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+        { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+        { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+      );
+
+      const runPromise = runtime.runSubagent({
+        parentSessionId: 'master',
+        parentToolCallId: 'call-timeout',
+        objective: 'hang forever',
+        availableTools: tools,
+        timeoutMs: 50,
+        vfsMode: 'isolated',
+        copyOutputs: false,
+        emit,
+      });
+
+      const observation: {
+        value:
+          | { status: 'pending' }
+          | { status: 'resolved' }
+          | { status: 'rejected'; error: unknown };
+      } = { value: { status: 'pending' } };
+      void runPromise.then(
+        () => {
+          observation.value = { status: 'resolved' };
+        },
+        (error: unknown) => {
+          observation.value = { status: 'rejected', error };
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(51);
+      await Promise.resolve();
+
+      const settled = observation.value;
+      expect(settled.status).toBe('rejected');
+      if (settled.status !== 'rejected') {
+        throw new Error(`Expected timeout rejection, got ${settled.status}`);
+      }
+      expect(settled.error).toBeInstanceOf(Error);
+      expect((settled.error as Error).message).toBe('Sub-agent timed out after 50ms');
+
+      const startCall = emit.mock.calls.find((call: unknown[]) => call[0] === 'agent:start');
+      const childSessionId = (startCall?.[1] as { sessionId: string } | undefined)?.sessionId;
+      expect(childSessionId).toBeTruthy();
+      expect(emit).toHaveBeenCalledWith('chat:error', expect.objectContaining({
+        sessionId: childSessionId,
+        code: 'LLM_ERROR',
+        message: 'Sub-agent timed out after 50ms',
+        hadContent: false,
+      }));
+      expect(emit).toHaveBeenCalledWith('agent:done', expect.objectContaining({ sessionId: childSessionId }));
+      expect(emit.mock.calls.some((call: unknown[]) => call[0] === 'chat:complete')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reuses an existing child session so the parent can send another message into the same subagent chat', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([{ type: 'text_delta', delta: 'follow-up done' }, { type: 'done' }])),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+    const existingChild = {
+      id: 'sub-existing',
+      personaId: 'default',
+      title: 'Sub-agent: existing',
+      kind: 'subagent' as const,
+      parentSessionId: 'master',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const sessions = {
+      createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)),
+      get: vi.fn(async () => existingChild),
+    };
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      sessions as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-follow-up',
+      objective: 'Refine the existing page',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+      childSessionId: 'sub-existing',
+    } as Parameters<SubagentRuntimeService['runSubagent']>[0]);
+
+    expect(sessions.get).toHaveBeenCalledWith('sub-existing');
+    expect(sessions.createWithId).not.toHaveBeenCalled();
+    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith('sub-existing', 'Refine the existing page');
+    expect(result.childSessionId).toBe('sub-existing');
+    expect(result.result).toBe('follow-up done');
+  });
+
+  it('emits chat:complete with the persisted assistant messageId instead of the child session id', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([{ type: 'text_delta', delta: 'done' }, { type: 'done' }])),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+    const emit = vi.fn();
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-complete',
+      objective: 'finish once',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+      emit,
+    });
+
+    const persistedMessageId = sessionManager.persistAssistantMessage.mock.calls.at(-1)?.[1] as string | undefined;
+    const completeCall = emit.mock.calls.find((call: unknown[]) => call[0] === 'chat:complete');
+
+    expect(persistedMessageId).toBeTruthy();
+    expect(completeCall?.[1]).toEqual(expect.objectContaining({
+      sessionId: result.childSessionId,
+      messageId: persistedMessageId,
+    }));
+    expect((completeCall?.[1] as { messageId: string } | undefined)?.messageId).not.toBe(result.childSessionId);
+  });
+
+  it('includes parent download URLs in the returned result when isolated child outputs are copied back', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([{ type: 'text_delta', delta: 'Image generation completed.' }, { type: 'done' }])),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+    const copiedFiles = [
+      {
+        fromPath: 'images/cat-hero.png',
+        toPath: 'sub-agents/sub-child/images/cat-hero.png',
+        sizeBytes: 123,
+      },
+    ];
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => copiedFiles) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-copy',
+      objective: 'Generate one cat image',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: true,
+    });
+
+    expect(result.copiedFiles).toEqual(copiedFiles);
+    expect(result.result).toContain('Image generation completed.');
+    expect(result.result).toContain('/api/sessions/master/vfs/download?path=sub-agents%2Fsub-child%2Fimages%2Fcat-hero.png');
+  });
+
+  it('copies requested attachments into isolated child VFS and prepends attachment hint in child prompt', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([{ type: 'text_delta', delta: 'done' }, { type: 'done' }])),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+    const vfs = {
+      copySessionFiles: vi.fn()
+        .mockReturnValueOnce([
+          { fromPath: 'images/cat.png', toPath: 'attachments/images/cat.png', sizeBytes: 10 },
+        ])
+        .mockReturnValueOnce([]),
+    };
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      vfs as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-attach',
+      objective: 'Inspect attachment',
+      attachments: ['images/cat.png'],
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+    });
+
+    expect(vfs.copySessionFiles).toHaveBeenCalledWith(expect.objectContaining({
+      fromSessionId: 'master',
+      toSessionId: expect.stringMatching(/^sub-/),
+      targetPrefix: 'attachments',
+      filePaths: ['images/cat.png'],
+    }));
+    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith(
+      expect.stringMatching(/^sub-/),
+      expect.stringContaining('attachments/images/cat.png'),
+    );
+  });
+
+  it('lets a first-level subagent see run_subagent, but hides it at the nested-depth limit', async () => {
+    const streamCalls: LLMSourceParams[] = [];
+    const llmSource: ILLMSource = {
+      stream: vi.fn((params: LLMSourceParams) => {
+        streamCalls.push(params);
+        return streamFrom([{ type: 'text_delta', delta: 'done' }, { type: 'done' }]);
+      }),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-1',
+      objective: 'outer',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+    });
+    await runtime.runSubagent({
+      parentSessionId: 'sub-parent',
+      parentToolCallId: 'call-2',
+      objective: 'nested',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+      parentAgentRun: { agentRunId: 'parent-run', agentType: 'subagent', subagentDepth: 1 } as AgentRunContext,
+    });
+
+    expect(streamCalls[0].tools.map((tool) => tool.name)).toContain('run_subagent');
+    expect(streamCalls[1].tools.map((tool) => tool.name)).not.toContain('run_subagent');
+  });
+
+  it('executes a subagent that delegates to one nested subagent', async () => {
+    const sessionStreamCounts = new Map<string, number>();
+    const llmSource: ILLMSource = {
+      stream: vi.fn((params: LLMSourceParams) => {
+        const count = sessionStreamCounts.get(params.sessionId) ?? 0;
+        sessionStreamCounts.set(params.sessionId, count + 1);
+        if (params.sessionId.startsWith('sub-') && count === 0 && params.tools.some((tool) => tool.name === 'run_subagent')) {
+          return streamFrom([
+            { type: 'tool_call', callId: 'nested-call', name: 'run_subagent', args: { objective: 'nested objective' } },
+            { type: 'done' },
+          ]);
+        }
+        if (count === 0) {
+          return streamFrom([{ type: 'text_delta', delta: 'nested done' }, { type: 'done' }]);
+        }
+        return streamFrom([{ type: 'text_delta', delta: 'outer saw nested' }, { type: 'done' }]);
+      }),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+    const sessions = { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) };
+    let runtime: SubagentRuntimeService;
+    const toolDispatch = {
+      dispatch: vi.fn(async (callId: string, toolName: string, args: Record<string, unknown>, ctx: StreamContext, availableTools: ToolMeta[]): Promise<ToolResult> => {
+        if (toolName !== 'run_subagent') return { callId, status: 'success', data: {} };
+        if (!availableTools.some((tool) => tool.name === 'run_subagent')) {
+          return { callId, status: 'error', errorCode: 'TOOL_NOT_AVAILABLE', errorMessage: 'run_subagent unavailable' };
+        }
+        const result = await runtime.runSubagent({
+          parentSessionId: ctx.sessionId,
+          parentToolCallId: callId,
+          objective: typeof args['objective'] === 'string' ? args['objective'] : 'nested',
+          availableTools,
+          timeoutMs: 60000,
+          vfsMode: 'isolated',
+          copyOutputs: false,
+          emit: ctx.emit,
+          parentAgentRun: ctx.agentRun,
+        });
+        return { callId, status: 'success', data: result, sessionId: ctx.sessionId, toolName, agentRun: ctx.agentRun };
+      }),
+      getToolMetas: vi.fn(),
+    };
+    runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      toolDispatch as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      sessions as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-outer',
+      objective: 'outer objective',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+      emit: vi.fn(),
+    });
+
+    expect(result.result).toBe('outer saw nested');
+    expect(sessions.createWithId).toHaveBeenCalledTimes(2);
+    expect(toolDispatch.dispatch).toHaveBeenCalledWith(
+      'nested-call',
+      'run_subagent',
+      { objective: 'nested objective' },
+      expect.objectContaining({ agentRun: expect.objectContaining({ subagentDepth: 1 }) }),
+      expect.arrayContaining([expect.objectContaining({ name: 'run_subagent' })]),
+    );
+  });
+});

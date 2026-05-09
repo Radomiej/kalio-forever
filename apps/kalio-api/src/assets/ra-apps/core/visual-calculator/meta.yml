@@ -1,0 +1,37 @@
+id: visual-calculator
+name: Visual Calculator
+version: "1.0"
+description: Visual calculator with GUI DSL rendering — add, subtract, multiply, divide
+author: kalio-core
+inputs:
+  - name: a
+    type: number
+    required: true
+    description: First number
+  - name: b
+    type: number
+    required: true
+    description: Second number
+  - name: operation
+    type: string
+    required: true
+    description: Operation to perform
+    enum: [add, subtract, multiply, divide]
+outputs:
+  - name: result
+    type: number
+  - name: expression
+    type: string
+  - name: error
+    type: string
+  - name: a
+    type: number
+  - name: b
+    type: number
+  - name: op_symbol
+    type: string
+expose_as_tool: true
+tool_description: Visual calculator — performs add/subtract/multiply/divide on two numbers and renders result as GUI
+execution:
+  timeout_ms: 3000
+  requires_user_approval: false

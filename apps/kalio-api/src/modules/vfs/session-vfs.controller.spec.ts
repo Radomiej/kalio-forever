@@ -1,0 +1,159 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Test, type TestingModule } from '@nestjs/testing';
+import { BadRequestException, UnsupportedMediaTypeException } from '@nestjs/common';
+import { SessionVfsController } from './session-vfs.controller';
+import { VFSService } from './vfs.service';
+import { StreamableFile } from '@nestjs/common';
+import type { VFSListResult, VFSReadResult } from '@kalio/types';
+import { Readable } from 'node:stream';
+
+describe('SessionVfsController', () => {
+  let controller: SessionVfsController;
+  const mockVfs = {
+    listFiles: vi.fn(),
+    writeFile: vi.fn(),
+    readFile: vi.fn(),
+    downloadFile: vi.fn(),
+    writeBinary: vi.fn(),
+    archiveSession: vi.fn(),
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [SessionVfsController],
+      providers: [{ provide: VFSService, useValue: mockVfs }],
+    }).compile();
+
+    controller = module.get(SessionVfsController);
+    vi.clearAllMocks();
+  });
+
+  describe('list()', () => {
+    it('returns list of files for session', () => {
+      const result: VFSListResult = { sessionId: 'sess-1', files: [{ sessionId: 'sess-1', path: 'output.txt', sizeBytes: 100, mimeType: 'text/plain', updatedAt: Date.now() }] };
+      mockVfs.listFiles.mockReturnValue(result);
+
+      expect(controller.list('sess-1')).toBe(result);
+      expect(mockVfs.listFiles).toHaveBeenCalledWith('sess-1');
+    });
+  });
+
+  describe('writeText()', () => {
+    it('writes text file and returns ok', () => {
+      mockVfs.writeFile.mockReturnValue(undefined);
+      const result = controller.writeText('sess-1', { filePath: 'hello.txt', content: 'world' });
+      expect(result).toEqual({ ok: true });
+      expect(mockVfs.writeFile).toHaveBeenCalledWith({ sessionId: 'sess-1', filePath: 'hello.txt', content: 'world' });
+    });
+
+    it('throws BadRequest when filePath is missing', () => {
+      expect(() => controller.writeText('sess-1', { filePath: '', content: 'x' })).toThrow(BadRequestException);
+    });
+
+    it('throws BadRequest when content is undefined', () => {
+      expect(() =>
+        controller.writeText('sess-1', { filePath: 'file.txt', content: undefined as unknown as string }),
+      ).toThrow(BadRequestException);
+    });
+
+    it('throws BadRequest when vfs throws PATH_TRAVERSAL_DENIED', () => {
+      const err = Object.assign(new Error('traversal denied'), { code: 'PATH_TRAVERSAL_DENIED' });
+      mockVfs.writeFile.mockImplementation(() => { throw err; });
+      expect(() => controller.writeText('sess-1', { filePath: '../etc/passwd', content: 'x' })).toThrow(BadRequestException);
+    });
+
+    it('re-throws non-traversal errors from vfs', () => {
+      mockVfs.writeFile.mockImplementation(() => { throw new Error('disk full'); });
+      expect(() => controller.writeText('sess-1', { filePath: 'file.txt', content: 'x' })).toThrow('disk full');
+    });
+  });
+
+  describe('read()', () => {
+    it('returns file content', () => {
+      const readResult: VFSReadResult = { sessionId: 'sess-1', filePath: 'output.txt', content: 'hello world' };
+      mockVfs.readFile.mockReturnValue(readResult);
+
+      expect(controller.read('sess-1', 'output.txt')).toBe(readResult);
+      expect(mockVfs.readFile).toHaveBeenCalledWith('sess-1', 'output.txt');
+    });
+
+    it('throws BadRequest for PATH_TRAVERSAL_DENIED', () => {
+      const err = Object.assign(new Error('path traversal'), { code: 'PATH_TRAVERSAL_DENIED' });
+      mockVfs.readFile.mockImplementation(() => { throw err; });
+      expect(() => controller.read('sess-1', '../secret')).toThrow(BadRequestException);
+    });
+
+    it('re-throws other errors from vfs', () => {
+      mockVfs.readFile.mockImplementation(() => { throw new Error('file not found'); });
+      expect(() => controller.read('sess-1', 'missing.txt')).toThrow('file not found');
+    });
+  });
+
+  describe('download()', () => {
+    it('sets content-disposition header and returns StreamableFile', () => {
+      const stream = Readable.from(['data']);
+      mockVfs.downloadFile.mockReturnValue({ stream, filename: 'output.txt' });
+      const res = { set: vi.fn() };
+
+      const result = controller.download('sess-1', 'output.txt', res as never);
+      expect(result).toBeInstanceOf(StreamableFile);
+      expect(res.set).toHaveBeenCalledWith(
+        expect.objectContaining({ 'Content-Disposition': 'attachment; filename="output.txt"' }),
+      );
+    });
+  });
+
+  describe('upload()', () => {
+    it('throws BadRequest when no file provided', () => {
+      expect(() => controller.upload('sess-1', undefined)).toThrow(BadRequestException);
+    });
+
+    it('throws UnsupportedMediaType for unsupported mime type', () => {
+      const file = { mimetype: 'text/plain', buffer: Buffer.from('') } as Express.Multer.File;
+      expect(() => controller.upload('sess-1', file)).toThrow(UnsupportedMediaTypeException);
+    });
+
+    it('uploads png and returns ChatAttachment', () => {
+      const file = { mimetype: 'image/png', buffer: Buffer.from('img-data') } as Express.Multer.File;
+      mockVfs.writeBinary.mockReturnValue(undefined);
+
+      const result = controller.upload('sess-1', file);
+      expect(result.mimeType).toBe('image/png');
+      expect(result.path).toMatch(/^uploads\/.+\.png$/);
+      expect(mockVfs.writeBinary).toHaveBeenCalledWith('sess-1', result.path, file.buffer);
+    });
+
+    it('uploads jpeg and returns ChatAttachment', () => {
+      const file = { mimetype: 'image/jpeg', buffer: Buffer.from('img-data') } as Express.Multer.File;
+      mockVfs.writeBinary.mockReturnValue(undefined);
+
+      const result = controller.upload('sess-1', file);
+      expect(result.mimeType).toBe('image/jpeg');
+      expect(result.path).toMatch(/^uploads\/.+\.jpg$/);
+    });
+
+    it('uploads webp and returns ChatAttachment', () => {
+      const file = { mimetype: 'image/webp', buffer: Buffer.from('') } as Express.Multer.File;
+      mockVfs.writeBinary.mockReturnValue(undefined);
+      const result = controller.upload('sess-1', file);
+      expect(result.path).toMatch(/\.webp$/);
+    });
+  });
+
+  describe('zip()', () => {
+    it('returns StreamableFile with zip content-type', () => {
+      const stream = Readable.from(['zip-data']);
+      mockVfs.archiveSession.mockReturnValue(stream);
+      const res = { set: vi.fn() };
+
+      const result = controller.zip('sess-1', res as never);
+      expect(result).toBeInstanceOf(StreamableFile);
+      expect(res.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'Content-Type': 'application/zip',
+          'Content-Disposition': 'attachment; filename="session-sess-1.zip"',
+        }),
+      );
+    });
+  });
+});

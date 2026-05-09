@@ -1,0 +1,30 @@
+{
+  "name": "kalio-forever",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "powershell -ExecutionPolicy Bypass -File start-dev.ps1",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "clean": "turbo run clean",
+    "audit": "node scripts/code-audit/run-audit.mjs",
+    "audit:report": "node scripts/code-audit/run-audit.mjs && node scripts/code-audit/aggregate.mjs"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.0",
+    "typescript": "~5.8.2"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "patchedDependencies": {
+      "@nestjs/cli": "patches/@nestjs__cli.patch"
+    }
+  }
+}
