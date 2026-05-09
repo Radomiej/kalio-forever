@@ -15,3 +15,4 @@
   - If audit artifacts are still needed, they should be added to `ci.yml` in a follow-up instead of restoring a separate workflow.
 - Next steps:
   - Re-run workflow validation on the branch and confirm only the consolidated CI remains relevant for merge checks.
+  - Update README status badges and any workflow-linked docs so they reference `.github/workflows/ci.yml` instead of the removed `backend-ci.yml`, `frontend-ci.yml`, and `audit.yml` workflows.
