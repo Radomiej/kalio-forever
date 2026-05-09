@@ -1,97 +1,142 @@
-# RAApp Design - stan aktualny
+# RA-App Design - stan aktualny
+
+Ten dokument opisuje aktualny model RA-App w Kalio.
+Najwazniejsze jest rozroznienie trzech rzeczy, ktore latwo pomylic:
+
+1. inline wynik toola w historii czatu
+2. zapisany app w katalogu RA-App
+3. pending approvals dla natywnych efektow wykonywanych z poziomu RA-App
 
 ## TL;DR
 
-- Sa dwa tryby RAApp: `html` i `gui`.
-- `html` to pojedynczy dokument `main.html` albo `index.html`, renderowany w iframe przez `srcDoc`.
-- `gui` to pojedynczy plik `ui.gui`, kompilowany do JSON `{ nodes, data }` i renderowany przez Reactowy `GuiDslRenderer`.
-- RAApp nie zyja w sesyjnym VFS. Sa trzymane jako ZIP-y w katalogu RA-App backendu (`RA_APPS_PATH`, domyslnie `./data/ra-apps`).
-- `raapp_create` robi dwie rzeczy naraz: pokazuje blok inline w czacie i zapisuje wygenerowany app do katalogu RA-App.
-- Jesli potrzebujesz prawdziwej wielostronicowosci, routingu, zlozonych komponentow albo lokalnego stanu UI, wybieraj `html`, nie `gui`.
+- RA-App moze byc `html` albo `gui`.
+- `raapp_create` zwraca inline blok do czatu i jednoczesnie zapisuje wygenerowany app do katalogu RA-App.
+- `raapp_create` jest dzis narzedziem wymagajacym potwierdzenia, bo zapisuje stan na dysku.
+- Zapisane appki zyja poza sesyjnym VFS.
+- Katalog RA-App ma dwa poziomy: plaskie appki ladowane przez `RAAppService` oraz wersjonowane grupy zarzadzane przez `RAAppVersioningService`.
+- Interaktywne HTML RA-App rozmawiaja z czatem przez `window.parent.postMessage(...)` przechwytywane w `HtmlIframeRenderer`.
+- Natywne efekty RA-App z approvalem przechodza przez `RAAppHITLService` i wracaja na frontend jako `raapp:native_result`.
 
-## 1. Jak dziala pipeline
+## Co jest czym
 
-### `raapp_create`
+| Powierzchnia | Owner | Gdzie zyje | Jak trafia do UI |
+| --- | --- | --- | --- |
+| Inline RA-App block | `ToolResult` / `tool_result` message | Historia czatu | `ToolCallBubble` -> `RAAppRenderer` |
+| Stored RA-App | `RAAppService` / `RAAppVersioningService` | `RA_APPS_PATH/core` i `RA_APPS_PATH/user` | `RAAppManager` przez REST |
+| Pending native approvals | `raapp_pending_approvals` + `RAAppHITLService` | DB | inline pending approvals plus `raapp:native_result` |
 
-`raapp_create` przyjmuje:
+## Modulowy podzial odpowiedzialnosci
 
-- `type: 'html' | 'gui'`
-- `content: string`
-- `mode: 'display' | 'interactive'`
-- opcjonalny `title`
+| Komponent | Rola |
+| --- | --- |
+| `RAAppService` | ladowanie ZIP-ow, czytanie `main.html` / `index.html` / `ui.gui` / `systems.yml`, inline execute dla `raapp_create` |
+| `RAAppVersioningService` | grupy user-apps: `current.zip`, `draft.zip`, `history/`, rollback, approve, discard |
+| `RAAppController` | REST dla listy appow, grup wersji i uploadow |
+| `RAAppHITLService` | zapis pending approvals, approve/cancel, wykonanie natywnych systemow po zatwierdzeniu |
+| `RAAppRenderer` | router FE: HTML iframe albo GUI DSL renderer |
+| `HtmlIframeRenderer` | iframe `srcDoc`, resize bridge, fullscreen, `kalio_send_message` bridge |
+| `RAAppManager` | katalog w UI, laczy stored apps z inline wynikami z historii sesji |
 
-Sciezka wykonania:
+## `raapp_create`: create + persist + render
 
-1. Backend waliduje blok przez `RAAppService.execute()`.
-2. Jesli walidacja przejdzie, backend zapisuje wynik przez `saveGeneratedApp()` jako ZIP w katalogu user RA-App.
-3. Do czatu wraca blok `status: 'ready'` z:
-   - `type`
-   - `mode`
-   - `content`
-   - `renderedContent`
-   - `storedAppId`
+Aktualny flow nie konczy sie na samym renderze w czacie.
+`raapp_create` robi dwa skutki uboczne:
 
-To oznacza, ze app jest jednoczesnie:
+- przygotowuje blok do inline renderu
+- zapisuje wygenerowany app do katalogu user RA-App
 
-- widoczny inline w aktualnej sesji jako wynik narzedzia,
-- zapisany w katalogu RA-App do pozniejszego uruchamiania.
+```mermaid
+sequenceDiagram
+    participant LLM as LLM
+    participant Chat as ChatService
+    participant Dispatch as ToolDispatchService
+    participant User as User
+    participant Tool as RaAppCreateTool
+    participant RA as RAAppService
+    participant FE as ToolCallBubble and RAAppRenderer
 
-### `run_raapp`
-
-`run_raapp` bierze zapisany app po jego `id` i odpala go z katalogu RA-App.
-
-- Dla `gui` czyta `ui.gui`, opcjonalnie `systems.yml`, buduje `data.output` i renderuje DSL.
-- Dla `html` czyta `main.html` albo `index.html` i oddaje ten HTML do iframe.
-
-## 2. Co backend faktycznie laduje z paczki
-
-RAApp jest paczka ZIP. Backend zna tylko te pliki:
-
-- `meta.yml`
-- `main.html` albo `index.html`
-- `ui.gui`
-- `systems.yml`
-
-W praktyce oznacza to:
-
-- HTML app jest ladowany z jednego pliku HTML.
-- GUI app jest ladowany z jednego pliku DSL.
-- `systems.yml` jest jedynym wspieranym plikiem pomocniczym po stronie GUI.
-- Dodatkowe pliki wrzucone do ZIP-a nie sa normalnie renderowane ani mapowane do URL-i.
-
-To jest bardzo wazne dla pytania o strony i komponenty: obecny loader nie robi bundlowania, nie wystawia zasobow z ZIP-a pod publicznym URL i nie sklada wielu plikow w jedna aplikacje.
-
-## 3. Gdzie to jest przechowywane
-
-Domyslny root to `./data/ra-apps` pod kontrola `RA_APPS_PATH`.
-
-Uklad katalogow:
-
-```text
-data/ra-apps/
-  core/
-  user/
-  tmp/
+    LLM->>Chat: tool call raapp_create
+    Chat->>Dispatch: dispatch(callId, raapp_create, args)
+    Dispatch-->>User: tool:confirmation_required
+    User-->>Dispatch: tool:confirm
+    Dispatch->>Tool: execute(request)
+    Tool->>RA: execute(block)
+    Tool->>RA: saveGeneratedApp(...)
+    RA-->>Tool: stored app metadata
+    Tool-->>Chat: ToolResult(status=success, type, mode, content, renderedContent, storedAppId)
+    Chat-->>FE: tool:result
+    FE->>FE: render inline RA-App block
 ```
 
-Mozliwe sa dwa warianty w `user/`:
+Praktyczna konsekwencja:
 
-### Flat ZIP
+- to nie jest tylko "chwilowy widget w jednej sesji"
+- po sukcesie masz tez zapisany artefakt, ktory moze wejsc do katalogu RA-App
 
-Tak zapisywane sa m.in. appki tworzone przez `raapp_create`:
+## `run_raapp`: realny runtime HTML vs GUI
 
-```text
-data/ra-apps/user/
-  generated-abc12345.zip
-  my-upload.zip
+`run_raapp` odpala juz zapisany app z katalogu, a sciezka zalezy od typu appki.
+
+```mermaid
+flowchart TD
+    Run[run_raapp] --> Load[RAAppService.getById]
+    Load --> Kind{html or gui}
+
+    Kind -- html --> HtmlFile[read main.html or index.html]
+    HtmlFile --> HtmlBlock[return HTML RA-App block]
+
+    Kind -- gui --> GuiFile[read ui.gui]
+    GuiFile --> Systems{systems.yml present?}
+    Systems -- yes --> ExecuteSystems[executeSystems fills data.output]
+    Systems -- no --> EmptyData[use empty data object]
+    ExecuteSystems --> Compile[compile GUI DSL]
+    EmptyData --> Compile
+    Compile --> GuiBlock[return GUI payload with nodes and data]
+
+    HtmlBlock --> Render[RAAppRenderer]
+    GuiBlock --> Render
 ```
 
-### Wersjonowana grupa
+## HTML vs GUI - realne roznice
 
-To layout obslugiwany przez `RAAppVersioningService`:
+| Tryb | Zrodla | Render path | Dobre do | Obecne ograniczenia |
+| --- | --- | --- | --- | --- |
+| `html` | `main.html` albo `index.html` | iframe przez `srcDoc` | bogatsze UI, wieloekranowe flow, wlasny JS i CSS | nadal jeden dokument; brak serwowania assetow z ZIP-a pod URL-ami |
+| `gui` | `ui.gui` plus opcjonalne `systems.yml` | `compileGui(...)` -> JSON wire format -> `GuiDslRenderer` | prostsze dashboardy, panele, deklaratywne widoki | to nie jest pelny frontend framework ani router |
+
+Wazne niuanse:
+
+- dla GUI backend moze policzyc `data.output` z `systems.yml`
+- dla HTML nie ma analogicznego mechanizmu automatycznego wstrzykiwania danych do DOM
+- HTML moze byc interaktywny tylko wtedy, gdy sam wykona `postMessage` do hosta
+
+## Katalog i wersjonowanie user-apps
+
+User RA-Appy nie musza zyc tylko jako plaskie ZIP-y.
+Obecny backend obsluguje wersjonowane grupy z draftem, current i historia.
+
+```mermaid
+flowchart LR
+    Upload[ZIP upload] --> Exists{current.zip exists?}
+    Exists -- no --> Current[current.zip]
+    Exists -- yes --> Draft[draft.zip]
+
+    Draft --> Approve[POST groups slug approve]
+    Approve --> Archive[move old current.zip to history]
+    Archive --> Promote[promote draft.zip to current.zip]
+    Promote --> Bump[patch meta version]
+
+    HistoryVersion[history version zip] --> Rollback[POST groups slug rollback version]
+    Rollback --> Draft
+
+    Draft --> Discard[POST groups slug discard-draft]
+    Discard --> Removed[draft removed]
+```
+
+Layout na dysku dla wersjonowanej grupy:
 
 ```text
-data/ra-apps/user/<slug>/
+RA_APPS_PATH/user/<slug>/
   current.zip
   draft.zip
   history/
@@ -100,268 +145,98 @@ data/ra-apps/user/<slug>/
   .manifest.json
 ```
 
-Frontend pokazuje oba zrodla:
+Aktualne endpointy kontrolera:
 
-- katalog RA-App z backendu,
-- inline appki znalezione w wiadomościach aktualnej sesji.
+- `GET /ra-apps`
+- `GET /ra-apps/:id`
+- `POST /ra-apps/upload`
+- `DELETE /ra-apps/:id`
+- `GET /ra-apps/groups`
+- `GET /ra-apps/groups/:slug`
+- `POST /ra-apps/groups/:slug/draft`
+- `POST /ra-apps/groups/:slug/approve`
+- `POST /ra-apps/groups/:slug/discard-draft`
+- `POST /ra-apps/groups/:slug/rollback/:version`
+- `DELETE /ra-apps/groups/:slug`
+- `POST /ra-apps/groups/slug`
 
-## 4. Czy to jest widoczne w VFS?
+## HTML iframe bridge: resize + user answer -> chat
 
-Nie, nie w obecnym modelu.
+`HtmlIframeRenderer` robi cos wiecej niz zwykle osadzenie `srcDoc`.
+Wstrzykuje mostek do resize i nasluchuje wiadomosci z iframe.
 
-Obecnie:
+```mermaid
+sequenceDiagram
+    participant App as HTML RA-App iframe
+    participant Renderer as HtmlIframeRenderer
+    participant Store as sessionStore
+    participant SDK as KalioSDK
 
-- RAApp catalog nie jest podpiety do VFS sesji,
-- `RAAppManager` ma parametr `onOpenVFS`, ale jest jawnie nieuzywany,
-- wygenerowany design trafia do katalogu RA-App jako ZIP, nie do `sessions/{sessionId}/files/`.
+    App->>Renderer: postMessage { type: 'raapp_resize', height }
+    Renderer->>Renderer: update iframe height
 
-Czyli odpowiedz brzmi:
-
-- nie jako pliki VFS,
-- tak jako czesc paczki RAApp na dysku backendu,
-- tak jako inline wynik `raapp_create` w historii czatu.
-
-## 5. Ruznica miedzy `raapp html` i `raapp gui`
-
-## `html`
-
-To pelny HTML wrzucony do iframe.
-
-Plusy:
-
-- najlepsza opcja do prawdziwych stron i podstron,
-- mozesz zrobic hash router, taby, wizard, modal, wlasny CSS i JS,
-- mozesz miec wlasne komponenty JS wewnatrz jednego dokumentu,
-- interakcje z czatem ida przez:
-
-```js
-window.parent.postMessage({ type: 'kalio_send_message', content: 'wybor usera' }, '*')
+    App->>Renderer: postMessage { type: 'kalio_send_message', content }
+    Renderer->>Store: add user ChatMessage to active session
+    Renderer->>SDK: sendMessage(sessionId, content, personaId)
 ```
 
-Ograniczenia:
+To oznacza, ze interaktywny HTML RA-App nie potrzebuje nowego backendowego API do wyslania odpowiedzi do czatu.
+Wystarczy ten kontrakt:
 
-- renderer czyta tylko jeden dokument HTML,
-- dodatkowe pliki z ZIP-a nie sa serwowane jako assets,
-- jesli chcesz wiele stron, musza zyc w jednym `main.html` jako client-side routing lub przelaczane widoki,
-- brak bezposredniego dostepu do host filesystem i VFS z poziomu iframe.
-
-## `gui`
-
-To lekki DSL kompilowany do drzewa wezlow i renderowany przez `GuiDslRenderer`.
-
-Plusy:
-
-- prosty do generowania z modelu,
-- nadaje sie do kart, paneli, CTA, prostych statusow i quizow,
-- ma podstawowe bindowanie danych przez `[output.key]`,
-- przy `run_raapp` moze korzystac z `systems.yml` i `inputs`.
-
-Ograniczenia:
-
-- to nie jest pelny frontend framework,
-- nie ma wbudowanego routera ani wielostronicowosci,
-- nie ma runtime importow ani skladania wielu plikow,
-- nie ma lokalnego stanu formularzy po stronie renderer-a,
-- parser zna wiecej tagow niz renderer realnie obsluguje; wiele nieznanych tagow konczy jako zwykly `div`.
-
-W praktyce `gui` traktuj jako deklaratywny layout DSL, a nie odpowiednik Reacta.
-
-## 6. Jak dodawac nowe strony
-
-### W `html`
-
-Nowe strony dodajesz wewnatrz jednego dokumentu `main.html` lub `index.html`.
-
-Najbezpieczniejsze wzorce:
-
-- hash routing, np. `#/home`, `#/settings`, `#/summary`,
-- przelaczanie widokow po stanie JS,
-- wizard oparty o `currentStep`.
-
-Czyli "nowa strona" dzisiaj oznacza raczej:
-
-- nowy widok w tym samym HTML,
-- nie osobny plik `page-2.html`.
-
-Osobne pliki HTML w ZIP-ie nie sa obecnie automatycznie obslugiwane przez renderer.
-
-### W `gui`
-
-Nie ma first-class pojecia strony.
-
-Mozesz zrobic tylko pseudo-strony, np.:
-
-- kilka sekcji pokazywanych przez `visible`,
-- uklad zakladek,
-- kilka kart/widokow warunkowych.
-
-To nadal bedzie jeden `ui.gui`, nie routing.
-
-Jesli potrzebujesz prawdziwej nawigacji miedzy stronami, przechodz na `html`.
-
-## 7. Jak tworzyc komponenty w `gui`
-
-W `gui` masz mechanizmy komponentopodobne, ale one dzialaja jako rozwijanie AST przy kompilacji, a nie runtime komponenty.
-
-Glówne mechanizmy:
-
-- `template X { ... }` dla wspolnych propsow,
-- `using = "X"` do nalozenia template,
-- `types Name { type Card = div { ... } }` dla aliasow komponentowych,
-- `block` i `blockoverride` do podstawiania fragmentow.
-
-Bezpieczny minimalny przyklad:
-
-```gui
-template Surface {
-  class = "rounded-lg border border-base-300 p-4 bg-base-200"
-}
-
-types UI {
-  type PrimaryButton = button {
-    class = "btn btn-primary"
-    text = "Continue"
-  }
-
-  type Card = div {
-    class = "rounded-lg border border-base-300 p-4"
-    block body { }
-  }
-}
-
-div {
-  using = "Surface"
-  label = { text = "Dashboard" }
-
-  PrimaryButton {
-    text = "Open"
-    onclick = "open dashboard"
-  }
-}
-
-Card {
-  blockoverride body {
-    label = { text = "Card body" }
-  }
-}
+```javascript
+window.parent.postMessage({ type: 'kalio_send_message', content: 'user answer' }, '*');
 ```
 
-Realnie obslugiwane zachowania renderer-a to glownie:
+## Pending approvals i natywne efekty
 
-- `window`, `container`, `widget`, `panel`
-- `vbox`, `hbox`
-- `label`, `span`
-- `button`
-- `divider`
-- `spacer`
-- `progressbar`
+Inline RA-App moze wygenerowac pending approvals dla natywnych systemow.
+To nie jest wykonywane bezposrednio w iframe. Najpierw approval trafia do bazy, a potem UI wysyla decyzje przez socket.
 
-Wiele innych tagow jest parsowanych, ale renderer nie daje im specjalnego zachowania.
+```mermaid
+sequenceDiagram
+    participant Result as tool_result with pendingApprovals
+    participant User as User
+    participant GW as ChatGateway
+    participant HITL as RAAppHITLService
+    participant Native as NativeSystemRegistry
+    participant FE as ChatInterface
 
-## 8. Jak tworzyc komponenty w `html`
+    Result-->>User: show pending native approvals
+    User->>GW: raapp:approve or raapp:cancel
 
-Tutaj po prostu budujesz normalny frontend w jednym pliku HTML:
+    alt approve
+        GW->>HITL: executeApproved(requestIds, sessionId)
+        HITL->>Native: executeApproved(system, args, sessionCtx)
+        Native-->>HITL: result
+        HITL-->>GW: executed or error results
+    else cancel
+        GW->>HITL: cancelApprovals(requestIds, sessionId)
+        HITL-->>GW: cancelled result with toolCallId
+    end
 
-- funkcje JS,
-- komponenty oparte o template stringi,
-- CSS classes i utility classes,
-- hash router,
-- modularyzacja wewnatrz jednego dokumentu.
+    GW-->>FE: raapp:native_result
+    FE->>FE: rewrite matching tool_result message with nativeResults and no pendingApprovals
+```
 
-To jest dzisiaj lepszy wybor dla:
+Wazne szczegoly z implementacji:
 
-- design systemu,
-- wieloekranowych flow,
-- zlozonych interakcji,
-- niestandardowych widgetow.
+- approvals sa zapisywane w tabeli `raapp_pending_approvals`
+- approve wykonuje realny natywny system dopiero po zatwierdzeniu
+- cancel nie wykonuje efektu, ale zwraca wynik do UI tak, zeby bubble mogla sie zaktualizowac
+- `ChatInterface` aktualizuje istniejacy `tool_result` message zamiast tworzyc nowy typ historii
 
-## 9. Co z danymi i interakcjami
+## Co jest prawda dzis, a co nie
 
-### GUI
+Prawda dzis:
 
-Przy `run_raapp` dla GUI:
+- RA-App catalog nie jest podpiety pod sesyjny VFS.
+- `RAAppManager` korzysta z REST katalogu, ale jednoczesnie potrafi pokazac inline appki znalezione w historii sesji.
+- `RAAppService` laduje tylko znane pliki: `meta.yml`, `main.html` lub `index.html`, `ui.gui`, `systems.yml`.
+- wersjonowanie dotyczy user-apps; core apps pozostaja read-only.
 
-- `inputs` sa zamieniane na `data.output`,
-- tekst moze bindowac dane jako `[output.name]`,
-- `onclick` na buttonie wysyla akcje jako wiadomosc usera do czatu,
-- `visible`, `disabled` i `dynamic_class` dzialaja na prostych warunkach tekstowych/liczbowych.
+Nieprawda dzis:
 
-### HTML
-
-Przy `html` nie ma analogicznego mechanizmu wstrzykiwania `inputs` do DOM.
-
-Obecnie HTML path robi praktycznie passthrough: bierze `main.html` i renderuje go w iframe. Jesli HTML ma rozmawiac z czatem, musi sam wywolac `postMessage`.
-
-## 10. Czy moge zaczytywac ten design z FS?
-
-Tak, ale tylko na poziomie katalogu RA-App, nie jako dowolny runtime file access.
-
-### Co jest wspierane
-
-- wrzucenie gotowego ZIP-a do `data/ra-apps/core/` lub `data/ra-apps/user/`,
-- upload ZIP-a przez endpoint `/ra-apps/upload`,
-- wersjonowane paczki w `data/ra-apps/user/<slug>/current.zip` i `draft.zip`,
-- automatyczne ladowanie `meta.yml`, `main.html`/`index.html`, `ui.gui`, `systems.yml`.
-
-### Czego nie ma
-
-- ladowania designu z VFS sesji jako live source dla RAApp catalog,
-- bezposredniego `import` z plikow obok `ui.gui`,
-- serwowania assetow z ZIP-a pod sciezkami typu `./styles.css` albo `./page2.html`,
-- dostepu runtime do host filesystem z poziomu iframe albo GUI renderer-a.
-
-## 11. Najpraktyczniejszy model pracy dzisiaj
-
-Jesli chcesz rozwijac RAApp w kontrolowany sposob, obecnie najbardziej praktyczne sa dwa warianty:
-
-### Wariant A - `html`
-
-1. Trzymaj zrodlo w repo albo poza katalogiem RA-App.
-2. Buduj jedna samowystarczalna strone `main.html`.
-3. Pakuj do ZIP z `meta.yml`.
-4. Wrzucaj do `data/ra-apps/user/` albo uploaduj.
-
-To jest najlepszy wariant dla designu, wielu ekranow i komponentow.
-
-### Wariant B - `gui`
-
-1. Trzymaj jeden `ui.gui`.
-2. Opcjonalnie dodaj `systems.yml`, jesli app ma liczyc output na backendzie.
-3. Pakuj do ZIP z `meta.yml`.
-4. Uruchamiaj przez `run_raapp`.
-
-To ma sens dla prostych narzedzi i malych widokow, nie dla pelnej wielostronicowej aplikacji.
-
-## 12. Odpowiedz na Twoje pytania wprost
-
-### Jak aktualnie dziala RAApp design?
-
-- `html`: jeden dokument HTML renderowany w iframe.
-- `gui`: jeden plik DSL kompilowany do JSON i renderowany przez React.
-
-### Jak moge dodawac nowe strony?
-
-- w `html`: jako widoki w tym samym `main.html`, najlepiej hash router,
-- w `gui`: tylko jako pseudo-strony w jednym `ui.gui`; brak prawdziwego routingu.
-
-### Jak moge tworzyc komponenty?
-
-- w `html`: normalnie w JS/CSS w ramach jednego dokumentu,
-- w `gui`: przez `template`, `types`, `using`, `block`, `blockoverride`, ale to jest mechanizm ograniczony.
-
-### Czy sa widoczne w VFS?
-
-- nie jako pliki sesyjnego VFS,
-- tak jako zawartosc paczki RAApp na dysku backendu,
-- tak jako wynik toola w historii sesji.
-
-### Czy to rozni sie od aplikacji RAApp HTML?
-
-- tak, bardzo:
-- `html` jest pelniejszym runtime UI,
-- `gui` jest lekkim DSL z ograniczonym rendererem.
-
-### Czy moge zaczytywac design z FS?
-
-- tak, jako ZIP w katalogu RA-App,
-- nie, jako dowolne live pliki z VFS lub host FS podczas renderowania.
+- RA-App nie jest pelnym bundlerem ani serwerem assetow.
+- GUI DSL nie jest odpowiednikiem Reacta ani wielostronicowego frameworka.
+- HTML RA-App nie ma automatycznego dostepu do host filesystem ani session VFS.
+- inline wynik `raapp_create` nie jest tym samym co wersjonowana grupa w katalogu, nawet jesli oba reprezentuja ten sam pomysl na appke.

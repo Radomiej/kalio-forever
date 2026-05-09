@@ -1,229 +1,203 @@
 # Tool Architecture
 
-## Overview
+This document describes how tools are registered, filtered, confirmed, executed, and persisted in the current Kalio runtime.
+For the wider system map, see `application-architecture-current.md`.
 
-This document describes how tools are registered, accessed by the chat core, and executed in the Kalio system.
+## Source of truth components
 
-## Architecture Diagram
+| Component | Current responsibility |
+| --- | --- |
+| `ToolRegistryService` | Reads `@Tool()` and `@ConfirmedTool()` metadata from native tool classes and exposes a typed registry |
+| `ToolDispatchService` | Merges native and MCP tool metadata, handles confirmation, dispatches calls, and returns `ToolResult` |
+| `ChatService` | Emits `tool:start`, calls dispatch, emits `tool:result`, and persists non-cancelled results into history |
+| `MCPService` | Dynamic external tool source used in addition to native tools |
+| `SubagentRuntimeService` | Handles child-session execution when sub-agent tools delegate work |
+| `ToolModule` | Wires concrete native tool classes into Nest DI |
+| `ToolController` | Exposes REST-level tool listing and admin surfaces |
+
+## Current native tool families
+
+| Family | Representative tools | Primary surface touched |
+| --- | --- | --- |
+| Session VFS | `vfs_write`, `vfs_read`, `vfs_list`, VFS search helpers | Session-scoped files under the active VFS session |
+| Local filesystem and search | `fs_read`, `fs_list`, `fs_write`, `grep_search`, `file_search` | Allowed host paths |
+| Session KV | `kv_write`, `kv_read`, `kv_list`, `kv_delete` | Per-session persistent KV store |
+| Terminal | `terminal_spawn`, `terminal_list`, `terminal_output`, `terminal_kill` | Host processes with session-aware UI state |
+| RA-App | `raapp_create`, `raapp_compile`, `run_raapp`, `list_raapps` | RA-App catalog and inline render path |
+| Memory | `memory_ingest`, `memory_search`, `memory_ingest_conversation` | Persona-scoped long-term memory |
+| Sub-agent | `run_subagent`, `spawn_subagent`, `message_subagent` | Child chat sessions and optional VFS copy-back |
+| Image | `image_generate`, `image_edit`, `image_view` | Session VFS plus provider-backed image APIs |
+| CLI agent | `run_cli_agent` | External coding-agent process execution |
+| Metadata and discovery | `list_tools`, `get_tool_details` | LLM tool self-discovery |
+| Settings models | `skill_*`, `persona_*` | Persistent DB-backed configuration |
+| Web search | `web_search` | Provider-backed network search |
+
+## Registration path
+
+Every native tool is a Nest provider class decorated with `@Tool(...)` or `@ConfirmedTool(...)`.
+`ToolRegistryService` receives all tool instances through DI, reads their decorator metadata via `Reflector`, and turns them into registry entries that `ChatModule` injects into `ToolDispatchService` through the `TOOL_REGISTRY` token.
 
 ```mermaid
-graph TB
-    subgraph ToolModule["Tool Module"]
-        ToolClasses["@Tool Decorated Classes"]
-        ToolRegistry[ToolRegistryService]
-        ToolController[ToolController]
+flowchart LR
+    subgraph Native[Native tool classes]
+        Decorators[Tool and ConfirmedTool decorators]
+        Families[VFS, FS, KV, terminal, RA-App, memory, sub-agent, image, persona, skill, CLI agent]
     end
 
-    subgraph ChatModule["Chat Module"]
-        TOOl_REGISTRY_Provider[TOOL_REGISTRY Provider]
-        ToolDispatch[ToolDispatchService]
-        ToolCallHandler[ToolCallHandler]
-        ChatService[ChatService]
-        ChatGateway[ChatGateway]
+    subgraph ToolModule[Tool module]
+        Registry[ToolRegistryService]
+        Controller[ToolController]
     end
 
-    subgraph LLM["LLM Provider"]
-        LLMProvider[LLM Service]
+    subgraph ChatModule[Chat module]
+        Token[TOOL_REGISTRY token]
+        Dispatch[ToolDispatchService]
+        Chat[ChatService]
     end
 
-    subgraph RaAppModule["RA-App Module"]
-        RaAppService[RAAppService]
-        RaAppController[RAAppController]
-        RaAppTools[RaApp Tools]
+    subgraph Dynamic[Dynamic source]
+        MCP[MCPService]
     end
 
-    subgraph Client["Client Frontend"]
-        WebSocket[Socket.IO Client]
-        RESTClient[REST API Client]
-    end
-
-    ToolClasses -->|Reflector reads metadata| ToolRegistry
-    ToolRegistry -->|getEntries| TOOl_REGISTRY_Provider
-    TOOl_REGISTRY_Provider -->|DI injection| ToolDispatch
-
-    ToolRegistry -->|getEntries| ToolController
-    RESTClient -->|GET /tools| ToolController
-
-    ChatService -->|getToolMetas| ToolDispatch
-    ToolDispatch -->|dispatch| ToolClasses
-
-    LLMProvider -->|tool_call chunks| ChatService
-    ChatService -->|process chunks| ToolCallHandler
-    ToolCallHandler -->|collect in TurnState| ChatService
-    ChatService -->|dispatch after done| ToolDispatch
-
-    ToolDispatch -->|tool:confirmation_required| ChatGateway
-    ChatGateway -->|Socket.IO| WebSocket
-    WebSocket -->|resolve/cancel| ChatGateway
-    ChatGateway -->|resolveConfirmation/cancelConfirmation| ToolDispatch
-
-    ToolDispatch -->|execute| ToolClasses
-    ToolClasses -->|ToolCallRequest| RaAppTools
-    RaAppTools -->|execute| RaAppService
-
-    RaAppController -->|CRUD operations| RaAppService
-    RESTClient -->|/ra-apps endpoints| RaAppController
-
-    ToolDispatch -->|tool:result| ChatService
-    ChatService -->|saveToolResult| ToolDispatch
-    ChatService -->|tool_result to LLM| LLMProvider
-
-    style ToolModule fill:#e1f5ff
-    style ChatModule fill:#ffe1e1
-    style LLM fill:#e1ffe1
-    style RaAppModule fill:#f5e1ff
-    style Client fill:#fff5e1
+    Families --> Decorators
+    Decorators --> Registry
+    Registry --> Token
+    Token --> Dispatch
+    Chat --> Dispatch
+    Dispatch --> MCP
+    Controller --> Registry
 ```
 
-## Tool Registration Flow
+Important practical details:
 
-1. **Tool Definition**: Each tool is a class decorated with `@Tool()` containing:
-   - `name`: Tool identifier
-   - `description`: What the tool does
-   - `parameters`: JSON schema for arguments
-   - `requiresConfirmation`: Whether user approval is needed
+- The registry is static for native tools and dynamic for MCP tools.
+- `setOverride(toolName, requiresConfirmation)` mutates the in-memory metadata object directly, so confirmation policy changes are visible immediately to `ToolDispatchService`.
+- `@ConfirmedTool(...)` exists to make persistent or destructive tool policy easier to apply consistently.
 
-2. **Metadata Collection**: `ToolRegistryService` constructor:
-   - Injects all tool classes via DI
-   - Uses NestJS Reflector to read `@Tool()` metadata
-   - Creates `ToolEntry` with `meta` and `execute` function
-   - Exposes via `getEntries()`
+## Runtime models
 
-3. **Module Integration**: ChatModule:
-   - Imports ToolModule
-   - Provides `TOOL_REGISTRY` token using factory
-   - Factory calls `ToolRegistryService.getEntries()`
-   - Injected into `ToolDispatchService`
+| Model | Fields that matter most at runtime |
+| --- | --- |
+| `ToolMeta` | `name`, `description`, `parameters`, `requiresConfirmation` |
+| `ToolCallRequest` | `sessionId`, `vfsSessionId`, `callId`, `args`, `availableTools`, `agentRun`, `_emit` |
+| `ToolConfirmationRequest` | `requestId`, `toolCallId`, `sessionId`, `toolName`, `args`, `timeoutMs`, `agentRun` |
+| `ToolResult` | `callId`, `status`, `data`, `errorCode`, `errorMessage`, optional `sessionId`, `toolName`, `agentRun` |
 
-## Tool Execution Flow
+Two fields deserve special attention:
 
-### 1. LLM Tool Call
+- `vfsSessionId` lets a tool operate either in the parent session VFS or in an isolated child VFS during sub-agent runs.
+- `_emit` lets long-running tools stream progress events before the final `tool:result` arrives. `run_cli_agent` uses this for `cli_agent:progress`.
+
+## Dispatch sequence
 
 ```mermaid
 sequenceDiagram
-    participant LLM as LLM Provider
     participant Chat as ChatService
-    participant Handler as ToolCallHandler
-    participant State as TurnState
     participant Dispatch as ToolDispatchService
-    participant Tool as Tool Class
-    participant Gateway as ChatGateway
-    participant Client as Client
+    participant FE as Frontend
+    participant Native as Native tool class
+    participant MCP as MCPService
 
-    LLM->>Chat: tool_call chunk
-    Chat->>Handler: handle(chunk, ctx)
-    Handler->>State: addToolCall(id, name, args)
-    LLM->>Chat: done chunk
-    Chat->>Chat: check state.toolCalls
-    loop For each tool call
-        Chat->>Dispatch: dispatch(callId, name, args, ctx)
-        Dispatch->>Dispatch: check requiresConfirmation
-        alt requiresConfirmation=true
-            Dispatch->>Gateway: emit tool:confirmation_required
-            Gateway->>Client: Socket.IO event
-            Client->>Gateway: resolve/cancel
-            Gateway->>Dispatch: resolveConfirmation/cancelConfirmation
+    Chat->>Dispatch: dispatch(callId, toolName, args, ctx, toolMetas)
+
+    alt native tool
+        Dispatch->>Dispatch: lookup in native toolMap
+        alt requires confirmation and not auto-approved
+            Dispatch-->>FE: tool:confirmation_required
+            FE-->>Dispatch: resolveConfirmation or cancelConfirmation
         end
-        Dispatch->>Tool: execute(ToolCallRequest)
-        Tool-->>Dispatch: result data
-        Dispatch->>Chat: ToolResult
-        Chat->>Chat: saveToolResult to DB
-        Chat->>Gateway: emit tool:result
-        Gateway->>Client: Socket.IO event
+        Dispatch->>Native: execute(ToolCallRequest)
+        Native-->>Dispatch: data or throw
+    else MCP tool
+        Dispatch->>MCP: resolveToolName(prefixedName)
+        alt MCP tool metadata requires confirmation
+            Dispatch-->>FE: tool:confirmation_required
+            FE-->>Dispatch: resolveConfirmation or cancelConfirmation
+        end
+        Dispatch->>MCP: callTool(serverId, originalName, args)
+        MCP-->>Dispatch: data or throw
+    else unknown tool
+        Dispatch-->>Chat: ToolResult(status=error, TOOL_NOT_FOUND)
     end
-    Chat->>LLM: next iteration with tool_results
+
+    Dispatch-->>Chat: ToolResult
+    Chat-->>FE: tool:result
+    Chat->>Chat: persist non-cancelled results as tool_result messages
 ```
 
-### 2. Human-in-the-Loop (HITL) Confirmation
+What `ToolDispatchService` does beyond simple routing:
 
-Tools with `requiresConfirmation: true` require user approval:
+- binds pending confirmations to both `requestId` and `sessionId`
+- applies the same confirmation gate to MCP tools if their metadata says so
+- enriches sub-agent results with `sessionId`, `toolName`, and `agentRun`
+- converts thrown executor errors into structured `ToolResult(status='error')`
 
-- Timeout: 30 seconds
-- Events:
-  - `tool:confirmation_required`: Sent to client with requestId, toolName, args
-  - Client responds via Socket.IO with approve/cancel
-- If timeout or cancelled: Tool execution skipped, returns `cancelled` status
+## Confirmation policy and auto-approval
 
-## RA-App Integration
+```mermaid
+flowchart TD
+    Call[Tool call] --> Kind{native or MCP?}
 
-### As Tools
+    Kind -- native --> NativeConfirm{meta.requiresConfirmation?}
+    Kind -- MCP --> MCPPConfirm{mcp meta requiresConfirmation?}
 
-RA-Apps are exposed as tools that the LLM can invoke:
+    NativeConfirm -- no --> Execute[execute tool]
+    MCPPConfirm -- no --> Execute
 
-- `run_raapp`: Execute stored RA-App by ID
-- `raapp_create`: Create inline RA-App from HTML/GUI DSL
-- `list_raapps`: List available RA-Apps
-- `raapp_compile`: Validate GUI DSL in sandbox
+    NativeConfirm -- yes --> AutoApprove{sub-agent run and isolated vfs_write?}
+    AutoApprove -- yes --> Execute
+    AutoApprove -- no --> Await[emit tool:confirmation_required]
 
-### REST API
+    MCPPConfirm -- yes --> Await
+    Await --> Decision{confirmed?}
+    Decision -- no --> Cancelled[return ToolResult cancelled]
+    Decision -- yes --> Execute
 
-RA-Apps also have direct REST API access at `/ra-apps`:
-
-- `GET /`: List all RA-Apps
-- `GET /:id`: Get specific RA-App details
-- `POST /upload`: Upload new RA-App (zip file)
-- `DELETE /:id`: Delete user RA-App (core apps protected)
-
-### Interactive Communication
-
-Interactive RA-Apps can send messages back to chat:
-
-```javascript
-window.parent.postMessage({
-  type: "kalio_send_message",
-  content: "user answer"
-}, "*");
+    Execute --> Result[return success or error ToolResult]
 ```
 
-## Tool Categories
+Current rules from the code:
 
-### VFS Tools
-- `vfs_write`: Write to virtual file system
-- `vfs_read`: Read from virtual file system
-- `vfs_list`: List virtual file system contents
+- Pending confirmations live in `ToolDispatchService.pending` and are keyed by generated `requestId` plus bound `sessionId`.
+- `ChatGateway` rejects `tool:confirm` and `tool:cancel` if the socket does not currently own the session.
+- The only built-in auto-approve special case is `vfs_write` during a sub-agent run when:
+  - `agentRun.agentType === 'subagent'`
+  - `agentRun.vfsMode === 'isolated'`
+  - `ctx.vfsSessionId === ctx.sessionId`
+- Sub-agent confirmation requests currently use `timeoutMs = 0`; the runtime is optimized around isolated child writes being auto-approved rather than timing out.
 
-### Filesystem Tools
-- `fs_read`: Read from real filesystem
-- `fs_write`: Write to real filesystem
-- `fs_list`: List real filesystem contents
+## Persistence and UI consequences
 
-### Key-Value Tools
-- `kv_write`: Write to KV store
-- `kv_read`: Read from KV store
-- `kv_list`: List KV store keys
-- `kv_delete`: Delete from KV store
+Tool execution is not finished when the executor returns.
+The runtime does a few more things that shape the UI and history model:
 
-### Search Tools
-- `grep_search`: Search files with regex
-- `file_search`: Search files by name
+1. `ChatService` emits `tool:start` before dispatch so the UI can open a live tool chip.
+2. `ToolDispatchService` returns a structured `ToolResult` instead of throwing through the socket layer.
+3. `ChatService` emits `tool:result` immediately after dispatch finishes.
+4. For every non-cancelled result, `ChatService` persists a `tool_result` message into session history.
+5. `ChatInterface` also mirrors successful results into `sessionStore` immediately so the chat UI does not need to wait for a REST reload.
 
-### Terminal Tools
-- `terminal_spawn`: Spawn terminal process
-- `terminal_list`: List running terminals
-- `terminal_output`: Get terminal output
-- `terminal_kill`: Kill terminal process
+That leads to an important split:
 
-### Memory Tools
-- `memory_ingest`: Ingest data to memory
-- `memory_search`: Search memory
-- `memory_ingest_conversation`: Ingest conversation to memory
+- `ToolActivity` is live UI state.
+- `tool_result` messages are durable history.
 
-### Subagent Tool
-- `subagent`: Spawn subagent for delegated tasks
+## Tool filtering
 
-## Persona-Based Tool Filtering
+Filtering happens before the LLM sees the tool list, not inside individual tool executors.
 
-Tools can be filtered by persona configuration:
+Current behavior in `ChatService.filterTools(...)`:
 
-- Persona config has `availableSkills` array
-- If empty: All tools available
-- If populated: Only tools with matching names available
-- Filtered tool list sent via `chat:context` event
+- native tools are filtered by `persona.allowedTools`
+- MCP tools are filtered by `persona.mcpPolicy`
+- when `mcpPolicy === 'allow_list'`, MCP tool visibility is also driven by the concrete tool names present in `persona.allowedTools`
 
-## Security Considerations
+This means tool visibility is a session-level orchestration concern, while tool execution remains a dispatch concern.
 
-1. **Confirmation Required**: Dangerous tools (fs_write, terminal_spawn, etc.) require user approval
-2. **Timeout Protection**: HITL confirmation times out after 30 seconds
-3. **Core App Protection**: Core RA-Apps cannot be deleted via API
-4. **Sandbox Execution**: GUI DSL compiled in isolated VM (RAAppSandboxService)
-5. **Abort Support**: All tool calls respect AbortController for user interruption
+## Current invariants worth preserving
+
+- Tool names must be unique across the merged native and MCP tool set exposed to the model.
+- A cancelled tool should still produce a visible `ToolResult`, but it must not be persisted as a `tool_result` message.
+- Confirmation enforcement must stay session-bound in both the gateway and dispatch layer.
+- Any tool that streams progress should use `_emit` and still end with a normal `ToolResult`.
+- New mutating tools should prefer `@ConfirmedTool(...)` unless there is a deliberate reason not to use it.

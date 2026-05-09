@@ -1,400 +1,258 @@
 # Chat, Streaming & Tools Architecture
 
-## Overview
+This document describes the current chat hot path.
+For the broader module map, see `application-architecture-current.md`.
 
-This document describes the architecture of chat, streaming, and tools handling in Kalio.
+## Scope
 
-## Architecture Diagram
+This document covers:
+
+- the socket path from `chat:send` to `agent:done`
+- per-session queueing and interrupts in `SessionPipelineService`
+- the handoff between streaming and tool execution
+- session-scoped event fan-out used by child sessions and canvas previews
+- the split between durable message state and live UI activity state in the frontend
+
+## Current component map
 
 ```mermaid
-graph TB
-    subgraph Frontend["Frontend (React)"]
-        ChatInterface["ChatInterface.tsx"]
-        ChatInput["ChatInput.tsx"]
-        MessageBubble["MessageBubble.tsx"]
-        AgentTurnBubble["AgentTurnBubble.tsx"]
-        ToolCallBubble["ToolCallBubble.tsx"]
-        EventBus["eventBus (KalioSDK)"]
-        SessionStore["sessionStore"]
-        AgentStore["agentStore"]
+flowchart LR
+    subgraph Web[Frontend]
+        Input[ChatInput]
+        Interface[ChatInterface]
+        Canvas[CanvasPanel]
+        SDK[KalioSDK]
+        SessionStore[sessionStore]
+        AgentStore[agentStore]
     end
 
-    subgraph Backend["Backend (NestJS)"]
-        ChatGateway["ChatGateway"]
-        ChatService["ChatService"]
-        LLMService["LLMService"]
-        ToolRegistry["ToolRegistryService"]
-        ToolDispatch["ToolDispatchService"]
-        MCPService["MCPService"]
-        ForeverAgent["ForeverAgentService"]
-        AgentLoopService["AgentLoopService"]
+    subgraph Api[Backend]
+        Gateway[ChatGateway]
+        Pipeline[SessionPipelineService]
+        Chat[ChatService]
+        Stream[StreamProcessorService]
+        Dispatch[ToolDispatchService]
+        SessionMgr[SessionManagerService]
     end
 
-    subgraph LLMProviders["LLM Providers"]
-        ILLMProvider["ILLMProvider (interface)"]
-        BaseProvider["BaseOpenAICompatibleProvider"]
-        MockProvider["MockLLMProvider"]
-        OpenRouter["OpenRouterProvider"]
-        OpenAI["OpenAIProvider"]
-        Ollama["OllamaProvider"]
-        Perplexity["PerplexityProvider"]
-    end
+    Input --> Interface
+    Interface --> SDK
+    Interface --> SessionStore
+    Interface --> AgentStore
+    Canvas --> SessionStore
+    Canvas --> AgentStore
+    Canvas --> SDK
 
-    subgraph Tools["Tool Implementations"]
-        VFS["VFSWriteTool<br/>VFSReadTool<br/>VFSListTool"]
-        FS["FsWriteTool<br/>FsReadTool<br/>FsListTool"]
-        KV["KVWriteTool<br/>KVReadTool<br/>KVListTool<br/>KVDeleteTool"]
-        Search["GrepSearchTool<br/>FileSearchTool"]
-        Terminal["TerminalSpawnTool<br/>TerminalListTool<br/>TerminalOutputTool<br/>TerminalKillTool"]
-        RAApp["RaAppCreateTool<br/>RaAppCompileTool<br/>RunRaAppTool<br/>ListRaAppsTool"]
-        Memory["MemoryIngestTool<br/>MemorySearchTool<br/>MemoryIngestConversationTool"]
-        Subagent["SubagentTool"]
-    end
+    SDK --> Gateway
+    Gateway --> Pipeline
+    Pipeline --> Chat
+    Chat --> Stream
+    Chat --> Dispatch
+    Chat --> SessionMgr
 
-    subgraph MCP["MCP Servers"]
-        MCPClient["MCP Client"]
-        MCPTools["External MCP Tools"]
-    end
-
-    subgraph Database["Database"]
-        Sessions["sessions"]
-        Messages["messages"]
-        AgentLoops["agentLoops"]
-        AgentTasks["agentTasks"]
-        MCPServers["mcpServers"]
-    end
-
-    %% Frontend connections
-    ChatInterface --> EventBus
-    ChatInput --> EventBus
-    EventBus --> ChatGateway
-    SessionStore --> ChatInterface
-    AgentStore --> ChatInterface
-
-    %% WebSocket Gateway
-    ChatGateway --> ChatService
-
-    %% Chat Service Flow
-    ChatService --> LLMService
-    ChatService --> ToolRegistry
-    ChatService --> ToolDispatch
-    ChatService --> Sessions
-    ChatService --> Messages
-
-    %% LLM Service Flow
-    LLMService --> ILLMProvider
-    ILLMProvider --> BaseProvider
-    ILLMProvider --> MockProvider
-    ILLMProvider --> OpenRouter
-    ILLMProvider --> OpenAI
-    ILLMProvider --> Ollama
-    ILLMProvider --> Perplexity
-
-    %% Tool Registry & Dispatch
-    ToolRegistry --> ToolDispatch
-    ToolDispatch --> VFS
-    ToolDispatch --> FS
-    ToolDispatch --> KV
-    ToolDispatch --> Search
-    ToolDispatch --> Terminal
-    ToolDispatch --> RAApp
-    ToolDispatch --> Memory
-    ToolDispatch --> Subagent
-    ToolDispatch --> MCPService
-
-    %% MCP Service
-    MCPService --> MCPClient
-    MCPClient --> MCPTools
-    MCPService --> MCPServers
-
-    %% Agent Loop
-    ForeverAgent --> AgentLoopService
-    ForeverAgent --> LLMService
-    ForeverAgent --> ToolRegistry
-    AgentLoopService --> AgentLoops
-    AgentLoopService --> AgentTasks
-
-    %% Database connections
-    ChatService --> Sessions
-    ChatService --> Messages
-    MCPService --> MCPServers
-
-    %% Styling
-    classDef frontend fill:#e1f5ff,stroke:#0288d1,stroke-width:2px
-    classDef backend fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    classDef providers fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef tools fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
-    classDef mcp fill:#fce4ec,stroke:#c2185b,stroke-width:2px
-    classDef database fill:#cfd8dc,stroke:#455a64,stroke-width:2px
-
-    class ChatInterface,ChatInput,MessageBubble,AgentTurnBubble,ToolCallBubble,EventBus,SessionStore,AgentStore frontend
-    class ChatGateway,ChatService,LLMService,ToolRegistry,ToolDispatch,MCPService,ForeverAgent,AgentLoopService backend
-    class ILLMProvider,BaseProvider,MockProvider,OpenRouter,OpenAI,Ollama,Perplexity providers
-    class VFS,FS,KV,Search,Terminal,RAApp,Memory,Subagent tools
-    class MCPClient,MCPTools,MCPService mcp
-    class Sessions,Messages,AgentLoops,AgentTasks,MCPServers database
+    Gateway -->|session-scoped events| Interface
+    Gateway -->|session-scoped events| Canvas
 ```
 
-## Class Descriptions
+## Wire contract that matters on the hot path
 
-### Frontend Components
+| Event | Direction | Role in the runtime |
+| --- | --- | --- |
+| `chat:send` | FE -> BE | Start a new turn or enqueue a follow-up for the same session |
+| `chat:queued` | BE -> FE | A turn is already active for that session, so the new payload is queued |
+| `agent:start` | BE -> FE | Opens a live agent turn in the UI before chunks arrive |
+| `chat:context` | BE -> FE | Real system prompt plus filtered tool names for this turn |
+| `chat:chunk` | BE -> FE | Streaming answer delta; can carry `thinking` chunks and `done=true` |
+| `tool:confirmation_required` | BE -> FE | Human-in-the-loop request for a confirmed tool |
+| `tool:start` | BE -> FE | One tool call is about to execute |
+| `tool:result` | BE -> FE | Final status of one tool call |
+| `chat:complete` | BE -> FE | Final assistant answer for the turn is complete |
+| `chat:error` | BE -> FE | Structured turn error, interrupt, or queue failure |
+| `agent:done` | BE -> FE | Always closes the live turn bracket, even on error |
+| `chat:stop` | FE -> BE | Abort the active turn and drop queued follow-ups for that session |
+| `session:identify` | FE -> BE | Re-subscribe the socket to a session after reconnect or when watching a child session |
 
-#### ChatInterface
-Main chat UI component that manages:
-- Message display and rendering
-- Streaming state management
-- Tool confirmation dialogs
-- Context statistics
-- Integration with eventBus for WebSocket communication
+## End-to-end sequence
 
-#### ChatInput
-Input component for user messages with persona selection.
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant FE as ChatInterface
+    participant SDK as KalioSDK
+    participant GW as ChatGateway
+    participant Pipe as SessionPipelineService
+    participant Chat as ChatService
+    participant LLM as ILLMSource
+    participant Stream as StreamProcessorService
+    participant Tools as ToolDispatchService
 
-#### MessageBubble
-Renders individual user messages.
+    User->>FE: submit prompt
+    FE->>SDK: sendMessage(sessionId, personaId, content)
+    SDK->>GW: chat:send
+    GW->>GW: subscribe socket to sessionId
+    GW->>Pipe: submit(payload, emit)
 
-#### AgentTurnBubble
-Renders complete agent turns (including text, thinking, and tool calls).
+    alt same session already active
+        Pipe-->>SDK: chat:queued
+        SDK-->>FE: queued badge state
+    else dispatch now
+        Pipe->>Chat: handleTurn(...)
+        Chat-->>SDK: agent:start
+        SDK-->>FE: onAgentStart()
+        FE->>SessionStore: startAgentTurn()
 
-#### ToolCallBubble
-Renders individual tool call activities with status indicators.
+        Chat-->>SDK: chat:context
+        SDK-->>FE: onContext()
+        FE->>AgentStore: setContext()
 
-#### EventBus (KalioSDK)
-WebSocket client that handles:
-- Sending chat messages
-- Receiving streaming chunks
-- Tool confirmation requests
-- Tool execution results
-- Agent loop events
+        loop each LLM iteration
+            Chat->>LLM: stream(messages, tools)
+            loop each chunk
+                LLM-->>Chat: chunk
+                Chat->>Stream: process(chunk, ctx)
+                Stream-->>SDK: chat:chunk
+                SDK-->>FE: onChunk()
+                FE->>SessionStore: appendChunk() or finalizeChunk()
+            end
 
-### Backend Services
+            alt tool calls were emitted
+                loop each tool call
+                    Chat-->>SDK: tool:start
+                    SDK-->>FE: onToolStart()
+                    FE->>SessionStore: flush live text and thinking
+                    FE->>AgentStore: addToolActivity(running)
 
-#### ChatGateway
-WebSocket gateway that:
-- Handles `chat:send` messages
-- Handles `tool:confirm` and `tool:cancel` events
-- Handles `agentLoop:start/pause/stop` events
-- Broadcasts events to connected clients
+                    Chat->>Tools: dispatch(callId, toolName, args)
+                    Tools-->>SDK: tool:confirmation_required (if needed)
+                    SDK-->>FE: onToolConfirmation()
+                    FE->>AgentStore: setPendingConfirmation()
 
-**Important:** confirmation events are session-bound. The gateway validates that
-the socket resolving a pending confirmation currently owns that `sessionId`.
-This closes the old gap where a different connected client could attempt to
-confirm or cancel a tool request for another session.
+                    Tools-->>Chat: ToolResult
+                    Chat-->>SDK: tool:result
+                    SDK-->>FE: onToolResult()
+                    FE->>AgentStore: updateToolActivity()
+                    FE->>SessionStore: add durable tool_result message
+                end
+            else no tool calls remain
+                Chat-->>SDK: chat:complete
+            end
+        end
 
-#### ChatService
-Core chat orchestration service that:
-- Manages agent loop (LLM → tools → repeat)
-- Streams LLM responses
-- Processes tool calls with confirmation
-- Builds conversation history with context window trimming
-- Persists messages to database
-- Handles HITL (Human-in-the-Loop) confirmations
+        Chat-->>SDK: agent:done
+        SDK-->>FE: onAgentDone()
+        FE->>SessionStore: finalizeAgentTurn()
+    end
+```
 
-#### LLMService
-LLM provider management:
-- Selects active provider (DB credential > .env fallback)
-- Delegates streaming to provider implementations
-- Manages provider configuration
+Important runtime facts:
 
-#### ToolRegistryService
-Tool metadata registry:
-- Registers all native tools via decorators
-- Integrates MCP tools
-- Filters tools by persona skills
-- Provides tool metadata (name, description, parameters, confirmation requirement)
+- `agent:start` comes before the first chunk so the UI has a place to attach streaming items.
+- `tool:start` intentionally flushes pending thinking/text chunks in the frontend. Otherwise the cursor would keep blinking while the model has already moved into tool use.
+- `tool_result` messages are persisted into session history. They are not just transient UI artifacts.
+- `agent:done` is the event the UI trusts to close the live turn, not `chat:complete` alone.
 
-#### ToolDispatchService
-Tool execution dispatcher:
-- Routes tool calls to appropriate executor
-- Handles MCP tool calls via MCPService
-- Executes native tools
-- Returns standardized ToolResult
+## SessionPipelineService: queue and interrupt model
 
-It also owns the Human-in-the-Loop wait state for confirmed tools:
-- pending confirmations are stored per request and tied to the originating session
-- `tool:confirm` and `tool:cancel` must echo the same `sessionId`
-- destructive tools should use `requiresConfirmation: true`, preferably via the generic `@ConfirmedTool(...)` wrapper
+`SessionPipelineService` is the traffic controller between the gateway and `ChatService`.
 
-## Tool Confirmation Flow
+Real behavior today:
 
-For tools marked `requiresConfirmation: true`, the turn pauses after the model
-emits a tool call and before the executor runs:
+- one active turn per `sessionId`
+- queue cap is 10 follow-up messages per session
+- `interrupt: true` aborts the active turn, waits for its completion boundary, then dispatches the interrupting payload itself
+- `chat:stop` aborts the active turn and drops queued follow-ups
+- different sessions remain independent and can run concurrently
 
-1. `ChatService` emits `tool:start`
-2. `ToolDispatchService` registers a pending confirmation for the current session
-3. Frontend shows the inline confirmation UI for that same session
-4. `ChatGateway` accepts `tool:confirm` / `tool:cancel` only from the socket that owns the session
-5. The tool either resumes execution or returns a cancelled result back into the turn
+```mermaid
+flowchart TD
+    Submit[submit chat:send] --> Interrupt{interrupt true and active turn?}
 
-This keeps HITL approval aligned with the same session isolation rules as VFS,
-KV state, and subagent session ownership.
+    Interrupt -- yes --> AbortCurrent[abort current turn]
+    AbortCurrent --> WaitPrior[wait for prior donePromise]
+    WaitPrior --> Empty{replacement content empty?}
+    Empty -- yes --> StopAfterInterrupt[stop without dispatching a new turn]
+    Empty -- no --> ClaimAfterInterrupt[claim active slot again]
+    ClaimAfterInterrupt --> Run[runWithDrain]
 
-#### MCPService
-Model Context Protocol service:
-- Manages MCP server connections (stdio/HTTP)
-- Discovers tools from connected servers
-- Handles tool calls to MCP servers
-- Health checking and auto-restart
-- Prefixes tool names with `mcp_{serverId}_{toolName}`
+    Interrupt -- no --> Active{active turn exists?}
+    Active -- no --> Claim[claim active slot]
+    Claim --> Run
 
-#### ForeverAgentService
-Autonomous agent loop manager:
-- Executes tasks from agent loop
-- Streams LLM responses for each task
-- Manages loop lifecycle (start/pause/stop)
-- Handles watchdog mode
-- Emits progress events via gateway
+    Active -- yes --> QueueCap{queue length below 10?}
+    QueueCap -- no --> Reject[emit chat:error QUEUE_FULL]
+    QueueCap -- yes --> Enqueue[push into per-session queue and emit chat:queued]
 
-#### AgentLoopService
-Database operations for agent loops:
-- CRUD operations for loops, tasks, iterations
-- Task prioritization and scheduling
-- Iteration tracking
+    Run --> Turn[ChatService.handleTurn]
+    Turn --> Next{queued follow-up exists?}
+    Next -- yes --> Dequeue[dequeue next payload]
+    Dequeue --> Run
+    Next -- no --> Release[release active slot]
+```
 
-### LLM Providers
+## Frontend state split
 
-#### ILLMProvider (interface)
-Defines contract for LLM providers with `streamChat` method.
+`ChatInterface.tsx` is the socket event adapter. It receives normal `KalioSDK` events and pushes them into two stores with different jobs.
 
-#### BaseOpenAICompatibleProvider
-Base implementation for OpenAI-compatible APIs:
-- Handles SSE streaming
-- Parses content, thinking, and tool calls
-- Supports DeepSeek-style reasoning tokens
+| State slice | Owner | Durable? | Why it exists |
+| --- | --- | --- | --- |
+| `sessionMessages` and `messages` | `sessionStore` | Yes, rebuilt from history | The current and cached message transcript per session |
+| `streamingChunks`, `thinkingChunks`, `chunkSessionIds` | `sessionStore` | No | Incremental deltas keyed by message ID and session ID |
+| `sessionAgentTurns`, `sessionActiveTurnIds` | `sessionStore` | Rebuildable | UI turn structure between `agent:start` and `agent:done` |
+| `sessionToolActivities` and `toolActivities` | `agentStore` | No | Live tool chips and canvas sections |
+| `pendingConfirmations` | `agentStore` | No | One pending HITL request per session |
+| `sessionContexts` | `agentStore` | No | Current system prompt and tool list per session |
+| `activeAgentLoops` | `agentStore` | No | Live tracking for master and sub-agent runs |
+| `cliAgentOutput` | `agentStore` | No | Incremental stdout and stderr for `run_cli_agent` |
 
-#### Provider Implementations
-- **MockLLMProvider**: Testing provider with canned responses
-- **OpenRouterProvider**: OpenRouter API
-- **CometAPIProvider**: CometAPI
-- **OpenAIProvider**: OpenAI API
-- **OllamaProvider**: Local Ollama instance
-- **XiaomiMiMoProvider**: Xiaomi MiMo API
+```mermaid
+flowchart LR
+    Events[Socket events] --> Adapter[ChatInterface event handlers]
+    Adapter -->|chat:chunk, chat:complete, chat:error, agent:*| SessionStore[sessionStore]
+    Adapter -->|tool:*, chat:context, cli_agent:progress| AgentStore[agentStore]
+    SessionStore --> Turns[AgentTurnBubble and MessageBubble]
+    SessionStore --> Canvas[CanvasPanel]
+    AgentStore --> ToolUI[ToolCallBubble]
+    AgentStore --> Canvas
+```
 
-### Tool Implementations
+Two practical rules follow from this split:
 
-#### VFS Tools
-- `VFSWriteTool`: Write files to virtual filesystem
-- `VFSReadTool`: Read files from virtual filesystem
-- `VFSListTool`: List virtual filesystem contents
+- If a piece of state must survive reload or reconnect, it should exist as message history or be rebuildable from history.
+- If a piece of state is purely live-progress UI, it belongs in `agentStore` and can be cleared when the turn finishes.
 
-#### Filesystem Tools
-- `FsWriteTool`: Write files to real filesystem
-- `FsReadTool`: Read files from real filesystem
-- `FsListTool`: List real filesystem contents
+## Session-scoped fan-out for child sessions and canvas
 
-#### Key-Value Tools
-- `KVWriteTool`: Write key-value pairs
-- `KVReadTool`: Read key-value pairs
-- `KVListTool`: List keys
-- `KVDeleteTool`: Delete keys
+The child-session experience does not use a second protocol.
+Canvas and child chat navigation work by subscribing the current socket to additional session IDs and consuming normal chat events for those sessions.
 
-#### Search Tools
-- `GrepSearchTool`: Search with regex (ripgrep)
-- `FileSearchTool`: Search files by name
+```mermaid
+sequenceDiagram
+    participant Canvas as CanvasPanel
+    participant SDK as KalioSDK
+    participant GW as ChatGateway
+    participant Child as Child session runtime
+    participant Store as sessionStore
 
-#### Terminal Tools
-- `TerminalSpawnTool`: Spawn terminal processes
-- `TerminalListTool`: List active terminals
-- `TerminalOutputTool`: Get terminal output
-- `TerminalKillTool`: Kill terminal processes
+    Canvas->>SDK: identifySession(childSessionId)
+    SDK->>GW: session:identify
+    GW->>GW: add socket to sessionSubscribers[childSessionId]
+    Child-->>GW: chat:chunk and tool events with child sessionId
+    GW-->>SDK: emit to initiator and session subscribers
+    SDK-->>Canvas: normal chat event flow
+    Canvas->>Store: read per-session transcript state
+    Canvas->>Store: merge fetched REST history only when needed
+```
 
-#### RAApp Tools
-- `RaAppCreateTool`: Create RA-App from DSL
-- `RaAppCompileTool`: Compile RA-App
-- `RunRaAppTool`: Run RA-App in sandbox
-- `ListRaAppsTool`: List available RA-Apps
+That design has a few consequences:
 
-#### Memory Tools
-- `MemoryIngestTool`: Ingest text into vector store
-- `MemorySearchTool`: Search vector store
-- `MemoryIngestConversationTool`: Ingest conversation history
+- Child sessions can be opened as normal chats because they are normal chats.
+- Canvas can stay live for child runs without inventing a custom sub-agent stream.
+- The REST transcript fetch in canvas is hydration, not the primary live data source.
 
-#### Subagent Tool
-- `SubagentTool`: Spawn subagent for delegated tasks
+## Runtime invariants worth preserving
 
-## Data Flow
-
-### Chat Message Flow
-1. User sends message via `ChatInput`
-2. `EventBus` sends `chat:send` via WebSocket
-3. `ChatGateway` receives and forwards to `ChatService.handleMessage`
-4. `ChatService`:
-   - Persists user message to database
-   - Emits `agent:start` to frontend
-   - Enters agent loop:
-     - Builds conversation history
-     - Calls `LLMService.streamChat` with tools
-     - Streams chunks via `chat:chunk` events
-     - Collects tool calls from LLM
-     - For each tool call:
-       - Emits `tool:start`
-       - Checks confirmation requirement
-       - If required, emits `tool:confirmation_required`
-       - Waits for `tool:confirm` or `tool:cancel`
-       - Dispatches via `ToolDispatchService`
-       - Emits `tool:result`
-       - Persists tool result to database
-     - Repeats until no more tool calls
-   - Emits `agent:done` to frontend
-
-### Streaming Flow
-1. `LLMService.streamChat` calls provider
-2. Provider opens SSE connection to LLM API
-3. Provider parses SSE chunks:
-   - Content chunks → `onChunk({ delta, done: false })`
-   - Thinking chunks → `onChunk({ delta, done: false, thinking: true })`
-   - Tool call chunks → buffered and assembled
-4. `ChatService` emits each chunk via `chat:chunk`
-5. Frontend `EventBus` receives chunks
-6. `ChatInterface` updates message content in real-time
-
-### Tool Execution Flow
-1. LLM returns tool call
-2. `ChatService.processToolCall`:
-   - Checks tool registry for metadata
-   - Validates against persona skills
-   - Checks confirmation requirement
-   - If confirmation required:
-     - Emits `tool:confirmation_required`
-     - Waits for user decision via `resolveConfirmation`
-     - If cancelled, returns cancelled status
-   - Calls `ToolDispatchService.dispatch`
-3. `ToolDispatchService`:
-   - If MCP tool (starts with `mcp_`):
-     - Resolves server ID and original name
-     - Calls `MCPService.callTool`
-   - If native tool:
-     - Retrieves executor from map
-     - Calls `executor.execute(request)`
-4. Tool executor performs operation
-5. Returns `ToolResult` with status and data/error
-6. Result emitted via `tool:result`
-7. Result persisted to database as `tool_result` message
-
-## Socket.IO Events
-
-### Client → Server
-- `chat:send`: Send chat message
-- `tool:confirm`: Confirm tool execution
-- `tool:cancel`: Cancel tool execution
-- `agentLoop:start`: Start agent loop
-- `agentLoop:pause`: Pause agent loop
-- `agentLoop:stop`: Stop agent loop
-
-### Server → Client
-- `chat:chunk`: Streaming text chunk
-- `chat:complete`: Message streaming complete
-- `chat:context`: System prompt and available tools
-- `chat:error`: Chat error
-- `tool:start`: Tool execution started
-- `tool:result`: Tool execution result
-- `tool:confirmation_required`: Request user confirmation
-- `agent:start`: Agent turn started
-- `agent:done`: Agent turn completed
-- `mcp:server:status`: MCP server status update
-- `agentLoop:stateChange`: Agent loop state changed
-- `agentLoop:taskStarted`: Agent loop task started
-- `agentLoop:taskDone`: Agent loop task completed
-- `agentLoop:error`: Agent loop error
-- `agentLoop:idle`: Agent loop idle (no tasks)
-- `agentLoop:watchdog`: Agent loop watchdog message
+- One session must never emit overlapping live turns in the frontend.
+- `agent:done` must be emitted on success, error, and interrupt paths.
+- `chat:stop` must clear queued follow-ups as well as aborting the current run.
+- `session:identify` must be sent both after reconnect and when the UI starts watching another session.
+- `tool:start` and `tool:result` ordering must stay stable, because the frontend uses those to build turn items and persistent result messages.

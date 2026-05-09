@@ -1,199 +1,169 @@
 # MCP Architecture
 
-This document describes how MCP (Model Context Protocol) integration works in Kalio — from server configuration and tool discovery through to LLM-driven tool invocation.
+This document describes the current MCP runtime in Kalio: how server configs are stored, how connections are established, how tools are discovered, and how those tools are filtered and dispatched.
 
----
+## Main components
 
-## Modules and Services
+| Component | Current responsibility |
+| --- | --- |
+| `MCPService` | Owns live server handles, transport creation, connection lifecycle, tool discovery, health checks, and restart attempts |
+| `MCPController` | REST API for list, add, remove, restart, and current tool listing |
+| `ToolDispatchService` | Merges MCP tools into the runtime tool list and routes prefixed tool names back to `MCPService` |
+| `ChatService` | Filters MCP visibility per persona before the LLM sees the tool set |
+| `mcp_servers` table | Stores persistent server configuration and last known status summary |
 
-| Service / Class | Location | Responsibility |
-|---|---|---|
-| `MCPService` | `modules/mcp/mcp.service.ts` | MCP server lifecycle: connect, reconnect, health-check, tool discovery |
-| `MCPController` | `modules/mcp/mcp.controller.ts` | REST API: `GET/POST /mcp/servers`, `DELETE /mcp/servers/:id`, `POST /mcp/servers/:id/restart`, `GET /mcp/tools` |
-| `MCPModule` | `modules/mcp/mcp.module.ts` | NestJS module; exports `MCPService` |
-| `MCPWatchdogService` | `modules/mcp/mcp-watchdog.service.ts` | Watchdog stub (planned Phase 8) |
-| `ToolDispatchService` | `modules/chat/tool-dispatch.service.ts` | Merges native + MCP tools into a single `getToolMetas()` call; routes `dispatch()` to either native tools or MCP servers |
-| `ChatService` | `modules/chat/chat.service.ts` | Orchestrates each turn: filters tools per `MCPPolicy`, builds `effectiveSystemPrompt` |
-| `ChatModule` | `modules/chat/chat.module.ts` | Imports `MCPModule` — enables `@Optional()` injection of `MCPService` into `ToolDispatchService` |
+## Data model split: persisted config vs live handle
 
----
+MCP has two parallel models and they should not be confused.
 
-## Wire Types (`@kalio/types`)
+| Layer | What lives there |
+| --- | --- |
+| Persisted row (`mcp_servers`) | `id`, `name`, `transport`, `url` or `command`, args, env vars, headers, enabled flag, last status summary |
+| Live runtime handle (`ServerHandle`) | instantiated `Client`, raw transport, discovered `MCPTool[]`, restart counter, last runtime error, connection state |
 
-```ts
-type MCPPolicy = 'allow_all' | 'deny_all' | 'allow_list';
+Only connected handles contribute tools to the live tool list.
 
-interface MCPServer {
-  id: ID;
-  name: string;
-  transport: 'stdio' | 'http';
-  url?: string;
-  command?: string;
-  status: 'connecting' | 'connected' | 'disconnected' | 'error' | 'stopped';
-  toolCount?: number;
-  lastError?: string;
-  createdAt: Timestamp;
-}
+## Startup and server lifecycle
 
-interface MCPTool {
-  name: string;          // prefixed: "mcp_{serverId}_{originalName}"
-  description: string;
-  serverId: ID;
-  requiresConfirmation: boolean;
-  parameters: Record<string, unknown>;
-}
-
-interface CreateMCPServerDto {
-  name: string;
-  transport: 'stdio' | 'http';
-  url?: string;          // for http transport
-  command?: string;      // for stdio transport
-  args?: string[];
-  env?: Record<string, string>;
-  headers?: Record<string, string>;
-}
-```
-
-### Database Schema (`mcp_servers`)
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | TEXT PK | nanoid assigned at `addServer()` |
-| `name` | TEXT | Display name shown in UI |
-| `transport` | `'stdio'\|'http'` | Transport type |
-| `url` | TEXT | URL for http transport (e.g. `http://localhost:3000/mcp`) |
-| `command` | TEXT | Command for stdio transport (e.g. `docker`) |
-| `args` | JSON | stdio command arguments |
-| `env_vars` | JSON | Environment variables for stdio transport |
-| `headers` | JSON | Extra HTTP headers |
-| `enabled` | BOOLEAN | Whether to connect on startup |
-| `status` | TEXT | Last known connection status |
-| `tool_count` | INTEGER | Number of discovered tools |
-| `last_error` | TEXT | Last error message |
-| `created_at` | INTEGER | Unix timestamp (ms) |
-
----
-
-## Per-Persona MCP Access Strategy
-
-`personas.mcp_policy` controls which MCP tools are visible to the LLM in any given session:
-
-| Value | Behavior |
-|---|---|
-| `allow_all` | LLM sees all tools from all connected MCP servers |
-| `deny_all` | LLM sees no MCP tools |
-| `allow_list` | LLM sees only MCP tools whose names appear in `persona.skills[]` |
-
----
-
-## Tool Naming Convention
-
-MCP tools are **prefixed** during discovery:
-
-```
-mcp_{serverId}_{originalName}
-```
-
-Example: server `abc123` with tool `run_container` → `mcp_abc123_run_container`
-
-The mapping is stored in `MCPService.toolNameMap: Map<prefixedName, { serverId, originalName }>`.
-
-At dispatch time: `dispatch("mcp_abc123_run_container", ...)` → `resolveToolName()` → `callTool("abc123", "run_container", args)`.
-
----
-
-## Diagrams
-
-### Startup — tool discovery
+`MCPService` does not block Nest startup waiting for MCP servers.
+Enabled rows are loaded from the database, connection attempts are kicked off in the background, and health checks continue every 30 seconds.
 
 ```mermaid
 flowchart TD
-    A[API Boot\nNestJS bootstrap] --> B[MCPService.onModuleInit]
-    B --> C{Enabled servers\nin DB?}
-    C -- No --> D[No-op]
-    C -- Yes --> E[Promise.allSettled\nfire-and-forget]
-    E --> F[connectHandle per server]
-    F --> G[createTransport\nstdio → StdioClientTransport\nhttp → StreamableHTTPClientTransport]
-    G --> H[client.connect]
-    H -- fail --> I[status = error\npersistStatus\nattemptRestart]
-    H -- ok --> J[discoverTools\nclient.listTools]
-    J --> K[prefix each tool\nmcp_serverId_name\nstore in toolNameMap]
-    K --> L[status = connected\npersistStatus\nemit status via Socket.IO]
-    L --> M[healthTimer every 30s\nclient.listTools as ping]
-    M -- fail --> I
+    Boot[API boot] --> Rows[load enabled rows from mcp_servers]
+    Rows --> Connect[connectHandle per server in background]
+    Connect --> Transport{transport type}
+    Transport -- stdio --> Stdio[build StdioClientTransport]
+    Transport -- http --> Http[build StreamableHTTPClientTransport]
+    Stdio --> ClientConnect[client.connect]
+    Http --> ClientConnect
+
+    ClientConnect --> Discover[listTools pagination]
+    Discover --> Prefix[prefix tools as mcp_serverId_name]
+    Prefix --> Connected[set status connected and persist summary]
+    Connected --> Health[health check every 30s]
+
+    ClientConnect -->|connect error| ConnectError[set error status and persist]
+    Health --> Healthy{listTools succeeds?}
+    Healthy -- yes --> Connected
+    Healthy -- no --> RuntimeError[set error status and persist]
+    RuntimeError --> Restart[restart with exponential backoff 2s to 60s]
+    Restart --> Connect
 ```
 
-### Per-turn — from message to tool call
+Important runtime details from the code:
+
+- Tool discovery paginates through `client.listTools(...)` until there is no cursor or the 100-iteration safety cap is reached.
+- `transport.onclose` marks the handle as errored and can trigger a restart attempt.
+- `findAll()` returns database-backed server summaries, but the status and tool count are patched with live handle data when available.
+
+## Tool naming and dispatch
+
+Discovered MCP tools are not exposed to the model under their original server-local names.
+Each one is rewritten into a single global namespace:
+
+```text
+mcp_<serverId>_<originalName>
+```
+
+The runtime keeps the reverse mapping in `toolNameMap`, so dispatch can resolve the prefixed name back to `{ serverId, originalName }`.
 
 ```mermaid
 sequenceDiagram
-    participant FE as Frontend
-    participant GW as ChatGateway
-    participant CS as ChatService
-    participant TD as ToolDispatchService
+    participant Chat as ChatService
+    participant Dispatch as ToolDispatchService
     participant MCP as MCPService
-    participant LLM as LLMService
-    participant EXT as External MCP Server
+    participant Ext as External MCP server
 
-    FE->>GW: chat:send {sessionId, content, personaId}
-    GW->>CS: handleTurn()
-    CS->>CS: getSessionConfig(personaId)\n→ systemPrompt, mcpPolicy, skills
-    CS->>TD: getToolMetas()
-    TD->>TD: static tools from toolMap
-    TD->>MCP: getAllTools() [connected servers only]
-    MCP-->>TD: MCPTool[]
-    TD-->>CS: ToolMeta[] (native + MCP merged)
-    CS->>CS: filterTools(mcpPolicy)\nallow_all / deny_all / allow_list
-    CS->>CS: build effectiveSystemPrompt\n+ Available tools section
-    CS->>GW: emit chat:context {systemPrompt, toolNames}
-    GW->>FE: chat:context
-    CS->>LLM: stream({messages, tools: toolMetas})
-    LLM-->>CS: chunks (text_delta, tool_call, done)
-    CS->>GW: emit chat:chunk (live stream)
-    GW->>FE: chat:chunk
+    Chat->>Dispatch: getToolMetas()
+    Dispatch->>MCP: getAllTools()
+    MCP-->>Dispatch: connected MCPTool[]
+    Dispatch-->>Chat: native + MCP ToolMeta[]
 
-    note over CS: LLM requests tool call
-    CS->>GW: emit tool:start {callId, toolName}
-    GW->>FE: tool:start
+    note over Chat: ChatService filters visibility before sending tools to the model
 
-    CS->>TD: dispatch(callId, toolName, args, ctx, toolMetas)
-
-    alt Native tool
-        TD->>TD: entry = toolMap.get(toolName)
-        TD->>TD: check requiresConfirmation → HITL if needed
-        TD->>TD: entry.execute(ToolCallRequest)
-    else MCP tool (name starts with mcp_)
-        TD->>MCP: resolveToolName(toolName)\n→ {serverId, originalName}
-        TD->>MCP: callTool(serverId, originalName, args)
-        MCP->>EXT: client.callTool({name, arguments})
-        EXT-->>MCP: result
-        MCP-->>TD: data
-    else Unknown
-        TD-->>CS: {status: error, TOOL_NOT_FOUND}
+    Chat->>Dispatch: dispatch(callId, mcp_serverId_name, args, ctx)
+    Dispatch->>MCP: resolveToolName(prefixedName)
+    Dispatch->>MCP: getToolByName(prefixedName)
+    alt MCP tool requires confirmation
+        Dispatch-->>Chat: emit tool:confirmation_required first
     end
-
-    TD-->>CS: ToolResult
-    CS->>GW: emit tool:result
-    GW->>FE: tool:result
+    Dispatch->>MCP: callTool(serverId, originalName, args)
+    MCP->>Ext: client.callTool({ name, arguments })
+    Ext-->>MCP: tool result
+    MCP-->>Dispatch: data
+    Dispatch-->>Chat: ToolResult
 ```
 
-### Per-persona tool filtering
+Current nuance:
+
+- `ToolDispatchService` is already capable of applying HITL confirmation to MCP tools.
+- The current discovery path sets discovered MCP tools to `requiresConfirmation: false`, so most MCP tools will run without a confirmation gate unless that metadata is changed upstream.
+
+## Persona filtering
+
+The filter boundary is `ChatService.filterTools(...)`, not `MCPService`.
+That means MCP discovery remains global, while per-session visibility is decided only when a persona starts a turn.
 
 ```mermaid
 flowchart LR
-    ALL[All tools\nnative + MCP] --> SPLIT{split}
-    SPLIT --> NAT[Native tools\nnot startsWith mcp_]
-    SPLIT --> MCPT[MCP tools\nstartsWith mcp_]
+    All[All tool metadata from ToolDispatchService] --> Split{split by name prefix}
+    Split --> Native[Native tools]
+    Split --> MCPTools[MCP tools]
 
-    NAT --> NS{skills == empty?}
-    NS -- "Yes → all native" --> MERGE
-    NS -- "No → filter by skills[]" --> MERGE
+    Native --> NativeFilter{persona.allowedTools empty?}
+    NativeFilter -- yes --> NativeKeep[keep all native tools]
+    NativeFilter -- no --> NativeAllow[keep only native names present in allowedTools]
 
-    MCPT --> MP{mcpPolicy}
-    MP -- allow_all --> MERGE
-    MP -- deny_all --> DROP[dropped]
-    MP -- allow_list --> MF["filter: name in skills[]"]
-    MF --> MERGE
+    MCPTools --> Policy{persona.mcpPolicy}
+    Policy -- allow_all --> MCPKeep[keep all MCP tools]
+    Policy -- deny_all --> MCPDrop[drop all MCP tools]
+    Policy -- allow_list --> MCPAllow[keep only MCP names also present in allowedTools]
 
-    MERGE["Filtered ToolMeta[]"] --> LLM[LLM sees these tools]
+    NativeKeep --> Merged[Merged filtered ToolMeta list]
+    NativeAllow --> Merged
+    MCPKeep --> Merged
+    MCPAllow --> Merged
 ```
+
+This is the real behavior in code today:
+
+- `allow_all` means all connected MCP tools are visible.
+- `deny_all` means none are visible.
+- `allow_list` uses concrete tool names in `persona.allowedTools`, including prefixed MCP names.
+
+## REST surface
+
+Current controller endpoints:
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| `GET` | `/mcp/servers` | List stored servers with live status merged in when present |
+| `POST` | `/mcp/servers` | Insert a row and immediately attempt connection |
+| `DELETE` | `/mcp/servers/:id` | Disconnect and remove the server |
+| `POST` | `/mcp/servers/:id/restart` | Force a reconnect cycle for one server |
+| `GET` | `/mcp/tools` | Return only currently connected, discovered MCP tools |
+
+## Status events
+
+The live service pushes status snapshots through the gateway reference using:
+
+- `mcp:server:status`
+
+Payload includes:
+
+- `serverId`
+- `serverName`
+- `status`
+- `toolCount`
+- optional `lastError`
+
+This is the main push-based observability channel for MCP connectivity in the current runtime.
+
+## Current invariants and caveats
+
+- MCP startup must stay non-blocking for the main API boot path.
+- Only connected handles should contribute tools to `getAllTools()`.
+- Prefixed tool names must remain stable for persona allow-lists and chat history to stay meaningful.
+- Filtering belongs at the chat/session boundary, not in the discovery layer.
+- Connection errors and health-check failures must be persisted back to the DB summary, otherwise the admin UI will drift from runtime reality.

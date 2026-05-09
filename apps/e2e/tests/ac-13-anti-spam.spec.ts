@@ -4,9 +4,11 @@ import { API_BASE } from './helpers/test-config';
 // AC-13: Anti-spam — input disabled during streaming, multiple clicks don't send extra messages
 test.describe('AC-13: Anti-spam protection', () => {
   test('input disabled while streaming and multiple clicks blocked', async ({ page, request }) => {
+    const title = `AC13 Anti-Spam Test ${Date.now()}`;
+
     // Pre-create session via API
     const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'AC13 Anti-Spam Test', personaId: 'default' },
+      data: { title, personaId: 'default' },
     });
     expect(res.ok()).toBeTruthy();
     const session = await res.json() as { id: string };
@@ -16,9 +18,9 @@ test.describe('AC-13: Anti-spam protection', () => {
 
     // Select the session
     await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC13 Anti-Spam Test' }).first(),
+      page.getByTestId('session-item').filter({ hasText: title }).first(),
     ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC13 Anti-Spam Test' }).first().click();
+    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
 
     const chatInput = page.getByTestId('chat-input');
     const sendBtn = page.getByTestId('chat-send-btn');
@@ -40,7 +42,7 @@ test.describe('AC-13: Anti-spam protection', () => {
     await expect(chatInput).toBeEnabled({ timeout: 30_000 });
 
     // Verify only one user message was sent
-    const userMessages = page.getByTestId('message-bubble');
+    const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
     await expect(userMessages).toHaveCount(1, { timeout: 5000 });
 
     // Verify one agent turn appeared
@@ -52,8 +54,10 @@ test.describe('AC-13: Anti-spam protection', () => {
   });
 
   test('rapid Enter key presses while streaming only send one message', async ({ page, request }) => {
+    const title = `AC13 Rapid Enter Test ${Date.now()}`;
+
     const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'AC13 Rapid Enter Test', personaId: 'default' },
+      data: { title, personaId: 'default' },
     });
     expect(res.ok()).toBeTruthy();
     const session = await res.json() as { id: string };
@@ -62,9 +66,9 @@ test.describe('AC-13: Anti-spam protection', () => {
     await page.getByTestId('nav-talk').click();
 
     await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC13 Rapid Enter Test' }).first(),
+      page.getByTestId('session-item').filter({ hasText: title }).first(),
     ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC13 Rapid Enter Test' }).first().click();
+    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
 
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });
@@ -82,7 +86,7 @@ test.describe('AC-13: Anti-spam protection', () => {
     await expect(chatInput).toBeEnabled({ timeout: 30_000 });
 
     // Only one user message
-    const userMessages = page.getByTestId('message-bubble');
+    const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
     await expect(userMessages).toHaveCount(1, { timeout: 5000 });
 
     // Cleanup

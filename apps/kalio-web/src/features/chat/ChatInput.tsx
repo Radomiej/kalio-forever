@@ -1,4 +1,4 @@
-import { useState, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Send, Square } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 
@@ -11,14 +11,39 @@ interface ChatInputProps {
 
 export function ChatInput({ onSend, disabled, isStreaming = false, onStop }: ChatInputProps) {
   const [value, setValue] = useState('');
+  const [isSendLocked, setIsSendLocked] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sawParentDisableRef = useRef(false);
   const { activeSessionId, sessions } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
+  const effectiveDisabled = disabled || isSendLocked;
+
+  useEffect(() => {
+    if (!isSendLocked) return;
+
+    if (disabled) {
+      sawParentDisableRef.current = true;
+      return;
+    }
+
+    if (sawParentDisableRef.current) {
+      sawParentDisableRef.current = false;
+      setIsSendLocked(false);
+    }
+  }, [disabled, isSendLocked]);
 
   const handleSend = () => {
     const trimmed = value.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed, activeSession?.personaId ?? 'default');
+    if (!trimmed || effectiveDisabled) return;
+
+    sawParentDisableRef.current = false;
+    setIsSendLocked(true);
+    try {
+      onSend(trimmed, activeSession?.personaId ?? 'default');
+    } catch (error) {
+      setIsSendLocked(false);
+      throw error;
+    }
     setValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   };
@@ -53,7 +78,7 @@ export function ChatInput({ onSend, disabled, isStreaming = false, onStop }: Cha
             placeholder={disabled && !activeSessionId ? 'Select a session first…' : 'Ask Kalio…'}
             rows={1}
             value={value}
-            disabled={disabled}
+            disabled={effectiveDisabled}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onInput={handleInput}
@@ -71,7 +96,7 @@ export function ChatInput({ onSend, disabled, isStreaming = false, onStop }: Cha
             <button
               data-testid="chat-send-btn"
               className="btn btn-sm h-[32px] w-[32px] p-0 bg-[#00D535] border-none text-white hover:bg-[#00C030] rounded-full shrink-0 disabled:opacity-40"
-              disabled={disabled || !value.trim()}
+              disabled={effectiveDisabled || !value.trim()}
               onClick={handleSend}
               aria-label="Send message"
             >
