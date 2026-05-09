@@ -8,6 +8,11 @@ interface AdapterCardProps {
   info: CLIAgentAdapterInfo;
 }
 
+const TIMEOUT_MIN_MS = 10_000;
+const TIMEOUT_MAX_MS = 1_200_000;
+const MAX_OUTPUT_MIN = 1_000;
+const MAX_OUTPUT_MAX = 500_000;
+
 function normalizeOptionalText(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
@@ -17,13 +22,17 @@ function normalizeCliPath(value: string): string {
   return normalizeOptionalText(value) ?? '';
 }
 
-function normalizeNumberInput(value: string, fallback: number): number {
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeNumberInput(value: string, fallback: number, min: number, max: number): number {
   if (value.trim().length === 0) {
     return fallback;
   }
 
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return Number.isFinite(parsed) ? clampNumber(parsed, min, max) : fallback;
 }
 
 function normalizeExtraArgs(value: string): string[] {
@@ -63,8 +72,12 @@ function AdapterCard({ info }: AdapterCardProps) {
         ...config,
         ...draft,
         cliPath: normalizeCliPath(draft.cliPath ?? config.cliPath),
-        timeoutMs: typeof draft.timeoutMs === 'number' ? draft.timeoutMs : config.timeoutMs,
-        maxOutputChars: typeof draft.maxOutputChars === 'number' ? draft.maxOutputChars : config.maxOutputChars,
+        timeoutMs: clampNumber(typeof draft.timeoutMs === 'number' ? draft.timeoutMs : config.timeoutMs, TIMEOUT_MIN_MS, TIMEOUT_MAX_MS),
+        maxOutputChars: clampNumber(
+          typeof draft.maxOutputChars === 'number' ? draft.maxOutputChars : config.maxOutputChars,
+          MAX_OUTPUT_MIN,
+          MAX_OUTPUT_MAX,
+        ),
         extraArgs: Array.isArray(draft.extraArgs) ? draft.extraArgs : config.extraArgs,
       };
       const res = await fetch(`/api/cli-agents/${info.id}/config`, {
@@ -153,13 +166,13 @@ function AdapterCard({ info }: AdapterCardProps) {
             <input
               type="number"
               className="input input-bordered input-xs font-mono w-36"
-              min={10_000}
-              max={1_200_000}
+              min={TIMEOUT_MIN_MS}
+              max={TIMEOUT_MAX_MS}
               step={10_000}
               value={merged.timeoutMs ?? 600_000}
               onChange={(e) => setDraft((d: ConfigDraft) => ({
                 ...d,
-                timeoutMs: normalizeNumberInput(e.target.value, merged.timeoutMs),
+                timeoutMs: normalizeNumberInput(e.target.value, merged.timeoutMs, TIMEOUT_MIN_MS, TIMEOUT_MAX_MS),
               }))}
             />
           </div>
@@ -169,13 +182,13 @@ function AdapterCard({ info }: AdapterCardProps) {
             <input
               type="number"
               className="input input-bordered input-xs font-mono w-36"
-              min={1_000}
-              max={500_000}
+              min={MAX_OUTPUT_MIN}
+              max={MAX_OUTPUT_MAX}
               step={1_000}
               value={merged.maxOutputChars ?? 16_000}
               onChange={(e) => setDraft((d: ConfigDraft) => ({
                 ...d,
-                maxOutputChars: normalizeNumberInput(e.target.value, merged.maxOutputChars),
+                maxOutputChars: normalizeNumberInput(e.target.value, merged.maxOutputChars, MAX_OUTPUT_MIN, MAX_OUTPUT_MAX),
               }))}
             />
           </div>

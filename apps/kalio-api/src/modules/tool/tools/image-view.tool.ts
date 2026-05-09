@@ -3,6 +3,41 @@ import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { VFSService } from '../../vfs/vfs.service';
 
+const MIME_MAP: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+};
+
+function getPathArg(args: ToolCallRequest['args']): string {
+  const rawValue = args['path'];
+  if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+    throw new Error('INVALID_PATH: path must be a non-empty string');
+  }
+  return rawValue.trim();
+}
+
+function getQualityArg(args: ToolCallRequest['args']): 'low' | 'medium' | 'high' {
+  const rawValue = args['quality'];
+  if (rawValue === undefined) {
+    return 'low';
+  }
+  if (rawValue !== 'low' && rawValue !== 'medium' && rawValue !== 'high') {
+    throw new Error('INVALID_QUALITY: quality must be one of "low", "medium", or "high"');
+  }
+  return rawValue;
+}
+
+function getMimeType(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  if (!ext || !(ext in MIME_MAP)) {
+    throw new Error(`File is not an image: ${filePath}`);
+  }
+  return MIME_MAP[ext];
+}
+
 @Injectable()
 @Tool({
   name: 'image_view',
@@ -28,8 +63,9 @@ export class ImageViewTool {
     const start = Date.now();
     const { sessionId } = request;
     const vfsSessionId = request.vfsSessionId ?? sessionId;
-    const filePath = request.args['path'] as string;
-    const quality = (request.args['quality'] as string | undefined) ?? 'low';
+    const filePath = getPathArg(request.args);
+    const quality = getQualityArg(request.args);
+    const mimeType = getMimeType(filePath);
 
     let buffer: Buffer;
     try {
@@ -40,17 +76,6 @@ export class ImageViewTool {
         throw new Error(`Image not found: ${filePath}`);
       }
       throw err;
-    }
-
-    const ext = filePath.split('.').pop()?.toLowerCase() ?? 'png';
-    const mimeMap: Record<string, string> = {
-      jpg: 'image/jpeg', jpeg: 'image/jpeg',
-      png: 'image/png', webp: 'image/webp', gif: 'image/gif',
-    };
-    const mimeType = mimeMap[ext] ?? 'image/png';
-
-    if (!mimeType.startsWith('image/')) {
-      throw new Error(`File is not an image: ${filePath}`);
     }
 
     const dataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;

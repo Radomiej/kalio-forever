@@ -39,6 +39,22 @@ describe('sessionStore.appendChunk — thinking phase clear', () => {
     // msg-A thinking should remain since msg-B is a different message
     expect(useSessionStore.getState().thinkingChunks['msg-A']).toBe('thinking A');
   });
+
+  it('does not create orphan chunks when there is no target session (REGRESSION)', () => {
+    useSessionStore.setState({
+      activeSessionId: null,
+      messages: [],
+      sessionMessages: {},
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+    });
+
+    useSessionStore.getState().appendChunk('msg-orphan', 'hello', false);
+
+    expect(useSessionStore.getState().sessionMessages['']).toBeUndefined();
+    expect(useSessionStore.getState().streamingChunks['msg-orphan']).toBeUndefined();
+  });
 });
 
 describe('sessionStore.flushThinkingChunks — tool-start regression', () => {

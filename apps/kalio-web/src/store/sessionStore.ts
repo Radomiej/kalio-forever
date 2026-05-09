@@ -144,7 +144,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   appendChunk: (messageId, delta, thinking = false, chunkSessionId?) =>
     set((s) => {
-      const targetSessionId = chunkSessionId ?? s.activeSessionId ?? '';
+      const targetSessionId = chunkSessionId ?? s.activeSessionId;
+      if (!targetSessionId) {
+        return s;
+      }
       const updatedChunkSessionIds = targetSessionId
         ? { ...s.chunkSessionIds, [messageId]: targetSessionId }
         : s.chunkSessionIds;

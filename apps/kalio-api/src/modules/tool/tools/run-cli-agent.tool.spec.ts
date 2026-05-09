@@ -99,4 +99,19 @@ describe('RunCliAgentTool', () => {
     progressFn!('cli_agent:progress', { callId: 'c', sessionId: 's', agentId: 'copilot', chunk: 'x' });
     expect(emitFn).toHaveBeenCalledWith('cli_agent:progress', expect.objectContaining({ chunk: 'x' }));
   });
+
+  it.each([
+    { label: 'prompt is empty', args: { prompt: '', workdir: '/projects/app' }, error: 'INVALID_PROMPT' },
+    { label: 'prompt is whitespace', args: { prompt: '   ', workdir: '/projects/app' }, error: 'INVALID_PROMPT' },
+    { label: 'prompt is numeric', args: { prompt: 123, workdir: '/projects/app' }, error: 'INVALID_PROMPT' },
+    { label: 'workdir is whitespace', args: { prompt: 'task', workdir: '   ' }, error: 'INVALID_WORKDIR' },
+    { label: 'workdir is numeric', args: { prompt: 'task', workdir: 123 }, error: 'INVALID_WORKDIR' },
+    { label: 'agentId is unsupported', args: { prompt: 'task', workdir: '/projects/app', agentId: 'cursor' }, error: 'INVALID_AGENT_ID' },
+    { label: 'timeout is zero', args: { prompt: 'task', workdir: '/projects/app', timeoutMs: 0 }, error: 'INVALID_TIMEOUT_MS' },
+    { label: 'timeout is negative', args: { prompt: 'task', workdir: '/projects/app', timeoutMs: -1 }, error: 'INVALID_TIMEOUT_MS' },
+    { label: 'timeout is fractional', args: { prompt: 'task', workdir: '/projects/app', timeoutMs: 1.5 }, error: 'INVALID_TIMEOUT_MS' },
+  ])('rejects malformed input when $label (REGRESSION)', async ({ args, error }) => {
+    await expect(tool.execute(makeRequest(args))).rejects.toThrow(error);
+    expect(cliAgent.run).not.toHaveBeenCalled();
+  });
 });

@@ -8,6 +8,37 @@ import { CLIAgentService } from '../../cli-agent/cli-agent.service';
 const MAX_TIMEOUT_MS = 1_200_000;
 /** Default timeout: 10 minutes */
 const DEFAULT_TIMEOUT_MS = 600_000;
+const SUPPORTED_AGENT_IDS = new Set(['copilot', 'gemini', 'claude']);
+
+function getNonEmptyStringArg(args: ToolCallRequest['args'], key: 'prompt' | 'workdir'): string {
+  const rawValue = args[key];
+  if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+    throw new Error(`INVALID_${key === 'prompt' ? 'PROMPT' : 'WORKDIR'}: ${key} must be a non-empty string`);
+  }
+  return rawValue.trim();
+}
+
+function getAgentIdArg(args: ToolCallRequest['args']): string {
+  const rawValue = args['agentId'];
+  if (rawValue === undefined) {
+    return 'copilot';
+  }
+  if (typeof rawValue !== 'string' || !SUPPORTED_AGENT_IDS.has(rawValue)) {
+    throw new Error('INVALID_AGENT_ID: agentId must be one of "copilot", "gemini", or "claude"');
+  }
+  return rawValue;
+}
+
+function getTimeoutArg(args: ToolCallRequest['args']): number {
+  const rawValue = args['timeoutMs'];
+  if (rawValue === undefined) {
+    return DEFAULT_TIMEOUT_MS;
+  }
+  if (typeof rawValue !== 'number' || !Number.isInteger(rawValue) || rawValue < 1) {
+    throw new Error('INVALID_TIMEOUT_MS: timeoutMs must be a positive integer');
+  }
+  return Math.min(rawValue, MAX_TIMEOUT_MS);
+}
 
 @Injectable()
 @Tool({
@@ -57,11 +88,10 @@ export class RunCliAgentTool {
   ) {}
 
   async execute(request: ToolCallRequest): Promise<CLIAgentResult> {
-    const agentId = (request.args['agentId'] as string | undefined) ?? 'copilot';
-    const prompt = request.args['prompt'] as string;
-    const workdir = request.args['workdir'] as string;
-    const rawTimeout = request.args['timeoutMs'] as number | undefined;
-    const timeoutMs = Math.min(rawTimeout ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
+    const agentId = getAgentIdArg(request.args);
+    const prompt = getNonEmptyStringArg(request.args, 'prompt');
+    const workdir = getNonEmptyStringArg(request.args, 'workdir');
+    const timeoutMs = getTimeoutArg(request.args);
 
     // Security: validate workdir is in AllowedPaths
     const allowed = await this.allowedPaths.isAllowed(workdir);

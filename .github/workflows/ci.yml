@@ -93,6 +93,8 @@ jobs:
       LLM_PROVIDER: mock
       CREDENTIALS_MASTER_KEY: ci-test-master-key-32-chars-minimum
       WORKSPACE_ROOT: /tmp/kalio-ci-workspace
+      DATABASE_PATH: /tmp/kalio-ci.db
+      MEMORY_DB_PATH: /tmp/kalio-ci-memory
       PORT: 3016
     steps:
       - name: Checkout repository

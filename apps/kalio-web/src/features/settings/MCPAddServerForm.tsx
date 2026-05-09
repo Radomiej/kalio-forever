@@ -18,7 +18,18 @@ function parseArgs(input: string): string[] | undefined {
   let current = '';
   let inQuotes = false;
 
-  for (const char of trimmed) {
+  for (let i = 0; i < trimmed.length; i++) {
+    const char = trimmed[i];
+
+    if (char === '\\' && inQuotes) {
+      const next = trimmed[i + 1];
+      if (next === '"' || next === '\\') {
+        current += next;
+        i++;
+        continue;
+      }
+    }
+
     if (char === '"') {
       inQuotes = !inQuotes;
       continue;

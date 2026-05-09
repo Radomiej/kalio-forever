@@ -16,17 +16,61 @@ export interface BuildHistoryOptions {
   imageDetailMode?: 'low' | 'auto' | 'high';
 }
 
+function isImageAttachment(mimeType: string): boolean {
+  return mimeType.toLowerCase().startsWith('image/');
+}
+
+function buildUserContentParts(message: ChatMessage, options: BuildHistoryOptions): ContentPart[] {
+  const imageDetailMode = options.imageDetailMode ?? 'auto';
+  const imageAttachments = (message.attachments ?? []).filter((attachment) => isImageAttachment(attachment.mimeType));
+  const parts: ContentPart[] = [];
+
+  if (message.content.length > 0) {
+    parts.push({ type: 'text', text: message.content });
+  }
+
+  if (options.stripImages) {
+    parts.push(
+      ...imageAttachments.map((attachment) => ({
+        type: 'text' as const,
+        text: `[Image attachment: ${attachment.path}]`,
+      })),
+    );
+    return parts;
+  }
+
+  parts.push(
+    ...imageAttachments.map((attachment) => ({
+      type: 'image_url' as const,
+      image_url: {
+        url: attachment.path,
+        detail: imageDetailMode,
+      },
+    })),
+  );
+
+  return parts;
+}
+
 /**
  * Converts session messages into LLM-compatible history.
  * - user/assistant text messages → passed through
  * - loading messages → skipped
  */
-export function buildHistory(messages: ChatMessage[], _options?: BuildHistoryOptions): LLMHistoryMessage[] {
+export function buildHistory(messages: ChatMessage[], options: BuildHistoryOptions = {}): LLMHistoryMessage[] {
   const out: LLMHistoryMessage[] = [];
 
   for (const m of messages) {
-    if (m.role === 'user' && m.content?.trim()) {
-      out.push({ role: 'user', content: m.content });
+    if (m.role === 'user') {
+      const parts = buildUserContentParts(m, options);
+      if (parts.length > 0) {
+        out.push({ role: 'user', content: parts.length === 1 && parts[0]?.type === 'text' ? parts[0].text : parts });
+        continue;
+      }
+
+      if (m.content?.trim()) {
+        out.push({ role: 'user', content: m.content });
+      }
       continue;
     }
 

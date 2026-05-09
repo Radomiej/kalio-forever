@@ -84,6 +84,13 @@ function defaultMap(opts: {
   };
 }
 
+function getRequestBody<T>(method: string, url: string): T {
+  const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
+  const match = calls.find(([callUrl, opts]) => callUrl === url && (opts?.method?.toUpperCase() ?? 'GET') === method.toUpperCase());
+  expect(match).toBeDefined();
+  return JSON.parse((match![1]?.body as string) ?? '{}') as T;
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
@@ -534,5 +541,93 @@ describe('LLMPanel', () => {
     await waitFor(() =>
       expect(screen.getByText(/500: Server error/i)).toBeInTheDocument(),
     );
+  });
+
+  it('keeps provider test disabled when API key contains only whitespace (REGRESSION)', async () => {
+    mockFetch(defaultMap());
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+
+    fireEvent.change(screen.getByTestId('add-provider-apikey'), { target: { value: '   ' } });
+
+    expect(screen.getByTestId('add-provider-test')).toBeDisabled();
+  });
+
+  it('omits a whitespace-only API key from the create payload (REGRESSION)', async () => {
+    const map = {
+      ...defaultMap(),
+      'POST /api/credentials': { ...CRED, id: 'c-space-api-key' },
+    };
+    mockFetch(map);
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+    fireEvent.change(screen.getByTestId('add-provider-apikey'), { target: { value: '   ' } });
+    await user.click(screen.getByTestId('add-provider-submit'));
+
+    await waitFor(() => expect(screen.getByTestId('provider-row-c-space-api-key')).toBeInTheDocument());
+    expect(getRequestBody<{ apiKey?: string }>('POST', '/api/credentials').apiKey).toBeUndefined();
+  });
+
+  it('omits a whitespace-only baseUrl from the create payload (REGRESSION)', async () => {
+    const map = {
+      ...defaultMap(),
+      'POST /api/credentials': { ...CRED, id: 'c-space-base-url' },
+    };
+    mockFetch(map);
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+    fireEvent.change(screen.getByRole('textbox', { name: /base url/i }), { target: { value: '   ' } });
+    await user.type(screen.getByTestId('add-provider-apikey'), 'sk-test');
+    await user.click(screen.getByTestId('add-provider-submit'));
+
+    await waitFor(() => expect(screen.getByTestId('provider-row-c-space-base-url')).toBeInTheDocument());
+    expect(getRequestBody<{ baseUrl?: string }>('POST', '/api/credentials').baseUrl).toBeUndefined();
+  });
+
+  it('omits a whitespace-only model from the create payload (REGRESSION)', async () => {
+    const map = {
+      ...defaultMap(),
+      'POST /api/credentials': { ...CRED, id: 'c-space-model' },
+    };
+    mockFetch(map);
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+    fireEvent.change(screen.getByTestId('add-provider-model'), { target: { value: '   ' } });
+    await user.type(screen.getByTestId('add-provider-apikey'), 'sk-test');
+    await user.click(screen.getByTestId('add-provider-submit'));
+
+    await waitFor(() => expect(screen.getByTestId('provider-row-c-space-model')).toBeInTheDocument());
+    expect(getRequestBody<{ model?: string }>('POST', '/api/credentials').model).toBeUndefined();
+  });
+
+  it('falls back to the provider label when name contains only whitespace (REGRESSION)', async () => {
+    const map = {
+      ...defaultMap(),
+      'POST /api/credentials': { ...CRED, id: 'c-space-name' },
+    };
+    mockFetch(map);
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+    fireEvent.change(screen.getByRole('textbox', { name: /name/i }), { target: { value: '   ' } });
+    await user.type(screen.getByTestId('add-provider-apikey'), 'sk-test');
+    await user.click(screen.getByTestId('add-provider-submit'));
+
+    await waitFor(() => expect(screen.getByTestId('provider-row-c-space-name')).toBeInTheDocument());
+    expect(getRequestBody<{ name: string }>('POST', '/api/credentials').name).toBe('OpenAI');
   });
 });

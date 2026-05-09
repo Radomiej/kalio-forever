@@ -46,4 +46,20 @@ describe('ImageViewTool', () => {
 
     await expect(tool.execute(makeRequest())).rejects.toThrow('Image not found: images/sea-otter.png');
   });
+
+  it.each([
+    { label: 'path is empty', args: { path: '' }, error: 'INVALID_PATH' },
+    { label: 'path is whitespace', args: { path: '   ' }, error: 'INVALID_PATH' },
+    { label: 'path is numeric', args: { path: 123 }, error: 'INVALID_PATH' },
+    { label: 'quality is unsupported', args: { quality: 'ultra' }, error: 'INVALID_QUALITY' },
+  ])('rejects malformed image_view input when $label (REGRESSION)', async ({ args, error }) => {
+    await expect(tool.execute(makeRequest(args))).rejects.toThrow(error);
+    expect(mockReadBinary).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-image extensions instead of defaulting them to image/png (REGRESSION)', async () => {
+    await expect(tool.execute(makeRequest({ path: 'documents/report.txt' }))).rejects.toThrow(
+      'File is not an image: documents/report.txt',
+    );
+  });
 });

@@ -118,4 +118,32 @@ describe('CLIAgentPanel', () => {
       expect(getPutBody().extraArgs).toEqual(['--flag', '--other']);
     });
   });
+
+  it('does not serialize a timeout below the UI minimum (REGRESSION)', async () => {
+    const user = userEvent.setup();
+    render(<CLIAgentPanel />);
+
+    await screen.findByText('GitHub Copilot');
+    const [timeoutInput] = await screen.findAllByRole('spinbutton');
+    fireEvent.change(timeoutInput, { target: { value: '-1' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(getPutBody().timeoutMs).toBeGreaterThanOrEqual(10000);
+    });
+  });
+
+  it('does not serialize maxOutputChars below the UI minimum (REGRESSION)', async () => {
+    const user = userEvent.setup();
+    render(<CLIAgentPanel />);
+
+    await screen.findByText('GitHub Copilot');
+    const [, maxOutputInput] = await screen.findAllByRole('spinbutton');
+    fireEvent.change(maxOutputInput, { target: { value: '1' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(getPutBody().maxOutputChars).toBeGreaterThanOrEqual(1000);
+    });
+  });
 });

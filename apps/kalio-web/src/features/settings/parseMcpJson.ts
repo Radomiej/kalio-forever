@@ -14,6 +14,22 @@ function getNonEmptyString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function getStringArray(value: unknown): string[] | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  if (value.some((item) => typeof item !== 'string')) {
+    return null;
+  }
+
+  return value;
+}
+
 /**
  * Parse VS Code–style or Claude Desktop–style MCP JSON into CreateMCPServerDto entries.
  *
@@ -89,8 +105,12 @@ export function parseMcpJson(raw: string): ParsedMCPEntry[] {
     if (transport === 'stdio') {
       dto.command = command;
 
-      if (Array.isArray(entry['args'])) {
-        dto.args = (entry['args'] as unknown[]).map(String);
+      const args = getStringArray(entry['args']);
+      if (args === null) {
+        continue;
+      }
+      if (args !== undefined) {
+        dto.args = args;
       }
 
       if (entry['env'] && typeof entry['env'] === 'object' && !Array.isArray(entry['env'])) {

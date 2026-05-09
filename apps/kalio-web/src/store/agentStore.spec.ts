@@ -212,3 +212,55 @@ describe('per-session tool activities (REGRESSION)', () => {
     ]);
   });
 });
+
+describe('agentStore input validation gaps (REGRESSION)', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      toolActivities: [],
+      sessionToolActivities: {},
+      callIdToName: {},
+      cliAgentOutput: {},
+      pendingConfirmations: {},
+      canvasOpen: false,
+    });
+  });
+
+  it('does not collapse distinct tool activities onto an empty callId', () => {
+    const store = useAgentStore.getState();
+
+    store.addToolActivity({
+      callId: '',
+      toolName: 'vfs_read',
+      args: { path: '/tmp/a.txt' },
+      status: 'running',
+      startedAt: 1,
+    });
+    store.addToolActivity({
+      callId: '',
+      toolName: 'vfs_write',
+      args: { path: '/tmp/b.txt', content: 'hello' },
+      status: 'running',
+      startedAt: 2,
+    });
+
+    expect(useAgentStore.getState().toolActivities).toHaveLength(2);
+  });
+
+  it('ignores blank session keys for pending confirmations', () => {
+    useAgentStore.getState().setPendingConfirmation('', makeReq('session-A'));
+
+    expect(useAgentStore.getState().pendingConfirmations).toEqual({});
+  });
+
+  it('ignores blank callIds when registering tool names', () => {
+    useAgentStore.getState().registerCallId('', 'run_raapp');
+
+    expect(useAgentStore.getState().callIdToName).toEqual({});
+  });
+
+  it('ignores blank callIds when appending CLI agent output', () => {
+    useAgentStore.getState().appendCLIAgentChunk('', 'partial output');
+
+    expect(useAgentStore.getState().cliAgentOutput).toEqual({});
+  });
+});

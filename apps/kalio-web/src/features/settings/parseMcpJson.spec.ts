@@ -170,4 +170,19 @@ describe('parseMcpJson', () => {
     expect(result).toHaveLength(1);
     expect(result[0].key).toBe('valid');
   });
+
+  it('skips stdio entries whose args array contains non-string values (REGRESSION)', () => {
+    const json = JSON.stringify({
+      mcpServers: {
+        broken: { command: 'npx', args: ['--port', 3000, { bad: true }] },
+        valid: { command: 'python', args: ['server.py'] },
+      },
+    });
+
+    const result = parseMcpJson(json);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].key).toBe('valid');
+    expect(result[0].dto.args).toEqual(['server.py']);
+  });
 });

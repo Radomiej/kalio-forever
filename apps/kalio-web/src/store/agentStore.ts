@@ -82,6 +82,10 @@ interface AgentState {
 }
 
 function upsertActivity(list: ToolActivity[], activity: ToolActivity): ToolActivity[] {
+  if (!activity.callId.trim()) {
+    return [...list, activity];
+  }
+
   return list.some((item) => item.callId === activity.callId)
     ? list.map((item) => (item.callId === activity.callId ? { ...item, ...activity } : item))
     : [...list, activity];
@@ -108,6 +112,10 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
     set({ isStreaming: streaming, streamingMessageId: messageId }),
   setPendingConfirmation: (sessionId, req) =>
     set((s) => {
+      if (!sessionId.trim()) {
+        return {};
+      }
+
       if (req === null) {
         const next = { ...s.pendingConfirmations };
         delete next[sessionId];
@@ -206,7 +214,12 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
     })),
 
   registerCallId: (callId, toolName) =>
-    set((s) => ({ callIdToName: { ...s.callIdToName, [callId]: toolName } })),
+    set((s) => {
+      if (!callId.trim()) {
+        return {};
+      }
+      return { callIdToName: { ...s.callIdToName, [callId]: toolName } };
+    }),
 
   setCanvasOpen: (open) => set({ canvasOpen: open }),
   toggleCanvas: () => set((s) => ({ canvasOpen: !s.canvasOpen })),
@@ -229,12 +242,17 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
     return Object.values(get().activeAgentLoops).some((loop) => loop.sessionId === sessionId);
   },
   appendCLIAgentChunk: (callId, chunk) =>
-    set((s) => ({
-      cliAgentOutput: {
-        ...s.cliAgentOutput,
-        [callId]: (s.cliAgentOutput[callId] ?? '') + chunk,
-      },
-    })),
+    set((s) => {
+      if (!callId.trim()) {
+        return {};
+      }
+      return {
+        cliAgentOutput: {
+          ...s.cliAgentOutput,
+          [callId]: (s.cliAgentOutput[callId] ?? '') + chunk,
+        },
+      };
+    }),
 
   clearCLIAgentOutput: (callId) =>
     set((s) => {

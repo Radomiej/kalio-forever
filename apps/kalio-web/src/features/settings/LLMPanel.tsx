@@ -91,6 +91,15 @@ function emptyForm(): AddForm {
   };
 }
 
+function normalizeOptionalText(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeProviderName(name: string, provider: string): string {
+  return normalizeOptionalText(name) ?? PROVIDER_LABELS[provider] ?? provider;
+}
+
 export function LLMPanel() {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -110,7 +119,10 @@ export function LLMPanel() {
   const persistedToolTimeouts = useRef<ToolTimeoutSettings>({ ...DEFAULT_TOOL_TIMEOUT_SETTINGS });
 
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
-  const allowsKeylessAuth = isLocalLlmProviderConfig(form.provider, form.baseUrl);
+  const normalizedApiKey = normalizeOptionalText(form.apiKey);
+  const normalizedBaseUrl = normalizeOptionalText(form.baseUrl);
+  const normalizedModel = normalizeOptionalText(form.model);
+  const allowsKeylessAuth = isLocalLlmProviderConfig(form.provider, normalizedBaseUrl);
 
   const reportUpdateError = useCallback((message: string, err: unknown) => {
     const error = err instanceof Error ? err : new Error(String(err));
@@ -177,8 +189,8 @@ export function LLMPanel() {
     setTestError(null);
     try {
       const params = new URLSearchParams({ provider: form.provider });
-      if (form.apiKey) params.set('apiKey', form.apiKey);
-      if (form.baseUrl) params.set('baseUrl', form.baseUrl);
+      if (normalizedApiKey) params.set('apiKey', normalizedApiKey);
+      if (normalizedBaseUrl) params.set('baseUrl', normalizedBaseUrl);
       const res = await fetch(`/api/llm/models?${params.toString()}`);
       if (!res.ok) {
         throw new Error(await readResponseErrorMessage(res, 'provider test'));
@@ -198,11 +210,11 @@ export function LLMPanel() {
     setError(null);
     try {
       const dto: CreateCredentialDto = {
-        name: form.name,
+        name: normalizeProviderName(form.name, form.provider),
         provider: form.provider,
-        apiKey: form.apiKey || undefined,
-        baseUrl: form.baseUrl || undefined,
-        model: form.model || undefined,
+        apiKey: normalizedApiKey,
+        baseUrl: normalizedBaseUrl,
+        model: normalizedModel,
       };
       const created = await apiFetch<Credential>('/credentials', {
         method: 'POST',
@@ -443,7 +455,7 @@ export function LLMPanel() {
                   type="button"
                   className={`btn btn-ghost btn-xs gap-1 ${testState === 'ok' ? 'text-success' : testState === 'error' ? 'text-error' : 'text-base-content/60'}`}
                   onClick={() => void handleTest()}
-                  disabled={(!allowsKeylessAuth && !form.apiKey) || testState === 'testing'}
+                  disabled={(!allowsKeylessAuth && !normalizedApiKey) || testState === 'testing'}
                   data-testid="add-provider-test"
                 >
                   {testState === 'testing' ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}

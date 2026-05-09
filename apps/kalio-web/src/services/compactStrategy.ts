@@ -29,6 +29,43 @@ function totalTokens(messages: ChatMessage[]): number {
   return sum;
 }
 
+function removeMessagesByIds(messages: ChatMessage[], idsToRemove: Set<string>): ChatMessage[] {
+  return messages.filter((message) => !idsToRemove.has(message.id));
+}
+
+function findOldestToolPair(messages: ChatMessage[], firstUserId?: string): ChatMessage[] | null {
+  for (const message of messages) {
+    if (message.role !== 'tool_result' || !message.toolCallId) {
+      continue;
+    }
+
+    const assistant = messages.find(
+      (candidate) => candidate.role === 'assistant'
+        && candidate.id !== firstUserId
+        && candidate.toolCalls?.some((toolCall) => toolCall.id === message.toolCallId),
+    );
+    if (assistant) {
+      return [assistant, message];
+    }
+  }
+
+  return null;
+}
+
+function findOldestStandaloneToolResult(messages: ChatMessage[], firstUserId?: string): ChatMessage | null {
+  return messages.find((message) => message.role === 'tool_result' && message.id !== firstUserId) ?? null;
+}
+
+function findOldestAssistant(messages: ChatMessage[], firstUserId?: string): ChatMessage | null {
+  return messages.find(
+    (message) => message.role === 'assistant' && message.id !== firstUserId && !(message.toolCalls && message.toolCalls.length > 0),
+  ) ?? null;
+}
+
+function findOldestNonInitialUser(messages: ChatMessage[], firstUserId?: string): ChatMessage | null {
+  return messages.find((message) => message.role === 'user' && message.id !== firstUserId) ?? null;
+}
+
 // ── AutoTrimStrategy ───────────────────────────────────────────────────────────
 
 class AutoTrimStrategy implements CompactStrategy {
@@ -36,18 +73,38 @@ class AutoTrimStrategy implements CompactStrategy {
 
   compact(messages: ChatMessage[], targetTokens: number): ChatMessage[] {
     const safeTarget = targetTokens * 0.8;
-    const result = [...messages];
+    let result = [...messages];
 
     if (totalTokens(result) <= safeTarget) return result;
 
-    // Tier 1: Remove oldest messages (keep the first user message)
-    const firstUserIdx = result.findIndex((m) => m.role === 'user');
-    if (firstUserIdx === -1) return result;
+    const firstUserId = result.find((message) => message.role === 'user')?.id;
 
-    for (let i = firstUserIdx + 1; i < result.length; i++) {
-      if (totalTokens(result) <= safeTarget) break;
-      result.splice(i, 1);
-      i--;
+    while (totalTokens(result) > safeTarget) {
+      const toolPair = findOldestToolPair(result, firstUserId);
+      if (toolPair) {
+        result = removeMessagesByIds(result, new Set(toolPair.map((message) => message.id)));
+        continue;
+      }
+
+      const standaloneToolResult = findOldestStandaloneToolResult(result, firstUserId);
+      if (standaloneToolResult) {
+        result = removeMessagesByIds(result, new Set([standaloneToolResult.id]));
+        continue;
+      }
+
+      const assistant = findOldestAssistant(result, firstUserId);
+      if (assistant) {
+        result = removeMessagesByIds(result, new Set([assistant.id]));
+        continue;
+      }
+
+      const user = findOldestNonInitialUser(result, firstUserId);
+      if (user) {
+        result = removeMessagesByIds(result, new Set([user.id]));
+        continue;
+      }
+
+      break;
     }
 
     return result;

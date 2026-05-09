@@ -3,6 +3,49 @@ import type { ToolCallRequest, MCPPolicy } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { PersonaService } from '../../persona/persona.service';
 
+function getRequiredStringArg(args: ToolCallRequest['args'], key: 'name' | 'systemPrompt' | 'model' | 'id'): string {
+  const rawValue = args[key];
+  if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+    const errorKey = key === 'systemPrompt' ? 'INVALID_SYSTEM_PROMPT' : key === 'id' ? 'INVALID_ID' : `INVALID_${key.toUpperCase()}`;
+    throw new Error(`${errorKey}: ${key} must be a non-empty string`);
+  }
+  return rawValue.trim();
+}
+
+function getOptionalStringArg(args: ToolCallRequest['args'], key: 'name' | 'systemPrompt' | 'model'): string | undefined {
+  const rawValue = args[key];
+  if (rawValue === undefined) {
+    return undefined;
+  }
+  if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+    const errorKey = key === 'systemPrompt' ? 'INVALID_SYSTEM_PROMPT' : `INVALID_${key.toUpperCase()}`;
+    throw new Error(`${errorKey}: ${key} must be a non-empty string`);
+  }
+  return rawValue.trim();
+}
+
+function getOptionalStringArrayArg(args: ToolCallRequest['args'], key: 'allowedTools' | 'skillIds'): string[] | undefined {
+  const rawValue = args[key];
+  if (rawValue === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(rawValue) || rawValue.some((item) => typeof item !== 'string' || item.trim().length === 0)) {
+    throw new Error(`INVALID_${key === 'allowedTools' ? 'ALLOWED_TOOLS' : 'SKILL_IDS'}: ${key} must be an array of non-empty strings`);
+  }
+  return rawValue.map((item) => item.trim());
+}
+
+function getOptionalMcpPolicyArg(args: ToolCallRequest['args']): MCPPolicy | undefined {
+  const rawValue = args['mcpPolicy'];
+  if (rawValue === undefined) {
+    return undefined;
+  }
+  if (rawValue !== 'allow_all' && rawValue !== 'deny_all' && rawValue !== 'allow_list') {
+    throw new Error('INVALID_MCP_POLICY: mcpPolicy must be one of "allow_all", "deny_all", or "allow_list"');
+  }
+  return rawValue;
+}
+
 @Injectable()
 @Tool({
   name: 'persona_list',
@@ -58,12 +101,12 @@ export class PersonaCreateTool {
   constructor(private readonly personaService: PersonaService) {}
 
   async execute(request: ToolCallRequest): Promise<{ id: string; name: string; model: string }> {
-    const name = request.args['name'] as string;
-    const systemPrompt = request.args['systemPrompt'] as string;
-    const model = request.args['model'] as string;
-    const allowedTools = (request.args['allowedTools'] as string[] | undefined) ?? [];
-    const skillIds = (request.args['skillIds'] as string[] | undefined) ?? [];
-    const mcpPolicy = (request.args['mcpPolicy'] as MCPPolicy | undefined) ?? 'allow_all';
+    const name = getRequiredStringArg(request.args, 'name');
+    const systemPrompt = getRequiredStringArg(request.args, 'systemPrompt');
+    const model = getRequiredStringArg(request.args, 'model');
+    const allowedTools = getOptionalStringArrayArg(request.args, 'allowedTools') ?? [];
+    const skillIds = getOptionalStringArrayArg(request.args, 'skillIds') ?? [];
+    const mcpPolicy = getOptionalMcpPolicyArg(request.args) ?? 'allow_all';
     const persona = await this.personaService.create({ name, systemPrompt, model, allowedTools, skillIds, mcpPolicy });
     return { id: persona.id, name: persona.name, model: persona.model };
   }
@@ -104,13 +147,13 @@ export class PersonaUpdateTool {
   constructor(private readonly personaService: PersonaService) {}
 
   async execute(request: ToolCallRequest): Promise<{ id: string; name: string; model: string }> {
-    const id = request.args['id'] as string;
-    const name = request.args['name'] as string | undefined;
-    const systemPrompt = request.args['systemPrompt'] as string | undefined;
-    const model = request.args['model'] as string | undefined;
-    const allowedTools = request.args['allowedTools'] as string[] | undefined;
-    const skillIds = request.args['skillIds'] as string[] | undefined;
-    const mcpPolicy = request.args['mcpPolicy'] as MCPPolicy | undefined;
+    const id = getRequiredStringArg(request.args, 'id');
+    const name = getOptionalStringArg(request.args, 'name');
+    const systemPrompt = getOptionalStringArg(request.args, 'systemPrompt');
+    const model = getOptionalStringArg(request.args, 'model');
+    const allowedTools = getOptionalStringArrayArg(request.args, 'allowedTools');
+    const skillIds = getOptionalStringArrayArg(request.args, 'skillIds');
+    const mcpPolicy = getOptionalMcpPolicyArg(request.args);
     const updated = await this.personaService.update(id, { name, systemPrompt, model, allowedTools, skillIds, mcpPolicy });
     return { id: updated.id, name: updated.name, model: updated.model };
   }
@@ -133,7 +176,7 @@ export class PersonaDeleteTool {
   constructor(private readonly personaService: PersonaService) {}
 
   async execute(request: ToolCallRequest): Promise<{ deleted: boolean; id: string }> {
-    const id = request.args['id'] as string;
+    const id = getRequiredStringArg(request.args, 'id');
     await this.personaService.remove(id);
     return { deleted: true, id };
   }

@@ -68,4 +68,22 @@ describe('MCPAddServerForm', () => {
       }));
     });
   });
+
+  it('preserves escaped quotes inside a quoted stdio arg (REGRESSION)', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<MCPAddServerForm onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    await user.type(screen.getByTestId('mcp-form-name'), 'My MCP');
+    await user.click(screen.getByTestId('mcp-form-transport-stdio'));
+    await user.type(screen.getByTestId('mcp-form-command'), 'npx');
+    await user.type(screen.getByTestId('mcp-form-args'), '--message "She said \\"hello\\"" --flag');
+    await user.click(screen.getByTestId('mcp-form-submit'));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        args: ['--message', 'She said "hello"', '--flag'],
+      }));
+    });
+  });
 });
