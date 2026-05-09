@@ -43,7 +43,12 @@ describe('VFSExplorer', () => {
 
   it('shows an empty state when the active session has no files', async () => {
     activeSession.activeSessionId = 'session-1';
-    apiGet.mockResolvedValue({ data: { files: [] } satisfies VFSListResult });
+    apiGet.mockResolvedValue({
+      data: {
+        sessionId: 'session-1',
+        files: [],
+      } satisfies VFSListResult,
+    });
 
     render(<VFSExplorer />);
 
@@ -57,7 +62,13 @@ describe('VFSExplorer', () => {
     apiGet
       .mockResolvedValueOnce({
         data: {
-          files: [{ path: 'notes/todo.md', sizeBytes: 2048, updatedAt: 1 }],
+          sessionId: 'session-1',
+          files: [{
+            sessionId: 'session-1',
+            path: 'notes/todo.md',
+            sizeBytes: 2048,
+            updatedAt: 1,
+          }],
         } satisfies VFSListResult,
       })
       .mockRejectedValueOnce(new Error('load failed'));
