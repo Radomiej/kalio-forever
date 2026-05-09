@@ -31,13 +31,13 @@ Every chat session gets its own sandboxed filesystem. Every persona has isolated
 <td width="50%">
 
 **🤖 Agentic loop**  
-Up to 8 tool-call hops per turn. The LLM plans, calls tools, reads results, and iterates until it's done — or asks you.
+Configurable multi-step tool loop per turn. The backend keeps iterating LLM -> tools -> LLM until no tool calls remain, the user interrupts, or the max-attempt guard is reached.
 
 **⚡ Sub-second streaming**  
 Every token arrives live via Socket.IO. The first chunk appears before the full response is generated.
 
 **🛡️ Human-in-the-Loop (HITL)**  
-Destructive tools (`fs_delete`, `terminal_exec`, `raapp_call_native`, …) pause and prompt for confirmation before executing.
+Confirmed tools pause on `tool:confirmation_required`; confirm and cancel are enforced against the owning `sessionId` before execution resumes.
 
 **📁 Virtual File System**  
 Each session gets a sandboxed workspace at `sessions/{id}/files/`. Agents read, write, list, and search files without ever leaving the sandbox.
@@ -52,7 +52,7 @@ Per-persona vector store powered by `sqlite-vec`. Agents embed episodic memories
 Fully isolated system prompts, default models, MCP policies, skills, and tool access per persona.
 
 **🔌 MCP — dynamic tool discovery**  
-Connect any Model Context Protocol server (stdio or HTTP). Tools appear in the agent's toolset immediately with automatic prefixing and HITL inheritance.
+Connect any Model Context Protocol server (stdio or HTTP). Connected tools are merged into the runtime tool list immediately and exposed under prefixed names like `mcp_<serverId>_<toolName>`.
 
 **📺 RA-App renderer**  
 Agents can produce interactive mini-apps: raw HTML iframes with `postMessage` bridge back to chat, or a declarative GUI DSL that renders as structured UI.
@@ -75,7 +75,7 @@ Invoke Copilot, Claude Code, Gemini CLI, or any subprocess-based agent directly 
   <img src="docs/kalio_module_architecture.svg" alt="Kalio module architecture — Frontend thin client communicates with NestJS backend via Socket.IO" width="700"/>
 </p>
 
-The frontend is a **thin client** — it renders state, dispatches events, and never runs business logic. All intelligence, tool execution, memory, and I/O live in the backend.
+The frontend is a **thin client** — it renders state, tracks live UI progress, and dispatches session-scoped socket events. The backend owns queueing, tool execution, memory, persistence, and I/O. `ChatSession` is the real isolation unit across chat history, VFS, KV state, approvals, and sub-agent lineage.
 
 ---
 
@@ -85,46 +85,53 @@ Every user message triggers this pipeline:
 
 ```mermaid
 sequenceDiagram
-    participant U as User
-    participant FE as Frontend
-    participant GW as ChatGateway
-    participant CS as ChatService
-    participant LLM as LLMService
-    participant T as ToolModule
+  participant U as User
+  participant FE as ChatInterface
+  participant GW as ChatGateway
+  participant P as SessionPipelineService
+  participant CS as ChatService
+  participant LLM as ILLMSource
+  participant TD as ToolDispatchService
 
-    U->>FE: type + send message
-    FE->>GW: chat:send {sessionId, content, attachments}
-    GW-->>FE: chat:context {systemPrompt, toolNames}
+  U->>FE: type + send message
+  FE->>GW: chat:send {sessionId, content, attachments}
+  GW->>P: submit(payload, emit)
 
-    GW->>CS: handleTurn()
-    CS->>LLM: streamChat(messages, toolMetas)
+  alt session already has an active turn
+    P-->>FE: chat:queued
+  else dispatch now
+    P->>CS: handleTurn(...)
+    CS-->>FE: agent:start
+    CS-->>FE: chat:context {systemPrompt, toolNames}
 
-    loop streaming tokens
-        LLM-->>CS: text_delta
-        CS-->>GW: chat:chunk {delta, done=false}
-        GW-->>FE: chat:chunk (live render)
+    loop each LLM iteration
+      CS->>LLM: stream(messages, toolMetas)
+      loop streaming chunks
+        LLM-->>CS: chunk
+        CS-->>FE: chat:chunk
+      end
+
+      alt tool calls emitted
+        loop each tool call
+          CS-->>FE: tool:start {callId, toolName, args}
+          CS->>TD: dispatch(callId, toolName, args, ctx)
+
+          alt requiresConfirmation = true
+            TD-->>FE: tool:confirmation_required
+            FE-->>GW: tool:confirm or tool:cancel
+          end
+
+          TD-->>CS: ToolResult
+          CS-->>FE: tool:result
+          CS->>CS: persist non-cancelled tool_result message
+        end
+      else no tool calls remain
+        CS-->>FE: chat:complete
+      end
     end
 
-    note over CS,T: LLM decides to call a tool
-
-    CS-->>GW: tool:start {callId, toolName, args}
-    GW-->>FE: tool:start (spinner appears)
-
-    CS->>T: dispatch(toolName, args)
-
-    alt requiresConfirmation = true
-        T-->>FE: hitl:confirm_request
-        FE-->>T: hitl:confirm_response (approve / cancel)
-    end
-
-    T-->>CS: ToolResult {status, data}
-    CS-->>GW: tool:result {callId, status, data}
-    GW-->>FE: tool:result (expand card)
-
-    CS->>LLM: continue stream with tool result
-    LLM-->>CS: final tokens
-    CS-->>GW: chat:complete
-    GW-->>FE: chat:complete
+    CS-->>FE: agent:done
+  end
 ```
 
 ---
@@ -135,7 +142,7 @@ sequenceDiagram
   <img src="docs/kalio_hitl_gate_flow.svg" alt="HITL confirmation gate flow" width="600"/>
 </p>
 
-Tools marked `requiresConfirmation: true` are paused before execution. The user sees a confirmation dialog with the tool name, arguments, and a clear approve/cancel choice. The agent waits. If cancelled, `TOOL_CANCELLED` is injected into the conversation context.
+Tools marked `requiresConfirmation: true` are paused before execution. The frontend receives `tool:confirmation_required`, shows the tool name and arguments inline, and responds with `tool:confirm` or `tool:cancel`. Confirmation is session-bound in both the gateway and dispatch layer, so another socket cannot resolve a pending request for a different session.
 
 ---
 
@@ -265,11 +272,12 @@ For image generation, set `IMAGE_PROVIDER` and `IMAGE_API_KEY` separately (same 
 | `kalio.db` | Sessions, messages, personas, credentials, audit log | `$WORKSPACE_ROOT/kalio.db` |
 | `memory/{personaId}.db` | Vector embeddings per persona (sqlite-vec RAG) | `$WORKSPACE_ROOT/memory/` |
 | `sessions/{id}/files/` | Per-session sandboxed file workspace | `$WORKSPACE_ROOT/sessions/` |
-| `sessions/{id}/_kv.json` | Agent-writable key-value store | (same root) |
+| `sessions/{id}/_kv.json` | Per-session key-value store | (same root) |
+| `ra-apps/` | Stored RA-App catalog (core + user apps, versioned groups) | `$WORKSPACE_ROOT/ra-apps` or `RA_APPS_PATH` |
 
 Provider secrets stored in `kalio.db` and image provider settings are encrypted at rest with `CREDENTIALS_MASTER_KEY`. This is field-level secret encryption, not a password on the SQLite database file itself.
 
-Each session sandbox is isolated. Agents can only read and write inside `WORKSPACE_ROOT/sessions/{sessionId}/` and the KV namespace attached to that session/persona boundary.
+Each session sandbox is isolated. Agents can only read and write inside `WORKSPACE_ROOT/sessions/{sessionId}/` and the KV namespace attached to that same session. Stored RA-Apps are separate from session VFS and live in the RA-App catalog path.
 
 ---
 
@@ -312,8 +320,10 @@ If you're contributing code or using an AI coding agent, start with [CONTRIBUTIN
 | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Community expectations, moderation scope, and reporting path |
 | [scripts/code-audit/README.md](./scripts/code-audit/README.md) | What the automated audit checks and how to run it |
 | [docs/sessions/](./docs/sessions/) | Chronological engineering session logs and implementation decisions |
+| [docs/application-architecture-current.md](./docs/application-architecture-current.md) | Current top-level runtime model across backend, frontend, storage, and session isolation |
 | [docs/chat-streaming-tools-architecture.md](./docs/chat-streaming-tools-architecture.md) | LLM streaming + tool dispatch deep-dive |
 | [docs/mcp-architecture.md](./docs/mcp-architecture.md) | MCP integration: discovery, lifecycle, per-persona policy |
+| [docs/raapp-design-current.md](./docs/raapp-design-current.md) | Inline RA-App blocks, stored catalog apps, iframe bridge, and approvals |
 | [docs/database-schema-diagram.md](./docs/database-schema-diagram.md) | Full ERD with all 13 tables |
 | [docs/tool-architecture.md](./docs/tool-architecture.md) | Tool registration pattern and dispatch pipeline |
 | [docs/cli-agent-module-architecture.md](./docs/cli-agent-module-architecture.md) | CLI agent module: adapters, config schema, output streaming |

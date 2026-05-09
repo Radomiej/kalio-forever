@@ -64,6 +64,7 @@ type RawEffect =
 
 interface ParsedSystem {
   id: string;
+  name?: string;
   condition?: string;
   /** ECS component filter — effects run once per matching entity */
   query?: string[];
@@ -167,6 +168,9 @@ export class EffectsProcessorService {
       }
 
       // Query-based execution — run effects per matching entity
+      if (system.query && system.query.length > 0 && !entityStore) {
+        this.logger.warn(`System "${system.name ?? '(unnamed)'}" has a query but no EntityStore — running globally`);
+      }
       if (system.query && system.query.length > 0 && entityStore) {
         const entities = entityStore.queryEntities(system.query);
         for (const entity of entities) {
@@ -270,7 +274,7 @@ export class EffectsProcessorService {
         return;
       }
       const { entity_id: rawEntityId, component, field, value: rawValue } = (effect as SetFieldEffect).set_field;
-      // entity_id may reference a query-loop variable (string expression)
+      // entity_id may reference a query-loop variable (string expression); fallback to raw string if eval yields nothing
       const entity_id = typeof rawEntityId === 'string'
         ? String(this.evalExpression(rawEntityId, input, output) ?? rawEntityId)
         : String(rawEntityId);
@@ -378,7 +382,8 @@ export class EffectsProcessorService {
         entity: (input as Record<string, unknown>)['entity'],
         // math helpers
         ...VM_MATH,
-        Math: VM_MATH,
+        // Merge VM_MATH helpers into Math to avoid shadowing Math.PI, Math.E, etc.
+        Math: { ...Math, ...VM_MATH },
         __result: undefined,
       });
       vm.runInContext(`__result = (${expression})`, ctx, { timeout: 1000 });

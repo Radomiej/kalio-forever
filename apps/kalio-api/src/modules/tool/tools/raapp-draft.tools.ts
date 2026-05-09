@@ -101,7 +101,8 @@ export class RaAppCreateDraftTool {
       };
     }
 
-    const mode = (request.args['mode'] as string | undefined) ?? 'display';
+    const rawMode = (request.args['mode'] as string | undefined) ?? 'display';
+    const mode: 'display' | 'interactive' = rawMode === 'interactive' ? 'interactive' : 'display';
 
     // Persist draft files to session VFS
     try {

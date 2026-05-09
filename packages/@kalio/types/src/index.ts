@@ -227,7 +227,7 @@ export interface ToolConfirmationRequest {
   sessionId: ID;
   toolName: string;
   args: Record<string, unknown>;
-  timeoutMs: number;          // default 30000
+  timeoutMs: number;          // confirmation timeout in ms; 0 disables timeout
   agentRun?: AgentRunContext;
 }
 
@@ -310,7 +310,7 @@ export interface MCPServer {
 }
 
 export interface MCPTool {
-  name: string;               // namespaced: "{serverId}::{toolName}"
+  name: string;               // runtime name: "mcp_<serverId>_<toolName>"
   description: string;
   serverId: ID;
   requiresConfirmation: boolean;

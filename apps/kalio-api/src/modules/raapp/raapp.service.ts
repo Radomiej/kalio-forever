@@ -381,7 +381,8 @@ export class RAAppService implements OnModuleInit {
         try {
           const metaRaw = await fs.readFile(path.join(tmpDir, 'meta.yml'), 'utf-8');
           const meta = yaml.load(metaRaw) as RAAppMeta;
-          const [major, minor, patch] = (meta.version ?? '1.0.0').split('.').map(Number);
+          const parts = (meta.version ?? '1.0.0').split('.').map(Number);
+          const [major, minor, patch] = parts.map((n) => (isNaN(n) ? 0 : n));
           meta.version = `${major}.${minor}.${(patch ?? 0) + 1}`;
           await fs.writeFile(path.join(tmpDir, 'meta.yml'), yaml.dump(meta), 'utf-8');
         } catch { /* no meta.yml — skip */ }

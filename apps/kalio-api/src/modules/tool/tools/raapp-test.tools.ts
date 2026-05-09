@@ -26,6 +26,28 @@ interface TestResult {
   failures: string[];
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || a === undefined || b === undefined) return a === b;
+  if (typeof a !== typeof b) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((item, i) => deepEqual(item, b[i]));
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (typeof a === 'object') {
+    const objA = a as Record<string, unknown>;
+    const objB = b as Record<string, unknown>;
+    const keysA = Object.keys(objA);
+    const keysB = Object.keys(objB);
+    if (keysA.length !== keysB.length) return false;
+    return keysA.every((k) => deepEqual(objA[k], objB[k]));
+  }
+  return false;
+}
+
 // ─── raapp_test ───────────────────────────────────────────────────────────────
 
 @Injectable()
@@ -171,11 +193,11 @@ export class RaAppTestTool {
       }
     }
 
-    // Compare actual vs expected (deep equality per key)
+    // Compare actual vs expected using structural deep equality
     const failures: string[] = [];
     for (const [key, expectedValue] of Object.entries(tc.expect)) {
       const actualValue = actual[key];
-      const match = JSON.stringify(actualValue) === JSON.stringify(expectedValue);
+      const match = deepEqual(actualValue, expectedValue);
       if (!match) {
         failures.push(
           `"${key}": expected ${JSON.stringify(expectedValue)}, got ${JSON.stringify(actualValue)}`,
