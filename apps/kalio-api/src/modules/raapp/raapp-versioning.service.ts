@@ -30,6 +30,8 @@ import type { RAAppGroup, RAAppVersionInfo, RAAppMetaSummary } from '@kalio/type
 import type { RAAppMeta } from './raapp.service';
 import { archiveDirectoryToZip } from './zip-archive.util';
 
+export const RAAPP_RELEASE_NOT_FOUND_CODE = 'RAAPP_RELEASE_NOT_FOUND';
+
 // ── Semver helpers ────────────────────────────────────────────────────────────
 
 export function parseSemver(v: string): [number, number, number] {
@@ -80,6 +82,12 @@ function metaToSummary(meta: RAAppMeta): RAAppMetaSummary {
     expose_as_tool: meta.expose_as_tool,
     tool_description: meta.tool_description,
   };
+}
+
+function createReleaseNotFoundError(message: string): NodeJS.ErrnoException {
+  const error = new Error(message) as NodeJS.ErrnoException;
+  error.code = RAAPP_RELEASE_NOT_FOUND_CODE;
+  return error;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -262,18 +270,36 @@ export class RAAppVersioningService implements OnModuleInit {
 
   downloadRelease(slug: string, version: string): { stream: fsSync.ReadStream; filename: string } {
     const group = this.groups.get(slug);
-    if (!group) throw new Error(`No RA-App group found for slug: ${slug}`);
+    if (!group) throw createReleaseNotFoundError(`No RA-App group found for slug: ${slug}`);
 
     const release = group.current.version === version
       ? group.current
       : group.history.find((entry) => entry.version === version);
 
     if (!release) {
-      throw new Error(`Release version ${version} not found for slug: ${slug}`);
+      throw createReleaseNotFoundError(`Release version ${version} not found for slug: ${slug}`);
     }
 
+    try {
+      const stat = fsSync.statSync(release.zipPath);
+      if (!stat.isFile()) {
+        throw createReleaseNotFoundError(`Release version ${version} not found for slug: ${slug}`);
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'ENOENT' || code === 'ENOTDIR' || code === RAAPP_RELEASE_NOT_FOUND_CODE) {
+        throw createReleaseNotFoundError(`Release version ${version} not found for slug: ${slug}`);
+      }
+      throw err;
+    }
+
+    const stream = fsSync.createReadStream(release.zipPath);
+    stream.once('error', (err) => {
+      this.logger.error(`[downloadRelease] Stream failed for ${slug}@${version}`, err);
+    });
+
     return {
-      stream: fsSync.createReadStream(release.zipPath),
+      stream,
       filename: `${slug}-${release.version}.zip`,
     };
   }

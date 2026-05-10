@@ -90,10 +90,13 @@ const VM_MATH = {
 };
 
 const DEFAULT_VM_TIMEOUT_MS = 1000;
+const MAX_VM_TIMEOUT_MS = 30_000;
 
 function parseVmTimeoutMs(value: string | number | undefined): number {
   const parsed = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_VM_TIMEOUT_MS;
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.min(parsed, MAX_VM_TIMEOUT_MS)
+    : DEFAULT_VM_TIMEOUT_MS;
 }
 
 // ─── Pending approval record ─────────────────────────────────────────────────

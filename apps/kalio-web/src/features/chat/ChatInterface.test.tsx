@@ -413,6 +413,24 @@ describe('ChatInterface event wiring', () => {
 
     expect(addSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'child-session', kind: 'subagent' }));
   });
+
+  it('BUG REPRODUCTION: tool:result from another session flips global streaming state', async () => {
+    mockActiveSessionId = 'session-1';
+    await renderChatInterface();
+
+    await emitEvent('tool:result', {
+      callId: 'call-background',
+      status: 'success',
+      data: { ok: true },
+      sessionId: 'session-2',
+    });
+
+    expect(setStreaming).toHaveBeenCalledWith(true);
+    expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-2',
+      toolCallId: 'call-background',
+    }));
+  });
 });
 
 describe('REGRESSION: tool name resolution persists across turns', () => {
@@ -954,5 +972,14 @@ describe('REGRESSION: pendingConfirmations cleared on agent:done', () => {
     await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
 
     expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+  });
+
+  it('agent:done for the active session stops streaming even when chat:complete never arrived', async () => {
+    await renderChatInterface();
+    setStreaming.mockClear();
+
+    await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
+
+    expect(setStreaming).toHaveBeenCalledWith(false);
   });
 });

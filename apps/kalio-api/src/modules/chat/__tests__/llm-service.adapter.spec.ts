@@ -97,4 +97,37 @@ describe('LLMServiceAdapter', () => {
     }));
     await expect(collect(adapter.stream(baseParams))).rejects.toThrow('LLM down');
   });
+
+  it('BUG REPRODUCTION: closing the iterator does not cancel the upstream LLM stream', async () => {
+    let release!: () => void;
+    const upstreamChunks: string[] = [];
+    const llm = {
+      streamChat: vi.fn().mockImplementation(async (
+        _msgs: unknown,
+        _tools: unknown,
+        onChunk: (c: LLMStreamChunk) => void,
+      ): Promise<LLMToolCall[]> => {
+        upstreamChunks.push('first');
+        onChunk({ delta: 'first', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        upstreamChunks.push('second');
+        onChunk({ delta: 'second', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
+        return [];
+      }),
+    } as unknown as LLMService;
+    const adapter = new LLMServiceAdapter(llm);
+    const iterator = adapter.stream(baseParams)[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toEqual({ value: { type: 'text_delta', delta: 'first' }, done: false });
+    await expect(iterator.return?.(undefined)).resolves.toEqual({ value: undefined, done: true });
+
+    release();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(upstreamChunks).toEqual(['first', 'second']);
+    expect(llm.streamChat).toHaveBeenCalledOnce();
+  });
 });

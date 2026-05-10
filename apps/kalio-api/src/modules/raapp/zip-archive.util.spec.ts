@@ -88,4 +88,25 @@ describe('archiveDirectoryToZip', () => {
 
     expect(onUnhandledRejection).not.toHaveBeenCalled();
   });
+
+  it('logs cleanup failures before rejecting with the original archive error', async () => {
+    const cleanupOnError = vi.fn().mockRejectedValue(new Error('cleanup failed'));
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      await expect(
+        archiveDirectoryToZip({
+          sourceDir: 'source-dir',
+          zipPath: 'out.zip',
+          createWriteStream: () => new FakeOutput() as never,
+          createArchiver: () => new FailingArchiver() as never,
+          cleanupOnError,
+        }),
+      ).rejects.toThrow('disk full');
+
+      expect(stderrSpy).toHaveBeenCalled();
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
 });

@@ -327,6 +327,22 @@ export class RaAppExecuteDslTool {
 export class RaAppPublishDraftTool {
   private readonly logger = new Logger(RaAppPublishDraftTool.name);
 
+  private resolvePublishSlug(meta: RAAppMeta, slugOverride: string | null): string | null {
+    const candidates = [
+      slugOverride,
+      typeof meta.id === 'string' ? meta.id : null,
+      typeof meta.name === 'string' ? deriveSlug(meta.name) : null,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return candidate.trim();
+      }
+    }
+
+    return null;
+  }
+
   constructor(
     private readonly vfs: VFSService,
     private readonly versioning: RAAppVersioningService,
@@ -398,7 +414,14 @@ export class RaAppPublishDraftTool {
         return { status: 'error', message: `Draft "${draftId}" is missing meta.yml.` };
       }
 
-      const slug = slugOverride ?? meta.id ?? deriveSlug(meta.name);
+      const slug = this.resolvePublishSlug(meta, slugOverride);
+      if (!slug) {
+        return {
+          status: 'error',
+          message: `Draft "${draftId}" must define a non-empty slug via .raapp-slug, meta.yml id, or meta.yml name.`,
+        };
+      }
+
       await archiveDirectoryToZip({
         sourceDir: tmpDir,
         zipPath: tmpZip,

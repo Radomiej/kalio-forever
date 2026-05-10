@@ -73,6 +73,7 @@ export class RaAppGetTool {
       ui_gui: { type: 'string', description: 'New ui.gui content (optional).' },
       ui_yml: { type: 'string', description: 'New ui.yml content (optional).' },
       tests_yml: { type: 'string', description: 'New tests.yml content (optional).' },
+      components_yml: { type: 'string', description: 'New components.yml content (optional).' },
     },
   },
   requiresConfirmation: false,
@@ -139,6 +140,7 @@ export class RaAppEditTool {
       ui_gui: 'ui.gui',
       ui_yml: 'ui.yml',
       tests_yml: 'tests.yml',
+      components_yml: 'components.yml',
     };
     for (const [argKey, filename] of Object.entries(fileMap)) {
       const val = request.args[argKey];
@@ -148,7 +150,7 @@ export class RaAppEditTool {
     }
 
     if (Object.keys(updates).length === 0) {
-      return { status: 'error', message: 'No file content provided. Pass at least one of: meta_yml, systems_yml, ui_gui, ui_yml, tests_yml.' };
+      return { status: 'error', message: 'No file content provided. Pass at least one of: meta_yml, systems_yml, ui_gui, ui_yml, tests_yml, components_yml.' };
     }
 
     const draftId = `edit-${id}`;

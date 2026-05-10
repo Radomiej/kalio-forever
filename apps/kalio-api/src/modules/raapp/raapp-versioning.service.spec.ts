@@ -304,6 +304,18 @@ describe('RAAppVersioningService', () => {
     });
   });
 
+  describe('downloadRelease', () => {
+    it('throws when the selected release zip is missing on disk', async () => {
+      const buf = await buildZip({ id: 'my-app', name: 'My App', version: '1.0.0' });
+      await service.saveAsDraft('my-app', buf);
+
+      const currentZip = path.join(tmpBase, 'user', 'my-app', 'current.zip');
+      await fs.unlink(currentZip);
+
+      expect(() => service.downloadRelease('my-app', '1.0.0')).toThrow(/release|zip|not found|missing/i);
+    });
+  });
+
   // ── rollback ─────────────────────────────────────────────────────────────
 
   describe('rollback', () => {

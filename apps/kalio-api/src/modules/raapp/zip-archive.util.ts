@@ -1,5 +1,6 @@
 import fsSync from 'node:fs';
 import archiver from 'archiver';
+import { Logger } from '@nestjs/common';
 
 type ZipOutput = {
   on(event: 'close', listener: () => void): unknown;
@@ -45,7 +46,13 @@ export async function archiveDirectoryToZip(options: ArchiveDirectoryToZipOption
       const error = err instanceof Error ? err : new Error(String(err));
       void Promise.resolve(options.cleanupOnError?.()).then(
         () => reject(error),
-        () => reject(error),
+        (cleanupErr) => {
+          new Logger('ZipArchiveUtil').error(
+            `[archiveDirectoryToZip] cleanupOnError failed for ${options.zipPath}`,
+            cleanupErr instanceof Error ? cleanupErr : new Error(String(cleanupErr)),
+          );
+          reject(error);
+        },
       );
     };
 

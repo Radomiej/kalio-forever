@@ -355,64 +355,6 @@ export class RAAppService implements OnModuleInit {
     }
   }
 
-  /**
-   * Update one or more source files in a stored RA-App, bump the patch
-   * version in meta.yml, and reload the app.
-   *
-   * @param id       The app ID to update (must exist and be a user app)
-   * @param updates  Map of filename → new content (partial; missing keys are unchanged)
-   */
-  async updateApp(id: string, updates: Record<string, string>): Promise<LoadedRAApp> {
-    const app = this.loaded.get(id);
-    if (!app) throw new Error(`RA-App not found: ${id}`);
-    if (app.source === 'core') throw new Error(`Cannot edit core RA-App: ${id}`);
-
-    const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
-    const zipPath = app.zipPath.endsWith('.zip') ? app.zipPath : `${app.zipPath}.zip`;
-    const tmpZipPath = `${zipPath}.tmp`;
-    try {
-      if (app.zipPath.endsWith('.zip')) {
-        await extractZip(app.zipPath, { dir: tmpDir });
-      } else {
-        await fs.cp(app.zipPath, tmpDir, { recursive: true });
-      }
-
-      // Bump patch version in meta.yml before applying user updates
-      if (!updates['meta.yml']) {
-        try {
-          const metaRaw = await fs.readFile(path.join(tmpDir, 'meta.yml'), 'utf-8');
-          const meta = yaml.load(metaRaw) as RAAppMeta;
-          const parts = (meta.version ?? '1.0.0').split('.').map(Number);
-          const [major, minor, patch] = parts.map((n) => (isNaN(n) ? 0 : n));
-          meta.version = `${major}.${minor}.${(patch ?? 0) + 1}`;
-          await fs.writeFile(path.join(tmpDir, 'meta.yml'), yaml.dump(meta), 'utf-8');
-        } catch { /* no meta.yml — skip */ }
-      }
-
-      // Apply updates
-      for (const [filename, content] of Object.entries(updates)) {
-        await fs.writeFile(path.join(tmpDir, filename), content, 'utf-8');
-      }
-
-      // Repack ZIP
-      await archiveDirectoryToZip({
-        sourceDir: tmpDir,
-        zipPath: tmpZipPath,
-        cleanupOnError: async () => {
-          await fs.rm(tmpZipPath, { force: true });
-        },
-      });
-      await fs.rename(tmpZipPath, zipPath);
-
-      const loaded = await this.loadZip(zipPath, 'user');
-      this.logger.log(`[RAAppService] Updated app ${loaded.id} → v${loaded.meta.version ?? '?'}`);
-      return loaded;
-    } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true });
-      await fs.rm(tmpZipPath, { force: true }).catch(() => { /* best effort */ });
-    }
-  }
-
   async executeSystems(systemsContent: string, inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
     try {
       const parsed = yaml.load(systemsContent) as {

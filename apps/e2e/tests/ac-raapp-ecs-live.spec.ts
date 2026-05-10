@@ -15,6 +15,7 @@ import { io, Socket } from 'socket.io-client';
 import { API_BASE } from './helpers/test-config';
 
 const WS_BASE = API_BASE.replace('/api', '');
+const MOCK_LLM = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.LLM_PROVIDER === 'mock';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ test.describe('ECS / RA-App live integration', () => {
 
   test.beforeEach(async ({ request }) => {
     const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'ECS Live Test', personaId: 'default' },
+      data: { title: 'ECS Live Test', personaId: 'ra-apps' },
     });
     expect(res.ok()).toBeTruthy();
     const body = await res.json() as { id: string };
@@ -89,21 +90,14 @@ test.describe('ECS / RA-App live integration', () => {
 
   // ── 2. run_raapp on seeded Visual Calculator (has systems.yml → ECS) ─────
   test('run_raapp returns GUI block for Visual Calculator', async ({ page }) => {
+    test.skip(MOCK_LLM, 'Mock LLM only echoes prompts and does not reliably launch RA-Apps through chat UI.');
+
     const socket = wsConnect(sessionId);
     await waitForEvent(socket, 'connect');
-
-    // Mock LLM is scripted to return "HELLO" echoes — but we can trigger
-    // tool execution directly by sending a message that the mock LLM will
-    // process as a tool call. The mock LLM in this codebase echoes — so
-    // we instead verify via the /api/tools REST endpoint that run_raapp exists,
-    // and call it directly via a custom approach.
-    //
-    // Since mock LLM doesn't natively fire tool calls, we verify the tool
-    // endpoint produces valid output by calling it through the chat message
-    // that includes a forced tool directive understood by mock.
     socket.disconnect();
 
-    // Navigate to chat and send a message via UI — verify it reaches the agent
+    // Navigate to chat and send a complete launch request via the RA-App persona.
+    // Visual Calculator requires a, b, and operation.
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
     await expect(
@@ -113,12 +107,13 @@ test.describe('ECS / RA-App live integration', () => {
 
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });
-    await chatInput.fill('Uruchom aplikację Visual Calculator z wejściami a=12, b=4. Użyj narzędzia run_raapp.');
+    await chatInput.fill('Uruchom aplikację Visual Calculator z wejściami a=12, b=4, operation=add. Użyj narzędzia run_raapp.');
     await page.getByTestId('chat-send-btn').click();
 
-    // Wait for LLM to respond (mock LLM will echo — verify input was disabled → re-enabled)
+    // Wait for the RA-App tool to render and the turn to finish.
     await expect(chatInput).toBeDisabled({ timeout: 5000 });
-    await expect(chatInput).toBeEnabled({ timeout: 20_000 });
+    await expect(page.getByTestId('gui-dsl-renderer')).toBeVisible({ timeout: 30_000 });
+    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
 
     // Assert at least one assistant bubble appeared
     await expect(page.getByTestId('agent-turn-bubble').first()).toBeVisible({ timeout: 5000 });

@@ -161,4 +161,32 @@ describe('RaAppPublishDraftTool', () => {
       bumpType: 'minor',
     });
   });
+
+  it('rejects publish when neither slug override nor meta id/name produce a non-empty slug', async () => {
+    vfs.listFiles.mockReturnValue({
+      sessionId: 'sess-1',
+      files: [
+        { sessionId: 'sess-1', path: 'drafts/draft-1/meta.yml', sizeBytes: 10, updatedAt: 1 },
+        { sessionId: 'sess-1', path: 'drafts/draft-1/ui.gui', sizeBytes: 20, updatedAt: 1 },
+      ],
+    });
+    vfs.readBinary.mockImplementation((_sessionId: string, filePath: string) => {
+      if (filePath.endsWith('meta.yml')) return Buffer.from('id: ""\nname: ""\nversion: "1.0.0"\n');
+      if (filePath.endsWith('ui.gui')) return Buffer.from('window { label { text = "Hello" } }');
+      throw new Error(`unexpected read: ${filePath}`);
+    });
+
+    const result = await tool.execute({
+      callId: 'call-3',
+      sessionId: 'sess-1',
+      toolName: 'raapp_publish_draft',
+      args: { draft_id: 'draft-1', bump_type: 'minor' },
+    });
+
+    expect(result).toMatchObject({
+      status: 'error',
+      message: expect.stringMatching(/slug|meta\.yml|name|id/i),
+    });
+    expect(versioning.saveAsDraft).not.toHaveBeenCalled();
+  });
 });

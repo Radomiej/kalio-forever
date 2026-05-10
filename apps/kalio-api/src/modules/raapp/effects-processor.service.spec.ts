@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import vm from 'node:vm';
 import { ConfigService } from '@nestjs/config';
@@ -11,29 +11,31 @@ const makeAuditService = () => ({
   log: vi.fn().mockResolvedValue(undefined),
 });
 
+async function createEffectsProcessorFixture(timeoutMs = 1000) {
+  const module: TestingModule = await Test.createTestingModule({
+    providers: [
+      EffectsProcessorService,
+      NativeSystemRegistry,
+      { provide: AuditService, useFactory: makeAuditService },
+      { provide: ConfigService, useValue: { get: vi.fn().mockReturnValue(timeoutMs) } },
+    ],
+  }).compile();
+
+  return {
+    service: module.get(EffectsProcessorService),
+    registry: module.get(NativeSystemRegistry),
+    audit: module.get(AuditService) as unknown as ReturnType<typeof makeAuditService>,
+  };
+}
+
 describe('EffectsProcessorService', () => {
   let service: EffectsProcessorService;
   let registry: NativeSystemRegistry;
   let audit: ReturnType<typeof makeAuditService>;
   const ctx: NativeSessionContext = { sessionId: 'sess-123' };
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        EffectsProcessorService,
-        NativeSystemRegistry,
-        { provide: AuditService, useFactory: makeAuditService },
-        { provide: ConfigService, useValue: { get: vi.fn().mockReturnValue(7) } },
-      ],
-    }).compile();
-
-    service = module.get(EffectsProcessorService);
-    registry = module.get(NativeSystemRegistry);
-    audit = module.get(AuditService) as unknown as ReturnType<typeof makeAuditService>;
+    ({ service, registry, audit } = await createEffectsProcessorFixture());
   });
 
   describe('empty / null systems.yml', () => {
@@ -84,6 +86,7 @@ systems:
     });
 
     it('uses VM timeout from config', async () => {
+      const timedFixture = await createEffectsProcessorFixture(7);
       const runSpy = vi.spyOn(vm, 'runInContext');
       const yaml = `
 systems:
@@ -94,13 +97,42 @@ systems:
           expression: "1 + 1"
 `;
 
-      await service.processSystemsYaml(yaml, {}, ctx);
+      try {
+        await timedFixture.service.processSystemsYaml(yaml, {}, ctx);
 
-      expect(runSpy).toHaveBeenCalledWith(
-        '__result = (1 + 1)',
-        expect.any(Object),
-        expect.objectContaining({ timeout: 7 }),
-      );
+        expect(runSpy).toHaveBeenCalledWith(
+          '__result = (1 + 1)',
+          expect.any(Object),
+          expect.objectContaining({ timeout: 7 }),
+        );
+      } finally {
+        runSpy.mockRestore();
+      }
+    });
+
+    it('caps oversized VM timeouts from config to a safe maximum', async () => {
+      const timedFixture = await createEffectsProcessorFixture(999_999_999);
+      const runSpy = vi.spyOn(vm, 'runInContext');
+      const yaml = `
+systems:
+  - id: s1
+    effects:
+      - assign:
+          target: output.result
+          expression: "1 + 1"
+`;
+
+      try {
+        await timedFixture.service.processSystemsYaml(yaml, {}, ctx);
+
+        expect(runSpy).toHaveBeenCalledWith(
+          '__result = (1 + 1)',
+          expect.any(Object),
+          expect.objectContaining({ timeout: 30_000 }),
+        );
+      } finally {
+        runSpy.mockRestore();
+      }
     });
   });
 

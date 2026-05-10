@@ -15,7 +15,6 @@ describe('RaAppEditTool', () => {
   let raapp: {
     getById: ReturnType<typeof vi.fn>;
     getSourceFiles: ReturnType<typeof vi.fn>;
-    updateApp: ReturnType<typeof vi.fn>;
   };
   let vfs: {
     readFile: ReturnType<typeof vi.fn>;
@@ -36,7 +35,6 @@ describe('RaAppEditTool', () => {
         'ui.gui': 'window { label { text = "release" } }',
         'tests.yml': 'tests:\n  - name: release\n',
       }),
-      updateApp: vi.fn(),
     };
     vfs = {
       readFile: vi.fn((_sessionId: string, filePath: string) => {
@@ -65,7 +63,6 @@ describe('RaAppEditTool', () => {
       draft_id: 'edit-my-app',
       updatedFiles: ['ui.gui'],
     });
-    expect(raapp.updateApp).not.toHaveBeenCalled();
     expect(raapp.getSourceFiles).toHaveBeenCalledWith('my-app');
     expect(vfs.writeFile).toHaveBeenCalledWith({
       sessionId: 'sess-1',
@@ -121,6 +118,24 @@ describe('RaAppEditTool', () => {
       sessionId: 'sess-1',
       filePath: 'drafts/edit-my-app/tests.yml',
       content: 'tests:\n  - name: updated\n',
+    });
+  });
+
+  it('accepts components_yml updates for the VFS working copy', async () => {
+    const result = await tool.execute(makeRequest({
+      id: 'my-app',
+      components_yml: 'globals:\n  hp:\n    type: number\n    default: 100\n',
+    }));
+
+    expect(result).toMatchObject({
+      status: 'draft_created',
+      draft_id: 'edit-my-app',
+      updatedFiles: ['components.yml'],
+    });
+    expect(vfs.writeFile).toHaveBeenCalledWith({
+      sessionId: 'sess-1',
+      filePath: 'drafts/edit-my-app/components.yml',
+      content: 'globals:\n  hp:\n    type: number\n    default: 100\n',
     });
   });
 });

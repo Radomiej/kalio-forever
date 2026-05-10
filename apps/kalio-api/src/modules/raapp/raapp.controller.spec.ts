@@ -336,6 +336,24 @@ describe('RAAppController', () => {
         ).downloadRelease('my-app', '9.9.9', { set: vi.fn() }),
       ).toThrow(NotFoundException);
     });
+
+    it('maps release-not-found error codes to NotFoundException without relying on message text', () => {
+      const group = { slug: 'my-app', displayName: 'My App', currentVersion: null, draft: null, history: [] };
+      mockVersioningService.getGroupBySlug.mockReturnValue(group);
+      mockVersioningService.downloadRelease.mockImplementation(() => {
+        const err = new Error('zip missing');
+        (err as NodeJS.ErrnoException).code = 'RAAPP_RELEASE_NOT_FOUND';
+        throw err;
+      });
+
+      expect(() =>
+        (
+          controller as unknown as {
+            downloadRelease: (slug: string, version: string, res: { set: ReturnType<typeof vi.fn> }) => StreamableFile;
+          }
+        ).downloadRelease('my-app', '9.9.9', { set: vi.fn() }),
+      ).toThrow(NotFoundException);
+    });
   });
 
   describe('deriveSlug()', () => {

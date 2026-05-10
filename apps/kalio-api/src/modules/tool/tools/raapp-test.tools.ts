@@ -282,6 +282,15 @@ export class RaAppTestTool {
       };
     }
 
+    if (!systemsContent) {
+      return {
+        status: 'error',
+        message: id
+          ? `RA-App "${id}" has no systems.yml. Add systems logic to the app first.`
+          : `Draft "${draftId}" has no systems.yml. Add systems logic to the draft first.`,
+      };
+    }
+
     let suite: TestSuite;
     try {
       suite = yaml.load(testsYml) as TestSuite;

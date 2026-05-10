@@ -147,6 +147,18 @@ describe('RaAppTestTool', () => {
     });
   });
 
+  it('returns a validation error when a stored release has no systems.yml', async () => {
+    raapp.getById.mockReturnValue({ systemsContent: null });
+    raapp.getSourceFiles.mockResolvedValue({ 'tests.yml': TESTS_YML });
+
+    const result = await tool.execute(makeRequest({ id: 'release-app' }));
+
+    expect(result).toEqual({
+      status: 'error',
+      message: 'RA-App "release-app" has no systems.yml. Add systems logic to the app first.',
+    });
+  });
+
   it('supports expect.entities matchers documented in the RaBuilder persona', async () => {
     const entityTests = `tests:
   - name: player starts with 100hp

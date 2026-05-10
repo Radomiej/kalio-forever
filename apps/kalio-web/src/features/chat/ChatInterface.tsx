@@ -232,6 +232,9 @@ export function ChatInterface() {
       console.log('[AgentDone]', payload.sessionId, payload.turnId);
       removeActiveAgentLoop(payload.sessionId, payload.agentRun);
       finalizeAgentTurn(payload.sessionId);
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setStreaming(false);
+      }
       setPendingConfirmation(payload.sessionId, null); // Clear unanswered confirmations when turn ends
     });
 
