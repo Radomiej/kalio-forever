@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
-import { HistoryToolCallBubble, LiveToolCallBubble } from './ToolCallBubble';
+import { HistoryToolCallBubble, LiveToolCallBubble, extractRAAppBlock } from './ToolCallBubble';
 import type { ToolActivity } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 
@@ -56,6 +56,23 @@ function makeActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
 // ── HistoryToolCallBubble tests ───────────────────────────────────────────────
 
 describe('REGRESSION: HistoryToolCallBubble — RA-App widget inside chip', () => {
+  it('preserves vfsPath when extracting html RA-App blocks', () => {
+    const block = extractRAAppBlock({
+      status: 'ready',
+      type: 'html',
+      mode: 'display',
+      content: '',
+      vfsPath: 'design/preview.html',
+    });
+
+    expect(block).toMatchObject({
+      type: 'html',
+      mode: 'display',
+      content: '',
+      vfsPath: 'design/preview.html',
+    });
+  });
+
   it('renders RAAppRenderer when content has RA-App block', () => {
     render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={false} />);
     expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();

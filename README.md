@@ -72,7 +72,7 @@ Invoke Copilot, Claude Code, Gemini CLI, or any subprocess-based agent directly 
 ## Architecture
 
 <p align="center">
-  <img src="docs/kalio_module_architecture.svg" alt="Kalio module architecture — Frontend thin client communicates with NestJS backend via Socket.IO" width="700"/>
+  <img src="docs/kalio_module_architecture.svg" alt="Kalio module architecture — Frontend thin client communicates with NestJS backend via Socket.IO"/>
 </p>
 
 The frontend is a **thin client** — it renders state, tracks live UI progress, and dispatches session-scoped socket events. The backend owns queueing, tool execution, memory, persistence, and I/O. `ChatSession` is the real isolation unit across chat history, VFS, KV state, approvals, and sub-agent lineage.
@@ -139,7 +139,7 @@ sequenceDiagram
 ## Human-in-the-Loop Gate
 
 <p align="center">
-  <img src="docs/kalio_hitl_gate_flow.svg" alt="HITL confirmation gate flow" width="600"/>
+  <img src="docs/kalio_hitl_gate_flow.svg" alt="HITL confirmation gate flow"/>
 </p>
 
 Tools marked `requiresConfirmation: true` are paused before execution. The frontend receives `tool:confirmation_required`, shows the tool name and arguments inline, and responds with `tool:confirm` or `tool:cancel`. Confirmation is session-bound in both the gateway and dispatch layer, so another socket cannot resolve a pending request for a different session.

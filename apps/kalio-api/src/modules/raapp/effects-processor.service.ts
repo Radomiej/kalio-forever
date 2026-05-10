@@ -1,5 +1,6 @@
 import vm from 'node:vm';
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import yaml from 'js-yaml';
 import { nanoid } from 'nanoid';
 import { NativeSystemRegistry } from './native/native-system-registry.service';
@@ -88,6 +89,13 @@ const VM_MATH = {
   lerp: (a: number, b: number, t: number) => a + (b - a) * t,
 };
 
+const DEFAULT_VM_TIMEOUT_MS = 1000;
+
+function parseVmTimeoutMs(value: string | number | undefined): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_VM_TIMEOUT_MS;
+}
+
 // ─── Pending approval record ─────────────────────────────────────────────────
 
 export interface PendingApproval {
@@ -126,11 +134,17 @@ export interface EffectsProcessorResult {
 @Injectable()
 export class EffectsProcessorService {
   private readonly logger = new Logger(EffectsProcessorService.name);
+  private readonly expressionTimeoutMs: number;
 
   constructor(
     private readonly nativeRegistry: NativeSystemRegistry,
     private readonly audit: AuditService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.expressionTimeoutMs = parseVmTimeoutMs(
+      config.get<string | number>('RAAPP_VM_TIMEOUT_MS', DEFAULT_VM_TIMEOUT_MS),
+    );
+  }
 
   /**
    * Parse systems.yml YAML and run all effect pipelines.
@@ -386,7 +400,7 @@ export class EffectsProcessorService {
         Math: { ...Math, ...VM_MATH },
         __result: undefined,
       });
-      vm.runInContext(`__result = (${expression})`, ctx, { timeout: 1000 });
+      vm.runInContext(`__result = (${expression})`, ctx, { timeout: this.expressionTimeoutMs });
       return ctx['__result'];
     } catch (err) {
       this.logger.warn(

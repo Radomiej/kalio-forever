@@ -1,73 +1,109 @@
-<svg width="700" height="470" viewBox="0 0 700 470" xmlns="http://www.w3.org/2000/svg" role="img">
-  <title>Kalio module architecture</title>
-  <desc>Frontend thin client (purple, left) communicates with NestJS backend modules (green, right) via Socket.IO and @kalio/sdk. Both import shared types from @kalio/types (amber, bottom).</desc>
+<svg width="100%" viewBox="0 0 1280 780" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>Kalio current module architecture</title>
+  <desc>Session-centric system map showing the frontend thin client, the session event lane, the backend orchestration modules, shared contracts, and runtime storage.</desc>
 
   <defs>
-    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M2 1 L8 5 L2 9" fill="none" stroke="#777" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7f5ef"/>
+      <stop offset="55%" stop-color="#fffdf9"/>
+      <stop offset="100%" stop-color="#f3f7f5"/>
+    </linearGradient>
+    <radialGradient id="glowLeft" cx="0" cy="0" r="1">
+      <stop offset="0%" stop-color="#d8cffc" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#d8cffc" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowRight" cx="1" cy="0" r="1">
+      <stop offset="0%" stop-color="#ccefe3" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#ccefe3" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M2 1 L8 5 L2 9" fill="none" stroke="#7a7a7a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>
+    <style>
+      .title { font: 700 34px Georgia, 'Times New Roman', serif; fill: #1f2937; }
+      .subtitle { font: 500 16px 'Segoe UI', Arial, sans-serif; fill: #5b6472; }
+      .pill { font: 700 12px 'Segoe UI', Arial, sans-serif; letter-spacing: 0.12em; text-transform: uppercase; }
+      .cardTitle { font: 700 26px 'Segoe UI', Arial, sans-serif; fill: #1f2937; }
+      .cardBody { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #4b5563; }
+      .label { font: 700 13px 'Segoe UI', Arial, sans-serif; fill: #6b7280; }
+      .small { font: 600 14px 'Segoe UI', Arial, sans-serif; fill: #64748b; }
+    </style>
   </defs>
 
-  <!-- ─── Frontend box ──────────────────────────────────────────────────── -->
-  <rect x="20" y="20" width="270" height="340" rx="12" fill="#EEEDFE" stroke="#534AB7" stroke-width="1"/>
-  <text x="155" y="47" text-anchor="middle" font-family="system-ui,-apple-system,BlinkMacSystemFont,sans-serif" font-size="13" font-weight="700" fill="#3C3489">Frontend — thin client</text>
+  <rect width="1280" height="780" fill="url(#bg)"/>
+  <circle cx="170" cy="140" r="220" fill="url(#glowLeft)"/>
+  <circle cx="1110" cy="120" r="240" fill="url(#glowRight)"/>
 
-  <text x="38" y="70"  font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">React 19 · Vite 6 · daisyUI 5</text>
-  <text x="38" y="90"  font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">Zustand 5 (session · agent · settings)</text>
-  <text x="38" y="110" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">@kalio/sdk — Socket.IO wrapper</text>
-  <text x="38" y="130" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">Zero business logic on FE</text>
+  <g filter="url(#shadow)">
+    <rect x="60" y="44" width="1160" height="130" rx="30" fill="#fffdfa" stroke="#e6dfd1" stroke-width="1.2"/>
+  </g>
+  <text x="92" y="96" class="title">Kalio Runtime Architecture</text>
+  <text x="92" y="128" class="subtitle">A thin React client drives session-scoped events. The backend owns orchestration, tools, persistence, and isolation boundaries.</text>
+  <g>
+    <rect x="910" y="72" width="250" height="36" rx="18" fill="#f4efe3" stroke="#d9ccb3" stroke-width="1"/>
+    <text x="1035" y="95" text-anchor="middle" class="pill" fill="#7a5a12">ChatSession isolates history, VFS, KV, approvals, sub-agents</text>
+  </g>
 
-  <line x1="38" y1="146" x2="272" y2="146" stroke="#534AB766" stroke-width="0.75"/>
+  <g filter="url(#shadow)">
+    <rect x="70" y="220" width="320" height="280" rx="30" fill="#f2eeff" stroke="#6d5bd0" stroke-width="1.5"/>
+  </g>
+  <rect x="96" y="244" width="116" height="30" rx="15" fill="#e5dcff"/>
+  <text x="154" y="264" text-anchor="middle" class="pill" fill="#5b44cc">Frontend</text>
+  <text x="96" y="312" class="cardTitle" fill="#332b84">React surface</text>
+  <text x="96" y="352" class="cardBody">ChatInterface, CanvasPanel, ToolCallBubble</text>
+  <text x="96" y="386" class="cardBody">sessionStore keeps transcript state and sessions</text>
+  <text x="96" y="420" class="cardBody">agentStore keeps live chunks, queue state, confirmations</text>
+  <text x="96" y="454" class="cardBody">eventBus and @kalio/sdk mirror the socket contract</text>
 
-  <text x="38" y="166" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">ChatInterface · CanvasPanel</text>
-  <text x="38" y="186" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">MessageBubble · ToolCallBubble</text>
-  <text x="38" y="206" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">HITLDialog — confirmation gate</text>
-  <text x="38" y="226" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">RAAppRenderer (iframe + GUI DSL)</text>
-  <text x="38" y="246" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">PersonaPanel · VFSExplorer</text>
-  <text x="38" y="266" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">MCPPanel · SkillEditorPanel</text>
-  <text x="38" y="286" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">MemoryPage · ObservabilityPage</text>
-  <text x="38" y="306" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">ImagePanel · CLIAgentPanel</text>
-  <text x="38" y="326" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">SettingsPanel · AuditLogViewer</text>
-  <text x="38" y="346" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#534AB7">SessionList · CredentialManager</text>
+  <g filter="url(#shadow)">
+    <rect x="440" y="250" width="310" height="220" rx="34" fill="#fffaf3" stroke="#dfcfb3" stroke-width="1.4"/>
+  </g>
+  <rect x="480" y="282" width="150" height="30" rx="15" fill="#f4ece0"/>
+  <text x="555" y="302" text-anchor="middle" class="pill" fill="#7d5c1e">Session lane</text>
+  <text x="480" y="348" class="cardTitle" fill="#2b2f36">Socket.IO + queue</text>
+  <text x="480" y="382" class="cardBody">chat, tool, agent, session, and RA-App events</text>
+  <text x="480" y="416" class="cardBody">One active turn per session via SessionPipelineService</text>
+  <text x="480" y="450" class="cardBody">Interrupts, confirmations, and child runs stay scoped</text>
 
-  <!-- ─── Backend box ──────────────────────────────────────────────────── -->
-  <rect x="410" y="20" width="270" height="340" rx="12" fill="#E1F5EE" stroke="#0F7055" stroke-width="1"/>
-  <text x="545" y="47" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#085041">Backend — NestJS 11</text>
+  <g filter="url(#shadow)">
+    <rect x="800" y="220" width="410" height="220" rx="30" fill="#e8f8f1" stroke="#1e8b69" stroke-width="1.5"/>
+  </g>
+  <rect x="826" y="244" width="166" height="30" rx="15" fill="#d8f1e6"/>
+  <text x="909" y="264" text-anchor="middle" class="pill" fill="#0d7c5d">Backend orchestration</text>
+  <text x="826" y="312" class="cardTitle" fill="#125542">NestJS control plane</text>
+  <text x="826" y="352" class="cardBody">ChatGateway receives and emits session-scoped events</text>
+  <text x="826" y="386" class="cardBody">ChatService drives LLM streaming, tool loops, persistence</text>
+  <text x="826" y="420" class="cardBody">ToolDispatch, MCP, RA-App, VFS, Image, Memory, Persona plug in here</text>
 
-  <text x="428" y="70"  font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">ChatModule · AgentLoopModule</text>
-  <text x="428" y="90"  font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">LLMModule · ToolModule</text>
-  <text x="428" y="110" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">VFSModule · PersonaModule</text>
-  <text x="428" y="130" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">MCPModule · RAAppModule</text>
-  <text x="428" y="150" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">MemoryModule · ImageModule</text>
-  <text x="428" y="170" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">CLIAgentModule · CredentialsModule</text>
+  <g filter="url(#shadow)">
+    <rect x="800" y="468" width="410" height="168" rx="30" fill="#fff9f1" stroke="#d59b2b" stroke-width="1.4"/>
+  </g>
+  <rect x="826" y="492" width="150" height="30" rx="15" fill="#f7e7c9"/>
+  <text x="901" y="512" text-anchor="middle" class="pill" fill="#936510">Runtime storage</text>
+  <text x="826" y="558" class="cardTitle" fill="#5d4210">Persistent state</text>
+  <text x="826" y="592" class="cardBody">SQLite rows for sessions, messages, tools, MCP, audit, RA-Apps</text>
+  <text x="826" y="626" class="cardBody">sessions/{id}/files and sessions/{id}/_kv.json for per-session data</text>
 
-  <line x1="428" y1="186" x2="662" y2="186" stroke="#0F705566" stroke-width="0.75"/>
+  <g filter="url(#shadow)">
+    <rect x="70" y="550" width="680" height="136" rx="30" fill="#fdf4e6" stroke="#ba7d16" stroke-width="1.4"/>
+  </g>
+  <rect x="96" y="574" width="164" height="30" rx="15" fill="#f6e1b9"/>
+  <text x="178" y="594" text-anchor="middle" class="pill" fill="#8d5e10">Shared contracts</text>
+  <text x="96" y="640" class="cardTitle" fill="#63380a">@kalio/types</text>
+  <text x="96" y="674" class="cardBody">SocketEvents, ChatMessage, ToolResult, MCPServer, GuiDslPayload, AuditLogEntry</text>
 
-  <text x="428" y="206" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">Drizzle ORM + SQLite (better-sqlite3)</text>
-  <text x="428" y="226" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">sqlite-vec — vector memory (RAG)</text>
-  <text x="428" y="246" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">@Tool() injectable decorator pattern</text>
-  <text x="428" y="266" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">Socket.IO gateway per session</text>
-  <text x="428" y="286" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">VFS: sessions/{id}/files/ isolation</text>
-  <text x="428" y="306" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">AllowedPathsService (fs_* guard)</text>
-  <text x="428" y="326" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">AuditLog · Skills · ToolOverrides</text>
-  <text x="428" y="346" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#0F7055">MCP watchdog + lifecycle mgmt</text>
+  <line x1="390" y1="360" x2="438" y2="360" stroke="#7a7a7a" stroke-width="2.2" marker-end="url(#arrow)"/>
+  <line x1="750" y1="360" x2="798" y2="360" stroke="#7a7a7a" stroke-width="2.2" marker-end="url(#arrow)"/>
+  <text x="416" y="340" text-anchor="middle" class="label">send + receive</text>
+  <text x="774" y="340" text-anchor="middle" class="label">queue + dispatch</text>
 
-  <!-- ─── Socket.IO / @kalio/sdk connector ─────────────────────────────── -->
-  <line x1="290" y1="190" x2="330" y2="190" stroke="#777" stroke-width="1.5" marker-end="url(#arr)"/>
-  <line x1="370" y1="190" x2="410" y2="190" stroke="#777" stroke-width="1.5" marker-end="url(#arr)"/>
-  <rect x="330" y="175" width="40" height="30" rx="5" fill="#F5F5F5" stroke="#ccc" stroke-width="0.75"/>
-  <text x="350" y="188" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="9" fill="#555">Socket</text>
-  <text x="350" y="200" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="9" fill="#555">.IO</text>
-
-  <!-- ─── @kalio/types box ──────────────────────────────────────────────── -->
-  <rect x="110" y="385" width="480" height="60" rx="10" fill="#FEF3E2" stroke="#854F0B" stroke-width="1"/>
-  <text x="350" y="407" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#63380A">@kalio/types</text>
-  <text x="350" y="425" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="10.5" fill="#854F0B">single source of truth · packages/@kalio/types/src/index.ts</text>
-  <text x="350" y="439" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="10.5" fill="#854F0B">SocketEvents · ChatMessage · MCPServer · GuiDslPayload · AuditLogEntry · CLIAgentConfig</text>
-
-  <!-- ─── Import arrows to @kalio/types ────────────────────────────────── -->
-  <line x1="155" y1="360" x2="155" y2="383" stroke="#777" stroke-width="1.5" marker-end="url(#arr)"/>
-  <line x1="545" y1="360" x2="545" y2="383" stroke="#777" stroke-width="1.5" marker-end="url(#arr)"/>
-  <text x="105" y="375" font-family="system-ui,-apple-system,sans-serif" font-size="9.5" fill="#999">imports</text>
-  <text x="550" y="375" font-family="system-ui,-apple-system,sans-serif" font-size="9.5" fill="#999">imports</text>
+  <line x1="220" y1="500" x2="220" y2="548" stroke="#7a7a7a" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="980" y1="440" x2="980" y2="466" stroke="#7a7a7a" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="560" y1="470" x2="560" y2="548" stroke="#7a7a7a" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="252" y="530" class="small">imports contracts</text>
+  <text x="1008" y="454" class="small">writes runtime state</text>
+  <text x="590" y="520" class="small">typed wire format</text>
 </svg>

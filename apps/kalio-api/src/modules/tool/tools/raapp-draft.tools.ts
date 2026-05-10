@@ -1,10 +1,18 @@
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
+import yaml from 'js-yaml';
 import { nanoid } from 'nanoid';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { RAAppService } from '../../raapp/raapp.service';
 import { EffectsProcessorService } from '../../raapp/effects-processor.service';
 import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
+import { RAAppVersioningService, deriveSlug } from '../../raapp/raapp-versioning.service';
+import type { RAAppMeta } from '../../raapp/raapp.service';
+import { archiveDirectoryToZip } from '../../raapp/zip-archive.util';
 import { VFSService } from '../../vfs/vfs.service';
 import { EntityStore } from '../../raapp/entity-store';
 
@@ -172,6 +180,26 @@ export class RaAppExecuteDslTool {
     private readonly vfs: VFSService,
   ) {}
 
+  private isMissingDraftFile(err: unknown): boolean {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    return code === 'ENOENT' || code === 'VFS_FILE_NOT_FOUND';
+  }
+
+  private readOptionalDraftFile(sessionId: string, draftBase: string, filename: string): string | null {
+    const filePath = `${draftBase}/${filename}`;
+    try {
+      return this.vfs.readFile(sessionId, filePath).content;
+    } catch (err) {
+      if (!this.isMissingDraftFile(err)) {
+        this.logger.warn(
+          `[raapp_execute_dsl] Unexpected VFS read error for ${filePath}`,
+          err instanceof Error ? err : new Error(String(err)),
+        );
+      }
+      return null;
+    }
+  }
+
   async execute(request: ToolCallRequest): Promise<object> {
     const sessionId = request.sessionId;
     const draftId = request.args['draft_id'] as string;
@@ -185,13 +213,11 @@ export class RaAppExecuteDslTool {
     let mode: 'display' | 'interactive' = 'display';
 
     try {
-      try { uiGui = this.vfs.readFile(sessionId, `${draftBase}/ui.gui`).content; } catch { /* absent */ }
-      try { uiYml = this.vfs.readFile(sessionId, `${draftBase}/ui.yml`).content; } catch { /* absent */ }
-      try { systemsYml = this.vfs.readFile(sessionId, `${draftBase}/systems.yml`).content; } catch { /* absent */ }
-      try {
-        const modeContent = this.vfs.readFile(sessionId, `${draftBase}/.mode`).content.trim();
-        if (modeContent === 'interactive') mode = 'interactive';
-      } catch { /* use default */ }
+      uiGui = this.readOptionalDraftFile(sessionId, draftBase, 'ui.gui');
+      uiYml = this.readOptionalDraftFile(sessionId, draftBase, 'ui.yml');
+      systemsYml = this.readOptionalDraftFile(sessionId, draftBase, 'systems.yml');
+      const modeContent = this.readOptionalDraftFile(sessionId, draftBase, '.mode')?.trim();
+      if (modeContent === 'interactive') mode = 'interactive';
     } catch (err) {
       this.logger.error(`[raapp_execute_dsl] VFS read error for draft ${draftId}`, err);
       return {
@@ -269,5 +295,139 @@ export class RaAppExecuteDslTool {
       content: uiYml,
       renderedContent: result.renderedContent,
     };
+  }
+}
+
+// ─── raapp_publish_draft ─────────────────────────────────────────────────────
+
+@Injectable()
+@Tool({
+  name: 'raapp_publish_draft',
+  description:
+    'Publish a raw VFS RA-App draft into the versioned release lifecycle. ' +
+    'Reads files from drafts/<draft_id>, stores them as a versioned draft ZIP, then promotes them to a release. ' +
+    'Use bump_type patch|minor|major for existing apps. New apps publish immediately as the first current release.',
+  parameters: {
+    type: 'object',
+    required: ['draft_id'],
+    properties: {
+      draft_id: {
+        type: 'string',
+        description: 'The VFS draft ID under drafts/<draft_id>.',
+      },
+      bump_type: {
+        type: 'string',
+        enum: ['patch', 'minor', 'major'],
+        description: 'Version bump to use when promoting over an existing release. Defaults to minor.',
+      },
+    },
+  },
+  requiresConfirmation: false,
+})
+export class RaAppPublishDraftTool {
+  private readonly logger = new Logger(RaAppPublishDraftTool.name);
+
+  constructor(
+    private readonly vfs: VFSService,
+    private readonly versioning: RAAppVersioningService,
+  ) {}
+
+  async execute(request: ToolCallRequest): Promise<object> {
+    const sessionId = request.sessionId;
+    const draftId = request.args['draft_id'] as string | undefined;
+    const rawBumpType = (request.args['bump_type'] as string | undefined) ?? 'minor';
+    const bumpType: 'patch' | 'minor' | 'major' = rawBumpType === 'patch' || rawBumpType === 'major' ? rawBumpType : 'minor';
+
+    if (!draftId) {
+      return { status: 'error', message: 'draft_id is required.' };
+    }
+    if (!['patch', 'minor', 'major'].includes(rawBumpType)) {
+      return { status: 'error', message: `Invalid bump_type: ${rawBumpType}` };
+    }
+
+    const draftPrefix = `drafts/${draftId}/`;
+    const draftFiles = this.vfs.listFiles(sessionId).files.filter((file) => file.path.startsWith(draftPrefix));
+    if (draftFiles.length === 0) {
+      return {
+        status: 'error',
+        message: `Draft "${draftId}" not found in session VFS.`,
+      };
+    }
+
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-publish-'));
+    const tmpDir = path.join(tmpRoot, 'draft');
+    const tmpZip = path.join(tmpRoot, `${draftId}.zip`);
+    try {
+      await fs.mkdir(tmpDir, { recursive: true });
+
+      const buffers = new Map<string, Buffer>();
+      for (const file of draftFiles) {
+        const relativePath = file.path.slice(draftPrefix.length);
+        buffers.set(relativePath, this.vfs.readBinary(sessionId, file.path));
+      }
+
+      const slugOverride = buffers.get('.raapp-slug')?.toString('utf-8').trim() || null;
+      const modeOverride: 'display' | 'interactive' =
+        buffers.get('.mode')?.toString('utf-8').trim() === 'interactive' ? 'interactive' : 'display';
+      let meta: RAAppMeta | null = null;
+
+      for (const [relativePath, buffer] of buffers.entries()) {
+        if (relativePath === '.raapp-slug') {
+          continue;
+        }
+
+        if (relativePath === '.mode') {
+          continue;
+        }
+
+        if (relativePath === 'meta.yml') {
+          meta = yaml.load(buffer.toString('utf-8')) as RAAppMeta;
+          meta.execution = { ...(meta.execution ?? {}), render_as: modeOverride };
+          const targetPath = path.join(tmpDir, relativePath);
+          await fs.mkdir(path.dirname(targetPath), { recursive: true });
+          await fs.writeFile(targetPath, yaml.dump(meta), 'utf-8');
+          continue;
+        }
+
+        const targetPath = path.join(tmpDir, relativePath);
+        await fs.mkdir(path.dirname(targetPath), { recursive: true });
+        await fs.writeFile(targetPath, buffer);
+      }
+
+      if (!meta) {
+        return { status: 'error', message: `Draft "${draftId}" is missing meta.yml.` };
+      }
+
+      const slug = slugOverride ?? meta.id ?? deriveSlug(meta.name);
+      await archiveDirectoryToZip({
+        sourceDir: tmpDir,
+        zipPath: tmpZip,
+        cleanupOnError: async () => {
+          await fs.rm(tmpZip, { force: true });
+        },
+      });
+      const buffer = await fs.readFile(tmpZip);
+
+      const savedGroup = await this.versioning.saveAsDraft(slug, buffer);
+      const releasedGroup = savedGroup.draft
+        ? await this.versioning.approveDraft(slug, bumpType)
+        : savedGroup;
+
+      return {
+        status: 'published',
+        draft_id: draftId,
+        slug,
+        version: releasedGroup.current.version,
+        bumpType,
+      };
+    } catch (err) {
+      this.logger.error(`[raapp_publish_draft] Failed to publish draft ${draftId}`, err);
+      return {
+        status: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => { /* best effort */ });
+    }
   }
 }

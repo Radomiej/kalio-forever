@@ -36,6 +36,24 @@ const UPLOAD_MAX_BYTES = 10 << 20; // 10 MB request body
 export class SessionVfsController {
   constructor(private readonly vfs: VFSService) {}
 
+  private streamServedFile(sessionId: string, path: string, res: Response): StreamableFile {
+    const { content, stream, mimeType } = this.vfs.serveFile(sessionId, path);
+    res.set({
+      'Cache-Control': 'no-store',
+      'Content-Type': mimeType,
+    });
+
+    if (content !== undefined) {
+      return new StreamableFile(content);
+    }
+
+    if (stream !== undefined) {
+      return new StreamableFile(stream);
+    }
+
+    throw new Error(`VFS serve for ${path} returned no content`);
+  }
+
   @Get()
   list(@Param('id') sessionId: string): VFSListResult {
     return this.vfs.listFiles(sessionId);
@@ -84,6 +102,38 @@ export class SessionVfsController {
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
     return new StreamableFile(stream);
+  }
+
+  @Get('serve')
+  serve(
+    @Param('id') sessionId: string,
+    @Query('path') path: string,
+    @Res({ passthrough: true }) res: Response,
+  ): StreamableFile {
+    try {
+      return this.streamServedFile(sessionId, path, res);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'PATH_TRAVERSAL_DENIED') {
+        throw new BadRequestException((err as Error).message);
+      }
+      throw err;
+    }
+  }
+
+  @Get('serve-path/*path')
+  servePath(
+    @Param('id') sessionId: string,
+    @Param('path') path: string,
+    @Res({ passthrough: true }) res: Response,
+  ): StreamableFile {
+    try {
+      return this.streamServedFile(sessionId, path, res);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'PATH_TRAVERSAL_DENIED') {
+        throw new BadRequestException((err as Error).message);
+      }
+      throw err;
+    }
   }
 
   /**

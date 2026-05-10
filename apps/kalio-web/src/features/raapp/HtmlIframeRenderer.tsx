@@ -6,7 +6,8 @@ import { eventBus } from '../../services/eventBus';
 import type { ChatMessage } from '@kalio/types';
 
 interface HtmlIframeRendererProps {
-  html: string;
+  html?: string;
+  src?: string;
   title?: string;
   minHeight?: number;
 }
@@ -22,12 +23,12 @@ function injectResizeBridge(rawHtml: string): string {
   return `${rawHtml}${bridge}`;
 }
 
-export function HtmlIframeRenderer({ html, title = 'App', minHeight = 200 }: HtmlIframeRendererProps) {
+export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200 }: HtmlIframeRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const fullscreenIframeRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(minHeight);
   const [expanded, setExpanded] = useState(false);
-  const bridgedHtml = injectResizeBridge(html);
+  const bridgedHtml = typeof html === 'string' ? injectResizeBridge(html) : undefined;
 
   const isKnownIframeSource = useCallback((source: MessageEvent['source']) => {
     if (!source) return false;
@@ -91,6 +92,9 @@ export function HtmlIframeRenderer({ html, title = 'App', minHeight = 200 }: Htm
   };
 
   const downloadHtml = () => {
+    if (typeof html !== 'string') {
+      return;
+    }
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -102,14 +106,16 @@ export function HtmlIframeRenderer({ html, title = 'App', minHeight = 200 }: Htm
 
   return (
     <div className="relative group">
-      <button
-        onClick={downloadHtml}
-        className="absolute top-2 right-10 z-10 btn btn-xs btn-ghost opacity-0 group-hover:opacity-100 transition-opacity bg-base-100/80"
-        title="Download HTML"
-        aria-label="Download HTML"
-      >
-        <Download size={12} />
-      </button>
+      {typeof html === 'string' && (
+        <button
+          onClick={downloadHtml}
+          className="absolute top-2 right-10 z-10 btn btn-xs btn-ghost opacity-0 group-hover:opacity-100 transition-opacity bg-base-100/80"
+          title="Download HTML"
+          aria-label="Download HTML"
+        >
+          <Download size={12} />
+        </button>
+      )}
       <button
         onClick={() => setExpanded(true)}
         className="absolute top-2 right-2 z-10 btn btn-xs btn-ghost opacity-0 group-hover:opacity-100 transition-opacity bg-base-100/80"
@@ -121,6 +127,7 @@ export function HtmlIframeRenderer({ html, title = 'App', minHeight = 200 }: Htm
       <iframe
         ref={iframeRef}
         data-testid="raapp-iframe"
+        src={src}
         srcDoc={bridgedHtml}
         className="w-full rounded border border-base-300 block"
         style={{ height: `${height}px`, minHeight: `${minHeight}px` }}
@@ -141,6 +148,7 @@ export function HtmlIframeRenderer({ html, title = 'App', minHeight = 200 }: Htm
             <iframe
               ref={fullscreenIframeRef}
               data-testid="raapp-iframe-fullscreen"
+              src={src}
               srcDoc={bridgedHtml}
               className="w-full h-[calc(92vh-3.5rem)] rounded border border-base-300 block"
               sandbox={SANDBOX_ATTR}

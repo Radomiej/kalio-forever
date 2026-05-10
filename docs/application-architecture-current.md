@@ -20,6 +20,7 @@ Primary source-of-truth areas:
 - `chat-streaming-tools-architecture.md` - main chat hot path, per-session queueing, live FE state
 - `tool-architecture.md` - native tool registry, dispatch, HITL, MCP merge
 - `mcp-architecture.md` - external tool discovery and persona filtering
+- `design-tools-architecture-current.md` - final design/prototype workflow: VFS-first preview vs RA-App publish lane
 - `raapp-design-current.md` - inline RA-App rendering, catalog, approvals, iframe bridge
 - `cli-agent-module-architecture.md` - CLI coding-agent adapter stack
 

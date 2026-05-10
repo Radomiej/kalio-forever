@@ -13,6 +13,7 @@ describe('SessionVfsController', () => {
     listFiles: vi.fn(),
     writeFile: vi.fn(),
     readFile: vi.fn(),
+    serveFile: vi.fn(),
     downloadFile: vi.fn(),
     writeBinary: vi.fn(),
     archiveSession: vi.fn(),
@@ -100,6 +101,65 @@ describe('SessionVfsController', () => {
       expect(res.set).toHaveBeenCalledWith(
         expect.objectContaining({ 'Content-Disposition': 'attachment; filename="output.txt"' }),
       );
+    });
+  });
+
+  describe('serve()', () => {
+    it('sets content-type header from VFSService and returns StreamableFile', () => {
+      mockVfs.serveFile.mockReturnValue({
+        content: Buffer.from('<!doctype html><html></html>'),
+        mimeType: 'text/html; charset=utf-8',
+      });
+      const res = { set: vi.fn() };
+
+      const result = controller.serve('sess-1', 'design/preview.html', res as never);
+
+      expect(result).toBeInstanceOf(StreamableFile);
+      expect(mockVfs.serveFile).toHaveBeenCalledWith('sess-1', 'design/preview.html');
+      expect(res.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'Content-Type': 'text/html; charset=utf-8',
+        }),
+      );
+    });
+
+    it('throws BadRequest for PATH_TRAVERSAL_DENIED', () => {
+      const err = Object.assign(new Error('path traversal'), { code: 'PATH_TRAVERSAL_DENIED' });
+      mockVfs.serveFile.mockImplementation(() => {
+        throw err;
+      });
+
+      expect(() => controller.serve('sess-1', '../secret.html', { set: vi.fn() } as never)).toThrow(BadRequestException);
+    });
+
+    it('returns StreamableFile for streamed assets too', () => {
+      mockVfs.serveFile.mockReturnValue({
+        stream: Readable.from(['body { color: red; }']),
+        mimeType: 'text/css; charset=utf-8',
+      });
+      const res = { set: vi.fn() };
+
+      const result = controller.serve('sess-1', 'design/style.css', res as never);
+
+      expect(result).toBeInstanceOf(StreamableFile);
+      expect(res.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'Content-Type': 'text/css; charset=utf-8',
+        }),
+      );
+    });
+
+    it('serves path-based VFS assets for iframe previews', () => {
+      mockVfs.serveFile.mockReturnValue({
+        content: Buffer.from('<!doctype html><html></html>'),
+        mimeType: 'text/html; charset=utf-8',
+      });
+      const res = { set: vi.fn() };
+
+      const result = controller.servePath('sess-1', 'design/preview.html', res as never);
+
+      expect(result).toBeInstanceOf(StreamableFile);
+      expect(mockVfs.serveFile).toHaveBeenCalledWith('sess-1', 'design/preview.html');
     });
   });
 

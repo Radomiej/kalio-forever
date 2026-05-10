@@ -1,5 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
+import vm from 'node:vm';
+import { ConfigService } from '@nestjs/config';
 import { EffectsProcessorService } from './effects-processor.service';
 import { NativeSystemRegistry } from './native/native-system-registry.service';
 import { AuditService } from '../chat/audit.service';
@@ -15,12 +17,17 @@ describe('EffectsProcessorService', () => {
   let audit: ReturnType<typeof makeAuditService>;
   const ctx: NativeSessionContext = { sessionId: 'sess-123' };
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EffectsProcessorService,
         NativeSystemRegistry,
         { provide: AuditService, useFactory: makeAuditService },
+        { provide: ConfigService, useValue: { get: vi.fn().mockReturnValue(7) } },
       ],
     }).compile();
 
@@ -74,6 +81,26 @@ systems:
       const { output } = await service.processSystemsYaml(yaml, {}, ctx);
       // Should not throw — result is undefined
       expect(output['result']).toBeUndefined();
+    });
+
+    it('uses VM timeout from config', async () => {
+      const runSpy = vi.spyOn(vm, 'runInContext');
+      const yaml = `
+systems:
+  - id: s1
+    effects:
+      - assign:
+          target: output.result
+          expression: "1 + 1"
+`;
+
+      await service.processSystemsYaml(yaml, {}, ctx);
+
+      expect(runSpy).toHaveBeenCalledWith(
+        '__result = (1 + 1)',
+        expect.any(Object),
+        expect.objectContaining({ timeout: 7 }),
+      );
     });
   });
 

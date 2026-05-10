@@ -26,9 +26,9 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import extractZip from 'extract-zip';
 import yaml from 'js-yaml';
-import archiver from 'archiver';
 import type { RAAppGroup, RAAppVersionInfo, RAAppMetaSummary } from '@kalio/types';
 import type { RAAppMeta } from './raapp.service';
+import { archiveDirectoryToZip } from './zip-archive.util';
 
 // ── Semver helpers ────────────────────────────────────────────────────────────
 
@@ -260,6 +260,24 @@ export class RAAppVersioningService implements OnModuleInit {
     return this.groups.get(slug);
   }
 
+  downloadRelease(slug: string, version: string): { stream: fsSync.ReadStream; filename: string } {
+    const group = this.groups.get(slug);
+    if (!group) throw new Error(`No RA-App group found for slug: ${slug}`);
+
+    const release = group.current.version === version
+      ? group.current
+      : group.history.find((entry) => entry.version === version);
+
+    if (!release) {
+      throw new Error(`Release version ${version} not found for slug: ${slug}`);
+    }
+
+    return {
+      stream: fsSync.createReadStream(release.zipPath),
+      filename: `${slug}-${release.version}.zip`,
+    };
+  }
+
   // ── Write API ─────────────────────────────────────────────────────────────
 
   /**
@@ -478,14 +496,12 @@ export class RAAppVersioningService implements OnModuleInit {
       meta.version = newVersion;
       await fs.writeFile(metaPath, yaml.dump(meta), 'utf-8');
 
-      await new Promise<void>((resolve, reject) => {
-        const output = fsSync.createWriteStream(tmpZip);
-        const arc = archiver('zip', { zlib: { level: 6 } });
-        arc.on('error', (err: Error) => reject(err));
-        output.on('close', resolve);
-        arc.pipe(output);
-        arc.directory(tmpDir, false);
-        void arc.finalize();
+      await archiveDirectoryToZip({
+        sourceDir: tmpDir,
+        zipPath: tmpZip,
+        cleanupOnError: async () => {
+          await fs.rm(tmpZip, { force: true });
+        },
       });
       await fs.rename(tmpZip, zipPath);
     } finally {

@@ -15,6 +15,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     testTimeout: 10000,
+    restoreMocks: true,
     include: ['src/**/*.spec.ts', 'src/**/*.test.ts'],
     coverage: {
       provider: 'v8',

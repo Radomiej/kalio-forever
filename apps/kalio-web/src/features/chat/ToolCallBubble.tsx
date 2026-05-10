@@ -46,6 +46,7 @@ export function extractRAAppBlock(data: unknown): RAAppBlock | null {
       type: d['type'] as 'html' | 'gui',
       mode: (d['mode'] as 'display' | 'interactive') ?? 'display',
       content: (d['renderedContent'] as string | undefined) ?? (d['content'] as string),
+      vfsPath: typeof d['vfsPath'] === 'string' ? d['vfsPath'] : undefined,
       pendingApprovals: (d['pendingApprovals'] as RaAppPendingApproval[] | undefined) ?? [],
     };
   }
@@ -144,7 +145,7 @@ function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
           ))}
         </div>
       )}
-      {childRaapp && <RAAppRenderer block={childRaapp} />}
+      {childRaapp && <RAAppRenderer block={childRaapp} sessionId={result.childSessionId} />}
     </div>
   );
 }

@@ -69,6 +69,15 @@ describe('HtmlIframeRenderer', () => {
     expect(btn).toBeInTheDocument();
   });
 
+  it('renders src-based previews without exposing the HTML download action', () => {
+    render(<HtmlIframeRenderer src="http://localhost:3016/api/sessions/session-1/vfs/serve-path/design/preview.html" />);
+
+    const iframe = screen.getByTestId('raapp-iframe');
+    expect(iframe).toHaveAttribute('src', 'http://localhost:3016/api/sessions/session-1/vfs/serve-path/design/preview.html');
+    expect(iframe).not.toHaveAttribute('srcDoc');
+    expect(screen.queryByLabelText('Download HTML')).not.toBeInTheDocument();
+  });
+
   it('does not grow endlessly when resize events echo current iframe height', () => {
     render(<HtmlIframeRenderer html="<p>Loop Guard</p>" minHeight={200} />);
 

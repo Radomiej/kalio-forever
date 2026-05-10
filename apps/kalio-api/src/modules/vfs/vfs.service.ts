@@ -10,12 +10,43 @@ import {
   unlinkSync,
   createReadStream,
 } from 'node:fs';
-import { join, resolve, normalize, basename, sep } from 'node:path';
+import { join, resolve, normalize, basename, extname, sep } from 'node:path';
 import type { Readable } from 'node:stream';
 import archiver from 'archiver';
 import type { VFSWriteRequest, VFSReadResult, VFSListResult, VFSFile } from '@kalio/types';
 
 const PATH_TRAVERSAL_ERROR = 'PATH_TRAVERSAL_DENIED';
+
+const MIME_TYPES: Record<string, string> = {
+  '.css': 'text/css; charset=utf-8',
+  '.gif': 'image/gif',
+  '.htm': 'text/html; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.otf': 'font/otf',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
+function injectPreviewBridge(rawHtml: string): string {
+  const bridge = `\n<script>(function(){\n  const sendHeight=function(){\n    try{\n      const doc=document.documentElement;\n      const body=document.body;\n      const h=Math.max(\n        doc?doc.scrollHeight:0,\n        body?body.scrollHeight:0,\n        doc?doc.offsetHeight:0,\n        body?body.offsetHeight:0\n      );\n      parent.postMessage({type:'raapp_resize',height:h},'*');\n    }catch(e){console.error('[RAApp:Bridge] sendHeight failed',e);}\n  };\n  window.addEventListener('load',function(){sendHeight();setTimeout(sendHeight,80);setTimeout(sendHeight,300);});\n  window.addEventListener('resize',sendHeight);\n  window.addEventListener('message',function(event){\n    if(event&&event.data&&event.data.type==='raapp_query_height'){sendHeight();}\n  });\n  var ro=new ResizeObserver(function(){sendHeight();});\n  if(document&&document.documentElement){ro.observe(document.documentElement);}\n})();</script>\n`;
+  const bodyClose = rawHtml.toLowerCase().lastIndexOf('</body>');
+  if (bodyClose >= 0) {
+    return `${rawHtml.slice(0, bodyClose)}${bridge}${rawHtml.slice(bodyClose)}`;
+  }
+  return `${rawHtml}${bridge}`;
+}
 
 export interface VFSCopySessionFilesRequest {
   fromSessionId: string;
@@ -28,6 +59,12 @@ export interface VFSCopiedFile {
   fromPath: string;
   toPath: string;
   sizeBytes: number;
+}
+
+export interface VFSServedFile {
+  content?: Buffer;
+  stream?: Readable;
+  mimeType: string;
 }
 
 @Injectable()
@@ -88,6 +125,25 @@ export class VFSService {
     const safePath = this.resolveSafe(sessionId, filePath);
     const stream = createReadStream(safePath);
     return { stream, filename: basename(safePath) };
+  }
+
+  serveFile(sessionId: string, filePath: string): VFSServedFile {
+    const mimeType = MIME_TYPES[extname(filePath).toLowerCase()] ?? 'application/octet-stream';
+    const extension = extname(filePath).toLowerCase();
+
+    if (extension === '.html' || extension === '.htm') {
+      const html = this.readBinary(sessionId, filePath).toString('utf8');
+      return {
+        content: Buffer.from(injectPreviewBridge(html), 'utf8'),
+        mimeType,
+      };
+    }
+
+    const safePath = this.resolveSafe(sessionId, filePath);
+    return {
+      stream: createReadStream(safePath),
+      mimeType,
+    };
   }
 
   archiveSession(sessionId: string): archiver.Archiver {

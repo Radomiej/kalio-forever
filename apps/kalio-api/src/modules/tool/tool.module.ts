@@ -14,8 +14,9 @@ import { GrepSearchTool, FileSearchTool } from './tools/file-search.tools';
 import { TerminalService } from './terminal.service';
 import { TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool } from './tools/terminal.tools';
 import { RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool } from './tools/raapp.tools';
+import { DesignPreviewTool } from './tools/design-preview.tool';
 import { RaAppGetTool, RaAppEditTool, RaAppDeleteTool } from './tools/raapp-crud.tools';
-import { RaAppCreateDraftTool, RaAppExecuteDslTool } from './tools/raapp-draft.tools';
+import { RaAppCreateDraftTool, RaAppExecuteDslTool, RaAppPublishDraftTool } from './tools/raapp-draft.tools';
 import { RaAppTestTool } from './tools/raapp-test.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 import { WebSearchTool } from './tools/web-search.tool';
@@ -51,8 +52,9 @@ import { ToolRegistryService } from './tool-registry.service';
     GrepSearchTool, FileSearchTool,
     TerminalService, TerminalSpawnTool, TerminalListTool, TerminalOutputTool, TerminalKillTool,
     RaAppCreateTool, RaAppCompileTool, RunRaAppTool, ListRaAppsTool,
+    DesignPreviewTool,
     RaAppGetTool, RaAppEditTool, RaAppDeleteTool,
-    RaAppCreateDraftTool, RaAppExecuteDslTool,
+    RaAppCreateDraftTool, RaAppExecuteDslTool, RaAppPublishDraftTool,
     RaAppTestTool,
     MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
     WebSearchTool,

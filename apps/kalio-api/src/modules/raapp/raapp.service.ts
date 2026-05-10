@@ -5,12 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import extractZip from 'extract-zip';
-import archiver from 'archiver';
 import yaml from 'js-yaml';
 import type { RAAppBlock, RAAppResult } from '@kalio/types';
 import { RAAppSandboxService } from './raapp-sandbox.service';
 import { compileGui } from './gui/guiDslExpand';
 import { GuiParseError } from './gui/guiDslParser';
+import { archiveDirectoryToZip } from './zip-archive.util';
 
 export interface RAAppMeta {
   id: string;
@@ -275,6 +275,7 @@ export class RAAppService implements OnModuleInit {
     const appId = `generated-${sessionPart}-${randomUUID().slice(0, 8)}`;
     const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
     const zipPath = path.join(this.userDir, `${appId}.zip`);
+    const tmpZipPath = `${zipPath}.tmp`;
 
     try {
       await fs.mkdir(tmpDir, { recursive: true });
@@ -299,22 +300,21 @@ export class RAAppService implements OnModuleInit {
         await fs.writeFile(path.join(tmpDir, 'main.html'), input.content, 'utf-8');
       }
 
-      await new Promise<void>((resolve, reject) => {
-        const output = fsSync.createWriteStream(zipPath);
-        const arc = archiver('zip', { zlib: { level: 6 } });
-        output.on('close', resolve);
-        output.on('error', reject);
-        arc.on('error', reject);
-        arc.pipe(output);
-        arc.directory(tmpDir, false);
-        void arc.finalize();
+      await archiveDirectoryToZip({
+        sourceDir: tmpDir,
+        zipPath: tmpZipPath,
+        cleanupOnError: async () => {
+          await fs.rm(tmpZipPath, { force: true });
+        },
       });
+      await fs.rename(tmpZipPath, zipPath);
 
       const loaded = await this.loadZip(zipPath, 'user');
       this.logger.log(`[RAAppService] Saved generated app ${loaded.id} (${input.type}, mode=${input.mode})`);
       return loaded;
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
+      await fs.rm(tmpZipPath, { force: true }).catch(() => { /* best effort */ });
     }
   }
 
@@ -369,6 +369,7 @@ export class RAAppService implements OnModuleInit {
 
     const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
     const zipPath = app.zipPath.endsWith('.zip') ? app.zipPath : `${app.zipPath}.zip`;
+    const tmpZipPath = `${zipPath}.tmp`;
     try {
       if (app.zipPath.endsWith('.zip')) {
         await extractZip(app.zipPath, { dir: tmpDir });
@@ -394,22 +395,21 @@ export class RAAppService implements OnModuleInit {
       }
 
       // Repack ZIP
-      await new Promise<void>((resolve, reject) => {
-        const output = fsSync.createWriteStream(zipPath);
-        const arc = archiver('zip', { zlib: { level: 6 } });
-        output.on('close', resolve);
-        output.on('error', reject);
-        arc.on('error', reject);
-        arc.pipe(output);
-        arc.directory(tmpDir, false);
-        void arc.finalize();
+      await archiveDirectoryToZip({
+        sourceDir: tmpDir,
+        zipPath: tmpZipPath,
+        cleanupOnError: async () => {
+          await fs.rm(tmpZipPath, { force: true });
+        },
       });
+      await fs.rename(tmpZipPath, zipPath);
 
       const loaded = await this.loadZip(zipPath, 'user');
       this.logger.log(`[RAAppService] Updated app ${loaded.id} → v${loaded.meta.version ?? '?'}`);
       return loaded;
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
+      await fs.rm(tmpZipPath, { force: true }).catch(() => { /* best effort */ });
     }
   }
 

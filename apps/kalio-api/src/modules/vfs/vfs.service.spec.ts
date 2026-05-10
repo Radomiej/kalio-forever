@@ -299,5 +299,48 @@ describe('VFSService', () => {
       }).toThrow(/PATH_TRAVERSAL_DENIED/);
     });
   });
+
+  describe('serveFile', () => {
+    it('injects the resize bridge into served HTML files', () => {
+      const filePath = join(testWorkspace, 'sessions', sessionId, 'files', 'design', 'preview.html');
+      mkdirSync(join(filePath, '..'), { recursive: true });
+      writeFileSync(filePath, '<!doctype html><html><body>Preview</body></html>', 'utf8');
+
+      const result = service.serveFile(sessionId, 'design/preview.html');
+
+      expect(result.mimeType).toBe('text/html; charset=utf-8');
+      expect(result.content?.toString('utf8')).toContain("type:'raapp_resize'");
+    });
+
+    it('streams non-html assets instead of buffering them into memory', async () => {
+      const filePath = join(testWorkspace, 'sessions', sessionId, 'files', 'assets', 'module.wasm');
+      mkdirSync(join(filePath, '..'), { recursive: true });
+      writeFileSync(filePath, Buffer.from([0x00, 0x61, 0x73, 0x6d]));
+
+      const result = service.serveFile(sessionId, 'assets/module.wasm');
+
+      expect(result.mimeType).toBe('application/wasm');
+      expect(result.stream).toBeDefined();
+      expect(result.content).toBeUndefined();
+
+      for await (const _chunk of result.stream!) {
+        // Consume the stream so the temp file can be cleaned up without unhandled errors.
+      }
+    });
+
+    it('serves font assets with explicit MIME types', async () => {
+      const filePath = join(testWorkspace, 'sessions', sessionId, 'files', 'fonts', 'brand.woff2');
+      mkdirSync(join(filePath, '..'), { recursive: true });
+      writeFileSync(filePath, Buffer.from('font-data'));
+
+      const result = service.serveFile(sessionId, 'fonts/brand.woff2');
+
+      expect(result.mimeType).toBe('font/woff2');
+
+      for await (const _chunk of result.stream!) {
+        // Consume the stream so the temp file can be cleaned up without unhandled errors.
+      }
+    });
+  });
 });
 

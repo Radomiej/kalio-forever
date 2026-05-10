@@ -195,6 +195,29 @@ describe('PersonaService', () => {
       expect(config['orchestrator']?.systemPrompt).toContain('download_url');
       expect(config['orchestrator']?.systemPrompt).toContain('distinct filenames');
     });
+
+    it('keeps prototype-capable personas on the VFS-first design_preview workflow', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { systemPrompt: string; allowedTools: string[] }>;
+        }
+      ).loadPersonasConfig();
+
+      expect(config['builder']?.allowedTools).toEqual(expect.arrayContaining(['design_preview']));
+      expect(config['designer']?.allowedTools).toEqual(expect.arrayContaining(['design_preview']));
+      expect(config['orchestrator']?.allowedTools).toEqual(expect.arrayContaining(['design_preview']));
+      expect(config['dev']?.allowedTools).toEqual(expect.arrayContaining(['design_preview']));
+      expect(config['jony']?.allowedTools).toEqual(expect.arrayContaining(['design_preview']));
+
+      expect(config['builder']?.systemPrompt).toContain('design_preview');
+      expect(config['builder']?.systemPrompt).toContain('write the HTML files into VFS first');
+      expect(config['designer']?.systemPrompt).toContain('design_preview');
+      expect(config['designer']?.systemPrompt).toContain('Write prototype source files into VFS first');
+      expect(config['orchestrator']?.systemPrompt).toContain('design_preview');
+      expect(config['orchestrator']?.systemPrompt).toContain('prototype page');
+      expect(config['dev']?.systemPrompt).toContain('design_preview');
+      expect(config['jony']?.systemPrompt).toContain('design_preview');
+    });
   });
 
   describe('CRUD Operations', () => {
