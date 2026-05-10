@@ -11,14 +11,16 @@ vi.mock('./apiClient', () => ({
 }));
 
 type BackendHealthTestService = {
-  getState: () => 'online' | 'offline' | 'unknown';
+  getState: () => BackendHealthState;
   isOnline: () => boolean;
-  subscribe: (fn: (state: 'online' | 'offline' | 'unknown', prev: 'online' | 'offline' | 'unknown') => void) => () => void;
+  subscribe: (fn: (state: BackendHealthState, prev: BackendHealthState) => void) => () => void;
   start: () => void;
   stop: () => void;
   reportFailure: () => void;
   reportSuccess: () => void;
 };
+
+type BackendHealthState = 'online' | 'offline' | 'unknown';
 
 let activeService: BackendHealthTestService | null = null;
 
