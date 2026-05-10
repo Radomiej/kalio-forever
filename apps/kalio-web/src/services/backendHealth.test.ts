@@ -10,10 +10,23 @@ vi.mock('./apiClient', () => ({
   },
 }));
 
+type BackendHealthTestService = {
+  getState: () => 'online' | 'offline' | 'unknown';
+  isOnline: () => boolean;
+  subscribe: (fn: (state: 'online' | 'offline' | 'unknown', prev: 'online' | 'offline' | 'unknown') => void) => () => void;
+  start: () => void;
+  stop: () => void;
+  reportFailure: () => void;
+  reportSuccess: () => void;
+};
+
+let activeService: BackendHealthTestService | null = null;
+
 async function loadBackendHealth() {
   vi.resetModules();
   const module = await import('./backendHealth');
-  return module.backendHealth;
+  activeService = module.backendHealth as BackendHealthTestService;
+  return activeService;
 }
 
 describe('backendHealth', () => {
@@ -21,11 +34,12 @@ describe('backendHealth', () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0.5);
     vi.clearAllMocks();
+    activeService = null;
   });
 
-  afterEach(async () => {
-    const service = await loadBackendHealth();
-    service.stop();
+  afterEach(() => {
+    activeService?.stop();
+    activeService = null;
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
