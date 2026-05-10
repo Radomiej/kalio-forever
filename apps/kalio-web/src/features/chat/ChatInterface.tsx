@@ -148,10 +148,12 @@ export function ChatInterface() {
 
     const offError = eventBus.onError((payload) => {
       console.error('[EventBus] chat:error', payload);
-      setStreaming(false);
-      removeActiveAgentLoop(payload.sessionId);
       const { activeSessionId: currentActiveSessionId, getSessionActiveTurnId: getTurnId } = useSessionStore.getState();
       const targetSessionId = payload.sessionId ?? currentActiveSessionId;
+      if (targetSessionId === currentActiveSessionId) {
+        setStreaming(false);
+      }
+      removeActiveAgentLoop(payload.sessionId);
       const activeTurnId = getTurnId(targetSessionId);
       if (!activeTurnId) {
         // Error before agent turn opened (e.g. QUEUE_FULL) → floating banner
@@ -312,10 +314,10 @@ export function ChatInterface() {
     const offReconnect = eventBus.onReconnect(() => {
       console.log('[ChatInterface] socket reconnected — resetting streaming state');
       backendHealth.reportSuccess();
-      setStreaming(false);
-      clearToolActivities();
       const { activeSessionId: sid } = useSessionStore.getState();
       if (sid) {
+        setStreaming(false);
+        clearToolActivities(sid);
         removeActiveAgentLoop(sid);
         setPendingConfirmation(sid, null);
         // Identify immediately so the server can abort if the socket drops again

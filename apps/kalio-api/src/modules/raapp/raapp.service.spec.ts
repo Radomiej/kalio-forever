@@ -6,6 +6,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { RAAppService } from './raapp.service';
 import { deriveGeneratedAppName } from './raapp.service';
+import type { LoadedRAApp } from './raapp.service';
 import { archiveDirectoryToZip } from './zip-archive.util';
 
 // AC-13: RA-App DSL parse error is returned inline (not thrown), with code DSL_PARSE_ERROR
@@ -267,6 +268,40 @@ describe('RAAppService', () => {
       await expect(
         service.execute({ type: 'gui', mode: 'display', content: '{ unclosed' }),
       ).resolves.toMatchObject({ status: 'error' });
+    });
+  });
+
+  describe('delete', () => {
+    it('removes unpacked user apps stored as directories', async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-delete-'));
+      const isolatedService = await createService({ RA_APPS_PATH: tempRoot });
+      const appDir = path.join(tempRoot, 'user', 'dir-app');
+
+      await fs.mkdir(appDir, { recursive: true });
+      await fs.writeFile(path.join(appDir, 'meta.yml'), 'id: dir-app\nname: Dir App\n', 'utf8');
+
+      const loaded = (isolatedService as unknown as { loaded: Map<string, LoadedRAApp> }).loaded;
+      loaded.set('dir-app', {
+        id: 'dir-app',
+        zipPath: appDir,
+        meta: { id: 'dir-app', name: 'Dir App' },
+        source: 'user',
+        htmlContent: '<p>dir app</p>',
+        guiContent: null,
+        systemsContent: null,
+        appMode: 'display',
+        createdAt: 0,
+        updatedAt: 0,
+      } as LoadedRAApp);
+
+      try {
+        await isolatedService.delete('dir-app');
+
+        await expect(fs.access(appDir)).rejects.toThrow();
+        expect(isolatedService.getById('dir-app')).toBeUndefined();
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
     });
   });
 });

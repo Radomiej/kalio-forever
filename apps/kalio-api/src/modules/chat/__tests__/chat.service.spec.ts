@@ -277,6 +277,66 @@ describe('ChatService', () => {
     expect(() => service.abort('sid')).not.toThrow();
   });
 
+  it('keeps the newer controller when overlapping turns share a session id', async () => {
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let streamCallCount = 0;
+
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(async function* (params: LLMSourceParams) {
+        const callIndex = ++streamCallCount;
+        yield { type: 'text_delta', delta: callIndex === 1 ? 'first' : 'second' };
+
+        if (callIndex === 1) {
+          await firstGate;
+          yield { type: 'done' };
+          return;
+        }
+
+        const outcome = await Promise.race([
+          secondGate.then(() => 'released' as const),
+          new Promise<'aborted'>((resolve) => {
+            params.abortSignal?.addEventListener('abort', () => resolve('aborted'), { once: true });
+          }),
+        ]);
+
+        if (outcome === 'released') {
+          yield { type: 'done' };
+        }
+      }),
+    };
+
+    await buildService(llmSource);
+
+    const firstTurn = service.handleTurn('sid', 'first', 'p1', emit as EmitFn);
+    await Promise.resolve();
+
+    const secondTurn = service.handleTurn('sid', 'second', 'p1', emit as EmitFn);
+    await Promise.resolve();
+
+    releaseFirst();
+    await firstTurn;
+
+    const controllers = (service as unknown as { abortControllers: Map<string, AbortController> }).abortControllers;
+
+    try {
+      expect(controllers.has('sid')).toBe(true);
+    } finally {
+      if (controllers.has('sid')) {
+        service.abort('sid');
+      } else {
+        releaseSecond();
+      }
+      await secondTurn;
+    }
+  });
+
   // ─── hadContent tracking ────────────────────────────────────────────────────
 
   it('emits hadContent=false when LLM throws before any chunk (early LLM_ERROR)', async () => {

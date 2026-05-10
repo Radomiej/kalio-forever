@@ -80,7 +80,7 @@ vi.mock('../../services/eventBus', () => ({
     onSessionCreated: (h: (...args: unknown[]) => void) => capture('session:created', h),
     onRaAppNativeResult: (h: (...args: unknown[]) => void) => capture('raapp:native_result', h),
     onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
-    onReconnect: vi.fn().mockReturnValue(vi.fn()),
+    onReconnect: (h: (...args: unknown[]) => void) => capture('socket:reconnect', h),
     identifySession: vi.fn(),
     sendMessage: mockSendMessage,
     stopTurn: vi.fn(),
@@ -680,6 +680,40 @@ describe('chat:error two-path dispatch', () => {
     expect(markAgentTurnError).not.toHaveBeenCalled();
     expect(removeLastAgentTurn).not.toHaveBeenCalled();
     expect(setStreaming).toHaveBeenCalledWith(false);
+  });
+
+  it('chat:error from a different session does not stop active-session streaming', async () => {
+    mockActiveSessionId = 'session-1';
+    mockActiveTurnId = 'turn-abc';
+    await renderChatInterface();
+    setStreaming.mockClear();
+
+    await emitEvent('chat:error', {
+      sessionId: 'session-2',
+      code: 'LLM_ERROR',
+      message: 'background failure',
+      hadContent: true,
+    });
+
+    expect(setStreaming).not.toHaveBeenCalled();
+    expect(markAgentTurnError).toHaveBeenCalledWith('turn-abc', {
+      code: 'LLM_ERROR',
+      message: 'background failure',
+    }, 'session-2');
+  });
+});
+
+describe('REGRESSION: reconnect preserves other-session state', () => {
+  it('reconnect clears tool activity only for the active session', async () => {
+    mockActiveSessionId = 'session-1';
+    await renderChatInterface();
+    clearToolActivities.mockClear();
+    setStreaming.mockClear();
+
+    await emitEvent('socket:reconnect', undefined);
+
+    expect(setStreaming).toHaveBeenCalledWith(false);
+    expect(clearToolActivities).toHaveBeenCalledWith('session-1');
   });
 });
 

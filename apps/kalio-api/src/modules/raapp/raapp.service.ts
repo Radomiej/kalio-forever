@@ -363,7 +363,7 @@ export class RAAppService implements OnModuleInit {
     const app = this.loaded.get(id);
     if (!app) return;
     if (app.source === 'core') throw new Error(`Cannot delete core RA-App: ${id}`);
-    await fs.unlink(app.zipPath);
+    await fs.rm(app.zipPath, { recursive: true, force: true });
     this.loaded.delete(id);
   }
 

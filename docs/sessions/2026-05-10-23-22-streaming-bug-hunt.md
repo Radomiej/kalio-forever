@@ -198,3 +198,39 @@
    - Confirmed agent saw `input_schema` for `a`, `b`, `operation`
    - Confirmed `run_raapp` executed with sample inputs `{ a: 15, b: 7, operation: 'add' }`
    - Confirmed rendered GUI showed `15 + 7 = 22`
+
+## 2026-05-11 00:57 review follow-up regressions fixed
+
+### What was done
+
+- Added failing regression coverage for two missed frontend session-scope leaks in `ChatInterface`:
+  - `chat:error` from a background session no longer clears active-session streaming state.
+  - socket reconnect now clears tool activity only for the active session instead of wiping all sessions.
+- Added a failing regression for overlapping `ChatService.handleTurn()` calls sharing one `sessionId`; fixed the abort-controller cleanup so an older turn cannot delete the newer controller.
+- Added a failing regression for unpacked user RA-Apps stored as directories; `RAAppService.delete()` now removes both `.zip` uploads and directory-backed apps via `fs.rm(..., { recursive: true, force: true })`.
+- Added failing regressions for both OpenAI-compatible providers so mid-stream abort always releases `response.body.getReader()` via `finally`.
+
+### Files touched
+
+- `apps/kalio-web/src/features/chat/ChatInterface.tsx`
+- `apps/kalio-web/src/features/chat/ChatInterface.test.tsx`
+- `apps/kalio-api/src/modules/chat/chat.service.ts`
+- `apps/kalio-api/src/modules/chat/__tests__/chat.service.spec.ts`
+- `apps/kalio-api/src/modules/raapp/raapp.service.ts`
+- `apps/kalio-api/src/modules/raapp/raapp.service.spec.ts`
+- `apps/kalio-api/src/modules/llm/providers/openai-compatible.provider.ts`
+- `apps/kalio-api/src/modules/llm/providers/openai-compatible.provider.spec.ts`
+- `apps/kalio-api/src/modules/llm/providers/base-openai-compatible.provider.ts`
+- `apps/kalio-api/src/modules/llm/providers/base-openai-compatible.provider.spec.ts`
+
+### Duplicate assessment
+
+- Verified that `apps/kalio-api/src/modules/vfs/raapp-preview-bridge.ts` and `apps/kalio-web/src/features/raapp/raapp-preview-bridge.ts` are still byte-identical.
+- Did not deduplicate them in this change: the earlier shared-path extraction already failed in live Nest/Vite runtime, so removing that duplication safely requires a real shared package extraction, not another ad-hoc cross-app import.
+
+### Validation
+
+- `Push-Location apps/kalio-web; node_modules\.bin\vitest.cmd run src/features/chat/ChatInterface.test.tsx; Pop-Location` ✅
+- `Push-Location apps/kalio-api; node_modules\.bin\vitest.cmd run src/modules/chat/__tests__/chat.service.spec.ts; Pop-Location` ✅
+- `Push-Location apps/kalio-api; node_modules\.bin\vitest.cmd run src/modules/raapp/raapp.service.spec.ts src/modules/llm/providers/openai-compatible.provider.spec.ts src/modules/llm/providers/base-openai-compatible.provider.spec.ts; Pop-Location` ✅
+- VS Code diagnostics on all touched files ✅

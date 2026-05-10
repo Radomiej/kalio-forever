@@ -199,6 +199,36 @@ describe('OpenAICompatibleProvider', () => {
   });
 
   describe('streamChat - Error Handling', () => {
+    it('should release the reader lock when abort happens mid-stream', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const sessionId = 'sess-123';
+      const messageId = 'msg-456';
+      const abortController = new AbortController();
+      const reader = {
+        read: vi.fn().mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'),
+        }),
+        releaseLock: vi.fn(),
+      };
+      const onChunk = vi.fn((chunk: LLMStreamChunk) => {
+        if (chunk.delta === 'Hello') {
+          abortController.abort();
+        }
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: { getReader: () => reader },
+      });
+
+      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortController.signal);
+
+      expect(result).toEqual([]);
+      expect(reader.releaseLock).toHaveBeenCalledOnce();
+    });
+
     it('should throw error on HTTP failure', async () => {
       // Arrange
       const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
