@@ -13,6 +13,7 @@ export interface ILLMProvider {
     onChunk: (chunk: LLMStreamChunk) => void,
     sessionId: string,
     messageId: string,
+    abortSignal?: AbortSignal,
   ): Promise<LLMToolCall[]>;
 }
 

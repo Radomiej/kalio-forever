@@ -414,9 +414,10 @@ describe('ChatInterface event wiring', () => {
     expect(addSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'child-session', kind: 'subagent' }));
   });
 
-  it('BUG REPRODUCTION: tool:result from another session flips global streaming state', async () => {
+  it('ignores tool:result streaming state changes from a different session', async () => {
     mockActiveSessionId = 'session-1';
     await renderChatInterface();
+    setStreaming.mockClear();
 
     await emitEvent('tool:result', {
       callId: 'call-background',
@@ -425,11 +426,24 @@ describe('ChatInterface event wiring', () => {
       sessionId: 'session-2',
     });
 
-    expect(setStreaming).toHaveBeenCalledWith(true);
+    expect(setStreaming).not.toHaveBeenCalled();
     expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-2',
       toolCallId: 'call-background',
     }));
+  });
+
+  it('ignores chat:complete streaming state changes from a different session', async () => {
+    mockActiveSessionId = 'session-1';
+    await renderChatInterface();
+    setStreaming.mockClear();
+
+    await emitEvent('chat:complete', {
+      sessionId: 'session-2',
+      messageId: 'msg-background',
+    });
+
+    expect(setStreaming).not.toHaveBeenCalled();
   });
 });
 

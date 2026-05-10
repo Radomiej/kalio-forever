@@ -7,6 +7,7 @@ export interface LLMSourceParams {
   tools: ToolMeta[];
   sessionId: string;
   messageId: string;
+  abortSignal?: AbortSignal;
 }
 
 /**

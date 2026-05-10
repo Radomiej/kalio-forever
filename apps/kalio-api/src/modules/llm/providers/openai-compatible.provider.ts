@@ -10,7 +10,12 @@ export class OpenAICompatibleProvider implements ILLMProvider {
     onChunk: (chunk: LLMStreamChunk) => void,
     sessionId: string,
     messageId: string,
+    abortSignal?: AbortSignal,
   ): Promise<LLMToolCall[]> {
+    if (abortSignal?.aborted) {
+      return [];
+    }
+
     const body = JSON.stringify({
       model: this.config.model,
       messages,
@@ -30,6 +35,7 @@ export class OpenAICompatibleProvider implements ILLMProvider {
         Authorization: `Bearer ${this.config.apiKey}`,
       },
       body,
+      signal: abortSignal,
     });
 
     if (!response.ok || !response.body) {
@@ -43,6 +49,9 @@ export class OpenAICompatibleProvider implements ILLMProvider {
     let buffer = '';
 
     while (true) {
+      if (abortSignal?.aborted) {
+        return [];
+      }
       const { done, value } = await reader.read();
       if (done) break;
 

@@ -54,8 +54,8 @@ describe('RunRaAppTool', () => {
     raapp = {
       getById: vi.fn(),
       getAll: vi.fn().mockReturnValue([]),
+      init: vi.fn().mockResolvedValue(undefined),
       execute: vi.fn(),
-      executeSystems: vi.fn().mockResolvedValue({}),
     };
     const mockEffectsProcessor = {
       processSystemsYaml: vi.fn().mockResolvedValue({ output: {}, pendingApprovals: [], entities: [] }),
@@ -84,6 +84,35 @@ describe('RunRaAppTool', () => {
 
     expect(result.status).toBe('error');
     expect(result.message as string).toContain('no renderable content');
+  });
+
+  it('reloads the RA-App catalog once before failing missing-content apps', async () => {
+    const staleApp = makeApp({
+      id: 'visual-calculator',
+      htmlContent: null,
+      guiContent: null,
+      systemsContent: 'systems:\n  - id: calc',
+    });
+    const refreshedApp = makeApp({
+      id: 'visual-calculator',
+      htmlContent: null,
+      guiContent: 'vbox { label { text = "[output.result]" } }',
+      systemsContent: 'systems:\n  - id: calc',
+      appMode: 'display',
+    });
+    (raapp.getById as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(staleApp)
+      .mockReturnValueOnce(refreshedApp);
+    (raapp.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'ready',
+      renderedContent: '{"nodes":[],"data":{}}',
+    });
+
+    const result = await tool.execute(makeRequest({ id: 'visual-calculator', inputs: { a: 12, b: 4, operation: 'add' } })) as Record<string, unknown>;
+
+    expect(raapp.init).toHaveBeenCalledOnce();
+    expect(result.status).toBe('ready');
+    expect(result.type).toBe('gui');
   });
 
   it('returns ready block with correct structure when app executes successfully', async () => {

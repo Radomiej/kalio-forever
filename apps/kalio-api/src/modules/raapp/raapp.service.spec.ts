@@ -6,19 +6,26 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { RAAppService } from './raapp.service';
 import { deriveGeneratedAppName } from './raapp.service';
-import { RAAppSandboxService } from './raapp-sandbox.service';
+import { archiveDirectoryToZip } from './zip-archive.util';
 
 // AC-13: RA-App DSL parse error is returned inline (not thrown), with code DSL_PARSE_ERROR
 
 describe('RAAppService', () => {
   let service: RAAppService;
 
-  async function createService(): Promise<RAAppService> {
+  async function createService(configOverrides?: Record<string, unknown>): Promise<RAAppService> {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         RAAppService,
-        RAAppSandboxService,
-        { provide: ConfigService, useValue: { get: (_key: string, def: unknown) => def } },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string, def: unknown) =>
+              Object.prototype.hasOwnProperty.call(configOverrides ?? {}, key)
+                ? configOverrides?.[key]
+                : def,
+          },
+        },
       ],
     }).compile();
 
@@ -43,8 +50,63 @@ describe('RAAppService', () => {
         const ids = isolatedService.getAll().map((app) => app.id);
         expect(ids).toContain('qa-interactive');
         expect(ids).toContain('visual-calculator');
+
+        const visualCalculator = isolatedService.getById('visual-calculator');
+        expect(visualCalculator?.meta.input_schema).toEqual({
+          type: 'object',
+          required: ['a', 'b', 'operation'],
+          properties: {
+            a: { type: 'number', description: 'First number' },
+            b: { type: 'number', description: 'Second number' },
+            operation: {
+              type: 'string',
+              description: 'Operation to perform',
+              enum: ['add', 'subtract', 'multiply', 'divide'],
+            },
+          },
+        });
+        expect(visualCalculator?.guiContent).toContain('[output.result]');
+        expect(visualCalculator?.guiContent).not.toContain('text = "[result]"');
       } finally {
         process.chdir(originalCwd);
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps the more renderable duplicate when the same app id appears twice in runtime core', async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-dup-'));
+      const coreDir = path.join(tempRoot, 'core');
+      const unpackedDir = path.join(coreDir, 'visual-calculator-extracted');
+      const staleZipSourceDir = path.join(tempRoot, 'stale-visual-calculator');
+      const staleZipPath = path.join(coreDir, 'visual-calculator.zip');
+
+      await fs.mkdir(unpackedDir, { recursive: true });
+      await fs.mkdir(staleZipSourceDir, { recursive: true });
+
+      const meta = [
+        'id: visual-calculator',
+        'name: Visual Calculator',
+        'version: "1.0"',
+        'description: Duplicate loader regression fixture',
+        'execution:',
+        '  render_as: display',
+      ].join('\n');
+
+      await fs.writeFile(path.join(unpackedDir, 'meta.yml'), meta, 'utf8');
+      await fs.writeFile(path.join(unpackedDir, 'ui.gui'), 'vbox { label { text = "rendered" } }', 'utf8');
+      await fs.writeFile(path.join(staleZipSourceDir, 'meta.yml'), meta, 'utf8');
+      await archiveDirectoryToZip({ sourceDir: staleZipSourceDir, zipPath: staleZipPath });
+
+      const isolatedService = await createService({ RA_APPS_PATH: tempRoot });
+
+      try {
+        await isolatedService.init();
+
+        const app = isolatedService.getById('visual-calculator');
+        expect(app).toBeDefined();
+        expect(app?.guiContent).toContain('rendered');
+        expect(app?.zipPath.endsWith('visual-calculator-extracted')).toBe(true);
+      } finally {
         await fs.rm(tempRoot, { recursive: true, force: true });
       }
     });
@@ -205,36 +267,6 @@ describe('RAAppService', () => {
       await expect(
         service.execute({ type: 'gui', mode: 'display', content: '{ unclosed' }),
       ).resolves.toMatchObject({ status: 'error' });
-    });
-  });
-
-  describe('executeSystems', () => {
-    it('computes output from assign effects', async () => {
-      const systems = `
-        systems:
-          - id: calc
-            effects:
-              - assign:
-                  target: output.result
-                  expression: input.a + input.b
-              - assign:
-                  target: output.label
-                  expression: '"sum"'
-      `;
-      const result = await service.executeSystems(systems, { a: 3, b: 4 });
-
-      expect(result).toHaveProperty('result', 7);
-      expect(result).toHaveProperty('label', 'sum');
-    });
-
-    it('returns empty object on invalid YAML', async () => {
-      const result = await service.executeSystems('invalid {{{', { a: 1 });
-      expect(result).toEqual({});
-    });
-
-    it('returns empty object when no systems defined', async () => {
-      const result = await service.executeSystems('other: []', { a: 1 });
-      expect(result).toEqual({});
     });
   });
 });

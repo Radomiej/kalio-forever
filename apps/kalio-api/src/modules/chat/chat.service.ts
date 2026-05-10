@@ -187,6 +187,7 @@ export class ChatService {
           tools: toolMetas,
           sessionId,
           messageId: iterationMessageId,
+          abortSignal: controller.signal,
         };
 
         let chunkCount = 0;

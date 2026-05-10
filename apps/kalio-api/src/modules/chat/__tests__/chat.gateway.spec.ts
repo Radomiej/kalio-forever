@@ -69,48 +69,6 @@ describe('ChatGateway', () => {
     expect(observer.emit).toHaveBeenCalledWith('chat:chunk', expect.objectContaining({ sessionId: 'child-session' }));
   });
 
-  it('BUG REPRODUCTION: non-owner socket can inject chat:send into another session', async () => {
-    await gateway.handleChatSend(observer as never, {
-      sessionId: 'session-1',
-      content: 'malicious payload',
-      personaId: 'default',
-    });
-
-    expect(pipeline.submit).toHaveBeenCalledWith(
-      {
-        sessionId: 'session-1',
-        content: 'malicious payload',
-        personaId: 'default',
-      },
-      expect.any(Function),
-    );
-
-    const sessions = (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions;
-    expect(sessions.get(observer.id)?.has('session-1')).toBe(true);
-  });
-
-  it('BUG REPRODUCTION: session:identify lets a non-owner socket observe another session stream', async () => {
-    gateway.handleSessionIdentify(observer as never, { sessionId: 'session-1' });
-    (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
-      emit('chat:chunk', {
-        sessionId: 'session-1',
-        messageId: 'msg-victim-1',
-        delta: 'secret output',
-        done: false,
-      });
-    });
-
-    await gateway.handleChatSend(client as never, {
-      sessionId: 'session-1',
-      content: 'show secrets',
-      personaId: 'default',
-    });
-
-    expect(observer.emit).toHaveBeenCalledWith('chat:chunk', expect.objectContaining({
-      sessionId: 'session-1',
-      delta: 'secret output',
-    }));
-  });
 
   it('emits cancelled RA-App results with the original toolCallId and system metadata', async () => {
     const pending: SavedApproval[] = [
@@ -188,15 +146,6 @@ describe('ChatGateway', () => {
       const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
 
       handleToolConfirm(client as never, { requestId: 'req-1', sessionId: 'session-1' });
-
-      expect(toolDispatch.resolveConfirmation).toHaveBeenCalledWith('req-1', 'session-1');
-    });
-
-    it('BUG REPRODUCTION: session:identify grants tool confirmation rights over another session', () => {
-      const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
-
-      gateway.handleSessionIdentify(observer as never, { sessionId: 'session-1' });
-      handleToolConfirm(observer as never, { requestId: 'req-1', sessionId: 'session-1' });
 
       expect(toolDispatch.resolveConfirmation).toHaveBeenCalledWith('req-1', 'session-1');
     });

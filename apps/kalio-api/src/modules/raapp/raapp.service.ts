@@ -7,7 +7,6 @@ import { ConfigService } from '@nestjs/config';
 import extractZip from 'extract-zip';
 import yaml from 'js-yaml';
 import type { RAAppBlock, RAAppResult } from '@kalio/types';
-import { RAAppSandboxService } from './raapp-sandbox.service';
 import { compileGui } from './gui/guiDslExpand';
 import { GuiParseError } from './gui/guiDslParser';
 import { archiveDirectoryToZip } from './zip-archive.util';
@@ -65,6 +64,17 @@ function hasCatalogEntries(dir: string): boolean {
   }
 }
 
+function getRenderableScore(app: LoadedRAApp): number {
+  let score = 0;
+  if (app.htmlContent) score += 1;
+  if (app.guiContent) score += 1;
+  return score;
+}
+
+function isDirectoryOrigin(app: LoadedRAApp): boolean {
+  return !app.zipPath.endsWith('.zip');
+}
+
 function cleanTitle(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
@@ -120,10 +130,7 @@ export class RAAppService implements OnModuleInit {
   private readonly coreDir: string;
   private readonly userDir: string;
 
-  constructor(
-    private readonly sandbox: RAAppSandboxService,
-    private readonly config: ConfigService,
-  ) {
+  constructor(private readonly config: ConfigService) {
     const configuredBase = this.config.get<string | undefined>('RA_APPS_PATH', undefined);
     const runtimeBase = path.resolve(configuredBase ?? DEFAULT_RUNTIME_RA_APPS_PATH);
 
@@ -148,6 +155,40 @@ export class RAAppService implements OnModuleInit {
     await fs.mkdir(this.userDir, { recursive: true });
     await this.loadFromDir(this.coreDir, 'core');
     await this.loadFromDir(this.userDir, 'user');
+  }
+
+  private storeLoadedApp(app: LoadedRAApp): LoadedRAApp {
+    const existing = this.loaded.get(app.id);
+    if (!existing) {
+      this.loaded.set(app.id, app);
+      return app;
+    }
+
+    const existingScore = getRenderableScore(existing);
+    const incomingScore = getRenderableScore(app);
+
+    if (incomingScore < existingScore) {
+      this.logger.warn(
+        `[RAAppService] Keeping existing RA-App ${app.id}; duplicate ${app.zipPath} is less renderable (${incomingScore} < ${existingScore})`,
+      );
+      return existing;
+    }
+
+    if (incomingScore === existingScore && isDirectoryOrigin(existing) && !isDirectoryOrigin(app)) {
+      this.logger.warn(
+        `[RAAppService] Keeping unpacked RA-App ${app.id}; duplicate archive ${app.zipPath} would overwrite equivalent content`,
+      );
+      return existing;
+    }
+
+    if (incomingScore > existingScore || !isDirectoryOrigin(existing) && isDirectoryOrigin(app)) {
+      this.logger.warn(
+        `[RAAppService] Replacing duplicate RA-App ${app.id} with ${app.zipPath}`,
+      );
+    }
+
+    this.loaded.set(app.id, app);
+    return app;
   }
 
   private async loadFromDir(dir: string, source: 'core' | 'user'): Promise<void> {
@@ -238,11 +279,11 @@ export class RAAppService implements OnModuleInit {
       updatedAt: stats.mtimeMs,
     };
 
-    this.loaded.set(meta.id, app);
+    const storedApp = this.storeLoadedApp(app);
     this.logger.log(
-      `RA-App loaded: ${meta.id} v${meta.version ?? '?'} (${source}) html=${htmlContent != null} gui=${guiContent != null}`,
+      `RA-App loaded: ${storedApp.id} v${storedApp.meta.version ?? '?'} (${source}) html=${storedApp.htmlContent != null} gui=${storedApp.guiContent != null}`,
     );
-    return app;
+    return storedApp;
   }
 
   private async loadZip(zipPath: string, source: 'core' | 'user'): Promise<LoadedRAApp> {
@@ -352,40 +393,6 @@ export class RAAppService implements OnModuleInit {
       return result;
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
-    }
-  }
-
-  async executeSystems(systemsContent: string, inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
-    try {
-      const parsed = yaml.load(systemsContent) as {
-        systems?: Array<{
-          id: string;
-          effects?: Array<{
-            assign?: { target: string; expression: string };
-          }>;
-        }>;
-      };
-      const systems = parsed?.systems ?? [];
-
-      let jsCode = `const input = ${JSON.stringify(inputs)};\nconst output = {};\n`;
-      for (const system of systems) {
-        for (const effect of system.effects ?? []) {
-          const assign = effect.assign;
-          if (!assign) continue;
-          const targetKey = assign.target.replace(/^output\./, '');
-          const expr = (assign.expression ?? '').replace(/\s+/g, ' ').trim();
-          jsCode += `output['${targetKey}'] = ${expr};\n`;
-        }
-      }
-      jsCode += 'return JSON.stringify(output);';
-
-      const result = await this.sandbox.execute(jsCode);
-      return JSON.parse(result) as Record<string, unknown>;
-    } catch (err) {
-      this.logger.warn(
-        `[RAAppService] System execution error: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return {};
     }
   }
 

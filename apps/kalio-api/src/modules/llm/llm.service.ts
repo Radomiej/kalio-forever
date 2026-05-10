@@ -52,9 +52,10 @@ export class LLMService {
     onChunk: (chunk: LLMStreamChunk) => void,
     sessionId: string,
     messageId: string,
+    abortSignal?: AbortSignal,
   ): Promise<LLMToolCall[]> {
     const { provider } = await this.getActiveProvider();
-    return provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+    return provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortSignal);
   }
 
   async getConfig(): Promise<LLMConfig & { source: 'db' | 'env' }> {

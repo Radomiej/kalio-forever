@@ -244,6 +244,8 @@ export function ChatInterface() {
 
     const offToolResult = eventBus.onToolResult((result) => {
       console.log('[ToolResult]', result.callId, 'status:', result.status, result.status !== 'success' ? `error: ${result.errorCode}` : '');
+      const activeSessionId = useSessionStore.getState().activeSessionId;
+      const resultSessionId = result.sessionId ?? activeSessionId;
       updateToolActivity(result.callId, {
         status: result.status === 'success' ? 'success' : result.status === 'cancelled' ? 'cancelled' : 'error',
         finishedAt: Date.now(),
@@ -258,11 +260,10 @@ export function ChatInterface() {
       }
       // Persist tool result into message store so RAAppManager (and chat history) can see it
       if (result.status === 'success' && result.data !== undefined) {
-        const sid = result.sessionId ?? useSessionStore.getState().activeSessionId;
-        if (sid) {
+        if (resultSessionId) {
           const toolResultMsg: ChatMessage = {
             id: nanoid(),
-            sessionId: sid,
+            sessionId: resultSessionId,
             role: 'tool_result',
             content: JSON.stringify(result.data),
             toolCallId: result.callId,
@@ -272,7 +273,7 @@ export function ChatInterface() {
         }
       }
       // Re-enable streaming state for follow-up LLM response after successful tool
-      if (result.status === 'success') {
+      if (result.status === 'success' && resultSessionId === activeSessionId) {
         setStreaming(true);
       }
     });

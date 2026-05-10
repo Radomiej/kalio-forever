@@ -254,6 +254,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         tools: params.tools,
         sessionId: params.childSessionId,
         messageId,
+        abortSignal: params.abortSignal,
       })) {
         if (params.abortSignal.aborted) {
           throw abortReason(params.abortSignal);

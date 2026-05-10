@@ -98,20 +98,28 @@ describe('LLMServiceAdapter', () => {
     await expect(collect(adapter.stream(baseParams))).rejects.toThrow('LLM down');
   });
 
-  it('BUG REPRODUCTION: closing the iterator does not cancel the upstream LLM stream', async () => {
+  it('stops upstream work when the streaming iterator is closed early', async () => {
     let release!: () => void;
     const upstreamChunks: string[] = [];
+    let upstreamAbortSignal: AbortSignal | undefined;
     const llm = {
       streamChat: vi.fn().mockImplementation(async (
         _msgs: unknown,
         _tools: unknown,
         onChunk: (c: LLMStreamChunk) => void,
+        _sessionId: string,
+        _messageId: string,
+        abortSignal?: AbortSignal,
       ): Promise<LLMToolCall[]> => {
+        upstreamAbortSignal = abortSignal;
         upstreamChunks.push('first');
         onChunk({ delta: 'first', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
         await new Promise<void>((resolve) => {
           release = resolve;
         });
+        if (abortSignal?.aborted) {
+          return [];
+        }
         upstreamChunks.push('second');
         onChunk({ delta: 'second', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
         return [];
@@ -122,12 +130,70 @@ describe('LLMServiceAdapter', () => {
 
     await expect(iterator.next()).resolves.toEqual({ value: { type: 'text_delta', delta: 'first' }, done: false });
     await expect(iterator.return?.(undefined)).resolves.toEqual({ value: undefined, done: true });
+    expect(upstreamAbortSignal?.aborted).toBe(true);
 
     release();
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(upstreamChunks).toEqual(['first', 'second']);
+    expect(upstreamChunks).toEqual(['first']);
+    expect(llm.streamChat).toHaveBeenCalledOnce();
+  });
+
+  it('does not start the upstream stream when the parent abort signal is already aborted', async () => {
+    const abortController = new AbortController();
+    abortController.abort(new Error('cancelled before start'));
+    const llm = {
+      streamChat: vi.fn(),
+    } as unknown as LLMService;
+    const adapter = new LLMServiceAdapter(llm);
+
+    const out = await collect(adapter.stream({
+      ...baseParams,
+      abortSignal: abortController.signal,
+    }));
+
+    expect(out).toEqual([]);
+    expect(llm.streamChat).not.toHaveBeenCalled();
+  });
+
+  it('stops cleanly on parent abort without emitting trailing tool calls or done', async () => {
+    let release!: () => void;
+    const abortController = new AbortController();
+    const llm = {
+      streamChat: vi.fn().mockImplementation(async (
+        _msgs: unknown,
+        _tools: unknown,
+        onChunk: (c: LLMStreamChunk) => void,
+        _sessionId: string,
+        _messageId: string,
+        abortSignal?: AbortSignal,
+      ): Promise<LLMToolCall[]> => {
+        onChunk({ delta: 'first', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        if (abortSignal?.aborted) {
+          const error = new Error('stream aborted');
+          error.name = 'AbortError';
+          throw error;
+        }
+        return [{ id: 'late-call', name: 'late_tool', args: { ok: true } }];
+      }),
+    } as unknown as LLMService;
+    const adapter = new LLMServiceAdapter(llm);
+    const iterator = adapter.stream({
+      ...baseParams,
+      abortSignal: abortController.signal,
+    })[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toEqual({ value: { type: 'text_delta', delta: 'first' }, done: false });
+
+    abortController.abort(new Error('user stopped turn'));
+    release();
+
+    await expect(iterator.next()).resolves.toEqual({ value: undefined, done: true });
+    await expect(iterator.next()).resolves.toEqual({ value: undefined, done: true });
     expect(llm.streamChat).toHaveBeenCalledOnce();
   });
 });

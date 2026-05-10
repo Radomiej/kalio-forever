@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
 import type { ChatMessage } from '@kalio/types';
+import { injectRaAppResizeBridge } from './raapp-preview-bridge';
 
 interface HtmlIframeRendererProps {
   html?: string;
@@ -14,21 +15,12 @@ interface HtmlIframeRendererProps {
 
 const SANDBOX_ATTR = 'allow-scripts allow-modals';
 
-function injectResizeBridge(rawHtml: string): string {
-  const bridge = `\n<script>(function(){\n  const sendHeight=function(){\n    try{\n      const doc=document.documentElement;\n      const body=document.body;\n      const h=Math.max(\n        doc?doc.scrollHeight:0,\n        body?body.scrollHeight:0,\n        doc?doc.offsetHeight:0,\n        body?body.offsetHeight:0\n      );\n      parent.postMessage({type:'raapp_resize',height:h},'*');\n    }catch(e){console.error('[RAApp:Bridge] sendHeight failed',e);}\n  };\n  window.addEventListener('load',function(){sendHeight();setTimeout(sendHeight,80);setTimeout(sendHeight,300);});\n  window.addEventListener('resize',sendHeight);\n  window.addEventListener('message',function(event){\n    if(event&&event.data&&event.data.type==='raapp_query_height'){sendHeight();}\n  });\n  var ro=new ResizeObserver(function(){sendHeight();});\n  if(document&&document.documentElement){ro.observe(document.documentElement);}\n})();</script>\n`;
-  const bodyClose = rawHtml.toLowerCase().lastIndexOf('</body>');
-  if (bodyClose >= 0) {
-    return `${rawHtml.slice(0, bodyClose)}${bridge}${rawHtml.slice(bodyClose)}`;
-  }
-  return `${rawHtml}${bridge}`;
-}
-
 export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200 }: HtmlIframeRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const fullscreenIframeRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(minHeight);
   const [expanded, setExpanded] = useState(false);
-  const bridgedHtml = typeof html === 'string' ? injectResizeBridge(html) : undefined;
+  const bridgedHtml = typeof html === 'string' ? injectRaAppResizeBridge(html) : undefined;
 
   const isKnownIframeSource = useCallback((source: MessageEvent['source']) => {
     if (!source) return false;

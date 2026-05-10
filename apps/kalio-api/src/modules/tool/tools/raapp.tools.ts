@@ -120,13 +120,26 @@ export class RunRaAppTool {
     const id = request.args['id'] as string;
     const inputs = (request.args['inputs'] ?? {}) as Record<string, unknown>;
     const sessionId = request.sessionId;
-    const app = this.raapp.getById(id);
+    let app = this.raapp.getById(id);
 
     if (!app) {
       const available = this.raapp.getAll().map((a) => a.id);
       return {
         status: 'error',
         message: `RA-App "${id}" not found. Available IDs: ${available.length > 0 ? available.join(', ') : '(none stored yet)'}`,
+      };
+    }
+
+    if (!app.guiContent && !app.htmlContent) {
+      this.logger.warn(`[run_raapp] ${id} loaded without renderable content; reloading catalog once before failing`);
+      await this.raapp.init();
+      app = this.raapp.getById(id);
+    }
+
+    if (!app) {
+      return {
+        status: 'error',
+        message: `RA-App "${id}" disappeared after catalog reload. Please try again.`,
       };
     }
 

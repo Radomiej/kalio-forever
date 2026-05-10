@@ -88,8 +88,8 @@ test.describe('ECS / RA-App live integration', () => {
     }
   });
 
-  // ── 2. run_raapp on seeded Visual Calculator (has systems.yml → ECS) ─────
-  test('run_raapp returns GUI block for Visual Calculator', async ({ page }) => {
+  // ── 2. run_raapp on seeded Interactive Q&A (stable GUI path) ─────────────
+  test('run_raapp returns GUI block for Interactive Q&A', async ({ page }) => {
     test.skip(MOCK_LLM, 'Mock LLM only echoes prompts and does not reliably launch RA-Apps through chat UI.');
 
     const socket = wsConnect(sessionId);
@@ -97,7 +97,6 @@ test.describe('ECS / RA-App live integration', () => {
     socket.disconnect();
 
     // Navigate to chat and send a complete launch request via the RA-App persona.
-    // Visual Calculator requires a, b, and operation.
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
     await expect(
@@ -107,12 +106,13 @@ test.describe('ECS / RA-App live integration', () => {
 
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });
-    await chatInput.fill('Uruchom aplikację Visual Calculator z wejściami a=12, b=4, operation=add. Użyj narzędzia run_raapp.');
+  await chatInput.fill('Uruchom aplikację Interactive Q&A z wejściami question="Ile to 2 + 2?", options=["4","5"], allow_custom=false. Użyj narzędzia run_raapp.');
     await page.getByTestId('chat-send-btn').click();
 
     // Wait for the RA-App tool to render and the turn to finish.
     await expect(chatInput).toBeDisabled({ timeout: 5000 });
     await expect(page.getByTestId('gui-dsl-renderer')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('gui-button').first()).toBeVisible({ timeout: 30_000 });
     await expect(chatInput).toBeEnabled({ timeout: 30_000 });
 
     // Assert at least one assistant bubble appeared

@@ -45,7 +45,12 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     onChunk: (chunk: LLMStreamChunk) => void,
     sessionId: string,
     messageId: string,
+    abortSignal?: AbortSignal,
   ): Promise<LLMToolCall[]> {
+    if (abortSignal?.aborted) {
+      return [];
+    }
+
     const body = JSON.stringify({
       model: this.model,
       messages: messages.map((m) => {
@@ -79,6 +84,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       method: 'POST',
       headers: this.buildHeaders(),
       body,
+      signal: abortSignal,
     });
 
     if (!response.ok || !response.body) {
@@ -99,6 +105,9 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     let debugChunkCount = 0;
 
     while (true) {
+      if (abortSignal?.aborted) {
+        return [];
+      }
       const { done, value } = await reader.read();
       if (done) break;
 
