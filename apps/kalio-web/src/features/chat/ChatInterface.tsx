@@ -32,7 +32,12 @@ function shouldRefreshVfsForToolResult(toolName: string | undefined, data: unkno
     return false;
   }
 
-  const copiedFiles = (data as Record<string, unknown>)['copiedFiles'];
+  const result = data as Record<string, unknown>;
+  if (result['vfsMode'] === 'shared') {
+    return true;
+  }
+
+  const copiedFiles = result['copiedFiles'];
   return Array.isArray(copiedFiles) && copiedFiles.length > 0;
 }
 

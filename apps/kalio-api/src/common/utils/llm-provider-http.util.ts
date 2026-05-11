@@ -14,19 +14,25 @@ const XIAOMI_COMPAT_HEADERS: Record<string, string> = {
   'User-Agent': 'RooCode/3.17.0',
 };
 
+const OPENAI_FALLBACK_BASE_URL = 'https://api.openai.com/v1';
+
+function normalizeProviderKey(provider: unknown): string {
+  return typeof provider === 'string' ? provider.toLowerCase() : '';
+}
+
 export function resolveLlmProviderBaseUrl(provider: string, baseUrl?: string): string {
   const trimmedBaseUrl = baseUrl?.trim();
   if (trimmedBaseUrl) {
     return trimmedBaseUrl.replace(/\/$/, '');
   }
 
-  return DEFAULT_LLM_PROVIDER_BASE_URLS[provider.toLowerCase()] ?? 'https://api.openai.com/v1';
+  return DEFAULT_LLM_PROVIDER_BASE_URLS[normalizeProviderKey(provider)] ?? OPENAI_FALLBACK_BASE_URL;
 }
 
 export function buildProviderCompatHeaders(provider: string, apiKey?: string): Record<string, string> {
   const headers: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
 
-  if (provider.toLowerCase() === 'xiaomimimo') {
+  if (normalizeProviderKey(provider) === 'xiaomimimo') {
     Object.assign(headers, XIAOMI_COMPAT_HEADERS);
   }
 

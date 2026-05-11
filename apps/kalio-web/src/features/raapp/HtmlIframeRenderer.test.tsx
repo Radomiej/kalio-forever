@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { HtmlIframeRenderer } from './HtmlIframeRenderer';
 
 // ── sessionStore mock ───────────────────────────────────────────────────────
@@ -112,6 +112,28 @@ describe('HtmlIframeRenderer', () => {
       }),
     );
     expect(iframe.style.height).toBe('200px');
+  });
+
+  it('REGRESSION: clamps absurdly tall inline previews instead of stretching the chat bubble indefinitely', () => {
+    render(<HtmlIframeRenderer html="<p>Clamp Guard</p>" minHeight={200} />);
+
+    const iframe = screen.getByTestId('raapp-iframe') as HTMLIFrameElement;
+    const source = iframe.contentWindow;
+
+    if (!source) {
+      throw new Error('Expected iframe contentWindow to be available in test environment');
+    }
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source,
+          data: { type: 'raapp_resize', height: 20_000 },
+        }),
+      );
+    });
+
+    expect(iframe.style.height).toBe('1200px');
   });
 
   it('opens and closes fullscreen modal', () => {

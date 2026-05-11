@@ -14,6 +14,7 @@ interface HtmlIframeRendererProps {
 }
 
 const SANDBOX_ATTR = 'allow-scripts allow-modals';
+const MAX_INLINE_PREVIEW_HEIGHT = 1200;
 
 export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200 }: HtmlIframeRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -35,7 +36,7 @@ export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200 }
       const data = event.data;
 
       if (data?.type === 'raapp_resize' && typeof data.height === 'number') {
-        const next = Math.max(minHeight, Math.ceil(data.height));
+        const next = Math.min(Math.max(minHeight, MAX_INLINE_PREVIEW_HEIGHT), Math.max(minHeight, Math.ceil(data.height)));
         setHeight((prev) => {
           // Ignore tiny jitter to prevent feedback growth loops from postMessage+resize.
           if (Math.abs(prev - next) < 2) return prev;

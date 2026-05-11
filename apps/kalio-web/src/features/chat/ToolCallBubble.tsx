@@ -79,11 +79,43 @@ function extractImageResult(data: unknown): ImageResultData | null {
   return null;
 }
 
+function isSubagentCopiedFile(data: unknown): data is SubagentToolResult['copiedFiles'][number] {
+  if (!data || typeof data !== 'object') return false;
+  const file = data as Record<string, unknown>;
+  return (
+    typeof file['fromPath'] === 'string' &&
+    typeof file['toPath'] === 'string' &&
+    typeof file['sizeBytes'] === 'number'
+  );
+}
+
 function extractSubagentResult(data: unknown): SubagentToolResult | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
-  if (typeof d['childSessionId'] !== 'string' || typeof d['result'] !== 'string') return null;
-  return d as unknown as SubagentToolResult;
+  if (
+    typeof d['childSessionId'] !== 'string' ||
+    typeof d['parentSessionId'] !== 'string' ||
+    (d['vfsMode'] !== 'shared' && d['vfsMode'] !== 'isolated') ||
+    typeof d['vfsSessionId'] !== 'string' ||
+    !Array.isArray(d['copiedFiles']) ||
+    !d['copiedFiles'].every(isSubagentCopiedFile) ||
+    typeof d['result'] !== 'string' ||
+    typeof d['taskId'] !== 'string' ||
+    typeof d['durationMs'] !== 'number'
+  ) {
+    return null;
+  }
+
+  return {
+    childSessionId: d['childSessionId'],
+    parentSessionId: d['parentSessionId'],
+    vfsMode: d['vfsMode'],
+    vfsSessionId: d['vfsSessionId'],
+    copiedFiles: d['copiedFiles'],
+    result: d['result'],
+    taskId: d['taskId'],
+    durationMs: d['durationMs'],
+  };
 }
 
 function extractChildToolPreviews(messages: ChatMessage[]): { raapp: RAAppBlock | null; images: ImageResultData[] } {
@@ -130,11 +162,14 @@ function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
 
   useEffect(() => {
     let cancelled = false;
+    const abortController = new AbortController();
     setChildRaapp(null);
     setChildImages([]);
     setDetailsOpen(false);
 
-    void apiClient.get<ChatMessage[]>(`/api/sessions/${result.childSessionId}/messages`)
+    void apiClient.get<ChatMessage[]>(`/api/sessions/${result.childSessionId}/messages`, {
+      signal: abortController.signal,
+    })
       .then((response) => {
         if (cancelled) return;
         const previews = extractChildToolPreviews(response.data);
@@ -142,11 +177,15 @@ function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
         setChildImages(previews.images);
       })
       .catch((err: unknown) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
         console.error('[ToolCallBubble] failed to load subagent messages for child previews', err instanceof Error ? err : new Error(String(err)));
       });
 
     return () => {
       cancelled = true;
+      abortController.abort();
     };
   }, [result.childSessionId]);
 

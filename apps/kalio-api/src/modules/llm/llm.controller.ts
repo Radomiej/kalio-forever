@@ -59,21 +59,25 @@ export class LLMController {
 
   @Get('models')
   async getModels(
-    @Query('provider') provider: string,
-    @Query('apiKey') apiKey?: string,
-    @Query('baseUrl') baseUrl?: string,
+    @Query('provider') provider: string | string[],
+    @Query('apiKey') apiKey?: string | string[],
+    @Query('baseUrl') baseUrl?: string | string[],
   ): Promise<unknown> {
-    if (!provider) {
+    if (typeof provider !== 'string' || provider.trim().length === 0) {
       throw new HttpException('Missing required query param: provider', HttpStatus.BAD_REQUEST);
     }
 
-    const resolvedBase = resolveLlmProviderBaseUrl(provider, baseUrl);
-    const isLocal = isLocalLlmProvider(provider, resolvedBase);
+    const normalizedProvider = provider.trim();
+    const normalizedApiKey = typeof apiKey === 'string' ? apiKey : undefined;
+    const normalizedBaseUrl = typeof baseUrl === 'string' ? baseUrl : undefined;
+
+    const resolvedBase = resolveLlmProviderBaseUrl(normalizedProvider, normalizedBaseUrl);
+    const isLocal = isLocalLlmProvider(normalizedProvider, resolvedBase);
     const allowsKeyless = isLocal;
 
-    if (!apiKey && !allowsKeyless) {
+    if (!normalizedApiKey && !allowsKeyless) {
       throw new HttpException(
-        `Missing apiKey for ${provider}. Provide query apiKey or use a local endpoint.`,
+        `Missing apiKey for ${normalizedProvider}. Provide query apiKey or use a local endpoint.`,
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -84,7 +88,7 @@ export class LLMController {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const authHeaders = buildProviderCompatHeaders(provider, !allowsKeyless ? apiKey : undefined);
+      const authHeaders = buildProviderCompatHeaders(normalizedProvider, !allowsKeyless ? normalizedApiKey : undefined);
 
       const upstream = await fetch(endpoint, { headers: authHeaders, signal: controller.signal });
 

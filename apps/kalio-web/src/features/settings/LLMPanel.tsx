@@ -234,17 +234,22 @@ export function LLMPanel() {
     setTestState('testing');
     setTestError(null);
     try {
-      const params = new URLSearchParams({ provider: form.provider });
-      if (normalizedApiKey) params.set('apiKey', normalizedApiKey);
-      if (normalizedBaseUrl) params.set('baseUrl', normalizedBaseUrl);
-      const res = await fetch(`/api/llm/models?${params.toString()}`);
-      if (!res.ok) {
-        throw new Error(await readResponseErrorMessage(res, 'provider test'));
+      const result = await apiFetch<{ ok: boolean; latencyMs: number; error?: string }>('/credentials/test', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider: form.provider,
+          apiKey: normalizedApiKey ?? '',
+          model: normalizedModel ?? PROVIDER_DEFAULT_MODELS[form.provider] ?? '',
+          baseUrl: normalizedBaseUrl,
+        }),
+      });
+
+      if (!result.ok) {
+        throw new Error(result.error ?? 'Provider test failed');
       }
-      const json = await res.json() as { data?: unknown[]; models?: unknown[] };
-      const count = (json.data ?? json.models ?? []).length;
+
       setTestState('ok');
-      setTestError(`${count} models available`);
+      setTestError(`Connection verified in ${result.latencyMs}ms`);
     } catch (e) {
       setTestState('error');
       setTestError(e instanceof Error ? e.message : 'Network error');
@@ -333,7 +338,10 @@ export function LLMPanel() {
       setCredentials((prev) => prev.filter((c) => c.id !== credentialId));
       if (activeId === credentialId) {
         setActiveId(null);
-        await refreshBackendConfig();
+        if (lastEnvRuntimeConfig) {
+          applyRuntimeConfig(lastEnvRuntimeConfig);
+        }
+        await refreshBackendConfig('env');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove');

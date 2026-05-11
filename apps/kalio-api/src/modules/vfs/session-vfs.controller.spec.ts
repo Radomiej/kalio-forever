@@ -177,6 +177,33 @@ describe('SessionVfsController', () => {
       expect(result).toBeInstanceOf(StreamableFile);
       expect(mockVfs.serveFile).toHaveBeenCalledWith('sess-1', 'design/my preview.html');
     });
+
+    it('REGRESSION: strips the query string when resolving serve-path from originalUrl', () => {
+      mockVfs.serveFile.mockReturnValue({
+        content: Buffer.from('<!doctype html><html></html>'),
+        mimeType: 'text/html; charset=utf-8',
+      });
+      const res = { set: vi.fn() };
+      const req = {
+        originalUrl: '/api/sessions/sess-1/vfs/serve-path/design/my%20preview.html?cacheBust=123',
+      };
+
+      const result = controller.servePath('sess-1', '' as never, res as never, req as never);
+
+      expect(result).toBeInstanceOf(StreamableFile);
+      expect(mockVfs.serveFile).toHaveBeenCalledWith('sess-1', 'design/my preview.html');
+    });
+
+    it('REGRESSION: throws BadRequest when neither wildcard binding nor originalUrl marker provides a path', () => {
+      expect(() =>
+        controller.servePath(
+          'sess-1',
+          '' as never,
+          { set: vi.fn() } as never,
+          { originalUrl: '/api/sessions/sess-1/vfs/serve?path=' } as never,
+        ),
+      ).toThrow(BadRequestException);
+    });
   });
 
   describe('upload()', () => {

@@ -127,6 +127,12 @@ describe('LLMController', () => {
       );
     });
 
+    it('REGRESSION: rejects duplicate provider query params instead of crashing on toLowerCase()', async () => {
+      await expect(
+        controller.getModels(['openai', 'deepseek'] as unknown as string, 'sk-test-key', undefined),
+      ).rejects.toThrow(HttpException);
+    });
+
     it('throws BadRequest when apiKey missing for non-local provider', async () => {
       // openai requires apiKey
       await expect(controller.getModels('openai', undefined, undefined)).rejects.toThrow(

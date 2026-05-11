@@ -94,9 +94,57 @@ describe('ChatGateway', () => {
       personaId: 'default',
     });
 
-    gateway.handleChatStop(client as never, { sessionId: 'child-session' });
+    await gateway.handleChatStop(client as never, { sessionId: 'child-session' });
 
     expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('child-session');
+  });
+
+  it('REGRESSION: child-session stream events do not grant tool confirmation rights to the initiator', async () => {
+    (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
+      emit('chat:chunk', {
+        sessionId: 'child-session',
+        messageId: 'msg-child-1',
+        delta: 'child says hello',
+        done: false,
+      });
+    });
+
+    await gateway.handleChatSend(client as never, {
+      sessionId: 'session-1',
+      content: 'delegate this task',
+      personaId: 'default',
+    });
+
+    const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
+    handleToolConfirm(client as never, { requestId: 'req-child', sessionId: 'child-session' });
+
+    expect(toolDispatch.resolveConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: emitToInitiatorAndSessionSubscribers does not re-subscribe a disconnected socket', () => {
+    gateway.handleDisconnect(client as never);
+
+    const emitToInitiatorAndSessionSubscribers = (gateway as unknown as {
+      emitToInitiatorAndSessionSubscribers: <K extends keyof import('@kalio/types').SocketEvents>(
+        initiatorSocketId: string,
+        fallbackSessionId: string,
+        event: K,
+        data: import('@kalio/types').SocketEvents[K],
+      ) => void;
+    }).emitToInitiatorAndSessionSubscribers.bind(gateway);
+
+    emitToInitiatorAndSessionSubscribers('socket-1', 'session-1', 'chat:chunk', {
+      sessionId: 'child-session',
+      messageId: 'msg-child-1',
+      delta: 'child says hello',
+      done: false,
+    });
+
+    const socketSessions = (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions;
+    const sessionSubscribers = (gateway as unknown as { sessionSubscribers: Map<string, Set<string>> }).sessionSubscribers;
+
+    expect(socketSessions.has('socket-1')).toBe(false);
+    expect(sessionSubscribers.get('child-session')?.has('socket-1')).not.toBe(true);
   });
 
   it('REGRESSION: stopping a parent session also stops its child subagent sessions', async () => {

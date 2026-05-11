@@ -45,7 +45,9 @@ function resolveServePath(path: string | undefined, request?: Pick<Request, 'ori
     return '';
   }
 
-  const rawPath = originalUrl.slice(markerIndex + SERVE_PATH_MARKER.length);
+  const rawPath = originalUrl
+    .slice(markerIndex + SERVE_PATH_MARKER.length)
+    .split(/[?#]/, 1)[0];
   try {
     return decodeURIComponent(rawPath);
   } catch {

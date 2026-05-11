@@ -193,6 +193,68 @@ describe('HistoryToolCallBubble — tool input args display', () => {
 });
 
 describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
+  it('REGRESSION: ignores malformed copiedFiles payloads instead of treating them as subagent results', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="run_subagent"
+        content={JSON.stringify({
+          childSessionId: 'sub-1',
+          parentSessionId: 'p-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'sub-1',
+          copiedFiles: null,
+          result: 'Completed',
+          taskId: 't-1',
+          durationMs: 1000,
+        })}
+      />,
+    );
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /toggle details/i }));
+    });
+
+    expect(screen.getByText(/"copiedFiles": null/)).toBeInTheDocument();
+    expect(apiClient.get).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: aborts the child transcript request on unmount', async () => {
+    const abortSpy = vi.fn();
+    vi.mocked(apiClient.get).mockImplementationOnce((...args: unknown[]) => {
+      const config = args[1] as { signal?: AbortSignal } | undefined;
+      config?.signal?.addEventListener('abort', abortSpy);
+      return new Promise(() => undefined) as Promise<{ data: never[] }>;
+    });
+
+    let unmount!: () => void;
+    await act(async () => {
+      ({ unmount } = render(
+        <HistoryToolCallBubble
+          toolName="run_subagent"
+          content={JSON.stringify({
+            childSessionId: 'sub-1',
+            parentSessionId: 'p-1',
+            vfsMode: 'isolated',
+            vfsSessionId: 'sub-1',
+            copiedFiles: [],
+            result: 'Completed',
+            taskId: 't-1',
+            durationMs: 1000,
+          })}
+        />,
+      ));
+    });
+
+    const requestConfig = vi.mocked(apiClient.get).mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined;
+    expect(requestConfig?.signal).toBeDefined();
+
+    await act(async () => {
+      unmount();
+    });
+
+    expect(abortSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('loads child session messages and renders latest raapp_create result', async () => {
     vi.mocked(apiClient.get).mockResolvedValueOnce({
       data: [

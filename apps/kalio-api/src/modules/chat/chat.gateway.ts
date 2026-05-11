@@ -41,12 +41,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   handleDisconnect(client: Socket): void {
     this.logger.log(`Client disconnected: ${client.id}`);
-    const sessions = this.socketSessions.get(client.id);
-    if (sessions) {
-      sessions.forEach((sid) => this.unsubscribeSocketFromSession(client.id, sid));
-      this.socketSessions.delete(client.id);
-    }
     this.clients.delete(client.id);
+    this.socketSessions.delete(client.id);
+    Array.from(this.sessionSubscribers.keys()).forEach((sessionId) => {
+      this.unsubscribeSocketFromSession(client.id, sessionId);
+    });
   }
 
   @SubscribeMessage('session:identify')
@@ -79,7 +78,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: SocketEvents['chat:stop'],
   ): Promise<void> {
     const socketSessions = this.socketSessions.get(client.id);
-    if (!socketSessions?.has(payload.sessionId)) {
+    const isSubscribedToSession = this.sessionSubscribers.get(payload.sessionId)?.has(client.id) ?? false;
+    if (!socketSessions?.has(payload.sessionId) && !isSubscribedToSession) {
       this.logger.warn(`chat:stop rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
@@ -196,13 +196,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  private subscribeSocketToSession(socketId: string, sessionId: string): void {
-    let sessions = this.socketSessions.get(socketId);
-    if (!sessions) {
-      sessions = new Set();
-      this.socketSessions.set(socketId, sessions);
+  private subscribeSocketToSession(socketId: string, sessionId: string, options?: { ownSession?: boolean }): void {
+    if (!this.clients.has(socketId)) {
+      return;
     }
-    sessions.add(sessionId);
+
+    if (options?.ownSession !== false) {
+      let sessions = this.socketSessions.get(socketId);
+      if (!sessions) {
+        sessions = new Set();
+        this.socketSessions.set(socketId, sessions);
+      }
+      sessions.add(sessionId);
+    }
 
     const subscribers = this.sessionSubscribers.get(sessionId) ?? new Set<string>();
     subscribers.add(socketId);
@@ -227,7 +233,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     data: SocketEvents[K],
   ): void {
     const targetSessionId = this.getEventSessionId(data) ?? fallbackSessionId;
-    this.subscribeSocketToSession(initiatorSocketId, targetSessionId);
+    this.subscribeSocketToSession(initiatorSocketId, targetSessionId, { ownSession: false });
 
     const initiator = this.clients.get(initiatorSocketId);
     initiator?.emit(event, data);

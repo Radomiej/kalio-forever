@@ -431,6 +431,39 @@ describe('ChatInterface event wiring', () => {
     },
   );
 
+  it('REGRESSION: refreshes the VFS file bar after a successful shared-mode subagent result', async () => {
+    await renderChatInterface();
+
+    expect(mockConversationFilesBar).toHaveBeenCalled();
+    expect(mockConversationFilesBar.mock.lastCall?.[0]).toMatchObject({
+      sessionId: 'session-1',
+      refreshSignal: 0,
+    });
+
+    agentStoreState.toolActivities = [{ callId: 'call-subagent-shared', toolName: 'run_subagent' }];
+
+    await emitEvent('tool:result', {
+      callId: 'call-subagent-shared',
+      status: 'success',
+      sessionId: 'session-1',
+      data: {
+        childSessionId: 'child-session',
+        parentSessionId: 'session-1',
+        vfsMode: 'shared',
+        vfsSessionId: 'session-1',
+        copiedFiles: [],
+        result: 'Created shared files',
+        taskId: 'task-1',
+        durationMs: 1234,
+      },
+    });
+
+    expect(mockConversationFilesBar.mock.lastCall?.[0]).toMatchObject({
+      sessionId: 'session-1',
+      refreshSignal: 1,
+    });
+  });
+
   it('session:created adds subagent session to the store', async () => {
     await renderChatInterface();
 
