@@ -198,3 +198,75 @@
    - Confirmed agent saw `input_schema` for `a`, `b`, `operation`
    - Confirmed `run_raapp` executed with sample inputs `{ a: 15, b: 7, operation: 'add' }`
    - Confirmed rendered GUI showed `15 + 7 = 22`
+
+## 2026-05-11 10:55 LLM settings/runtime fixes and provider helper unification
+
+### What was done
+
+- Restored the missing `LLMService.getActiveModels()` and `LLMService.updateActiveModel()` contract so `LLMController` and `llm.service.spec.ts` are back in sync with the implementation.
+- Fixed `LLMController.updateActiveModel()` to reject non-string payloads before calling `.trim()`, preventing runtime `TypeError` crashes on malformed bodies.
+- Reworked env fallback handling in `LLMService` so env model overrides are respected by `getConfig()`, `getActiveModels()`, and `streamChat()`; the env provider is now cached by effective config and rebuilt when the override changes.
+- Extracted shared backend provider URL/header logic into `src/common/utils/llm-provider-http.util.ts` and reused it from `LLMController`, `CredentialsService`, `BaseOpenAICompatibleProvider`, and `XiaomiMiMoProvider`.
+- Fixed `ModelSettingsSection` so stale save errors are cleared before retrying a model save.
+- Aligned frontend settings store typing with the actual `/api/llm/config` payload by including `source`, and fixed the local `App.tsx` fetch typing fallout.
+- Fixed the indentation regression in the `LLMPanel` context-window block.
+
+### Files touched
+
+- `apps/kalio-api/src/common/utils/llm-provider-http.util.ts`
+- `apps/kalio-api/src/common/utils/llm-provider-http.util.spec.ts`
+- `apps/kalio-api/src/modules/credentials/credentials.service.ts`
+- `apps/kalio-api/src/modules/llm/llm.controller.ts`
+- `apps/kalio-api/src/modules/llm/llm.controller.spec.ts`
+- `apps/kalio-api/src/modules/llm/llm.service.ts`
+- `apps/kalio-api/src/modules/llm/llm.service.spec.ts`
+- `apps/kalio-api/src/modules/llm/providers/base-openai-compatible.provider.ts`
+- `apps/kalio-api/src/modules/llm/providers/xiaomimimo.provider.ts`
+- `apps/kalio-web/src/features/settings/ModelSettingsSection.tsx`
+- `apps/kalio-web/src/features/settings/ModelSettingsSection.test.tsx`
+- `apps/kalio-web/src/features/settings/settingsStore.ts`
+- `apps/kalio-web/src/features/settings/LLMPanel.tsx`
+- `apps/kalio-web/src/App.tsx`
+
+### Validation
+
+- `Push-Location apps/kalio-api; node_modules\.bin\vitest.cmd run src/modules/llm/llm.controller.spec.ts src/modules/llm/llm.service.spec.ts src/common/utils/llm-provider-http.util.spec.ts; Pop-Location` ✅
+- `Push-Location apps/kalio-api; node_modules\.bin\tsc.cmd --noEmit; Pop-Location` ✅
+- `Push-Location apps/kalio-web; node_modules\.bin\vitest.cmd run src/features/settings/ModelSettingsSection.test.tsx; Pop-Location` ✅
+- `Push-Location apps/kalio-web; node_modules\.bin\tsc.cmd --noEmit; Pop-Location` ✅
+- VS Code diagnostics on all touched files ✅
+
+### Notes
+
+- The biggest real regression in this slice was not the original review note but the missing `LLMService` methods, which had already broken backend `tsc`.
+- I fixed the runtime bug with a minimal type guard rather than introducing a DTO/class-validator migration in this change.
+
+## 2026-05-11 11:20 full-suite cleanup + settings smoke verification
+
+### What was done
+
+- Ran the full monorepo `pnpm turbo run test` after the LLM/settings fixes and followed up on the remaining backend failures instead of stopping at the narrow green slice.
+- Restored the `ChatService` overlapping-turn abort-controller cleanup so an older turn only removes its own controller entry.
+- Restored `reader.releaseLock()` cleanup in both streaming providers after abort, bringing the reader-lock regressions back in line with the existing specs.
+- Preserved credential-specific error logging in `CredentialsService.getModelsForCredential()` while keeping the new shared provider helper.
+- Stabilized the live Playwright settings smoke in `apps/e2e/tests/llm-panel.spec.ts` by waiting for the provider list to finish loading before asserting row counts or seeded credentials.
+
+### Files touched
+
+- `apps/kalio-api/src/modules/chat/chat.service.ts`
+- `apps/kalio-api/src/modules/llm/providers/base-openai-compatible.provider.ts`
+- `apps/kalio-api/src/modules/llm/providers/openai-compatible.provider.ts`
+- `apps/kalio-api/src/modules/credentials/credentials.service.ts`
+- `apps/e2e/tests/llm-panel.spec.ts`
+
+### Validation
+
+- `Push-Location apps/kalio-api; node_modules\.bin\vitest.cmd run src/modules/chat/__tests__/chat.service.spec.ts src/modules/llm/providers/base-openai-compatible.provider.spec.ts src/modules/llm/providers/openai-compatible.provider.spec.ts; Pop-Location` ✅
+- `Push-Location apps/e2e; pnpm exec playwright test tests/llm-panel.spec.ts --project=chromium; Pop-Location` ✅ (`8 passed`)
+- `Push-Location apps/kalio-api; node_modules\.bin\vitest.cmd run src/modules/credentials/credentials.service.spec.ts; Pop-Location` ✅
+- `pnpm turbo run test` ✅ (`5/5` tasks successful)
+
+### Notes
+
+- The failing Playwright settings smoke was a load-state race in the test, not a confirmed product regression in the settings UI.
+- After these fixes, both the broad repo test sweep and the focused live settings smoke are green.

@@ -125,6 +125,68 @@ describe('ModelSettingsSection', () => {
     });
   });
 
+  it('clears a stale model-save error before a successful retry (REGRESSION)', async () => {
+    const onRuntimeConfigChange = vi.fn();
+    let saveAttempts = 0;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, opts?: RequestInit) => {
+        const method = opts?.method?.toUpperCase() ?? 'GET';
+
+        if (url === '/api/credentials/settings/generation' && method === 'GET') {
+          return Promise.resolve(new Response(JSON.stringify({ temperature: 0.7, maxTokens: 4096 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+
+        if (url === '/api/llm/active/models' && method === 'GET') {
+          return Promise.resolve(new Response(JSON.stringify({ models: ['gpt-4o-mini', 'gpt-4o-next'] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+
+        if (url === '/api/llm/active/model' && method === 'PUT') {
+          saveAttempts += 1;
+          if (saveAttempts === 1) {
+            return Promise.resolve(new Response('first failure', { status: 500 }));
+          }
+
+          return Promise.resolve(new Response(JSON.stringify({
+            provider: 'openai',
+            model: 'gpt-4o-next',
+            baseUrl: '',
+            source: 'db',
+            contextWindowSize: 32000,
+            maxToolAttempts: 8,
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<ModelSettingsSection activeRuntimeConfig={ACTIVE_RUNTIME_CONFIG} onRuntimeConfigChange={onRuntimeConfigChange} />);
+
+    const input = await screen.findByTestId('model-selector');
+    await user.clear(input);
+    await user.type(input, 'gpt-4o-next');
+
+    await user.click(screen.getByTestId('model-save'));
+    await waitFor(() => expect(screen.getByText('500: first failure')).toBeInTheDocument());
+
+    await user.click(screen.getByTestId('model-save'));
+
+    await waitFor(() => expect(onRuntimeConfigChange).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-4o-next' })));
+    await waitFor(() => expect(screen.queryByText('500: first failure')).not.toBeInTheDocument());
+  });
+
   it.each([
     { label: 'temperature is a string', response: { temperature: 'hot', maxTokens: 4096 } },
     { label: 'temperature is null', response: { temperature: null, maxTokens: 4096 } },

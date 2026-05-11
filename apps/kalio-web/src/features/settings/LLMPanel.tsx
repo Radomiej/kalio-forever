@@ -421,30 +421,30 @@ export function LLMPanel() {
         />
 
         <div className="border-t border-base-300 pt-4">
-        <h3 className="text-sm font-semibold mb-1">Context Window</h3>
-        <p className="text-xs text-base-content/60 mb-3">
-          Oldest messages are trimmed automatically when history exceeds this limit.
-          Stored in the backend.
-        </p>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-base-content/60">Max tokens</span>
-          <span className="badge badge-neutral font-mono text-xs" data-testid="context-window-value">
-            {(contextWindow / 1000).toFixed(0)}k
-          </span>
-        </div>
-        <input
-          type="range"
-          className="range range-sm range-primary w-full"
-          min={4000}
-          max={200000}
-          step={4000}
-          value={contextWindow}
-          onChange={(e) => void handleContextWindowChange(parseInt(e.target.value, 10))}
-          data-testid="context-window-slider"
-        />
-        <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
-          <span>4k</span><span>32k</span><span>128k</span><span>200k</span>
-        </div>
+          <h3 className="text-sm font-semibold mb-1">Context Window</h3>
+          <p className="text-xs text-base-content/60 mb-3">
+            Oldest messages are trimmed automatically when history exceeds this limit.
+            Stored in the backend.
+          </p>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-base-content/60">Max tokens</span>
+            <span className="badge badge-neutral font-mono text-xs" data-testid="context-window-value">
+              {(contextWindow / 1000).toFixed(0)}k
+            </span>
+          </div>
+          <input
+            type="range"
+            className="range range-sm range-primary w-full"
+            min={4000}
+            max={200000}
+            step={4000}
+            value={contextWindow}
+            onChange={(e) => void handleContextWindowChange(parseInt(e.target.value, 10))}
+            data-testid="context-window-slider"
+          />
+          <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
+            <span>4k</span><span>32k</span><span>128k</span><span>200k</span>
+          </div>
         </div>
 
         <div className="border-t border-base-300 pt-4">

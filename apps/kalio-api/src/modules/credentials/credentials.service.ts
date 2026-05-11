@@ -9,20 +9,14 @@ import { eq } from 'drizzle-orm';
 import type { ProviderConfig } from '../llm/llm.types';
 import { TimeoutSettingsService } from './timeout-settings.service';
 import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
+import {
+  buildProviderCompatHeaders,
+  resolveLlmProviderBaseUrl,
+} from '../../common/utils/llm-provider-http.util';
 
 const CREDENTIALS_CIPHER_PREFIX = 'kalio-enc-v1';
 const CREDENTIALS_MASTER_KEY_ENV = 'CREDENTIALS_MASTER_KEY';
 const DEV_FALLBACK_CREDENTIALS_MASTER_KEY = 'kalio-dev-credentials-master-key-not-for-production';
-
-const PROVIDER_BASE_URLS: Record<string, string> = {
-  openai: 'https://api.openai.com/v1',
-  xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
-  deepseek: 'https://api.deepseek.com/v1',
-  cometapi: 'https://api.cometapi.com/v1',
-  openrouter: 'https://openrouter.ai/api/v1',
-  ollama: 'http://localhost:11434/v1',
-  bitnet: 'http://localhost:8080/v1',
-};
 
 @Injectable()
 export class CredentialsService {
@@ -234,12 +228,12 @@ export class CredentialsService {
       apiKey: apiKey ?? '',
       model: row.model ?? '',
       baseUrl: row.baseUrl ?? undefined,
-    });
+    }, `credential ${id}`);
   }
 
-  async getModelsForProviderConfig(config: ProviderConfig): Promise<string[]> {
+  async getModelsForProviderConfig(config: ProviderConfig, sourceLabel?: string): Promise<string[]> {
     const isLocal = isLocalLlmProvider(config.provider, config.baseUrl ?? undefined);
-    const resolvedBase = (config.baseUrl ?? PROVIDER_BASE_URLS[config.provider] ?? '').replace(/\/$/, '');
+    const resolvedBase = resolveLlmProviderBaseUrl(config.provider, config.baseUrl ?? undefined);
     if (!resolvedBase) {
       return [];
     }
@@ -250,12 +244,7 @@ export class CredentialsService {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const authHeaders: Record<string, string> = config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {};
-      if (config.provider === 'xiaomimimo') {
-        authHeaders['HTTP-Referer'] = 'https://github.com/RooVetGit/Roo-Cline';
-        authHeaders['X-Title'] = 'Roo Code';
-        authHeaders['User-Agent'] = 'RooCode/3.17.0';
-      }
+      const authHeaders = buildProviderCompatHeaders(config.provider, config.apiKey || undefined);
       const res = await fetch(endpoint, { headers: authHeaders, signal: controller.signal });
       if (!res.ok) return [];
       const json = await res.json() as { data?: { id: string }[]; models?: { id: string }[] };
@@ -263,7 +252,7 @@ export class CredentialsService {
       return items.map((m) => (typeof m === 'string' ? m : m.id)).filter(Boolean);
     } catch (err) {
       this.logger.error(
-        `Failed to fetch models for provider ${config.provider}`,
+        `Failed to fetch models for ${sourceLabel ?? `provider ${config.provider}`}`,
         err instanceof Error ? err : new Error(String(err)),
       );
       return [];

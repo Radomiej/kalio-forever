@@ -8,6 +8,7 @@ async function openLLMPanel(page: Page) {
   await expect(page.getByTestId('settings-modal')).toBeVisible();
   await page.getByTestId('settings-tab-llm').click();
   await expect(page.getByTestId('llm-panel')).toBeVisible();
+  await expect(page.getByTestId('add-provider-btn')).toBeVisible({ timeout: 10_000 });
 }
 
 // ── Helper: clean up a credential by id via API ───────────────────────────────
@@ -51,6 +52,7 @@ test.describe('LLMPanel E2E', () => {
     await page.getByTestId('add-provider-btn').click();
     await page.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.getByTestId('add-provider-form')).not.toBeVisible();
+    await expect(page.getByTestId('add-provider-btn')).toBeVisible();
     expect(await page.getByTestId(/^provider-row-/).count()).toBe(initialRows);
   });
 
@@ -100,7 +102,7 @@ test.describe('LLMPanel E2E', () => {
 
     await openLLMPanel(page);
     const row = page.getByTestId(`provider-row-${cred.id}`);
-    await expect(row).toBeVisible();
+    await expect(row).toBeVisible({ timeout: 10_000 });
 
     // Click the trash/delete button (last button in row)
     await row.locator('button').last().click();

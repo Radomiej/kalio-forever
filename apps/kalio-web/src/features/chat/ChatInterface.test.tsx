@@ -62,6 +62,7 @@ async function emitEvent(event: string, payload: unknown) {
 
 // Spies declared via vi.hoisted() so they're initialized before vi.mock factories run
 const mockSendMessage = vi.hoisted(() => vi.fn());
+const mockConversationFilesBar = vi.hoisted(() => vi.fn());
 
 // ── eventBus mock ─────────────────────────────────────────────────────────────
 vi.mock('../../services/eventBus', () => ({
@@ -256,7 +257,12 @@ vi.mock('./ToolActivityRow', () => ({ ToolActivityRow: () => null }));
 vi.mock('./ChatInput', () => ({ ChatInput: () => null }));
 vi.mock('./TokenBadge', () => ({ TokenBadge: () => null }));
 vi.mock('./ContextStats', () => ({ ContextStats: () => null }));
-vi.mock('../vfs/ConversationFilesBar', () => ({ ConversationFilesBar: () => null }));
+vi.mock('../vfs/ConversationFilesBar', () => ({
+  ConversationFilesBar: (props: { sessionId: string; refreshSignal: number }) => {
+    mockConversationFilesBar(props);
+    return null;
+  },
+}));
 vi.mock('./AgentTurnBubble', () => ({ AgentTurnBubble: () => null }));
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -272,6 +278,7 @@ beforeEach(() => {
   mockActiveSessionId = 'session-1';
   mockPendingMessage = null;
   agentStoreState.activeAgentLoops = {};
+  agentStoreState.toolActivities = [];
   vi.clearAllMocks();
 });
 
@@ -396,6 +403,33 @@ describe('ChatInterface event wiring', () => {
       toolCallId: 'call-sub',
     }));
   });
+
+  it.each(['image_generate', 'image_edit'])(
+    'refreshes the VFS file bar after successful %s results',
+    async (toolName) => {
+      await renderChatInterface();
+
+      expect(mockConversationFilesBar).toHaveBeenCalled();
+      expect(mockConversationFilesBar.mock.lastCall?.[0]).toMatchObject({
+        sessionId: 'session-1',
+        refreshSignal: 0,
+      });
+
+      agentStoreState.toolActivities = [{ callId: `call-${toolName}`, toolName }];
+
+      await emitEvent('tool:result', {
+        callId: `call-${toolName}`,
+        status: 'success',
+        data: { output_type: 'image', path: 'images/hero.png' },
+        sessionId: 'session-1',
+      });
+
+      expect(mockConversationFilesBar.mock.lastCall?.[0]).toMatchObject({
+        sessionId: 'session-1',
+        refreshSignal: 1,
+      });
+    },
+  );
 
   it('session:created adds subagent session to the store', async () => {
     await renderChatInterface();

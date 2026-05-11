@@ -18,6 +18,7 @@ import { MemoryPage } from './features/memory/MemoryPage';
 import { LandingPage } from './features/landing/LandingPage';
 import { BackendStatusBadge } from './components/ui/BackendStatusBadge';
 import { ObservabilityPage } from './features/observability/ObservabilityPage';
+import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
 import { useSessionStore } from './store/sessionStore';
 import { useAgentStore } from './store/agentStore';
 import { backendHealth } from './services/backendHealth';
@@ -115,7 +116,7 @@ export function App() {
     backendHealth.start();
     void fetch('/api/llm/config')
       .then((r) => r.json())
-      .then((cfg: { provider: string; model: string; baseUrl: string; contextWindowSize: number; maxToolAttempts: number }) => {
+      .then((cfg: LLMConfigWithSource) => {
         setBackendConfig(cfg);
       })
       .catch(() => {/* non-fatal */});

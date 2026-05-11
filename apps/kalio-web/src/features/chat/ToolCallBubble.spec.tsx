@@ -188,7 +188,7 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
 });
 
 describe('HistoryToolCallBubble — run_subagent', () => {
-  it('shows child session, VFS mode, copied count, and copied file path by default', () => {
+  it('shows child session, VFS mode, and copied count while keeping copied file paths collapsed by default', () => {
     const content = JSON.stringify({
       result: 'created index.html',
       taskId: 'task-1',
@@ -208,6 +208,6 @@ describe('HistoryToolCallBubble — run_subagent', () => {
     expect(screen.getAllByText('isolated').length).toBeGreaterThan(0);
     expect(screen.getByText('copied')).toBeDefined();
     expect(screen.getByText('1')).toBeDefined();
-    expect(screen.getByText('sub-agents/sub-child-1/index.html')).toBeDefined();
+    expect(screen.queryByText('sub-agents/sub-child-1/index.html')).toBeNull();
   });
 });

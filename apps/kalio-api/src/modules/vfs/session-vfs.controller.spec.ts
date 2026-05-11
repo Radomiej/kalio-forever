@@ -161,6 +161,22 @@ describe('SessionVfsController', () => {
       expect(result).toBeInstanceOf(StreamableFile);
       expect(mockVfs.serveFile).toHaveBeenCalledWith('sess-1', 'design/preview.html');
     });
+
+    it('falls back to the original URL when wildcard path binding is missing', () => {
+      mockVfs.serveFile.mockReturnValue({
+        content: Buffer.from('<!doctype html><html></html>'),
+        mimeType: 'text/html; charset=utf-8',
+      });
+      const res = { set: vi.fn() };
+      const req = {
+        originalUrl: '/api/sessions/sess-1/vfs/serve-path/design/my%20preview.html',
+      };
+
+      const result = controller.servePath('sess-1', '' as never, res as never, req as never);
+
+      expect(result).toBeInstanceOf(StreamableFile);
+      expect(mockVfs.serveFile).toHaveBeenCalledWith('sess-1', 'design/my preview.html');
+    });
   });
 
   describe('upload()', () => {

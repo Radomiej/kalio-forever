@@ -87,35 +87,63 @@ function extractSubagentResult(data: unknown): SubagentToolResult | null {
   return d as unknown as SubagentToolResult;
 }
 
-function extractLatestRAAppFromMessages(messages: ChatMessage[]): RAAppBlock | null {
-  for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
-    const msg = messages[idx];
+function extractChildToolPreviews(messages: ChatMessage[]): { raapp: RAAppBlock | null; images: ImageResultData[] } {
+  let raapp: RAAppBlock | null = null;
+  const images: ImageResultData[] = [];
+  const seenImages = new Set<string>();
+
+  for (const msg of messages) {
     if (!msg || msg.role !== 'tool_result') continue;
     try {
       const parsed = JSON.parse(msg.content);
-      const raapp = extractRAAppBlock(parsed);
-      if (raapp) return raapp;
+      const nextRaapp = extractRAAppBlock(parsed);
+      if (nextRaapp) {
+        raapp = nextRaapp;
+      }
+
+      const image = extractImageResult(parsed);
+      if (!image) {
+        continue;
+      }
+
+      const imageKey = `${image.path ?? ''}|${image.image_url}`;
+      if (seenImages.has(imageKey)) {
+        continue;
+      }
+
+      seenImages.add(imageKey);
+      images.push(image);
     } catch {
       // ignore invalid JSON payloads in history lookup
     }
   }
-  return null;
+
+  return { raapp, images };
 }
 
 function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
   const [childRaapp, setChildRaapp] = useState<RAAppBlock | null>(null);
+  const [childImages, setChildImages] = useState<ImageResultData[]>([]);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const hasVerboseResult = result.result.trim().length > 0;
+  const hasCopiedFiles = result.copiedFiles.length > 0;
+  const hasDetails = hasVerboseResult || hasCopiedFiles;
 
   useEffect(() => {
     let cancelled = false;
     setChildRaapp(null);
+    setChildImages([]);
+    setDetailsOpen(false);
 
     void apiClient.get<ChatMessage[]>(`/api/sessions/${result.childSessionId}/messages`)
       .then((response) => {
         if (cancelled) return;
-        setChildRaapp(extractLatestRAAppFromMessages(response.data));
+        const previews = extractChildToolPreviews(response.data);
+        setChildRaapp(previews.raapp);
+        setChildImages(previews.images);
       })
       .catch((err: unknown) => {
-        console.error('[ToolCallBubble] failed to load subagent messages for RAApp preview', err instanceof Error ? err : new Error(String(err)));
+        console.error('[ToolCallBubble] failed to load subagent messages for child previews', err instanceof Error ? err : new Error(String(err)));
       });
 
     return () => {
@@ -125,6 +153,17 @@ function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
 
   return (
     <div className="space-y-2">
+      {childRaapp && <RAAppRenderer block={childRaapp} sessionId={result.childSessionId} />}
+      {childImages.length > 0 && (
+        <div className="space-y-3">
+          {childImages.map((image) => (
+            <ImageResultRenderer
+              key={`${image.path ?? image.image_url}`}
+              data={image}
+            />
+          ))}
+        </div>
+      )}
       <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] font-mono text-base-content/60 bg-base-200/60 rounded px-2 py-1.5">
         <span className="text-base-content/35">session</span>
         <span className="truncate">{result.childSessionId}</span>
@@ -132,20 +171,32 @@ function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
         <span>{result.vfsMode}</span>
         <span className="text-base-content/35">copied</span>
         <span>{result.copiedFiles.length}</span>
+        {hasDetails && (
+          <>
+            <span className="text-base-content/35">details</span>
+            <button
+              type="button"
+              className="justify-self-start text-sky-400/70 hover:text-sky-400 transition-colors"
+              onClick={() => setDetailsOpen((value) => !value)}
+              aria-label="Toggle sub-agent details"
+            >
+              {detailsOpen ? 'hide' : 'show'}
+            </button>
+          </>
+        )}
       </div>
-      {result.result && (
-        <div className="text-xs text-base-content/60 bg-base-200/40 rounded px-2 py-1.5 whitespace-pre-wrap">
+      {detailsOpen && hasVerboseResult && (
+        <div className="text-xs text-base-content/60 bg-base-200/40 rounded px-2 py-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap">
           {result.result}
         </div>
       )}
-      {result.copiedFiles.length > 0 && (
+      {detailsOpen && hasCopiedFiles && (
         <div className="font-mono text-[11px] text-base-content/50 bg-base-200/40 rounded px-2 py-1.5 max-h-32 overflow-y-auto">
           {result.copiedFiles.map((file) => (
             <div key={file.toPath} className="truncate">{file.toPath}</div>
           ))}
         </div>
       )}
-      {childRaapp && <RAAppRenderer block={childRaapp} sessionId={result.childSessionId} />}
     </div>
   );
 }

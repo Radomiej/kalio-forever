@@ -7,6 +7,7 @@ import {
   Param,
   Post,
   Query,
+  Req,
   Res,
   StreamableFile,
   UnsupportedMediaTypeException,
@@ -15,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { nanoid } from 'nanoid';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import type { ChatAttachment, VFSListResult, VFSReadResult } from '@kalio/types';
 import { VFSService } from './vfs.service';
 
@@ -27,6 +28,30 @@ const ALLOWED_UPLOAD_MIMES: Record<string, string> = {
 };
 
 const UPLOAD_MAX_BYTES = 10 << 20; // 10 MB request body
+const SERVE_PATH_MARKER = '/vfs/serve-path/';
+
+function resolveServePath(path: string | undefined, request?: Pick<Request, 'originalUrl'>): string {
+  if (typeof path === 'string' && path.length > 0) {
+    return path;
+  }
+
+  const originalUrl = request?.originalUrl;
+  if (!originalUrl) {
+    return '';
+  }
+
+  const markerIndex = originalUrl.indexOf(SERVE_PATH_MARKER);
+  if (markerIndex < 0) {
+    return '';
+  }
+
+  const rawPath = originalUrl.slice(markerIndex + SERVE_PATH_MARKER.length);
+  try {
+    return decodeURIComponent(rawPath);
+  } catch {
+    return rawPath;
+  }
+}
 
 /**
  * REST endpoints for per-session virtual filesystem access.
@@ -125,9 +150,15 @@ export class SessionVfsController {
     @Param('id') sessionId: string,
     @Param('path') path: string,
     @Res({ passthrough: true }) res: Response,
+    @Req() req?: Pick<Request, 'originalUrl'>,
   ): StreamableFile {
     try {
-      return this.streamServedFile(sessionId, path, res);
+      const resolvedPath = resolveServePath(path, req);
+      if (!resolvedPath) {
+        throw new BadRequestException('path is required');
+      }
+
+      return this.streamServedFile(sessionId, resolvedPath, res);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'PATH_TRAVERSAL_DENIED') {
         throw new BadRequestException((err as Error).message);

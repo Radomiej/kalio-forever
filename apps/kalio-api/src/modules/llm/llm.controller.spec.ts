@@ -111,6 +111,13 @@ describe('LLMController', () => {
     it('rejects a blank model payload', async () => {
       await expect(controller.updateActiveModel({ model: '   ' })).rejects.toThrow(HttpException);
     });
+
+    it('rejects a non-string model payload instead of crashing on trim()', async () => {
+      await expect(
+        controller.updateActiveModel({ model: 123 as unknown as string }),
+      ).rejects.toThrow(HttpException);
+      expect(mockLLMService.updateActiveModel).not.toHaveBeenCalled();
+    });
   });
 
   describe('getModels() — validation', () => {

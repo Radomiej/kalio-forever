@@ -103,6 +103,7 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
   const handleModelSave = async () => {
     if (!activeRuntimeConfig || !selectedModel) return;
     setModelSaving(true);
+    setModelsError(null);
     try {
       const updated = await apiFetch<LLMConfigWithSource>('/llm/active/model', {
         method: 'PUT',

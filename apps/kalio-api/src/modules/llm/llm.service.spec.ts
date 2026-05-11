@@ -205,6 +205,37 @@ describe('LLMService - DB credential overrides env', () => {
       );
       expect(Array.isArray(result)).toBe(true);
     });
+
+    it('refreshes the env provider when the env model override changes', async () => {
+      credentialsService.getActiveProviderConfig.mockResolvedValue(null);
+      credentialsService.getEnvModelOverride.mockResolvedValue('env-override-model');
+
+      const originalFetch = globalThis.fetch;
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response('data: [DONE]\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      );
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      try {
+        await service.streamChat(
+          [{ role: 'user', content: 'hello' }],
+          [],
+          () => {},
+          'session-1',
+          'msg-1',
+        );
+
+        const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+        const body = JSON.parse(String(requestInit?.body)) as { model: string };
+
+        expect(body.model).toBe('env-override-model');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
   });
 
   describe('getActiveModels()', () => {

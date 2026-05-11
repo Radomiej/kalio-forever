@@ -19,7 +19,7 @@ export function VfsHtmlRenderer({ sessionId, vfsPath, title = 'App', minHeight =
     const controller = new AbortController();
     setStatus('checking');
 
-    fetch(src, { signal: controller.signal, credentials: 'include' })
+    fetch(src, { signal: controller.signal })
       .then((response) => {
         if (controller.signal.aborted) {
           return;

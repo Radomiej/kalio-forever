@@ -4,27 +4,16 @@ import { CredentialsService } from '../credentials/credentials.service';
 import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
 import type { LLMConfig } from '@kalio/types';
 import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
+import {
+  buildProviderCompatHeaders,
+  resolveLlmProviderBaseUrl,
+} from '../../common/utils/llm-provider-http.util';
 
 export interface LLMConfigResponse extends LLMConfig {
   contextWindowSize: number;
   maxToolAttempts: number;
   /** Whether the active LLM config comes from a DB credential or .env fallback */
   source: 'db' | 'env';
-}
-
-const PROVIDER_BASE_URLS: Record<string, string> = {
-  openai:     'https://api.openai.com/v1',
-  xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
-  deepseek:   'https://api.deepseek.com/v1',
-  cometapi:   'https://api.cometapi.com/v1',
-  openrouter: 'https://openrouter.ai/api/v1',
-  ollama:     'http://localhost:11434/v1',
-  bitnet:     'http://localhost:8080/v1',
-};
-
-function resolveBaseUrl(provider: string, baseUrl?: string): string {
-  if (baseUrl) return baseUrl.replace(/\/$/, '');
-  return PROVIDER_BASE_URLS[provider] ?? 'https://api.openai.com/v1';
 }
 
 @Controller('llm')
@@ -52,13 +41,15 @@ export class LLMController {
   }
 
   @Put('active/model')
-  async updateActiveModel(@Body() body: { model?: string }): Promise<LLMConfigResponse> {
-    if (!body.model || body.model.trim().length === 0) {
+  async updateActiveModel(@Body() body: { model?: unknown }): Promise<LLMConfigResponse> {
+    if (typeof body?.model !== 'string' || body.model.trim().length === 0) {
       throw new HttpException('Missing required body field: model', HttpStatus.BAD_REQUEST);
     }
 
+    const normalizedModel = body.model.trim();
+
     const [config, contextWindowSize, maxToolAttempts] = await Promise.all([
-      this.llm.updateActiveModel(body.model),
+      this.llm.updateActiveModel(normalizedModel),
       this.credentials.getContextWindowSize(),
       this.credentials.getMaxToolAttempts(),
     ]);
@@ -76,7 +67,7 @@ export class LLMController {
       throw new HttpException('Missing required query param: provider', HttpStatus.BAD_REQUEST);
     }
 
-    const resolvedBase = resolveBaseUrl(provider, baseUrl);
+    const resolvedBase = resolveLlmProviderBaseUrl(provider, baseUrl);
     const isLocal = isLocalLlmProvider(provider, resolvedBase);
     const allowsKeyless = isLocal;
 
@@ -93,14 +84,7 @@ export class LLMController {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const authHeaders: Record<string, string> =
-        !allowsKeyless && apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
-
-      if (provider === 'xiaomimimo') {
-        authHeaders['HTTP-Referer'] = 'https://github.com/RooVetGit/Roo-Cline';
-        authHeaders['X-Title'] = 'Roo Code';
-        authHeaders['User-Agent'] = 'RooCode/3.17.0';
-      }
+      const authHeaders = buildProviderCompatHeaders(provider, !allowsKeyless ? apiKey : undefined);
 
       const upstream = await fetch(endpoint, { headers: authHeaders, signal: controller.signal });
 

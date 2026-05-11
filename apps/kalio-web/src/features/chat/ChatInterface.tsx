@@ -19,6 +19,23 @@ import type { ChatMessage, Persona } from '@kalio/types';
 
 export { computeAnsweredCallIds } from './chatUtils';
 
+const VFS_REFRESH_TOOL_NAMES = new Set(['vfs_write', 'image_generate', 'image_edit']);
+
+function shouldRefreshVfsForToolResult(toolName: string | undefined, data: unknown): boolean {
+  if (!toolName) {
+    return false;
+  }
+  if (VFS_REFRESH_TOOL_NAMES.has(toolName)) {
+    return true;
+  }
+  if (toolName !== 'run_subagent' || !data || typeof data !== 'object') {
+    return false;
+  }
+
+  const copiedFiles = (data as Record<string, unknown>)['copiedFiles'];
+  return Array.isArray(copiedFiles) && copiedFiles.length > 0;
+}
+
 export function ChatInterface() {
   const {
     messages, activeSessionId, sessions, addMessage, addSession, appendChunk, finalizeChunk, setMessages,
@@ -253,10 +270,10 @@ export function ChatInterface() {
       });
       // Clear accumulated live output so the cliAgentOutput map doesn't grow unbounded
       clearCLIAgentOutput(result.callId);
-      // Refresh VFS file list after a successful vfs_write
+      // Refresh VFS file list after successful file-producing tool results.
       if (result.status === 'success') {
         const toolName = useAgentStore.getState().toolActivities.find((a) => a.callId === result.callId)?.toolName;
-        if (toolName === 'vfs_write' || toolName === 'run_subagent') setVfsRefreshSignal((n) => n + 1);
+        if (shouldRefreshVfsForToolResult(toolName, result.data)) setVfsRefreshSignal((n) => n + 1);
       }
       // Persist tool result into message store so RAAppManager (and chat history) can see it
       if (result.status === 'success' && result.data !== undefined) {

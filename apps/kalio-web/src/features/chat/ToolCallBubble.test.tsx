@@ -7,7 +7,7 @@
  * 3. LiveToolCallBubble auto-expands when RA-App result arrives after mount
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import { HistoryToolCallBubble, LiveToolCallBubble, extractRAAppBlock } from './ToolCallBubble';
 import type { ToolActivity } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
@@ -229,5 +229,107 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
     );
 
     expect(await screen.findByTestId('raapp-renderer')).toBeInTheDocument();
+  });
+
+  it('renders generated child images from the subagent transcript', async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({
+      data: [
+        {
+          id: 'tool-image-1',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-image-1',
+          content: JSON.stringify({
+            output_type: 'image',
+            image_url: 'data:image/png;base64,AAAA',
+            path: 'images/hero-coffee.png',
+            message: 'Generated hero image',
+          }),
+          createdAt: Date.now(),
+        },
+        {
+          id: 'tool-image-2',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-image-2',
+          content: JSON.stringify({
+            output_type: 'image',
+            image_url: 'data:image/png;base64,BBBB',
+            path: 'images/menu-collage.png',
+            message: 'Generated menu collage',
+          }),
+          createdAt: Date.now() + 1,
+        },
+      ],
+    } as never);
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_subagent"
+        content={JSON.stringify({
+          childSessionId: 'sub-1',
+          parentSessionId: 'p-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'sub-1',
+          copiedFiles: [],
+          result: 'Completed',
+          taskId: 't-1',
+          durationMs: 1000,
+        })}
+      />,
+    );
+
+    expect(await screen.findByAltText('Generated hero image')).toBeInTheDocument();
+    expect(screen.getByAltText('Generated menu collage')).toBeInTheDocument();
+    expect(screen.getByText('images/hero-coffee.png')).toBeInTheDocument();
+    expect(screen.getByText('images/menu-collage.png')).toBeInTheDocument();
+  });
+
+  it('keeps the child preview visible while collapsing verbose result details by default', async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({
+      data: [
+        {
+          id: 'tool-1',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-1',
+          content: JSON.stringify({
+            status: 'ready',
+            type: 'html',
+            mode: 'display',
+            content: '',
+            vfsPath: 'design/preview.html',
+          }),
+          createdAt: Date.now(),
+        },
+      ],
+    } as never);
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_subagent"
+        content={JSON.stringify({
+          childSessionId: 'sub-1',
+          parentSessionId: 'p-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'sub-1',
+          copiedFiles: [{ fromPath: 'design/preview.html', toPath: 'sub-agents/sub-1/design/preview.html', sizeBytes: 321 }],
+          result: 'Verbose implementation summary',
+          taskId: 't-1',
+          durationMs: 1000,
+        })}
+      />,
+    );
+
+    expect(await screen.findByTestId('raapp-renderer')).toBeInTheDocument();
+    expect(screen.queryByText('Verbose implementation summary')).not.toBeInTheDocument();
+    expect(screen.queryByText('sub-agents/sub-1/design/preview.html')).not.toBeInTheDocument();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /toggle sub-agent details/i }));
+    });
+
+    expect(screen.getByText('Verbose implementation summary')).toBeInTheDocument();
+    expect(screen.getByText('sub-agents/sub-1/design/preview.html')).toBeInTheDocument();
   });
 });
