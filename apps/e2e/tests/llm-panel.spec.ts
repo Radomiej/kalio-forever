@@ -16,6 +16,27 @@ async function deleteCredential(page: Page, id: string) {
   await page.request.delete(`${API_BASE}/credentials/${id}`);
 }
 
+async function getActiveCredentialId(page: Page): Promise<string | null> {
+  const response = await page.request.get(`${API_BASE}/credentials/active`);
+  const payload = await response.json() as { credentialId?: string | null };
+  return payload.credentialId ?? null;
+}
+
+async function restoreActiveCredential(page: Page, credentialId: string | null) {
+  if (credentialId) {
+    await page.request.put(`${API_BASE}/credentials/active/${credentialId}`);
+    return;
+  }
+
+  await page.request.delete(`${API_BASE}/credentials/active`);
+}
+
+async function getRuntimeModel(page: Page): Promise<string> {
+  const response = await page.request.get(`${API_BASE}/llm/config`);
+  const payload = await response.json() as { model?: string };
+  return payload.model ?? '';
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 test.describe('LLMPanel E2E', () => {
   test('LLM panel is visible when settings modal is opened', async ({ page }) => {
@@ -90,6 +111,43 @@ test.describe('LLMPanel E2E', () => {
       await row.locator('button').first().click();
       await expect(row.getByText('active')).toBeVisible({ timeout: 5000 });
     } finally {
+      await deleteCredential(page, cred.id);
+    }
+  });
+
+  test('can switch back to the env fallback after activating a saved credential', async ({ page }) => {
+    const previousActiveId = await getActiveCredentialId(page);
+    await page.request.delete(`${API_BASE}/credentials/active`);
+    const envModel = await getRuntimeModel(page);
+
+    const res = await page.request.post(`${API_BASE}/credentials`, {
+      data: {
+        name: 'E2E Env Fallback Test',
+        provider: 'ollama',
+        apiKey: 'local',
+        model: 'e2e-saved-model-switch-check',
+      },
+    });
+    const cred = await res.json() as { id: string };
+
+    try {
+      await openLLMPanel(page);
+      const row = page.getByTestId(`provider-row-${cred.id}`);
+      await expect(row).toBeVisible();
+
+      await row.locator('button').first().click();
+      await expect(row.getByText('active')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('model-selector')).toHaveValue('e2e-saved-model-switch-check');
+
+      const envFallbackRow = page.getByTestId('provider-row-env');
+      await expect(envFallbackRow).toBeVisible();
+      await page.getByTestId('provider-activate-env').click();
+
+      await expect(envFallbackRow).toContainText('active', { timeout: 5000 });
+      await expect(row).not.toContainText('active');
+      await expect(page.getByTestId('model-selector')).toHaveValue(envModel);
+    } finally {
+      await restoreActiveCredential(page, previousActiveId);
       await deleteCredential(page, cred.id);
     }
   });

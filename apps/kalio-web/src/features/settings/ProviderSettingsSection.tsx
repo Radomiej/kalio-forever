@@ -1,14 +1,102 @@
-import { AlertCircle, Loader2, Plus, Zap } from 'lucide-react';
+import { useState } from 'react';
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Circle, Loader2, Plus, Zap } from 'lucide-react';
 import type { Credential } from '@kalio/types';
 import type { AddForm, ProviderTestState } from './llm-panel.types';
 import { ProviderCard } from './ProviderCard';
 import { ALL_PROVIDER_TYPES, PROVIDER_LABELS } from './llm-provider-settings';
+
+interface EnvProviderCardProps {
+  isActive: boolean;
+  isSyncing: boolean;
+  providerId: string;
+  providerLabel?: string;
+  model?: string;
+  onActivate: () => void;
+}
+
+function EnvProviderCard({
+  isActive,
+  isSyncing,
+  providerId,
+  providerLabel,
+  model,
+  onActivate,
+}: EnvProviderCardProps) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <div
+      className={`border rounded-lg overflow-hidden transition-colors ${isActive ? 'border-sky-500/40 bg-sky-500/5' : 'border-base-300 bg-base-200/50'}`}
+      data-testid="provider-row-env"
+    >
+      <div
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-base-300/50"
+        onClick={() => setCollapsed((value) => !value)}
+      >
+        <button
+          className="text-base-content/40 hover:text-sky-400 transition-colors shrink-0"
+          onClick={(event) => {
+            event.stopPropagation();
+            onActivate();
+          }}
+          title={isActive ? 'Active provider' : 'Set as active'}
+          disabled={isSyncing}
+          data-testid="provider-activate-env"
+        >
+          {isSyncing ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : isActive ? (
+            <CheckCircle2 size={16} className="text-sky-400" />
+          ) : (
+            <Circle size={16} />
+          )}
+        </button>
+
+        <div className="flex-1 flex items-center gap-2 min-w-0">
+          <span className="badge badge-sm badge-outline font-mono shrink-0">{providerId}</span>
+          <span className="font-medium text-sm truncate">Environment fallback</span>
+          {model ? (
+            <span className="text-xs text-base-content/50 font-mono truncate hidden sm:block">{model}</span>
+          ) : null}
+          {isActive ? <span className="badge badge-xs badge-info shrink-0">active</span> : null}
+        </div>
+
+        {collapsed ? <ChevronDown size={16} className="shrink-0" /> : <ChevronUp size={16} className="shrink-0" />}
+      </div>
+
+      {!collapsed ? (
+        <div className="px-4 pb-4 space-y-3 border-t border-base-300">
+          <div className="mt-3 space-y-1">
+            <div className="text-xs text-base-content/50">
+              <span className="font-medium">Provider:</span>{' '}
+              <span className="font-mono">{providerLabel ?? 'Resolved from backend env configuration'}</span>
+            </div>
+            {model ? (
+              <div className="text-xs text-base-content/50">
+                <span className="font-medium">Default model:</span>{' '}
+                <span className="font-mono">{model}</span>
+              </div>
+            ) : null}
+            <div className="text-xs text-base-content/40 italic">
+              Runtime falls back to the backend environment when no saved credential is active.
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 interface ProviderSettingsSectionProps {
   credentials: Credential[];
   activeId: string | null;
   syncing: string | null;
   loading: boolean;
+  showEnvFallback: boolean;
+  envFallbackActive: boolean;
+  envFallbackProviderId: string;
+  envFallbackProviderLabel?: string;
+  envFallbackModel?: string;
   showForm: boolean;
   form: AddForm;
   allowsKeylessAuth: boolean;
@@ -18,6 +106,7 @@ interface ProviderSettingsSectionProps {
   emptyStateMessage: string;
   onActivate: (credentialId: string) => void;
   onRemove: (credentialId: string) => void;
+  onUseEnvFallback: () => void;
   onShowAdd: () => void;
   onCancelAdd: () => void;
   onSubmit: (event: React.FormEvent) => void;
@@ -34,6 +123,11 @@ export function ProviderSettingsSection({
   activeId,
   syncing,
   loading,
+  showEnvFallback,
+  envFallbackActive,
+  envFallbackProviderId,
+  envFallbackProviderLabel,
+  envFallbackModel,
   showForm,
   form,
   allowsKeylessAuth,
@@ -43,6 +137,7 @@ export function ProviderSettingsSection({
   emptyStateMessage,
   onActivate,
   onRemove,
+  onUseEnvFallback,
   onShowAdd,
   onCancelAdd,
   onSubmit,
@@ -68,6 +163,17 @@ export function ProviderSettingsSection({
         </div>
       ) : (
         <>
+          {showEnvFallback ? (
+            <EnvProviderCard
+              isActive={envFallbackActive}
+              isSyncing={syncing === '__env__'}
+              providerId={envFallbackProviderId}
+              providerLabel={envFallbackProviderLabel}
+              model={envFallbackModel}
+              onActivate={onUseEnvFallback}
+            />
+          ) : null}
+
           {credentials.length > 0 ? (
             <div className="flex flex-col gap-2">
               {credentials.map((credential) => (

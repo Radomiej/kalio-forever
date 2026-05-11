@@ -141,7 +141,7 @@ describe('SessionPanel', () => {
     await waitFor(() => expect(screen.getAllByText('2m ago').length).toBeGreaterThan(0));
   });
 
-  it('renders subagent sessions with a badge and master-agent interlocutor', async () => {
+  it('renders subagent sessions with a badge and interlocutor label', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
 

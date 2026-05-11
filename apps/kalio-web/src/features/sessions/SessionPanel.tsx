@@ -300,9 +300,9 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
                     </button>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {isSubagent && (
+                    {isSubagent && s.interlocutorLabel && (
                       <span className="text-[10px] text-sky-300/70 bg-base-300/40 rounded px-1 py-0.5 leading-none truncate max-w-[6rem]">
-                        {s.interlocutorLabel ?? 'Master agent'}
+                        {s.interlocutorLabel}
                       </span>
                     )}
                     {personaName && (

@@ -33,7 +33,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
   if (isUser) {
     const session = sessions.find((item) => item.id === message.sessionId);
-    const userLabel = session?.kind === 'subagent' ? (session.interlocutorLabel ?? 'Master agent') : null;
+    const userLabel = session?.kind === 'subagent' ? (session.interlocutorLabel ?? null) : null;
     return (
       <div data-testid="message-bubble" data-role="user" className="flex justify-end">
         <div className="flex flex-col items-end max-w-[75%]">

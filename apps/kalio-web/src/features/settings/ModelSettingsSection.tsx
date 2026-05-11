@@ -32,8 +32,10 @@ function sanitizeGenSettings(value: unknown): GenSettings {
 }
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
+  const method = opts?.method?.toUpperCase() ?? 'GET';
   const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    cache: method === 'GET' ? 'no-store' : undefined,
     ...opts,
   });
   if (!res.ok) {

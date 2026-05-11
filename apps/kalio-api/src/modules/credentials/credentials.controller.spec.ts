@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { INestApplication } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { CredentialsController } from './credentials.controller';
 import { CredentialsService } from './credentials.service';
@@ -19,6 +20,7 @@ function makeCredential(overrides: Partial<Credential> = {}): Credential {
 
 describe('CredentialsController', () => {
   let controller: CredentialsController;
+  let app: INestApplication | null = null;
   const mockService = {
     findAll: vi.fn(),
     create: vi.fn(),
@@ -59,6 +61,13 @@ describe('CredentialsController', () => {
       providerRemoteTimeoutMs: 15000,
     });
     mockTimeoutSettings.getProviderTimeoutMs.mockResolvedValue(15000);
+  });
+
+  afterEach(async () => {
+    if (app) {
+      await app.close();
+      app = null;
+    }
   });
 
   describe('findAll()', () => {
@@ -114,6 +123,34 @@ describe('CredentialsController', () => {
       mockService.clearActiveCredential.mockResolvedValue(undefined);
       await controller.clearActive();
       expect(mockService.clearActiveCredential).toHaveBeenCalled();
+    });
+
+    it('routes DELETE /credentials/active to clearActiveCredential instead of remove(id)', async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        controllers: [CredentialsController],
+        providers: [
+          { provide: CredentialsService, useValue: mockService },
+          { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
+        ],
+      }).compile();
+
+      app = module.createNestApplication();
+      await app.init();
+      await app.listen(0);
+
+      const address = app.getHttpServer().address();
+      const port = typeof address === 'string' ? Number.parseInt(address.split(':').at(-1) ?? '0', 10) : address.port;
+
+      mockService.clearActiveCredential.mockResolvedValue(undefined);
+      mockService.remove.mockResolvedValue(undefined);
+
+      const response = await fetch(`http://127.0.0.1:${port}/credentials/active`, {
+        method: 'DELETE',
+      });
+
+      expect(response.status).toBe(204);
+      expect(mockService.clearActiveCredential).toHaveBeenCalledTimes(1);
+      expect(mockService.remove).not.toHaveBeenCalled();
     });
   });
 

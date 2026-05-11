@@ -164,7 +164,7 @@ describe('LLMPanel', () => {
     );
 
     expect(screen.getByText('Active Provider')).toBeInTheDocument();
-    expect(screen.getByText(/xiaomi mimo/i)).toBeInTheDocument();
+    expect(screen.getByTestId('provider-row-env')).toHaveTextContent(/xiaomi mimo/i);
     expect(screen.queryByText(/activate a provider above to select its model/i)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('mimo-v2-omni'));
   });
@@ -401,6 +401,304 @@ describe('LLMPanel', () => {
     await waitFor(() => screen.getByTestId(`provider-activate-${CRED.id}`));
     await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
     await waitFor(() => expect(screen.getByText('active')).toBeInTheDocument());
+  });
+
+  it('switches the current model from env runtime to the saved provider model when activating a credential (REGRESSION)', async () => {
+    mockFetch({
+      ...defaultMap({
+        credentials: [CRED],
+        activeId: null,
+        llmProvider: 'xiaomimimo',
+        llmModel: 'env-gpt-4',
+        llmBaseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        llmSource: 'env',
+      }),
+      [`PUT /api/credentials/active/${CRED.id}`]: 204 as const,
+      'GET /api/llm/active/models': { models: ['env-gpt-4', CRED.model ?? ''] },
+    });
+
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+
+    await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
+
+    await waitFor(() => expect(screen.getByTestId(`provider-row-${CRED.id}`)).toHaveTextContent('active'));
+    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('gpt-4o-mini'));
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
+  });
+
+  it('bypasses browser cache when reading runtime config so provider switches reflect fresh backend state (REGRESSION)', async () => {
+    let activeCredentialId: string | null = null;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, opts?: RequestInit) => {
+        const method = opts?.method?.toUpperCase() ?? 'GET';
+        const envConfig = {
+          provider: 'xiaomimimo',
+          model: 'env-gpt-4',
+          baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+          contextWindowSize: 32000,
+          maxToolAttempts: 8,
+          source: 'env',
+        };
+        const dbConfig = {
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          baseUrl: 'https://api.openai.com/v1',
+          contextWindowSize: 32000,
+          maxToolAttempts: 8,
+          source: 'db',
+        };
+
+        if (method === 'GET' && url === '/api/credentials') {
+          return Promise.resolve(new Response(JSON.stringify([CRED]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/active') {
+          return Promise.resolve(new Response(JSON.stringify({ credentialId: activeCredentialId }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/context-window') {
+          return Promise.resolve(new Response(JSON.stringify({ size: 32000 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/generation') {
+          return Promise.resolve(new Response(JSON.stringify({ temperature: 0.7, maxTokens: 4096 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/tool-timeouts') {
+          return Promise.resolve(new Response(JSON.stringify({
+            webSearchTimeoutMs: 120000,
+            providerLocalTimeoutMs: 3000,
+            providerRemoteTimeoutMs: 15000,
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/llm/active/models') {
+          const models = activeCredentialId ? ['gpt-4o-mini'] : ['env-gpt-4', 'env-gpt-4-mini'];
+          return Promise.resolve(new Response(JSON.stringify({ models }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/llm/config') {
+          const freshConfig = activeCredentialId ? dbConfig : envConfig;
+          const cachedConfig = dbConfig;
+          const body = opts?.cache === 'no-store' ? freshConfig : cachedConfig;
+          return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'PUT' && url === `/api/credentials/active/${CRED.id}`) {
+          activeCredentialId = CRED.id;
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+
+        if (method === 'DELETE' && url === '/api/credentials/active') {
+          activeCredentialId = null;
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+
+    await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
+
+    await user.click(screen.getByTestId('provider-activate-env'));
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+  });
+
+  it('renders env fallback like a provider row and switches the current model when activated (REGRESSION)', async () => {
+    let activeCredentialId: string | null = CRED.id;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, opts?: RequestInit) => {
+        const method = opts?.method?.toUpperCase() ?? 'GET';
+
+        if (method === 'GET' && url === '/api/credentials') {
+          return Promise.resolve(new Response(JSON.stringify([CRED]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/active') {
+          return Promise.resolve(new Response(JSON.stringify({ credentialId: activeCredentialId }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/context-window') {
+          return Promise.resolve(new Response(JSON.stringify({ size: 32000 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/generation') {
+          return Promise.resolve(new Response(JSON.stringify({ temperature: 0.7, maxTokens: 4096 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/tool-timeouts') {
+          return Promise.resolve(new Response(JSON.stringify({
+            webSearchTimeoutMs: 120000,
+            providerLocalTimeoutMs: 3000,
+            providerRemoteTimeoutMs: 15000,
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/llm/active/models') {
+          const models = activeCredentialId ? ['gpt-4o-mini'] : ['env-gpt-4', 'env-gpt-4-mini'];
+          return Promise.resolve(new Response(JSON.stringify({ models }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/llm/config') {
+          const body = activeCredentialId
+            ? {
+                provider: 'openai',
+                model: 'gpt-4o-mini',
+                baseUrl: 'https://api.openai.com/v1',
+                contextWindowSize: 32000,
+                maxToolAttempts: 8,
+                source: 'db',
+              }
+            : {
+                provider: 'openai',
+                model: 'env-gpt-4',
+                baseUrl: 'https://api.openai.com/v1',
+                contextWindowSize: 32000,
+                maxToolAttempts: 8,
+                source: 'env',
+              };
+
+          return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'DELETE' && url === '/api/credentials/active') {
+          activeCredentialId = null;
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('provider-row-env')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('gpt-4o-mini'));
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
+
+    await user.click(screen.getByTestId('provider-activate-env'));
+
+    await waitFor(() => expect(screen.getByTestId('provider-row-env')).toHaveTextContent('active'));
+    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+    const fetchCalls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as Array<[string, RequestInit | undefined]>;
+    expect(fetchCalls.some(
+      ([url, opts]) =>
+        url === '/api/credentials/active' && (opts?.method?.toUpperCase() ?? 'GET') === 'DELETE',
+    )).toBe(true);
+  });
+
+  it('restores the last known env model immediately when switching back to env fallback even if the first refresh is stale (REGRESSION)', async () => {
+    let activeCredentialId: string | null = null;
+    let staleEnvRefreshPending = false;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, opts?: RequestInit) => {
+        const method = opts?.method?.toUpperCase() ?? 'GET';
+
+        if (method === 'GET' && url === '/api/credentials') {
+          return Promise.resolve(new Response(JSON.stringify([CRED]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/active') {
+          return Promise.resolve(new Response(JSON.stringify({ credentialId: activeCredentialId }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/context-window') {
+          return Promise.resolve(new Response(JSON.stringify({ size: 32000 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/generation') {
+          return Promise.resolve(new Response(JSON.stringify({ temperature: 0.7, maxTokens: 4096 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/credentials/settings/tool-timeouts') {
+          return Promise.resolve(new Response(JSON.stringify({
+            webSearchTimeoutMs: 120000,
+            providerLocalTimeoutMs: 3000,
+            providerRemoteTimeoutMs: 15000,
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/llm/active/models') {
+          const models = activeCredentialId ? ['gpt-4o-mini'] : ['env-gpt-4', 'env-gpt-4-mini'];
+          return Promise.resolve(new Response(JSON.stringify({ models }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'GET' && url === '/api/llm/config') {
+          const envConfig = {
+            provider: 'xiaomimimo',
+            model: 'env-gpt-4',
+            baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+            contextWindowSize: 32000,
+            maxToolAttempts: 8,
+            source: 'env',
+          };
+          const dbConfig = {
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            baseUrl: 'https://api.openai.com/v1',
+            contextWindowSize: 32000,
+            maxToolAttempts: 8,
+            source: 'db',
+          };
+
+          if (activeCredentialId) {
+            return Promise.resolve(new Response(JSON.stringify(dbConfig), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+          }
+
+          if (staleEnvRefreshPending) {
+            staleEnvRefreshPending = false;
+            return Promise.resolve(new Response(JSON.stringify(dbConfig), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+          }
+
+          return Promise.resolve(new Response(JSON.stringify(envConfig), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        if (method === 'PUT' && url === `/api/credentials/active/${CRED.id}`) {
+          activeCredentialId = CRED.id;
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+
+        if (method === 'DELETE' && url === '/api/credentials/active') {
+          activeCredentialId = null;
+          staleEnvRefreshPending = true;
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+
+    await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
+
+    await user.click(screen.getByTestId('provider-activate-env'));
+
+    await waitFor(() => expect(screen.getByTestId('provider-row-env')).toHaveTextContent('active'));
+    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
   });
 
   it('logs a non-fatal error when backend config refresh fails after activation', async () => {

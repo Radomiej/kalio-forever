@@ -56,8 +56,10 @@ async function readResponseErrorMessage(res: Response, context: string): Promise
 }
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
+  const method = opts?.method?.toUpperCase() ?? 'GET';
   const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    cache: method === 'GET' ? 'no-store' : undefined,
     ...opts,
   });
   if (!res.ok) {
@@ -122,6 +124,7 @@ export function LLMPanel() {
   const [maxToolAttempts, setMaxToolAttempts] = useState(8);
   const [toolTimeouts, setToolTimeouts] = useState<ToolTimeoutSettings>(DEFAULT_TOOL_TIMEOUT_SETTINGS);
   const [runtimeConfig, setRuntimeConfig] = useState<LLMConfigWithSource | null>(null);
+  const [lastEnvRuntimeConfig, setLastEnvRuntimeConfig] = useState<LLMConfigWithSource | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<AddForm>(emptyForm());
   const [loading, setLoading] = useState(true);
@@ -138,6 +141,14 @@ export function LLMPanel() {
   const normalizedBaseUrl = normalizeOptionalText(form.baseUrl);
   const normalizedModel = normalizeOptionalText(form.model);
   const allowsKeylessAuth = isLocalLlmProviderConfig(form.provider, normalizedBaseUrl);
+  const applyRuntimeConfig = useCallback((config: LLMConfigWithSource) => {
+    setRuntimeConfig(config);
+    setBackendConfig(config);
+    setMaxToolAttempts(config.maxToolAttempts ?? 8);
+    if (config.source === 'env') {
+      setLastEnvRuntimeConfig(config);
+    }
+  }, [setBackendConfig]);
   const activeCredential = useMemo(
     () => credentials.find((credential) => credential.id === activeId) ?? null,
     [activeId, credentials],
@@ -146,6 +157,12 @@ export function LLMPanel() {
     () => buildActiveRuntimeConfig(activeCredential, runtimeConfig),
     [activeCredential, runtimeConfig],
   );
+  const envRuntimeSnapshot = runtimeConfig?.source === 'env' ? runtimeConfig : lastEnvRuntimeConfig;
+  const envFallbackProviderId = envRuntimeSnapshot?.provider ?? 'env';
+  const envFallbackProviderLabel = envRuntimeSnapshot
+    ? (PROVIDER_LABELS[envRuntimeSnapshot.provider] ?? envRuntimeSnapshot.provider)
+    : undefined;
+  const envFallbackModel = envRuntimeSnapshot?.model;
   const providerEmptyStateMessage = runtimeConfig?.source === 'env'
     ? 'No credentials configured. Runtime currently uses the env fallback.'
     : 'No credentials configured. Add one below.';
@@ -156,19 +173,23 @@ export function LLMPanel() {
     setError(message);
   }, []);
 
-  const refreshBackendConfig = useCallback(async () => {
+  const refreshBackendConfig = useCallback(async (expectedSource?: 'db' | 'env') => {
     try {
       const cfg = await apiFetch<LLMConfigWithSource>('/llm/config');
-      setRuntimeConfig(cfg);
-      setBackendConfig(cfg);
-      setMaxToolAttempts(cfg.maxToolAttempts ?? 8);
+
+      if (expectedSource === 'env' && cfg.source !== 'env' && lastEnvRuntimeConfig) {
+        applyRuntimeConfig(lastEnvRuntimeConfig);
+        return;
+      }
+
+      applyRuntimeConfig(cfg);
     } catch (err) {
       console.error(
         '[LLMPanel] Failed to refresh backend config',
         err instanceof Error ? err : new Error(String(err)),
       );
     }
-  }, [setBackendConfig]);
+  }, [applyRuntimeConfig, lastEnvRuntimeConfig]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -186,16 +207,14 @@ export function LLMPanel() {
       persistedContextWindow.current = cw.size;
       setToolTimeouts(toolTimeouts);
       persistedToolTimeouts.current = toolTimeouts;
-      setRuntimeConfig(llmCfg);
-      setMaxToolAttempts(llmCfg.maxToolAttempts ?? 8);
+      applyRuntimeConfig(llmCfg);
       persistedMaxToolAttempts.current = llmCfg.maxToolAttempts ?? 8;
-      setBackendConfig(llmCfg);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
-  }, [setBackendConfig]);
+  }, [applyRuntimeConfig]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -257,9 +276,7 @@ export function LLMPanel() {
   };
 
   const handleRuntimeConfigChange = useCallback((updated: LLMConfigWithSource) => {
-    setRuntimeConfig(updated);
-    setBackendConfig(updated);
-    setMaxToolAttempts(updated.maxToolAttempts ?? 8);
+    applyRuntimeConfig(updated);
 
     if (activeId) {
       setCredentials((current) => current.map((credential) => (
@@ -272,7 +289,7 @@ export function LLMPanel() {
           : credential
       )));
     }
-  }, [activeId, setBackendConfig]);
+  }, [activeId, applyRuntimeConfig]);
 
   const handleCancelAdd = useCallback(() => {
     setShowForm(false);
@@ -292,6 +309,22 @@ export function LLMPanel() {
       setSyncing(null);
     }
   };
+
+  const handleUseEnvFallback = useCallback(async () => {
+    setSyncing('__env__');
+    try {
+      await apiFetch('/credentials/active', { method: 'DELETE' });
+      setActiveId(null);
+      if (lastEnvRuntimeConfig) {
+        applyRuntimeConfig(lastEnvRuntimeConfig);
+      }
+      await refreshBackendConfig('env');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to switch to env fallback');
+    } finally {
+      setSyncing(null);
+    }
+  }, [applyRuntimeConfig, lastEnvRuntimeConfig, refreshBackendConfig]);
 
   const handleRemove = async (credentialId: string) => {
     setSyncing(credentialId);
@@ -387,6 +420,11 @@ export function LLMPanel() {
         activeId={activeId}
         syncing={syncing}
         loading={loading}
+        showEnvFallback={runtimeConfig !== null}
+        envFallbackActive={!activeId && runtimeConfig?.source === 'env'}
+        envFallbackProviderId={envFallbackProviderId}
+        envFallbackProviderLabel={envFallbackProviderLabel}
+        envFallbackModel={envFallbackModel}
         showForm={showForm}
         form={form}
         allowsKeylessAuth={allowsKeylessAuth}
@@ -396,6 +434,7 @@ export function LLMPanel() {
         emptyStateMessage={providerEmptyStateMessage}
         onActivate={(credentialId) => void handleActivate(credentialId)}
         onRemove={(credentialId) => void handleRemove(credentialId)}
+        onUseEnvFallback={() => void handleUseEnvFallback()}
         onShowAdd={() => setShowForm(true)}
         onCancelAdd={handleCancelAdd}
         onSubmit={(event) => void handleAdd(event)}
