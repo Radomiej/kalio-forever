@@ -63,6 +63,14 @@ export class SessionsService {
     return this.repo.loadHistory(sessionId);
   }
 
+  async listChildren(parentSessionId: string): Promise<ChatSession[]> {
+    const rows = await this.drizzle.db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.parentSessionId, parentSessionId));
+    return rows.map(this.toChatSession);
+  }
+
   async delete(id: string): Promise<void> {
     await this.assertExists(id);
     await this.drizzle.db.delete(sessions).where(eq(sessions.id, id));

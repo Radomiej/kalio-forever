@@ -212,11 +212,24 @@ describe('PersonaService', () => {
       expect(config['builder']?.systemPrompt).toContain('design_preview');
       expect(config['builder']?.systemPrompt).toContain('write the HTML files into VFS first');
       expect(config['designer']?.systemPrompt).toContain('design_preview');
-      expect(config['designer']?.systemPrompt).toContain('Write prototype source files into VFS first');
+      expect(config['designer']?.systemPrompt).toContain('Write or update prototype source files in VFS with vfs_write');
       expect(config['orchestrator']?.systemPrompt).toContain('design_preview');
       expect(config['orchestrator']?.systemPrompt).toContain('prototype page');
       expect(config['dev']?.systemPrompt).toContain('design_preview');
       expect(config['jony']?.systemPrompt).toContain('design_preview');
+    });
+
+    it('teaches the designer to use the exact VFS tool names without a rigid dark multi-page template', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { systemPrompt: string }>;
+        }
+      ).loadPersonasConfig();
+
+      expect(config['designer']?.systemPrompt).toContain('Never mention or attempt file_write');
+      expect(config['designer']?.systemPrompt).toContain('Prefer a single focused page unless the brief clearly needs multiple screens or navigation');
+      expect(config['designer']?.systemPrompt).not.toContain('Dark theme by default');
+      expect(config['designer']?.systemPrompt).not.toContain('Every app MUST have at least 2 pages with working navigation');
     });
   });
 
@@ -343,6 +356,96 @@ describe('PersonaService', () => {
           allowedTools: expect.any(Array),
           skillIds: expect.any(Array),
         }),
+      );
+    });
+
+    it('refreshes the seeded designer prompt when the stored prompt still matches the rigid legacy template', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        designer: {
+          name: 'UX Designer',
+          systemPrompt: 'new designer prompt',
+          model: '',
+          allowedTools: ['vfs_read', 'vfs_write', 'vfs_list', 'design_preview'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'designer',
+            systemPrompt: [
+              'Build every app using this structure:',
+              'Dark theme by default',
+              'Every app MUST have at least 2 pages with working navigation',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({ systemPrompt: 'new designer prompt' }),
+      );
+    });
+
+    it('does NOT overwrite a customized designer prompt while refreshing other seeded fields', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        designer: {
+          name: 'UX Designer',
+          systemPrompt: 'new designer prompt',
+          model: '',
+          allowedTools: ['vfs_read', 'vfs_write', 'vfs_list', 'design_preview'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'designer',
+            systemPrompt: 'custom prompt from the user',
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.not.objectContaining({ systemPrompt: expect.any(String) }),
       );
     });
   });

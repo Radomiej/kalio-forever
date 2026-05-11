@@ -11,6 +11,7 @@ import type { Socket } from 'socket.io';
 import type { SocketEvents } from '@kalio/types';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionPipelineService } from './session-pipeline.service';
+import { SessionsService } from './sessions.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { RAAppHITLService } from '../raapp/raapp-hitl.service';
@@ -29,6 +30,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly toolDispatch: ToolDispatchService,
     private readonly pipeline: SessionPipelineService,
     private readonly raappHITL: RAAppHITLService,
+    private readonly sessionsService: SessionsService,
   ) {}
 
   handleConnection(client: Socket): void {
@@ -69,16 +71,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('chat:stop')
-  handleChatStop(
+  async handleChatStop(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SocketEvents['chat:stop'],
-  ): void {
+  ): Promise<void> {
     const socketSessions = this.socketSessions.get(client.id);
     if (!socketSessions?.has(payload.sessionId)) {
       this.logger.warn(`chat:stop rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
+
     this.pipeline.stop(payload.sessionId);
+
+    const descendantSessionIds = await this.collectDescendantSessionIds(payload.sessionId);
+    descendantSessionIds.forEach((sessionId) => this.pipeline.stop(sessionId));
   }
 
   @SubscribeMessage('tool:confirm')
@@ -217,10 +223,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     event: K,
     data: SocketEvents[K],
   ): void {
+    const targetSessionId = this.getEventSessionId(data) ?? fallbackSessionId;
+    this.subscribeSocketToSession(initiatorSocketId, targetSessionId);
+
     const initiator = this.clients.get(initiatorSocketId);
     initiator?.emit(event, data);
 
-    const targetSessionId = this.getEventSessionId(data) ?? fallbackSessionId;
     const subscribers = this.sessionSubscribers.get(targetSessionId);
     if (!subscribers) return;
 
@@ -234,5 +242,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!payload || typeof payload !== 'object') return undefined;
     const candidate = payload as { sessionId?: unknown };
     return typeof candidate.sessionId === 'string' ? candidate.sessionId : undefined;
+  }
+
+  private async collectDescendantSessionIds(rootSessionId: string): Promise<string[]> {
+    const descendantSessionIds: string[] = [];
+    const pending = [rootSessionId];
+    const seen = new Set<string>(pending);
+
+    while (pending.length > 0) {
+      const currentSessionId = pending.shift();
+      if (!currentSessionId) break;
+
+      const children = await this.sessionsService.listChildren(currentSessionId);
+      children.forEach((child) => {
+        if (seen.has(child.id)) return;
+        seen.add(child.id);
+        descendantSessionIds.push(child.id);
+        pending.push(child.id);
+      });
+    }
+
+    return descendantSessionIds;
   }
 }

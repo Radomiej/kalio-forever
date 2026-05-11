@@ -18,7 +18,11 @@ export class PersonaService implements OnApplicationBootstrap {
     const personasConfig = this.loadPersonasConfig();
 
     for (const [id, config] of Object.entries(personasConfig)) {
-      const existing = await this.drizzle.db.select({ id: personas.id }).from(personas).where(eq(personas.id, id)).then((r) => r[0]);
+      const existing = await this.drizzle.db
+        .select({ id: personas.id, systemPrompt: personas.systemPrompt })
+        .from(personas)
+        .where(eq(personas.id, id))
+        .then((r) => r[0]);
       
       if (!existing) {
         await this.drizzle.db.insert(personas).values({
@@ -33,15 +37,45 @@ export class PersonaService implements OnApplicationBootstrap {
         });
         this.logger.log(`Seeded ${id} persona`);
       } else {
-        await this.drizzle.db.update(personas).set({
+        const updatePayload: {
+          name: string;
+          allowedTools: string[];
+          skillIds: string[];
+          updatedAt: Date;
+          systemPrompt?: string;
+        } = {
           name: config.name,
           allowedTools: config.allowedTools,
           skillIds: config.skillIds ?? [],
           updatedAt: now,
-        }).where(eq(personas.id, id));
+        };
+
+        if (this.shouldRefreshSeededSystemPrompt(id, existing.systemPrompt, config.systemPrompt)) {
+          updatePayload.systemPrompt = config.systemPrompt;
+        }
+
+        await this.drizzle.db.update(personas).set(updatePayload).where(eq(personas.id, id));
         this.logger.log(`Updated ${id} persona`);
       }
     }
+  }
+
+  private shouldRefreshSeededSystemPrompt(
+    personaId: string,
+    existingPrompt: string | null | undefined,
+    nextPrompt: string,
+  ): boolean {
+    if (personaId !== 'designer' || typeof existingPrompt !== 'string') {
+      return false;
+    }
+
+    if (existingPrompt === nextPrompt) {
+      return false;
+    }
+
+    return existingPrompt.includes('Build every app using this structure:')
+      && existingPrompt.includes('Dark theme by default')
+      && existingPrompt.includes('Every app MUST have at least 2 pages with working navigation');
   }
 
   private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model: string; allowedTools: string[]; skillIds?: string[] }> {

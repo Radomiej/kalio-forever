@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatGateway } from '../chat.gateway';
 import type { ToolDispatchService } from '../tool-dispatch.service';
 import type { SessionPipelineService } from '../session-pipeline.service';
+import type { SessionsService } from '../sessions.service';
 import type { RAAppHITLService, SavedApproval } from '../../raapp/raapp-hitl.service';
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string }) => void;
@@ -10,6 +11,7 @@ describe('ChatGateway', () => {
   let gateway: ChatGateway;
   let toolDispatch: ToolDispatchService;
   let pipeline: SessionPipelineService;
+  let sessions: SessionsService;
   let raappHITL: RAAppHITLService;
   let client: { id: string; emit: ReturnType<typeof vi.fn> };
   let observer: { id: string; emit: ReturnType<typeof vi.fn> };
@@ -22,8 +24,13 @@ describe('ChatGateway', () => {
 
     pipeline = {
       submit: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn(),
       abortAll: vi.fn(),
     } as unknown as SessionPipelineService;
+
+    sessions = {
+      listChildren: vi.fn().mockResolvedValue([]),
+    } as unknown as SessionsService;
 
     raappHITL = {
       executeApproved: vi.fn(),
@@ -40,7 +47,7 @@ describe('ChatGateway', () => {
       emit: vi.fn(),
     };
 
-    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL);
+    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL, sessions);
     gateway.handleConnection(client as never);
     gateway.handleConnection(observer as never);
     (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
@@ -67,6 +74,38 @@ describe('ChatGateway', () => {
 
     expect(client.emit).toHaveBeenCalledWith('chat:chunk', expect.objectContaining({ sessionId: 'child-session' }));
     expect(observer.emit).toHaveBeenCalledWith('chat:chunk', expect.objectContaining({ sessionId: 'child-session' }));
+  });
+
+  it('REGRESSION: allows the initiator to stop a child session after child events were streamed to that socket', async () => {
+    (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
+      emit('chat:chunk', {
+        sessionId: 'child-session',
+        messageId: 'msg-child-1',
+        delta: 'child says hello',
+        done: false,
+      });
+    });
+
+    await gateway.handleChatSend(client as never, {
+      sessionId: 'session-1',
+      content: 'delegate this task',
+      personaId: 'default',
+    });
+
+    gateway.handleChatStop(client as never, { sessionId: 'child-session' });
+
+    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('child-session');
+  });
+
+  it('REGRESSION: stopping a parent session also stops its child subagent sessions', async () => {
+    (sessions.listChildren as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([{ id: 'child-session' }])
+      .mockResolvedValueOnce([]);
+
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+
+    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'session-1');
+    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'child-session');
   });
 
 
