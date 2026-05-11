@@ -64,22 +64,31 @@ function defaultMap(opts: {
   webSearchTimeoutMs?: number;
   providerLocalTimeoutMs?: number;
   providerRemoteTimeoutMs?: number;
+  llmProvider?: string;
+  llmModel?: string;
+  llmBaseUrl?: string;
+  llmSource?: 'db' | 'env';
 } = {}): FetchMap {
+  const runtimeSource = opts.llmSource ?? (opts.activeId ? 'db' : 'env');
+
   return {
     'GET /api/credentials': opts.credentials ?? [],
     'GET /api/credentials/active': { credentialId: opts.activeId ?? null },
     'GET /api/credentials/settings/context-window': { size: opts.contextWindow ?? 32000 },
+    'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
     'GET /api/credentials/settings/tool-timeouts': {
       webSearchTimeoutMs: opts.webSearchTimeoutMs ?? 120000,
       providerLocalTimeoutMs: opts.providerLocalTimeoutMs ?? 3000,
       providerRemoteTimeoutMs: opts.providerRemoteTimeoutMs ?? 15000,
     },
+    'GET /api/llm/active/models': { models: [] },
     'GET /api/llm/config': {
-      provider: 'openai',
-      model: 'gpt-4o-mini',
-      baseUrl: 'https://api.openai.com/v1',
+      provider: opts.llmProvider ?? 'openai',
+      model: opts.llmModel ?? 'gpt-4o-mini',
+      baseUrl: opts.llmBaseUrl ?? 'https://api.openai.com/v1',
       contextWindowSize: 32000,
       maxToolAttempts: opts.maxToolAttempts ?? 8,
+      source: runtimeSource,
     },
   };
 }
@@ -134,6 +143,62 @@ describe('LLMPanel', () => {
     mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
     render(<LLMPanel />);
     await waitFor(() => expect(screen.getByText('active')).toBeInTheDocument());
+  });
+
+  it('renders a dedicated runtime settings panel for an env-backed active provider', async () => {
+    mockFetch({
+      ...defaultMap({
+        llmProvider: 'xiaomimimo',
+        llmModel: 'mimo-v2-omni',
+        llmBaseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        llmSource: 'env',
+      }),
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+      'GET /api/llm/active/models': { models: ['mimo-v2-omni', 'mimo-v2-thinking'] },
+    });
+
+    render(<LLMPanel />);
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Runtime Settings' })).toBeInTheDocument(),
+    );
+
+    expect(screen.getByText('Active Provider')).toBeInTheDocument();
+    expect(screen.getByText(/xiaomi mimo/i)).toBeInTheDocument();
+    expect(screen.queryByText(/activate a provider above to select its model/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('mimo-v2-omni'));
+  });
+
+  it('saves the active model through the runtime endpoint when the env provider is active', async () => {
+    mockFetch({
+      ...defaultMap({
+        llmProvider: 'xiaomimimo',
+        llmModel: 'mimo-v2-omni',
+        llmBaseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        llmSource: 'env',
+      }),
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+      'GET /api/llm/active/models': { models: ['mimo-v2-omni', 'mimo-v2-thinking'] },
+      'PUT /api/llm/active/model': {
+        provider: 'xiaomimimo',
+        model: 'mimo-v2-thinking',
+        baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        contextWindowSize: 32000,
+        maxToolAttempts: 8,
+        source: 'env',
+      },
+    });
+    const user = userEvent.setup();
+
+    render(<LLMPanel />);
+
+    const modelInput = await screen.findByTestId('model-selector');
+    await user.clear(modelInput);
+    await user.type(modelInput, 'mimo-v2-thinking');
+    await user.click(screen.getByTestId('model-save'));
+
+    await waitFor(() => expect(screen.getByTestId('model-save')).toHaveTextContent('Saved'));
+    expect(getRequestBody<{ model: string }>('PUT', '/api/llm/active/model').model).toBe('mimo-v2-thinking');
   });
 
   it('opens add-provider form on button click', async () => {

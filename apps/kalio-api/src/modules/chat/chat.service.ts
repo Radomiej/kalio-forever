@@ -325,9 +325,7 @@ export class ChatService {
         data: { message },
       });
     } finally {
-      if (this.abortControllers.get(sessionId) === controller) {
-        this.abortControllers.delete(sessionId);
-      }
+      this.abortControllers.delete(sessionId);
     }
   }
 

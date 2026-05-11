@@ -48,59 +48,55 @@ export class OpenAICompatibleProvider implements ILLMProvider {
     const decoder = new TextDecoder();
     let buffer = '';
 
-    try {
-      while (true) {
-        if (abortSignal?.aborted) {
-          return [];
+    while (true) {
+      if (abortSignal?.aborted) {
+        return [];
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === '[DONE]') {
+          onChunk({ delta: '', done: true, sessionId, messageId });
+          continue;
         }
-        const { done, value } = await reader.read();
-        if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(data) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          const data = trimmed.slice(5).trim();
-          if (data === '[DONE]') {
-            onChunk({ delta: '', done: true, sessionId, messageId });
-            continue;
-          }
+        const choices = parsed['choices'] as Array<Record<string, unknown>> | undefined;
+        const delta = choices?.[0]?.['delta'] as Record<string, unknown> | undefined;
+        if (!delta) continue;
 
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(data) as Record<string, unknown>;
-          } catch {
-            continue;
-          }
+        const content = delta['content'];
+        if (typeof content === 'string' && content) {
+          onChunk({ delta: content, done: false, sessionId, messageId });
+        }
 
-          const choices = parsed['choices'] as Array<Record<string, unknown>> | undefined;
-          const delta = choices?.[0]?.['delta'] as Record<string, unknown> | undefined;
-          if (!delta) continue;
-
-          const content = delta['content'];
-          if (typeof content === 'string' && content) {
-            onChunk({ delta: content, done: false, sessionId, messageId });
-          }
-
-          const rawToolCalls = delta['tool_calls'] as Array<Record<string, unknown>> | undefined;
-          if (rawToolCalls) {
-            for (const tc of rawToolCalls) {
-              const idx = String(tc['index'] ?? 0);
-              const fn = tc['function'] as Record<string, unknown> | undefined;
-              if (!toolCallBuffers[idx]) {
-                toolCallBuffers[idx] = { name: '', argsRaw: '' };
-              }
-              if (typeof fn?.['name'] === 'string') toolCallBuffers[idx]!.name += fn['name'];
-              if (typeof fn?.['arguments'] === 'string') toolCallBuffers[idx]!.argsRaw += fn['arguments'];
+        const rawToolCalls = delta['tool_calls'] as Array<Record<string, unknown>> | undefined;
+        if (rawToolCalls) {
+          for (const tc of rawToolCalls) {
+            const idx = String(tc['index'] ?? 0);
+            const fn = tc['function'] as Record<string, unknown> | undefined;
+            if (!toolCallBuffers[idx]) {
+              toolCallBuffers[idx] = { name: '', argsRaw: '' };
             }
+            if (typeof fn?.['name'] === 'string') toolCallBuffers[idx]!.name += fn['name'];
+            if (typeof fn?.['arguments'] === 'string') toolCallBuffers[idx]!.argsRaw += fn['arguments'];
           }
         }
       }
-    } finally {
-      reader.releaseLock();
     }
 
     for (const [, buf] of Object.entries(toolCallBuffers)) {

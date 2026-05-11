@@ -1,32 +1,28 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Loader2, AlertCircle, Zap, Info } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { AlertCircle } from 'lucide-react';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { useSettingsStore } from './settingsStore';
-import { ProviderCard } from './ProviderCard';
 import { ModelSettingsSection } from './ModelSettingsSection';
+import { ProviderSettingsSection } from './ProviderSettingsSection';
 import { ToolTimeoutsSection } from './ToolTimeoutsSection';
 import {
-  ALL_PROVIDER_TYPES,
   isLocalLlmProviderConfig,
   PROVIDER_BASE_URLS,
   PROVIDER_DEFAULT_MODELS,
   PROVIDER_LABELS,
 } from './llm-provider-settings';
+import type {
+  AddForm,
+  ActiveRuntimeConfig,
+  LLMConfigWithSource,
+  ProviderTestState,
+} from './llm-panel.types';
 import {
   DEFAULT_TOOL_TIMEOUT_SETTINGS,
   normalizeToolTimeout,
   type ToolTimeoutKey,
   type ToolTimeoutSettings,
 } from './tool-timeout-settings';
-
-interface LLMConfigWithSource {
-  provider: string;
-  model: string;
-  baseUrl: string;
-  contextWindowSize: number;
-  maxToolAttempts: number;
-  source: 'db' | 'env';
-}
 
 async function readResponseErrorMessage(res: Response, context: string): Promise<string> {
   const body = await res.text();
@@ -71,15 +67,6 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-interface AddForm {
-  name: string;
-  provider: string;
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  nameEdited?: boolean;
-}
-
 function emptyForm(): AddForm {
   return {
     name: PROVIDER_LABELS['openai'] ?? '',
@@ -100,19 +87,47 @@ function normalizeProviderName(name: string, provider: string): string {
   return normalizeOptionalText(name) ?? PROVIDER_LABELS[provider] ?? provider;
 }
 
+function buildActiveRuntimeConfig(
+  activeCredential: Credential | null,
+  runtimeConfig: LLMConfigWithSource | null,
+): ActiveRuntimeConfig | null {
+  if (activeCredential) {
+    return {
+      source: 'db',
+      provider: activeCredential.provider,
+      model: activeCredential.model ?? '',
+      baseUrl: activeCredential.baseUrl ?? '',
+      displayName: activeCredential.name,
+      credentialId: activeCredential.id,
+    };
+  }
+
+  if (!runtimeConfig) {
+    return null;
+  }
+
+  return {
+    source: runtimeConfig.source,
+    provider: runtimeConfig.provider,
+    model: runtimeConfig.model,
+    baseUrl: runtimeConfig.baseUrl,
+    displayName: PROVIDER_LABELS[runtimeConfig.provider] ?? runtimeConfig.provider,
+  };
+}
+
 export function LLMPanel() {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [contextWindow, setContextWindow] = useState(32000);
   const [maxToolAttempts, setMaxToolAttempts] = useState(8);
   const [toolTimeouts, setToolTimeouts] = useState<ToolTimeoutSettings>(DEFAULT_TOOL_TIMEOUT_SETTINGS);
-  const [envConfig, setEnvConfig] = useState<LLMConfigWithSource | null>(null);
+  const [runtimeConfig, setRuntimeConfig] = useState<LLMConfigWithSource | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<AddForm>(emptyForm());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
-  const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
+  const [testState, setTestState] = useState<ProviderTestState>('idle');
   const [testError, setTestError] = useState<string | null>(null);
   const persistedContextWindow = useRef(32000);
   const persistedMaxToolAttempts = useRef(8);
@@ -123,6 +138,17 @@ export function LLMPanel() {
   const normalizedBaseUrl = normalizeOptionalText(form.baseUrl);
   const normalizedModel = normalizeOptionalText(form.model);
   const allowsKeylessAuth = isLocalLlmProviderConfig(form.provider, normalizedBaseUrl);
+  const activeCredential = useMemo(
+    () => credentials.find((credential) => credential.id === activeId) ?? null,
+    [activeId, credentials],
+  );
+  const activeRuntimeConfig = useMemo(
+    () => buildActiveRuntimeConfig(activeCredential, runtimeConfig),
+    [activeCredential, runtimeConfig],
+  );
+  const providerEmptyStateMessage = runtimeConfig?.source === 'env'
+    ? 'No credentials configured. Runtime currently uses the env fallback.'
+    : 'No credentials configured. Add one below.';
 
   const reportUpdateError = useCallback((message: string, err: unknown) => {
     const error = err instanceof Error ? err : new Error(String(err));
@@ -132,7 +158,8 @@ export function LLMPanel() {
 
   const refreshBackendConfig = useCallback(async () => {
     try {
-      const cfg = await apiFetch<{ provider: string; model: string; baseUrl: string; contextWindowSize: number; maxToolAttempts: number }>('/llm/config');
+      const cfg = await apiFetch<LLMConfigWithSource>('/llm/config');
+      setRuntimeConfig(cfg);
       setBackendConfig(cfg);
       setMaxToolAttempts(cfg.maxToolAttempts ?? 8);
     } catch (err) {
@@ -159,7 +186,7 @@ export function LLMPanel() {
       persistedContextWindow.current = cw.size;
       setToolTimeouts(toolTimeouts);
       persistedToolTimeouts.current = toolTimeouts;
-      setEnvConfig(llmCfg);
+      setRuntimeConfig(llmCfg);
       setMaxToolAttempts(llmCfg.maxToolAttempts ?? 8);
       persistedMaxToolAttempts.current = llmCfg.maxToolAttempts ?? 8;
       setBackendConfig(llmCfg);
@@ -228,6 +255,30 @@ export function LLMPanel() {
       setError(err instanceof Error ? err.message : 'Failed to add');
     }
   };
+
+  const handleRuntimeConfigChange = useCallback((updated: LLMConfigWithSource) => {
+    setRuntimeConfig(updated);
+    setBackendConfig(updated);
+    setMaxToolAttempts(updated.maxToolAttempts ?? 8);
+
+    if (activeId) {
+      setCredentials((current) => current.map((credential) => (
+        credential.id === activeId
+          ? {
+              ...credential,
+              model: updated.model,
+              baseUrl: updated.baseUrl || undefined,
+            }
+          : credential
+      )));
+    }
+  }, [activeId, setBackendConfig]);
+
+  const handleCancelAdd = useCallback(() => {
+    setShowForm(false);
+    setTestState('idle');
+    setTestError(null);
+  }, []);
 
   const handleActivate = async (credentialId: string) => {
     setSyncing(credentialId);
@@ -331,162 +382,45 @@ export function LLMPanel() {
         </div>
       )}
 
-      {loading ? (
-        <div className="flex items-center gap-2 text-xs text-base-content/50 py-4">
-          <Loader2 size={14} className="animate-spin" /> Loading credentials…
-        </div>
-      ) : (
-        <>
-          {credentials.length > 0 && (
-            <div className="flex flex-col gap-2">
-              {credentials.map((c) => (
-                <ProviderCard
-                  key={c.id}
-                  credential={c}
-                  isActive={c.id === activeId}
-                  isSyncing={syncing === c.id}
-                  onActivate={(id) => void handleActivate(id)}
-                  onRemove={(id) => void handleRemove(id)}
-                />
-              ))}
-            </div>
-          )}
-
-          {credentials.length === 0 && !showForm && (
-            <>
-              {envConfig && envConfig.source === 'env' && envConfig.model && envConfig.model !== 'mock' ? (
-                <div className="border border-base-300 rounded-lg p-3 bg-base-200/40 flex flex-col gap-1" data-testid="env-provider-card">
-                  <div className="flex items-center gap-2">
-                    <Info size={13} className="text-sky-400 shrink-0" />
-                    <span className="text-xs font-semibold text-base-content/80">Env Provider (read-only)</span>
-                    <span className="badge badge-ghost badge-xs ml-auto">active</span>
-                  </div>
-                  <div className="text-xs text-base-content/60 pl-5 space-y-0.5">
-                    <div>Provider: <span className="font-mono text-base-content/80">{PROVIDER_LABELS[envConfig.provider] ?? envConfig.provider}</span></div>
-                    <div>Model: <span className="font-mono text-base-content/80">{envConfig.model}</span></div>
-                    {envConfig.baseUrl && <div>Base URL: <span className="font-mono text-base-content/80">{envConfig.baseUrl}</span></div>}
-                  </div>
-                  <p className="text-[10px] text-base-content/40 pl-5 mt-1">
-                    Configured via environment variables. Add a provider above to override.
-                  </p>
-                </div>
-              ) : (
-                <div className="text-sm text-base-content/50 italic text-center py-6">
-                  No credentials configured. Add one below.
-                </div>
-              )}
-            </>
-          )}
-
-          {showForm ? (
-            <form
-              className="flex flex-col gap-3 border border-base-300 rounded-lg p-4 bg-base-200/40"
-              onSubmit={(e) => void handleAdd(e)}
-              data-testid="add-provider-form"
-            >
-              <h3 className="text-sm font-semibold">Add Provider</h3>
-
-              <label className="form-control gap-1">
-                <span className="text-xs text-base-content/60">Name <span className="text-base-content/40">(optional — defaults to provider)</span></span>
-                <input
-                  className="input input-bordered input-sm"
-                  placeholder="e.g. My OpenAI Key"
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value, nameEdited: true }))}
-                  required
-                />
-              </label>
-
-              <div className="flex gap-2 flex-wrap">
-                {ALL_PROVIDER_TYPES.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    className={`btn btn-xs ${form.provider === t ? 'btn-primary' : 'btn-ghost border border-base-300'}`}
-                    onClick={() => handleProviderChange(t)}
-                  >
-                    {PROVIDER_LABELS[t]}
-                  </button>
-                ))}
-              </div>
-
-              <label className="form-control gap-1">
-                <span className="text-xs text-base-content/60">
-                  API Key {allowsKeylessAuth ? <span className="text-base-content/40">(optional for local providers)</span> : null}
-                </span>
-                <input
-                  className="input input-bordered input-sm font-mono"
-                  type="password"
-                  placeholder={allowsKeylessAuth ? 'Optional for local endpoint' : 'sk-…'}
-                  value={form.apiKey}
-                  onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
-                  data-testid="add-provider-apikey"
-                  required={!allowsKeylessAuth}
-                />
-              </label>
-
-              <label className="form-control gap-1">
-                <span className="text-xs text-base-content/60">Base URL</span>
-                <input
-                  className="input input-bordered input-sm font-mono"
-                  value={form.baseUrl}
-                  onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-control gap-1">
-                <span className="text-xs text-base-content/60">Model</span>
-                <input
-                  className="input input-bordered input-sm font-mono"
-                  value={form.model}
-                  onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-                  data-testid="add-provider-model"
-                />
-              </label>
-
-              {testError && (
-                <div className={`text-xs flex gap-1 items-center ${testState === 'ok' ? 'text-success' : 'text-error'}`}>
-                  <AlertCircle size={12} /> {testError}
-                </div>
-              )}
-
-              <div className="flex gap-2 items-center justify-between">
-                <button
-                  type="button"
-                  className={`btn btn-ghost btn-xs gap-1 ${testState === 'ok' ? 'text-success' : testState === 'error' ? 'text-error' : 'text-base-content/60'}`}
-                  onClick={() => void handleTest()}
-                  disabled={(!allowsKeylessAuth && !normalizedApiKey) || testState === 'testing'}
-                  data-testid="add-provider-test"
-                >
-                  {testState === 'testing' ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
-                  {testState === 'ok' ? 'Connected!' : testState === 'error' ? 'Failed' : 'Test'}
-                </button>
-                <div className="flex gap-2">
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setShowForm(false); setTestState('idle'); }}>Cancel</button>
-                  <button type="submit" className="btn btn-primary btn-sm" data-testid="add-provider-submit">Add Provider</button>
-                </div>
-              </div>
-            </form>
-          ) : (
-            <button
-              className="btn btn-ghost btn-sm gap-2 self-start text-sky-400 hover:text-sky-300"
-              onClick={() => setShowForm(true)}
-              data-testid="add-provider-btn"
-            >
-              <Plus size={14} /> Add Provider
-            </button>
-          )}
-        </>
-      )}
-
-      {/* Model + Generation settings */}
-      <ModelSettingsSection
-        activeCredential={credentials.find((c) => c.id === activeId) ?? null}
-        onModelChange={(updated) => setCredentials((prev) => prev.map((c) => c.id === updated.id ? updated : c))}
+      <ProviderSettingsSection
+        credentials={credentials}
+        activeId={activeId}
+        syncing={syncing}
+        loading={loading}
+        showForm={showForm}
+        form={form}
+        allowsKeylessAuth={allowsKeylessAuth}
+        normalizedApiKey={normalizedApiKey}
+        testState={testState}
+        testError={testError}
+        emptyStateMessage={providerEmptyStateMessage}
+        onActivate={(credentialId) => void handleActivate(credentialId)}
+        onRemove={(credentialId) => void handleRemove(credentialId)}
+        onShowAdd={() => setShowForm(true)}
+        onCancelAdd={handleCancelAdd}
+        onSubmit={(event) => void handleAdd(event)}
+        onProviderTypeChange={handleProviderChange}
+        onNameChange={(value) => setForm((current) => ({ ...current, name: value, nameEdited: true }))}
+        onApiKeyChange={(value) => setForm((current) => ({ ...current, apiKey: value }))}
+        onBaseUrlChange={(value) => setForm((current) => ({ ...current, baseUrl: value }))}
+        onModelChange={(value) => setForm((current) => ({ ...current, model: value }))}
+        onTest={() => void handleTest()}
       />
 
-      {/* Context window */}
-      <div className="border-t border-base-300 pt-4">
+      <section className="flex flex-col gap-5 border border-base-300 rounded-xl p-4 bg-base-200/10">
+        <div>
+          <h3 className="text-sm font-semibold mb-1">Runtime Settings</h3>
+          <p className="text-xs text-base-content/60">
+            Configure the active provider, runtime model, generation parameters, and turn-level limits.
+          </p>
+        </div>
+
+        <ModelSettingsSection
+          activeRuntimeConfig={activeRuntimeConfig}
+          onRuntimeConfigChange={handleRuntimeConfigChange}
+        />
+
+        <div className="border-t border-base-300 pt-4">
         <h3 className="text-sm font-semibold mb-1">Context Window</h3>
         <p className="text-xs text-base-content/60 mb-3">
           Oldest messages are trimmed automatically when history exceeds this limit.
@@ -511,40 +445,41 @@ export function LLMPanel() {
         <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
           <span>4k</span><span>32k</span><span>128k</span><span>200k</span>
         </div>
-      </div>
-
-      <div className="border-t border-base-300 pt-4">
-        <h3 className="text-sm font-semibold mb-1">Agent Loop Limit</h3>
-        <p className="text-xs text-base-content/60 mb-3">
-          Max tool-attempt loop iterations per turn before automatic stop.
-          Increase for complex test scenarios (for example 25).
-        </p>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-base-content/60">Max tool attempts</span>
-          <span className="badge badge-neutral font-mono text-xs" data-testid="max-tool-attempts-value">
-            {maxToolAttempts}
-          </span>
         </div>
-        <input
-          type="range"
-          className="range range-sm range-primary w-full"
-          min={1}
-          max={100}
-          step={1}
-          value={maxToolAttempts}
-          onChange={(e) => void handleMaxToolAttemptsChange(parseInt(e.target.value, 10))}
-          data-testid="max-tool-attempts-slider"
+
+        <div className="border-t border-base-300 pt-4">
+          <h3 className="text-sm font-semibold mb-1">Agent Loop Limit</h3>
+          <p className="text-xs text-base-content/60 mb-3">
+            Max tool-attempt loop iterations per turn before automatic stop.
+            Increase for complex test scenarios (for example 25).
+          </p>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-base-content/60">Max tool attempts</span>
+            <span className="badge badge-neutral font-mono text-xs" data-testid="max-tool-attempts-value">
+              {maxToolAttempts}
+            </span>
+          </div>
+          <input
+            type="range"
+            className="range range-sm range-primary w-full"
+            min={1}
+            max={100}
+            step={1}
+            value={maxToolAttempts}
+            onChange={(e) => void handleMaxToolAttemptsChange(parseInt(e.target.value, 10))}
+            data-testid="max-tool-attempts-slider"
+          />
+          <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
+            <span>1</span><span>8</span><span>25</span><span>100</span>
+          </div>
+        </div>
+
+        <ToolTimeoutsSection
+          values={toolTimeouts}
+          onInputChange={handleToolTimeoutInputChange}
+          onCommit={(key, value) => void commitToolTimeoutChange(key, value)}
         />
-        <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
-          <span>1</span><span>8</span><span>25</span><span>100</span>
-        </div>
-      </div>
-
-      <ToolTimeoutsSection
-        values={toolTimeouts}
-        onInputChange={handleToolTimeoutInputChange}
-        onCommit={(key, value) => void commitToolTimeoutChange(key, value)}
-      />
+      </section>
     </div>
   );
 }

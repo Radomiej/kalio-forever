@@ -18,6 +18,11 @@ describe('LLMService - DB credential overrides env', () => {
   function buildCredentialsMock() {
     return {
       getActiveProviderConfig: vi.fn(),
+      getActiveCredentialId: vi.fn().mockResolvedValue(null),
+      updateModel: vi.fn(),
+      getEnvModelOverride: vi.fn().mockResolvedValue(null),
+      setEnvModelOverride: vi.fn(),
+      getModelsForProviderConfig: vi.fn().mockResolvedValue([]),
       getContextWindowSize: vi.fn().mockResolvedValue(32000),
     };
   }
@@ -79,6 +84,16 @@ describe('LLMService - DB credential overrides env', () => {
       expect(config.provider).toBe('openai');
       expect(config.model).toBe('env-gpt-4');
       expect(config.baseUrl).toBe('https://env.openai.com/v1');
+    });
+
+    it('should apply the env model override when no DB credential is active', async () => {
+      credentialsService.getActiveProviderConfig.mockResolvedValue(null);
+      credentialsService.getEnvModelOverride.mockResolvedValue('env-override-model');
+
+      const config = await service.getConfig();
+
+      expect(config.source).toBe('env');
+      expect(config.model).toBe('env-override-model');
     });
 
     it('should not expose API key in getConfig regardless of source', async () => {
@@ -189,6 +204,51 @@ describe('LLMService - DB credential overrides env', () => {
         'msg-1',
       );
       expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
+  describe('getActiveModels()', () => {
+    it('loads models for the effective runtime config', async () => {
+      credentialsService.getActiveProviderConfig.mockResolvedValue(null);
+      credentialsService.getEnvModelOverride.mockResolvedValue('env-override-model');
+      credentialsService.getModelsForProviderConfig.mockResolvedValue(['env-override-model']);
+
+      await expect(service.getActiveModels()).resolves.toEqual(['env-override-model']);
+      expect(credentialsService.getModelsForProviderConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'openai', model: 'env-override-model' }),
+      );
+    });
+  });
+
+  describe('updateActiveModel()', () => {
+    it('updates the active DB credential when one is selected', async () => {
+      credentialsService.getActiveCredentialId.mockResolvedValue('cred-1');
+      credentialsService.getActiveProviderConfig.mockResolvedValue({
+        provider: 'openai',
+        apiKey: 'db-api-key',
+        model: 'gpt-4o-next',
+        baseUrl: 'https://db.openai.com/v1',
+      });
+
+      const config = await service.updateActiveModel('gpt-4o-next');
+
+      expect(credentialsService.updateModel).toHaveBeenCalledWith('cred-1', 'gpt-4o-next');
+      expect(credentialsService.setEnvModelOverride).not.toHaveBeenCalled();
+      expect(config.model).toBe('gpt-4o-next');
+      expect(config.source).toBe('db');
+    });
+
+    it('stores an env model override when no DB credential is active', async () => {
+      credentialsService.getActiveCredentialId.mockResolvedValue(null);
+      credentialsService.getActiveProviderConfig.mockResolvedValue(null);
+      credentialsService.getEnvModelOverride.mockResolvedValue('mimo-v2-thinking');
+
+      const config = await service.updateActiveModel('mimo-v2-thinking');
+
+      expect(credentialsService.setEnvModelOverride).toHaveBeenCalledWith('mimo-v2-thinking');
+      expect(credentialsService.updateModel).not.toHaveBeenCalled();
+      expect(config.model).toBe('mimo-v2-thinking');
+      expect(config.source).toBe('env');
     });
   });
 

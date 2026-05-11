@@ -14,6 +14,16 @@ const CREDENTIALS_CIPHER_PREFIX = 'kalio-enc-v1';
 const CREDENTIALS_MASTER_KEY_ENV = 'CREDENTIALS_MASTER_KEY';
 const DEV_FALLBACK_CREDENTIALS_MASTER_KEY = 'kalio-dev-credentials-master-key-not-for-production';
 
+const PROVIDER_BASE_URLS: Record<string, string> = {
+  openai: 'https://api.openai.com/v1',
+  xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  cometapi: 'https://api.cometapi.com/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
+  ollama: 'http://localhost:11434/v1',
+  bitnet: 'http://localhost:8080/v1',
+};
+
 @Injectable()
 export class CredentialsService {
   private readonly logger = new Logger(CredentialsService.name);
@@ -138,6 +148,20 @@ export class CredentialsService {
     };
   }
 
+  async getEnvModelOverride(): Promise<string | null> {
+    const row = await this.drizzle.db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.key, 'env_llm_model_override'))
+      .then((results) => results[0]);
+
+    return row?.value ?? null;
+  }
+
+  async setEnvModelOverride(model: string): Promise<void> {
+    await this.upsertSetting('env_llm_model_override', model, new Date());
+  }
+
   // ─── Model update ─────────────────────────────────────────────────────────────
 
   async updateModel(id: string, model: string): Promise<Credential> {
@@ -197,37 +221,37 @@ export class CredentialsService {
   async getModelsForCredential(id: string): Promise<string[]> {
     const row = await this.drizzle.db.select().from(credentials).where(eq(credentials.id, id)).then((r) => r[0]);
     if (!row) throw new NotFoundException(`Credential ${id} not found`);
-
-    const PROVIDER_BASE_URLS: Record<string, string> = {
-      openai:     'https://api.openai.com/v1',
-      xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
-      deepseek:   'https://api.deepseek.com/v1',
-      cometapi:   'https://api.cometapi.com/v1',
-      openrouter: 'https://openrouter.ai/api/v1',
-      ollama:     'http://localhost:11434/v1',
-      bitnet:     'http://localhost:8080/v1',
-    };
-
-    const isLocal = isLocalLlmProvider(row.provider, row.baseUrl ?? undefined);
-    const resolvedBase = (row.baseUrl ?? PROVIDER_BASE_URLS[row.provider] ?? '').replace(/\/$/, '');
-    if (!resolvedBase) return [];
-
-    const endpoint = `${resolvedBase}/models`;
-    const timeoutMs = await this.timeoutSettings.getProviderTimeoutMs(isLocal);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const apiKey = this.tryDecryptApiKey(
       row.apiKey,
       `Failed to decrypt credential secret while fetching models for ${id}`,
     );
     if (row.apiKey.length > 0 && apiKey === null) {
-      clearTimeout(timer);
       return [];
     }
 
+    return this.getModelsForProviderConfig({
+      provider: row.provider as LLMProviderType,
+      apiKey: apiKey ?? '',
+      model: row.model ?? '',
+      baseUrl: row.baseUrl ?? undefined,
+    });
+  }
+
+  async getModelsForProviderConfig(config: ProviderConfig): Promise<string[]> {
+    const isLocal = isLocalLlmProvider(config.provider, config.baseUrl ?? undefined);
+    const resolvedBase = (config.baseUrl ?? PROVIDER_BASE_URLS[config.provider] ?? '').replace(/\/$/, '');
+    if (!resolvedBase) {
+      return [];
+    }
+
+    const endpoint = `${resolvedBase}/models`;
+    const timeoutMs = await this.timeoutSettings.getProviderTimeoutMs(isLocal);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
-      const authHeaders: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
-      if (row.provider === 'xiaomimimo') {
+      const authHeaders: Record<string, string> = config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {};
+      if (config.provider === 'xiaomimimo') {
         authHeaders['HTTP-Referer'] = 'https://github.com/RooVetGit/Roo-Cline';
         authHeaders['X-Title'] = 'Roo Code';
         authHeaders['User-Agent'] = 'RooCode/3.17.0';
@@ -238,7 +262,10 @@ export class CredentialsService {
       const items = json.data ?? json.models ?? [];
       return items.map((m) => (typeof m === 'string' ? m : m.id)).filter(Boolean);
     } catch (err) {
-      this.logger.error(`Failed to fetch models for credential ${id}`, err instanceof Error ? err : new Error(String(err)));
+      this.logger.error(
+        `Failed to fetch models for provider ${config.provider}`,
+        err instanceof Error ? err : new Error(String(err)),
+      );
       return [];
     } finally {
       clearTimeout(timer);

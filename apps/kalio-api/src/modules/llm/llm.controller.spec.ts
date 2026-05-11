@@ -10,6 +10,8 @@ describe('LLMController', () => {
   let controller: LLMController;
   const mockLLMService = {
     getConfig: vi.fn(),
+    getActiveModels: vi.fn(),
+    updateActiveModel: vi.fn(),
   };
   const mockCredentials = {
     getContextWindowSize: vi.fn(),
@@ -69,6 +71,45 @@ describe('LLMController', () => {
       expect(result.source).toBe('env');
       expect(result.contextWindowSize).toBe(8192);
       expect(result.maxToolAttempts).toBe(8);
+    });
+  });
+
+  describe('getActiveModels()', () => {
+    it('returns the model list for the active runtime provider', async () => {
+      mockLLMService.getActiveModels.mockResolvedValue(['mimo-v2-omni', 'mimo-v2-thinking']);
+
+      await expect(controller.getActiveModels()).resolves.toEqual({
+        models: ['mimo-v2-omni', 'mimo-v2-thinking'],
+      });
+    });
+  });
+
+  describe('updateActiveModel()', () => {
+    it('updates the active runtime model and returns merged config', async () => {
+      mockLLMService.updateActiveModel.mockResolvedValue({
+        provider: 'xiaomimimo',
+        apiKey: '',
+        baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        model: 'mimo-v2-thinking',
+        source: 'env',
+      });
+      mockCredentials.getContextWindowSize.mockResolvedValue(32000);
+      mockCredentials.getMaxToolAttempts.mockResolvedValue(8);
+
+      await expect(controller.updateActiveModel({ model: 'mimo-v2-thinking' })).resolves.toEqual({
+        provider: 'xiaomimimo',
+        apiKey: '',
+        baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        model: 'mimo-v2-thinking',
+        source: 'env',
+        contextWindowSize: 32000,
+        maxToolAttempts: 8,
+      });
+      expect(mockLLMService.updateActiveModel).toHaveBeenCalledWith('mimo-v2-thinking');
+    });
+
+    it('rejects a blank model payload', async () => {
+      await expect(controller.updateActiveModel({ model: '   ' })).rejects.toThrow(HttpException);
     });
   });
 

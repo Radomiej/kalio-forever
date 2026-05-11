@@ -15,6 +15,7 @@ import { SkillsModule } from '../modules/skills/skills.module';
 import { PersonaModule } from '../modules/persona/persona.module';
 import { CredentialsModule } from '../modules/credentials/credentials.module';
 import { TOOL_CATALOG, type ToolCatalogPort } from '../modules/tool/tool-catalog.port';
+import { TOOL_DISPATCH_REGISTRY } from '../modules/tool/tool-dispatch-registry.port';
 import { TOOL_CONFIGURATION_PROVIDERS, TOOL_PROVIDER_CLASSES } from '../modules/tool/tool.providers';
 import { ToolRegistryService } from '../modules/tool/tool-registry.service';
 
@@ -53,7 +54,11 @@ function buildToolCatalog(reflector: Reflector): ToolCatalogPort {
       useFactory: (reflector: Reflector) => buildToolCatalog(reflector),
       inject: [Reflector],
     },
+    {
+      provide: TOOL_DISPATCH_REGISTRY,
+      useExisting: ToolRegistryService,
+    },
   ],
-  exports: [MCPModule, ToolRegistryService, TOOL_CATALOG],
+  exports: [MCPModule, ToolRegistryService, TOOL_CATALOG, TOOL_DISPATCH_REGISTRY],
 })
 export class ToolApplicationConfigModule {}

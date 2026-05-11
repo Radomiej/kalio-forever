@@ -104,72 +104,68 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     let buffer = '';
     let debugChunkCount = 0;
 
-    try {
-      while (true) {
-        if (abortSignal?.aborted) {
-          return [];
+    while (true) {
+      if (abortSignal?.aborted) {
+        return [];
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === '[DONE]') {
+          onChunk({ delta: '', done: true, sessionId, messageId });
+          continue;
         }
-        const { done, value } = await reader.read();
-        if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(data) as Record<string, unknown>;
+        } catch {
+          this.logger.warn(`[${this.providerName}] Failed to parse SSE chunk: ${data.slice(0, 100)}`);
+          continue;
+        }
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          const data = trimmed.slice(5).trim();
-          if (data === '[DONE]') {
-            onChunk({ delta: '', done: true, sessionId, messageId });
-            continue;
-          }
+        const choices = parsed['choices'] as Array<Record<string, unknown>> | undefined;
+        const delta = choices?.[0]?.['delta'] as Record<string, unknown> | undefined;
+        if (!delta) continue;
 
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(data) as Record<string, unknown>;
-          } catch {
-            this.logger.warn(`[${this.providerName}] Failed to parse SSE chunk: ${data.slice(0, 100)}`);
-            continue;
-          }
+        // Debug: log delta keys on first few chunks to diagnose field names
+        debugChunkCount++;
+        if (debugChunkCount <= 3) {
+          this.logger.debug(`[${this.providerName}] delta keys: ${JSON.stringify(Object.keys(delta))}, reasoning_content=${JSON.stringify(delta['reasoning_content'])?.slice(0,40)}, content=${JSON.stringify(delta['content'])?.slice(0,40)}`);
+        }
 
-          const choices = parsed['choices'] as Array<Record<string, unknown>> | undefined;
-          const delta = choices?.[0]?.['delta'] as Record<string, unknown> | undefined;
-          if (!delta) continue;
+        const content = delta['content'];
+        if (typeof content === 'string' && content) {
+          onChunk({ delta: content, done: false, sessionId, messageId });
+        }
 
-          // Debug: log delta keys on first few chunks to diagnose field names
-          debugChunkCount++;
-          if (debugChunkCount <= 3) {
-            this.logger.debug(`[${this.providerName}] delta keys: ${JSON.stringify(Object.keys(delta))}, reasoning_content=${JSON.stringify(delta['reasoning_content'])?.slice(0,40)}, content=${JSON.stringify(delta['content'])?.slice(0,40)}`);
-          }
-
-          const content = delta['content'];
-          if (typeof content === 'string' && content) {
-            onChunk({ delta: content, done: false, sessionId, messageId });
-          }
-
-          // Thinking / reasoning tokens (DeepSeek R1 / MiMo style)
+        // Thinking / reasoning tokens (DeepSeek R1 / MiMo style)
         const reasoning = delta['reasoning_content'];
         if (typeof reasoning === 'string' && reasoning) {
           onChunk({ delta: reasoning, done: false, sessionId, messageId, thinking: true });
         }
 
-          const rawToolCalls = delta['tool_calls'] as Array<Record<string, unknown>> | undefined;
-          if (rawToolCalls) {
-            for (const tc of rawToolCalls) {
-              const idx = String(tc['index'] ?? 0);
-              const fn = tc['function'] as Record<string, unknown> | undefined;
-              if (!toolCallBuffers[idx]) {
-                toolCallBuffers[idx] = { name: '', argsRaw: '' };
-              }
-              if (typeof fn?.['name'] === 'string') toolCallBuffers[idx]!.name += fn['name'];
-              if (typeof fn?.['arguments'] === 'string') toolCallBuffers[idx]!.argsRaw += fn['arguments'];
+        const rawToolCalls = delta['tool_calls'] as Array<Record<string, unknown>> | undefined;
+        if (rawToolCalls) {
+          for (const tc of rawToolCalls) {
+            const idx = String(tc['index'] ?? 0);
+            const fn = tc['function'] as Record<string, unknown> | undefined;
+            if (!toolCallBuffers[idx]) {
+              toolCallBuffers[idx] = { name: '', argsRaw: '' };
             }
+            if (typeof fn?.['name'] === 'string') toolCallBuffers[idx]!.name += fn['name'];
+            if (typeof fn?.['arguments'] === 'string') toolCallBuffers[idx]!.argsRaw += fn['arguments'];
           }
         }
       }
-    } finally {
-      reader.releaseLock();
     }
 
     for (const [, buf] of Object.entries(toolCallBuffers)) {

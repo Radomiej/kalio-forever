@@ -28,7 +28,6 @@ describe('RaAppCreateTool', () => {
     raapp = {
       execute: vi.fn(),
       init: vi.fn().mockResolvedValue(undefined),
-      saveGeneratedApp: vi.fn().mockResolvedValue({ id: 'generated-default' }),
     };
     versioning = {
       saveAsDraft: vi.fn().mockResolvedValue({
@@ -120,7 +119,6 @@ describe('RaAppCreateTool', () => {
         expect.any(Buffer),
       );
       expect(versioning.approveDraft).not.toHaveBeenCalled();
-      expect(raapp.saveGeneratedApp).not.toHaveBeenCalled();
       expect(raapp.init).toHaveBeenCalledOnce();
       expect(result.storedAppId).toMatch(/^generated-sess-ra-/);
     });

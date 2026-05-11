@@ -1,4 +1,4 @@
-import { Controller, Get, Query, HttpException, HttpStatus } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, HttpStatus, Put, Query } from '@nestjs/common';
 import { LLMService } from './llm.service';
 import { CredentialsService } from '../credentials/credentials.service';
 import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
@@ -42,6 +42,27 @@ export class LLMController {
       this.credentials.getContextWindowSize(),
       this.credentials.getMaxToolAttempts(),
     ]);
+    return { ...config, contextWindowSize, maxToolAttempts };
+  }
+
+  @Get('active/models')
+  async getActiveModels(): Promise<{ models: string[] }> {
+    const models = await this.llm.getActiveModels();
+    return { models };
+  }
+
+  @Put('active/model')
+  async updateActiveModel(@Body() body: { model?: string }): Promise<LLMConfigResponse> {
+    if (!body.model || body.model.trim().length === 0) {
+      throw new HttpException('Missing required body field: model', HttpStatus.BAD_REQUEST);
+    }
+
+    const [config, contextWindowSize, maxToolAttempts] = await Promise.all([
+      this.llm.updateActiveModel(body.model),
+      this.credentials.getContextWindowSize(),
+      this.credentials.getMaxToolAttempts(),
+    ]);
+
     return { ...config, contextWindowSize, maxToolAttempts };
   }
 
