@@ -19,6 +19,19 @@ function buildDelegatedRequest(
   };
 }
 
+function normalizeToolNameList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const normalized = Array.from(new Set(
+    value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0),
+  ));
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 @Injectable()
 @Tool({
   name: 'run_subagent',
@@ -63,6 +76,11 @@ function buildDelegatedRequest(
       copyOutputs: {
         type: 'boolean',
         description: 'When true, copy isolated child VFS files back into the master VFS. Default: true.',
+      },
+      autoApproveTools: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional isolated-child tool allowlist for narrow auto-approval. Only backend-approved safe tools are honored; unsupported names are ignored.',
       },
     },
   },
@@ -147,6 +165,7 @@ export class SubagentTool {
     const rawVfsMode = request.args['vfsMode'];
     const vfsMode: VFSMode = rawVfsMode === 'shared' ? 'shared' : 'isolated';
     const copyOutputs = request.args['copyOutputs'] !== false;
+    const autoApproveTools = normalizeToolNameList(request.args['autoApproveTools']);
     const timeoutMs = Math.min(rawTimeout ?? 300_000, 600_000);
     const taskId = randomUUID();
     const sessionId = request.sessionId;
@@ -160,6 +179,7 @@ export class SubagentTool {
       parentToolCallId: request.callId,
       objective,
       attachments,
+      autoApproveTools,
       childSessionId,
       personaId,
       availableTools: tools,
@@ -212,6 +232,11 @@ export class SubagentTool {
       copyOutputs: {
         type: 'boolean',
         description: 'When true, copy isolated child VFS files back into the master VFS. Default: true.',
+      },
+      autoApproveTools: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional isolated-child tool allowlist for narrow auto-approval. Only backend-approved safe tools are honored; unsupported names are ignored.',
       },
     },
   },
@@ -268,6 +293,11 @@ export class SpawnSubagentTool {
       copyOutputs: {
         type: 'boolean',
         description: 'When true, copy isolated child VFS files back into the master VFS. Default: true.',
+      },
+      autoApproveTools: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional isolated-child tool allowlist for narrow auto-approval. Only backend-approved safe tools are honored; unsupported names are ignored.',
       },
     },
   },

@@ -144,7 +144,7 @@ flowchart TD
     NativeConfirm -- no --> Execute[execute tool]
     MCPPConfirm -- no --> Execute
 
-    NativeConfirm -- yes --> AutoApprove{sub-agent run and isolated vfs_write?}
+    NativeConfirm -- yes --> AutoApprove{sub-agent run and isolated built-in or opt-in safe tool?}
     AutoApprove -- yes --> Execute
     AutoApprove -- no --> Await[emit tool:confirmation_required]
 
@@ -160,11 +160,14 @@ Current rules from the code:
 
 - Pending confirmations live in `ToolDispatchService.pending` and are keyed by generated `requestId` plus bound `sessionId`.
 - `ChatGateway` rejects `tool:confirm` and `tool:cancel` if the socket does not currently own the session.
-- The only built-in auto-approve special case is `vfs_write` during a sub-agent run when:
+- The built-in auto-approve special case is `vfs_write` during a sub-agent run when:
   - `agentRun.agentType === 'subagent'`
   - `agentRun.vfsMode === 'isolated'`
   - `ctx.vfsSessionId === ctx.sessionId`
-- Sub-agent confirmation requests currently use `timeoutMs = 0`; the runtime is optimized around isolated child writes being auto-approved rather than timing out.
+- `run_subagent` can also pass an optional `autoApproveTools` allowlist for isolated child runs.
+- Only a narrow backend safelist is honored from that allowlist today: `image_generate` and `raapp_create`.
+- Unsupported tool names in `autoApproveTools` are ignored; shared-VFS child runs still require normal HITL confirmation.
+- Sub-agent confirmation requests currently use `timeoutMs = 0`; the runtime is optimized around isolated child writes or explicitly allowlisted safe child tools being auto-approved rather than timing out.
 
 ## Persistence and UI consequences
 

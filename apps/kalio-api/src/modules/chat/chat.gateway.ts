@@ -55,6 +55,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: SocketEvents['session:identify'],
   ): void {
     this.subscribeSocketToSession(client.id, payload.sessionId);
+    this.toolDispatch.getPendingConfirmations(payload.sessionId).forEach((request) => {
+      client.emit('tool:confirmation_required', request);
+    });
     this.logger.log(`Session re-identified: ${payload.sessionId} for socket ${client.id}`);
   }
 

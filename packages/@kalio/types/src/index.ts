@@ -139,7 +139,6 @@ export interface ChatSession {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
-  interlocutorLabel?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -151,7 +150,6 @@ export interface CreateSessionDto {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
-  interlocutorLabel?: string;
 }
 
 // ─── Tools ────────────────────────────────────────────────────────────────────

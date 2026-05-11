@@ -12,11 +12,10 @@
  *   LiveToolCallBubble   — tool still in-flight (ToolActivity, no result yet)
  *   HistoryToolCallBubble — tool finished (tool_result ChatMessage)
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { CheckCircle2, XCircle, Loader2, ChevronDown, ExternalLink, AlertTriangle } from 'lucide-react';
 import type { ToolActivity } from '../../store/agentStore';
 import { useAgentStore } from '../../store/agentStore';
-import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
 import { apiClient } from '../../services/apiClient';
 import type { ChatMessage, RAAppBlock, RaAppPendingApproval, CLIAgentResult, SubagentToolResult } from '@kalio/types';
@@ -261,11 +260,9 @@ function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const setPendingConfirmation = useAgentStore((s) => s.setPendingConfirmation);
   const updateToolActivity = useAgentStore((s) => s.updateToolActivity);
-  const activeSessionId = useSessionStore((s) => s.activeSessionId);
-  const confirmation = pendingConfirmations[activeSessionId ?? ''];
+  const confirmation = Object.values(pendingConfirmations).find((pending) => pending.toolCallId === activity.callId);
 
-  // Only render full buttons when this activity matches the stored confirmation for this session
-  const isMatch = confirmation?.toolCallId === activity.callId;
+  const isMatch = confirmation != null;
 
   const argEntries = Object.entries(activity.args);
   const argPreview = argEntries.length === 0
@@ -273,17 +270,17 @@ function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
     : `${argEntries[0][0]}: ${formatArgValue(argEntries[0][1])}${argEntries.length > 1 ? ' …' : ''}`;
 
   const handleConfirm = () => {
-    if (!confirmation || !activeSessionId) return;
+    if (!confirmation) return;
     updateToolActivity(activity.callId, { status: 'running', startedAt: Date.now() });
-    eventBus.confirmTool({ requestId: confirmation.requestId, sessionId: activeSessionId });
-    setPendingConfirmation(activeSessionId, null);
+    eventBus.confirmTool({ requestId: confirmation.requestId, sessionId: confirmation.sessionId });
+    setPendingConfirmation(confirmation.sessionId, null);
   };
 
   const handleCancel = () => {
-    if (!confirmation || !activeSessionId) return;
+    if (!confirmation) return;
     updateToolActivity(activity.callId, { status: 'cancelled', finishedAt: Date.now() });
-    eventBus.cancelTool({ requestId: confirmation.requestId, sessionId: activeSessionId });
-    setPendingConfirmation(activeSessionId, null);
+    eventBus.cancelTool({ requestId: confirmation.requestId, sessionId: confirmation.sessionId });
+    setPendingConfirmation(confirmation.sessionId, null);
   };
 
   return (
@@ -355,6 +352,30 @@ function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
 export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
   const [open, setOpen] = useState(false);
   const elapsed = activity.finishedAt != null ? activity.finishedAt - activity.startedAt : null;
+  const toolActivities = useAgentStore((s) => s.toolActivities);
+  const descendantActivities = useMemo(
+    () =>
+      activity.toolName !== 'run_subagent'
+        ? []
+        : toolActivities
+            .filter((candidate) => candidate.agentRun?.parentToolCallId === activity.callId)
+            .slice()
+            .sort((left, right) => {
+              if (left.status === right.status) {
+                return left.startedAt - right.startedAt;
+              }
+              if (left.status === 'awaiting_confirmation') return -1;
+              if (right.status === 'awaiting_confirmation') return 1;
+              return left.startedAt - right.startedAt;
+            }),
+    [activity.callId, activity.toolName, toolActivities],
+  );
+
+  useEffect(() => {
+    if (descendantActivities.length > 0) {
+      setOpen(true);
+    }
+  }, [descendantActivities.length]);
 
   // Awaiting confirmation gets its own dedicated inline bubble with action buttons
   if (activity.status === 'awaiting_confirmation') {
@@ -373,7 +394,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
   const hasArgs = Object.keys(activity.args).length > 0;
   const hasNonRaappResult = activity.result?.data != null && extractRAAppBlock(activity.result.data) == null && extractImageResult(activity.result.data) == null;
   const isRunningCliAgent = activity.toolName === 'run_cli_agent' && activity.status === 'running';
-  const expandable = hasArgs || hasNonRaappResult || isRunningCliAgent;
+  const expandable = hasArgs || hasNonRaappResult || isRunningCliAgent || descendantActivities.length > 0;
   const imageResult = activity.result?.data != null ? extractImageResult(activity.result.data) : null;
 
   return (
@@ -385,6 +406,18 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
       open={open}
       onToggle={() => setOpen((v) => !v)}
     >
+      {descendantActivities.length > 0 && (
+        <div className="space-y-2 rounded border border-base-300/60 bg-base-200/50 px-2 py-2">
+          <div className="text-[10px] font-mono uppercase tracking-[0.14em] text-base-content/45">
+            Sub-agent activity
+          </div>
+          {descendantActivities.map((childActivity) => (
+            <div key={childActivity.callId} className="pl-2 border-l border-base-300/60">
+              <LiveToolCallBubble activity={childActivity} />
+            </div>
+          ))}
+        </div>
+      )}
       {isRunningCliAgent && (
         <LiveCLIAgentBlock
           callId={activity.callId}

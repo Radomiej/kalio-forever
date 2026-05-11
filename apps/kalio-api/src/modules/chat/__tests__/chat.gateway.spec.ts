@@ -4,6 +4,7 @@ import type { ToolDispatchService } from '../tool-dispatch.service';
 import type { SessionPipelineService } from '../session-pipeline.service';
 import type { SessionsService } from '../sessions.service';
 import type { RAAppHITLService, SavedApproval } from '../../raapp/raapp-hitl.service';
+import type { ToolConfirmationRequest } from '@kalio/types';
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string }) => void;
 
@@ -20,6 +21,7 @@ describe('ChatGateway', () => {
     toolDispatch = {
       resolveConfirmation: vi.fn(),
       cancelConfirmation: vi.fn(),
+      getPendingConfirmations: vi.fn().mockReturnValue([]),
     } as unknown as ToolDispatchService;
 
     pipeline = {
@@ -169,6 +171,22 @@ describe('ChatGateway', () => {
       const registered = sessions.get(client.id);
       expect(registered).toBeTruthy();
       expect(registered?.has('session-reconnect')).toBe(true);
+    });
+
+    it('REGRESSION: replays pending tool confirmations for the re-identified session', () => {
+      const pending: ToolConfirmationRequest = {
+        requestId: 'req-1',
+        toolCallId: 'call-1',
+        sessionId: 'session-2',
+        toolName: 'image_generate',
+        args: { filename: 'coffee-hero.png' },
+        timeoutMs: 600000,
+      };
+      (toolDispatch.getPendingConfirmations as ReturnType<typeof vi.fn>).mockReturnValue([pending]);
+
+      gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
+
+      expect(client.emit).toHaveBeenCalledWith('tool:confirmation_required', pending);
     });
   });
 

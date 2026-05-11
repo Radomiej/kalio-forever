@@ -13,7 +13,6 @@ interface FakeRow {
   parentSessionId?: string | null;
   parentTurnId?: string | null;
   parentToolCallId?: string | null;
-  interlocutorLabel?: string | null;
   createdAt: number | Date;
   updatedAt: number | Date;
 }
@@ -115,7 +114,6 @@ describe('SessionsService', () => {
           parentSessionId: undefined,
           parentTurnId: undefined,
           parentToolCallId: undefined,
-          interlocutorLabel: undefined,
           createdAt: 1000,
           updatedAt: 2000,
         },

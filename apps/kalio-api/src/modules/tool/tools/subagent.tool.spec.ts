@@ -174,6 +174,14 @@ describe('SubagentTool', () => {
     }));
   });
 
+  it('REGRESSION: forwards optional child auto-approve allowlist into the runtime', async () => {
+    await tool.execute(makeRequest({ objective: 'make image', autoApproveTools: ['image_generate', 'raapp_create'] }, 'sess-parent'));
+
+    expect(runtime.runSubagent).toHaveBeenCalledWith(expect.objectContaining({
+      autoApproveTools: ['image_generate', 'raapp_create'],
+    }));
+  });
+
   it('resolves child tools from persona allowedTools', async () => {
     await tool.execute(makeRequest({ objective: 'task', personaId: 'default' }));
 

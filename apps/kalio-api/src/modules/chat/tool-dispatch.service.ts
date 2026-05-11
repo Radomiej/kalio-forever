@@ -8,10 +8,14 @@ import { TOOL_REGISTRY } from './chat.tokens';
 import { MCPService } from '../mcp/mcp.service';
 
 const HITL_TIMEOUT_MS = 600_000;
-const SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
+const BUILTIN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
+const OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['image_generate', 'raapp_create']);
+
+type SubagentAgentRunContext = NonNullable<StreamContext['agentRun']> & { autoApproveTools?: string[] };
 
 interface PendingConfirmation {
   sessionId: string;
+  payload: ToolConfirmationRequest;
   resolve: () => void;
   reject: (err: Error) => void;
 }
@@ -150,6 +154,12 @@ export class ToolDispatchService {
     pending.reject(new Error('User cancelled tool confirmation'));
   }
 
+  getPendingConfirmations(sessionId: string): ToolConfirmationRequest[] {
+    return Array.from(this.pending.values())
+      .filter((pending) => pending.sessionId === sessionId)
+      .map((pending) => pending.payload);
+  }
+
   private awaitConfirmation(
     callId: string,
     toolName: string,
@@ -184,6 +194,7 @@ export class ToolDispatchService {
 
       this.pending.set(requestId, {
         sessionId: ctx.sessionId,
+        payload,
         resolve: () => {
           if (timeout) clearTimeout(timeout);
           resolve(true);
@@ -197,10 +208,23 @@ export class ToolDispatchService {
   }
 
   private canAutoApprove(toolName: string, ctx: StreamContext): boolean {
-    return ctx.agentRun?.agentType === 'subagent'
-      && ctx.agentRun.vfsMode === 'isolated'
-      && ctx.vfsSessionId === ctx.sessionId
-      && SUBAGENT_AUTO_APPROVE_TOOLS.has(toolName);
+    const agentRun = ctx.agentRun as SubagentAgentRunContext | undefined;
+    if (
+      agentRun?.agentType !== 'subagent'
+      || agentRun.vfsMode !== 'isolated'
+      || ctx.vfsSessionId !== ctx.sessionId
+    ) {
+      return false;
+    }
+
+    if (BUILTIN_SUBAGENT_AUTO_APPROVE_TOOLS.has(toolName)) {
+      return true;
+    }
+
+    return Array.isArray(agentRun.autoApproveTools)
+      && agentRun.autoApproveTools.some(
+        (candidate) => candidate === toolName && OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS.has(candidate),
+      );
   }
 
   private withMeta(result: ToolResult, toolName: string, ctx: StreamContext): ToolResult {

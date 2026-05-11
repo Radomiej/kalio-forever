@@ -440,7 +440,6 @@ describe('ChatInterface event wiring', () => {
         title: 'Sub-agent: demo',
         kind: 'subagent',
         parentSessionId: 'session-1',
-        interlocutorLabel: 'Master agent',
         createdAt: 1,
         updatedAt: 1,
       });

@@ -27,7 +27,7 @@ If a tool returns download URLs or other directly usable URLs for created artifa
 If a tool partially succeeds (for example, it saves a file but its textual result is weak), inspect the VFS if needed and still produce a final summary.
 Do not ask clarifying questions. Work autonomously end-to-end.`;
 
-type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number };
+type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number; autoApproveTools?: string[] };
 
 function abortReason(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error('Sub-agent execution aborted');
@@ -88,6 +88,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       vfsMode: request.vfsMode,
       vfsSessionId,
       label: 'Sub-agent',
+      autoApproveTools: request.autoApproveTools,
       subagentDepth,
     };
 
@@ -99,7 +100,6 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           kind: 'subagent',
           parentSessionId: request.parentSessionId,
           parentToolCallId: request.parentToolCallId,
-          interlocutorLabel: 'Master agent',
         });
 
     if (childSession.kind !== 'subagent') {
