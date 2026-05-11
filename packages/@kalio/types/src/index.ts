@@ -172,6 +172,8 @@ export interface AgentRunContext {
   vfsMode?: VFSMode;
   vfsSessionId?: ID;
   label?: string;
+  autoApproveTools?: string[];
+  subagentDepth?: number;
 }
 
 export interface SubagentCopiedFile {

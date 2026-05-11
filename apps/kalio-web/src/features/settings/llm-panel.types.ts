@@ -2,6 +2,7 @@ export interface LLMConfigWithSource {
   provider: string;
   model: string;
   baseUrl: string;
+  apiKey?: string;
   contextWindowSize: number;
   maxToolAttempts: number;
   source: 'db' | 'env';

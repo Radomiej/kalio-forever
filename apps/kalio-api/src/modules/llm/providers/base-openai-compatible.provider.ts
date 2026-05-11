@@ -1,7 +1,7 @@
 import type { ILLMProvider } from '../llm.types';
 import type { LLMMessage, LLMStreamChunk, LLMToolCall, LLMConfig } from '@kalio/types';
 import { Logger } from '@nestjs/common';
-import { resolveLlmProviderBaseUrl } from '../../../common/utils/llm-provider-http.util';
+import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../../common/utils/llm-provider-http.util';
 
 let _toolCallCounter = 0;
 function uniqueToolCallId(): string {
@@ -180,7 +180,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
   protected buildHeaders(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${this.apiKey}`,
+      ...buildProviderCompatHeaders(this.providerName, this.apiKey || undefined),
     };
   }
 

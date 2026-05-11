@@ -79,6 +79,22 @@ function extractImageResult(data: unknown): ImageResultData | null {
   return null;
 }
 
+function hashString(value: string): string {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function getChildImageIdentity(image: ImageResultData): string {
+  if (typeof image.path === 'string' && image.path.trim().length > 0) {
+    return `path:${image.path}`;
+  }
+
+  return `inline:${hashString(image.image_url)}`;
+}
+
 function isSubagentCopiedFile(data: unknown): data is SubagentToolResult['copiedFiles'][number] {
   if (!data || typeof data !== 'object') return false;
   const file = data as Record<string, unknown>;
@@ -137,7 +153,7 @@ function extractChildToolPreviews(messages: ChatMessage[]): { raapp: RAAppBlock 
         continue;
       }
 
-      const imageKey = `${image.path ?? ''}|${image.image_url}`;
+      const imageKey = getChildImageIdentity(image);
       if (seenImages.has(imageKey)) {
         continue;
       }
@@ -196,7 +212,7 @@ function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
         <div className="space-y-3">
           {childImages.map((image) => (
             <ImageResultRenderer
-              key={`${image.path ?? image.image_url}`}
+              key={getChildImageIdentity(image)}
               data={image}
             />
           ))}

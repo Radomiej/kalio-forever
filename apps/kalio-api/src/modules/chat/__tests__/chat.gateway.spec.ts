@@ -236,6 +236,35 @@ describe('ChatGateway', () => {
 
       expect(client.emit).toHaveBeenCalledWith('tool:confirmation_required', pending);
     });
+
+    it('REGRESSION: re-identifying the master session replays child confirmations and lets the socket confirm them', async () => {
+      const pending: ToolConfirmationRequest = {
+        requestId: 'req-child',
+        toolCallId: 'call-child',
+        sessionId: 'child-session',
+        toolName: 'image_generate',
+        args: { filename: 'coffee-hero.png' },
+        timeoutMs: 600000,
+      };
+      (sessions.listChildren as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce([{ id: 'child-session' }])
+        .mockResolvedValueOnce([]);
+      (toolDispatch.getPendingConfirmations as ReturnType<typeof vi.fn>).mockImplementation((sessionId: string) => {
+        if (sessionId === 'child-session') {
+          return [pending];
+        }
+        return [];
+      });
+
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-1' });
+
+      expect(client.emit).toHaveBeenCalledWith('tool:confirmation_required', pending);
+
+      const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
+      handleToolConfirm(client as never, { requestId: 'req-child', sessionId: 'child-session' });
+
+      expect(toolDispatch.resolveConfirmation).toHaveBeenCalledWith('req-child', 'child-session');
+    });
   });
 
   describe('tool confirmations', () => {

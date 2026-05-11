@@ -49,14 +49,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('session:identify')
-  handleSessionIdentify(
+  async handleSessionIdentify(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SocketEvents['session:identify'],
-  ): void {
+  ): Promise<void> {
     this.subscribeSocketToSession(client.id, payload.sessionId);
-    this.toolDispatch.getPendingConfirmations(payload.sessionId).forEach((request) => {
-      client.emit('tool:confirmation_required', request);
+
+    const replayedRequestIds = new Set<string>();
+    const replayPendingConfirmations = (sessionId: string): void => {
+      this.toolDispatch.getPendingConfirmations(sessionId).forEach((request) => {
+        this.subscribeSocketToSession(client.id, request.sessionId);
+        if (replayedRequestIds.has(request.requestId)) {
+          return;
+        }
+        replayedRequestIds.add(request.requestId);
+        client.emit('tool:confirmation_required', request);
+      });
+    };
+
+    replayPendingConfirmations(payload.sessionId);
+
+    const descendantSessionIds = await this.collectDescendantSessionIds(payload.sessionId);
+    descendantSessionIds.forEach((sessionId) => {
+      this.subscribeSocketToSession(client.id, sessionId);
+      replayPendingConfirmations(sessionId);
     });
+
     this.logger.log(`Session re-identified: ${payload.sessionId} for socket ${client.id}`);
   }
 

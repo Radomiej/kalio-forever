@@ -140,6 +140,28 @@ describe('LiveToolCallBubble — status indicator only (no widget)', () => {
     render(<LiveToolCallBubble activity={activity} />);
     expect(screen.getByText('run_raapp')).toBeInTheDocument();
   });
+
+  it('REGRESSION: ToolActivity accepts backend agentRun metadata for auto-approve and subagent depth', () => {
+    const activity: ToolActivity = {
+      callId: 'call-subagent',
+      toolName: 'run_subagent',
+      args: { objective: 'Design a landing page' },
+      status: 'running',
+      startedAt: Date.now(),
+      agentRun: {
+        agentRunId: 'subagent-run-1',
+        agentType: 'subagent',
+        parentSessionId: 'session-1',
+        parentToolCallId: 'call-parent',
+        autoApproveTools: ['image_generate'],
+        subagentDepth: 1,
+      },
+    };
+
+    render(<LiveToolCallBubble activity={activity} />);
+
+    expect(screen.getByText('run_subagent')).toBeInTheDocument();
+  });
 });
 
 // ── HistoryToolCallBubble args display ────────────────────────────────────────
@@ -345,6 +367,58 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
     expect(screen.getByAltText('Generated menu collage')).toBeInTheDocument();
     expect(screen.getByText('images/hero-coffee.png')).toBeInTheDocument();
     expect(screen.getByText('images/menu-collage.png')).toBeInTheDocument();
+  });
+
+  it('REGRESSION: deduplicates child images by VFS path when the path is available', async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({
+      data: [
+        {
+          id: 'tool-image-1',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-image-1',
+          content: JSON.stringify({
+            output_type: 'image',
+            image_url: 'data:image/png;base64,AAAA',
+            path: 'images/hero-coffee.png',
+            message: 'Generated hero image',
+          }),
+          createdAt: Date.now(),
+        },
+        {
+          id: 'tool-image-2',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-image-2',
+          content: JSON.stringify({
+            output_type: 'image',
+            image_url: 'data:image/png;base64,BBBB',
+            path: 'images/hero-coffee.png',
+            message: 'Generated hero image',
+          }),
+          createdAt: Date.now() + 1,
+        },
+      ],
+    } as never);
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_subagent"
+        content={JSON.stringify({
+          childSessionId: 'sub-1',
+          parentSessionId: 'p-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'sub-1',
+          copiedFiles: [],
+          result: 'Completed',
+          taskId: 't-1',
+          durationMs: 1000,
+        })}
+      />,
+    );
+
+    expect((await screen.findAllByAltText('Generated hero image')).length).toBe(1);
+    expect(screen.getAllByText('images/hero-coffee.png')).toHaveLength(1);
   });
 
   it('keeps the child preview visible while collapsing verbose result details by default', async () => {

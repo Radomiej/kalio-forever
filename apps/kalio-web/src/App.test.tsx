@@ -1,6 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { App } from './App';
+import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
+
+const CONFIG_WITH_API_KEY: LLMConfigWithSource = {
+  provider: 'mock',
+  model: 'test-model',
+  baseUrl: 'http://localhost',
+  apiKey: '',
+  contextWindowSize: 32000,
+  maxToolAttempts: 4,
+  source: 'env',
+};
 
 const {
   setCanvasOpen,
@@ -152,5 +163,9 @@ describe('App view state persistence', () => {
     expect(screen.getByTestId('raapp-manager')).toBeInTheDocument();
     expect(screen.queryByTestId('landing-page')).not.toBeInTheDocument();
     expect(screen.queryByTestId('tool-panel')).not.toBeInTheDocument();
+  });
+
+  it('REGRESSION: runtime config type accepts backend responses that include apiKey', () => {
+    expect(CONFIG_WITH_API_KEY.apiKey).toBe('');
   });
 });

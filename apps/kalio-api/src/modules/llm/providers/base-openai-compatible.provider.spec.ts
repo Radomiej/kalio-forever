@@ -97,6 +97,36 @@ describe('BaseOpenAICompatibleProvider', () => {
     });
   });
 
+  describe('buildHeaders()', () => {
+    it('REGRESSION: omits Authorization when the API key is empty', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const keylessProvider = new BaseOpenAICompatibleProvider('TestProvider', '', 'gpt-4', 'https://api.test.com');
+      (keylessProvider as any).logger = mockLogger;
+
+      const mockStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await keylessProvider.streamChat(messages, tools, vi.fn(), 'sess-123', 'msg-456');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.test.com/chat/completions',
+        expect.objectContaining({
+          headers: expect.not.objectContaining({ Authorization: expect.any(String) }),
+        }),
+      );
+    });
+  });
+
   describe('streamChat - Tool Call ID Collision (REGRESSION TEST)', () => {
     it('should generate unique tool call IDs even for calls in same millisecond', async () => {
       // Arrange
