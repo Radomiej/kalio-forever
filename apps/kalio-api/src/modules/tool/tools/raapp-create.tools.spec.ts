@@ -7,6 +7,7 @@ import { Reflector } from '@nestjs/core';
 import { RaAppCreateTool, RaAppCompileTool } from './raapp.tools';
 import type { RAAppService } from '../../raapp/raapp.service';
 import type { RAAppSandboxService } from '../../raapp/raapp-sandbox.service';
+import type { RAAppVersioningService } from '../../raapp/raapp-versioning.service';
 import type { ToolCallRequest } from '@kalio/types';
 import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
@@ -21,13 +22,31 @@ const reflector = new Reflector();
 describe('RaAppCreateTool', () => {
   let tool: RaAppCreateTool;
   let raapp: Partial<RAAppService>;
+  let versioning: Partial<RAAppVersioningService>;
 
   beforeEach(() => {
     raapp = {
       execute: vi.fn(),
+      init: vi.fn().mockResolvedValue(undefined),
       saveGeneratedApp: vi.fn().mockResolvedValue({ id: 'generated-default' }),
     };
-    tool = new RaAppCreateTool(raapp as RAAppService);
+    versioning = {
+      saveAsDraft: vi.fn().mockResolvedValue({
+        slug: 'generated-sess-ra-abcd1234',
+        name: 'Generated App',
+        source: 'user',
+        current: {
+          version: '1.0.0',
+          status: 'current',
+          zipPath: '/tmp/current.zip',
+          createdAt: 1,
+          meta: { id: 'generated-sess-ra-abcd1234', name: 'Generated App', version: '1.0.0' },
+        },
+        history: [],
+      }),
+      approveDraft: vi.fn(),
+    };
+    tool = new RaAppCreateTool(raapp as RAAppService, versioning as RAAppVersioningService);
   });
 
   it('REGRESSION: requires confirmation because it persists generated RA-Apps', () => {
@@ -86,24 +105,24 @@ describe('RaAppCreateTool', () => {
       });
     });
 
-    it('persists generated app in RA-App manager and returns storedAppId', async () => {
+    it('publishes generated app in versioned release storage and returns storedAppId', async () => {
       (raapp.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: 'ok',
         renderedContent: '<html>hello</html>',
       });
-      (raapp.saveGeneratedApp as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'generated-cats' });
 
       const result = await tool.execute(
         makeRequest('raapp_create', { type: 'html', content: '<html>hello</html>', mode: 'display' }),
       ) as Record<string, unknown>;
 
-      expect(raapp.saveGeneratedApp).toHaveBeenCalledWith({
-        type: 'html',
-        content: '<html>hello</html>',
-        mode: 'display',
-        sessionId: 'sess-ra',
-      });
-      expect(result.storedAppId).toBe('generated-cats');
+      expect(versioning.saveAsDraft).toHaveBeenCalledWith(
+        expect.stringMatching(/^generated-sess-ra-/),
+        expect.any(Buffer),
+      );
+      expect(versioning.approveDraft).not.toHaveBeenCalled();
+      expect(raapp.saveGeneratedApp).not.toHaveBeenCalled();
+      expect(raapp.init).toHaveBeenCalledOnce();
+      expect(result.storedAppId).toMatch(/^generated-sess-ra-/);
     });
   });
 

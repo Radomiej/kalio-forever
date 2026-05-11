@@ -1,11 +1,70 @@
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
+import yaml from 'js-yaml';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool, ConfirmedTool } from '../../../common/decorators/tool.decorator';
-import { RAAppService } from '../../raapp/raapp.service';
+import { RAAppService, deriveGeneratedAppName } from '../../raapp/raapp.service';
+import type { RAAppMeta, SaveGeneratedAppInput } from '../../raapp/raapp.service';
 import { RAAppSandboxService } from '../../raapp/raapp-sandbox.service';
 import { EffectsProcessorService } from '../../raapp/effects-processor.service';
 import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
+import { RAAppVersioningService } from '../../raapp/raapp-versioning.service';
+import { archiveDirectoryToZip } from '../../raapp/zip-archive.util';
 import { EntityStore } from '../../raapp/entity-store';
+
+function createGeneratedAppId(sessionId: string): string {
+  const sessionPart = sessionId.trim().slice(0, 8) || 'session';
+  return `generated-${sessionPart}-${randomUUID().slice(0, 8)}`;
+}
+
+async function buildGeneratedArchive(input: SaveGeneratedAppInput): Promise<{ appId: string; buffer: Buffer }> {
+  const appId = createGeneratedAppId(input.sessionId);
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-create-'));
+  const tmpDir = path.join(tmpRoot, 'app');
+  const tmpZip = path.join(tmpRoot, `${appId}.zip`);
+
+  try {
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    const meta: RAAppMeta = {
+      id: appId,
+      name: deriveGeneratedAppName(input),
+      description: 'Auto-saved by raapp_create tool',
+      version: '1.0.0',
+      tags: ['generated', 'raapp-create'],
+      expose_as_tool: false,
+      execution: {
+        render_as: input.mode,
+      },
+    };
+
+    await fs.writeFile(path.join(tmpDir, 'meta.yml'), yaml.dump(meta), 'utf-8');
+
+    if (input.type === 'gui') {
+      await fs.writeFile(path.join(tmpDir, 'ui.gui'), input.content, 'utf-8');
+    } else {
+      await fs.writeFile(path.join(tmpDir, 'main.html'), input.content, 'utf-8');
+    }
+
+    await archiveDirectoryToZip({
+      sourceDir: tmpDir,
+      zipPath: tmpZip,
+      cleanupOnError: async () => {
+        await fs.rm(tmpZip, { force: true });
+      },
+    });
+
+    return {
+      appId,
+      buffer: await fs.readFile(tmpZip),
+    };
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+}
 
 @Injectable()
 @ConfirmedTool({
@@ -45,7 +104,10 @@ import { EntityStore } from '../../raapp/entity-store';
 export class RaAppCreateTool {
   private readonly logger = new Logger(RaAppCreateTool.name);
 
-  constructor(private readonly raapp: RAAppService) {}
+  constructor(
+    private readonly raapp: RAAppService,
+    private readonly versioning: RAAppVersioningService,
+  ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
     const type = request.args['type'] as 'html' | 'gui';
@@ -64,7 +126,7 @@ export class RaAppCreateTool {
       };
     }
 
-    const saved = await this.raapp.saveGeneratedApp({
+    const generated = await buildGeneratedArchive({
       type,
       content,
       mode: mode as 'display' | 'interactive',
@@ -72,13 +134,16 @@ export class RaAppCreateTool {
       ...(title !== undefined && { title }),
     });
 
+    await this.versioning.saveAsDraft(generated.appId, generated.buffer);
+    await this.raapp.init();
+
     return {
       status: 'ready',
       type,
       mode,
       content,
       renderedContent: result.renderedContent,
-      storedAppId: saved.id,
+      storedAppId: generated.appId,
     };
   }
 }

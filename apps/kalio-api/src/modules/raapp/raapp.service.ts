@@ -9,7 +9,6 @@ import yaml from 'js-yaml';
 import type { RAAppBlock, RAAppResult } from '@kalio/types';
 import { compileGui } from './gui/guiDslExpand';
 import { GuiParseError } from './gui/guiDslParser';
-import { archiveDirectoryToZip } from './zip-archive.util';
 
 export interface RAAppMeta {
   id: string;
@@ -309,54 +308,6 @@ export class RAAppService implements OnModuleInit {
     const zipPath = path.join(this.userDir, `${id}.zip`);
     await fs.writeFile(zipPath, buffer);
     return this.loadZip(zipPath, 'user');
-  }
-
-  async saveGeneratedApp(input: SaveGeneratedAppInput): Promise<LoadedRAApp> {
-    const sessionPart = input.sessionId.trim().slice(0, 8) || 'session';
-    const appId = `generated-${sessionPart}-${randomUUID().slice(0, 8)}`;
-    const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
-    const zipPath = path.join(this.userDir, `${appId}.zip`);
-    const tmpZipPath = `${zipPath}.tmp`;
-
-    try {
-      await fs.mkdir(tmpDir, { recursive: true });
-
-      const meta: RAAppMeta = {
-        id: appId,
-        name: deriveGeneratedAppName(input),
-        description: 'Auto-saved by raapp_create tool',
-        version: '1.0.0',
-        tags: ['generated', 'raapp-create'],
-        expose_as_tool: false,
-        execution: {
-          render_as: input.mode,
-        },
-      };
-
-      await fs.writeFile(path.join(tmpDir, 'meta.yml'), yaml.dump(meta), 'utf-8');
-
-      if (input.type === 'gui') {
-        await fs.writeFile(path.join(tmpDir, 'ui.gui'), input.content, 'utf-8');
-      } else {
-        await fs.writeFile(path.join(tmpDir, 'main.html'), input.content, 'utf-8');
-      }
-
-      await archiveDirectoryToZip({
-        sourceDir: tmpDir,
-        zipPath: tmpZipPath,
-        cleanupOnError: async () => {
-          await fs.rm(tmpZipPath, { force: true });
-        },
-      });
-      await fs.rename(tmpZipPath, zipPath);
-
-      const loaded = await this.loadZip(zipPath, 'user');
-      this.logger.log(`[RAAppService] Saved generated app ${loaded.id} (${input.type}, mode=${input.mode})`);
-      return loaded;
-    } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true });
-      await fs.rm(tmpZipPath, { force: true }).catch(() => { /* best effort */ });
-    }
   }
 
   async delete(id: string): Promise<void> {

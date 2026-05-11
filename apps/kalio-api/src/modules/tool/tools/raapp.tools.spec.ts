@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RunRaAppTool, ListRaAppsTool, RaAppCreateTool } from './raapp.tools';
 import type { RAAppService } from '../../raapp/raapp.service';
 import type { LoadedRAApp } from '../../raapp/raapp.service';
+import type { RAAppVersioningService } from '../../raapp/raapp-versioning.service';
 import type { ToolCallRequest } from '@kalio/types';
 import type { EffectsProcessorService } from '../../raapp/effects-processor.service';
 import type { RAAppHITLService } from '../../raapp/raapp-hitl.service';
@@ -248,16 +249,34 @@ describe('REGRESSION: ra-apps persona skills include run_raapp and list_raapps',
 });
 
 describe('RaAppCreateTool', () => {
-  it('forwards optional title when saving generated app', async () => {
+  it('publishes optional-title apps through versioned release storage', async () => {
     const execute = vi.fn().mockResolvedValue({ status: 'ready', renderedContent: '<html></html>' });
-    const saveGeneratedApp = vi.fn().mockResolvedValue({ id: 'generated-1' });
+    const init = vi.fn().mockResolvedValue(undefined);
+    const saveGeneratedApp = vi.fn();
+    const saveAsDraft = vi.fn().mockResolvedValue({
+      slug: 'generated-sid-1-12345678',
+      name: 'Kocia Strona',
+      source: 'user',
+      current: {
+        version: '1.0.0',
+        status: 'current',
+        zipPath: '/tmp/current.zip',
+        createdAt: 1,
+        meta: { id: 'generated-sid-1-12345678', name: 'Kocia Strona', version: '1.0.0' },
+      },
+      history: [],
+    });
     const raapp = {
       execute,
+      init,
       saveGeneratedApp,
     } as unknown as RAAppService;
-    const tool = new RaAppCreateTool(raapp);
+    const versioning = {
+      saveAsDraft,
+    } as unknown as RAAppVersioningService;
+    const tool = new RaAppCreateTool(raapp, versioning);
 
-    await tool.execute({
+    const result = await tool.execute({
       callId: 'call-1',
       sessionId: 'sid-1',
       toolName: 'raapp_create',
@@ -267,7 +286,7 @@ describe('RaAppCreateTool', () => {
         mode: 'display',
         title: 'Kocia Strona',
       },
-    });
+    }) as Record<string, unknown>;
 
     expect(execute).toHaveBeenCalledWith({
       type: 'html',
@@ -275,12 +294,14 @@ describe('RaAppCreateTool', () => {
       content: '<html><head><title>Koty</title></head></html>',
     });
 
-    expect(saveGeneratedApp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: 'Kocia Strona',
-      }),
+    expect(saveAsDraft).toHaveBeenCalledWith(
+      expect.stringMatching(/^generated-sid-1-/),
+      expect.any(Buffer),
     );
+    expect(saveGeneratedApp).not.toHaveBeenCalled();
+    expect(init).toHaveBeenCalledOnce();
+    expect(result.storedAppId).toMatch(/^generated-sid-1-/);
 
-    expect(execute.mock.invocationCallOrder[0]).toBeLessThan(saveGeneratedApp.mock.invocationCallOrder[0]);
+    expect(execute.mock.invocationCallOrder[0]).toBeLessThan(saveAsDraft.mock.invocationCallOrder[0]);
   });
 });
