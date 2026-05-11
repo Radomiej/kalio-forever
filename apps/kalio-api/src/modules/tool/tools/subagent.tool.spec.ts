@@ -3,6 +3,7 @@ import { MessageSubagentTool, SpawnSubagentTool, SubagentTool } from './subagent
 import type { ModuleRef } from '@nestjs/core';
 import type { AgentRunContext, ToolCallRequest, ToolMeta } from '@kalio/types';
 import { SUBAGENT_RUNTIME } from '../subagent-runtime.port';
+import type { ToolCatalogPort } from '../tool-catalog.port';
 import type { PersonaService } from '../../persona/persona.service';
 import type { CredentialsService } from '../../credentials/credentials.service';
 
@@ -73,6 +74,7 @@ describe('SubagentTool', () => {
 
     tool = new SubagentTool(
       moduleRef as ModuleRef,
+      registry as ToolCatalogPort,
       personaService as unknown as PersonaService,
       credentialsService as unknown as CredentialsService,
     );
@@ -188,13 +190,14 @@ describe('SubagentTool', () => {
     moduleRef = {
       get: vi.fn().mockImplementation((token: unknown) => {
         if (token === SUBAGENT_RUNTIME) return runtime;
-        return {
-          getEntries: vi.fn().mockReturnValue([entry]),
-        };
+        return registry;
       }),
     };
     tool = new SubagentTool(
       moduleRef as ModuleRef,
+      {
+        getEntries: vi.fn().mockReturnValue([entry]),
+      },
       personaService as unknown as PersonaService,
       credentialsService as unknown as CredentialsService,
     );
@@ -214,36 +217,36 @@ describe('SubagentTool', () => {
     expect(runtime.runSubagent).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 600000 }));
   });
 
-  it('resolves registry when moduleRef.get is called with class token instead of a string token', async () => {
-    const stringRejectingModuleRef = {
+  it('resolves the tool catalog without relying on class tokens', async () => {
+    const classRejectingModuleRef = {
       get: vi.fn().mockImplementation((token: unknown) => {
-        if (typeof token === 'string') {
+        if (typeof token === 'function') {
           throw new Error(
-            `Nest could not find ${String(token)} element (this provider does not exist in the current context)`,
+            `Nest could not resolve class token ${String(token)} in the current context`,
           );
         }
         if (token === SUBAGENT_RUNTIME) return runtime;
         return registry;
       }),
     };
-    const toolWithClassToken = new SubagentTool(
-      stringRejectingModuleRef as unknown as ModuleRef,
+    const toolWithSymbolCatalog = new SubagentTool(
+      classRejectingModuleRef as unknown as ModuleRef,
+      registry as ToolCatalogPort,
       personaService as unknown as PersonaService,
       credentialsService as unknown as CredentialsService,
     );
 
     await expect(
-      toolWithClassToken.execute(makeRequest({ objective: 'task' })),
+      toolWithSymbolCatalog.execute(makeRequest({ objective: 'task' })),
     ).resolves.toBeDefined();
   });
 
-  it('calls moduleRef.get with a class token and { strict: false }', async () => {
+  it('does not resolve the tool catalog through ModuleRef', async () => {
     await tool.execute(makeRequest({ objective: 'task' }));
 
-    expect(moduleRef.get).toHaveBeenCalledWith(
-      expect.any(Function),
-      expect.objectContaining({ strict: false }),
-    );
+    expect(vi.mocked(moduleRef.get as ReturnType<typeof vi.fn>).mock.calls).toEqual([
+      [SUBAGENT_RUNTIME, { strict: false }],
+    ]);
   });
 
   it('rejects when the runtime is unavailable instead of silently falling back to direct LLM streaming', async () => {
@@ -257,6 +260,7 @@ describe('SubagentTool', () => {
     };
     tool = new SubagentTool(
       moduleRef as ModuleRef,
+      registry as ToolCatalogPort,
       personaService as unknown as PersonaService,
       credentialsService as unknown as CredentialsService,
     );

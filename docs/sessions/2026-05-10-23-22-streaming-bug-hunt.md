@@ -261,3 +261,27 @@
 ### Remaining note
 
 - The duplicated RA-App preview bridge helper still exists on purpose in backend and frontend local `src` trees. I did not deduplicate it here because the previous shared-path extraction already broke live runtime resolution; that needs a real shared package or a parity check, not another direct cross-app import.
+
+## 2026-05-11 10:23 review cleanup + focused Playwright pass
+
+### What was done
+
+- Added regression coverage for the successful catalog-reload path where `run_raapp` finds a stale app first and then the app disappears after reload.
+- Simplified `RunRaAppTool.execute()` so the reload path uses an explicit `appToRun` variable and no longer needs the redundant trailing `if (!app)` narrowing guard.
+- Ran a focused Playwright slice against the live dev stack for RA-App rendering, RA-App chat launch, tool-chip visibility, and tool-registry smoke.
+
+### Files touched
+
+- `apps/kalio-api/src/modules/tool/tools/raapp.tools.ts`
+- `apps/kalio-api/src/modules/tool/tools/raapp.tools.spec.ts`
+
+### Validation
+
+- `Push-Location apps/kalio-api; node_modules\.bin\vitest.cmd run src/modules/tool/tools/raapp.tools.spec.ts; Pop-Location` ✅
+- `Push-Location apps/e2e; pnpm exec playwright test tests/ac-10-raapp-rendering.spec.ts tests/ac-11-tool-call-visible.spec.ts tests/ac-raapp-ecs-live.spec.ts tests/ac-25-raapp-memory-tools.spec.ts --project=chromium; Pop-Location` ✅ (`13 passed`)
+- VS Code diagnostics on touched files ✅
+
+### Notes
+
+- Dev stack was already healthy before Playwright (`GET /api/health` on :3016 and web on :5188 both responded).
+- There is still no active GitHub pull request attached to the current branch.

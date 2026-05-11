@@ -185,7 +185,7 @@ export class RunRaAppTool {
     const id = request.args['id'] as string;
     const inputs = (request.args['inputs'] ?? {}) as Record<string, unknown>;
     const sessionId = request.sessionId;
-    let app = this.raapp.getById(id);
+    const app = this.raapp.getById(id);
 
     if (!app) {
       const available = this.raapp.getAll().map((a) => a.id);
@@ -195,35 +195,28 @@ export class RunRaAppTool {
       };
     }
 
-    if (!app.guiContent && !app.htmlContent) {
+    let appToRun = app;
+
+    if (!appToRun.guiContent && !appToRun.htmlContent) {
       this.logger.warn(`[run_raapp] ${id} loaded without renderable content; reloading catalog once before failing`);
-      let reloadFailed = false;
       try {
         await this.raapp.init();
-        app = this.raapp.getById(id);
+        const reloadedApp = this.raapp.getById(id);
+        if (!reloadedApp) {
+          return {
+            status: 'error',
+            message: `RA-App "${id}" disappeared after catalog reload. Please try again.`,
+          };
+        }
+        appToRun = reloadedApp;
       } catch (err) {
-        reloadFailed = true;
         const error = err instanceof Error ? err : new Error(String(err));
         this.logger.warn(`[run_raapp] Catalog reload failed for ${id}: ${error.message}`);
       }
-
-      if (!reloadFailed && !app) {
-        return {
-          status: 'error',
-          message: `RA-App "${id}" disappeared after catalog reload. Please try again.`,
-        };
-      }
-    }
-
-    if (!app) {
-      return {
-        status: 'error',
-        message: `RA-App "${id}" disappeared after catalog reload. Please try again.`,
-      };
     }
 
     // GUI DSL app (ui.gui)
-    if (app.guiContent) {
+    if (appToRun.guiContent) {
       // Flatten array inputs into indexed keys: options[0..N] → output.option_0..N
       const outputData: Record<string, unknown> = { ...inputs };
       if (Array.isArray(inputs['options'])) {
@@ -234,10 +227,10 @@ export class RunRaAppTool {
       }
       // Execute system effects (including call_native) to compute derived outputs
       let pendingApprovals: import('@kalio/types').RaAppPendingApproval[] = [];
-      if (app.systemsContent) {
+      if (appToRun.systemsContent) {
         const entityStore = new EntityStore();
         const effectsResult = await this.effectsProcessor.processSystemsYaml(
-          app.systemsContent,
+          appToRun.systemsContent,
           inputs,
           { sessionId },
           entityStore,
@@ -260,7 +253,7 @@ export class RunRaAppTool {
         }
       }
       const data = { output: outputData };
-      const result = await this.raapp.execute({ type: 'gui', mode: app.appMode, content: app.guiContent }, data);
+      const result = await this.raapp.execute({ type: 'gui', mode: appToRun.appMode, content: appToRun.guiContent }, data);
       if (result.status === 'error') {
         this.logger.warn(`[run_raapp] GUI DSL error: ${result.error?.message}`);
         return { status: 'error', message: result.error?.message };
@@ -268,22 +261,22 @@ export class RunRaAppTool {
       return {
         status: 'ready',
         type: 'gui',
-        mode: app.appMode,
-        content: app.guiContent,
+        mode: appToRun.appMode,
+        content: appToRun.guiContent,
         renderedContent: result.renderedContent,
         ...(pendingApprovals.length > 0 ? { pendingApprovals } : {}),
       };
     }
 
     // HTML app (main.html / index.html)
-    if (!app.htmlContent) {
+    if (!appToRun.htmlContent) {
       return {
         status: 'error',
         message: `RA-App "${id}" has no renderable content (missing main.html, index.html, or ui.gui in the zip).`,
       };
     }
 
-    const result = await this.raapp.execute({ type: 'html', mode: app.appMode, content: app.htmlContent });
+    const result = await this.raapp.execute({ type: 'html', mode: appToRun.appMode, content: appToRun.htmlContent });
     if (result.status === 'error') {
       this.logger.warn(`[run_raapp] Execution error: ${result.error?.message}`);
       return { status: 'error', message: result.error?.message };
@@ -292,8 +285,8 @@ export class RunRaAppTool {
     return {
       status: 'ready',
       type: 'html',
-      mode: app.appMode,
-      content: app.htmlContent,
+      mode: appToRun.appMode,
+      content: appToRun.htmlContent,
       renderedContent: result.renderedContent,
     };
   }

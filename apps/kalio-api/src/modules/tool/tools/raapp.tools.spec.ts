@@ -129,6 +129,18 @@ describe('RunRaAppTool', () => {
     expect(result.message).toBe('RA-App "visual-calculator" has no renderable content (missing main.html, index.html, or ui.gui in the zip).');
   });
 
+  it('returns a disappeared-after-reload error when catalog reload succeeds but the app is gone', async () => {
+    (raapp.getById as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(makeApp({ id: 'visual-calculator', htmlContent: null, guiContent: null }))
+      .mockReturnValueOnce(undefined);
+
+    const result = await tool.execute(makeRequest({ id: 'visual-calculator' })) as Record<string, unknown>;
+
+    expect(raapp.init).toHaveBeenCalledOnce();
+    expect(result.status).toBe('error');
+    expect(result.message).toBe('RA-App "visual-calculator" disappeared after catalog reload. Please try again.');
+  });
+
   it('returns ready block with correct structure when app executes successfully', async () => {
     const app = makeApp();
     (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(app);

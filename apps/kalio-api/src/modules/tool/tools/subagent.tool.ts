@@ -1,19 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { randomUUID } from 'node:crypto';
 import type { SubagentToolResult, ToolCallRequest, ToolMeta, VFSMode } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
-// eslint-disable-next-line import/no-cycle
-import { ToolRegistryService } from '../tool-registry.service';
+import { TOOL_CATALOG, type ToolCatalogPort } from '../tool-catalog.port';
 import { SUBAGENT_RUNTIME, type SubagentRuntimePort } from '../subagent-runtime.port';
 import { PersonaService } from '../../persona/persona.service';
 import { CredentialsService } from '../../credentials/credentials.service';
-
-interface ToolRegistryLike {
-  getEntries?: () => Array<{ meta: ToolMeta }>;
-  getAllTools?: () => ToolMeta[];
-  getToolsForSkills?: (skills: string[]) => ToolMeta[];
-}
 
 function buildDelegatedRequest(
   request: ToolCallRequest,
@@ -79,17 +72,10 @@ export class SubagentTool {
 
   constructor(
     private readonly moduleRef: ModuleRef,
+    @Inject(TOOL_CATALOG) private readonly toolCatalog: ToolCatalogPort,
     private readonly personaService: PersonaService,
     private readonly credentialsService: CredentialsService,
   ) {}
-
-  private getToolRegistry(): ToolRegistryLike {
-    // Use the class as the DI token (not a string) so NestJS can resolve it.
-    // { strict: false } searches the entire application graph, which is needed
-    // because ToolRegistryService and SubagentTool are in the same module but
-    // the default strict lookup fails with a class-keyed provider.
-    return this.moduleRef.get(ToolRegistryService, { strict: false });
-  }
 
   private getRuntime(): SubagentRuntimePort {
     try {
@@ -115,24 +101,28 @@ export class SubagentTool {
       throw new Error(`Persona ${personaId} not found`);
     }
 
-    const registry = this.getToolRegistry();
     const allowedTools = personaConfig.allowedTools ?? [];
 
     if (allowedTools.length === 0) return [];
 
-    if (typeof registry.getToolsForSkills === 'function') {
-      return registry.getToolsForSkills(allowedTools);
+    if (typeof this.toolCatalog.getToolsForSkills === 'function') {
+      return this.toolCatalog.getToolsForSkills(allowedTools);
     }
 
-    if (typeof registry.getEntries === 'function') {
+    if (typeof this.toolCatalog.getEntries === 'function') {
       const allowed = new Set(allowedTools);
-      return registry
+      return this.toolCatalog
         .getEntries()
         .map((entry) => entry.meta)
         .filter((meta) => allowed.has(meta.name));
     }
 
-    throw new Error('ToolRegistryService does not expose a supported tool listing API');
+    if (typeof this.toolCatalog.getAllTools === 'function') {
+      const allowed = new Set(allowedTools);
+      return this.toolCatalog.getAllTools().filter((meta) => allowed.has(meta.name));
+    }
+
+    throw new Error('Tool catalog does not expose a supported tool listing API');
   }
 
   async execute(request: ToolCallRequest): Promise<SubagentToolResult> {
