@@ -116,6 +116,19 @@ describe('RunRaAppTool', () => {
     expect(result.type).toBe('gui');
   });
 
+  it('returns the existing no-renderable-content error when catalog reload itself fails', async () => {
+    (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeApp({ id: 'visual-calculator', htmlContent: null, guiContent: null }),
+    );
+    (raapp.init as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('disk busy'));
+
+    const result = await tool.execute(makeRequest({ id: 'visual-calculator' })) as Record<string, unknown>;
+
+    expect(raapp.init).toHaveBeenCalledOnce();
+    expect(result.status).toBe('error');
+    expect(result.message).toBe('RA-App "visual-calculator" has no renderable content (missing main.html, index.html, or ui.gui in the zip).');
+  });
+
   it('returns ready block with correct structure when app executes successfully', async () => {
     const app = makeApp();
     (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(app);

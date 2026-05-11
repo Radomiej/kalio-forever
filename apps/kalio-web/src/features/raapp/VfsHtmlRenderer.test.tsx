@@ -28,6 +28,19 @@ describe('VfsHtmlRenderer', () => {
     );
   });
 
+  it('includes credentials on the preview preflight request', async () => {
+    fetchMock.mockResolvedValue({ ok: true });
+
+    render(<VfsHtmlRenderer sessionId="session-1" vfsPath="drafts/secure/index.html" />);
+
+    await screen.findByTestId('raapp-vfs-src');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3016/api/sessions/session-1/vfs/serve-path/drafts/secure/index.html',
+      expect.objectContaining({ credentials: 'include', signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('shows a friendly fallback when the VFS preview target is unavailable', async () => {
     fetchMock.mockResolvedValue({ ok: false });
 

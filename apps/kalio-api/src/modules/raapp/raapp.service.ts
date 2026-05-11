@@ -184,6 +184,10 @@ export class RAAppService implements OnModuleInit {
       this.logger.warn(
         `[RAAppService] Replacing duplicate RA-App ${app.id} with ${app.zipPath}`,
       );
+    } else if (incomingScore === existingScore) {
+      this.logger.warn(
+        `[RAAppService] Replacing duplicate RA-App ${app.id} with ${app.zipPath} (equivalent renderable content)` ,
+      );
     }
 
     this.loaded.set(app.id, app);

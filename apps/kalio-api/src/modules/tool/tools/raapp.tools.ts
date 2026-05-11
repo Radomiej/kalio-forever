@@ -197,8 +197,22 @@ export class RunRaAppTool {
 
     if (!app.guiContent && !app.htmlContent) {
       this.logger.warn(`[run_raapp] ${id} loaded without renderable content; reloading catalog once before failing`);
-      await this.raapp.init();
-      app = this.raapp.getById(id);
+      let reloadFailed = false;
+      try {
+        await this.raapp.init();
+        app = this.raapp.getById(id);
+      } catch (err) {
+        reloadFailed = true;
+        const error = err instanceof Error ? err : new Error(String(err));
+        this.logger.warn(`[run_raapp] Catalog reload failed for ${id}: ${error.message}`);
+      }
+
+      if (!reloadFailed && !app) {
+        return {
+          status: 'error',
+          message: `RA-App "${id}" disappeared after catalog reload. Please try again.`,
+        };
+      }
     }
 
     if (!app) {

@@ -234,3 +234,30 @@
 - `Push-Location apps/kalio-api; node_modules\.bin\vitest.cmd run src/modules/chat/__tests__/chat.service.spec.ts; Pop-Location` ✅
 - `Push-Location apps/kalio-api; node_modules\.bin\vitest.cmd run src/modules/raapp/raapp.service.spec.ts src/modules/llm/providers/openai-compatible.provider.spec.ts src/modules/llm/providers/base-openai-compatible.provider.spec.ts; Pop-Location` ✅
 - VS Code diagnostics on all touched files ✅
+
+## 2026-05-11 10:06 remaining review follow-up applied
+
+### What was done
+
+- Added a regression for `run_raapp` when catalog reload fails after a stale non-renderable app lookup, then changed the tool to keep the existing no-renderable-content error instead of throwing the raw `raapp.init()` failure.
+- Added a regression for VFS preview preflight auth and changed `VfsHtmlRenderer` to call `fetch(src, { signal, credentials: 'include' })`.
+- Added a regression for duplicate loader observability and changed `RAAppService.storeLoadedApp()` to log when an equal-score duplicate replaces an existing app.
+
+### Files touched
+
+- `apps/kalio-api/src/modules/tool/tools/raapp.tools.ts`
+- `apps/kalio-api/src/modules/tool/tools/raapp.tools.spec.ts`
+- `apps/kalio-api/src/modules/raapp/raapp.service.ts`
+- `apps/kalio-api/src/modules/raapp/raapp.service.spec.ts`
+- `apps/kalio-web/src/features/raapp/VfsHtmlRenderer.tsx`
+- `apps/kalio-web/src/features/raapp/VfsHtmlRenderer.test.tsx`
+
+### Validation
+
+- `Push-Location apps/kalio-api; node_modules\.bin\vitest.cmd run src/modules/tool/tools/raapp.tools.spec.ts src/modules/raapp/raapp.service.spec.ts; Pop-Location` ✅
+- `Push-Location apps/kalio-web; node_modules\.bin\vitest.cmd run src/features/raapp/VfsHtmlRenderer.test.tsx; Pop-Location` ✅
+- VS Code diagnostics on touched files ✅
+
+### Remaining note
+
+- The duplicated RA-App preview bridge helper still exists on purpose in backend and frontend local `src` trees. I did not deduplicate it here because the previous shared-path extraction already broke live runtime resolution; that needs a real shared package or a parity check, not another direct cross-app import.
