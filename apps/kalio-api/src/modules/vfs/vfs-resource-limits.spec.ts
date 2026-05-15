@@ -1,21 +1,28 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { VFSService } from './vfs.service';
-import { ConfigService } from '@nestjs/config';
+import type { ConfigService } from '@nestjs/config';
+import type { DrizzleService } from '../../database/drizzle.service';
 import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 describe('VFSService - Resource Limits', () => {
   let service: VFSService;
-  let mockConfig: any;
+  let mockConfig: ConfigService;
+  let mockDrizzle: DrizzleService;
   let testDir: string;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `vfs-test-${Date.now()}`);
     mockConfig = {
       get: vi.fn().mockReturnValue(testDir),
-    };
-    service = new VFSService(mockConfig);
+    } as unknown as ConfigService;
+    mockDrizzle = {
+      db: {
+        update: vi.fn(),
+      },
+    } as unknown as DrizzleService;
+    service = new VFSService(mockConfig, mockDrizzle);
   });
 
   describe('readFile - no file size limit BUG CONFIRMED', () => {

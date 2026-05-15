@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { eq } from 'drizzle-orm';
 import { VFSService } from './vfs.service';
+import { DrizzleService } from '../../database/drizzle.service';
+import { sessions } from '../../database/schema';
 import { mkdirSync, writeFileSync, rmdirSync, rmSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import * as os from 'node:os';
@@ -12,6 +15,7 @@ import * as os from 'node:os';
 describe('VFSService', () => {
   let service: VFSService;
   let configService: ConfigService;
+  let drizzleService: { db: { update: ReturnType<typeof vi.fn> } };
   let testWorkspace: string;
   let sessionId: string;
 
@@ -22,10 +26,21 @@ describe('VFSService', () => {
 
     sessionId = 'test-ws-123';
     mkdirSync(join(testWorkspace, 'sessions', sessionId, 'files'), { recursive: true });
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+    drizzleService = {
+      db: {
+        update: vi.fn().mockReturnValue({ set: updateSet }),
+      },
+    };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         VFSService,
+        {
+          provide: DrizzleService,
+          useValue: drizzleService,
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -211,6 +226,16 @@ describe('VFSService', () => {
       const paths = result.files.map((f) => f.path);
       expect(paths).toContain('root.txt');
       expect(paths.some((p) => p.includes('nested.txt'))).toBe(true);
+    });
+  });
+
+  describe('touchSession', () => {
+    it('updates sessions.updatedAt for the touched session id', async () => {
+      await service.touchSession(sessionId);
+
+      expect(drizzleService.db.update).toHaveBeenCalledWith(sessions);
+      expect(drizzleService.db.update.mock.results[0]?.value.set).toHaveBeenCalledWith({ updatedAt: expect.any(Date) });
+      expect(drizzleService.db.update.mock.results[0]?.value.set.mock.results[0]?.value.where).toHaveBeenCalledWith(eq(sessions.id, sessionId));
     });
   });
 

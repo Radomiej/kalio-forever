@@ -12,6 +12,7 @@ describe('SessionVfsController', () => {
   const mockVfs = {
     listFiles: vi.fn(),
     writeFile: vi.fn(),
+    touchSession: vi.fn(),
     readFile: vi.fn(),
     serveFile: vi.fn(),
     downloadFile: vi.fn(),
@@ -40,32 +41,34 @@ describe('SessionVfsController', () => {
   });
 
   describe('writeText()', () => {
-    it('writes text file and returns ok', () => {
+    it('writes text file, touches the session, and returns ok', async () => {
       mockVfs.writeFile.mockReturnValue(undefined);
-      const result = controller.writeText('sess-1', { filePath: 'hello.txt', content: 'world' });
+      mockVfs.touchSession.mockResolvedValue(undefined);
+      const result = await controller.writeText('sess-1', { filePath: 'hello.txt', content: 'world' });
       expect(result).toEqual({ ok: true });
       expect(mockVfs.writeFile).toHaveBeenCalledWith({ sessionId: 'sess-1', filePath: 'hello.txt', content: 'world' });
+      expect(mockVfs.touchSession).toHaveBeenCalledWith('sess-1');
     });
 
-    it('throws BadRequest when filePath is missing', () => {
-      expect(() => controller.writeText('sess-1', { filePath: '', content: 'x' })).toThrow(BadRequestException);
+    it('throws BadRequest when filePath is missing', async () => {
+      await expect(controller.writeText('sess-1', { filePath: '', content: 'x' })).rejects.toThrow(BadRequestException);
     });
 
-    it('throws BadRequest when content is undefined', () => {
-      expect(() =>
+    it('throws BadRequest when content is undefined', async () => {
+      await expect(
         controller.writeText('sess-1', { filePath: 'file.txt', content: undefined as unknown as string }),
-      ).toThrow(BadRequestException);
+      ).rejects.toThrow(BadRequestException);
     });
 
-    it('throws BadRequest when vfs throws PATH_TRAVERSAL_DENIED', () => {
+    it('throws BadRequest when vfs throws PATH_TRAVERSAL_DENIED', async () => {
       const err = Object.assign(new Error('traversal denied'), { code: 'PATH_TRAVERSAL_DENIED' });
       mockVfs.writeFile.mockImplementation(() => { throw err; });
-      expect(() => controller.writeText('sess-1', { filePath: '../etc/passwd', content: 'x' })).toThrow(BadRequestException);
+      await expect(controller.writeText('sess-1', { filePath: '../etc/passwd', content: 'x' })).rejects.toThrow(BadRequestException);
     });
 
-    it('re-throws non-traversal errors from vfs', () => {
+    it('re-throws non-traversal errors from vfs', async () => {
       mockVfs.writeFile.mockImplementation(() => { throw new Error('disk full'); });
-      expect(() => controller.writeText('sess-1', { filePath: 'file.txt', content: 'x' })).toThrow('disk full');
+      await expect(controller.writeText('sess-1', { filePath: 'file.txt', content: 'x' })).rejects.toThrow('disk full');
     });
   });
 
@@ -207,38 +210,42 @@ describe('SessionVfsController', () => {
   });
 
   describe('upload()', () => {
-    it('throws BadRequest when no file provided', () => {
-      expect(() => controller.upload('sess-1', undefined)).toThrow(BadRequestException);
+    it('throws BadRequest when no file provided', async () => {
+      await expect(controller.upload('sess-1', undefined)).rejects.toThrow(BadRequestException);
     });
 
-    it('throws UnsupportedMediaType for unsupported mime type', () => {
+    it('throws UnsupportedMediaType for unsupported mime type', async () => {
       const file = { mimetype: 'text/plain', buffer: Buffer.from('') } as Express.Multer.File;
-      expect(() => controller.upload('sess-1', file)).toThrow(UnsupportedMediaTypeException);
+      await expect(controller.upload('sess-1', file)).rejects.toThrow(UnsupportedMediaTypeException);
     });
 
-    it('uploads png and returns ChatAttachment', () => {
+    it('uploads png, touches the session, and returns ChatAttachment', async () => {
       const file = { mimetype: 'image/png', buffer: Buffer.from('img-data') } as Express.Multer.File;
       mockVfs.writeBinary.mockReturnValue(undefined);
+      mockVfs.touchSession.mockResolvedValue(undefined);
 
-      const result = controller.upload('sess-1', file);
+      const result = await controller.upload('sess-1', file);
       expect(result.mimeType).toBe('image/png');
       expect(result.path).toMatch(/^uploads\/.+\.png$/);
       expect(mockVfs.writeBinary).toHaveBeenCalledWith('sess-1', result.path, file.buffer);
+      expect(mockVfs.touchSession).toHaveBeenCalledWith('sess-1');
     });
 
-    it('uploads jpeg and returns ChatAttachment', () => {
+    it('uploads jpeg and returns ChatAttachment', async () => {
       const file = { mimetype: 'image/jpeg', buffer: Buffer.from('img-data') } as Express.Multer.File;
       mockVfs.writeBinary.mockReturnValue(undefined);
+      mockVfs.touchSession.mockResolvedValue(undefined);
 
-      const result = controller.upload('sess-1', file);
+      const result = await controller.upload('sess-1', file);
       expect(result.mimeType).toBe('image/jpeg');
       expect(result.path).toMatch(/^uploads\/.+\.jpg$/);
     });
 
-    it('uploads webp and returns ChatAttachment', () => {
+    it('uploads webp and returns ChatAttachment', async () => {
       const file = { mimetype: 'image/webp', buffer: Buffer.from('') } as Express.Multer.File;
       mockVfs.writeBinary.mockReturnValue(undefined);
-      const result = controller.upload('sess-1', file);
+      mockVfs.touchSession.mockResolvedValue(undefined);
+      const result = await controller.upload('sess-1', file);
       expect(result.path).toMatch(/\.webp$/);
     });
   });

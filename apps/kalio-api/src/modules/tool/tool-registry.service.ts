@@ -35,6 +35,8 @@ export interface ToolEntry {
   execute(req: ToolCallRequest): Promise<unknown>;
 }
 
+type RegisteredToolEntry = ToolEntry & { defaultRequiresConfirmation: boolean };
+
 type HasExecute = { execute(req: ToolCallRequest): Promise<unknown> };
 
 /**
@@ -43,7 +45,7 @@ type HasExecute = { execute(req: ToolCallRequest): Promise<unknown> };
  */
 @Injectable()
 export class ToolRegistryService {
-  private readonly entries: ToolEntry[];
+  private readonly entries: RegisteredToolEntry[];
 
   constructor(
     private readonly reflector: Reflector,
@@ -145,18 +147,20 @@ export class ToolRegistryService {
   setOverride(toolName: string, requiresConfirmation: boolean): boolean {
     const entry = this.entries.find((e) => e.meta.name === toolName);
     if (!entry) return false;
-    entry.meta.requiresConfirmation = requiresConfirmation;
+    entry.meta.requiresConfirmation = entry.defaultRequiresConfirmation || requiresConfirmation;
     return true;
   }
 
-  private toEntry(tool: object): ToolEntry {
+  private toEntry(tool: object): RegisteredToolEntry {
     const opts = this.reflector.get<ToolOptions>(TOOL_METADATA, tool.constructor as NewableFunction);
+    const defaultRequiresConfirmation = opts.requiresConfirmation ?? false;
     return {
+      defaultRequiresConfirmation,
       meta: {
         name: opts.name,
         description: opts.description,
         parameters: opts.parameters,
-        requiresConfirmation: opts.requiresConfirmation ?? false,
+        requiresConfirmation: defaultRequiresConfirmation,
       },
       execute: (req: ToolCallRequest) => (tool as HasExecute).execute(req),
     };

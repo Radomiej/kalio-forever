@@ -13,7 +13,10 @@ import {
 import { join, resolve, normalize, basename, extname, sep } from 'node:path';
 import type { Readable } from 'node:stream';
 import archiver from 'archiver';
+import { eq } from 'drizzle-orm';
 import type { VFSWriteRequest, VFSReadResult, VFSListResult, VFSFile } from '@kalio/types';
+import { DrizzleService } from '../../database/drizzle.service';
+import { sessions } from '../../database/schema';
 import { injectRaAppResizeBridge } from './raapp-preview-bridge';
 
 const PATH_TRAVERSAL_ERROR = 'PATH_TRAVERSAL_DENIED';
@@ -64,9 +67,19 @@ export class VFSService {
   private readonly logger = new Logger(VFSService.name);
   private readonly workspaceRoot: string;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly drizzle: DrizzleService,
+  ) {
     this.workspaceRoot = this.config.get<string>('WORKSPACE_ROOT', './data/workspaces');
     mkdirSync(this.workspaceRoot, { recursive: true });
+  }
+
+  async touchSession(sessionId: string): Promise<void> {
+    await this.drizzle.db
+      .update(sessions)
+      .set({ updatedAt: new Date() })
+      .where(eq(sessions.id, sessionId));
   }
 
   writeFile(req: VFSWriteRequest): void {

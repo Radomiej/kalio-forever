@@ -23,7 +23,16 @@ const mockPersonas: Persona[] = [
   { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', allowedTools: [], skillIds: [], mcpPolicy: 'allow_all', createdAt: 0, updatedAt: 0 },
 ];
 
-const mockState = {
+const mockState: {
+  sessions: ChatSession[];
+  activeSessionId: string | null;
+  setSessions: typeof mockSetSessions;
+  setActiveSession: typeof mockSetActiveSession;
+  addSession: typeof mockAddSession;
+  setMessages: typeof mockSetMessages;
+  removeSession: typeof mockRemoveSession;
+  updateSession: typeof mockUpdateSession;
+} = {
   sessions: mockSessions,
   activeSessionId: 's1',
   setSessions: mockSetSessions,
@@ -109,6 +118,9 @@ describe('formatRelativeTime', () => {
 describe('SessionPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
+    mockState.sessions = mockSessions;
+    mockState.activeSessionId = 's1';
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
       if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
@@ -161,6 +173,32 @@ describe('SessionPanel', () => {
     expect(subagentIndex).toBe(masterIndex + 1);
   });
 
+  it('REGRESSION: keeps sibling subagent sessions in creation order under the master session', async () => {
+    const orderedSessions: ChatSession[] = [
+      { id: 'master', personaId: 'orchestrator', title: 'Main orchestration chat', createdAt: 1_000, updatedAt: 5_000 },
+      { id: 'child-older', personaId: 'default', title: 'Sub-agent: older child', kind: 'subagent', parentSessionId: 'master', createdAt: 2_000, updatedAt: 6_000 },
+      { id: 'child-newer', personaId: 'default', title: 'Sub-agent: newer child', kind: 'subagent', parentSessionId: 'master', createdAt: 3_000, updatedAt: 7_000 },
+    ];
+
+    mockState.sessions = orderedSessions;
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: orderedSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(orderedSessions));
+
+    const orderedItems = screen.getAllByTestId('session-item').map((item) => item.textContent ?? '');
+
+    expect(orderedItems.slice(0, 3)).toEqual([
+      expect.stringContaining('Main orchestration chat'),
+      expect.stringContaining('Sub-agent: older child'),
+      expect.stringContaining('Sub-agent: newer child'),
+    ]);
+  });
+
   it('filter button toggles filter row', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
@@ -210,6 +248,39 @@ describe('SessionPanel', () => {
     fireEvent.click(items[0]!);
 
     await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1));
+  });
+
+  it('restores the last active session from sessionStorage before falling back to recency', async () => {
+    mockState.activeSessionId = null;
+    sessionStorage.setItem('kalio:last-active-session-id', 's1');
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      if (url === '/api/sessions/s1/messages') return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+
+    await waitFor(() => expect(mockSetActiveSession).toHaveBeenCalledWith('s1'));
+    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/s1/messages');
+  });
+
+  it('persists the active session id when a session is clicked', async () => {
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      if (url === '/api/sessions/s2/messages') return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+
+    const items = screen.getAllByTestId('session-item');
+    fireEvent.click(items[0]!);
+
+    await waitFor(() => expect(sessionStorage.getItem('kalio:last-active-session-id')).toBe('s2'));
   });
 });
 

@@ -6,6 +6,29 @@ import { apiClient } from '../../services/apiClient';
 import type { ChatSession, ChatMessage, Persona } from '@kalio/types';
 import { formatRelativeTime } from './session.utils';
 
+const LAST_ACTIVE_SESSION_STORAGE_KEY = 'kalio:last-active-session-id';
+
+function loadStoredActiveSessionId(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return window.sessionStorage.getItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
+}
+
+function persistActiveSessionId(sessionId: string | null): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (sessionId) {
+    window.sessionStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, sessionId);
+    return;
+  }
+
+  window.sessionStorage.removeItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
+}
+
 function sortSessionsForSidebar(sessions: ChatSession[]): ChatSession[] {
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
   const depthById = new Map<string, number>();
@@ -68,7 +91,10 @@ function sortSessionsForSidebar(sessions: ChatSession[]): ChatSession[] {
       const depthDiff = getDepth(left) - getDepth(right);
       if (depthDiff !== 0) return depthDiff;
 
-      return right.updatedAt - left.updatedAt;
+      const createdAtDiff = left.createdAt - right.createdAt;
+      if (createdAtDiff !== 0) return createdAtDiff;
+
+      return left.id.localeCompare(right.id);
     }));
 }
 
@@ -84,6 +110,12 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
   const [newPersonaId, setNewPersonaId] = useState<string>('default');
 
   useEffect(() => {
+    if (activeSessionId) {
+      persistActiveSessionId(activeSessionId);
+    }
+  }, [activeSessionId]);
+
+  useEffect(() => {
     setLoading(true);
     apiClient
       .get<ChatSession[]>('/api/sessions')
@@ -91,7 +123,11 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
         setSessions(r.data);
         const orderedSessions = sortSessionsForSidebar(r.data);
         if (!useSessionStore.getState().activeSessionId && orderedSessions.length > 0) {
-          void selectSession(orderedSessions[0].id);
+          const storedSessionId = loadStoredActiveSessionId();
+          const initialSessionId = storedSessionId && orderedSessions.some((session) => session.id === storedSessionId)
+            ? storedSessionId
+            : orderedSessions[0].id;
+          void selectSession(initialSessionId);
         }
       })
       .catch((err: unknown) => console.error('[SessionPanel] load failed', err))
@@ -113,6 +149,7 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
       });
       addSession(data);
       setActiveSession(data.id);
+      persistActiveSessionId(data.id);
       setMessages([]);
       onSelect?.();
     } catch (err) {
@@ -122,6 +159,7 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
 
   const selectSession = async (id: string) => {
     setActiveSession(id);
+    persistActiveSessionId(id);
     onSelect?.();
     try {
       const { data } = await apiClient.get<ChatMessage[]>(`/api/sessions/${id}/messages`);

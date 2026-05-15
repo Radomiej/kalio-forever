@@ -88,14 +88,15 @@ export class SessionVfsController {
 
   @Post()
   @HttpCode(200)
-  writeText(
+  async writeText(
     @Param('id') sessionId: string,
     @Body() body: { filePath: string; content: string },
-  ): { ok: boolean } {
+  ): Promise<{ ok: boolean }> {
     if (!body.filePath) throw new BadRequestException('filePath is required');
     if (body.content === undefined) throw new BadRequestException('content is required');
     try {
       this.vfs.writeFile({ sessionId, filePath: body.filePath, content: body.content });
+      await this.vfs.touchSession(sessionId);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'PATH_TRAVERSAL_DENIED') {
         throw new BadRequestException((err as Error).message);
@@ -176,10 +177,10 @@ export class SessionVfsController {
    */
   @Post('upload')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: UPLOAD_MAX_BYTES } }))
-  upload(
+  async upload(
     @Param('id') sessionId: string,
     @UploadedFile() file: Express.Multer.File | undefined,
-  ): ChatAttachment {
+  ): Promise<ChatAttachment> {
     if (!file) throw new BadRequestException('No file provided in field "file"');
     const ext = ALLOWED_UPLOAD_MIMES[file.mimetype];
     if (!ext) {
@@ -189,6 +190,7 @@ export class SessionVfsController {
     }
     const path = `uploads/${nanoid()}.${ext}`;
     this.vfs.writeBinary(sessionId, path, file.buffer);
+    await this.vfs.touchSession(sessionId);
     return { path, mimeType: file.mimetype };
   }
 

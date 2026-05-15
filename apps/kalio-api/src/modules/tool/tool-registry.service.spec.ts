@@ -174,7 +174,7 @@ describe('ToolRegistryService — all tools registered', () => {
     expect(subset.map((m) => m.name).sort()).toEqual(['fs_read', 'terminal_spawn', 'vfs_write']);
   });
 
-  it('setOverride mutates requiresConfirmation in-place', () => {
+  it('setOverride does not downgrade tools that require confirmation by default', () => {
     const before = registry.getAllTools().find((m) => m.name === 'terminal_spawn')!;
     expect(before.requiresConfirmation).toBe(true);
 
@@ -182,7 +182,18 @@ describe('ToolRegistryService — all tools registered', () => {
     expect(changed).toBe(true);
 
     const after = registry.getAllTools().find((m) => m.name === 'terminal_spawn')!;
-    expect(after.requiresConfirmation).toBe(false);
+    expect(after.requiresConfirmation).toBe(true);
+  });
+
+  it('setOverride still allows non-destructive tools to toggle confirmation on and off', () => {
+    const before = registry.getAllTools().find((m) => m.name === 'terminal_list')!;
+    expect(before.requiresConfirmation).toBe(false);
+
+    expect(registry.setOverride('terminal_list', true)).toBe(true);
+    expect(registry.getAllTools().find((m) => m.name === 'terminal_list')?.requiresConfirmation).toBe(true);
+
+    expect(registry.setOverride('terminal_list', false)).toBe(true);
+    expect(registry.getAllTools().find((m) => m.name === 'terminal_list')?.requiresConfirmation).toBe(false);
   });
 
   it('setOverride returns false for unknown tool names', () => {

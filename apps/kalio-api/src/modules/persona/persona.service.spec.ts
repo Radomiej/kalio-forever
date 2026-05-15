@@ -219,6 +219,19 @@ describe('PersonaService', () => {
       expect(config['jony']?.systemPrompt).toContain('design_preview');
     });
 
+    it('teaches the orchestrator to keep RA-App DSL delegation on the draft-first path instead of HTML preview flow', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { systemPrompt: string }>;
+        }
+      ).loadPersonasConfig();
+
+      expect(config['orchestrator']?.systemPrompt).toContain('RA-App DSL or ECS');
+      expect(config['orchestrator']?.systemPrompt).toContain('raapp_create_draft');
+      expect(config['orchestrator']?.systemPrompt).toContain('raapp_execute_dsl');
+      expect(config['orchestrator']?.systemPrompt).toContain('Do not ask the child for HTML, design_preview');
+    });
+
     it('teaches the designer to use the exact VFS tool names without a rigid dark multi-page template', () => {
       const config = (
         service as unknown as {
