@@ -1,9 +1,9 @@
-import type { LLMMessage } from '@kalio/types';
 import type { ToolMeta } from '@kalio/types';
 import type { InternalLLMChunk } from './llm-chunk.types';
+import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 
 export interface LLMSourceParams {
-  messages: LLMMessage[];
+  messages: ContextManagedLLMMessage[];
   tools: ToolMeta[];
   sessionId: string;
   messageId: string;

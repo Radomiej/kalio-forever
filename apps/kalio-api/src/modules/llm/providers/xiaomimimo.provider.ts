@@ -21,4 +21,8 @@ export class XiaomiMiMoProvider extends BaseOpenAICompatibleProvider {
     }
     return {};
   }
+
+  protected override supportsReasoningContentHistory(): boolean {
+    return true;
+  }
 }

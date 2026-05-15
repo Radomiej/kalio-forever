@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { LLMMessage, LLMStreamChunk, LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
+import type { LLMStreamChunk, LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
 import type { ILLMProvider, ProviderConfig } from './llm.types';
 import { createLLMProvider } from './providers/provider-factory';
 import { CredentialsService } from '../credentials/credentials.service';
+import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 
 export type { ILLMProvider } from './llm.types';
 
@@ -80,7 +81,7 @@ export class LLMService {
   }
 
   async streamChat(
-    messages: LLMMessage[],
+    messages: ContextManagedLLMMessage[],
     tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
     onChunk: (chunk: LLMStreamChunk) => void,
     sessionId: string,

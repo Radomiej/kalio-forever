@@ -1,9 +1,10 @@
 import type { ILLMProvider } from '../llm.types';
-import type { LLMMessage, LLMStreamChunk, LLMToolCall } from '@kalio/types';
+import type { LLMStreamChunk, LLMToolCall } from '@kalio/types';
+import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 
 export class MockLLMProvider implements ILLMProvider {
   async streamChat(
-    messages: LLMMessage[],
+    messages: ContextManagedLLMMessage[],
     _tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
     onChunk: (chunk: LLMStreamChunk) => void,
     sessionId: string,

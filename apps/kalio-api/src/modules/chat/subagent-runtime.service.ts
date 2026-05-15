@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import type { AgentRunContext, LLMMessage, SubagentCopiedFile, ToolMeta } from '@kalio/types';
+import type { AgentRunContext, SubagentCopiedFile, ToolMeta } from '@kalio/types';
 import { TurnState } from './turn-state';
 import { StreamProcessorService } from './stream-processor.service';
 import { ToolDispatchService } from './tool-dispatch.service';
@@ -246,8 +246,10 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         emit: params.emit ?? (() => undefined),
         agentRun: params.agentRun,
       };
-      const rawHistory = await this.sessionManager.loadHistory(params.childSessionId);
-      const history: LLMMessage[] = [{ role: 'system', content: systemPrompt }, ...rawHistory];
+      const { history } = await this.sessionManager.loadHistoryForLLM(params.childSessionId, {
+        systemPrompt,
+        toolMetas: params.tools,
+      });
 
       for await (const chunk of this.llmSource.stream({
         messages: history,

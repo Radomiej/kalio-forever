@@ -1,7 +1,9 @@
 import type { ILLMProvider } from '../llm.types';
-import type { LLMMessage, LLMStreamChunk, LLMToolCall, LLMConfig } from '@kalio/types';
+import type { LLMStreamChunk, LLMToolCall, LLMConfig } from '@kalio/types';
 import { Logger } from '@nestjs/common';
 import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../../common/utils/llm-provider-http.util';
+import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
+import { getReasoningContent } from '../../../common/utils/context-managed-llm-message.util';
 
 let _toolCallCounter = 0;
 function uniqueToolCallId(): string {
@@ -28,7 +30,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
   }
 
   async streamChat(
-    messages: LLMMessage[],
+    messages: ContextManagedLLMMessage[],
     tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
     onChunk: (chunk: LLMStreamChunk) => void,
     sessionId: string,
@@ -41,23 +43,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
     const body = JSON.stringify({
       model: this.model,
-      messages: messages.map((m) => {
-        if (m.role === 'tool' && m.toolCallId) {
-          return { role: 'tool', content: m.content, tool_call_id: m.toolCallId };
-        }
-        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
-          return {
-            role: 'assistant',
-            content: m.content || null,
-            tool_calls: m.toolCalls.map((tc) => ({
-              id: tc.id,
-              type: 'function',
-              function: { name: tc.name, arguments: JSON.stringify(tc.args) },
-            })),
-          };
-        }
-        return m;
-      }),
+      messages: messages.map((m) => this.buildRequestMessage(m)),
       stream: true,
       tools: tools.length > 0
         ? tools.map((t) => ({
@@ -186,5 +172,57 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
   protected buildThinkingParams(): Record<string, unknown> {
     return {};
+  }
+
+  protected supportsReasoningContentHistory(): boolean {
+    return false;
+  }
+
+  private buildRequestMessage(message: ContextManagedLLMMessage): Record<string, unknown> {
+    if (message.role === 'tool' && message.toolCallId) {
+      return { role: 'tool', content: message.content, tool_call_id: message.toolCallId };
+    }
+
+    if (message.role === 'assistant') {
+      const reasoningContent = this.getReasoningContent(message);
+
+      if (message.toolCalls && message.toolCalls.length > 0) {
+        return {
+          role: 'assistant',
+          content: this.normalizeAssistantContent(message.content),
+          ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+          tool_calls: message.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+          })),
+        };
+      }
+
+      return {
+        role: 'assistant',
+        content: reasoningContent ? this.normalizeAssistantContent(message.content) : message.content,
+        ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+      };
+    }
+
+    return { role: message.role, content: message.content };
+  }
+
+  private getReasoningContent(message: ContextManagedLLMMessage): string | undefined {
+    if (!this.supportsReasoningContentHistory()) {
+      return undefined;
+    }
+
+    const reasoningContent = getReasoningContent(message);
+    if (reasoningContent.length === 0) {
+      return undefined;
+    }
+
+    return reasoningContent;
+  }
+
+  private normalizeAssistantContent(content: ContextManagedLLMMessage['content']): ContextManagedLLMMessage['content'] | null {
+    return typeof content === 'string' && content.length === 0 ? null : content;
   }
 }

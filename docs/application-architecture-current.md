@@ -29,7 +29,7 @@ Primary source-of-truth areas:
 | Entity | Source of truth | What it means in practice |
 | --- | --- | --- |
 | `ChatSession` | SQLite row plus session-owned files | The isolation unit. Chat history, queueing, aborts, VFS, KV state, tool approvals, and sub-agent parentage all hang off `sessionId`. |
-| `ChatMessage` | SQLite row, mirrored into `sessionStore` | Durable history item. Roles are `user`, `assistant`, `tool_result`, `system`. |
+| `ChatMessage` | SQLite row, mirrored into `sessionStore` | Durable history item. Roles are `user`, `assistant`, `tool_result`, `system`; assistant `thinking` is also persisted and later re-exposed as backend-only `reasoningContent` when building LLM context. |
 | `AgentTurn` | Frontend state in `sessionStore` | Live rendering bracket between `agent:start` and `agent:done`. Rebuilt from message history after reconnect or reload. |
 | `ToolActivity` | Frontend state in `agentStore` | Live per-call UI state: running, awaiting confirmation, success, error, cancelled. Not durable by itself. |
 | `AgentRunContext` | Shared wire contract in `@kalio/types` | Labels a run as `master` or `subagent`, carries parent linkage, and tells the UI whether a tool/event belongs to a child run. |
@@ -152,7 +152,7 @@ sequenceDiagram
         Chat-->>FE: chat:context(systemPrompt, toolNames)
 
         loop each LLM iteration
-            Chat->>DB: loadHistory(sessionId)
+            Chat->>DB: loadHistoryForLLM(sessionId, { systemPrompt, toolMetas })
             Chat->>LLM: stream(messages, tools)
             loop each stream chunk
                 LLM-->>Chat: chunk
@@ -182,7 +182,9 @@ Key details that matter for the real runtime:
 
 - `chat:complete` and `agent:done` are different. `chat:complete` means the turn produced a final assistant answer. `agent:done` means the live turn bracket is closed in the UI, including error and interrupt cases.
 - `tool_result` messages are durable history. `ToolActivity` rows are live UI state and can be cleared or rebuilt.
-- `ChatService` reloads history on every LLM iteration so the next call sees newly persisted tool results in canonical order.
+- `ChatService` reloads managed history on every LLM iteration so the next call sees newly persisted tool results in canonical order.
+- `SessionManagerService.loadHistoryForLLM(...)` is the single backend context boundary for both `ChatService` and `SubagentRuntimeService`. It prepends the active system prompt, sanitizes oversized `tool_result` payloads, counts assistant reasoning, and compacts history against the configured context window before the provider sees it.
+- `OpenAICompatibleProvider` now stays a thin subclass of `BaseOpenAICompatibleProvider`, so OpenAI-style providers reuse one serializer/parser path instead of drifting into separate request-shaping behavior.
 
 ## Session-scoped isolation and fan-out
 
@@ -208,6 +210,7 @@ What this means:
 
 - Different sessions do not block each other. Queueing and interrupts are keyed by session.
 - A child sub-agent is not a special stream format. It is another session that reuses the same event contract.
+- A child sub-agent also reuses the same managed LLM context path as the parent chat; it does not bypass compaction or provider normalization.
 - Canvas previewing of child chats works because the frontend explicitly identifies those child sessions to the gateway and subscribes to their normal session events.
 
 ## Backend module map

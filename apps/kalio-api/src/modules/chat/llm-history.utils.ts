@@ -1,4 +1,6 @@
-import type { LLMMessage, ToolMeta } from '@kalio/types';
+import type { ToolMeta } from '@kalio/types';
+import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
+import { getReasoningContent } from '../../common/utils/context-managed-llm-message.util';
 
 const CHARS_PER_TOKEN = 4;
 const IMAGE_PART_TOKENS = 85;
@@ -59,7 +61,7 @@ function sanitizeJsonValue(value: unknown, root: Record<string, unknown> | null)
   return sanitized;
 }
 
-function estimateContentTokens(content: LLMMessage['content']): number {
+function estimateContentTokens(content: ContextManagedLLMMessage['content']): number {
   if (typeof content === 'string') {
     return estimateTextTokens(content);
   }
@@ -78,8 +80,10 @@ function estimateContentTokens(content: LLMMessage['content']): number {
   return total;
 }
 
-function estimateMessageTokens(message: LLMMessage): number {
+function estimateMessageTokens(message: ContextManagedLLMMessage): number {
   let total = estimateContentTokens(message.content);
+
+  total += estimateTextTokens(getReasoningContent(message));
 
   if ('toolCalls' in message && Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
     total += estimateTextTokens(JSON.stringify(message.toolCalls));
@@ -101,7 +105,7 @@ function estimateToolTokens(toolMetas: ToolMeta[]): number {
   return estimateTextTokens(serialized);
 }
 
-function totalHistoryTokens(messages: LLMMessage[], toolMetas: ToolMeta[]): number {
+function totalHistoryTokens(messages: ContextManagedLLMMessage[], toolMetas: ToolMeta[]): number {
   let total = estimateToolTokens(toolMetas);
   for (const message of messages) {
     total += estimateMessageTokens(message);
@@ -109,11 +113,11 @@ function totalHistoryTokens(messages: LLMMessage[], toolMetas: ToolMeta[]): numb
   return total;
 }
 
-function removeIndexes(messages: LLMMessage[], indexes: Set<number>): LLMMessage[] {
+function removeIndexes(messages: ContextManagedLLMMessage[], indexes: Set<number>): ContextManagedLLMMessage[] {
   return messages.filter((_, index) => !indexes.has(index));
 }
 
-function findOldestToolPair(messages: LLMMessage[]): [number, number] | null {
+function findOldestToolPair(messages: ContextManagedLLMMessage[]): [number, number] | null {
   for (let toolIndex = 0; toolIndex < messages.length; toolIndex += 1) {
     const toolMessage = messages[toolIndex];
     if (toolMessage.role !== 'tool' || !('toolCallId' in toolMessage) || typeof toolMessage.toolCallId !== 'string') {
@@ -137,24 +141,50 @@ function findOldestToolPair(messages: LLMMessage[]): [number, number] | null {
 }
 
 function findOldestIndex(
-  messages: LLMMessage[],
-  predicate: (message: LLMMessage, index: number) => boolean,
+  messages: ContextManagedLLMMessage[],
+  predicate: (message: ContextManagedLLMMessage, index: number) => boolean,
 ): number {
   return messages.findIndex(predicate);
 }
 
-function truncateMessageContent(message: LLMMessage): LLMMessage {
+function truncateMessageContent(message: ContextManagedLLMMessage): ContextManagedLLMMessage {
+  const reasoningContent = getReasoningContent(message);
+  const truncatedReasoningContent = reasoningContent
+    ? truncateText(reasoningContent, MAX_TOOL_RESULT_PREVIEW_CHARS)
+    : undefined;
+
   if (typeof message.content === 'string') {
-    return { ...message, content: truncateText(message.content, MAX_TOOL_RESULT_PREVIEW_CHARS) };
+    return {
+      ...message,
+      ...(truncatedReasoningContent ? { reasoningContent: truncatedReasoningContent } : {}),
+      content: truncateText(message.content, MAX_TOOL_RESULT_PREVIEW_CHARS),
+    };
   }
 
   return {
     ...message,
+    ...(truncatedReasoningContent ? { reasoningContent: truncatedReasoningContent } : {}),
     content: message.content.map((part) =>
       part.type === 'text'
         ? { ...part, text: truncateText(part.text, MAX_TOOL_RESULT_PREVIEW_CHARS) }
         : part,
     ),
+  };
+}
+
+export function prepareHistoryForLLM(
+  messages: ContextManagedLLMMessage[],
+  systemPrompt: string,
+  contextWindowSize: number,
+  toolMetas: ToolMeta[],
+): { history: ContextManagedLLMMessage[]; unboundedHistoryCount: number } {
+  const unboundedHistory = systemPrompt
+    ? [{ role: 'system', content: systemPrompt } satisfies ContextManagedLLMMessage, ...messages]
+    : [...messages];
+
+  return {
+    history: compactLLMHistory(unboundedHistory, contextWindowSize, toolMetas),
+    unboundedHistoryCount: unboundedHistory.length,
   };
 }
 
@@ -178,7 +208,11 @@ export function sanitizeToolResultContentForLLM(content: string): string {
   }
 }
 
-export function compactLLMHistory(messages: LLMMessage[], contextWindowSize: number, toolMetas: ToolMeta[]): LLMMessage[] {
+export function compactLLMHistory(
+  messages: ContextManagedLLMMessage[],
+  contextWindowSize: number,
+  toolMetas: ToolMeta[],
+): ContextManagedLLMMessage[] {
   if (messages.length === 0 || contextWindowSize <= 0) {
     return messages;
   }

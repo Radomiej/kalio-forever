@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BaseOpenAICompatibleProvider } from './base-openai-compatible.provider';
+import { XiaomiMiMoProvider } from './xiaomimimo.provider';
 import type { LLMMessage, LLMStreamChunk } from '@kalio/types';
 
 // Regression test for: Silent JSON parse error in streaming
@@ -124,6 +125,50 @@ describe('BaseOpenAICompatibleProvider', () => {
           headers: expect.not.objectContaining({ Authorization: expect.any(String) }),
         }),
       );
+    });
+
+    it('REGRESSION: Xiaomi passes assistant reasoning_content back together with tool calls', async () => {
+      const messages = [
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'tc-1', name: 'my_tool', args: { prompt: 'cat' } }],
+          reasoningContent: 'step 1',
+        } as LLMMessage & { reasoningContent: string },
+      ];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const xiaomiProvider = new XiaomiMiMoProvider('test-key', 'mimo-v2-omni', 'https://api.test.com');
+      (xiaomiProvider as unknown as { logger: typeof mockLogger }).logger = mockLogger;
+
+      const mockStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await xiaomiProvider.streamChat(messages, tools, vi.fn(), 'sess-123', 'msg-456');
+
+      const request = mockFetch.mock.calls[0]?.[1] as { body: string };
+      const parsed = JSON.parse(request.body) as { messages: Array<Record<string, unknown>> };
+
+      expect(parsed.messages[0]).toEqual({
+        role: 'assistant',
+        content: null,
+        reasoning_content: 'step 1',
+        tool_calls: [
+          {
+            id: 'tc-1',
+            type: 'function',
+            function: { name: 'my_tool', arguments: '{"prompt":"cat"}' },
+          },
+        ],
+      });
     });
   });
 
