@@ -36,7 +36,7 @@ describe('ChatService', () => {
   };
   let toolDispatch: { getToolMetas: ReturnType<typeof vi.fn>; dispatch: ReturnType<typeof vi.fn> };
   let personaService: Partial<PersonaService>;
-  let credentialsService: Pick<CredentialsService, 'getMaxToolAttempts'>;
+  let credentialsService: Pick<CredentialsService, 'getMaxToolAttempts' | 'getContextWindowSize'>;
   let auditService: Partial<AuditService>;
   let emit: ReturnType<typeof vi.fn>;
 
@@ -44,6 +44,7 @@ describe('ChatService', () => {
 
   beforeEach(async () => {
     emit = vi.fn() as ReturnType<typeof vi.fn>;
+    historyMessages.length = 0;
     sessionManager = {
       ensureSession: vi.fn().mockResolvedValue(undefined),
       persistUserMessage: vi.fn().mockResolvedValue({ id: 'u1', sessionId: 'sid', role: 'user', content: 'hi', createdAt: 1 }),
@@ -60,6 +61,7 @@ describe('ChatService', () => {
     };
     credentialsService = {
       getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+      getContextWindowSize: vi.fn().mockResolvedValue(32000),
     };
     auditService = {
       log: vi.fn().mockResolvedValue('audit-id'),
@@ -142,6 +144,31 @@ describe('ChatService', () => {
     expect(llmSource.stream).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'sid' }),
     );
+  });
+
+  it('REGRESSION: compacts history server-side against the configured context window before streaming', async () => {
+    historyMessages.push(
+      { role: 'user', content: 'first user stays' },
+      {
+        role: 'assistant',
+        content: 'calling image tool',
+        toolCalls: [{ id: 'call-1', name: 'image_generate', args: { prompt: 'cat' } }],
+      },
+      { role: 'tool', toolCallId: 'call-1', content: 'x'.repeat(6_000) },
+      { role: 'assistant', content: 'older assistant reply' },
+      { role: 'user', content: 'latest user prompt' },
+    );
+    credentialsService.getContextWindowSize.mockResolvedValue(200);
+
+    const llmSource = makeLLMSource([]);
+    await buildService(llmSource);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    const params = (llmSource.stream as ReturnType<typeof vi.fn>).mock.calls[0][0] as LLMSourceParams;
+
+    expect(params.messages.some((message) => message.role === 'tool' && message.toolCallId === 'call-1')).toBe(false);
+    expect(params.messages.some((message) => message.role === 'assistant' && message.toolCalls?.some((toolCall) => toolCall.id === 'call-1'))).toBe(false);
+    expect(params.messages.some((message) => message.role === 'user' && message.content === 'first user stays')).toBe(true);
   });
 
   it('processes each chunk via StreamProcessorService', async () => {

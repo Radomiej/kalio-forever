@@ -108,6 +108,22 @@ describe('LLMController', () => {
       expect(mockLLMService.updateActiveModel).toHaveBeenCalledWith('mimo-v2-thinking');
     });
 
+    it('REGRESSION: validates a trimmed model value but delegates the raw body string so normalization lives in one place', async () => {
+      mockLLMService.updateActiveModel.mockResolvedValue({
+        provider: 'xiaomimimo',
+        apiKey: '',
+        baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        model: 'mimo-v2-thinking',
+        source: 'env',
+      });
+      mockCredentials.getContextWindowSize.mockResolvedValue(32000);
+      mockCredentials.getMaxToolAttempts.mockResolvedValue(8);
+
+      await controller.updateActiveModel({ model: '  mimo-v2-thinking  ' });
+
+      expect(mockLLMService.updateActiveModel).toHaveBeenCalledWith('  mimo-v2-thinking  ');
+    });
+
     it('rejects a blank model payload', async () => {
       await expect(controller.updateActiveModel({ model: '   ' })).rejects.toThrow(HttpException);
     });

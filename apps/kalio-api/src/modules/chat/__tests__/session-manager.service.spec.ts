@@ -195,6 +195,39 @@ describe('SessionManagerService', () => {
       expect(history[0]).toEqual({ role: 'tool', content: '{"ok":true}', toolCallId: 'tc-1' });
     });
 
+    it('REGRESSION: strips inline image data URLs from tool_result history before sending them back to the LLM', async () => {
+      repo = makeRepo([
+        {
+          id: '3',
+          sessionId: 'sid',
+          role: 'tool_result',
+          content: JSON.stringify({
+            output_type: 'image',
+            image_url: `data:image/png;base64,${'a'.repeat(8_000)}`,
+            path: 'images/cat.png',
+            download_url: '/api/sessions/sid/vfs/download?path=images%2Fcat.png',
+          }),
+          toolCallId: 'tc-1',
+          createdAt: 1,
+        },
+      ]);
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          SessionManagerService,
+          { provide: MESSAGE_REPOSITORY, useValue: repo },
+          { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
+        ],
+      }).compile();
+      service = moduleRef.get(SessionManagerService);
+
+      const history = await service.loadHistory('sid');
+      const toolMessage = history[0];
+      expect(toolMessage).toMatchObject({ role: 'tool', toolCallId: 'tc-1' });
+      expect(typeof toolMessage?.content).toBe('string');
+      expect(toolMessage?.content).toContain('images/cat.png');
+      expect(toolMessage?.content).not.toContain('data:image/png;base64');
+    });
+
     it('converts system messages to role:system format', async () => {
       repo = makeRepo([
         { id: '4', sessionId: 'sid', role: 'system', content: 'You are a helpful assistant', createdAt: 1 },

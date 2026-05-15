@@ -5,6 +5,7 @@ import type { IMessageRepository } from './interfaces/message-repository.interfa
 import type { TurnState } from './turn-state';
 import { MESSAGE_REPOSITORY } from './chat.tokens';
 import { ImageHydratorService } from './image-hydrator.service';
+import { sanitizeToolResultContentForLLM } from './llm-history.utils';
 
 /**
  * Manages chat message persistence and history conversion.
@@ -107,7 +108,7 @@ export class SessionManagerService {
         return [
           {
             role: 'tool',
-            content: msg.content,
+            content: sanitizeToolResultContentForLLM(msg.content),
             toolCallId: msg.toolCallId,
           },
         ];

@@ -512,6 +512,56 @@ describe('PersonaService', () => {
         }),
       );
     });
+
+    it('REGRESSION: does not overwrite a customized VFS-first designer prompt that already mentions image_edit', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        designer: {
+          name: 'UX Designer',
+          systemPrompt: 'new designer prompt with image_generate and image_view and image_edit',
+          model: '',
+          allowedTools: ['vfs_read', 'vfs_write', 'vfs_list', 'design_preview', 'image_generate', 'image_view', 'image_edit'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'designer',
+            systemPrompt: [
+              'When the user asks for a prototype page or website, do not jump straight to raapp_create. Work in VFS first and finish with a design_preview result.',
+              'Use the exact tool names: vfs_list, vfs_read, vfs_write, design_preview, raapp_create',
+              'Never mention or attempt file_write, file_read, write_file, read_file, or other aliases - they do not exist here',
+              'For follow-up adjustments to an existing image asset, prefer image_edit over a full regeneration.',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          systemPrompt: 'new designer prompt with image_generate and image_view and image_edit',
+        }),
+      );
+    });
   });
 
   describe('onApplicationBootstrap — skillIds sync regression', () => {

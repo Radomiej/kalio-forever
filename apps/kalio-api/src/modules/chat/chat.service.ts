@@ -10,6 +10,7 @@ import { SessionManagerService } from './session-manager.service';
 import { AuditService } from './audit.service';
 import { LLM_SOURCE } from './chat.tokens';
 import { TurnErrorAlreadyEmitted } from './turn-error';
+import { compactLLMHistory } from './llm-history.utils';
 import { PersonaService } from '../persona/persona.service';
 import { SkillsService } from '../skills/skills.service';
 import { CredentialsService } from '../credentials/credentials.service';
@@ -119,6 +120,7 @@ export class ChatService {
       // Agentic loop: keep calling LLM until it stops emitting tool calls
       // or we hit maxToolAttempts as a safety net.
       const maxToolAttempts = await this.credentialsService.getMaxToolAttempts();
+      const contextWindowSize = await this.credentialsService.getContextWindowSize();
       const maxEmptyNoToolRetries = Math.max(5, maxToolAttempts * 2);
       let iteration = 0;
       let emptyNoToolRetries = 0;
@@ -151,9 +153,16 @@ export class ChatService {
 
         // Reload history so it picks up tool_result rows persisted by ToolCallHandler
         const rawHistory = await this.sessionManager.loadHistory(sessionId);
-        const history: LLMMessage[] = effectiveSystemPrompt
+        const unboundedHistory: LLMMessage[] = effectiveSystemPrompt
           ? [{ role: 'system', content: effectiveSystemPrompt }, ...rawHistory]
           : rawHistory;
+        const history = compactLLMHistory(unboundedHistory, contextWindowSize, toolMetas);
+
+        if (history.length !== unboundedHistory.length) {
+          this.logger.warn(
+            `Compacted LLM history for session ${sessionId} iteration ${iteration} from ${unboundedHistory.length} to ${history.length} messages (context window ${contextWindowSize})`,
+          );
+        }
 
         const turnStart = performance.now();
         await this.audit.log({

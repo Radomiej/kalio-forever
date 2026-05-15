@@ -231,6 +231,72 @@ describe('CanvasPanel subagent grouping', () => {
     });
   });
 
+  it('REGRESSION: renders image_generate results as an image preview instead of raw base64 JSON', () => {
+    agentState.toolActivities = [
+      {
+        callId: 'image-call',
+        toolName: 'image_generate',
+        args: { prompt: 'otter on a surfboard' },
+        status: 'success',
+        startedAt: 1,
+        finishedAt: 2,
+        result: {
+          callId: 'image-call',
+          status: 'success',
+          data: {
+            output_type: 'image',
+            image_url: 'data:image/png;base64,ZmFrZS1pbWFnZS1ieXRlcw==',
+            download_url: '/api/sessions/session-1/vfs/download?path=images%2Fotter.png',
+            path: 'images/otter.png',
+            message: 'Image generated and saved to images/otter.png.',
+          },
+        },
+      },
+    ];
+    agentState.activeAgentLoops = {};
+    sessionState.messages = [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'draw an otter', createdAt: 1 }];
+    sessionState.sessionMessages = {
+      'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'draw an otter', createdAt: 1 }],
+    };
+
+    render(<CanvasPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: /image_generate/i }));
+
+    expect(screen.getByRole('img', { name: 'Image generated and saved to images/otter.png.' })).toBeInTheDocument();
+    expect(screen.queryByText(/data:image\/png;base64/i)).not.toBeInTheDocument();
+  });
+
+  it('REGRESSION: ignores oversized tool_result payloads when estimating session tokens', () => {
+    const hugeBase64 = 'a'.repeat(400_000);
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    sessionState.messages = [
+      { id: 'u1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 },
+      {
+        id: 'tool-1',
+        sessionId: 'session-1',
+        role: 'tool_result',
+        toolCallId: 'image-call',
+        content: JSON.stringify({
+          output_type: 'image',
+          image_url: `data:image/png;base64,${hugeBase64}`,
+          path: 'images/huge.png',
+        }),
+        createdAt: 2,
+      },
+    ];
+    sessionState.sessionMessages = {
+      'session-1': sessionState.messages,
+    };
+
+    render(<CanvasPanel />);
+
+    const tokenValue = screen.getByText('~Tokens').nextElementSibling;
+    expect(tokenValue).not.toHaveClass('text-warning');
+    expect(tokenValue).not.toHaveClass('text-error');
+  });
+
   it('shows subagent loops and separates subagent tools from master tools', () => {
     render(<CanvasPanel />);
 

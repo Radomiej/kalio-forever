@@ -66,6 +66,7 @@ describe('ChatService - Agent Loop Limits', () => {
 
     mockCredentialsService = {
       getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+      getContextWindowSize: vi.fn().mockResolvedValue(32000),
     } as any;
 
     service = new ChatService(

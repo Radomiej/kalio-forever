@@ -46,10 +46,8 @@ export class LLMController {
       throw new HttpException('Missing required body field: model', HttpStatus.BAD_REQUEST);
     }
 
-    const normalizedModel = body.model.trim();
-
     const [config, contextWindowSize, maxToolAttempts] = await Promise.all([
-      this.llm.updateActiveModel(normalizedModel),
+      this.llm.updateActiveModel(body.model),
       this.credentials.getContextWindowSize(),
       this.credentials.getMaxToolAttempts(),
     ]);

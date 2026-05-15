@@ -58,6 +58,7 @@ describe('ChatService — MAX_ITERATIONS', () => {
   };
   const credentialsService = {
     getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+    getContextWindowSize: vi.fn().mockResolvedValue(32000),
   };
   const auditService = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
 

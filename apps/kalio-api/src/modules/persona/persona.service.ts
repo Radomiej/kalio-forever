@@ -84,7 +84,8 @@ export class PersonaService implements OnApplicationBootstrap {
     ) && existingPrompt.includes(
       'Never mention or attempt file_write, file_read, write_file, read_file, or other aliases - they do not exist here',
     ) && !existingPrompt.includes('image_generate')
-      && !existingPrompt.includes('image_view');
+      && !existingPrompt.includes('image_view')
+      && !existingPrompt.includes('image_edit');
 
     return matchesRigidLegacyPrompt || matchesPreviousVfsFirstSeed;
   }

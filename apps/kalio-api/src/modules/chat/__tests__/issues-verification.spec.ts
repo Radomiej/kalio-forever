@@ -249,6 +249,7 @@ describe('ISSUE 2: MAX_ITERATIONS behavior', () => {
           provide: CredentialsService,
           useValue: {
             getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+            getContextWindowSize: vi.fn().mockResolvedValue(32000),
           },
         },
         { provide: AuditService, useValue: { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) } },

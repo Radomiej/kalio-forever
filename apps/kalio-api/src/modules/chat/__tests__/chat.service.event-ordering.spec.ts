@@ -77,7 +77,13 @@ async function buildService(
       },
       { provide: AuditService, useValue: { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) } },
       { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
-      { provide: CredentialsService, useValue: { getMaxToolAttempts: vi.fn().mockResolvedValue(8) } },
+      {
+        provide: CredentialsService,
+        useValue: {
+          getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+          getContextWindowSize: vi.fn().mockResolvedValue(32000),
+        },
+      },
       { provide: LLM_SOURCE, useValue: llmSource },
       { provide: TOOL_REGISTRY, useValue: [] },
     ],

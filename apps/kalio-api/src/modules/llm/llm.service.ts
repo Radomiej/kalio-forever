@@ -21,11 +21,13 @@ export class LLMService {
   ) {
     const provider = this.config.get<string>('LLM_PROVIDER', 'openai') as LLMProviderType;
     const apiKey = this.config.get<string>('LLM_API_KEY', 'mock');
-    const baseUrl = this.config.get<string>('LLM_BASE_URL', 'mock');
+    const configuredBaseUrl = this.config.get<string>('LLM_BASE_URL', 'mock');
     const model = this.config.get<string>('LLM_MODEL', 'mock');
 
+    const baseUrl = configuredBaseUrl === 'mock' ? undefined : configuredBaseUrl;
+
     this.envConfig = { provider, apiKey, model, baseUrl };
-  this.envProviderKey = this.getProviderConfigKey(this.envConfig);
+    this.envProviderKey = this.getProviderConfigKey(this.envConfig);
     this.envProvider = createLLMProvider(this.envConfig);
 
     if (provider === 'mock' || apiKey === 'mock') {

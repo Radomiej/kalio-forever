@@ -236,6 +236,40 @@ describe('LLMService - DB credential overrides env', () => {
         globalThis.fetch = originalFetch;
       }
     });
+
+    it('REGRESSION: does not rebuild the fallback env provider on first use when the configured baseUrl is mock', async () => {
+      const mockCreds = buildCredentialsMock();
+      mockCreds.getActiveProviderConfig.mockResolvedValue(null);
+
+      const moduleWithMockBaseUrl = await Test.createTestingModule({
+        providers: [
+          LLMService,
+          {
+            provide: ConfigService,
+            useValue: buildConfigMock({
+              LLM_PROVIDER: 'mock',
+              LLM_API_KEY: 'mock',
+              LLM_BASE_URL: 'mock',
+              LLM_MODEL: 'mock-model',
+            }),
+          },
+          { provide: CredentialsService, useValue: mockCreds },
+        ],
+      }).compile();
+
+      const mockBaseUrlService = moduleWithMockBaseUrl.get<LLMService>(LLMService);
+      const initialProviderKey = (mockBaseUrlService as unknown as { envProviderKey: string }).envProviderKey;
+
+      await mockBaseUrlService.streamChat(
+        [{ role: 'user', content: 'hello' }],
+        [],
+        () => {},
+        'session-1',
+        'msg-1',
+      );
+
+      expect((mockBaseUrlService as unknown as { envProviderKey: string }).envProviderKey).toBe(initialProviderKey);
+    });
   });
 
   describe('getActiveModels()', () => {
