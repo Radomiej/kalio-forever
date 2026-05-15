@@ -45,6 +45,7 @@ interface SessionManagerMock {
   persistAssistantMessage: ReturnType<typeof vi.fn>;
   saveToolResult?: ReturnType<typeof vi.fn>;
   loadHistory: ReturnType<typeof vi.fn>;
+  loadHistoryForLLM: ReturnType<typeof vi.fn>;
 }
 
 async function buildService(
@@ -117,6 +118,10 @@ describe('ChatService — event ordering (integration)', () => {
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockImplementation(async () => [...history]),
+      loadHistoryForLLM: vi.fn().mockImplementation(async (_sessionId: string, options: { systemPrompt: string }) => ({
+        history: options.systemPrompt ? [{ role: 'system', content: options.systemPrompt }] : [],
+        unboundedHistoryCount: options.systemPrompt ? 1 : 0,
+      })),
     };
     toolDispatch = {
       getToolMetas: vi.fn().mockReturnValue([

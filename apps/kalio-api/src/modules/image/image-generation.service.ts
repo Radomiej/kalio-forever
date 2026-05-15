@@ -1,12 +1,4 @@
-/**
- * ImageGenerationService — CometAPI / OpenAI-compatible multi-model image generation.
- * Supports: OpenAI standard (DALL-E, gpt-image), FLUX, Kling, Doubao, Qwen.
- *
- * FLUX routing:
- *   - CometAPI and other OpenAI-compatible /v1 proxies → /v1/images/generations
- *   - Native Replicate (api.replicate.com) → /v1/models/.../predictions (async polling)
- *   - OpenRouter / OpenAI → /v1/images/generations (standard, no polling)
- */
+/** ImageGenerationService for OpenAI-compatible image providers plus FLUX/Kling/Doubao/Qwen routing. */
 import { Injectable, Logger } from '@nestjs/common';
 import { fetchAndConvertImage } from './image-utils';
 

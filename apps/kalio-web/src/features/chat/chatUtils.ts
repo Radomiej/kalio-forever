@@ -1,6 +1,10 @@
 import type { ChatMessage } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
 
+export type ChatTimelineEntry =
+  | { kind: 'user_message'; message: ChatMessage }
+  | { kind: 'agent_turn'; turn: AgentTurn };
+
 /**
  * Returns a Set of toolCallIds for which a user message appears AFTER
  * the corresponding tool_result — i.e., the user already submitted an answer.
@@ -36,10 +40,17 @@ export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string
   let turnIndex = 0;
   let currentItems: AgentTurn['items'] = [];
   let firstMsgId: string | null = null;
+  let currentPromptMessageId: string | undefined;
 
   const flushTurn = () => {
     if (currentItems.length === 0 || firstMsgId === null) return;
-    turns.push({ id: `history-turn-${turnIndex++}-${firstMsgId}`, sessionId, items: currentItems, done: true });
+    turns.push({
+      id: `history-turn-${turnIndex++}-${firstMsgId}`,
+      sessionId,
+      promptMessageId: currentPromptMessageId,
+      items: currentItems,
+      done: true,
+    });
     currentItems = [];
     firstMsgId = null;
   };
@@ -48,6 +59,7 @@ export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string
     if (msg.role === 'user') {
       // A user message closes the current agent cycle and starts a new one.
       flushTurn();
+      currentPromptMessageId = msg.id;
       continue;
     }
     if (msg.role !== 'assistant') continue;
@@ -64,4 +76,43 @@ export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string
   flushTurn(); // flush trailing cycle (last assistant messages with no subsequent user message)
 
   return turns;
+}
+
+export function buildConversationTimeline(messages: ChatMessage[], agentTurns: AgentTurn[]): ChatTimelineEntry[] {
+  const userMessages = messages.filter((message) => message.role === 'user');
+  const turnsByPromptMessageId = new Map<string, AgentTurn[]>();
+  const leadingTurns: AgentTurn[] = [];
+  const trailingTurns: AgentTurn[] = [];
+  const knownUserIds = new Set(userMessages.map((message) => message.id));
+
+  agentTurns.forEach((turn) => {
+    if (!turn.promptMessageId) {
+      leadingTurns.push(turn);
+      return;
+    }
+
+    if (!knownUserIds.has(turn.promptMessageId)) {
+      trailingTurns.push(turn);
+      return;
+    }
+
+    const bucket = turnsByPromptMessageId.get(turn.promptMessageId) ?? [];
+    bucket.push(turn);
+    turnsByPromptMessageId.set(turn.promptMessageId, bucket);
+  });
+
+  const timeline: ChatTimelineEntry[] = leadingTurns.map((turn) => ({ kind: 'agent_turn', turn }));
+
+  userMessages.forEach((message) => {
+    timeline.push({ kind: 'user_message', message });
+    (turnsByPromptMessageId.get(message.id) ?? []).forEach((turn) => {
+      timeline.push({ kind: 'agent_turn', turn });
+    });
+  });
+
+  trailingTurns.forEach((turn) => {
+    timeline.push({ kind: 'agent_turn', turn });
+  });
+
+  return timeline;
 }

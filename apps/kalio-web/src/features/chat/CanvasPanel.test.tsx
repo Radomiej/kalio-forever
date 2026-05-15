@@ -308,6 +308,68 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.getByText('run_subagent')).toBeDefined();
   });
 
+  it('REGRESSION: orders sub-agent preview cards oldest-to-newest instead of newest-first', () => {
+    agentState.toolActivities = [
+      {
+        callId: 'master-call-newer',
+        toolName: 'run_subagent',
+        args: {},
+        status: 'success',
+        startedAt: 3,
+        finishedAt: 4,
+        result: {
+          callId: 'master-call-newer',
+          status: 'success',
+          data: {
+            result: 'newer child result',
+            taskId: 'task-newer',
+            childSessionId: 'sub-session-2',
+            parentSessionId: 'session-1',
+            vfsMode: 'isolated',
+            vfsSessionId: 'sub-session-2',
+            copiedFiles: [],
+            durationMs: 20,
+          },
+        },
+      },
+      {
+        callId: 'master-call-older',
+        toolName: 'run_subagent',
+        args: {},
+        status: 'success',
+        startedAt: 1,
+        finishedAt: 2,
+        result: {
+          callId: 'master-call-older',
+          status: 'success',
+          data: {
+            result: 'older child result',
+            taskId: 'task-older',
+            childSessionId: 'sub-session-1',
+            parentSessionId: 'session-1',
+            vfsMode: 'isolated',
+            vfsSessionId: 'sub-session-1',
+            copiedFiles: [],
+            durationMs: 20,
+          },
+        },
+      },
+    ];
+    agentState.activeAgentLoops = {};
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      { id: 'sub-session-1', personaId: 'default', title: 'Sub-agent: older', kind: 'subagent', createdAt: 2, updatedAt: 10 },
+      { id: 'sub-session-2', personaId: 'default', title: 'Sub-agent: newer', kind: 'subagent', createdAt: 3, updatedAt: 20 },
+    ];
+
+    render(<CanvasPanel />);
+
+    const olderCard = screen.getByText('Sub-agent: older');
+    const newerCard = screen.getByText('Sub-agent: newer');
+
+    expect(olderCard.compareDocumentPosition(newerCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('shows subagent transcript, copied VFS files, and opens the child conversation', async () => {
     render(<CanvasPanel />);
 

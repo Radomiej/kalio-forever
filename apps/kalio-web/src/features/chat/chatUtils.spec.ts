@@ -7,8 +7,9 @@
  * session reload.
  */
 import { describe, it, expect } from 'vitest';
-import { buildTurnsFromHistory, computeAnsweredCallIds } from './chatUtils';
+import { buildConversationTimeline, buildTurnsFromHistory, computeAnsweredCallIds } from './chatUtils';
 import type { ChatMessage } from '@kalio/types';
+import type { AgentTurn } from '../../store/sessionStore';
 
 function makeMsg(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -205,6 +206,35 @@ describe('buildTurnsFromHistory', () => {
     const kinds = turns[0].items.map((i) => i.kind);
     // Order: thinking(a1), text(a1), tool(tc1), thinking(a2), text(a2)
     expect(kinds).toEqual(['thinking', 'text', 'tool', 'thinking', 'text']);
+  });
+
+  it('REGRESSION: a rebuilt agent turn stays anchored to the user prompt that actually started it', () => {
+    const msgs = [
+      makeMsg({ id: 'u1', role: 'user', content: 'first prompt with no answer' }),
+      makeMsg({ id: 'u2', role: 'user', content: 'second prompt that got the answer' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: 'answer for second prompt' }),
+    ];
+
+    const turns = buildTurnsFromHistory(msgs, 's1');
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({ promptMessageId: 'u2' });
+  });
+
+  it('REGRESSION: timeline rendering keeps a later agent turn under the user prompt that owns it', () => {
+    const messages = [
+      makeMsg({ id: 'u1', role: 'user', content: 'first prompt with no answer' }),
+      makeMsg({ id: 'u2', role: 'user', content: 'second prompt that got the answer' }),
+    ];
+    const turns: AgentTurn[] = [
+      { id: 'turn-2', sessionId: 's1', promptMessageId: 'u2', items: [], done: true },
+    ];
+
+    const timeline = buildConversationTimeline(messages, turns).map((entry) =>
+      entry.kind === 'user_message' ? `user:${entry.message.id}` : `turn:${entry.turn.id}`,
+    );
+
+    expect(timeline).toEqual(['user:u1', 'user:u2', 'turn:turn-2']);
   });
 });
 

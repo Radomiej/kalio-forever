@@ -48,6 +48,7 @@ describe('ChatService — MAX_ITERATIONS', () => {
     persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
     saveToolResult: vi.fn().mockResolvedValue(undefined),
     loadHistory: vi.fn().mockResolvedValue([]),
+    loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
   };
   const toolDispatch = {
     getToolMetas: vi.fn().mockReturnValue([{ name: 'tool_a', description: '', parameters: {}, requiresConfirmation: false }]),

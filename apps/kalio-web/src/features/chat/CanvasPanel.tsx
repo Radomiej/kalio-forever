@@ -37,6 +37,7 @@ function extractSubagentResult(data: unknown): SubagentToolResult | null {
 
 function buildSubagentPreviews(messages: ChatMessage[], toolActivities: ToolActivity[], activeAgentLoops: Record<string, { sessionId: string; turnId: string; startedAt: number; agentRun?: ToolActivity['agentRun'] }>, sessions: ReturnType<typeof useSessionStore.getState>['sessions']): SubagentCanvasPreview[] {
   const previews = new Map<string, SubagentCanvasPreview>();
+  const sessionUpdatedAt = new Map(sessions.map((session) => [session.id, session.updatedAt]));
 
   Object.values(activeAgentLoops)
     .filter((loop) => loop.agentRun?.agentType === 'subagent')
@@ -82,7 +83,9 @@ function buildSubagentPreviews(messages: ChatMessage[], toolActivities: ToolActi
       });
     });
 
-  return [...previews.values()];
+  return [...previews.values()].sort(
+    (left, right) => (sessionUpdatedAt.get(left.sessionId) ?? 0) - (sessionUpdatedAt.get(right.sessionId) ?? 0),
+  );
 }
 
 function mergeFetchedMessages(currentMessages: ChatMessage[], loadedMessages: ChatMessage[]): ChatMessage[] {
@@ -123,6 +126,8 @@ function SubagentConversationCard({
 }) {
   const visibleMessages = transcript
     .filter((message) => message.role === 'user' || message.role === 'assistant')
+    .slice()
+    .sort((left, right) => left.createdAt - right.createdAt)
     .slice(-2);
 
   return (

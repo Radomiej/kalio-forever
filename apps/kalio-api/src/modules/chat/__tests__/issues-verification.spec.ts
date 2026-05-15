@@ -223,6 +223,7 @@ describe('ISSUE 2: MAX_ITERATIONS behavior', () => {
             ensureSession: vi.fn().mockResolvedValue(undefined),
             persistUserMessage: vi.fn().mockResolvedValue(undefined),
             loadHistory: vi.fn().mockResolvedValue([]),
+            loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
             saveToolResult: vi.fn().mockResolvedValue(undefined),
           },
         },

@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { nanoid } from 'nanoid';
-import { Copy, Check } from 'lucide-react';
-import { ConversationFilesBar } from '../vfs/ConversationFilesBar';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { useSettingsStore } from '../settings/settingsStore';
@@ -10,36 +8,20 @@ import { backendHealth } from '../../services/backendHealth';
 import { MessageBubble } from './MessageBubble';
 import { AgentTurnBubble } from './AgentTurnBubble';
 import { ChatInput } from './ChatInput';
-import { TokenBadge } from './TokenBadge';
-import { ContextStats } from './ContextStats';
 import { useContextUsage } from './hooks/useContextUsage';
-import { computeAnsweredCallIds, buildTurnsFromHistory } from './chatUtils';
+import { useChatSessionActivation } from './hooks/useChatSessionActivation';
+import { computeAnsweredCallIds, buildConversationTimeline, buildTurnsFromHistory } from './chatUtils';
 import { apiClient } from '../../services/apiClient';
 import type { ChatMessage, Persona } from '@kalio/types';
+import {
+  buildCopiedChatText,
+  ChatSessionHeader,
+  ChatStatusBanners,
+  ChatWelcomeScreen,
+  shouldRefreshVfsForToolResult,
+} from './ChatInterface.Parts';
 
 export { computeAnsweredCallIds } from './chatUtils';
-
-const VFS_REFRESH_TOOL_NAMES = new Set(['vfs_write', 'image_generate', 'image_edit']);
-
-function shouldRefreshVfsForToolResult(toolName: string | undefined, data: unknown): boolean {
-  if (!toolName) {
-    return false;
-  }
-  if (VFS_REFRESH_TOOL_NAMES.has(toolName)) {
-    return true;
-  }
-  if (toolName !== 'run_subagent' || !data || typeof data !== 'object') {
-    return false;
-  }
-
-  const result = data as Record<string, unknown>;
-  if (result['vfsMode'] === 'shared') {
-    return true;
-  }
-
-  const copiedFiles = result['copiedFiles'];
-  return Array.isArray(copiedFiles) && copiedFiles.length > 0;
-}
 
 export function ChatInterface() {
   const {
@@ -97,10 +79,8 @@ export function ChatInterface() {
   const [vfsRefreshSignal, setVfsRefreshSignal] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Compute answered RA-App call IDs (user message appeared after the tool_result)
   const answeredCallIds = computeAnsweredCallIds(messages);
 
-  // Context usage monitoring
   const { tokenCount, needsCompact, compactMessages } = useContextUsage();
 
   useEffect(() => {
@@ -153,10 +133,6 @@ export function ChatInterface() {
 
     const offComplete = eventBus.onComplete((payload) => {
       console.debug('[EventBus] chat:complete', payload.messageId);
-      // Finalize ALL streaming messages for this session — the agent loop may have produced
-      // multiple assistant rows (one per LLM iteration). Without this each
-      // streamed bubble keeps `streaming: true` and the typing caret blinks
-      // forever even after the turn ends.
       const { streamingChunks, thinkingChunks, finalizeChunk: doFinalize, chunkSessionIds } = useSessionStore.getState();
       const ids = new Set([...Object.keys(streamingChunks), ...Object.keys(thinkingChunks)])
       ids.forEach((id) => {
@@ -375,18 +351,10 @@ export function ChatInterface() {
     };
   }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput, clearToolActivities, addSession, backendHealth, getSessionActiveTurnId, getSessionAgentTurns, hasActiveLoopForSession]);
 
-  // Clear stale retry content when the user switches sessions.
-  // Without this, clicking Retry after switching sessions would send the previous
-  // session's message into the new session.
   useEffect(() => {
     lastSentContentRef.current = '';
   }, [activeSessionId]);
 
-  // Re-register session ownership with the server whenever the active session changes.
-  // This fixes the race condition where identifySession is called on reconnect but the
-  // user switches sessions before the history fetch completes — the server would be left
-  // owning the old session. Calling it here ensures the server always knows the current
-  // session regardless of reconnect timing.
   useEffect(() => {
     if (activeSessionId && eventBus.connected) {
       eventBus.identifySession(activeSessionId);
@@ -422,7 +390,6 @@ export function ChatInterface() {
     prevStreamingRef.current = isStreaming;
   }, [isStreaming, addMessage]);
 
-  // Latest-ref so the pending-message effect always calls the current handleSend
   const handleSendRef = useRef<(content: string, personaId: string) => void>(() => {});
 
   const handleSend = (content: string, personaId: string) => {
@@ -461,51 +428,17 @@ export function ChatInterface() {
     });
   };
 
-  // Keep ref current so the effect below always sees the latest handleSend
   handleSendRef.current = handleSend;
 
-  // Auto-send pending message/RA-App when a new session becomes active
-  useEffect(() => {
-    if (!activeSessionId) return;
-    // Reset stale streaming state from any previous session
-    setStreaming(false);
-    clearToolActivities(activeSessionId);
-    setPendingConfirmation(activeSessionId, null); // Clear stale confirmation — tool activities were just wiped
-    // Note: agentTurns are cleared by setActiveSession in the store on real session switch.
-    // Do NOT call clearAgentTurns here — this effect also fires on component remount
-    // (e.g. navigating home and back), which would wipe an in-flight streaming turn.
-    console.debug('[ChatInterface] session activated', activeSessionId, '— streaming reset');
-
-    // Load message history from backend
-    fetch(`/api/sessions/${activeSessionId}/messages`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((data: ChatMessage[]) => {
-        // Only apply if the session is still active when the response arrives
-        if (useSessionStore.getState().activeSessionId !== activeSessionId) return;
-        setMessages(data);
-        // Guard: if a live agent turn is already running for this session, do NOT
-        // overwrite agentTurns. setAgentTurns() also resets activeTurnId to null,
-        // which would make all subsequent addTurnItem / finalizeAgentTurn calls
-        // no-ops — causing the entire turn (and any RA-App widgets) to disappear.
-        // This race happens when: session activates → pendingMessage auto-sent →
-        // agent:start fires → fetch resolves with empty history and clobbers the
-        // live turn that was just created.
-        if (!useAgentStore.getState().hasActiveLoopForSession(activeSessionId)) {
-          setAgentTurns(buildTurnsFromHistory(data, activeSessionId));
-        }
-      })
-      .catch((err: unknown) => {
-        console.error('[ChatInterface] failed to load message history', err instanceof Error ? err : new Error(String(err)));
-      });
-
-    const { pendingMessage, pendingRAAppId, setPendingMessage, setPendingRAAppId, sessions: s } = useSessionStore.getState();
-    const toSend = pendingMessage ?? (pendingRAAppId ? `Use the ${s.find((a) => a.id === activeSessionId)?.title ?? pendingRAAppId} tool` : null);
-    if (!toSend) return;
-    setPendingMessage(null);
-    setPendingRAAppId(null);
-    const pendingSession = s.find((sess) => sess.id === activeSessionId);
-    handleSendRef.current(toSend, pendingSession?.personaId ?? 'default');
-  }, [activeSessionId, setMessages, setAgentTurns]);
+  useChatSessionActivation({
+    activeSessionId,
+    clearToolActivities,
+    handleSendRef,
+    setAgentTurns,
+    setMessages,
+    setPendingConfirmation,
+    setStreaming,
+  });
 
   const handleStop = () => {
     if (!activeSessionId) return;
@@ -521,13 +454,7 @@ export function ChatInterface() {
 
   const [copied, setCopied] = useState(false);
   const handleCopyChat = () => {
-    const text = messages
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => {
-        const who = m.role === 'user' ? 'You' : 'Kalio';
-        return `${who}: ${m.content}`;
-      })
-      .join('\n\n');
+    const text = buildCopiedChatText(messages);
     void navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       console.log('[ChatInterface] chat copied to clipboard', { messageCount: messages.length });
@@ -537,137 +464,65 @@ export function ChatInterface() {
 
   return (
     <div data-testid="chat-interface" className="flex h-full flex-col bg-base-200 rounded-xl border border-base-300 overflow-hidden">
-      {error && (
-        <div data-testid="chat-error" className="alert alert-error m-2 py-2 text-sm">
-          {error}
-          <button className="btn btn-ghost btn-xs ml-auto" onClick={() => setError(null)}>✕</button>
-        </div>
-      )}
-      {retryError && (
-        <div data-testid="chat-retry-error" className="alert alert-warning m-2 py-2 text-sm flex items-center gap-2">
-          <span className="flex-1">{retryError}</span>
-          <button
-            className="btn btn-xs btn-warning"
-            onClick={() => {
-              const content = lastSentContentRef.current;
-              const session = sessions.find((s) => s.id === activeSessionId);
-              if (content && session) {
-                setRetryError(null);
-                handleSend(content, session.personaId);
-              }
-            }}
-          >
-            Retry
-          </button>
-          <button className="btn btn-ghost btn-xs" onClick={() => setRetryError(null)}>✕</button>
-        </div>
-      )}
+      <ChatStatusBanners
+        error={error}
+        onCloseError={() => setError(null)}
+        onCloseRetryError={() => setRetryError(null)}
+        onRetry={() => {
+          const content = lastSentContentRef.current;
+          const session = sessions.find((item) => item.id === activeSessionId);
+          if (content && session) {
+            setRetryError(null);
+            handleSend(content, session.personaId);
+          }
+        }}
+        retryError={retryError}
+      />
 
-      {/* Session header */}
-      {activeSession && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
-          <span className="text-sm font-medium truncate flex-1">{activeSession.title}</span>
-          <ConversationFilesBar sessionId={activeSessionId!} refreshSignal={vfsRefreshSignal} />
-          {messages.length > 0 && (
-            <button
-              className="btn btn-ghost btn-xs text-base-content/40 hover:text-base-content/70"
-              onClick={handleCopyChat}
-              title="Copy chat to clipboard"
-            >
-              {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-            </button>
-          )}
-          <div className="relative shrink-0">
-            <TokenBadge tokenCount={tokenCount} onClick={() => setShowContextStats((v) => !v)} />
-            {showContextStats && (
-              <ContextStats
-                tokenCount={tokenCount}
-                onCompactNow={needsCompact ? handleCompactNow : undefined}
-                onClose={() => setShowContextStats(false)}
-                systemPrompt={activeContext.systemPrompt}
-                activeToolNames={activeContext.activeToolNames}
-              />
-            )}
-          </div>
-          {activeModel && (
-            <span className="text-[10px] font-mono text-base-content/35 shrink-0 truncate max-w-[9rem]" title={activeModel}>
-              {activeModel}
-            </span>
-          )}
-        </div>
+      {activeSession && activeSessionId && (
+        <ChatSessionHeader
+          activeContext={activeContext}
+          activeModel={activeModel}
+          activeSession={activeSession}
+          activeSessionId={activeSessionId}
+          copied={copied}
+          messages={messages}
+          needsCompact={needsCompact}
+          onCloseContextStats={() => setShowContextStats(false)}
+          onCompactNow={handleCompactNow}
+          onCopyChat={handleCopyChat}
+          onToggleContextStats={() => setShowContextStats((value) => !value)}
+          showContextStats={showContextStats}
+          tokenCount={tokenCount}
+          vfsRefreshSignal={vfsRefreshSignal}
+        />
       )}
 
       <div data-testid="message-list" className="flex-1 overflow-y-auto p-4 space-y-1">
-        {/* Welcome screen — only when no messages */}
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-5 max-w-sm mx-auto px-4" data-testid="welcome-screen">
-            <div className="text-center select-none">
-              <div className="text-primary font-black text-4xl drop-shadow-[0_0_12px_oklch(0.60_0.176_232.6/0.6)] mb-2">K</div>
-              <h2 className="text-base font-semibold text-base-content/80">KALIO</h2>
-              <p className="text-base-content/45 text-xs mt-1 leading-relaxed max-w-60">
-                AI assistant — build apps, query data, generate images, run tools
-              </p>
-            </div>
-            {activeSessionId && personas.length > 1 && (
-              <div className="w-full max-w-xs">
-                <label className="text-[10px] uppercase tracking-wider text-base-content/35 mb-1 block pl-1">
-                  Persona
-                </label>
-                <select
-                  className="select select-bordered select-sm w-full text-sm"
-                  value={activeSession?.personaId ?? 'default'}
-                  onChange={(e) => void handlePersonaChange(e.target.value)}
-                  disabled={isStreaming}
-                  data-testid="welcome-persona-select"
-                >
-                  {personas.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {activeSessionId && (
-              <div className="flex flex-wrap justify-center gap-2 mt-1">
-                {['What can you do?', 'Build a calculator app', 'Create a todo list', 'Generate an image of a fox'].map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    className="btn btn-sm btn-ghost border border-base-300/70 text-xs text-base-content/70 hover:text-primary hover:border-primary/40"
-                    onClick={() => handleSend(prompt, activeSession?.personaId ?? 'default')}
-                    disabled={isStreaming}
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <ChatWelcomeScreen
+            activeSession={activeSession}
+            activeSessionId={activeSessionId}
+            isStreaming={isStreaming}
+            onPersonaChange={(personaId) => void handlePersonaChange(personaId)}
+            onSend={handleSend}
+            personas={personas}
+          />
         )}
 
-        {/* Interleaved timeline: user message → agent turn → user message → ... */}
-        {(() => {
-          const userMsgs = messages.filter((m) => m.role === 'user');
-          const timeline: React.ReactNode[] = [];
-          const maxLen = Math.max(userMsgs.length, agentTurns.length);
-          for (let i = 0; i < maxLen; i++) {
-            if (i < userMsgs.length) {
-              timeline.push(<MessageBubble key={userMsgs[i].id} message={userMsgs[i]} />);
-            }
-            if (i < agentTurns.length) {
-              timeline.push(
-                <AgentTurnBubble
-                  key={agentTurns[i].id}
-                  turn={agentTurns[i]}
-                  toolActivities={activeToolActivities}
-                  answeredCallIds={answeredCallIds}
-                />,
-              );
-            }
-          }
-          return timeline;
-        })()}
+        {buildConversationTimeline(messages, agentTurns).map((entry) => (
+          entry.kind === 'user_message'
+            ? <MessageBubble key={entry.message.id} message={entry.message} />
+            : (
+              <AgentTurnBubble
+                key={entry.turn.id}
+                turn={entry.turn}
+                toolActivities={activeToolActivities}
+                answeredCallIds={answeredCallIds}
+              />
+            )
+        ))}
 
-        {/* Generic streaming indicator when streaming with no messages yet */}
         {isStreaming && activeToolActivities.length === 0 && messages.length === 0 && (
           <div className="flex justify-start">
             <div className="bg-base-300 rounded-2xl px-4 py-2">

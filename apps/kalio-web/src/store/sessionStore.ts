@@ -347,9 +347,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   // Agent turn management — unified chronological rendering per user prompt
   startAgentTurn: (turnId, sessionId, agentRun) =>
     set((s) => {
+      const promptMessageId = [...getStoredSessionMessages(s, sessionId)]
+        .reverse()
+        .find((message) => message.role === 'user')?.id;
       const nextSessionTurns = [
         ...getStoredSessionTurns(s, sessionId),
-        { id: turnId, sessionId, agentRun, items: [], done: false },
+        { id: turnId, sessionId, promptMessageId, agentRun, items: [], done: false },
       ];
       return {
         sessionAgentTurns: {

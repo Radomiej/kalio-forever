@@ -38,7 +38,10 @@ describe('ChatService', () => {
   };
   let toolDispatch: { getToolMetas: ReturnType<typeof vi.fn>; dispatch: ReturnType<typeof vi.fn> };
   let personaService: Partial<PersonaService>;
-  let credentialsService: Pick<CredentialsService, 'getMaxToolAttempts' | 'getContextWindowSize'>;
+  let credentialsService: {
+    getMaxToolAttempts: ReturnType<typeof vi.fn>;
+    getContextWindowSize: ReturnType<typeof vi.fn>;
+  };
   let auditService: Partial<AuditService>;
   let emit: ReturnType<typeof vi.fn>;
 
