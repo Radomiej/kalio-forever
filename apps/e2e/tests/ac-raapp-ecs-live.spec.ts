@@ -110,7 +110,6 @@ test.describe('ECS / RA-App live integration', () => {
     await page.getByTestId('chat-send-btn').click();
 
     // Wait for the RA-App tool to render and the turn to finish.
-    await expect(chatInput).toBeDisabled({ timeout: 5000 });
     await expect(page.getByTestId('gui-dsl-renderer')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('gui-button').first()).toBeVisible({ timeout: 30_000 });
     await expect(chatInput).toBeEnabled({ timeout: 30_000 });

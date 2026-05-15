@@ -3,6 +3,10 @@ import { API_BASE } from './helpers/test-config';
 
 const APP_URL = 'http://localhost:5188';
 
+function uniquePersonaName(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 async function goToPersonas(page: import('@playwright/test').Page) {
   await page.goto(APP_URL);
   await page.getByTestId('nav-mind').click();
@@ -85,10 +89,12 @@ test.describe('AC-04: Persona Tool Picker', () => {
   });
 
   test('tools badge shows count when persona has tools', async ({ page, request }) => {
+    const personaName = uniquePersonaName('AC04 Tools Badge');
+
     // Create persona with tools via API
     const res = await request.post(`${API_BASE}/personas`, {
       data: {
-        name: 'AC04 Tools Badge',
+        name: personaName,
         systemPrompt: 'test',
         model: 'mock',
         allowedTools: ['vfs_read', 'vfs_write', 'memory_search'],
@@ -98,7 +104,7 @@ test.describe('AC-04: Persona Tool Picker', () => {
 
     await goToPersonas(page);
 
-    const item = page.getByTestId('persona-item').filter({ hasText: 'AC04 Tools Badge' });
+  const item = page.getByTestId('persona-item').filter({ hasText: personaName });
     await expect(item).toBeVisible({ timeout: 5000 });
     // Badge shows "3"
     await expect(item.locator('.badge', { hasText: '3' })).toBeVisible();
@@ -107,9 +113,11 @@ test.describe('AC-04: Persona Tool Picker', () => {
   });
 
   test('tool badges shown in expanded read view', async ({ page, request }) => {
+    const personaName = uniquePersonaName('AC04 Tools Expanded');
+
     const res = await request.post(`${API_BASE}/personas`, {
       data: {
-        name: 'AC04 Tools Expanded',
+        name: personaName,
         systemPrompt: 'test',
         model: 'mock',
         allowedTools: ['vfs_read', 'vfs_list', 'terminal_spawn'],
@@ -119,7 +127,7 @@ test.describe('AC-04: Persona Tool Picker', () => {
 
     await goToPersonas(page);
 
-    const item = page.getByTestId('persona-item').filter({ hasText: 'AC04 Tools Expanded' });
+  const item = page.getByTestId('persona-item').filter({ hasText: personaName });
     await expect(item).toBeVisible({ timeout: 5000 });
     // Expand
     await item.locator('button').first().click();
@@ -131,9 +139,11 @@ test.describe('AC-04: Persona Tool Picker', () => {
   });
 
   test('creates persona with selected tools and persists', async ({ page, request }) => {
+    const personaName = uniquePersonaName('AC04 Tools Persist');
+
     await goToPersonas(page);
     await page.getByTestId('new-persona-btn').click();
-    await page.getByTestId('persona-name-input').fill('AC04 Tools Persist');
+    await page.getByTestId('persona-name-input').fill(personaName);
     await page.getByTestId('persona-model-input').fill('mock');
     await page.getByTestId('persona-tools-toggle').click();
 
@@ -151,7 +161,7 @@ test.describe('AC-04: Persona Tool Picker', () => {
     // Verify via API
     const list = await request.get(`${API_BASE}/personas`);
     const personas: Array<{ id: string; name: string; allowedTools: string[] }> = await list.json();
-    const created = personas.find((p) => p.name === 'AC04 Tools Persist');
+    const created = personas.find((p) => p.name === personaName);
     expect(created).toBeDefined();
     expect(created!.allowedTools).toContain('vfs_read');
 

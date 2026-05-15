@@ -230,6 +230,7 @@ describe('PersonaService', () => {
       expect(config['orchestrator']?.systemPrompt).toContain('raapp_create_draft');
       expect(config['orchestrator']?.systemPrompt).toContain('raapp_execute_dsl');
       expect(config['orchestrator']?.systemPrompt).toContain('Do not ask the child for HTML, design_preview');
+      expect(config['orchestrator']?.systemPrompt).toContain('Do not ask the child for preview links, rendered previews, or design_preview results');
     });
 
     it('teaches the designer to use the exact VFS tool names without a rigid dark multi-page template', () => {
