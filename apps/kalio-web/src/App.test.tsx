@@ -31,6 +31,10 @@ vi.mock('./features/chat/CanvasPanel', () => ({
   CanvasPanel: () => <div data-testid="canvas-panel">Canvas</div>,
 }));
 
+vi.mock('./features/chat/graph/ExecutionGraphView', () => ({
+  ExecutionGraphView: () => <div data-testid="execution-graph-view">Graph</div>,
+}));
+
 vi.mock('./features/sessions/ConversationPanel', () => ({
   ConversationPanel: () => <div data-testid="conversation-panel">Conversations</div>,
 }));
@@ -163,6 +167,39 @@ describe('App view state persistence', () => {
     expect(screen.getByTestId('raapp-manager')).toBeInTheDocument();
     expect(screen.queryByTestId('landing-page')).not.toBeInTheDocument();
     expect(screen.queryByTestId('tool-panel')).not.toBeInTheDocument();
+  });
+
+  it('hydrates the stored talk graph view on first mount', () => {
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
+      activeSection: 'talk',
+      talkTab: 'conversations',
+      talkView: 'graph',
+      toolsTab: 'native',
+      mindTab: 'memory',
+      selectedSkillId: null,
+    }));
+
+    render(<App />);
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('canvas-panel')).not.toBeInTheDocument();
+  });
+
+  it('persists the selected talk graph view after remount', () => {
+    const firstRender = render(<App />);
+
+    fireEvent.click(screen.getByTestId('landing-to-chat'));
+    fireEvent.click(screen.getByTestId('talk-view-graph'));
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+
+    firstRender.unmount();
+
+    render(<App />);
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
   });
 
   it('REGRESSION: runtime config type accepts backend responses that include apiKey', () => {
