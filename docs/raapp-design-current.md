@@ -1,6 +1,6 @@
 # RA-App Design - stan aktualny
 
-Ten dokument opisuje runtime i powierzchnie renderowania RA-App w Kalio.
+Ten dokument opisuje runtime i powierzchnie renderowania RA-App w Kalio Workstation.
 Jesli chcesz zrozumiec aktualny VFS-first workflow roboczy, wersjonowany release lane,
 porownanie z legacy V1 oraz status testow przed merge, zacznij od
 `raapp-v2-architecture-current.md`.

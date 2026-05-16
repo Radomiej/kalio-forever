@@ -2,6 +2,7 @@ import { io, Socket } from 'socket.io-client';
 import type {
   SocketEvents,
   LLMStreamChunk,
+  ToolConfirmationInvalidated,
   ToolConfirmationRequest,
   ToolResult,
   ChatSession,
@@ -11,6 +12,7 @@ export type ChunkHandler = (chunk: LLMStreamChunk) => void;
 export type CompleteHandler = (payload: SocketEvents['chat:complete']) => void;
 export type ErrorHandler = (payload: SocketEvents['chat:error']) => void;
 export type ConfirmationHandler = (req: ToolConfirmationRequest) => void;
+export type ConfirmationInvalidatedHandler = (payload: ToolConfirmationInvalidated) => void;
 export type ToolStartHandler = (payload: SocketEvents['tool:start']) => void;
 export type ToolResultHandler = (result: ToolResult) => void;
 export type SessionCreatedHandler = (session: ChatSession) => void;
@@ -146,6 +148,19 @@ export class KalioSDK {
     };
     this.socket.on('tool:confirmation_required', wrappedHandler);
     return () => this.socket.off('tool:confirmation_required', wrappedHandler);
+  }
+
+  onToolConfirmationInvalidated(handler: ConfirmationInvalidatedHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['tool:confirmation_invalidated']) => {
+      console.groupCollapsed(`[Thread] ℹ️ CONFIRMATION INVALIDATED: ${payload.requestId} → ${payload.reason}`);
+      if (payload.message) {
+        console.log('message:', payload.message);
+      }
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('tool:confirmation_invalidated', wrappedHandler);
+    return () => this.socket.off('tool:confirmation_invalidated', wrappedHandler);
   }
 
   onToolStart(handler: ToolStartHandler): () => void {

@@ -178,9 +178,33 @@ export function ChatInterface() {
         setAwaitingFirstChunk(false);
       }
       setStreaming(false);
-      removeActiveAgentLoop(payload.sessionId);
       const { activeSessionId: currentActiveSessionId, getSessionActiveTurnId: getTurnId } = useSessionStore.getState();
       const targetSessionId = payload.sessionId ?? currentActiveSessionId;
+      if (targetSessionId) {
+        removeActiveAgentLoop(targetSessionId);
+        setPendingConfirmation(targetSessionId, null);
+
+        const terminalToolStatus = payload.code === 'INTERRUPTED' ? 'cancelled' : 'error';
+        const finishedAt = Date.now();
+        const activeActivities = getToolActivitiesForSession(targetSessionId).filter(
+          (activity) => activity.status === 'running' || activity.status === 'awaiting_confirmation',
+        );
+
+        activeActivities.forEach((activity) => {
+          updateToolActivity(activity.callId, {
+            status: terminalToolStatus,
+            finishedAt,
+            result: {
+              callId: activity.callId,
+              status: terminalToolStatus,
+              ...(terminalToolStatus === 'error'
+                ? { errorCode: payload.code, errorMessage: payload.message }
+                : {}),
+            },
+          });
+        });
+      }
+
       const activeTurnId = getTurnId(targetSessionId);
       if (!activeTurnId) {
         // Error before agent turn opened (e.g. QUEUE_FULL) → floating banner
@@ -213,6 +237,19 @@ export function ChatInterface() {
         agentRun: req.agentRun,
         status: 'awaiting_confirmation',
         startedAt: Date.now(),
+      });
+    });
+
+    const offConfirmationInvalidated = eventBus.onToolConfirmationInvalidated((payload) => {
+      setPendingConfirmation(payload.sessionId, null);
+      updateToolActivity(payload.toolCallId ?? payload.requestId, {
+        status: payload.reason === 'cancelled' ? 'cancelled' : 'expired',
+        finishedAt: Date.now(),
+        result: {
+          callId: payload.toolCallId ?? payload.requestId,
+          status: 'cancelled',
+          ...(payload.message ? { errorMessage: payload.message } : {}),
+        },
       });
     });
 
@@ -375,6 +412,7 @@ export function ChatInterface() {
       offComplete();
       offError();
       offConfirmation();
+      offConfirmationInvalidated();
       offToolStart();
       offAgentStart();
       offAgentDone();

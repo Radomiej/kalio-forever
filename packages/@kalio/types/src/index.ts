@@ -231,6 +231,15 @@ export interface ToolConfirmationRequest {
   agentRun?: AgentRunContext;
 }
 
+export interface ToolConfirmationInvalidated {
+  requestId: string;
+  toolCallId?: string;
+  sessionId: ID;
+  reason: 'timeout' | 'cancelled' | 'confirmed' | 'not_found' | 'replay_stale';
+  message?: string;
+  agentRun?: AgentRunContext;
+}
+
 // ─── VFS ──────────────────────────────────────────────────────────────────────
 export interface VFSFile {
   sessionId: ID;
@@ -483,6 +492,7 @@ export interface SocketEvents {
 
   // Tool HITL — server → client
   'tool:confirmation_required': ToolConfirmationRequest;
+  'tool:confirmation_invalidated': ToolConfirmationInvalidated;
 
   // Tool HITL — client → server
   'tool:confirm': { requestId: string; sessionId: ID };

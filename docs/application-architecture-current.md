@@ -1,6 +1,6 @@
 # Application Architecture - Current State
 
-This document is the current top-level map of Kalio-Forever.
+This document is the current top-level map of Kalio Workstation (repository: Kalio-Forever).
 It reflects the runtime visible in the codebase today, not older design intent.
 
 Primary source-of-truth areas:

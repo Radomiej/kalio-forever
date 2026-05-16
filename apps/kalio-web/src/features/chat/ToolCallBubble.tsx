@@ -189,7 +189,6 @@ function Chip({
 function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
   const [argsOpen, setArgsOpen] = useState(false);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
-  const setPendingConfirmation = useAgentStore((s) => s.setPendingConfirmation);
   const updateToolActivity = useAgentStore((s) => s.updateToolActivity);
   const confirmation = Object.values(pendingConfirmations).find((pending) => pending.toolCallId === activity.callId);
 
@@ -204,14 +203,12 @@ function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
     if (!confirmation) return;
     updateToolActivity(activity.callId, { status: 'running', startedAt: Date.now() });
     eventBus.confirmTool({ requestId: confirmation.requestId, sessionId: confirmation.sessionId });
-    setPendingConfirmation(confirmation.sessionId, null);
   };
 
   const handleCancel = () => {
     if (!confirmation) return;
     updateToolActivity(activity.callId, { status: 'cancelled', finishedAt: Date.now() });
     eventBus.cancelTool({ requestId: confirmation.requestId, sessionId: confirmation.sessionId });
-    setPendingConfirmation(confirmation.sessionId, null);
   };
 
   return (
@@ -313,9 +310,15 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
       <Loader2 size={12} className="text-sky-400 animate-spin shrink-0" />
     ) : activity.status === 'success' ? (
       <CheckCircle2 size={12} className="text-success shrink-0" />
+    ) : activity.status === 'expired' ? (
+      <AlertTriangle size={12} className="text-warning shrink-0" />
     ) : (
       <XCircle size={12} className={activity.status === 'cancelled' ? 'text-base-content/40 shrink-0' : 'text-error shrink-0'} />
     );
+
+  const badge = activity.status === 'expired'
+    ? <span className="text-[10px] font-mono text-warning/70 bg-warning/10 rounded px-1">confirmation expired</span>
+    : undefined;
 
   const hasArgs = Object.keys(activity.args).length > 0;
   const hasNonRaappResult = activity.result?.data != null && extractRAAppBlock(activity.result.data) == null && extractImageResult(activity.result.data) == null;
@@ -327,6 +330,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
     <Chip
       icon={icon}
       toolName={activity.toolName}
+      badge={badge}
       elapsed={elapsed}
       expandable={expandable}
       open={open}

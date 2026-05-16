@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { AgentRunContext, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
 
-export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled';
+export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled' | 'expired';
 
 export interface ToolActivity {
   callId: string;

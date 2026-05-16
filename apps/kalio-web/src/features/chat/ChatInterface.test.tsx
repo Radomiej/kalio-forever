@@ -111,7 +111,14 @@ const clearCLIAgentOutput = vi.fn();
 const agentStoreState = {
   isStreaming: false,
   pendingConfirmations: {} as Record<string, unknown>,
-  toolActivities: [] as { callId: string; toolName: string }[],
+  toolActivities: [] as Array<{
+    callId: string;
+    toolName: string;
+    args?: Record<string, unknown>;
+    sessionId?: string;
+    status?: 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled';
+    startedAt?: number;
+  }>,
   llmActivities: [],
   systemPrompt: null,
   activeToolNames: [],
@@ -752,6 +759,112 @@ describe('chat:error two-path dispatch', () => {
     expect(markAgentTurnError).not.toHaveBeenCalled();
     expect(removeLastAgentTurn).not.toHaveBeenCalled();
     expect(setStreaming).toHaveBeenCalledWith(false);
+  });
+
+  it('REGRESSION: chat:error clears pending confirmation and settles active tool activities for the errored session', async () => {
+    mockActiveTurnId = 'turn-abc';
+    agentStoreState.toolActivities = [
+      {
+        callId: 'call-awaiting',
+        toolName: 'vfs_write',
+        args: { path: 'orchestrator-edit-cycle.html' },
+        sessionId: 'session-1',
+        status: 'awaiting_confirmation',
+        startedAt: 1000,
+      },
+      {
+        callId: 'call-running',
+        toolName: 'image_generate',
+        args: { filename: 'images/coffee-hero.png' },
+        sessionId: 'session-1',
+        status: 'running',
+        startedAt: 2000,
+      },
+      {
+        callId: 'call-other-session',
+        toolName: 'vfs_write',
+        args: { path: 'other.html' },
+        sessionId: 'session-2',
+        status: 'awaiting_confirmation',
+        startedAt: 3000,
+      },
+    ];
+
+    await renderChatInterface();
+    setPendingConfirmation.mockClear();
+    updateToolActivity.mockClear();
+
+    await emitEvent('chat:error', {
+      sessionId: 'session-1',
+      code: 'LLM_ERROR',
+      message: 'quota exhausted',
+      hadContent: true,
+    });
+
+    expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+    expect(updateToolActivity).toHaveBeenCalledWith(
+      'call-awaiting',
+      expect.objectContaining({
+        status: 'error',
+        result: expect.objectContaining({
+          callId: 'call-awaiting',
+          status: 'error',
+          errorCode: 'LLM_ERROR',
+          errorMessage: 'quota exhausted',
+        }),
+      }),
+    );
+    expect(updateToolActivity).toHaveBeenCalledWith(
+      'call-running',
+      expect.objectContaining({
+        status: 'error',
+        result: expect.objectContaining({
+          callId: 'call-running',
+          status: 'error',
+          errorCode: 'LLM_ERROR',
+          errorMessage: 'quota exhausted',
+        }),
+      }),
+    );
+    expect(updateToolActivity).not.toHaveBeenCalledWith(
+      'call-other-session',
+      expect.anything(),
+    );
+  });
+
+  it('REGRESSION: chat:error with INTERRUPTED settles active tool activities as cancelled', async () => {
+    mockActiveTurnId = 'turn-abc';
+    agentStoreState.toolActivities = [
+      {
+        callId: 'call-awaiting',
+        toolName: 'vfs_write',
+        args: { path: 'orchestrator-edit-cycle.html' },
+        sessionId: 'session-1',
+        status: 'awaiting_confirmation',
+        startedAt: 1000,
+      },
+    ];
+
+    await renderChatInterface();
+    updateToolActivity.mockClear();
+
+    await emitEvent('chat:error', {
+      sessionId: 'session-1',
+      code: 'INTERRUPTED',
+      message: 'Turn interrupted by user',
+      hadContent: false,
+    });
+
+    expect(updateToolActivity).toHaveBeenCalledWith(
+      'call-awaiting',
+      expect.objectContaining({
+        status: 'cancelled',
+        result: expect.objectContaining({
+          callId: 'call-awaiting',
+          status: 'cancelled',
+        }),
+      }),
+    );
   });
 });
 

@@ -1,7 +1,7 @@
 import { Injectable, Inject, Optional, Logger } from '@nestjs/common';
 
 import { nanoid } from 'nanoid';
-import type { ToolMeta, ToolCallRequest, ToolResult, ToolConfirmationRequest } from '@kalio/types';
+import type { ToolMeta, ToolCallRequest, ToolResult, ToolConfirmationInvalidated, ToolConfirmationRequest } from '@kalio/types';
 import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from './interfaces/tool-registry-entry.interface';
 import { TOOL_REGISTRY } from './chat.tokens';
@@ -9,13 +9,15 @@ import { MCPService } from '../mcp/mcp.service';
 
 const HITL_TIMEOUT_MS = 600_000;
 const BUILTIN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
-const OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['image_generate', 'raapp_create']);
+const OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['image_generate']);
 
 type SubagentAgentRunContext = NonNullable<StreamContext['agentRun']> & { autoApproveTools?: string[] };
+type ConfirmationResolutionStatus = 'resolved' | 'rejected' | 'not_found' | 'session_mismatch';
 
 interface PendingConfirmation {
   sessionId: string;
   payload: ToolConfirmationRequest;
+  emit: StreamContext['emit'];
   resolve: () => void;
   reject: (err: Error) => void;
 }
@@ -128,30 +130,34 @@ export class ToolDispatchService {
     }
   }
 
-  resolveConfirmation(requestId: string, sessionId?: string): void {
+  resolveConfirmation(requestId: string, sessionId?: string): ConfirmationResolutionStatus {
     const pending = this.pending.get(requestId);
-    if (!pending) return;
+    if (!pending) return 'not_found';
     if (sessionId && pending.sessionId !== sessionId) {
       this.logger.warn(
         `Ignoring tool confirmation for request ${requestId}: session mismatch (${sessionId} !== ${pending.sessionId})`,
       );
-      return;
+      return 'session_mismatch';
     }
     this.pending.delete(requestId);
+    this.emitConfirmationInvalidated(pending, 'confirmed');
     pending.resolve();
+    return 'resolved';
   }
 
-  cancelConfirmation(requestId: string, sessionId?: string): void {
+  cancelConfirmation(requestId: string, sessionId?: string): ConfirmationResolutionStatus {
     const pending = this.pending.get(requestId);
-    if (!pending) return;
+    if (!pending) return 'not_found';
     if (sessionId && pending.sessionId !== sessionId) {
       this.logger.warn(
         `Ignoring tool cancellation for request ${requestId}: session mismatch (${sessionId} !== ${pending.sessionId})`,
       );
-      return;
+      return 'session_mismatch';
     }
     this.pending.delete(requestId);
+    this.emitConfirmationInvalidated(pending, 'cancelled');
     pending.reject(new Error('User cancelled tool confirmation'));
+    return 'rejected';
   }
 
   getPendingConfirmations(sessionId: string): ToolConfirmationRequest[] {
@@ -184,7 +190,15 @@ export class ToolDispatchService {
     return new Promise<boolean>(resolve => {
       const timeout = timeoutMs > 0
         ? setTimeout(() => {
-            this.pending.delete(requestId);
+            const pending = this.pending.get(requestId);
+            if (pending) {
+              this.pending.delete(requestId);
+              this.emitConfirmationInvalidated(
+                pending,
+                'timeout',
+                `Approval timed out for tool ${toolName}.`,
+              );
+            }
             this.logger.warn(
               `HITL confirmation timed out for tool [${toolName}] session=${ctx.sessionId}`,
             );
@@ -195,6 +209,7 @@ export class ToolDispatchService {
       this.pending.set(requestId, {
         sessionId: ctx.sessionId,
         payload,
+        emit: ctx.emit,
         resolve: () => {
           if (timeout) clearTimeout(timeout);
           resolve(true);
@@ -235,5 +250,20 @@ export class ToolDispatchService {
       toolName,
       agentRun: ctx.agentRun,
     };
+  }
+
+  private emitConfirmationInvalidated(
+    pending: PendingConfirmation,
+    reason: ToolConfirmationInvalidated['reason'],
+    message?: string,
+  ): void {
+    pending.emit('tool:confirmation_invalidated', {
+      requestId: pending.payload.requestId,
+      toolCallId: pending.payload.toolCallId,
+      sessionId: pending.payload.sessionId,
+      reason,
+      ...(message !== undefined ? { message } : {}),
+      ...(pending.payload.agentRun !== undefined ? { agentRun: pending.payload.agentRun } : {}),
+    });
   }
 }
