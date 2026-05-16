@@ -75,6 +75,8 @@ export function extractArtifactFromData(callId: string, data: unknown): Executio
   const path = typeof candidate['path'] === 'string' ? candidate['path'] : undefined;
   const outputType = typeof candidate['output_type'] === 'string' ? candidate['output_type'] : undefined;
   const type = typeof candidate['type'] === 'string' ? candidate['type'] : undefined;
+  const renderedContent = typeof candidate['renderedContent'] === 'string' ? candidate['renderedContent'] : undefined;
+  const content = typeof candidate['content'] === 'string' ? candidate['content'] : undefined;
 
   if (typeof candidate['status'] === 'string' && candidate['status'] === 'ready' && (type === 'html' || type === 'gui')) {
     return {
@@ -82,7 +84,7 @@ export function extractArtifactFromData(callId: string, data: unknown): Executio
       kind: 'raapp',
       label: type === 'html' ? 'HTML app' : 'GUI app',
       subtitle: 'Interactive preview block',
-      preview: typeof candidate['content'] === 'string' ? candidate['content'] : undefined,
+      preview: renderedContent ?? content,
       payload: data,
     };
   }

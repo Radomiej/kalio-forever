@@ -472,7 +472,7 @@ export function buildExecutionGraphModel({
         subtitle: `${groupedTools.length} calls collapsed`,
         detail: groupedTools.map((tool) => tool.toolName).join(', '),
         status: groupStatus,
-        column: baseColumn + 1,
+        column: baseColumn,
         row: startRow + 1,
         turnId: turn.id,
         payload: { kind: 'tool-group', tools: groupedTools },
@@ -482,7 +482,7 @@ export function buildExecutionGraphModel({
 
       let nextOutcomeRow = groupNode.row + 1;
       turnToolItems.forEach((item) => {
-        const outcome = renderOutcomes(item.callId, groupNode.id, nextOutcomeRow, baseColumn + 2);
+        const outcome = renderOutcomes(item.callId, groupNode.id, nextOutcomeRow, baseColumn + 1);
         outcomeIds.push(...outcome.outcomeIds);
         if (outcome.maxRow >= nextOutcomeRow) {
           maxRow = Math.max(maxRow, outcome.maxRow);
@@ -490,10 +490,9 @@ export function buildExecutionGraphModel({
         }
       });
     } else {
-      turnToolItems.forEach((item) => {
+      turnToolItems.forEach((item, index) => {
         const snapshot = toolSnapshots.get(item.callId);
-        const hasSiblingTools = turnToolItems.length > 1;
-        const toolRow = hasSiblingTools ? maxRow + 1 : startRow;
+        const toolRow = startRow + index + 1;
         const toolNode = addNode({
           id: `tool:${item.callId}`,
           kind: 'tool',
@@ -507,7 +506,7 @@ export function buildExecutionGraphModel({
             ? 'Accept required before this branch can continue'
             : Object.keys(snapshot?.args ?? {}).slice(0, 3).join(', ') || undefined,
           status: statusFromActivity(snapshot?.activity ?? null, snapshot?.result != null),
-          column: baseColumn + 1,
+          column: baseColumn,
           row: toolRow,
           callId: item.callId,
           payload: {
@@ -522,7 +521,7 @@ export function buildExecutionGraphModel({
         addEdge(turnNode.id, toolNode.id);
         maxRow = Math.max(maxRow, toolRow);
 
-        const outcome = renderOutcomes(item.callId, toolNode.id, toolRow + 1, baseColumn + 2);
+        const outcome = renderOutcomes(item.callId, toolNode.id, toolRow + 1, baseColumn + 1);
         outcomeIds.push(...outcome.outcomeIds);
         if (outcome.maxRow >= toolRow + 1) {
           maxRow = Math.max(maxRow, outcome.maxRow);

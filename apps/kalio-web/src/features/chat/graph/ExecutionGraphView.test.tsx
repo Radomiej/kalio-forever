@@ -294,4 +294,64 @@ describe('ExecutionGraphView empty-session state', () => {
 
     expect(await screen.findByTestId(`graph-node-tool-group:${sessionState.agentTurns[0]?.id}`)).toBeInTheDocument();
   });
+
+  it('zooms the graph with the mouse wheel over the canvas', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Build graph layout', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-list-1', name: 'list_tools', args: {} }],
+      }),
+      makeMessage({ id: 'tr1', role: 'tool_result', toolCallId: 'call-list-1', content: JSON.stringify({ ok: true }), createdAt: 3 }),
+      makeMessage({ id: 'a2', role: 'assistant', content: 'Done.', createdAt: 4 }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [];
+
+    render(<ExecutionGraphView />);
+
+    fireEvent.wheel(await screen.findByTestId('execution-graph-viewport'), { deltaY: -120 });
+
+    expect(await screen.findByText('115%')).toBeInTheDocument();
+  });
+
+  it('lets the inspector panel be resized from the graph view', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Build graph layout', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-list-1', name: 'list_tools', args: {} }],
+      }),
+      makeMessage({ id: 'tr1', role: 'tool_result', toolCallId: 'call-list-1', content: JSON.stringify({ ok: true }), createdAt: 3 }),
+      makeMessage({ id: 'a2', role: 'assistant', content: 'Done.', createdAt: 4 }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [];
+
+    render(<ExecutionGraphView />);
+
+    const inspector = await screen.findByTestId('execution-graph-inspector');
+
+    expect(inspector).toHaveStyle({ width: '384px' });
+
+    fireEvent.mouseDown(screen.getByTestId('graph-inspector-resize-handle'), { clientX: 1000 });
+    fireEvent.mouseMove(document, { clientX: 920 });
+    fireEvent.mouseUp(document);
+
+    expect(inspector.style.width).toBe('464px');
+  });
 });

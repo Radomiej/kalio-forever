@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent } from 'react';
+import { useRef, useState, type MouseEvent, type WheelEvent } from 'react';
 import {
   Bot, Boxes, BrainCircuit, CheckCircle2, FolderTree, MessageSquareText, Wrench,
 } from 'lucide-react';
@@ -56,6 +56,28 @@ function previewRaApp(value: string | undefined): string | null {
   const stripped = value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   if (!stripped) return 'Interactive preview ready';
   return stripped.slice(0, 140);
+}
+
+function buildEdgePath(source: ExecutionGraphNode, target: ExecutionGraphNode): string {
+  const targetIsToolBranch = target.kind === 'tool' || target.kind === 'tool-group';
+
+  if (targetIsToolBranch && target.y >= source.y) {
+    const startX = source.x + source.width / 2;
+    const startY = source.y + source.height;
+    const endX = target.x + target.width / 2;
+    const endY = target.y;
+    const delta = Math.max((endY - startY) / 2, 40);
+
+    return `M ${startX} ${startY} C ${startX} ${startY + delta}, ${endX} ${endY - delta}, ${endX} ${endY}`;
+  }
+
+  const startX = source.x + source.width;
+  const startY = source.y + source.height / 2;
+  const endX = target.x;
+  const endY = target.y + target.height / 2;
+  const delta = Math.max((endX - startX) / 2, 40);
+
+  return `M ${startX} ${startY} C ${startX + delta} ${startY}, ${endX - delta} ${endY}, ${endX} ${endY}`;
 }
 
 function GraphNodeCard({
@@ -131,9 +153,16 @@ interface ExecutionGraphBoardProps {
   selectedNodeId: string | null;
   onSelectNode: (nodeId: string) => void;
   zoom: number;
+  onWheelZoom?: (deltaY: number) => void;
 }
 
-export function ExecutionGraphBoard({ model, selectedNodeId, onSelectNode, zoom }: ExecutionGraphBoardProps) {
+export function ExecutionGraphBoard({
+  model,
+  selectedNodeId,
+  onSelectNode,
+  zoom,
+  onWheelZoom,
+}: ExecutionGraphBoardProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{
     startX: number;
@@ -144,6 +173,10 @@ export function ExecutionGraphBoard({ model, selectedNodeId, onSelectNode, zoom 
   const [dragging, setDragging] = useState(false);
 
   const handleMouseDown = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
     const target = event.target;
     if (target instanceof HTMLElement && target.closest('[data-graph-node-card="true"]')) {
       return;
@@ -179,18 +212,28 @@ export function ExecutionGraphBoard({ model, selectedNodeId, onSelectNode, zoom 
     setDragging(false);
   };
 
+  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (!onWheelZoom) {
+      return;
+    }
+
+    event.preventDefault();
+    onWheelZoom(event.deltaY);
+  };
+
   return (
     <div
       ref={viewportRef}
       data-testid="execution-graph-viewport"
-      className={`flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.10),_transparent_42%),linear-gradient(rgba(56,189,248,0.08)_1px,_transparent_1px),linear-gradient(90deg,_rgba(56,189,248,0.08)_1px,_transparent_1px)] bg-[length:100%_100%,40px_40px,40px_40px] bg-[#0a1220] ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+      className={`flex-1 overflow-auto overscroll-none bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.10),_transparent_42%),linear-gradient(rgba(56,189,248,0.08)_1px,_transparent_1px),linear-gradient(90deg,_rgba(56,189,248,0.08)_1px,_transparent_1px)] bg-[length:100%_100%,40px_40px,40px_40px] bg-[#0a1220] ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={stopDragging}
       onMouseLeave={stopDragging}
+      onWheel={handleWheel}
     >
       <div
-        className="relative"
+        className="relative min-w-full min-h-full"
         style={{
           width: Math.max(model.board.width * zoom, model.board.width),
           height: Math.max(model.board.height * zoom, model.board.height),
@@ -210,17 +253,12 @@ export function ExecutionGraphBoard({ model, selectedNodeId, onSelectNode, zoom 
               const source = model.nodes.find((node) => node.id === edge.sourceId);
               const target = model.nodes.find((node) => node.id === edge.targetId);
               if (!source || !target) return null;
-
-              const startX = source.x + source.width;
-              const startY = source.y + source.height / 2;
-              const endX = target.x;
-              const endY = target.y + target.height / 2;
-              const delta = Math.max((endX - startX) / 2, 40);
-              const path = `M ${startX} ${startY} C ${startX + delta} ${startY}, ${endX - delta} ${endY}, ${endX} ${endY}`;
+              const path = buildEdgePath(source, target);
 
               return (
                 <path
                   key={edge.id}
+                  data-testid={`graph-edge-${edge.id}`}
                   d={path}
                   fill="none"
                   markerEnd="url(#graph-arrow)"

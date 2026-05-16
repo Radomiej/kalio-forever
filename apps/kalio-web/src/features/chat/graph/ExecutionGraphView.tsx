@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   ArrowRight, BrainCircuit, FileCode2, FileImage, MessageSquareText, Wrench, Zap,
 } from 'lucide-react';
@@ -69,7 +69,9 @@ export function ExecutionGraphView() {
   const { toolActivities, activeAgentLoops, pendingConfirmations, setPendingConfirmation } = useAgentStore();
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [zoom, setZoom] = useState(1);
+  const [inspectorWidth, setInspectorWidth] = useState(384);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const inspectorResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
     apiClient
@@ -78,10 +80,48 @@ export function ExecutionGraphView() {
       .catch((err: unknown) => console.error('[ExecutionGraphView] personas load failed', err));
   }, []);
 
+  useEffect(() => {
+    const handleMouseMove = (event: globalThis.MouseEvent) => {
+      const dragState = inspectorResizeRef.current;
+      if (!dragState) {
+        return;
+      }
+
+      const nextWidth = dragState.startWidth + (dragState.startX - event.clientX);
+      setInspectorWidth(Math.max(280, Math.min(640, nextWidth)));
+    };
+
+    const stopResize = () => {
+      inspectorResizeRef.current = null;
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', stopResize);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', stopResize);
+    };
+  }, []);
+
+  const clampZoom = (value: number) => Math.max(0.55, Math.min(1.6, Number(value.toFixed(2))));
   const collapseTools = zoom <= 0.8;
-  const decreaseZoom = () => setZoom((value) => Math.max(0.55, Number((value - 0.15).toFixed(2))));
-  const increaseZoom = () => setZoom((value) => Math.min(1.6, Number((value + 0.15).toFixed(2))));
+  const decreaseZoom = () => setZoom((value) => clampZoom(value - 0.15));
+  const increaseZoom = () => setZoom((value) => clampZoom(value + 0.15));
   const resetZoom = () => setZoom(1);
+  const handleWheelZoom = (deltaY: number) => {
+    if (deltaY === 0) {
+      return;
+    }
+
+    setZoom((value) => clampZoom(value + (deltaY < 0 ? 0.15 : -0.15)));
+  };
+  const startInspectorResize = (event: ReactMouseEvent<HTMLDivElement>) => {
+    inspectorResizeRef.current = {
+      startX: event.clientX,
+      startWidth: inspectorWidth,
+    };
+  };
 
   const runningLoops = Object.values(activeAgentLoops);
   const runningToolActivities = toolActivities.filter((activity) => isLiveTool(activity));
@@ -130,7 +170,7 @@ export function ExecutionGraphView() {
             {collapseTools ? 'tools grouped' : 'tools expanded'}
           </span>
           <span className="rounded-full border border-base-300 px-3 py-1.5 text-xs uppercase tracking-[0.22em] text-base-content/45">
-            drag to pan
+            drag to pan / wheel to zoom
           </span>
           <span className="rounded-full border border-base-300 px-3 py-1.5 text-xs uppercase tracking-[0.22em] text-base-content/45">
             {runningLoops.length} agent{runningLoops.length === 1 ? '' : 's'} live
@@ -346,10 +386,23 @@ export function ExecutionGraphView() {
           selectedNodeId={effectiveSelectedId}
           onSelectNode={setSelectedNodeId}
           zoom={zoom}
+          onWheelZoom={handleWheelZoom}
         />
       </div>
 
-      <aside className="w-[24rem] shrink-0 border-l border-base-300 bg-base-100 overflow-y-auto">
+      <div
+        role="separator"
+        aria-label="Resize graph inspector"
+        data-testid="graph-inspector-resize-handle"
+        className="w-2 shrink-0 cursor-col-resize bg-base-200/40 transition-colors hover:bg-sky-500/25"
+        onMouseDown={startInspectorResize}
+      />
+
+      <aside
+        data-testid="execution-graph-inspector"
+        className="shrink-0 border-l border-base-300 bg-base-100 overflow-y-auto"
+        style={{ width: `${inspectorWidth}px` }}
+      >
         {selectedNode && (
           <div className="p-5 space-y-5">
             <div className="rounded-[22px] border border-base-300 bg-base-200/35 px-5 py-4">

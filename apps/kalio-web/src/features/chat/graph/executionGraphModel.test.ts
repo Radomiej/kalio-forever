@@ -219,6 +219,11 @@ describe('buildExecutionGraphModel', () => {
     expect(turnNode?.subtitle).toContain('RaBuilder');
     expect(toolNodes.length).toBe(2);
     expect(Math.min(...toolNodes.map((node) => node.row))).toBeGreaterThan(turnNode?.row ?? -1);
+    expect(new Set(toolNodes.map((node) => node.column))).toEqual(new Set([turnNode?.column]));
+    expect(toolNodes.map((node) => node.row)).toEqual([
+      (turnNode?.row ?? 0) + 1,
+      (turnNode?.row ?? 0) + 2,
+    ]);
   });
 
   it('shows nested child turns and persona models below the subagent node', () => {
@@ -389,5 +394,94 @@ describe('buildExecutionGraphModel', () => {
     expect(toolNode?.subtitle).toBe('Awaiting confirmation');
     expect(toolNode?.payload.kind).toBe('tool');
     expect(toolNode?.payload.kind === 'tool' ? toolNode.payload.confirmationRequired : false).toBe(true);
+  });
+
+  it('places even a single tool below the turn so tool calls read as downward branches', () => {
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Delegate calculator build', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-subagent-1', name: 'run_subagent', args: { persona: 'RaBuilder' } }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-subagent-1',
+        content: JSON.stringify({
+          result: 'The calculator is built.',
+          taskId: 'task-1',
+          childSessionId: 'child-session-1',
+          parentSessionId: 'session-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'child-session-1',
+          copiedFiles: [],
+          durationMs: 42,
+        }),
+        createdAt: 3,
+      }),
+    ];
+
+    const turns = buildTurnsFromHistory(messages, 'session-1');
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns,
+      toolActivities: [],
+      activeAgentLoops: {},
+      sessions: [makeSession(), makeSession({ id: 'child-session-1', title: 'Child session', kind: 'subagent' })],
+      sessionMessages: {
+        'session-1': messages,
+      },
+      collapseTools: false,
+    });
+
+    const turnNode = model.nodes.find((node) => node.kind === 'turn');
+    const toolNode = model.nodes.find((node) => node.id === 'tool:call-subagent-1');
+
+    expect(toolNode?.row).toBeGreaterThan(turnNode?.row ?? -1);
+    expect(toolNode?.column).toBe(turnNode?.column);
+  });
+
+  it('uses rendered RAApp content so the node can show a live preview', () => {
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Build a calculator app', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-raapp-1', name: 'raapp_create', args: { mode: 'html' } }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-raapp-1',
+        content: JSON.stringify({
+          status: 'ready',
+          type: 'html',
+          renderedContent: '<main><h1>Calculator preview</h1></main>',
+        }),
+        createdAt: 3,
+      }),
+    ];
+
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns: buildTurnsFromHistory(messages, 'session-1'),
+      toolActivities: [],
+      activeAgentLoops: {},
+      sessions: [makeSession()],
+      sessionMessages: {
+        'session-1': messages,
+      },
+      collapseTools: false,
+    });
+
+    const artifactNode = model.nodes.find((node) => node.kind === 'artifact' && node.payload.kind === 'artifact' && node.payload.artifact.kind === 'raapp');
+
+    expect(artifactNode?.payload.kind).toBe('artifact');
+    expect(artifactNode?.payload.kind === 'artifact' ? artifactNode.payload.artifact.preview : null).toContain('Calculator preview');
   });
 });
