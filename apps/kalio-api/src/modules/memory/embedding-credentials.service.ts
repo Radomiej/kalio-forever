@@ -8,6 +8,18 @@ import { embeddingCredentials } from '../../database/schema';
 
 const ACTIVE_KEY = 'active_embedding_credential';
 
+function toEmbeddingCredentialResponse(row: typeof embeddingCredentials.$inferSelect): EmbeddingCredential {
+  return {
+    id: row.id,
+    name: row.name,
+    provider: row.provider as EmbeddingCredential['provider'],
+    baseUrl: row.baseUrl ?? undefined,
+    model: row.model ?? undefined,
+    dimensions: row.dimensions ?? undefined,
+    createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : row.createdAt,
+  };
+}
+
 export interface EmbeddingCredentialFull extends EmbeddingCredential {
   apiKey: string;
 }
@@ -23,11 +35,7 @@ export class EmbeddingCredentialsService {
 
   async findAll(): Promise<EmbeddingCredential[]> {
     const rows = await this.drizzle.db.select().from(embeddingCredentials);
-    return rows.map(({ apiKey: _omit, ...rest }) => ({
-      ...rest,
-      provider: rest.provider as EmbeddingCredential['provider'],
-      createdAt: rest.createdAt instanceof Date ? rest.createdAt.getTime() : rest.createdAt,
-    }));
+    return rows.map((row) => toEmbeddingCredentialResponse(row));
   }
 
   async create(dto: CreateEmbeddingCredentialDto): Promise<EmbeddingCredential> {
@@ -48,13 +56,8 @@ export class EmbeddingCredentialsService {
       .where(eq(embeddingCredentials.id, id))
       .then((r) => r[0]);
     if (!row) throw new Error(`Embedding credential insert succeeded but row not found for id: ${id}`);
-    const { apiKey: _omit, ...rest } = row;
     this.logger.log(`Embedding credential created: "${dto.name}" (${dto.provider})`);
-    return {
-      ...rest,
-      provider: rest.provider as EmbeddingCredential['provider'],
-      createdAt: rest.createdAt instanceof Date ? rest.createdAt.getTime() : rest.createdAt,
-    };
+    return toEmbeddingCredentialResponse(row);
   }
 
   async remove(id: string): Promise<void> {

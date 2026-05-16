@@ -60,7 +60,6 @@ export class ImageViewTool {
   constructor(private readonly vfs: VFSService) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
-    const start = Date.now();
     const { sessionId } = request;
     const vfsSessionId = request.vfsSessionId ?? sessionId;
     const filePath = getPathArg(request.args);
@@ -73,9 +72,13 @@ export class ImageViewTool {
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'VFS_FILE_NOT_FOUND' || code === 'ENOENT') {
-        throw new Error(`Image not found: ${filePath}`);
+        throw new Error(`Image not found: ${filePath}`, {
+          cause: err,
+        });
       }
-      throw err;
+      throw new Error(`Failed to load image: ${filePath}`, {
+        cause: err,
+      });
     }
 
     const dataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;

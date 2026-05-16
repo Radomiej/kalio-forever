@@ -1,12 +1,4 @@
-/**
- * ImageGenerationService — CometAPI / OpenAI-compatible multi-model image generation.
- * Supports: OpenAI standard (DALL-E, gpt-image), FLUX, Kling, Doubao, Qwen.
- *
- * FLUX routing:
- *   - CometAPI and other OpenAI-compatible /v1 proxies → /v1/images/generations
- *   - Native Replicate (api.replicate.com) → /v1/models/.../predictions (async polling)
- *   - OpenRouter / OpenAI → /v1/images/generations (standard, no polling)
- */
+/** ImageGenerationService for OpenAI-compatible image providers plus FLUX/Kling/Doubao/Qwen routing. */
 import { Injectable, Logger } from '@nestjs/common';
 import { fetchAndConvertImage } from './image-utils';
 
@@ -133,6 +125,67 @@ function formatFromMimeType(mimeType: string): string {
   if (mimeType.includes('png')) return 'png';
   if (mimeType.includes('webp')) return 'webp';
   return 'jpeg';
+}
+
+interface JsonResponseLike {
+  ok: boolean;
+  status: number;
+  statusText?: string;
+  headers?: { get(name: string): string | null };
+  text(): Promise<string>;
+}
+
+function getResponseContentType(response: JsonResponseLike): string {
+  return response.headers?.get('content-type')?.toLowerCase() ?? '';
+}
+
+function summarizeResponseBody(rawBody: string): string {
+  const compact = rawBody.replace(/\s+/g, ' ').trim();
+  return compact.slice(0, 160);
+}
+
+function parseJsonBody(
+  rawBody: string,
+  contentType: string,
+  errorPrefix: string,
+): Record<string, unknown> {
+  if (contentType.length > 0 && !contentType.includes('json')) {
+    const snippet = summarizeResponseBody(rawBody);
+    throw new Error(
+      `${errorPrefix}: Expected JSON image response but received ${contentType}${snippet ? `: ${snippet}` : ''}`,
+    );
+  }
+
+  try {
+    return JSON.parse(rawBody) as Record<string, unknown>;
+  } catch {
+    const snippet = summarizeResponseBody(rawBody);
+    throw new Error(
+      `${errorPrefix}: Expected JSON image response but received invalid JSON${snippet ? `: ${snippet}` : ''}`,
+    );
+  }
+}
+
+async function readJsonResponse(response: JsonResponseLike, errorPrefix: string): Promise<Record<string, unknown>> {
+  const rawBody = await response.text();
+  return parseJsonBody(rawBody, getResponseContentType(response), errorPrefix);
+}
+
+async function readImageApiError(response: JsonResponseLike): Promise<ImageApiError> {
+  const rawBody = await response.text().catch(() => '');
+  const contentType = getResponseContentType(response);
+
+  if (rawBody.trim().length > 0 && (contentType.length === 0 || contentType.includes('json'))) {
+    try {
+      return JSON.parse(rawBody) as ImageApiError;
+    } catch {
+      // Fall back to a readable body summary below.
+    }
+  }
+
+  const snippet = summarizeResponseBody(rawBody);
+  const message = snippet || response.statusText || `HTTP ${response.status}`;
+  return { error: { message } };
 }
 
 function getModelConfig(
@@ -360,7 +413,7 @@ async function pollForImage(
     const response = await fetch(pollingUrl, { headers });
     if (!response.ok) throw new Error(`Polling failed: ${response.status}`);
 
-    const data = await response.json() as Record<string, unknown>;
+    const data = await readJsonResponse(response, 'Image polling failed');
     const topStatus = typeof data['status'] === 'string' ? data['status'] : '';
     const nestedStatus =
       typeof (data['data'] as Record<string, unknown> | undefined)?.['status'] === 'string'
@@ -468,14 +521,12 @@ export class ImageGenerationService {
     });
 
     if (!response.ok) {
-      const errorData = await response
-        .json()
-        .catch(() => ({ error: { message: response.statusText } })) as ImageApiError;
+      const errorData = await readImageApiError(response);
       const msg = errorData?.error?.message ?? `HTTP ${response.status}`;
       throw new Error(`Image generation failed: ${msg}`);
     }
 
-    const data = await response.json() as Record<string, unknown>;
+    const data = await readJsonResponse(response, 'Image generation failed');
 
     if (config.requiresPolling) {
       const initResp = data as PollingInitResponse;

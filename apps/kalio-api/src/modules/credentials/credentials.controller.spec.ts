@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { INestApplication } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { CredentialsController } from './credentials.controller';
 import { CredentialsService } from './credentials.service';
@@ -19,6 +20,7 @@ function makeCredential(overrides: Partial<Credential> = {}): Credential {
 
 describe('CredentialsController', () => {
   let controller: CredentialsController;
+  let app: INestApplication | null = null;
   const mockService = {
     findAll: vi.fn(),
     create: vi.fn(),
@@ -59,6 +61,13 @@ describe('CredentialsController', () => {
       providerRemoteTimeoutMs: 15000,
     });
     mockTimeoutSettings.getProviderTimeoutMs.mockResolvedValue(15000);
+  });
+
+  afterEach(async () => {
+    if (app) {
+      await app.close();
+      app = null;
+    }
   });
 
   describe('findAll()', () => {
@@ -114,6 +123,164 @@ describe('CredentialsController', () => {
       mockService.clearActiveCredential.mockResolvedValue(undefined);
       await controller.clearActive();
       expect(mockService.clearActiveCredential).toHaveBeenCalled();
+    });
+
+    it('routes DELETE /credentials/active to clearActiveCredential instead of remove(id)', async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        controllers: [CredentialsController],
+        providers: [
+          { provide: CredentialsService, useValue: mockService },
+          { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
+        ],
+      }).compile();
+
+      app = module.createNestApplication();
+      await app.init();
+      await app.listen(0);
+
+      const address = app.getHttpServer().address();
+      const port = typeof address === 'string' ? Number.parseInt(address.split(':').at(-1) ?? '0', 10) : address.port;
+
+      mockService.clearActiveCredential.mockResolvedValue(undefined);
+      mockService.remove.mockResolvedValue(undefined);
+
+      const response = await fetch(`http://127.0.0.1:${port}/credentials/active`, {
+        method: 'DELETE',
+      });
+
+      expect(response.status).toBe(204);
+      expect(mockService.clearActiveCredential).toHaveBeenCalledTimes(1);
+      expect(mockService.remove).not.toHaveBeenCalled();
+    });
+
+    it('REGRESSION: routes POST /credentials/test to testConnection instead of testById', async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        controllers: [CredentialsController],
+        providers: [
+          { provide: CredentialsService, useValue: mockService },
+          { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
+        ],
+      }).compile();
+
+      app = module.createNestApplication();
+      await app.init();
+      await app.listen(0);
+
+      const address = app.getHttpServer().address();
+      const port = typeof address === 'string' ? Number.parseInt(address.split(':').at(-1) ?? '0', 10) : address.port;
+
+      mockService.findAll.mockResolvedValue([]);
+
+      const response = await fetch(`http://127.0.0.1:${port}/credentials/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'mock', apiKey: 'mock', model: 'mock' }),
+      });
+
+      expect(response.ok).toBe(true);
+      await expect(response.json()).resolves.toEqual(
+        expect.objectContaining({ ok: true, latencyMs: expect.any(Number) }),
+      );
+      expect(mockService.findAll).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('settings endpoints - HTTP integration pass', () => {
+    async function startHttpApp(): Promise<number> {
+      const module: TestingModule = await Test.createTestingModule({
+        controllers: [CredentialsController],
+        providers: [
+          { provide: CredentialsService, useValue: mockService },
+          { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
+        ],
+      }).compile();
+
+      app = module.createNestApplication();
+      await app.init();
+      await app.listen(0);
+
+      const address = app.getHttpServer().address();
+      return typeof address === 'string'
+        ? Number.parseInt(address.split(':').at(-1) ?? '0', 10)
+        : address.port;
+    }
+
+    it('serves the settings GET routes over HTTP with the expected payloads', async () => {
+      mockService.getContextWindowSize.mockResolvedValue(128000);
+      mockService.getMaxToolAttempts.mockResolvedValue(12);
+      mockService.getGenerationSettings.mockResolvedValue({ temperature: 0.8, maxTokens: 2048 });
+      mockTimeoutSettings.getTimeoutSettings.mockResolvedValue({
+        webSearchTimeoutMs: 180000,
+        providerLocalTimeoutMs: 5000,
+        providerRemoteTimeoutMs: 20000,
+      });
+
+      const port = await startHttpApp();
+
+      const [contextWindowRes, maxToolAttemptsRes, generationRes, toolTimeoutsRes] = await Promise.all([
+        fetch(`http://127.0.0.1:${port}/credentials/settings/context-window`),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/max-tool-attempts`),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/generation`),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/tool-timeouts`),
+      ]);
+
+      expect(contextWindowRes.status).toBe(200);
+      await expect(contextWindowRes.json()).resolves.toEqual({ size: 128000 });
+
+      expect(maxToolAttemptsRes.status).toBe(200);
+      await expect(maxToolAttemptsRes.json()).resolves.toEqual({ size: 12 });
+
+      expect(generationRes.status).toBe(200);
+      await expect(generationRes.json()).resolves.toEqual({ temperature: 0.8, maxTokens: 2048 });
+
+      expect(toolTimeoutsRes.status).toBe(200);
+      await expect(toolTimeoutsRes.json()).resolves.toEqual({
+        webSearchTimeoutMs: 180000,
+        providerLocalTimeoutMs: 5000,
+        providerRemoteTimeoutMs: 20000,
+      });
+    });
+
+    it('routes the settings PUT endpoints over HTTP to the correct services', async () => {
+      mockService.setContextWindowSize.mockResolvedValue(undefined);
+      mockService.setMaxToolAttempts.mockResolvedValue(undefined);
+      mockService.setGenerationSettings.mockResolvedValue(undefined);
+      mockTimeoutSettings.setTimeoutSettings.mockResolvedValue(undefined);
+
+      const port = await startHttpApp();
+
+      const [contextWindowRes, maxToolAttemptsRes, generationRes, toolTimeoutsRes] = await Promise.all([
+        fetch(`http://127.0.0.1:${port}/credentials/settings/context-window`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ size: 64000 }),
+        }),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/max-tool-attempts`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ size: 16 }),
+        }),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/generation`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ temperature: 0.9, maxTokens: 1024 }),
+        }),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/tool-timeouts`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerRemoteTimeoutMs: 25000 }),
+        }),
+      ]);
+
+      expect(contextWindowRes.status).toBe(204);
+      expect(maxToolAttemptsRes.status).toBe(204);
+      expect(generationRes.status).toBe(204);
+      expect(toolTimeoutsRes.status).toBe(204);
+
+      expect(mockService.setContextWindowSize).toHaveBeenCalledWith(64000);
+      expect(mockService.setMaxToolAttempts).toHaveBeenCalledWith(16);
+      expect(mockService.setGenerationSettings).toHaveBeenCalledWith({ temperature: 0.9, maxTokens: 1024 });
+      expect(mockTimeoutSettings.setTimeoutSettings).toHaveBeenCalledWith({ providerRemoteTimeoutMs: 25000 });
     });
   });
 

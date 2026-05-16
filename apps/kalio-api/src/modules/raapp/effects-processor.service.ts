@@ -1,10 +1,12 @@
 import vm from 'node:vm';
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import yaml from 'js-yaml';
 import { nanoid } from 'nanoid';
 import { NativeSystemRegistry } from './native/native-system-registry.service';
 import type { NativeSessionContext } from './native/native-system-registry.service';
 import { AuditService } from '../chat/audit.service';
+import { EntityStore, type Entity } from './entity-store';
 
 // ─── DSL types (systems.yml) ─────────────────────────────────────────────────
 
@@ -34,12 +36,67 @@ interface CallNativeEffect {
   };
 }
 
-type RawEffect = AssignEffect | SetEffect | IfEffect | CallNativeEffect | Record<string, unknown>;
+// ─── ECS effects ─────────────────────────────────────────────────────────────
+
+interface CreateEntityEffect {
+  create_entity: {
+    id: string;
+    components?: Record<string, Record<string, unknown>>;
+  };
+}
+
+interface DeleteEntityEffect {
+  delete_entity: { id: string };
+}
+
+interface SetFieldEffect {
+  set_field: { entity_id: string; component: string; field: string; value: unknown };
+}
+
+type RawEffect =
+  | AssignEffect
+  | SetEffect
+  | IfEffect
+  | CallNativeEffect
+  | CreateEntityEffect
+  | DeleteEntityEffect
+  | SetFieldEffect
+  | Record<string, unknown>;
 
 interface ParsedSystem {
   id: string;
+  name?: string;
   condition?: string;
+  /** ECS component filter — effects run once per matching entity */
+  query?: string[];
   effects?: RawEffect[];
+}
+
+// ─── Math helpers exposed inside VM expressions ───────────────────────────────
+
+const VM_MATH = {
+  floor: Math.floor,
+  ceil: Math.ceil,
+  round: Math.round,
+  abs: Math.abs,
+  min: Math.min,
+  max: Math.max,
+  sqrt: Math.sqrt,
+  pow: Math.pow,
+  /** Returns a random float in [min, max) — mirrors ExpressionParser.random() */
+  random: (min = 0, max = 1) => Math.random() * (max - min) + min,
+  /** Linear interpolation */
+  lerp: (a: number, b: number, t: number) => a + (b - a) * t,
+};
+
+const DEFAULT_VM_TIMEOUT_MS = 1000;
+const MAX_VM_TIMEOUT_MS = 30_000;
+
+function parseVmTimeoutMs(value: string | number | undefined): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.min(parsed, MAX_VM_TIMEOUT_MS)
+    : DEFAULT_VM_TIMEOUT_MS;
 }
 
 // ─── Pending approval record ─────────────────────────────────────────────────
@@ -61,6 +118,8 @@ export interface PendingApproval {
 export interface EffectsProcessorResult {
   output: Record<string, unknown>;
   pendingApprovals: PendingApproval[];
+  /** ECS snapshot — populated when systems.yml used create_entity / set_field. */
+  entities: Entity[];
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -78,24 +137,39 @@ export interface EffectsProcessorResult {
 @Injectable()
 export class EffectsProcessorService {
   private readonly logger = new Logger(EffectsProcessorService.name);
+  private readonly expressionTimeoutMs: number;
 
   constructor(
     private readonly nativeRegistry: NativeSystemRegistry,
     private readonly audit: AuditService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.expressionTimeoutMs = parseVmTimeoutMs(
+      config.get<string | number>('RAAPP_VM_TIMEOUT_MS', DEFAULT_VM_TIMEOUT_MS),
+    );
+  }
 
   /**
    * Parse systems.yml YAML and run all effect pipelines.
    *
+   * Supports ECS via an optional pre-built EntityStore:
+   * - If `entityStore` is provided, systems with a `query: [Component, ...]`
+   *   field will execute their effects once per matching entity, injecting
+   *   `entity_id` and `entity` into the expression context.
+   * - ECS effects (`create_entity`, `delete_entity`, `set_field`) require
+   *   an entityStore to be passed; they are silently skipped otherwise.
+   *
    * @param systemsContent  Raw systems.yml YAML string
    * @param inputs          Input data for the RA-App
    * @param sessionCtx      Session context (used by native systems)
-   * @returns Computed output map and any pending approval requests
+   * @param entityStore     Optional ECS store — created externally per execution
+   * @returns Computed output map, any pending approvals, and entity snapshot
    */
   async processSystemsYaml(
     systemsContent: string,
     inputs: Record<string, unknown>,
     sessionCtx: NativeSessionContext,
+    entityStore?: EntityStore,
   ): Promise<EffectsProcessorResult> {
     const parsed = yaml.load(systemsContent) as { systems?: ParsedSystem[] } | null;
     const systems = parsed?.systems ?? [];
@@ -110,12 +184,27 @@ export class EffectsProcessorService {
         if (!condResult) continue;
       }
 
-      for (const effect of system.effects ?? []) {
-        await this.processEffect(effect, inputs, output, pendingApprovals, sessionCtx);
+      // Query-based execution — run effects per matching entity
+      if (system.query && system.query.length > 0 && !entityStore) {
+        this.logger.warn(`System "${system.name ?? '(unnamed)'}" has a query but no EntityStore — running globally`);
+      }
+      if (system.query && system.query.length > 0 && entityStore) {
+        const entities = entityStore.queryEntities(system.query);
+        for (const entity of entities) {
+          const entityInput = { ...inputs, entity_id: entity.id, entity: entity.components };
+          for (const effect of system.effects ?? []) {
+            await this.processEffect(effect, entityInput, output, pendingApprovals, sessionCtx, entityStore);
+          }
+        }
+      } else {
+        // Global execution — no entity context
+        for (const effect of system.effects ?? []) {
+          await this.processEffect(effect, inputs, output, pendingApprovals, sessionCtx, entityStore);
+        }
       }
     }
 
-    return { output, pendingApprovals };
+    return { output, pendingApprovals, entities: entityStore?.getAllEntities() ?? [] };
   }
 
   private async processEffect(
@@ -124,6 +213,7 @@ export class EffectsProcessorService {
     output: Record<string, unknown>,
     pendingApprovals: PendingApproval[],
     sessionCtx: NativeSessionContext,
+    entityStore?: EntityStore,
   ): Promise<void> {
     // assign: { target, expression }
     if ('assign' in effect) {
@@ -146,7 +236,7 @@ export class EffectsProcessorService {
       const condResult = this.evalExpression(condition, input, output);
       const branch = condResult ? thenBranch : (elseBranch ?? []);
       for (const e of branch) {
-        await this.processEffect(e, input, output, pendingApprovals, sessionCtx);
+        await this.processEffect(e, input, output, pendingApprovals, sessionCtx, entityStore);
       }
       return;
     }
@@ -154,6 +244,65 @@ export class EffectsProcessorService {
     // call_native: { system, args?, output? }
     if ('call_native' in effect) {
       await this.processCallNative(effect as CallNativeEffect, input, output, pendingApprovals, sessionCtx);
+      return;
+    }
+
+    // ─── ECS effects (require entityStore) ────────────────────────────────
+
+    // create_entity: { id, components? }
+    if ('create_entity' in effect) {
+      if (!entityStore) {
+        this.logger.warn('create_entity effect skipped — no EntityStore available');
+        return;
+      }
+      const { id, components = {} } = (effect as CreateEntityEffect).create_entity;
+      entityStore.createEntity(id);
+      for (const [component, fields] of Object.entries(components)) {
+        // Always initialize the component namespace (even when fields is empty {})
+        // so queryEntities() can find entities by component name.
+        const entity = entityStore.getEntity(id);
+        if (entity && !entity.components[component]) {
+          entity.components[component] = {};
+        }
+        for (const [field, rawValue] of Object.entries(fields as Record<string, unknown>)) {
+          const value = typeof rawValue === 'string'
+            ? this.evalExpression(rawValue, input, output)
+            : rawValue;
+          entityStore.setComponentField(id, component, field, value);
+        }
+      }
+      return;
+    }
+
+    // delete_entity: { id }
+    if ('delete_entity' in effect) {
+      if (!entityStore) {
+        this.logger.warn('delete_entity effect skipped — no EntityStore available');
+        return;
+      }
+      entityStore.deleteEntity((effect as DeleteEntityEffect).delete_entity.id);
+      return;
+    }
+
+    // set_field: { entity_id, component, field, value }
+    if ('set_field' in effect) {
+      if (!entityStore) {
+        this.logger.warn('set_field effect skipped — no EntityStore available');
+        return;
+      }
+      const { entity_id: rawEntityId, component, field, value: rawValue } = (effect as SetFieldEffect).set_field;
+      // entity_id may reference a query-loop variable (string expression); fallback to raw string if eval yields nothing
+      const entity_id = typeof rawEntityId === 'string'
+        ? String(this.evalExpression(rawEntityId, input, output) ?? rawEntityId)
+        : String(rawEntityId);
+      const value = typeof rawValue === 'string'
+        ? this.evalExpression(rawValue, input, output)
+        : rawValue;
+      try {
+        entityStore.setComponentField(entity_id, component, field, value);
+      } catch (err) {
+        this.logger.warn(`set_field: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return;
     }
 
@@ -227,7 +376,13 @@ export class EffectsProcessorService {
 
   /**
    * Evaluate a JS expression in an isolated VM sandbox.
-   * Context exposes `input` and `output`.
+   *
+   * Context exposes:
+   * - `input`, `output` — standard pipeline data
+   * - `entity_id`, `entity` — present when evaluating inside a query loop
+   * - Math helpers: `floor`, `ceil`, `round`, `abs`, `min`, `max`, `sqrt`,
+   *   `pow`, `random(min?, max?)`, `lerp(a, b, t)`, `Math`
+   *
    * Returns `undefined` on error rather than throwing to keep pipelines running.
    */
   private evalExpression(
@@ -236,8 +391,19 @@ export class EffectsProcessorService {
     output: Record<string, unknown>,
   ): unknown {
     try {
-      const ctx = vm.createContext({ input, output, __result: undefined });
-      vm.runInContext(`__result = (${expression})`, ctx, { timeout: 1000 });
+      const ctx = vm.createContext({
+        input,
+        output,
+        // entity context (present when called inside a query-based system)
+        entity_id: (input as Record<string, unknown>)['entity_id'],
+        entity: (input as Record<string, unknown>)['entity'],
+        // math helpers
+        ...VM_MATH,
+        // Merge VM_MATH helpers into Math to avoid shadowing Math.PI, Math.E, etc.
+        Math: { ...Math, ...VM_MATH },
+        __result: undefined,
+      });
+      vm.runInContext(`__result = (${expression})`, ctx, { timeout: this.expressionTimeoutMs });
       return ctx['__result'];
     } catch (err) {
       this.logger.warn(

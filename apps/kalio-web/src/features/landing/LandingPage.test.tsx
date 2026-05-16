@@ -206,4 +206,34 @@ describe('LandingPage', () => {
     expect(screen.getAllByTestId('tile-cats-suite-current')).toHaveLength(1);
     expect(screen.getByTestId('tile-core-calc')).toBeInTheDocument();
   });
+
+  it('skips invalid catalog entries that do not provide an id', async () => {
+    getRAApps.mockResolvedValue([
+      makeSummary('core-calc', 'core', 'Visual Calculator'),
+    ]);
+    getRAAppGroups.mockResolvedValue([
+      {
+        slug: 'broken-suite',
+        name: 'Broken Suite',
+        source: 'user',
+        current: {
+          version: '2.0.0',
+          status: 'current',
+          zipPath: '/tmp/current.zip',
+          createdAt: 1,
+          meta: {
+            id: undefined as unknown as string,
+            name: 'Broken Suite',
+            version: '2.0.0',
+          },
+        },
+        history: [],
+      },
+    ]);
+
+    render(<LandingPage onNavigateToChat={() => undefined} />);
+
+    expect(await screen.findByTestId('tile-core-calc')).toBeInTheDocument();
+    expect(screen.queryByTestId('tile-undefined')).toBeNull();
+  });
 });

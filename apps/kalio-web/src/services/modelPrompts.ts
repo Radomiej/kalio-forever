@@ -23,10 +23,12 @@ export const CORE_OS_PROMPT_SMALL = CORE_OS_PROMPT_LARGE;
 export const SECURITY_INJECTION_GUARD_PROMPT = '';
 
 export function getCoreOsPrompt(_model?: string): string {
+  void _model;
   return CORE_OS_PROMPT_LARGE;
 }
 
 export function isSmallModel(_model: string): boolean {
+  void _model;
   return false;
 }
 
@@ -51,5 +53,6 @@ Plain text is allowed only when: (a) answering without tools, (b) summarizing re
 export const DEFAULT_SYSTEM_PROMPT = CORE_OS_PROMPT_LARGE;
 
 export function getToolCallingPrompt(_model = 'gpt-4'): string {
+  void _model;
   return TOOL_CALLING_PROMPT;
 }

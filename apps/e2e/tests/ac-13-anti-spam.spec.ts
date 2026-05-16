@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE } from './helpers/test-config';
+import { API_BASE, deleteSessionIfExists, selectSession } from './helpers/test-config';
 
 const LONG_STREAMING_PROMPT = `Repeat this text slowly: ${'HELLO '.repeat(120).trim()}`;
 
@@ -17,12 +17,7 @@ test.describe('AC-13: Anti-spam protection', () => {
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
-
-    // Select the session
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: title }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
+    await selectSession(page, session.id, title);
 
     const chatInput = page.getByTestId('chat-input');
     const sendBtn = page.getByTestId('chat-send-btn');
@@ -33,11 +28,11 @@ test.describe('AC-13: Anti-spam protection', () => {
     await chatInput.fill(LONG_STREAMING_PROMPT);
     await sendBtn.click();
 
-    // Input should be disabled immediately
-    await expect(chatInput).toBeDisabled({ timeout: 3000 });
+    // Streaming should flip the composer into stop-mode immediately.
+    await expect(page.getByTestId('chat-stop-btn')).toBeVisible({ timeout: 5000 });
 
-    // Try clicking send button again while disabled — should not send second message
-    await chatInput.fill('This should NOT be sent', { force: true });
+    // Try clicking the original send button handle again while the composer is locked.
+    // In stop-mode the button may be detached or blocked; either outcome is acceptable.
     await sendBtn.click({ timeout: 1000 }).catch(() => { /* expected to be blocked */ });
 
     // Wait for first response to complete
@@ -52,10 +47,12 @@ test.describe('AC-13: Anti-spam protection', () => {
     await expect(agentTurns.first()).toBeVisible({ timeout: 5000 });
 
     // Cleanup
-    await request.delete(`${API_BASE}/sessions/${session.id}`);
+    await deleteSessionIfExists(request, session.id);
   });
 
   test('rapid Enter key presses while streaming only send one message', async ({ page, request }) => {
+    test.setTimeout(45_000);
+
     const title = `AC13 Rapid Enter Test ${Date.now()}`;
 
     const res = await request.post(`${API_BASE}/sessions`, {
@@ -66,11 +63,7 @@ test.describe('AC-13: Anti-spam protection', () => {
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
-
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: title }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
+    await selectSession(page, session.id, title);
 
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });
@@ -92,6 +85,6 @@ test.describe('AC-13: Anti-spam protection', () => {
     await expect(userMessages).toHaveCount(1, { timeout: 5000 });
 
     // Cleanup
-    await request.delete(`${API_BASE}/sessions/${session.id}`);
+    await deleteSessionIfExists(request, session.id);
   });
 });

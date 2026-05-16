@@ -4,14 +4,9 @@
  * All configuration lives in the backend (credentials table + app_settings).
  */
 import { create } from 'zustand';
+import type { LLMConfigWithSource } from './llm-panel.types';
 
-export interface BackendLLMConfig {
-  provider: string;
-  model: string;
-  baseUrl: string;
-  contextWindowSize: number;
-  maxToolAttempts: number;
-}
+export type BackendLLMConfig = LLMConfigWithSource;
 
 interface SettingsState {
   /** Config fetched from /api/llm/config — reflects what backend is actually using */

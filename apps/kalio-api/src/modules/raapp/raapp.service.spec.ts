@@ -1,24 +1,32 @@
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { RAAppService } from './raapp.service';
 import { deriveGeneratedAppName } from './raapp.service';
-import { RAAppSandboxService } from './raapp-sandbox.service';
+import type { LoadedRAApp } from './raapp.service';
+import { archiveDirectoryToZip } from './zip-archive.util';
 
 // AC-13: RA-App DSL parse error is returned inline (not thrown), with code DSL_PARSE_ERROR
 
 describe('RAAppService', () => {
   let service: RAAppService;
 
-  async function createService(): Promise<RAAppService> {
+  async function createService(configOverrides?: Record<string, unknown>): Promise<RAAppService> {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         RAAppService,
-        RAAppSandboxService,
-        { provide: ConfigService, useValue: { get: (_key: string, def: unknown) => def } },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string, def: unknown) =>
+              Object.prototype.hasOwnProperty.call(configOverrides ?? {}, key)
+                ? configOverrides?.[key]
+                : def,
+          },
+        },
       ],
     }).compile();
 
@@ -43,9 +51,114 @@ describe('RAAppService', () => {
         const ids = isolatedService.getAll().map((app) => app.id);
         expect(ids).toContain('qa-interactive');
         expect(ids).toContain('visual-calculator');
+
+        const visualCalculator = isolatedService.getById('visual-calculator');
+        expect(visualCalculator?.meta.input_schema).toEqual({
+          type: 'object',
+          required: ['a', 'b', 'operation'],
+          properties: {
+            a: { type: 'number', description: 'First number' },
+            b: { type: 'number', description: 'Second number' },
+            operation: {
+              type: 'string',
+              description: 'Operation to perform',
+              enum: ['add', 'subtract', 'multiply', 'divide'],
+            },
+          },
+        });
+        expect(visualCalculator?.guiContent).toContain('[output.result]');
+        expect(visualCalculator?.guiContent).not.toContain('text = "[result]"');
       } finally {
         process.chdir(originalCwd);
         await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps the more renderable duplicate when the same app id appears twice in runtime core', async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-dup-'));
+      const coreDir = path.join(tempRoot, 'core');
+      const unpackedDir = path.join(coreDir, 'visual-calculator-extracted');
+      const staleZipSourceDir = path.join(tempRoot, 'stale-visual-calculator');
+      const staleZipPath = path.join(coreDir, 'visual-calculator.zip');
+
+      await fs.mkdir(unpackedDir, { recursive: true });
+      await fs.mkdir(staleZipSourceDir, { recursive: true });
+
+      const meta = [
+        'id: visual-calculator',
+        'name: Visual Calculator',
+        'version: "1.0"',
+        'description: Duplicate loader regression fixture',
+        'execution:',
+        '  render_as: display',
+      ].join('\n');
+
+      await fs.writeFile(path.join(unpackedDir, 'meta.yml'), meta, 'utf8');
+      await fs.writeFile(path.join(unpackedDir, 'ui.gui'), 'vbox { label { text = "rendered" } }', 'utf8');
+      await fs.writeFile(path.join(staleZipSourceDir, 'meta.yml'), meta, 'utf8');
+      await archiveDirectoryToZip({ sourceDir: staleZipSourceDir, zipPath: staleZipPath });
+
+      const isolatedService = await createService({ RA_APPS_PATH: tempRoot });
+
+      try {
+        await isolatedService.init();
+
+        const app = isolatedService.getById('visual-calculator');
+        expect(app).toBeDefined();
+        expect(app?.guiContent).toContain('rendered');
+        expect(app?.zipPath.endsWith('visual-calculator-extracted')).toBe(true);
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('logs when an equal-score duplicate replaces an existing app', async () => {
+      const isolatedService = await createService();
+      const warnSpy = vi.spyOn((isolatedService as unknown as { logger: { warn: (message: string) => void } }).logger, 'warn');
+      const storeLoadedApp = (
+        isolatedService as unknown as { storeLoadedApp: (app: LoadedRAApp) => LoadedRAApp }
+      ).storeLoadedApp.bind(isolatedService);
+      const baseMeta = {
+        id: 'visual-calculator',
+        name: 'Visual Calculator',
+        version: '1.0',
+        description: 'Duplicate loader logging fixture',
+        execution: {
+          render_as: 'display',
+        },
+      };
+
+      try {
+        storeLoadedApp({
+          id: 'visual-calculator',
+          zipPath: 'core/a-visual-calculator.zip',
+          meta: baseMeta,
+          source: 'core',
+          htmlContent: null,
+          guiContent: 'vbox { label { text = "first" } }',
+          systemsContent: null,
+          appMode: 'display',
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        storeLoadedApp({
+          id: 'visual-calculator',
+          zipPath: 'core/b-visual-calculator.zip',
+          meta: baseMeta,
+          source: 'core',
+          htmlContent: null,
+          guiContent: 'vbox { label { text = "second" } }',
+          systemsContent: null,
+          appMode: 'display',
+          createdAt: 2,
+          updatedAt: 2,
+        });
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Replacing duplicate RA-App visual-calculator'),
+        );
+      } finally {
+        warnSpy.mockRestore();
       }
     });
   });
@@ -208,33 +321,37 @@ describe('RAAppService', () => {
     });
   });
 
-  describe('executeSystems', () => {
-    it('computes output from assign effects', async () => {
-      const systems = `
-        systems:
-          - id: calc
-            effects:
-              - assign:
-                  target: output.result
-                  expression: input.a + input.b
-              - assign:
-                  target: output.label
-                  expression: '"sum"'
-      `;
-      const result = await service.executeSystems(systems, { a: 3, b: 4 });
+  describe('delete', () => {
+    it('removes unpacked user apps stored as directories', async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-delete-'));
+      const isolatedService = await createService({ RA_APPS_PATH: tempRoot });
+      const appDir = path.join(tempRoot, 'user', 'dir-app');
 
-      expect(result).toHaveProperty('result', 7);
-      expect(result).toHaveProperty('label', 'sum');
-    });
+      await fs.mkdir(appDir, { recursive: true });
+      await fs.writeFile(path.join(appDir, 'meta.yml'), 'id: dir-app\nname: Dir App\n', 'utf8');
 
-    it('returns empty object on invalid YAML', async () => {
-      const result = await service.executeSystems('invalid {{{', { a: 1 });
-      expect(result).toEqual({});
-    });
+      const loaded = (isolatedService as unknown as { loaded: Map<string, LoadedRAApp> }).loaded;
+      loaded.set('dir-app', {
+        id: 'dir-app',
+        zipPath: appDir,
+        meta: { id: 'dir-app', name: 'Dir App' },
+        source: 'user',
+        htmlContent: '<p>dir app</p>',
+        guiContent: null,
+        systemsContent: null,
+        appMode: 'display',
+        createdAt: 0,
+        updatedAt: 0,
+      } as LoadedRAApp);
 
-    it('returns empty object when no systems defined', async () => {
-      const result = await service.executeSystems('other: []', { a: 1 });
-      expect(result).toEqual({});
+      try {
+        await isolatedService.delete('dir-app');
+
+        await expect(fs.access(appDir)).rejects.toThrow();
+        expect(isolatedService.getById('dir-app')).toBeUndefined();
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
     });
   });
 });

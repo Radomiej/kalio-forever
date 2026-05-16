@@ -8,6 +8,7 @@ export type AgentTurnItem =
 export interface AgentTurn {
   id: ID;
   sessionId: ID;
+  promptMessageId?: ID;
   agentRun?: AgentRunContext;
   items: AgentTurnItem[];
   done: boolean;
@@ -90,7 +91,7 @@ export function getStoredSessionActiveTurnId(state: SessionProjectionState, sess
   return state.sessionActiveTurnIds[sessionId] ?? (sessionId === state.activeSessionId ? state.activeTurnId : null);
 }
 
-function buildRestoredTurn(sessionId: string | null, chunkSessionIds: Record<string, string>): { agentTurns: AgentTurn[]; activeTurnId: ID | null } {
+function buildRestoredTurn(sessionId: string | null, messages: ChatMessage[], chunkSessionIds: Record<string, string>): { agentTurns: AgentTurn[]; activeTurnId: ID | null } {
   if (!sessionId) return { agentTurns: [], activeTurnId: null };
 
   const pendingIds = Object.entries(chunkSessionIds)
@@ -100,10 +101,14 @@ function buildRestoredTurn(sessionId: string | null, chunkSessionIds: Record<str
   if (pendingIds.length === 0) return { agentTurns: [], activeTurnId: null };
 
   const turnId = `restoring-${sessionId}`;
+  const promptMessageId = [...messages]
+    .reverse()
+    .find((message) => message.role === 'user')?.id;
   return {
     agentTurns: [{
       id: turnId,
       sessionId,
+      promptMessageId,
       items: pendingIds.map((messageId) => ({ kind: 'text' as const, messageId })),
       done: false,
     }],
@@ -133,7 +138,7 @@ export function resolveSessionSlice(state: SessionProjectionState, sessionId: st
     };
   }
 
-  const restored = buildRestoredTurn(sessionId, state.chunkSessionIds);
+  const restored = buildRestoredTurn(sessionId, messages, state.chunkSessionIds);
   return {
     messages,
     agentTurns: restored.agentTurns,

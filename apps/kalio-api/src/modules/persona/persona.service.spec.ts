@@ -195,6 +195,71 @@ describe('PersonaService', () => {
       expect(config['orchestrator']?.systemPrompt).toContain('download_url');
       expect(config['orchestrator']?.systemPrompt).toContain('distinct filenames');
     });
+
+    it('keeps prototype-capable personas on the VFS-first design_preview workflow', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { systemPrompt: string; allowedTools: string[] }>;
+        }
+      ).loadPersonasConfig();
+
+      expect(config['builder']?.allowedTools).toEqual(expect.arrayContaining(['design_preview']));
+      expect(config['designer']?.allowedTools).toEqual(expect.arrayContaining(['design_preview']));
+      expect(config['orchestrator']?.allowedTools).toEqual(expect.arrayContaining(['design_preview']));
+      expect(config['dev']?.allowedTools).toEqual(expect.arrayContaining(['design_preview']));
+      expect(config['jony']?.allowedTools).toEqual(expect.arrayContaining(['design_preview']));
+
+      expect(config['builder']?.systemPrompt).toContain('design_preview');
+      expect(config['builder']?.systemPrompt).toContain('write the HTML files into VFS first');
+      expect(config['designer']?.systemPrompt).toContain('design_preview');
+      expect(config['designer']?.systemPrompt).toContain('Write or update prototype source files in VFS with vfs_write');
+      expect(config['orchestrator']?.systemPrompt).toContain('design_preview');
+      expect(config['orchestrator']?.systemPrompt).toContain('prototype page');
+      expect(config['dev']?.systemPrompt).toContain('design_preview');
+      expect(config['jony']?.systemPrompt).toContain('design_preview');
+    });
+
+    it('teaches the orchestrator to keep RA-App DSL delegation on the draft-first path instead of HTML preview flow', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { systemPrompt: string }>;
+        }
+      ).loadPersonasConfig();
+
+      expect(config['orchestrator']?.systemPrompt).toContain('RA-App DSL or ECS');
+      expect(config['orchestrator']?.systemPrompt).toContain('raapp_create_draft');
+      expect(config['orchestrator']?.systemPrompt).toContain('raapp_execute_dsl');
+      expect(config['orchestrator']?.systemPrompt).toContain('Do not ask the child for HTML, design_preview');
+      expect(config['orchestrator']?.systemPrompt).toContain('Do not ask the child for preview links, rendered previews, or design_preview results');
+    });
+
+    it('teaches the designer to use the exact VFS tool names without a rigid dark multi-page template', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { systemPrompt: string }>;
+        }
+      ).loadPersonasConfig();
+
+      expect(config['designer']?.systemPrompt).toContain('Never mention or attempt file_write');
+      expect(config['designer']?.systemPrompt).toContain('Prefer a single focused page unless the brief clearly needs multiple screens or navigation');
+      expect(config['designer']?.systemPrompt).not.toContain('Dark theme by default');
+      expect(config['designer']?.systemPrompt).not.toContain('Every app MUST have at least 2 pages with working navigation');
+    });
+
+    it('includes image generation and inspection tools in the seeded designer persona', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { allowedTools: string[]; systemPrompt: string }>;
+        }
+      ).loadPersonasConfig();
+
+      expect(config['designer']?.allowedTools).toEqual(
+        expect.arrayContaining(['image_generate', 'image_view', 'image_edit']),
+      );
+      expect(config['designer']?.systemPrompt).toContain('image_generate');
+      expect(config['designer']?.systemPrompt).toContain('image_view');
+      expect(config['designer']?.systemPrompt).toContain('never use a leading / in VFS paths');
+    });
   });
 
   describe('CRUD Operations', () => {
@@ -319,6 +384,195 @@ describe('PersonaService', () => {
           name: expect.any(String),
           allowedTools: expect.any(Array),
           skillIds: expect.any(Array),
+        }),
+      );
+    });
+
+    it('refreshes the seeded designer prompt when the stored prompt still matches the rigid legacy template', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        designer: {
+          name: 'UX Designer',
+          systemPrompt: 'new designer prompt',
+          model: '',
+          allowedTools: ['vfs_read', 'vfs_write', 'vfs_list', 'design_preview'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'designer',
+            systemPrompt: [
+              'Build every app using this structure:',
+              'Dark theme by default',
+              'Every app MUST have at least 2 pages with working navigation',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({ systemPrompt: 'new designer prompt' }),
+      );
+    });
+
+    it('does NOT overwrite a customized designer prompt while refreshing other seeded fields', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        designer: {
+          name: 'UX Designer',
+          systemPrompt: 'new designer prompt',
+          model: '',
+          allowedTools: ['vfs_read', 'vfs_write', 'vfs_list', 'design_preview'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'designer',
+            systemPrompt: 'custom prompt from the user',
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.not.objectContaining({ systemPrompt: expect.any(String) }),
+      );
+    });
+
+    it('refreshes the seeded designer prompt when the stored VFS-first prompt still lacks the image workflow', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        designer: {
+          name: 'UX Designer',
+          systemPrompt: 'new designer prompt with image_generate and image_view and never use a leading / in VFS paths',
+          model: '',
+          allowedTools: ['vfs_read', 'vfs_write', 'vfs_list', 'design_preview', 'image_generate', 'image_view', 'image_edit'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'designer',
+            systemPrompt: [
+              'When the user asks for a prototype page or website, do not jump straight to raapp_create. Work in VFS first and finish with a design_preview result.',
+              'Use the exact tool names: vfs_list, vfs_read, vfs_write, design_preview, raapp_create',
+              'Never mention or attempt file_write, file_read, write_file, read_file, or other aliases - they do not exist here',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemPrompt: 'new designer prompt with image_generate and image_view and never use a leading / in VFS paths',
+        }),
+      );
+    });
+
+    it('REGRESSION: does not overwrite a customized VFS-first designer prompt that already mentions image_edit', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        designer: {
+          name: 'UX Designer',
+          systemPrompt: 'new designer prompt with image_generate and image_view and image_edit',
+          model: '',
+          allowedTools: ['vfs_read', 'vfs_write', 'vfs_list', 'design_preview', 'image_generate', 'image_view', 'image_edit'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'designer',
+            systemPrompt: [
+              'When the user asks for a prototype page or website, do not jump straight to raapp_create. Work in VFS first and finish with a design_preview result.',
+              'Use the exact tool names: vfs_list, vfs_read, vfs_write, design_preview, raapp_create',
+              'Never mention or attempt file_write, file_read, write_file, read_file, or other aliases - they do not exist here',
+              'For follow-up adjustments to an existing image asset, prefer image_edit over a full regeneration.',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          systemPrompt: 'new designer prompt with image_generate and image_view and image_edit',
         }),
       );
     });

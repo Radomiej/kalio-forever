@@ -14,6 +14,21 @@ interface TileItem {
   description: string;
 }
 
+function createTileItem(id: string | undefined, name: string | undefined, description?: string): TileItem | null {
+  const normalizedId = typeof id === 'string' ? id.trim() : '';
+  const normalizedName = typeof name === 'string' ? name.trim() : '';
+
+  if (!normalizedId || !normalizedName) {
+    return null;
+  }
+
+  return {
+    id: normalizedId,
+    name: normalizedName,
+    description: description ?? '',
+  };
+}
+
 interface LandingPageProps {
   onNavigateToChat: () => void;
 }
@@ -27,7 +42,6 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
   const setPendingMessage = useSessionStore((s) => s.setPendingMessage);
 
   useEffect(() => {
-    setLoading(true);
     Promise.all([
       getRAAppGroups().catch(() => []),
       getRAApps().catch(() => []),
@@ -36,27 +50,25 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
         const buckets = bucketCatalogApps(flatApps, groups);
 
         const byId = new Map(flatApps.map((app) => [app.id, app]));
-        const groupedCurrent: TileItem[] = groups.map((group) => {
-          const currentId = group.current.meta.id;
-          const fromFlat = byId.get(currentId);
-          return {
-            id: currentId,
-            name: group.current.meta.name,
-            description: group.current.meta.description ?? fromFlat?.description ?? '',
-          };
-        });
+        const groupedCurrent = groups
+          .map((group) => {
+            const currentId = group.current.meta.id;
+            const fromFlat = currentId ? byId.get(currentId) : undefined;
+            return createTileItem(
+              currentId,
+              group.current.meta.name,
+              group.current.meta.description ?? fromFlat?.description ?? '',
+            );
+          })
+          .filter((tile): tile is TileItem => tile !== null);
 
-        const coreTiles: TileItem[] = buckets.coreApps.map((app) => ({
-          id: app.id,
-          name: app.name,
-          description: app.description,
-        }));
+        const coreTiles = buckets.coreApps
+          .map((app) => createTileItem(app.id, app.name, app.description))
+          .filter((tile): tile is TileItem => tile !== null);
 
-        const userStandaloneTiles: TileItem[] = buckets.userStandaloneApps.map((app) => ({
-          id: app.id,
-          name: app.name,
-          description: app.description,
-        }));
+        const userStandaloneTiles = buckets.userStandaloneApps
+          .map((app) => createTileItem(app.id, app.name, app.description))
+          .filter((tile): tile is TileItem => tile !== null);
 
         const seen = new Set<string>();
         const merged = [...groupedCurrent, ...coreTiles, ...userStandaloneTiles].filter((tile) => {

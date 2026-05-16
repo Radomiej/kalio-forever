@@ -1,10 +1,13 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import type { ChatAttachment, ChatMessage, LLMContent, LLMMessage, LLMTextPart } from '@kalio/types';
+import type { ChatAttachment, ChatMessage, LLMContent, LLMTextPart, ToolMeta } from '@kalio/types';
 import type { IMessageRepository } from './interfaces/message-repository.interface';
 import type { TurnState } from './turn-state';
 import { MESSAGE_REPOSITORY } from './chat.tokens';
 import { ImageHydratorService } from './image-hydrator.service';
+import { prepareHistoryForLLM, sanitizeToolResultContentForLLM } from './llm-history.utils';
+import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
+import { CredentialsService } from '../credentials/credentials.service';
 
 /**
  * Manages chat message persistence and history conversion.
@@ -15,6 +18,7 @@ export class SessionManagerService {
   constructor(
     @Inject(MESSAGE_REPOSITORY) private readonly repo: IMessageRepository,
     private readonly imageHydrator: ImageHydratorService,
+    private readonly credentialsService: CredentialsService,
   ) {}
 
   /** Upserts the session row so FK constraints are satisfied before message inserts. */
@@ -22,13 +26,28 @@ export class SessionManagerService {
     await this.repo.ensureSession(sessionId, personaId);
   }
 
-  async loadHistory(sessionId: string): Promise<LLMMessage[]> {
+  async loadHistory(sessionId: string): Promise<ContextManagedLLMMessage[]> {
     const messages = await this.repo.loadHistory(sessionId);
-    const out: LLMMessage[] = [];
+    const out: ContextManagedLLMMessage[] = [];
     for (const m of messages) {
       out.push(...await this.toLLMMessages(sessionId, m));
     }
     return out;
+  }
+
+  async loadHistoryForLLM(
+    sessionId: string,
+    options: { systemPrompt: string; toolMetas: ToolMeta[] },
+  ): Promise<{ history: ContextManagedLLMMessage[]; unboundedHistoryCount: number }> {
+    const rawHistory = await this.loadHistory(sessionId);
+    const contextWindowSize = await this.credentialsService.getContextWindowSize();
+
+    return prepareHistoryForLLM(
+      rawHistory,
+      options.systemPrompt,
+      contextWindowSize,
+      options.toolMetas,
+    );
   }
 
   async persistUserMessage(
@@ -83,7 +102,7 @@ export class SessionManagerService {
    * multimodal `content` array (text part + image_url parts) — that's the
    * only async branch.
    */
-  private async toLLMMessages(sessionId: string, msg: ChatMessage): Promise<LLMMessage[]> {
+  private async toLLMMessages(sessionId: string, msg: ChatMessage): Promise<ContextManagedLLMMessage[]> {
     switch (msg.role) {
       case 'user': {
         if (!msg.attachments || msg.attachments.length === 0) {
@@ -96,9 +115,12 @@ export class SessionManagerService {
       }
 
       case 'assistant': {
-        const m: LLMMessage = { role: 'assistant', content: msg.content };
+        const m: ContextManagedLLMMessage = { role: 'assistant', content: msg.content };
         if (msg.toolCalls?.length) {
           m.toolCalls = msg.toolCalls;
+        }
+        if (typeof msg.thinking === 'string' && msg.thinking.trim().length > 0) {
+          m.reasoningContent = msg.thinking;
         }
         return [m];
       }
@@ -107,7 +129,7 @@ export class SessionManagerService {
         return [
           {
             role: 'tool',
-            content: msg.content,
+            content: sanitizeToolResultContentForLLM(msg.content),
             toolCallId: msg.toolCallId,
           },
         ];

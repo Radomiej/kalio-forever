@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ModelSettingsSection } from './ModelSettingsSection';
 import type { Credential } from '@kalio/types';
+import type { ActiveRuntimeConfig } from './llm-panel.types';
 
 type FetchMap = Record<string, unknown>;
 
@@ -34,35 +35,44 @@ const CRED: Credential = {
   createdAt: 1704067200000,
 };
 
+const ACTIVE_RUNTIME_CONFIG: ActiveRuntimeConfig = {
+  source: 'db',
+  provider: CRED.provider,
+  model: CRED.model ?? '',
+  baseUrl: '',
+  displayName: CRED.name,
+  credentialId: CRED.id,
+};
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
 
 describe('ModelSettingsSection', () => {
-  it('shows "activate a provider" message when no active credential', async () => {
+  it('shows an empty-state message when no active provider is configured', async () => {
     mockFetch({
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
     });
-    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText(/activate a provider/i)).toBeInTheDocument());
+    render(<ModelSettingsSection activeRuntimeConfig={null} onRuntimeConfigChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(/no active provider configured yet/i)).toBeInTheDocument());
   });
 
   it('fetches and displays generation settings', async () => {
     mockFetch({
       'GET /api/credentials/settings/generation': { temperature: 1.2, maxTokens: 8192 },
-      [`GET /api/credentials/${CRED.id}/models`]: { models: ['gpt-4o', 'gpt-4o-mini'] },
+      'GET /api/llm/active/models': { models: ['gpt-4o', 'gpt-4o-mini'] },
     });
-    render(<ModelSettingsSection activeCredential={CRED} onModelChange={vi.fn()} />);
+    render(<ModelSettingsSection activeRuntimeConfig={ACTIVE_RUNTIME_CONFIG} onRuntimeConfigChange={vi.fn()} />);
     await waitFor(() => expect(screen.getByTestId('gen-temperature-value')).toHaveTextContent('1.20'));
   });
 
-  it('populates model dropdown from GET /api/credentials/:id/models', async () => {
+  it('populates model dropdown from GET /api/llm/active/models', async () => {
     mockFetch({
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
-      [`GET /api/credentials/${CRED.id}/models`]: { models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'] },
+      'GET /api/llm/active/models': { models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'] },
     });
     const user = userEvent.setup();
-    render(<ModelSettingsSection activeCredential={CRED} onModelChange={vi.fn()} />);
+    render(<ModelSettingsSection activeRuntimeConfig={ACTIVE_RUNTIME_CONFIG} onRuntimeConfigChange={vi.fn()} />);
     const input = screen.getByTestId('model-selector');
     await waitFor(() => expect(input).toBeInTheDocument());
     await user.click(input);
@@ -76,10 +86,10 @@ describe('ModelSettingsSection', () => {
   it('filters model list when typing', async () => {
     mockFetch({
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
-      [`GET /api/credentials/${CRED.id}/models`]: { models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'] },
+      'GET /api/llm/active/models': { models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'] },
     });
     const user = userEvent.setup();
-    render(<ModelSettingsSection activeCredential={CRED} onModelChange={vi.fn()} />);
+    render(<ModelSettingsSection activeRuntimeConfig={ACTIVE_RUNTIME_CONFIG} onRuntimeConfigChange={vi.fn()} />);
     const input = screen.getByTestId('model-selector');
     await waitFor(() => expect(input).toBeInTheDocument());
     await user.click(input);
@@ -97,10 +107,10 @@ describe('ModelSettingsSection', () => {
     mockFetch({
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
       'PUT /api/credentials/settings/generation': 204,
-      [`GET /api/credentials/${CRED.id}/models`]: { models: [] },
+      'GET /api/llm/active/models': { models: [] },
     });
     const user = userEvent.setup();
-    render(<ModelSettingsSection activeCredential={CRED} onModelChange={vi.fn()} />);
+    render(<ModelSettingsSection activeRuntimeConfig={ACTIVE_RUNTIME_CONFIG} onRuntimeConfigChange={vi.fn()} />);
     await waitFor(() => screen.getByTestId('gen-save'));
     await user.click(screen.getByTestId('gen-save'));
     await waitFor(() => {
@@ -115,6 +125,68 @@ describe('ModelSettingsSection', () => {
     });
   });
 
+  it('clears a stale model-save error before a successful retry (REGRESSION)', async () => {
+    const onRuntimeConfigChange = vi.fn();
+    let saveAttempts = 0;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, opts?: RequestInit) => {
+        const method = opts?.method?.toUpperCase() ?? 'GET';
+
+        if (url === '/api/credentials/settings/generation' && method === 'GET') {
+          return Promise.resolve(new Response(JSON.stringify({ temperature: 0.7, maxTokens: 4096 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+
+        if (url === '/api/llm/active/models' && method === 'GET') {
+          return Promise.resolve(new Response(JSON.stringify({ models: ['gpt-4o-mini', 'gpt-4o-next'] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+
+        if (url === '/api/llm/active/model' && method === 'PUT') {
+          saveAttempts += 1;
+          if (saveAttempts === 1) {
+            return Promise.resolve(new Response('first failure', { status: 500 }));
+          }
+
+          return Promise.resolve(new Response(JSON.stringify({
+            provider: 'openai',
+            model: 'gpt-4o-next',
+            baseUrl: '',
+            source: 'db',
+            contextWindowSize: 32000,
+            maxToolAttempts: 8,
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<ModelSettingsSection activeRuntimeConfig={ACTIVE_RUNTIME_CONFIG} onRuntimeConfigChange={onRuntimeConfigChange} />);
+
+    const input = await screen.findByTestId('model-selector');
+    await user.clear(input);
+    await user.type(input, 'gpt-4o-next');
+
+    await user.click(screen.getByTestId('model-save'));
+    await waitFor(() => expect(screen.getByText('500: first failure')).toBeInTheDocument());
+
+    await user.click(screen.getByTestId('model-save'));
+
+    await waitFor(() => expect(onRuntimeConfigChange).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-4o-next' })));
+    await waitFor(() => expect(screen.queryByText('500: first failure')).not.toBeInTheDocument());
+  });
+
   it.each([
     { label: 'temperature is a string', response: { temperature: 'hot', maxTokens: 4096 } },
     { label: 'temperature is null', response: { temperature: null, maxTokens: 4096 } },
@@ -123,7 +195,7 @@ describe('ModelSettingsSection', () => {
       'GET /api/credentials/settings/generation': response,
     });
 
-    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
+    render(<ModelSettingsSection activeRuntimeConfig={null} onRuntimeConfigChange={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByTestId('gen-temperature-value')).toHaveTextContent('0.70'));
   });
@@ -133,7 +205,7 @@ describe('ModelSettingsSection', () => {
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
     });
 
-    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
+    render(<ModelSettingsSection activeRuntimeConfig={null} onRuntimeConfigChange={vi.fn()} />);
 
     const slider = await screen.findByTestId('gen-temperature');
     fireEvent.change(slider, { target: { value: '' } });
@@ -146,7 +218,7 @@ describe('ModelSettingsSection', () => {
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
     });
 
-    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
+    render(<ModelSettingsSection activeRuntimeConfig={null} onRuntimeConfigChange={vi.fn()} />);
 
     const slider = await screen.findByTestId('gen-max-tokens');
     fireEvent.change(slider, { target: { value: '' } });
@@ -161,7 +233,7 @@ describe('ModelSettingsSection', () => {
     });
     const user = userEvent.setup();
 
-    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
+    render(<ModelSettingsSection activeRuntimeConfig={null} onRuntimeConfigChange={vi.fn()} />);
 
     fireEvent.change(await screen.findByTestId('gen-temperature'), { target: { value: '' } });
     await user.click(screen.getByTestId('gen-save'));
@@ -182,7 +254,7 @@ describe('ModelSettingsSection', () => {
     });
     const user = userEvent.setup();
 
-    render(<ModelSettingsSection activeCredential={null} onModelChange={vi.fn()} />);
+    render(<ModelSettingsSection activeRuntimeConfig={null} onRuntimeConfigChange={vi.fn()} />);
 
     fireEvent.change(await screen.findByTestId('gen-max-tokens'), { target: { value: '' } });
     await user.click(screen.getByTestId('gen-save'));

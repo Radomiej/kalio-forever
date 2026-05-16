@@ -27,7 +27,7 @@ export function isPrivateUrl(rawUrl: string): boolean {
     // Check IPv4 private / link-local ranges
     const ipv4 = parseIPv4(host);
     if (ipv4) {
-      const [a, b, c] = ipv4;
+      const [a, b] = ipv4;
       if (a === 127) return true;                          // 127.0.0.0/8 loopback
       if (a === 10) return true;                           // 10.0.0.0/8
       if (a === 172 && b >= 16 && b <= 31) return true;   // 172.16.0.0/12

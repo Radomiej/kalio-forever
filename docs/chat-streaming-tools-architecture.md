@@ -82,6 +82,7 @@ sequenceDiagram
     participant GW as ChatGateway
     participant Pipe as SessionPipelineService
     participant Chat as ChatService
+    participant SessionMgr as SessionManagerService
     participant LLM as ILLMSource
     participant Stream as StreamProcessorService
     participant Tools as ToolDispatchService
@@ -106,6 +107,7 @@ sequenceDiagram
         FE->>AgentStore: setContext()
 
         loop each LLM iteration
+            Chat->>SessionMgr: loadHistoryForLLM(sessionId, { systemPrompt, toolMetas })
             Chat->>LLM: stream(messages, tools)
             loop each chunk
                 LLM-->>Chat: chunk
@@ -150,6 +152,21 @@ Important runtime facts:
 - `tool:start` intentionally flushes pending thinking/text chunks in the frontend. Otherwise the cursor would keep blinking while the model has already moved into tool use.
 - `tool_result` messages are persisted into session history. They are not just transient UI artifacts.
 - `agent:done` is the event the UI trusts to close the live turn, not `chat:complete` alone.
+- `ChatService` does not hand raw database history to the provider. It asks `SessionManagerService.loadHistoryForLLM(...)` for already-managed messages.
+- `SubagentRuntimeService` uses the same `loadHistoryForLLM(...)` path, so child sessions do not bypass context compaction or reasoning accounting.
+
+## Managed LLM context boundary
+
+`SessionManagerService.loadHistoryForLLM(...)` is the single path that prepares provider-ready messages for both `ChatService` and `SubagentRuntimeService`.
+
+Before each provider call, that boundary currently:
+
+- loads canonical session history and maps it into backend-only `ContextManagedLLMMessage`
+- rehydrates user attachments and sanitizes oversized or inline-binary `tool_result` payloads
+- preserves assistant `thinking` as backend-only `reasoningContent` so it is counted during compaction and can be replayed by providers that support it
+- prepends the active system prompt and compacts the whole payload against the configured context window
+
+At the provider boundary, `BaseOpenAICompatibleProvider` is the shared serializer and stream parser for OpenAI-style providers. `OpenAICompatibleProvider` stays a thin subclass so new providers do not create a second request-shaping path, and only providers that opt into reasoning-history replay emit `reasoning_content` on the wire.
 
 ## SessionPipelineService: queue and interrupt model
 

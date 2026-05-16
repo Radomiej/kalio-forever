@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import type { LLMMessage, ToolMeta } from '@kalio/types';
+import type { ToolMeta } from '@kalio/types';
 import type { ILLMSource } from './interfaces/llm-source.interface';
 import type { EmitFn, StreamContext } from './interfaces/stream-context.interface';
 import { TurnState } from './turn-state';
@@ -150,10 +150,16 @@ export class ChatService {
         };
 
         // Reload history so it picks up tool_result rows persisted by ToolCallHandler
-        const rawHistory = await this.sessionManager.loadHistory(sessionId);
-        const history: LLMMessage[] = effectiveSystemPrompt
-          ? [{ role: 'system', content: effectiveSystemPrompt }, ...rawHistory]
-          : rawHistory;
+        const { history, unboundedHistoryCount } = await this.sessionManager.loadHistoryForLLM(sessionId, {
+          systemPrompt: effectiveSystemPrompt,
+          toolMetas,
+        });
+
+        if (history.length !== unboundedHistoryCount) {
+          this.logger.warn(
+            `Compacted LLM history for session ${sessionId} iteration ${iteration} from ${unboundedHistoryCount} to ${history.length} messages`,
+          );
+        }
 
         const turnStart = performance.now();
         await this.audit.log({
@@ -187,6 +193,7 @@ export class ChatService {
           tools: toolMetas,
           sessionId,
           messageId: iterationMessageId,
+          abortSignal: controller.signal,
         };
 
         let chunkCount = 0;
@@ -324,7 +331,9 @@ export class ChatService {
         data: { message },
       });
     } finally {
-      this.abortControllers.delete(sessionId);
+      if (this.abortControllers.get(sessionId) === controller) {
+        this.abortControllers.delete(sessionId);
+      }
     }
   }
 

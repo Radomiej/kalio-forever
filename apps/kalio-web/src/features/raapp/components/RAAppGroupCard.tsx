@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   CheckCircle,
+  Download,
   XCircle,
   RotateCcw,
   AlertCircle,
@@ -25,6 +26,7 @@ export interface RAAppGroupCardProps {
   onApprove: (slug: string, bumpType: 'patch' | 'minor' | 'major') => Promise<void>;
   onDiscardDraft: (slug: string) => Promise<void>;
   onRollback: (slug: string, version: string) => Promise<void>;
+  onDownloadVersion?: (slug: string, version: string) => void;
 }
 
 export function RAAppGroupCard({
@@ -34,6 +36,7 @@ export function RAAppGroupCard({
   onApprove,
   onDiscardDraft,
   onRollback,
+  onDownloadVersion,
 }: RAAppGroupCardProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -84,6 +87,16 @@ export function RAAppGroupCard({
   );
 
   const { current, draft, history } = group;
+
+  const handleDelete = useCallback(() => {
+    const confirmed = typeof window === 'undefined'
+      ? true
+      : window.confirm(`Delete RA-App group "${current.meta.name}"? This removes current, draft, and history versions.`);
+    if (!confirmed) {
+      return;
+    }
+    onDelete(group.slug);
+  }, [current.meta.name, group.slug, onDelete]);
 
   return (
     <div
@@ -182,6 +195,17 @@ export function RAAppGroupCard({
               {history.map((entry) => (
                 <div key={entry.version} className="flex items-center gap-2 text-[11px] text-base-content/50">
                   <span className="flex-1">v{entry.version}</span>
+                  {onDownloadVersion && (
+                    <button
+                      className="btn btn-xs btn-ghost gap-1 py-0 h-auto"
+                      onClick={() => onDownloadVersion(group.slug, entry.version)}
+                      data-testid={`raapp-download-history-${group.slug}-${entry.version}`}
+                      title={`Download v${entry.version}`}
+                    >
+                      <Download size={9} />
+                      Download
+                    </button>
+                  )}
                   <button
                     className="btn btn-xs btn-ghost gap-1 py-0 h-auto"
                     onClick={() => handleRollback(entry.version)}
@@ -213,9 +237,19 @@ export function RAAppGroupCard({
           <Play size={10} />
           Run
         </button>
+        {onDownloadVersion && (
+          <button
+            className="btn btn-xs btn-ghost gap-1"
+            onClick={() => onDownloadVersion(group.slug, current.version)}
+            data-testid={`raapp-download-current-${group.slug}`}
+            title={`Download current release v${current.version}`}
+          >
+            <Download size={10} />
+          </button>
+        )}
         <button
           className="btn btn-xs btn-ghost text-error/70 hover:text-error"
-          onClick={() => onDelete(group.slug)}
+          onClick={handleDelete}
           data-testid={`raapp-delete-${group.slug}`}
           title="Delete this RA-App group"
         >

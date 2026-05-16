@@ -1,67 +1,124 @@
-<svg width="100%" viewBox="0 0 680 560" role="img" style="" xmlns="http://www.w3.org/2000/svg">
-<title style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">Kalio v2 HITL gate flow</title>
-<desc style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">Human-in-the-loop confirmation flow for destructive tool calls</desc>
-<defs>
-<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-</marker>
-<mask id="imagine-text-gaps-ovqdj0" maskUnits="userSpaceOnUse"><rect x="0" y="0" width="680" height="560" fill="white"/><rect x="283.2518615722656" y="30.921974182128906" width="112.79865264892578" height="20.156055450439453" fill="black" rx="2"/><rect x="258.6850280761719" y="49.65633773803711" width="163.00738525390625" height="18.6873197555542" fill="black" rx="2"/><rect x="284.4566650390625" y="130.92196655273438" width="111.18711853027344" height="21.624784469604492" fill="black" rx="2"/><rect x="274.014892578125" y="149.65634155273438" width="131.28182983398438" height="18.6873197555542" fill="black" rx="2"/><rect x="274.014892578125" y="240.92196655273438" width="132.2907257080078" height="20.156051635742188" fill="black" rx="2"/><rect x="255.736083984375" y="259.65631103515625" width="168.6207733154297" height="18.6873197555542" fill="black" rx="2"/><rect x="285.0877685546875" y="340.9219665527344" width="110.50636291503906" height="20.156051635742188" fill="black" rx="2"/><rect x="268.66778564453125" y="359.65631103515625" width="142.82411193847656" height="18.687342643737793" fill="black" rx="2"/><rect x="291.0774230957031" y="430.9219665527344" width="97.91007995605469" height="20.156051635742188" fill="black" rx="2"/><rect x="257.6178894042969" y="449.6563415527344" width="164.29969787597656" height="18.6873197555542" fill="black" rx="2"/><rect x="92.33334350585938" y="502.92193603515625" width="101.39529418945312" height="20.156051635742188" fill="black" rx="2"/><rect x="79.7802734375" y="519.6563110351562" width="126.90315246582031" height="18.6873197555542" fill="black" rx="2"/><rect x="466.30059814453125" y="502.92193603515625" width="143.23741149902344" height="20.156051635742188" fill="black" rx="2"/><rect x="473.1278991699219" y="519.6563110351562" width="130.59183502197266" height="18.6873197555542" fill="black" rx="2"/><rect x="345.53125" y="289.2501525878906" width="111.75257110595703" height="18.6873197555542" fill="black" rx="2"/><rect x="207.5123291015625" y="465.2501525878906" width="29.54147720336914" height="18.6873197555542" fill="black" rx="2"/><rect x="429.795166015625" y="465.2501525878906" width="50.30546951293945" height="18.6873197555542" fill="black" rx="2"/><rect x="458.53125" y="426.2501220703125" width="157.235595703125" height="18.6873197555542" fill="black" rx="2"/></mask></defs>
+<svg width="100%" viewBox="0 0 1280 760" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>Kalio current HITL confirmation flow</title>
+  <desc>Decision-tree view of the confirmation gate for tools with requiresConfirmation, including session-bound confirmation, cancellation, and timeout semantics.</desc>
 
-<g onclick="sendPrompt('What tools require confirmation in Kalio v2?')" style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-  <rect x="220" y="20" width="240" height="50" rx="8" stroke-width="0.5" style="fill:rgb(250, 236, 231);stroke:rgb(153, 60, 29);color:rgb(0, 0, 0);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-  <text x="340" y="41" text-anchor="middle" dominant-baseline="central" style="fill:rgb(113, 43, 19);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">Agent calls tool</text>
-  <text x="340" y="59" text-anchor="middle" dominant-baseline="central" style="fill:rgb(153, 60, 29);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:central">requiresConfirmation: true</text>
-</g>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8f4ed"/>
+      <stop offset="50%" stop-color="#fffdfa"/>
+      <stop offset="100%" stop-color="#f1f8f5"/>
+    </linearGradient>
+    <radialGradient id="glowGold" cx="0" cy="0" r="1">
+      <stop offset="0%" stop-color="#f4dfb6" stop-opacity="0.78"/>
+      <stop offset="100%" stop-color="#f4dfb6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowMint" cx="1" cy="0" r="1">
+      <stop offset="0%" stop-color="#d6f2e7" stop-opacity="0.82"/>
+      <stop offset="100%" stop-color="#d6f2e7" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M2 1 L8 5 L2 9" fill="none" stroke="#707070" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Georgia, 'Times New Roman', serif; fill: #1f2937; }
+      .subtitle { font: 500 16px 'Segoe UI', Arial, sans-serif; fill: #5b6472; }
+      .pill { font: 700 12px 'Segoe UI', Arial, sans-serif; letter-spacing: 0.12em; text-transform: uppercase; }
+      .cardTitle { font: 700 24px 'Segoe UI', Arial, sans-serif; fill: #1f2937; }
+      .body { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #4b5563; }
+      .label { font: 700 13px 'Segoe UI', Arial, sans-serif; fill: #6b7280; }
+    </style>
+  </defs>
 
-<g onclick="sendPrompt('How does ToolDispatcher check requiresConfirmation?')" style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-  <rect x="220" y="120" width="240" height="50" rx="8" stroke-width="0.5" style="fill:rgb(225, 245, 238);stroke:rgb(15, 110, 86);color:rgb(0, 0, 0);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-  <text x="340" y="141" text-anchor="middle" dominant-baseline="central" style="fill:rgb(8, 80, 65);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">ToolDispatcher</text>
-  <text x="340" y="159" text-anchor="middle" dominant-baseline="central" style="fill:rgb(15, 110, 86);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:central">checks tool metadata</text>
-</g>
+  <rect width="1280" height="760" fill="url(#bg)"/>
+  <circle cx="170" cy="150" r="220" fill="url(#glowGold)"/>
+  <circle cx="1120" cy="130" r="240" fill="url(#glowMint)"/>
 
-<g onclick="sendPrompt('What Socket.IO event triggers the HITL dialog?')" style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-  <rect x="220" y="230" width="240" height="50" rx="8" stroke-width="0.5" style="fill:rgb(225, 245, 238);stroke:rgb(15, 110, 86);color:rgb(0, 0, 0);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-  <text x="340" y="251" text-anchor="middle" dominant-baseline="central" style="fill:rgb(8, 80, 65);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">Emit via Socket.IO</text>
-  <text x="340" y="269" text-anchor="middle" dominant-baseline="central" style="fill:rgb(15, 110, 86);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:central">'tool:confirmation_required'</text>
-</g>
+  <g filter="url(#shadow)">
+    <rect x="60" y="44" width="1160" height="126" rx="30" fill="#fffdfa" stroke="#e6dfd1" stroke-width="1.2"/>
+  </g>
+  <text x="92" y="96" class="title">Human-in-the-Loop Gate</text>
+  <text x="92" y="128" class="subtitle">Confirmed tools pause the run, emit a session-bound approval request, and only resume after confirm, cancel, or timeout.</text>
+  <rect x="940" y="72" width="220" height="36" rx="18" fill="#f4efe3" stroke="#d8c9af" stroke-width="1"/>
+  <text x="1050" y="95" text-anchor="middle" class="pill" fill="#7a5a12">Session-bound approval</text>
 
-<g onclick="sendPrompt('How does the HITL dialog look in Kalio v2?')" style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-  <rect x="220" y="330" width="240" height="50" rx="8" stroke-width="0.5" style="fill:rgb(238, 237, 254);stroke:rgb(83, 74, 183);color:rgb(0, 0, 0);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-  <text x="340" y="351" text-anchor="middle" dominant-baseline="central" style="fill:rgb(60, 52, 137);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">FE: HITL Dialog</text>
-  <text x="340" y="369" text-anchor="middle" dominant-baseline="central" style="fill:rgb(83, 74, 183);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:central">toolName + args shown</text>
-</g>
+  <g filter="url(#shadow)">
+    <rect x="90" y="230" width="252" height="120" rx="28" fill="#fff7eb" stroke="#c9861a" stroke-width="1.4"/>
+  </g>
+  <rect x="118" y="254" width="140" height="30" rx="15" fill="#f6e3c2"/>
+  <text x="188" y="274" text-anchor="middle" class="pill" fill="#8d5e10">Step 1</text>
+  <text x="118" y="314" class="cardTitle" fill="#70480f">Tool call arrives</text>
+  <text x="118" y="346" class="body">Dispatch reads the tool metadata.</text>
 
-<g onclick="sendPrompt('What happens when user confirms or cancels HITL?')" style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-  <rect x="220" y="420" width="240" height="50" rx="8" stroke-width="0.5" style="fill:rgb(250, 238, 218);stroke:rgb(133, 79, 11);color:rgb(0, 0, 0);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-  <text x="340" y="441" text-anchor="middle" dominant-baseline="central" style="fill:rgb(99, 56, 6);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">User decides</text>
-  <text x="340" y="459" text-anchor="middle" dominant-baseline="central" style="fill:rgb(133, 79, 11);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:central">OK or Cancel (30s timeout)</text>
-</g>
+  <polygon points="480,222 620,300 480,378 340,300" fill="#fffaf1" stroke="#d59b2b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="480" y="294" text-anchor="middle" class="cardTitle" fill="#7a5411">requiresConfirmation?</text>
+  <text x="480" y="324" text-anchor="middle" class="body">per-tool decision</text>
 
-<g onclick="sendPrompt('What happens after tool confirmation?')" style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-  <rect x="50" y="495" width="185" height="44" rx="8" stroke-width="0.5" style="fill:rgb(225, 245, 238);stroke:rgb(15, 110, 86);color:rgb(0, 0, 0);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-  <text x="143" y="513" text-anchor="middle" dominant-baseline="central" style="fill:rgb(8, 80, 65);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">Tool executes</text>
-  <text x="143" y="529" text-anchor="middle" dominant-baseline="central" style="fill:rgb(15, 110, 86);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:central">→ tool_result to LLM</text>
-</g>
+  <g filter="url(#shadow)">
+    <rect x="90" y="456" width="252" height="120" rx="28" fill="#e9f8f2" stroke="#1f8b69" stroke-width="1.4"/>
+  </g>
+  <rect x="118" y="480" width="140" height="30" rx="15" fill="#d9f2e7"/>
+  <text x="188" y="500" text-anchor="middle" class="pill" fill="#0d7c5d">No gate</text>
+  <text x="118" y="540" class="cardTitle" fill="#115644">Execute now</text>
+  <text x="118" y="572" class="body">The tool runs immediately and returns a normal ToolResult.</text>
 
-<g onclick="sendPrompt('What is TOOL_CANCELLED in Kalio v2?')" style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-  <rect x="443" y="495" width="190" height="44" rx="8" stroke-width="0.5" style="fill:rgb(241, 239, 232);stroke:rgb(95, 94, 90);color:rgb(0, 0, 0);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-  <text x="538" y="513" text-anchor="middle" dominant-baseline="central" style="fill:rgb(68, 68, 65);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">TOOL_CANCELLED</text>
-  <text x="538" y="529" text-anchor="middle" dominant-baseline="central" style="fill:rgb(95, 94, 90);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:central">LLM gets error result</text>
-</g>
+  <g filter="url(#shadow)">
+    <rect x="610" y="230" width="300" height="132" rx="28" fill="#e9f8f2" stroke="#1f8b69" stroke-width="1.4"/>
+  </g>
+  <rect x="638" y="254" width="160" height="30" rx="15" fill="#d9f2e7"/>
+  <text x="718" y="274" text-anchor="middle" class="pill" fill="#0d7c5d">Step 2</text>
+  <text x="638" y="314" class="cardTitle" fill="#115644">Pause and emit</text>
+  <text x="638" y="346" class="body">The event includes requestId and sessionId.</text>
 
-<line x1="340" y1="70" x2="340" y2="118" marker-end="url(#arrow)" style="fill:none;stroke:rgb(115, 114, 108);color:rgb(0, 0, 0);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<line x1="340" y1="170" x2="340" y2="228" marker-end="url(#arrow)" style="fill:none;stroke:rgb(115, 114, 108);color:rgb(0, 0, 0);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  <g filter="url(#shadow)">
+    <rect x="950" y="230" width="240" height="132" rx="28" fill="#f3efff" stroke="#6d5bd0" stroke-width="1.4"/>
+  </g>
+  <rect x="978" y="254" width="150" height="30" rx="15" fill="#e7ddff"/>
+  <text x="1053" y="274" text-anchor="middle" class="pill" fill="#5b44cc">Step 3</text>
+  <text x="978" y="314" class="cardTitle" fill="#332b84">User decides</text>
+  <text x="978" y="346" class="body">Frontend sends confirm or cancel.</text>
 
-<text x="351" y="303" text-anchor="start" style="fill:rgb(61, 61, 58);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:start;dominant-baseline:auto">FE receives event</text>
-<line x1="340" y1="280" x2="340" y2="328" marker-end="url(#arrow)" style="fill:none;stroke:rgb(115, 114, 108);color:rgb(0, 0, 0);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  <polygon points="1053,426 1173,494 1053,562 933,494" fill="#fffaf1" stroke="#d59b2b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="1053" y="488" text-anchor="middle" class="cardTitle" fill="#7a5411">confirmed?</text>
+  <text x="1053" y="516" text-anchor="middle" class="body">or timeout</text>
 
-<line x1="340" y1="380" x2="340" y2="418" marker-end="url(#arrow)" style="fill:none;stroke:rgb(115, 114, 108);color:rgb(0, 0, 0);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  <g filter="url(#shadow)">
+    <rect x="830" y="610" width="270" height="98" rx="28" fill="#e9f8f2" stroke="#1f8b69" stroke-width="1.4"/>
+  </g>
+  <text x="862" y="652" class="cardTitle" fill="#115644">Resume the run</text>
+  <text x="862" y="684" class="body">Confirmed calls execute and return tool:result.</text>
 
-<path d="M 340,470 L 340,482 L 143,482 L 143,493" fill="none" stroke="var(--color-text-secondary)" stroke-width="1.5" marker-end="url(#arrow)" mask="url(#imagine-text-gaps-ovqdj0)" style="fill:none;stroke:rgb(61, 61, 58);color:rgb(0, 0, 0);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<path d="M 340,470 L 340,482 L 538,482 L 538,493" fill="none" stroke="var(--color-text-secondary)" stroke-width="1.5" marker-end="url(#arrow)" mask="url(#imagine-text-gaps-ovqdj0)" style="fill:none;stroke:rgb(61, 61, 58);color:rgb(0, 0, 0);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  <g filter="url(#shadow)">
+    <rect x="1080" y="610" width="140" height="98" rx="28" fill="#f3f1ea" stroke="#6c6a62" stroke-width="1.3"/>
+  </g>
+  <text x="1150" y="652" text-anchor="middle" class="cardTitle" fill="#4c4a45">Cancel</text>
+  <text x="1150" y="684" text-anchor="middle" class="body">Return cancelled result.</text>
 
-<text x="222" y="479" text-anchor="middle" style="fill:rgb(61, 61, 58);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:auto">OK</text>
-<text x="455" y="479" text-anchor="middle" style="fill:rgb(61, 61, 58);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:auto">Cancel</text>
+  <g filter="url(#shadow)">
+    <rect x="520" y="590" width="248" height="118" rx="28" fill="#fff9f1" stroke="#d59b2b" stroke-width="1.3"/>
+  </g>
+  <rect x="548" y="614" width="148" height="30" rx="15" fill="#f7e7c9"/>
+  <text x="622" y="634" text-anchor="middle" class="pill" fill="#936510">Timeout rule</text>
+  <text x="548" y="672" class="body">timeoutMs comes from the request.</text>
+  <text x="548" y="700" class="body">0 disables the timeout.</text>
 
-<text x="464" y="440" text-anchor="start" fill="var(--color-text-tertiary)" style="fill:rgb(61, 61, 58);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:start;dominant-baseline:auto">timeout → HITL_TIMEOUT</text>
+  <line x1="342" y1="300" x2="620" y2="300" stroke="#707070" stroke-width="2.3" marker-end="url(#arrow)"/>
+  <text x="390" y="280" class="label">yes</text>
+
+  <line x1="480" y1="378" x2="216" y2="454" stroke="#707070" stroke-width="2.3" marker-end="url(#arrow)"/>
+  <text x="340" y="408" class="label">no</text>
+
+  <line x1="910" y1="300" x2="948" y2="300" stroke="#707070" stroke-width="2.3" marker-end="url(#arrow)"/>
+  <text x="930" y="280" class="label">show dialog</text>
+
+  <line x1="1053" y1="362" x2="1053" y2="424" stroke="#707070" stroke-width="2.3" marker-end="url(#arrow)"/>
+  <text x="1071" y="398" class="label">respond</text>
+
+  <line x1="995" y1="550" x2="930" y2="608" stroke="#707070" stroke-width="2.3" marker-end="url(#arrow)"/>
+  <text x="948" y="578" class="label">confirm</text>
+
+  <line x1="1116" y1="550" x2="1142" y2="608" stroke="#707070" stroke-width="2.3" marker-end="url(#arrow)"/>
+  <text x="1150" y="578" class="label">cancel or timeout</text>
 </svg>

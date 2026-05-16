@@ -249,6 +249,35 @@ describe('ToolDispatchService', () => {
       expect(entry.execute).not.toHaveBeenCalled();
     });
 
+    it('REGRESSION: optionally auto-approves a whitelisted isolated child image_generate tool', async () => {
+      const entry = makeEntry('image_generate', true, { path: 'images/coffee-hero.png' });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'child-session',
+        vfsSessionId: 'child-session',
+        agentRun: {
+          agentRunId: 'sub-run-allowlist',
+          agentType: 'subagent' as const,
+          parentSessionId: 'master-session',
+          vfsMode: 'isolated' as const,
+          autoApproveTools: ['image_generate'],
+        },
+      };
+
+      const result = await scopedService.dispatch('c1', 'image_generate', { prompt: 'hero coffee' }, ctx);
+
+      expect(result.status).toBe('success');
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'image_generate' }));
+    });
+
     it('does not auto-timeout HITL confirmation for subagent turns', async () => {
       vi.useFakeTimers();
       try {

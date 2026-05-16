@@ -42,6 +42,8 @@ async function seedCredential(page: Page, name: string) {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 test.describe('Embedding Credentials UI', () => {
+  test.describe.configure({ mode: 'serial' });
+
   test.beforeEach(async ({ page }) => {
     await cleanupCredentials(page);
     await openEmbeddingsPanel(page);

@@ -73,7 +73,8 @@ describe('SubagentRuntimeService nested subagents', () => {
         persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
         saveToolResult: vi.fn().mockResolvedValue(undefined),
         loadHistory: vi.fn().mockResolvedValue([]),
-      } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+        loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+      } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
       const emit = vi.fn();
       const runtime = new SubagentRuntimeService(
         llmSource,
@@ -147,7 +148,8 @@ describe('SubagentRuntimeService nested subagents', () => {
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockResolvedValue([]),
-    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const existingChild = {
       id: 'sub-existing',
       personaId: 'default',
@@ -189,6 +191,55 @@ describe('SubagentRuntimeService nested subagents', () => {
     expect(result.result).toBe('follow-up done');
   });
 
+  it('REGRESSION: routes subagent history through the shared managed-history path before streaming', async () => {
+    const managedHistory = [
+      { role: 'system', content: 'managed system prompt' },
+      { role: 'user', content: 'latest user prompt' },
+    ];
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([{ type: 'text_delta', delta: 'done' }, { type: 'done' }])),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([
+        {
+          role: 'assistant',
+          content: '',
+          reasoningContent: 'x'.repeat(6_000),
+        },
+      ]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: managedHistory,
+        unboundedHistoryCount: 3,
+      }),
+    };
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager as Pick<SessionManagerService, 'persistAssistantMessage'>) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: 'managed system prompt', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-managed-history',
+      objective: 'use shared history path',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+    });
+
+    expect(sessionManager.loadHistoryForLLM).toHaveBeenCalled();
+    const params = (llmSource.stream as ReturnType<typeof vi.fn>).mock.calls[0][0] as LLMSourceParams;
+    expect(params.messages).toEqual(managedHistory);
+  });
+
   it('emits chat:complete with the persisted assistant messageId instead of the child session id', async () => {
     const llmSource: ILLMSource = {
       stream: vi.fn(() => streamFrom([{ type: 'text_delta', delta: 'done' }, { type: 'done' }])),
@@ -198,7 +249,8 @@ describe('SubagentRuntimeService nested subagents', () => {
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockResolvedValue([]),
-    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const emit = vi.fn();
     const runtime = new SubagentRuntimeService(
       llmSource,
@@ -241,7 +293,8 @@ describe('SubagentRuntimeService nested subagents', () => {
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockResolvedValue([]),
-    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const copiedFiles = [
       {
         fromPath: 'images/cat-hero.png',
@@ -283,7 +336,8 @@ describe('SubagentRuntimeService nested subagents', () => {
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockResolvedValue([]),
-    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const vfs = {
       copySessionFiles: vi.fn()
         .mockReturnValueOnce([
@@ -337,7 +391,8 @@ describe('SubagentRuntimeService nested subagents', () => {
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockResolvedValue([]),
-    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const runtime = new SubagentRuntimeService(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
@@ -395,7 +450,8 @@ describe('SubagentRuntimeService nested subagents', () => {
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockResolvedValue([]),
-    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory'>;
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const sessions = { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) };
     let runtime: SubagentRuntimeService;
     const toolDispatch = {

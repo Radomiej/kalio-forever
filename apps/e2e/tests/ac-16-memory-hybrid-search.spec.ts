@@ -52,11 +52,14 @@ test.describe('AC-16: Memory Hybrid Search', () => {
     const searchBtn = page.getByTestId('memory-search-btn');
     await searchBtn.click();
 
-    // Wait for results or no results message
-    await page.waitForTimeout(1000);
-    const hasResults = await page.getByTestId('memory-result').count() > 0;
-    const hasNoResults = await page.getByText(/No results found|Search to find memories/i).isVisible();
-    expect(hasResults || hasNoResults).toBeTruthy();
+    // Wait for either results or the empty-state copy that appears after the search completes.
+    await expect
+      .poll(async () => {
+        const resultCount = await page.getByTestId('memory-result').count();
+        const hasNoResults = await page.getByText(/No results found/i).isVisible().catch(() => false);
+        return resultCount > 0 || hasNoResults;
+      }, { timeout: 10000 })
+      .toBe(true);
   });
 
   test('user can switch search modes', async ({ page }) => {

@@ -24,12 +24,6 @@ export class CredentialsController {
     return this.credentialsService.create(dto);
   }
 
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id') id: string): Promise<void> {
-    return this.credentialsService.remove(id);
-  }
-
   // ─── Active credential ────────────────────────────────────────────────────────
 
   @Get('active')
@@ -50,6 +44,12 @@ export class CredentialsController {
   async clearActive(): Promise<void> {
     await this.credentialsService.clearActiveCredential();
     this.logger.log('Active LLM credential cleared via API');
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(@Param('id') id: string): Promise<void> {
+    return this.credentialsService.remove(id);
   }
 
   // ─── Context window size ──────────────────────────────────────────────────────

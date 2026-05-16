@@ -9,16 +9,18 @@ export function PersonaPanel() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    apiClient
-      .get<Persona[]>('/api/personas')
-      .then((r) => setPersonas(r.data))
-      .catch((err: unknown) => console.error('[PersonaPanel] load failed', err))
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    try {
+      const response = await apiClient.get<Persona[]>('/api/personas');
+      setPersonas(response.data);
+    } catch (err: unknown) {
+      console.error('[PersonaPanel] load failed', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   const handleCreate = async (dto: CreatePersonaDto) => {
     const { data } = await apiClient.post<Persona>('/api/personas', dto);

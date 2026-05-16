@@ -1,16 +1,19 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE } from './helpers/test-config';
+import { API_BASE, isMockLlm } from './helpers/test-config';
 
-const MOCK_LLM = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.LLM_PROVIDER === 'mock';
+function uniqueSessionTitle(prefix: string): string {
+  return `${prefix} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 // AC-11: Tool call chips appear inline during streaming and show results after completion
 test.describe('AC-11: Tool call visibility', () => {
   test('tool call chip appears and resolves during RA-App session', async ({ page, request }) => {
-    test.skip(MOCK_LLM, 'Mock LLM only echoes the latest prompt and never emits tool calls.');
+    test.skip(await isMockLlm(request), 'Mock LLM only echoes the latest prompt and never emits tool calls.');
+    const title = uniqueSessionTitle('AC11 Tool Call Test');
 
     // Use a persona that has RA-Apps available
     const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'AC11 Tool Call Test', personaId: 'ra-apps' },
+      data: { title, personaId: 'ra-apps' },
     });
     expect(res.ok()).toBeTruthy();
     const session = await res.json() as { id: string };
@@ -20,9 +23,9 @@ test.describe('AC-11: Tool call visibility', () => {
 
     // Select the session
     await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC11 Tool Call Test' }).first(),
+      page.getByTestId('session-item').filter({ hasText: title }).first(),
     ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC11 Tool Call Test' }).first().click();
+    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
 
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });

@@ -43,7 +43,7 @@ export class FsWriteTool {
     const content = getContentArg(request.args);
 
     const absPath = resolve(rawPath);
-    const allowed = await this.allowedPaths.isAllowed(absPath);
+    const allowed = await this.allowedPaths.isAllowed(absPath, { allowMissingPath: true });
     if (!allowed) {
       throw new Error(`ACCESS_DENIED: path is outside allowed roots`);
     }

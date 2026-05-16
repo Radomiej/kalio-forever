@@ -26,9 +26,12 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import extractZip from 'extract-zip';
 import yaml from 'js-yaml';
-import archiver from 'archiver';
 import type { RAAppGroup, RAAppVersionInfo, RAAppMetaSummary } from '@kalio/types';
 import type { RAAppMeta } from './raapp.service';
+import { archiveDirectoryToZip } from './zip-archive.util';
+
+export const RAAPP_RELEASE_NOT_FOUND_CODE = 'RAAPP_RELEASE_NOT_FOUND';
+const RAAPP_SLUG_PATTERN = /^[a-z0-9-]+$/;
 
 // ── Semver helpers ────────────────────────────────────────────────────────────
 
@@ -80,6 +83,16 @@ function metaToSummary(meta: RAAppMeta): RAAppMetaSummary {
     expose_as_tool: meta.expose_as_tool,
     tool_description: meta.tool_description,
   };
+}
+
+function createReleaseNotFoundError(message: string): NodeJS.ErrnoException {
+  const error = new Error(message) as NodeJS.ErrnoException;
+  error.code = RAAPP_RELEASE_NOT_FOUND_CODE;
+  return error;
+}
+
+function isValidRAAppSlug(slug: string): boolean {
+  return RAAPP_SLUG_PATTERN.test(slug);
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -137,8 +150,15 @@ export class RAAppVersioningService implements OnModuleInit {
         continue;
       }
 
-      const slug = meta.id;
-      const slugDir = path.join(this.userDir, slug);
+      let slug: string;
+      let slugDir: string;
+      try {
+        ({ slug, slugDir } = this.resolveUserSlugPath(meta.id));
+      } catch (err) {
+        this.logger.warn(`Migration: invalid slug in ${entry}, skipping`, err instanceof Error ? err : new Error(String(err)));
+        continue;
+      }
+
       if (fsSync.existsSync(slugDir)) continue; // already migrated
 
       await ensureDir(path.join(slugDir, 'history'));
@@ -257,7 +277,43 @@ export class RAAppVersioningService implements OnModuleInit {
   }
 
   getGroupBySlug(slug: string): RAAppGroup | undefined {
-    return this.groups.get(slug);
+    return this.groups.get(slug.trim());
+  }
+
+  downloadRelease(slug: string, version: string): { stream: fsSync.ReadStream; filename: string } {
+    const group = this.groups.get(slug);
+    if (!group) throw createReleaseNotFoundError(`No RA-App group found for slug: ${slug}`);
+
+    const release = group.current.version === version
+      ? group.current
+      : group.history.find((entry) => entry.version === version);
+
+    if (!release) {
+      throw createReleaseNotFoundError(`Release version ${version} not found for slug: ${slug}`);
+    }
+
+    try {
+      const stat = fsSync.statSync(release.zipPath);
+      if (!stat.isFile()) {
+        throw createReleaseNotFoundError(`Release version ${version} not found for slug: ${slug}`);
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'ENOENT' || code === 'ENOTDIR' || code === RAAPP_RELEASE_NOT_FOUND_CODE) {
+        throw createReleaseNotFoundError(`Release version ${version} not found for slug: ${slug}`);
+      }
+      throw err;
+    }
+
+    const stream = fsSync.createReadStream(release.zipPath);
+    stream.once('error', (err) => {
+      this.logger.error(`[downloadRelease] Stream failed for ${slug}@${version}`, err);
+    });
+
+    return {
+      stream,
+      filename: `${slug}-${release.version}.zip`,
+    };
   }
 
   // ── Write API ─────────────────────────────────────────────────────────────
@@ -271,10 +327,14 @@ export class RAAppVersioningService implements OnModuleInit {
     try {
       meta = await this.extractMeta(buffer);
     } catch (err) {
-      throw new Error(`Invalid RA-App ZIP: could not parse meta.yml — ${(err as Error).message}`);
+      throw new Error(`Invalid RA-App ZIP: could not parse meta.yml — ${(err as Error).message}`, {
+        cause: err,
+      });
     }
 
-    const slugDir = path.join(this.userDir, slug);
+    const resolved = this.resolveUserSlugPath(slug);
+    slug = resolved.slug;
+    const slugDir = resolved.slugDir;
     const currentZip = path.join(slugDir, 'current.zip');
 
     if (meta.id && meta.id !== slug) {
@@ -313,11 +373,13 @@ export class RAAppVersioningService implements OnModuleInit {
    *   3. Reload group in memory
    */
   async approveDraft(slug: string, bumpType: 'patch' | 'minor' | 'major' = 'minor'): Promise<RAAppGroup> {
+    const resolved = this.resolveUserSlugPath(slug);
+    slug = resolved.slug;
     const group = this.groups.get(slug);
     if (!group) throw new Error(`No RA-App group found for slug: ${slug}`);
     if (!group.draft) throw new Error(`No draft to approve for slug: ${slug}`);
 
-    const slugDir = path.join(this.userDir, slug);
+    const slugDir = resolved.slugDir;
     const currentZip = path.join(slugDir, 'current.zip');
     const draftZip = path.join(slugDir, 'draft.zip');
     const histDir = path.join(slugDir, 'history');
@@ -358,6 +420,8 @@ export class RAAppVersioningService implements OnModuleInit {
 
   /** Copy a historical version to draft for re-approval. */
   async rollback(slug: string, version: string): Promise<RAAppGroup> {
+    const resolved = this.resolveUserSlugPath(slug);
+    slug = resolved.slug;
     const group = this.groups.get(slug);
     if (!group) throw new Error(`No RA-App group found for slug: ${slug}`);
 
@@ -369,7 +433,7 @@ export class RAAppVersioningService implements OnModuleInit {
       throw new Error(`Version ${version} not found in history for slug: ${slug}`);
     }
 
-    const slugDir = path.join(this.userDir, slug);
+    const slugDir = resolved.slugDir;
     const draftZip = path.join(slugDir, 'draft.zip');
     if (fsSync.existsSync(draftZip)) {
       throw new Error(`Cannot rollback: a draft already exists for '${slug}'. Discard it first.`);
@@ -383,22 +447,26 @@ export class RAAppVersioningService implements OnModuleInit {
 
   /** Delete draft without approving it. */
   async discardDraft(slug: string): Promise<RAAppGroup> {
+    const resolved = this.resolveUserSlugPath(slug);
+    slug = resolved.slug;
     const group = this.groups.get(slug);
     if (!group) throw new Error(`No RA-App group found for slug: ${slug}`);
     if (!group.draft) throw new Error(`No draft to discard for slug: ${slug}`);
 
-    await fs.unlink(path.join(this.userDir, slug, 'draft.zip'));
-    await this.loadGroupFromDir(slug, path.join(this.userDir, slug));
+    await fs.unlink(path.join(resolved.slugDir, 'draft.zip'));
+    await this.loadGroupFromDir(slug, resolved.slugDir);
     this.logger.log(`discardDraft: '${slug}'`);
     return this.groups.get(slug)!;
   }
 
   /** Delete an entire group (folder). Core apps are never stored here. */
   async deleteGroup(slug: string): Promise<void> {
+    const resolved = this.resolveUserSlugPath(slug);
+    slug = resolved.slug;
     const group = this.groups.get(slug);
     if (!group) throw new Error(`No RA-App group found for slug: ${slug}`);
 
-    await fs.rm(path.join(this.userDir, slug), { recursive: true, force: true });
+    await fs.rm(resolved.slugDir, { recursive: true, force: true });
     this.groups.delete(slug);
     this.logger.log(`deleteGroup: '${slug}'`);
   }
@@ -425,7 +493,9 @@ export class RAAppVersioningService implements OnModuleInit {
       try {
         return yaml.load(raw) as RAAppMeta;
       } catch (err) {
-        throw new Error(`meta.yml is not valid YAML: ${(err as Error).message}`);
+        throw new Error(`meta.yml is not valid YAML: ${(err as Error).message}`, {
+          cause: err,
+        });
       }
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {/* best effort */});
@@ -435,6 +505,21 @@ export class RAAppVersioningService implements OnModuleInit {
   private async parseZipMeta(zipPath: string): Promise<RAAppMeta> {
     const buf = await fs.readFile(zipPath);
     return this.extractMeta(buf);
+  }
+
+  private resolveUserSlugPath(slug: string): { slug: string; slugDir: string } {
+    const normalizedSlug = slug.trim();
+    if (!isValidRAAppSlug(normalizedSlug)) {
+      throw new Error(`Invalid RA-App slug "${slug}". Slugs must match ^[a-z0-9-]+$`);
+    }
+
+    const slugDir = path.resolve(this.userDir, normalizedSlug);
+    const relative = path.relative(this.userDir, slugDir);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`Invalid RA-App slug "${slug}". Resolved path escapes the RA-App root.`);
+    }
+
+    return { slug: normalizedSlug, slugDir };
   }
 
   private async readManifest(slugDir: string): Promise<GroupManifest> {
@@ -478,14 +563,12 @@ export class RAAppVersioningService implements OnModuleInit {
       meta.version = newVersion;
       await fs.writeFile(metaPath, yaml.dump(meta), 'utf-8');
 
-      await new Promise<void>((resolve, reject) => {
-        const output = fsSync.createWriteStream(tmpZip);
-        const arc = archiver('zip', { zlib: { level: 6 } });
-        arc.on('error', (err: Error) => reject(err));
-        output.on('close', resolve);
-        arc.pipe(output);
-        arc.directory(tmpDir, false);
-        void arc.finalize();
+      await archiveDirectoryToZip({
+        sourceDir: tmpDir,
+        zipPath: tmpZip,
+        cleanupOnError: async () => {
+          await fs.rm(tmpZip, { force: true });
+        },
       });
       await fs.rename(tmpZip, zipPath);
     } finally {

@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { nanoid } from 'nanoid';
 import type { RAAppBlock, RAAppResult, ChatMessage } from '@kalio/types';
 import { HtmlIframeRenderer } from './HtmlIframeRenderer';
+import { VfsHtmlRenderer } from './VfsHtmlRenderer';
 import { isHtmlString, findHtmlInData, injectEngineCDN } from './raappRendererUtils';
 import { GuiDslRenderer, type GuiDslPayload } from './GuiDslRenderer';
 import { RaAppHITLOverlay } from './RaAppHITLOverlay';
@@ -12,10 +13,12 @@ import { eventBus } from '../../services/eventBus';
 interface RAAppRendererProps {
   block: RAAppBlock;
   result?: RAAppResult;
+  sessionId?: string;
 }
 
-export function RAAppRenderer({ block, result }: RAAppRendererProps) {
+export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) {
   const isStreaming = useAgentStore((s) => s.isStreaming);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
 
   const handleGuiAction = useCallback(
     (action: string) => {
@@ -63,6 +66,15 @@ export function RAAppRenderer({ block, result }: RAAppRendererProps) {
     ) : null;
 
   if (block.type === 'html') {
+    const previewSessionId = sessionId ?? activeSessionId;
+    if (block.vfsPath && previewSessionId) {
+      return (
+        <>
+          <VfsHtmlRenderer sessionId={previewSessionId} vfsPath={block.vfsPath} title="RA-App" />
+          {hitlOverlay}
+        </>
+      );
+    }
     const html = injectEngineCDN(content, (block as { engine?: string }).engine);
     return (
       <>

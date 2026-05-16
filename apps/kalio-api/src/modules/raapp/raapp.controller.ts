@@ -8,13 +8,16 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Res,
+  StreamableFile,
   UseInterceptors,
   UploadedFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import type { RAAppSummary, RAAppGroup } from '@kalio/types';
 import { RAAppService } from './raapp.service';
-import { RAAppVersioningService, deriveSlug } from './raapp-versioning.service';
+import { RAAppVersioningService, RAAPP_RELEASE_NOT_FOUND_CODE, deriveSlug } from './raapp-versioning.service';
 
 @Controller('ra-apps')
 export class RAAppController {
@@ -53,6 +56,34 @@ export class RAAppController {
     const group = this.versioningService.getGroupBySlug(slug);
     if (!group) throw new NotFoundException(`RA-App group not found: ${slug}`);
     return group;
+  }
+
+  @Get('groups/:slug/download/:version')
+  downloadRelease(
+    @Param('slug') slug: string,
+    @Param('version') version: string,
+    @Res({ passthrough: true }) res: Response,
+  ): StreamableFile {
+    const group = this.versioningService.getGroupBySlug(slug);
+    if (!group) throw new NotFoundException(`RA-App group not found: ${slug}`);
+
+    let stream: ReturnType<RAAppVersioningService['downloadRelease']>['stream'];
+    let filename: string;
+    try {
+      ({ stream, filename } = this.versioningService.downloadRelease(slug, version));
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      const code = (err as NodeJS.ErrnoException | undefined)?.code;
+      if (code === RAAPP_RELEASE_NOT_FOUND_CODE || error.message.includes('Release version not found')) {
+        throw new NotFoundException(error.message);
+      }
+      throw err;
+    }
+    res.set({
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+    return new StreamableFile(stream);
   }
 
   @Get(':id')

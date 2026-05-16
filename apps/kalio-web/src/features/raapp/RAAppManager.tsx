@@ -1,12 +1,13 @@
 /**
  * RAAppManager — dual-source RaConsierge browser.
  *
- * Two sections:
+ * Three sections:
  *  1. Catalog  — stored apps fetched from /api/ra-apps (core + versioned user)
- *  2. Session  — inline apps created by raapp_create in the current chat session
+ *  2. Work     — raw draft files from the active session VFS
+ *  3. Session  — inline apps created by raapp_create in the current chat session
  */
 import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { Code2, Globe, Eye, RefreshCw, Upload, Package } from 'lucide-react';
+import { Code2, Globe, Eye, RefreshCw, Upload, Package, FolderOpen, FlaskConical, Workflow, FileCode, Play, Rocket } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { RAAppRenderer } from './RAAppRenderer';
 import { RAAppGroupCard } from './components/RAAppGroupCard';
@@ -15,13 +16,15 @@ import { bucketCatalogApps } from './catalog.utils';
 import {
   getRAApps,
   getRAAppGroups,
+  getSessionVfsFiles,
+  getRAAppGroupDownloadUrl,
   uploadRAApp,
   approveRAAppDraft,
   discardRAAppDraft,
   rollbackRAApp,
   deleteRAAppGroup,
 } from '../../services/apiClient';
-import type { RAAppBlock, RAAppSummary, RAAppGroup } from '@kalio/types';
+import type { RAAppBlock, RAAppSummary, RAAppGroup, VFSFile } from '@kalio/types';
 
 interface FoundRAApp {
   messageId: string;
@@ -29,9 +32,13 @@ interface FoundRAApp {
   index: number;
 }
 
-export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId: string) => void; onRunWithAgent: () => void }) {
-  void onOpenVFS;
+interface WorkDraft {
+  id: string;
+  files: VFSFile[];
+  updatedAt: number;
+}
 
+export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId: string) => void; onRunWithAgent: () => void }) {
   // ── Catalog state ────────────────────────────────────────────────────────
   const [groups, setGroups] = useState<RAAppGroup[]>([]);
   const [coreApps, setCoreApps] = useState<RAAppSummary[]>([]);
@@ -43,8 +50,12 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Session state ────────────────────────────────────────────────────────
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const messages = useSessionStore((s) => s.messages);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [workFiles, setWorkFiles] = useState<VFSFile[]>([]);
+  const [workLoading, setWorkLoading] = useState(false);
+  const [workError, setWorkError] = useState<string | null>(null);
 
   // ── Derive session inline apps from messages ─────────────────────────────
   const sessionApps = useMemo<FoundRAApp[]>(() => {
@@ -72,6 +83,25 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
 
   const selected = selectedIdx !== null ? sessionApps[selectedIdx] ?? null : null;
 
+  const workDrafts = useMemo<WorkDraft[]>(() => {
+    const drafts = new Map<string, VFSFile[]>();
+    for (const file of workFiles) {
+      const parts = file.path.split('/');
+      if (parts[0] !== 'drafts' || !parts[1]) continue;
+      const existing = drafts.get(parts[1]) ?? [];
+      existing.push(file);
+      drafts.set(parts[1], existing);
+    }
+
+    return Array.from(drafts.entries())
+      .map(([id, files]) => ({
+        id,
+        files: files.slice().sort((a, b) => a.path.localeCompare(b.path)),
+        updatedAt: Math.max(...files.map((file) => file.updatedAt)),
+      }))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [workFiles]);
+
   // ── Load catalog ─────────────────────────────────────────────────────────
   const refreshCatalog = useCallback(async () => {
     setCatalogLoading(true);
@@ -95,6 +125,30 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
   useEffect(() => {
     void refreshCatalog();
   }, [refreshCatalog]);
+
+  const refreshWork = useCallback(async () => {
+    if (!activeSessionId) {
+      setWorkFiles([]);
+      setWorkError(null);
+      return;
+    }
+
+    setWorkLoading(true);
+    setWorkError(null);
+    try {
+      const result = await getSessionVfsFiles(activeSessionId);
+      setWorkFiles(result.files);
+    } catch (err) {
+      setWorkFiles([]);
+      setWorkError(`Failed to load work files: ${(err as Error).message}`);
+    } finally {
+      setWorkLoading(false);
+    }
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    void refreshWork();
+  }, [refreshWork]);
 
   // ── Upload ───────────────────────────────────────────────────────────────
   const handleUpload = useCallback(
@@ -172,6 +226,16 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
     [refreshCatalog],
   );
 
+  const handleGroupDownload = useCallback((slug: string, version: string) => {
+    window.open(getRAAppGroupDownloadUrl(slug, version), '_blank');
+  }, []);
+
+  const handleWorkAction = useCallback((message: string) => {
+    const { setPendingMessage } = useSessionStore.getState();
+    setPendingMessage(message);
+    onRunWithAgent();
+  }, [onRunWithAgent]);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
 
@@ -236,6 +300,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
             onApprove={handleGroupApprove}
             onDiscardDraft={handleGroupDiscard}
             onRollback={handleGroupRollback}
+            onDownloadVersion={handleGroupDownload}
           />
         ))}
 
@@ -252,6 +317,100 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
             No apps in catalog — upload a .zip to get started
           </p>
         )}
+      </div>
+
+      {/* ── Work section ─────────────────────────────────────────────────── */}
+      <div className="px-3 py-2 border-t border-b border-base-300 shrink-0 flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-base-content/60 uppercase tracking-wider flex items-center gap-1.5">
+          <FolderOpen size={12} />
+          Work ({workDrafts.length})
+        </span>
+        {activeSessionId && (
+          <button
+            className="btn btn-xs btn-ghost gap-1"
+            onClick={() => onOpenVFS(activeSessionId)}
+            data-testid={`raapp-work-open-vfs-${activeSessionId}`}
+            title="Open raw session files"
+          >
+            <FolderOpen size={12} />
+            Open VFS
+          </button>
+        )}
+      </div>
+
+      <div className="overflow-y-auto shrink-0 max-h-44 p-2 flex flex-col gap-2 border-b border-base-300">
+        {workLoading && (
+          <p className="text-xs text-base-content/30 text-center py-2">Loading work files…</p>
+        )}
+
+        {!workLoading && workError && (
+          <p className="text-[10px] text-error px-1">{workError}</p>
+        )}
+
+        {!workLoading && !workError && workDrafts.length === 0 && (
+          <p className="text-xs text-base-content/30 text-center py-2">
+            No raw drafts in the active session
+          </p>
+        )}
+
+        {workDrafts.map((draft) => {
+          const hasGui = draft.files.some((file) => file.path.endsWith('/ui.gui'));
+          const hasSystems = draft.files.some((file) => file.path.endsWith('/systems.yml'));
+          const hasTests = draft.files.some((file) => file.path.endsWith('/tests.yml'));
+
+          return (
+            <div
+              key={draft.id}
+              className="bg-base-200 rounded-lg p-3 flex flex-col gap-2"
+              data-testid={`raapp-work-draft-${draft.id}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-base-content truncate">{draft.id}</p>
+                  <p className="text-[11px] text-base-content/45">{draft.files.length} files</p>
+                </div>
+                <div className="flex flex-wrap gap-1 justify-end">
+                  {hasGui && <span className="badge badge-xs badge-info gap-1"><FileCode size={9} />ui</span>}
+                  {hasSystems && <span className="badge badge-xs badge-warning gap-1"><Workflow size={9} />systems</span>}
+                  {hasTests && <span className="badge badge-xs badge-success gap-1"><FlaskConical size={9} />tests</span>}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {draft.files.map((file) => (
+                  <span key={file.path} className="badge badge-xs badge-ghost">
+                    {file.path.split('/').slice(2).join('/') || file.path}
+                  </span>
+                ))}
+              </div>
+              <div className="flex items-center gap-1 pt-1 border-t border-base-300">
+                <button
+                  className="btn btn-xs btn-ghost gap-1"
+                  onClick={() => handleWorkAction(`Run raapp_test for draft_id "${draft.id}" now and summarize the results briefly.`)}
+                  data-testid={`raapp-work-test-${draft.id}`}
+                >
+                  <FlaskConical size={10} />
+                  Test
+                </button>
+                <button
+                  className="btn btn-xs btn-primary gap-1"
+                  onClick={() => handleWorkAction(`Run the RA-App draft "${draft.id}" now using raapp_execute_dsl and launch it immediately.`)}
+                  data-testid={`raapp-work-run-${draft.id}`}
+                >
+                  <Play size={10} />
+                  Run
+                </button>
+                <button
+                  className="btn btn-xs btn-success gap-1 ml-auto"
+                  onClick={() => handleWorkAction(`Publish the RA-App draft "${draft.id}" now using raapp_publish_draft with bump_type "minor", then report the released version.`)}
+                  data-testid={`raapp-work-publish-${draft.id}`}
+                >
+                  <Rocket size={10} />
+                  Publish
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Session section ──────────────────────────────────────────────── */}

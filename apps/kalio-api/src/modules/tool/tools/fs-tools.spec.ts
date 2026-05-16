@@ -360,6 +360,17 @@ describe('FsWriteTool', () => {
       ).rejects.toThrow('ACCESS_DENIED');
     });
 
+    it('checks missing write targets using the real path of the deepest existing parent', async () => {
+      (allowedPaths.isAllowed as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+      await expect(
+        tool.execute(makeRequest('fs_write', { path: `${ALLOWED_DIR}/link/new.txt`, content: 'x' })),
+      ).rejects.toThrow('ACCESS_DENIED');
+
+      expect(allowedPaths.isAllowed).toHaveBeenCalledWith(expect.any(String), { allowMissingPath: true });
+      expect(nodefs.writeFileSync).not.toHaveBeenCalled();
+    });
+
     it('does not call writeFileSync when access is denied', async () => {
       (allowedPaths.isAllowed as ReturnType<typeof vi.fn>).mockResolvedValue(false);
 

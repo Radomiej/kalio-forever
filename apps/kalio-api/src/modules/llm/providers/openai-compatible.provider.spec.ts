@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OpenAICompatibleProvider } from './openai-compatible.provider';
 import type { LLMMessage, LLMStreamChunk, LLMConfig } from '@kalio/types';
+import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 
 // Regression test for: Empty catch blocks in OpenAICompatibleProvider
 // Issue: Multiple empty catch blocks that silently ignore errors
@@ -104,6 +105,49 @@ describe('OpenAICompatibleProvider', () => {
     });
   });
 
+  describe('streamChat - Request normalization', () => {
+    it('REGRESSION: uses the shared provider message serialization and does not leak internal context fields', async () => {
+      const messages: ContextManagedLLMMessage[] = [
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'tc-1', name: 'my_tool', args: { prompt: 'cat' } }],
+          reasoningContent: 'internal reasoning',
+        },
+      ];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+
+      const mockStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await provider.streamChat(messages, tools, vi.fn(), 'sess-123', 'msg-456');
+
+      const request = mockFetch.mock.calls[0]?.[1] as { body: string };
+      const parsed = JSON.parse(request.body) as { messages: Array<Record<string, unknown>> };
+
+      expect(parsed.messages[0]).toEqual({
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'tc-1',
+            type: 'function',
+            function: { name: 'my_tool', arguments: '{"prompt":"cat"}' },
+          },
+        ],
+      });
+    });
+  });
+
   describe('streamChat - Normal Operation', () => {
     it('should stream content chunks correctly', async () => {
       // Arrange
@@ -199,6 +243,36 @@ describe('OpenAICompatibleProvider', () => {
   });
 
   describe('streamChat - Error Handling', () => {
+    it('should release the reader lock when abort happens mid-stream', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const sessionId = 'sess-123';
+      const messageId = 'msg-456';
+      const abortController = new AbortController();
+      const reader = {
+        read: vi.fn().mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'),
+        }),
+        releaseLock: vi.fn(),
+      };
+      const onChunk = vi.fn((chunk: LLMStreamChunk) => {
+        if (chunk.delta === 'Hello') {
+          abortController.abort();
+        }
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: { getReader: () => reader },
+      });
+
+      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortController.signal);
+
+      expect(result).toEqual([]);
+      expect(reader.releaseLock).toHaveBeenCalledOnce();
+    });
+
     it('should throw error on HTTP failure', async () => {
       // Arrange
       const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
@@ -212,12 +286,13 @@ describe('OpenAICompatibleProvider', () => {
         status: 500,
         statusText: 'Internal Server Error',
         body: null,
+        text: vi.fn().mockResolvedValue(''),
       });
 
       // Act & Assert
       await expect(
         provider.streamChat(messages, tools, onChunk, sessionId, messageId),
-      ).rejects.toThrow('LLM request failed: 500 Internal Server Error');
+      ).rejects.toThrow('[openai] LLM request failed: 500 Internal Server Error - ');
     });
 
     it('should throw error when response body is missing', async () => {
@@ -231,12 +306,13 @@ describe('OpenAICompatibleProvider', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         body: null,
+        text: vi.fn().mockResolvedValue(''),
       });
 
       // Act & Assert
       await expect(
         provider.streamChat(messages, tools, onChunk, sessionId, messageId),
-      ).rejects.toThrow('LLM request failed');
+      ).rejects.toThrow('[openai] LLM request failed');
     });
   });
 });

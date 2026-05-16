@@ -1,30 +1,19 @@
-import { Controller, Get, Query, HttpException, HttpStatus } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, HttpStatus, Put, Query } from '@nestjs/common';
 import { LLMService } from './llm.service';
 import { CredentialsService } from '../credentials/credentials.service';
 import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
 import type { LLMConfig } from '@kalio/types';
 import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
+import {
+  buildProviderCompatHeaders,
+  resolveLlmProviderBaseUrl,
+} from '../../common/utils/llm-provider-http.util';
 
 export interface LLMConfigResponse extends LLMConfig {
   contextWindowSize: number;
   maxToolAttempts: number;
   /** Whether the active LLM config comes from a DB credential or .env fallback */
   source: 'db' | 'env';
-}
-
-const PROVIDER_BASE_URLS: Record<string, string> = {
-  openai:     'https://api.openai.com/v1',
-  xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
-  deepseek:   'https://api.deepseek.com/v1',
-  cometapi:   'https://api.cometapi.com/v1',
-  openrouter: 'https://openrouter.ai/api/v1',
-  ollama:     'http://localhost:11434/v1',
-  bitnet:     'http://localhost:8080/v1',
-};
-
-function resolveBaseUrl(provider: string, baseUrl?: string): string {
-  if (baseUrl) return baseUrl.replace(/\/$/, '');
-  return PROVIDER_BASE_URLS[provider] ?? 'https://api.openai.com/v1';
 }
 
 @Controller('llm')
@@ -45,23 +34,48 @@ export class LLMController {
     return { ...config, contextWindowSize, maxToolAttempts };
   }
 
+  @Get('active/models')
+  async getActiveModels(): Promise<{ models: string[] }> {
+    const models = await this.llm.getActiveModels();
+    return { models };
+  }
+
+  @Put('active/model')
+  async updateActiveModel(@Body() body: { model?: unknown }): Promise<LLMConfigResponse> {
+    if (typeof body?.model !== 'string' || body.model.trim().length === 0) {
+      throw new HttpException('Missing required body field: model', HttpStatus.BAD_REQUEST);
+    }
+
+    const [config, contextWindowSize, maxToolAttempts] = await Promise.all([
+      this.llm.updateActiveModel(body.model),
+      this.credentials.getContextWindowSize(),
+      this.credentials.getMaxToolAttempts(),
+    ]);
+
+    return { ...config, contextWindowSize, maxToolAttempts };
+  }
+
   @Get('models')
   async getModels(
-    @Query('provider') provider: string,
-    @Query('apiKey') apiKey?: string,
-    @Query('baseUrl') baseUrl?: string,
+    @Query('provider') provider: string | string[],
+    @Query('apiKey') apiKey?: string | string[],
+    @Query('baseUrl') baseUrl?: string | string[],
   ): Promise<unknown> {
-    if (!provider) {
+    if (typeof provider !== 'string' || provider.trim().length === 0) {
       throw new HttpException('Missing required query param: provider', HttpStatus.BAD_REQUEST);
     }
 
-    const resolvedBase = resolveBaseUrl(provider, baseUrl);
-    const isLocal = isLocalLlmProvider(provider, resolvedBase);
+    const normalizedProvider = provider.trim();
+    const normalizedApiKey = typeof apiKey === 'string' ? apiKey : undefined;
+    const normalizedBaseUrl = typeof baseUrl === 'string' ? baseUrl : undefined;
+
+    const resolvedBase = resolveLlmProviderBaseUrl(normalizedProvider, normalizedBaseUrl);
+    const isLocal = isLocalLlmProvider(normalizedProvider, resolvedBase);
     const allowsKeyless = isLocal;
 
-    if (!apiKey && !allowsKeyless) {
+    if (!normalizedApiKey && !allowsKeyless) {
       throw new HttpException(
-        `Missing apiKey for ${provider}. Provide query apiKey or use a local endpoint.`,
+        `Missing apiKey for ${normalizedProvider}. Provide query apiKey or use a local endpoint.`,
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -72,14 +86,7 @@ export class LLMController {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const authHeaders: Record<string, string> =
-        !allowsKeyless && apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
-
-      if (provider === 'xiaomimimo') {
-        authHeaders['HTTP-Referer'] = 'https://github.com/RooVetGit/Roo-Cline';
-        authHeaders['X-Title'] = 'Roo Code';
-        authHeaders['User-Agent'] = 'RooCode/3.17.0';
-      }
+      const authHeaders = buildProviderCompatHeaders(normalizedProvider, !allowsKeyless ? normalizedApiKey : undefined);
 
       const upstream = await fetch(endpoint, { headers: authHeaders, signal: controller.signal });
 

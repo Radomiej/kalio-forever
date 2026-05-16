@@ -21,11 +21,13 @@ const mockSetPendingConfirmation = vi.fn();
 const mockUpdateToolActivity = vi.fn();
 let mockPendingConfirmations: Record<string, ToolConfirmationRequest> = {};
 let mockActiveSessionId = 'session-1';
+let mockToolActivities: ToolActivity[] = [];
 
 vi.mock('../../store/agentStore', () => ({
   useAgentStore: (selector: (s: unknown) => unknown) =>
     selector({
       pendingConfirmations: mockPendingConfirmations,
+      toolActivities: mockToolActivities,
       setPendingConfirmation: mockSetPendingConfirmation,
       updateToolActivity: mockUpdateToolActivity,
       setCanvasOpen: vi.fn(),
@@ -91,6 +93,7 @@ function makeConfirmation(sessionId = 'session-1', callId = 'call-1'): ToolConfi
 beforeEach(() => {
   mockPendingConfirmations = {};
   mockActiveSessionId = 'session-1';
+  mockToolActivities = [];
   vi.clearAllMocks();
   mockApiGet.mockResolvedValue({ data: [] });
 });
@@ -177,6 +180,33 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
     expect(mockUpdateToolActivity).toHaveBeenCalledWith('call-1', expect.objectContaining({ status: 'cancelled' }));
   });
 
+  it('REGRESSION: child-session confirmation can be approved from the master view when callId matches', () => {
+    mockActiveSessionId = 'master-session';
+    mockPendingConfirmations = { 'child-session': makeConfirmation('child-session', 'call-1') };
+
+    render(
+      <LiveToolCallBubble
+        activity={makeActivity({
+          sessionId: 'child-session',
+          agentRun: {
+            agentRunId: 'subagent-1',
+            agentType: 'subagent',
+            parentSessionId: 'master-session',
+            parentTurnId: 'turn-1',
+            parentToolCallId: 'parent-call-1',
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('confirmation-confirm-btn')).toBeDefined();
+
+    act(() => { fireEvent.click(screen.getByTestId('confirmation-confirm-btn')); });
+
+    expect(mockConfirmTool).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'child-session' });
+    expect(mockSetPendingConfirmation).toHaveBeenCalledWith('child-session', null);
+  });
+
   it('activity with no args renders no preview and no toggle', () => {
     mockPendingConfirmations = { 'session-1': makeConfirmation() };
 
@@ -188,7 +218,7 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
 });
 
 describe('HistoryToolCallBubble — run_subagent', () => {
-  it('shows child session, VFS mode, copied count, and copied file path by default', () => {
+  it('shows child session, VFS mode, and copied count while keeping copied file paths collapsed by default', () => {
     const content = JSON.stringify({
       result: 'created index.html',
       taskId: 'task-1',
@@ -208,6 +238,52 @@ describe('HistoryToolCallBubble — run_subagent', () => {
     expect(screen.getAllByText('isolated').length).toBeGreaterThan(0);
     expect(screen.getByText('copied')).toBeDefined();
     expect(screen.getByText('1')).toBeDefined();
-    expect(screen.getByText('sub-agents/sub-child-1/index.html')).toBeDefined();
+    expect(screen.queryByText('sub-agents/sub-child-1/index.html')).toBeNull();
+  });
+});
+
+describe('LiveToolCallBubble — run_subagent', () => {
+  it('REGRESSION: renders child pending approvals inside the master subagent bubble', () => {
+    mockActiveSessionId = 'master-session';
+    mockPendingConfirmations = { 'child-session': makeConfirmation('child-session', 'child-call-1') };
+    mockToolActivities = [
+      makeActivity({
+        callId: 'parent-call-1',
+        toolName: 'run_subagent',
+        status: 'running',
+        args: { objective: 'design a landing page' },
+        sessionId: 'master-session',
+      }),
+      makeActivity({
+        callId: 'child-call-1',
+        toolName: 'image_generate',
+        status: 'awaiting_confirmation',
+        args: { filename: 'coffee-hero.png' },
+        sessionId: 'child-session',
+        agentRun: {
+          agentRunId: 'subagent-1',
+          agentType: 'subagent',
+          parentSessionId: 'master-session',
+          parentTurnId: 'turn-1',
+          parentToolCallId: 'parent-call-1',
+          label: 'UX Designer child',
+        },
+      }),
+    ];
+
+    render(
+      <LiveToolCallBubble
+        activity={makeActivity({
+          callId: 'parent-call-1',
+          toolName: 'run_subagent',
+          status: 'running',
+          args: { objective: 'design a landing page' },
+          sessionId: 'master-session',
+        })}
+      />,
+    );
+
+    expect(screen.getByText('image_generate')).toBeDefined();
+    expect(screen.getByTestId('confirmation-confirm-btn')).toBeDefined();
   });
 });

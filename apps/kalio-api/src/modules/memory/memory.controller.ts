@@ -26,7 +26,7 @@ import {
   OpenAICompatibleEmbeddingProvider,
   OllamaEmbeddingProvider,
 } from './embedding.service';
-import type { IngestDto, IngestConversationDto, SearchDto } from './dto';
+import type { IngestDto, IngestConversationDto } from './dto';
 
 @Controller('memory')
 export class MemoryController {

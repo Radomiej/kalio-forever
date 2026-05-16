@@ -41,7 +41,6 @@ export class ImageGenerateTool {
   ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
-    const start = Date.now();
     const { sessionId } = request;
     const vfsSessionId = request.vfsSessionId ?? sessionId;
 

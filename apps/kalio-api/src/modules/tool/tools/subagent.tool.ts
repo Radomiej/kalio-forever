@@ -1,19 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { randomUUID } from 'node:crypto';
 import type { SubagentToolResult, ToolCallRequest, ToolMeta, VFSMode } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
-// eslint-disable-next-line import/no-cycle
-import { ToolRegistryService } from '../tool-registry.service';
+import { TOOL_CATALOG, type ToolCatalogPort } from '../tool-catalog.port';
 import { SUBAGENT_RUNTIME, type SubagentRuntimePort } from '../subagent-runtime.port';
 import { PersonaService } from '../../persona/persona.service';
 import { CredentialsService } from '../../credentials/credentials.service';
-
-interface ToolRegistryLike {
-  getEntries?: () => Array<{ meta: ToolMeta }>;
-  getAllTools?: () => ToolMeta[];
-  getToolsForSkills?: (skills: string[]) => ToolMeta[];
-}
 
 function buildDelegatedRequest(
   request: ToolCallRequest,
@@ -24,6 +17,19 @@ function buildDelegatedRequest(
     toolName: 'run_subagent',
     args,
   };
+}
+
+function normalizeToolNameList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const normalized = Array.from(new Set(
+    value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0),
+  ));
+
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 @Injectable()
@@ -71,6 +77,11 @@ function buildDelegatedRequest(
         type: 'boolean',
         description: 'When true, copy isolated child VFS files back into the master VFS. Default: true.',
       },
+      autoApproveTools: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional isolated-child tool allowlist for narrow auto-approval. Only backend-approved safe tools are honored; unsupported names are ignored.',
+      },
     },
   },
 })
@@ -79,17 +90,10 @@ export class SubagentTool {
 
   constructor(
     private readonly moduleRef: ModuleRef,
+    @Inject(TOOL_CATALOG) private readonly toolCatalog: ToolCatalogPort,
     private readonly personaService: PersonaService,
     private readonly credentialsService: CredentialsService,
   ) {}
-
-  private getToolRegistry(): ToolRegistryLike {
-    // Use the class as the DI token (not a string) so NestJS can resolve it.
-    // { strict: false } searches the entire application graph, which is needed
-    // because ToolRegistryService and SubagentTool are in the same module but
-    // the default strict lookup fails with a class-keyed provider.
-    return this.moduleRef.get(ToolRegistryService, { strict: false });
-  }
 
   private getRuntime(): SubagentRuntimePort {
     try {
@@ -115,24 +119,28 @@ export class SubagentTool {
       throw new Error(`Persona ${personaId} not found`);
     }
 
-    const registry = this.getToolRegistry();
     const allowedTools = personaConfig.allowedTools ?? [];
 
     if (allowedTools.length === 0) return [];
 
-    if (typeof registry.getToolsForSkills === 'function') {
-      return registry.getToolsForSkills(allowedTools);
+    if (typeof this.toolCatalog.getToolsForSkills === 'function') {
+      return this.toolCatalog.getToolsForSkills(allowedTools);
     }
 
-    if (typeof registry.getEntries === 'function') {
+    if (typeof this.toolCatalog.getEntries === 'function') {
       const allowed = new Set(allowedTools);
-      return registry
+      return this.toolCatalog
         .getEntries()
         .map((entry) => entry.meta)
         .filter((meta) => allowed.has(meta.name));
     }
 
-    throw new Error('ToolRegistryService does not expose a supported tool listing API');
+    if (typeof this.toolCatalog.getAllTools === 'function') {
+      const allowed = new Set(allowedTools);
+      return this.toolCatalog.getAllTools().filter((meta) => allowed.has(meta.name));
+    }
+
+    throw new Error('Tool catalog does not expose a supported tool listing API');
   }
 
   async execute(request: ToolCallRequest): Promise<SubagentToolResult> {
@@ -157,6 +165,7 @@ export class SubagentTool {
     const rawVfsMode = request.args['vfsMode'];
     const vfsMode: VFSMode = rawVfsMode === 'shared' ? 'shared' : 'isolated';
     const copyOutputs = request.args['copyOutputs'] !== false;
+    const autoApproveTools = normalizeToolNameList(request.args['autoApproveTools']);
     const timeoutMs = Math.min(rawTimeout ?? 300_000, 600_000);
     const taskId = randomUUID();
     const sessionId = request.sessionId;
@@ -170,6 +179,7 @@ export class SubagentTool {
       parentToolCallId: request.callId,
       objective,
       attachments,
+      autoApproveTools,
       childSessionId,
       personaId,
       availableTools: tools,
@@ -223,6 +233,11 @@ export class SubagentTool {
         type: 'boolean',
         description: 'When true, copy isolated child VFS files back into the master VFS. Default: true.',
       },
+      autoApproveTools: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional isolated-child tool allowlist for narrow auto-approval. Only backend-approved safe tools are honored; unsupported names are ignored.',
+      },
     },
   },
 })
@@ -230,7 +245,8 @@ export class SpawnSubagentTool {
   constructor(private readonly subagentTool: SubagentTool) {}
 
   async execute(request: ToolCallRequest): Promise<SubagentToolResult> {
-    const { childSessionId: _ignored, ...restArgs } = request.args;
+    const restArgs = { ...request.args };
+    delete restArgs['childSessionId'];
     return this.subagentTool.execute(buildDelegatedRequest(request, restArgs));
   }
 }
@@ -278,6 +294,11 @@ export class SpawnSubagentTool {
       copyOutputs: {
         type: 'boolean',
         description: 'When true, copy isolated child VFS files back into the master VFS. Default: true.',
+      },
+      autoApproveTools: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional isolated-child tool allowlist for narrow auto-approval. Only backend-approved safe tools are honored; unsupported names are ignored.',
       },
     },
   },

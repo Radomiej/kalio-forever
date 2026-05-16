@@ -99,7 +99,8 @@ export class TerminalSpawnTool {
 export class TerminalListTool {
   constructor(private readonly terminals: TerminalService) {}
 
-  async execute(_request: ToolCallRequest) {
+  async execute(request: ToolCallRequest) {
+    void request;
     return { sessions: this.terminals.list() };
   }
 }

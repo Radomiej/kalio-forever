@@ -28,7 +28,7 @@ import { RAAppModule } from '../raapp/raapp.module';
 import { MCPModule } from '../mcp/mcp.module';
 import { SkillsModule } from '../skills/skills.module';
 import { CredentialsModule } from '../credentials/credentials.module';
-import { ToolRegistryService } from '../tool/tool-registry.service';
+import { TOOL_DISPATCH_REGISTRY, type ToolDispatchRegistryPort } from '../tool/tool-dispatch-registry.port';
 import { SUBAGENT_RUNTIME } from '../tool/subagent-runtime.port';
 import {
   CHUNK_HANDLERS,
@@ -47,7 +47,7 @@ import {
  * Integration points:
  *   LLM_SOURCE        → LLMServiceAdapter (wraps LLMModule)
  *   MESSAGE_REPOSITORY → DrizzleMessageRepository (uses global DrizzleService)
- *   TOOL_REGISTRY     → ToolRegistryService.getEntries() (from ToolModule)
+ *   TOOL_REGISTRY     → Tool dispatch registry port exported by ToolModule
  */
 @Module({
   imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule],
@@ -91,11 +91,11 @@ import {
       useFactory: () => [abortCheckMiddleware, errorBoundaryMiddleware, metricsMiddleware],
     },
 
-    // TOOL_REGISTRY: built from ToolRegistryService (reads @Tool() metadata)
+    // TOOL_REGISTRY: built from the executable tool registry port exported by ToolModule
     {
       provide: TOOL_REGISTRY,
-      useFactory: (registry: ToolRegistryService) => registry.getEntries(),
-      inject: [ToolRegistryService],
+      useFactory: (registry: ToolDispatchRegistryPort) => registry.getEntries(),
+      inject: [TOOL_DISPATCH_REGISTRY],
     },
 
     // LLM_SOURCE: async iterable adapter over LLMService callback API

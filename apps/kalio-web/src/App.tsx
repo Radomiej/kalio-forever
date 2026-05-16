@@ -18,12 +18,74 @@ import { MemoryPage } from './features/memory/MemoryPage';
 import { LandingPage } from './features/landing/LandingPage';
 import { BackendStatusBadge } from './components/ui/BackendStatusBadge';
 import { ObservabilityPage } from './features/observability/ObservabilityPage';
+import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
 import { useSessionStore } from './store/sessionStore';
 import { useAgentStore } from './store/agentStore';
 import { backendHealth } from './services/backendHealth';
 import { useSettingsStore } from './features/settings/settingsStore';
 
 type ActiveSection = 'landing' | 'talk' | 'tools' | 'mind' | 'observe';
+type TalkTab = 'conversations' | 'agents';
+type ToolsTab = 'native' | 'mcp' | 'raapps';
+type MindTab = 'memory' | 'files' | 'skills' | 'personas';
+
+type AppViewState = {
+  activeSection: ActiveSection;
+  talkTab: TalkTab;
+  toolsTab: ToolsTab;
+  mindTab: MindTab;
+  selectedSkillId: string | null;
+};
+
+const APP_VIEW_STATE_STORAGE_KEY = 'kalio:app-view-state';
+
+const DEFAULT_APP_VIEW_STATE: AppViewState = {
+  activeSection: 'landing',
+  talkTab: 'conversations',
+  toolsTab: 'native',
+  mindTab: 'memory',
+  selectedSkillId: null,
+};
+
+function isActiveSection(value: unknown): value is ActiveSection {
+  return value === 'landing' || value === 'talk' || value === 'tools' || value === 'mind' || value === 'observe';
+}
+
+function isTalkTab(value: unknown): value is TalkTab {
+  return value === 'conversations' || value === 'agents';
+}
+
+function isToolsTab(value: unknown): value is ToolsTab {
+  return value === 'native' || value === 'mcp' || value === 'raapps';
+}
+
+function isMindTab(value: unknown): value is MindTab {
+  return value === 'memory' || value === 'files' || value === 'skills' || value === 'personas';
+}
+
+function loadAppViewState(): AppViewState {
+  if (typeof window === 'undefined') {
+    return DEFAULT_APP_VIEW_STATE;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(APP_VIEW_STATE_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_APP_VIEW_STATE;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<AppViewState>;
+    return {
+      activeSection: isActiveSection(parsed.activeSection) ? parsed.activeSection : DEFAULT_APP_VIEW_STATE.activeSection,
+      talkTab: isTalkTab(parsed.talkTab) ? parsed.talkTab : DEFAULT_APP_VIEW_STATE.talkTab,
+      toolsTab: isToolsTab(parsed.toolsTab) ? parsed.toolsTab : DEFAULT_APP_VIEW_STATE.toolsTab,
+      mindTab: isMindTab(parsed.mindTab) ? parsed.mindTab : DEFAULT_APP_VIEW_STATE.mindTab,
+      selectedSkillId: typeof parsed.selectedSkillId === 'string' ? parsed.selectedSkillId : null,
+    };
+  } catch {
+    return DEFAULT_APP_VIEW_STATE;
+  }
+}
 
 const NAV: { id: ActiveSection; icon: React.ReactNode; label: string }[] = [
   { id: 'talk',    icon: <MessageSquare size={18} />, label: 'Talk' },
@@ -32,16 +94,13 @@ const NAV: { id: ActiveSection; icon: React.ReactNode; label: string }[] = [
   { id: 'observe', icon: <Activity size={18} />,      label: 'Observability' },
 ];
 
-type TalkTab = 'conversations' | 'agents';
-type ToolsTab = 'native' | 'mcp' | 'raapps';
-type MindTab = 'memory' | 'files' | 'skills' | 'personas';
-
 export function App() {
-  const [activeSection, setActiveSection] = useState<ActiveSection>('landing');
-  const [talkTab, setTalkTab] = useState<TalkTab>('conversations');
-  const [toolsTab, setToolsTab] = useState<ToolsTab>('native');
-  const [mindTab, setMindTab] = useState<MindTab>('memory');
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const initialViewState = loadAppViewState();
+  const [activeSection, setActiveSection] = useState<ActiveSection>(initialViewState.activeSection);
+  const [talkTab, setTalkTab] = useState<TalkTab>(initialViewState.talkTab);
+  const [toolsTab, setToolsTab] = useState<ToolsTab>(initialViewState.toolsTab);
+  const [mindTab, setMindTab] = useState<MindTab>(initialViewState.mindTab);
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(initialViewState.selectedSkillId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined);
 
@@ -57,7 +116,7 @@ export function App() {
     backendHealth.start();
     void fetch('/api/llm/config')
       .then((r) => r.json())
-      .then((cfg: { provider: string; model: string; baseUrl: string; contextWindowSize: number; maxToolAttempts: number }) => {
+      .then((cfg: LLMConfigWithSource) => {
         setBackendConfig(cfg);
       })
       .catch(() => {/* non-fatal */});
@@ -69,6 +128,21 @@ export function App() {
       setCanvasOpen(false);
     }
   }, [activeSection, setCanvasOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const nextState: AppViewState = {
+      activeSection,
+      talkTab,
+      toolsTab,
+      mindTab,
+      selectedSkillId,
+    };
+    window.sessionStorage.setItem(APP_VIEW_STATE_STORAGE_KEY, JSON.stringify(nextState));
+  }, [activeSection, mindTab, selectedSkillId, talkTab, toolsTab]);
 
   const goHome = () => {
     setActiveSection('landing');
@@ -229,7 +303,10 @@ export function App() {
               {toolsTab === 'mcp' && <MCPPanel onOpenSettings={() => openSettings('mcp')} />}
               {toolsTab === 'raapps' && (
                 <RAAppManager
-                  onOpenVFS={() => {/* RaConsierge catalog has no VFS */}}
+                  onOpenVFS={() => {
+                    setActiveSection('mind');
+                    setMindTab('files');
+                  }}
                   onRunWithAgent={() => setActiveSection('talk')}
                 />
               )}

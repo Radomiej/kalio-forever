@@ -21,6 +21,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: ['**/integration/**'],
       use: { ...devices['Desktop Chrome'] },
     },
     {

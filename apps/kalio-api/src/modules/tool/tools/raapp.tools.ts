@@ -1,10 +1,70 @@
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
+import yaml from 'js-yaml';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool, ConfirmedTool } from '../../../common/decorators/tool.decorator';
-import { RAAppService } from '../../raapp/raapp.service';
+import { RAAppService, deriveGeneratedAppName } from '../../raapp/raapp.service';
+import type { RAAppMeta, SaveGeneratedAppInput } from '../../raapp/raapp.service';
 import { RAAppSandboxService } from '../../raapp/raapp-sandbox.service';
 import { EffectsProcessorService } from '../../raapp/effects-processor.service';
 import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
+import { RAAppVersioningService } from '../../raapp/raapp-versioning.service';
+import { archiveDirectoryToZip } from '../../raapp/zip-archive.util';
+import { EntityStore } from '../../raapp/entity-store';
+
+function createGeneratedAppId(sessionId: string): string {
+  const sessionPart = sessionId.trim().slice(0, 8) || 'session';
+  return `generated-${sessionPart}-${randomUUID().slice(0, 8)}`;
+}
+
+async function buildGeneratedArchive(input: SaveGeneratedAppInput): Promise<{ appId: string; buffer: Buffer }> {
+  const appId = createGeneratedAppId(input.sessionId);
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-create-'));
+  const tmpDir = path.join(tmpRoot, 'app');
+  const tmpZip = path.join(tmpRoot, `${appId}.zip`);
+
+  try {
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    const meta: RAAppMeta = {
+      id: appId,
+      name: deriveGeneratedAppName(input),
+      description: 'Auto-saved by raapp_create tool',
+      version: '1.0.0',
+      tags: ['generated', 'raapp-create'],
+      expose_as_tool: false,
+      execution: {
+        render_as: input.mode,
+      },
+    };
+
+    await fs.writeFile(path.join(tmpDir, 'meta.yml'), yaml.dump(meta), 'utf-8');
+
+    if (input.type === 'gui') {
+      await fs.writeFile(path.join(tmpDir, 'ui.gui'), input.content, 'utf-8');
+    } else {
+      await fs.writeFile(path.join(tmpDir, 'main.html'), input.content, 'utf-8');
+    }
+
+    await archiveDirectoryToZip({
+      sourceDir: tmpDir,
+      zipPath: tmpZip,
+      cleanupOnError: async () => {
+        await fs.rm(tmpZip, { force: true });
+      },
+    });
+
+    return {
+      appId,
+      buffer: await fs.readFile(tmpZip),
+    };
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+}
 
 @Injectable()
 @ConfirmedTool({
@@ -44,7 +104,10 @@ import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
 export class RaAppCreateTool {
   private readonly logger = new Logger(RaAppCreateTool.name);
 
-  constructor(private readonly raapp: RAAppService) {}
+  constructor(
+    private readonly raapp: RAAppService,
+    private readonly versioning: RAAppVersioningService,
+  ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
     const type = request.args['type'] as 'html' | 'gui';
@@ -63,7 +126,7 @@ export class RaAppCreateTool {
       };
     }
 
-    const saved = await this.raapp.saveGeneratedApp({
+    const generated = await buildGeneratedArchive({
       type,
       content,
       mode: mode as 'display' | 'interactive',
@@ -71,13 +134,16 @@ export class RaAppCreateTool {
       ...(title !== undefined && { title }),
     });
 
+    await this.versioning.saveAsDraft(generated.appId, generated.buffer);
+    await this.raapp.init();
+
     return {
       status: 'ready',
       type,
       mode,
       content,
       renderedContent: result.renderedContent,
-      storedAppId: saved.id,
+      storedAppId: generated.appId,
     };
   }
 }
@@ -129,8 +195,28 @@ export class RunRaAppTool {
       };
     }
 
+    let appToRun = app;
+
+    if (!appToRun.guiContent && !appToRun.htmlContent) {
+      this.logger.warn(`[run_raapp] ${id} loaded without renderable content; reloading catalog once before failing`);
+      try {
+        await this.raapp.init();
+        const reloadedApp = this.raapp.getById(id);
+        if (!reloadedApp) {
+          return {
+            status: 'error',
+            message: `RA-App "${id}" disappeared after catalog reload. Please try again.`,
+          };
+        }
+        appToRun = reloadedApp;
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        this.logger.warn(`[run_raapp] Catalog reload failed for ${id}: ${error.message}`);
+      }
+    }
+
     // GUI DSL app (ui.gui)
-    if (app.guiContent) {
+    if (appToRun.guiContent) {
       // Flatten array inputs into indexed keys: options[0..N] → output.option_0..N
       const outputData: Record<string, unknown> = { ...inputs };
       if (Array.isArray(inputs['options'])) {
@@ -141,13 +227,20 @@ export class RunRaAppTool {
       }
       // Execute system effects (including call_native) to compute derived outputs
       let pendingApprovals: import('@kalio/types').RaAppPendingApproval[] = [];
-      if (app.systemsContent) {
+      if (appToRun.systemsContent) {
+        const entityStore = new EntityStore();
         const effectsResult = await this.effectsProcessor.processSystemsYaml(
-          app.systemsContent,
+          appToRun.systemsContent,
           inputs,
           { sessionId },
+          entityStore,
         );
         Object.assign(outputData, effectsResult.output);
+
+        // Include ECS entity snapshot in data bindings (available as [entities[0].components...] in GUI DSL)
+        if (effectsResult.entities.length > 0) {
+          outputData['entities'] = effectsResult.entities;
+        }
 
         if (effectsResult.pendingApprovals.length > 0) {
           await this.hitl.savePendingApprovals(request.callId, sessionId, effectsResult.pendingApprovals);
@@ -160,7 +253,7 @@ export class RunRaAppTool {
         }
       }
       const data = { output: outputData };
-      const result = await this.raapp.execute({ type: 'gui', mode: app.appMode, content: app.guiContent }, data);
+      const result = await this.raapp.execute({ type: 'gui', mode: appToRun.appMode, content: appToRun.guiContent }, data);
       if (result.status === 'error') {
         this.logger.warn(`[run_raapp] GUI DSL error: ${result.error?.message}`);
         return { status: 'error', message: result.error?.message };
@@ -168,22 +261,22 @@ export class RunRaAppTool {
       return {
         status: 'ready',
         type: 'gui',
-        mode: app.appMode,
-        content: app.guiContent,
+        mode: appToRun.appMode,
+        content: appToRun.guiContent,
         renderedContent: result.renderedContent,
         ...(pendingApprovals.length > 0 ? { pendingApprovals } : {}),
       };
     }
 
     // HTML app (main.html / index.html)
-    if (!app.htmlContent) {
+    if (!appToRun.htmlContent) {
       return {
         status: 'error',
         message: `RA-App "${id}" has no renderable content (missing main.html, index.html, or ui.gui in the zip).`,
       };
     }
 
-    const result = await this.raapp.execute({ type: 'html', mode: app.appMode, content: app.htmlContent });
+    const result = await this.raapp.execute({ type: 'html', mode: appToRun.appMode, content: appToRun.htmlContent });
     if (result.status === 'error') {
       this.logger.warn(`[run_raapp] Execution error: ${result.error?.message}`);
       return { status: 'error', message: result.error?.message };
@@ -192,8 +285,8 @@ export class RunRaAppTool {
     return {
       status: 'ready',
       type: 'html',
-      mode: app.appMode,
-      content: app.htmlContent,
+      mode: appToRun.appMode,
+      content: appToRun.htmlContent,
       renderedContent: result.renderedContent,
     };
   }
@@ -209,7 +302,8 @@ export class RunRaAppTool {
 export class ListRaAppsTool {
   constructor(private readonly raapp: RAAppService) {}
 
-  execute(_request: ToolCallRequest): Promise<object> {
+  execute(request: ToolCallRequest): Promise<object> {
+    void request;
     const apps = this.raapp.getAll().map((a) => ({
       id: a.id,
       name: a.meta.name,

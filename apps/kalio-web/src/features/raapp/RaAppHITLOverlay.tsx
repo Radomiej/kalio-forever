@@ -14,7 +14,8 @@ interface RaAppHITLOverlayProps {
  * Buttons show a loading spinner while waiting for `raapp:native_result`.
  * The parent component drives hide by clearing pendingApprovals.
  */
-export function RaAppHITLOverlay({ pendingApprovals, onSettled: _onSettled }: RaAppHITLOverlayProps) {
+export function RaAppHITLOverlay({ pendingApprovals, onSettled }: RaAppHITLOverlayProps) {
+  void onSettled;
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const [submitting, setSubmitting] = useState<'approve' | 'cancel' | null>(null);
 

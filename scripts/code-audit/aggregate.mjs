@@ -72,6 +72,37 @@ function mdTable(headers, rows) {
   return [head, sep, body].join('\n');
 }
 
+export function collectKnipRows(report, pkg) {
+  const rows = [];
+  const seenUnusedFiles = new Set();
+  const pushUnusedFile = (item) => {
+    const name = typeof item === 'string'
+      ? item
+      : (item && typeof item === 'object' && 'name' in item && typeof item.name === 'string' ? item.name : null);
+    if (!name || seenUnusedFiles.has(name)) return;
+    seenUnusedFiles.add(name);
+    rows.push({ Severity: '🟢 MEDIUM', Package: pkg, Kind: 'unused file', Item: name });
+  };
+
+  const files = report?.files ?? [];
+  for (const f of files) {
+    pushUnusedFile(f);
+  }
+  const issues = report?.issues ?? [];
+  for (const issue of issues) {
+    for (const f of issue.files ?? []) {
+      pushUnusedFile(f);
+    }
+    for (const ex of issue.exports ?? []) {
+      rows.push({ Severity: '⚪ LOW', Package: pkg, Kind: 'unused export', Item: `${issue.file}:${ex.name}` });
+    }
+    for (const dep of issue.dependencies ?? []) {
+      rows.push({ Severity: '🟢 MEDIUM', Package: pkg, Kind: 'unused dep', Item: dep.name ?? String(dep) });
+    }
+  }
+  return rows;
+}
+
 async function main() {
   const fileStats = await readJson('file-stats.json', { rows: [], silentCatchHits: [], anyHits: [] });
   const governance = await readJson('docs-governance.json', { docs: {}, findings: [] });
@@ -151,28 +182,11 @@ async function main() {
   }));
 
   // --- Dead code (knip) ------------------------------------------------------
-  function knipRows(report, pkg) {
-    const rows = [];
-    const files = report?.files ?? [];
-    for (const f of files) {
-      rows.push({ Severity: '🟢 MEDIUM', Package: pkg, Kind: 'unused file', Item: f });
-    }
-    const issues = report?.issues ?? [];
-    for (const issue of issues) {
-      for (const ex of issue.exports ?? []) {
-        rows.push({ Severity: '⚪ LOW', Package: pkg, Kind: 'unused export', Item: `${issue.file}:${ex.name}` });
-      }
-      for (const dep of issue.dependencies ?? []) {
-        rows.push({ Severity: '🟢 MEDIUM', Package: pkg, Kind: 'unused dep', Item: dep.name ?? String(dep) });
-      }
-    }
-    return rows;
-  }
   const deadRows = [
-    ...knipRows(knipReports['apps-kalio-api'], 'kalio-api'),
-    ...knipRows(knipReports['apps-kalio-web'], 'kalio-web'),
-    ...knipRows(knipReports['packages-kalio-types'], '@kalio/types'),
-    ...knipRows(knipReports['packages-kalio-sdk'], '@kalio/sdk'),
+    ...collectKnipRows(knipReports['apps-kalio-api'], 'kalio-api'),
+    ...collectKnipRows(knipReports['apps-kalio-web'], 'kalio-web'),
+    ...collectKnipRows(knipReports['packages-kalio-types'], '@kalio/types'),
+    ...collectKnipRows(knipReports['packages-kalio-sdk'], '@kalio/sdk'),
   ].slice(0, 40);
 
   // --- Governance and agent docs -------------------------------------------
@@ -327,7 +341,11 @@ ${governanceRows.length ? mdTable(['Severity', 'Target', 'Check', 'Message', 'Fi
   console.log(`  Totals: 🔴 ${counts.critical}  🟡 ${counts.high}  🟢 ${counts.medium}  ⚪ ${counts.low}`);
 }
 
-main().catch((err) => {
-  console.error('FATAL:', err);
-  process.exit(1);
-});
+const isDirectExecution = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+
+if (isDirectExecution) {
+  main().catch((err) => {
+    console.error('FATAL:', err);
+    process.exit(1);
+  });
+}

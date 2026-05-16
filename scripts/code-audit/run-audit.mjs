@@ -48,6 +48,11 @@ const GOVERNANCE_DOCS = [
 ];
 
 const NPX_CMD = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+const EMPTY_BLOCK_CONTENT = String.raw`(?:\/\*[\s\S]*?\*\/\s*|\/\/[^\n]*\n\s*)*`;
+const SILENT_CATCH_PATTERN =
+  String.raw`catch(?:\s*\([^)]*\))?\s*\{\s*${EMPTY_BLOCK_CONTENT}\}` +
+  String.raw`|\.catch\s*\(\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*(?:\{\s*${EMPTY_BLOCK_CONTENT}\}|null|undefined|false)\s*\)`;
+const ANY_TYPE_RE = /(?:^|[^A-Za-z0-9_])(?::\s*any\b|as\s+any\b|<any>)/g;
 
 /**
  * Run a command, capture stdout+stderr, never throw.
@@ -89,6 +94,25 @@ function lineCount(text) {
   return text.split(/\r?\n/).length;
 }
 
+export function extractSilentCatchHits(text, relativeFile = '') {
+  const hits = [];
+  const silentCatchRe = new RegExp(SILENT_CATCH_PATTERN, 'g');
+  let m;
+  while ((m = silentCatchRe.exec(text)) !== null) {
+    const before = text.slice(0, m.index);
+    const line = before.split(/\r?\n/).length;
+    hits.push({ file: relativeFile, line, match: m[0].slice(0, 80) });
+  }
+  return hits;
+}
+
+export function countAnyHits(text) {
+  ANY_TYPE_RE.lastIndex = 0;
+  let anyCount = 0;
+  while (ANY_TYPE_RE.exec(text) !== null) anyCount++;
+  return anyCount;
+}
+
 /** Recursively walk a directory, returning *.ts / *.tsx files (skip tests, node_modules, dist). */
 async function walkTsFiles(root) {
   const out = [];
@@ -118,9 +142,6 @@ async function fileStats(files) {
   const rows = [];
   let silentCatchHits = [];
   let anyHits = [];
-  const silentRe = /catch\s*\([^)]*\)\s*\{\s*\}|\.catch\s*\(\s*\(\s*\)\s*=>\s*(?:\{\s*\}|null|undefined|false)\s*\)/g;
-  // `:any` / `as any` / `<any>` outside of comments (rough)
-  const anyRe = /(?:^|[^A-Za-z0-9_])(?::\s*any\b|as\s+any\b|<any>)/g;
 
   for (const f of files) {
     let text;
@@ -128,18 +149,11 @@ async function fileStats(files) {
     const lines = text.split(/\r?\n/).length;
     rows.push({ file: path.relative(REPO_ROOT, f).replaceAll('\\', '/'), lines });
 
-    let m;
-    silentRe.lastIndex = 0;
-    while ((m = silentRe.exec(text)) !== null) {
-      const before = text.slice(0, m.index);
-      const line = before.split(/\r?\n/).length;
-      silentCatchHits.push({ file: path.relative(REPO_ROOT, f).replaceAll('\\', '/'), line, match: m[0].slice(0, 80) });
-    }
-    anyRe.lastIndex = 0;
-    let anyCount = 0;
-    while (anyRe.exec(text) !== null) anyCount++;
+    const relativeFile = path.relative(REPO_ROOT, f).replaceAll('\\', '/');
+    silentCatchHits.push(...extractSilentCatchHits(text, relativeFile));
+    const anyCount = countAnyHits(text);
     if (anyCount > 0) {
-      anyHits.push({ file: path.relative(REPO_ROOT, f).replaceAll('\\', '/'), count: anyCount });
+      anyHits.push({ file: relativeFile, count: anyCount });
     }
   }
   rows.sort((a, b) => b.lines - a.lines);
@@ -410,7 +424,11 @@ async function main() {
   console.log('Next: node scripts/code-audit/aggregate.mjs');
 }
 
-main().catch((err) => {
-  console.error('FATAL:', err);
-  process.exit(1);
-});
+const isDirectExecution = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+
+if (isDirectExecution) {
+  main().catch((err) => {
+    console.error('FATAL:', err);
+    process.exit(1);
+  });
+}

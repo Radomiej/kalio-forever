@@ -3,35 +3,23 @@ name: Visual Calculator
 version: "1.0"
 description: Visual calculator with GUI DSL rendering — add, subtract, multiply, divide
 author: kalio-core
-inputs:
-  - name: a
-    type: number
-    required: true
-    description: First number
-  - name: b
-    type: number
-    required: true
-    description: Second number
-  - name: operation
-    type: string
-    required: true
-    description: Operation to perform
-    enum: [add, subtract, multiply, divide]
-outputs:
-  - name: result
-    type: number
-  - name: expression
-    type: string
-  - name: error
-    type: string
-  - name: a
-    type: number
-  - name: b
-    type: number
-  - name: op_symbol
-    type: string
+input_schema:
+  type: object
+  required: [a, b, operation]
+  properties:
+    a:
+      type: number
+      description: First number
+    b:
+      type: number
+      description: Second number
+    operation:
+      type: string
+      description: Operation to perform
+      enum: [add, subtract, multiply, divide]
+output_type: object
 expose_as_tool: true
-tool_description: Visual calculator — performs add/subtract/multiply/divide on two numbers and renders result as GUI
+tool_description: Visual calculator — pass { a, b, operation } where operation is add, subtract, multiply, or divide; returns a GUI rendering of the result.
 execution:
   timeout_ms: 3000
   requires_user_approval: false

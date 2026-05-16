@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { eq } from 'drizzle-orm';
 import { VFSService } from './vfs.service';
+import { DrizzleService } from '../../database/drizzle.service';
+import { sessions } from '../../database/schema';
 import { mkdirSync, writeFileSync, rmdirSync, rmSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import * as os from 'node:os';
@@ -12,6 +15,7 @@ import * as os from 'node:os';
 describe('VFSService', () => {
   let service: VFSService;
   let configService: ConfigService;
+  let drizzleService: { db: { update: ReturnType<typeof vi.fn> } };
   let testWorkspace: string;
   let sessionId: string;
 
@@ -22,10 +26,21 @@ describe('VFSService', () => {
 
     sessionId = 'test-ws-123';
     mkdirSync(join(testWorkspace, 'sessions', sessionId, 'files'), { recursive: true });
+    const updateWhere = vi.fn().mockResolvedValue(undefined);
+    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+    drizzleService = {
+      db: {
+        update: vi.fn().mockReturnValue({ set: updateSet }),
+      },
+    };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         VFSService,
+        {
+          provide: DrizzleService,
+          useValue: drizzleService,
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -214,6 +229,16 @@ describe('VFSService', () => {
     });
   });
 
+  describe('touchSession', () => {
+    it('updates sessions.updatedAt for the touched session id', async () => {
+      await service.touchSession(sessionId);
+
+      expect(drizzleService.db.update).toHaveBeenCalledWith(sessions);
+      expect(drizzleService.db.update.mock.results[0]?.value.set).toHaveBeenCalledWith({ updatedAt: expect.any(Date) });
+      expect(drizzleService.db.update.mock.results[0]?.value.set.mock.results[0]?.value.where).toHaveBeenCalledWith(eq(sessions.id, sessionId));
+    });
+  });
+
   describe('copySessionFiles', () => {
     it('copies all child session files into a prefixed master directory', () => {
       service.writeFile({ sessionId: 'child-session', filePath: 'site/index.html', content: '<h1>Hello</h1>' });
@@ -297,6 +322,49 @@ describe('VFSService', () => {
         (service as unknown as { resolveSafe: (s: string, p: string) => string })
           .resolveSafe(sessionId, '%2e%2e%2f%2e%2e%2fetc%2fpasswd');
       }).toThrow(/PATH_TRAVERSAL_DENIED/);
+    });
+  });
+
+  describe('serveFile', () => {
+    it('injects the resize bridge into served HTML files', () => {
+      const filePath = join(testWorkspace, 'sessions', sessionId, 'files', 'design', 'preview.html');
+      mkdirSync(join(filePath, '..'), { recursive: true });
+      writeFileSync(filePath, '<!doctype html><html><body>Preview</body></html>', 'utf8');
+
+      const result = service.serveFile(sessionId, 'design/preview.html');
+
+      expect(result.mimeType).toBe('text/html; charset=utf-8');
+      expect(result.content?.toString('utf8')).toContain("type:'raapp_resize'");
+    });
+
+    it('streams non-html assets instead of buffering them into memory', async () => {
+      const filePath = join(testWorkspace, 'sessions', sessionId, 'files', 'assets', 'module.wasm');
+      mkdirSync(join(filePath, '..'), { recursive: true });
+      writeFileSync(filePath, Buffer.from([0x00, 0x61, 0x73, 0x6d]));
+
+      const result = service.serveFile(sessionId, 'assets/module.wasm');
+
+      expect(result.mimeType).toBe('application/wasm');
+      expect(result.stream).toBeDefined();
+      expect(result.content).toBeUndefined();
+
+      for await (const _chunk of result.stream!) {
+        // Consume the stream so the temp file can be cleaned up without unhandled errors.
+      }
+    });
+
+    it('serves font assets with explicit MIME types', async () => {
+      const filePath = join(testWorkspace, 'sessions', sessionId, 'files', 'fonts', 'brand.woff2');
+      mkdirSync(join(filePath, '..'), { recursive: true });
+      writeFileSync(filePath, Buffer.from('font-data'));
+
+      const result = service.serveFile(sessionId, 'fonts/brand.woff2');
+
+      expect(result.mimeType).toBe('font/woff2');
+
+      for await (const _chunk of result.stream!) {
+        // Consume the stream so the temp file can be cleaned up without unhandled errors.
+      }
     });
   });
 });

@@ -26,6 +26,7 @@ describe('GrepSearchTool', () => {
     vi.clearAllMocks();
     allowedPaths = {
       getRoots: vi.fn(),
+      isAllowed: vi.fn().mockResolvedValue(true),
     };
     tool = new GrepSearchTool(allowedPaths as AllowedPathsService);
   });
@@ -150,6 +151,26 @@ describe('GrepSearchTool', () => {
   });
 
   describe('negative scenarios', () => {
+    it('skips files whose resolved path escapes the allowed roots via symlink', async () => {
+      (allowedPaths.getRoots as ReturnType<typeof vi.fn>).mockResolvedValue(['/allowed']);
+      (allowedPaths.isAllowed as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.readdirSync).mockImplementation((dir) => {
+        if (dir === '/allowed') {
+          return [{ name: 'link.txt', isDirectory: () => false }] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        return [] as unknown as ReturnType<typeof nodefs.readdirSync>;
+      });
+      vi.mocked(nodefs.statSync).mockReturnValue({ size: 50 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('secret content');
+
+      const result = await tool.execute(makeRequest('grep_search', { query: 'secret' }));
+
+      expect(allowedPaths.isAllowed).toHaveBeenCalledWith(nodepath.join('/allowed', 'link.txt'));
+      expect(nodefs.readFileSync).not.toHaveBeenCalled();
+      expect(result.matches).toHaveLength(0);
+    });
+
     it('returns empty matches for invalid regex pattern', async () => {
       (allowedPaths.getRoots as ReturnType<typeof vi.fn>).mockResolvedValue(['/allowed']);
       vi.mocked(nodefs.existsSync).mockReturnValue(true);
@@ -198,6 +219,7 @@ describe('FileSearchTool', () => {
     vi.clearAllMocks();
     allowedPaths = {
       getRoots: vi.fn(),
+      isAllowed: vi.fn().mockResolvedValue(true),
     };
     tool = new FileSearchTool(allowedPaths as AllowedPathsService);
   });
@@ -267,6 +289,23 @@ describe('FileSearchTool', () => {
   });
 
   describe('negative scenarios', () => {
+    it('skips files whose resolved path escapes the allowed roots via symlink', async () => {
+      (allowedPaths.getRoots as ReturnType<typeof vi.fn>).mockResolvedValue(['/project']);
+      (allowedPaths.isAllowed as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.readdirSync).mockImplementation((dir) => {
+        if (dir === '/project') {
+          return [{ name: 'link.ts', isDirectory: () => false }] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        return [] as unknown as ReturnType<typeof nodefs.readdirSync>;
+      });
+
+      const result = await tool.execute(makeRequest('file_search', { pattern: '**/*.ts' }));
+
+      expect(allowedPaths.isAllowed).toHaveBeenCalledWith(nodepath.join('/project', 'link.ts'));
+      expect(result.files).toHaveLength(0);
+    });
+
     it('does not throw for any glob pattern (special chars are escaped)', async () => {
       (allowedPaths.getRoots as ReturnType<typeof vi.fn>).mockResolvedValue(['/project']);
       vi.mocked(nodefs.existsSync).mockReturnValue(true);

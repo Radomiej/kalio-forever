@@ -1,12 +1,18 @@
 import { test, expect } from '@playwright/test';
 import { API_BASE } from './helpers/test-config';
 
+function uniqueSessionTitle(prefix: string): string {
+  return `${prefix} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 // AC-10: Streaming content appears token-by-token in agent turn bubble
 test.describe('AC-10: Streaming visibility', () => {
   test('agent response streams and is visible during and after streaming', async ({ page, request }) => {
+    const title = uniqueSessionTitle('AC10 Streaming Test');
+
     // Pre-create session via API
     const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'AC10 Streaming Test', personaId: 'default' },
+      data: { title, personaId: 'default' },
     });
     expect(res.ok()).toBeTruthy();
     const session = await res.json() as { id: string };
@@ -16,9 +22,9 @@ test.describe('AC-10: Streaming visibility', () => {
 
     // Select the session
     await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC10 Streaming Test' }).first(),
+      page.getByTestId('session-item').filter({ hasText: title }).first(),
     ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC10 Streaming Test' }).first().click();
+    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
 
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });
@@ -49,8 +55,10 @@ test.describe('AC-10: Streaming visibility', () => {
   });
 
   test('multiple turns render in chronological order', async ({ page, request }) => {
+    const title = uniqueSessionTitle('AC10 Multi-Turn Test');
+
     const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'AC10 Multi-Turn Test', personaId: 'default' },
+      data: { title, personaId: 'default' },
     });
     expect(res.ok()).toBeTruthy();
     const session = await res.json() as { id: string };
@@ -59,9 +67,9 @@ test.describe('AC-10: Streaming visibility', () => {
     await page.getByTestId('nav-talk').click();
 
     await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC10 Multi-Turn Test' }).first(),
+      page.getByTestId('session-item').filter({ hasText: title }).first(),
     ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC10 Multi-Turn Test' }).first().click();
+    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
 
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });

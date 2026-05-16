@@ -22,6 +22,7 @@ describe('settingsStore', () => {
       baseUrl: 'https://api.example.com',
       contextWindowSize: 128000,
       maxToolAttempts: 4,
+      source: 'db',
     });
 
     const state = useSettingsStore.getState();

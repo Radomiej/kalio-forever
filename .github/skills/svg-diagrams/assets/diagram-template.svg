@@ -1,0 +1,54 @@
+<svg width="100%" viewBox="0 0 1280 760" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>Diagram title</title>
+  <desc>Short description of what the diagram explains.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8f5ef"/>
+      <stop offset="100%" stop-color="#f2f8f5"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M2 1 L8 5 L2 9" fill="none" stroke="#707070" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Georgia, 'Times New Roman', serif; fill: #1f2937; }
+      .subtitle { font: 500 16px 'Segoe UI', Arial, sans-serif; fill: #5b6472; }
+      .pill { font: 700 12px 'Segoe UI', Arial, sans-serif; letter-spacing: 0.12em; text-transform: uppercase; }
+      .cardTitle { font: 700 24px 'Segoe UI', Arial, sans-serif; fill: #1f2937; }
+      .body { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #4b5563; }
+      .label { font: 700 13px 'Segoe UI', Arial, sans-serif; fill: #6b7280; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="760" fill="url(#bg)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="44" width="1160" height="126" rx="30" fill="#fffdfa" stroke="#e6dfd1" stroke-width="1.2"/>
+  </g>
+  <text x="92" y="96" class="title">Diagram Title</text>
+  <text x="92" y="128" class="subtitle">One sentence that explains the visual in plain language.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="90" y="230" width="320" height="180" rx="28" fill="#f2eeff" stroke="#6d5bd0" stroke-width="1.4"/>
+  </g>
+  <rect x="118" y="254" width="120" height="30" rx="15" fill="#e5dcff"/>
+  <text x="178" y="274" text-anchor="middle" class="pill" fill="#5b44cc">Section</text>
+  <text x="118" y="320" class="cardTitle" fill="#332b84">Block title</text>
+  <text x="118" y="356" class="body">Short body line one.</text>
+  <text x="118" y="388" class="body">Short body line two.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="500" y="230" width="320" height="180" rx="28" fill="#e9f8f2" stroke="#1f8b69" stroke-width="1.4"/>
+  </g>
+  <rect x="528" y="254" width="120" height="30" rx="15" fill="#d9f2e7"/>
+  <text x="588" y="274" text-anchor="middle" class="pill" fill="#0d7c5d">Section</text>
+  <text x="528" y="320" class="cardTitle" fill="#115644">Block title</text>
+  <text x="528" y="356" class="body">Short body line one.</text>
+  <text x="528" y="388" class="body">Short body line two.</text>
+
+  <line x1="410" y1="320" x2="498" y2="320" stroke="#707070" stroke-width="2.2" marker-end="url(#arrow)"/>
+  <text x="454" y="300" text-anchor="middle" class="label">connector</text>
+</svg>
