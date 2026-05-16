@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { ChatInterface } from './features/chat/ChatInterface';
 import { CanvasPanel } from './features/chat/CanvasPanel';
+import { ExecutionGraphView } from './features/chat/graph/ExecutionGraphView';
 import { ConversationPanel } from './features/sessions/ConversationPanel';
 import { ConversationManagerPanel } from './features/sessions/ConversationManagerPanel';
 import { PersonaPanel } from './features/persona/PersonaPanel';
@@ -26,12 +27,14 @@ import { useSettingsStore } from './features/settings/settingsStore';
 
 type ActiveSection = 'landing' | 'talk' | 'tools' | 'mind' | 'observe';
 type TalkTab = 'conversations' | 'agents';
+type TalkView = 'conversation' | 'graph';
 type ToolsTab = 'native' | 'mcp' | 'raapps';
 type MindTab = 'memory' | 'files' | 'skills' | 'personas';
 
 type AppViewState = {
   activeSection: ActiveSection;
   talkTab: TalkTab;
+  talkView: TalkView;
   toolsTab: ToolsTab;
   mindTab: MindTab;
   selectedSkillId: string | null;
@@ -42,6 +45,7 @@ const APP_VIEW_STATE_STORAGE_KEY = 'kalio:app-view-state';
 const DEFAULT_APP_VIEW_STATE: AppViewState = {
   activeSection: 'landing',
   talkTab: 'conversations',
+  talkView: 'conversation',
   toolsTab: 'native',
   mindTab: 'memory',
   selectedSkillId: null,
@@ -53,6 +57,10 @@ function isActiveSection(value: unknown): value is ActiveSection {
 
 function isTalkTab(value: unknown): value is TalkTab {
   return value === 'conversations' || value === 'agents';
+}
+
+function isTalkView(value: unknown): value is TalkView {
+  return value === 'conversation' || value === 'graph';
 }
 
 function isToolsTab(value: unknown): value is ToolsTab {
@@ -78,6 +86,7 @@ function loadAppViewState(): AppViewState {
     return {
       activeSection: isActiveSection(parsed.activeSection) ? parsed.activeSection : DEFAULT_APP_VIEW_STATE.activeSection,
       talkTab: isTalkTab(parsed.talkTab) ? parsed.talkTab : DEFAULT_APP_VIEW_STATE.talkTab,
+      talkView: isTalkView(parsed.talkView) ? parsed.talkView : DEFAULT_APP_VIEW_STATE.talkView,
       toolsTab: isToolsTab(parsed.toolsTab) ? parsed.toolsTab : DEFAULT_APP_VIEW_STATE.toolsTab,
       mindTab: isMindTab(parsed.mindTab) ? parsed.mindTab : DEFAULT_APP_VIEW_STATE.mindTab,
       selectedSkillId: typeof parsed.selectedSkillId === 'string' ? parsed.selectedSkillId : null,
@@ -98,6 +107,7 @@ export function App() {
   const initialViewState = loadAppViewState();
   const [activeSection, setActiveSection] = useState<ActiveSection>(initialViewState.activeSection);
   const [talkTab, setTalkTab] = useState<TalkTab>(initialViewState.talkTab);
+  const [talkView, setTalkView] = useState<TalkView>(initialViewState.talkView);
   const [toolsTab, setToolsTab] = useState<ToolsTab>(initialViewState.toolsTab);
   const [mindTab, setMindTab] = useState<MindTab>(initialViewState.mindTab);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(initialViewState.selectedSkillId);
@@ -137,12 +147,13 @@ export function App() {
     const nextState: AppViewState = {
       activeSection,
       talkTab,
+      talkView,
       toolsTab,
       mindTab,
       selectedSkillId,
     };
     window.sessionStorage.setItem(APP_VIEW_STATE_STORAGE_KEY, JSON.stringify(nextState));
-  }, [activeSection, mindTab, selectedSkillId, talkTab, toolsTab]);
+  }, [activeSection, mindTab, selectedSkillId, talkTab, talkView, toolsTab]);
 
   const goHome = () => {
     setActiveSection('landing');
@@ -264,13 +275,49 @@ export function App() {
                 )}
               </div>
             </div>
-            {/* Chat area */}
-            <div className="flex-1 overflow-hidden min-w-0">
-              <ChatInterface />
-            </div>
-            {/* Canvas — only rendered inside talk section, hidden when navigating away */}
-            <div className="relative flex">
-              <CanvasPanel />
+            <div className="flex-1 min-w-0 flex overflow-hidden">
+              <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+                <div className="border-b border-base-300 bg-base-100/90 backdrop-blur supports-[backdrop-filter]:bg-base-100/75 px-4 py-2 flex items-center justify-between gap-4 shrink-0">
+                  <div className="flex items-center gap-2">
+                    {[
+                      { id: 'conversation' as const, label: 'Conversation', disabled: false },
+                      { id: 'graph' as const, label: 'Graph', disabled: false },
+                      { id: 'timeline' as const, label: 'Timeline', disabled: true },
+                    ].map((view) => (
+                      <button
+                        key={view.id}
+                        type="button"
+                        disabled={view.disabled}
+                        data-testid={`talk-view-${view.id}`}
+                        className={`rounded-full px-4 py-1.5 text-sm border transition-colors ${
+                          view.disabled
+                            ? 'border-base-300 text-base-content/35 cursor-not-allowed'
+                            : talkView === view.id
+                              ? 'border-sky-500 bg-sky-500/12 text-sky-300'
+                              : 'border-base-300 text-base-content/65 hover:text-base-content hover:border-base-content/20'
+                        }`}
+                        onClick={() => {
+                          if (view.disabled || view.id === 'timeline') return;
+                          setTalkView(view.id);
+                        }}
+                      >
+                        {view.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-base-content/45">Execution views stay inside Talk, so live sockets and stream state remain intact.</p>
+                </div>
+
+                <div className="flex-1 overflow-hidden min-h-0">
+                  {talkView === 'conversation' ? <ChatInterface /> : <ExecutionGraphView />}
+                </div>
+              </div>
+
+              {talkView === 'conversation' && (
+                <div className="relative flex">
+                  <CanvasPanel />
+                </div>
+              )}
             </div>
           </div>
 

@@ -15,7 +15,7 @@ function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
   } as ChatMessage;
 }
 
-function makeSession(overrides: Partial<ChatSession>): ChatSession {
+function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: 'session-1',
     personaId: 'default',
@@ -111,7 +111,7 @@ describe('buildExecutionGraphModel', () => {
       expect.objectContaining({ sourceId: 'prompt:u1', targetId: expect.stringContaining('turn:') }),
       expect.objectContaining({ sourceId: expect.stringContaining('turn:'), targetId: 'tool:call-subagent-1' }),
       expect.objectContaining({ sourceId: 'tool:call-subagent-1', targetId: 'subagent:child-session-1' }),
-      expect.objectContaining({ sourceId: 'tool:call-subagent-1', targetId: 'artifact:sub-agents/child-session-1/wireframe.svg' }),
+      expect.objectContaining({ sourceId: 'subagent:child-session-1', targetId: 'artifact:sub-agents/child-session-1/wireframe.svg' }),
     ]));
   });
 });
