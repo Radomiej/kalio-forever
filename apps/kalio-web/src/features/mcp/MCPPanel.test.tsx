@@ -51,6 +51,8 @@ describe('MCPPanel', () => {
 
     render(<MCPPanel onOpenSettings={onOpenSettings} />);
 
+    // The panel deduplicates by server id via Map insertion order, so the later duplicate
+    // wins and its toolCount (999) is what contributes to the header total.
     expect(await screen.findByText('2 servers · 1000 tools')).toBeInTheDocument();
     expect(screen.getByText('Socket closed')).toBeInTheDocument();
 
