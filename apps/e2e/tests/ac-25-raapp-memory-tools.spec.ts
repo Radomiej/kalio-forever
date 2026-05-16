@@ -42,7 +42,7 @@ test.describe('AC-25: RAApp and Memory tools registered', () => {
   });
 
   test('all 22 expected tool names are present', async ({ request }) => {
-    const res = await request.get(`${BASE}/api/tools`);
+    const res = await request.get(`${API_BASE}/tools`);
     const tools: { name: string }[] = await res.json();
     const names = tools.map((t) => t.name);
 

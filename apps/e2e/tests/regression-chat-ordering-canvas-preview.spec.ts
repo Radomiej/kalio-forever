@@ -26,7 +26,10 @@ interface SeededOrderingFixture {
 
 const requireBackend = createRequire(resolve(__dirname, '../../kalio-api/package.json'));
 const BetterSqlite3 = requireBackend('better-sqlite3') as new (path: string) => SeedDb;
-const DB_PATH = resolve(__dirname, '../../kalio-api/data/kalio.db');
+const PROCESS_ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+const DB_PATH = PROCESS_ENV?.DATABASE_PATH?.trim()
+  ? resolve(PROCESS_ENV.DATABASE_PATH)
+  : resolve(__dirname, '../../kalio-api/data/kalio.db');
 
 function openDb(): SeedDb {
   const db = new BetterSqlite3(DB_PATH);

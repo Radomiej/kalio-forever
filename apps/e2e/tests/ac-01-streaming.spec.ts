@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { API_BASE, deleteSessionIfExists, selectSession } from './helpers/test-config';
 
-const LONG_STREAMING_PROMPT = `Repeat this text slowly: ${'HELLO '.repeat(80).trim()}`;
+const LONG_STREAMING_PROMPT = `Repeat this text slowly: ${'HELLO '.repeat(160).trim()}`;
 
 function uniqueSessionTitle(prefix: string): string {
   return `${prefix} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -9,7 +9,7 @@ function uniqueSessionTitle(prefix: string): string {
 
 // AC-01: When user sends a message, assistant response streams token-by-token
 test.describe('AC-01: LLM streaming', () => {
-  test('chat input is disabled while streaming and re-enables after response', async ({ page, request }) => {
+  test('assistant turn appears and input re-enables after the streamed response', async ({ page, request }) => {
     const title = uniqueSessionTitle('AC01 Streaming Test');
 
     // Pre-create session via API so the backend has a DB record
@@ -28,16 +28,16 @@ test.describe('AC-01: LLM streaming', () => {
     await chatInput.fill(LONG_STREAMING_PROMPT);
     await page.getByTestId('chat-send-btn').click();
 
-    // The stop button is rendered from the same streaming state that disables input,
-    // but it is more reliable to observe under the mock provider.
-    await expect(page.getByTestId('chat-stop-btn')).toBeVisible({ timeout: 5000 });
+    // AC-13 owns the transient "composer locks during streaming" assertion.
+    // Here we keep the stable streaming contract: an agent turn appears and the
+    // composer returns to ready state when the response completes.
+    const assistantBubbles = page.getByTestId('agent-turn-bubble');
+    await expect(assistantBubbles.first()).toBeVisible({ timeout: 10_000 });
 
     // Wait for response — input re-enables when chat:complete fires
     await expect(chatInput).toBeEnabled({ timeout: 30_000 });
 
     // At least one agent turn bubble should be present (assistant replies use AgentTurnBubble)
-    const assistantBubbles = page.getByTestId('agent-turn-bubble');
-    await expect(assistantBubbles.first()).toBeVisible({ timeout: 5000 });
     const content = await assistantBubbles.first().textContent();
     expect(content?.trim().length).toBeGreaterThan(0);
 
