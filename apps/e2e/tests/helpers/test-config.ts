@@ -2,7 +2,8 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 const PROCESS_ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
 
-export const API_BASE = PROCESS_ENV?.TEST_API_URL || 'http://localhost:3016/api';
+export const APP_BASE = PROCESS_ENV?.PLAYWRIGHT_BASE_URL || 'http://localhost:5288';
+export const API_BASE = PROCESS_ENV?.TEST_API_URL || 'http://localhost:3316/api';
 
 interface LLMConfigResponse {
 	provider: string;

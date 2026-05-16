@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const CI = (globalThis as any).process?.env.CI;
+const PLAYWRIGHT_BASE_URL = (globalThis as any).process?.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5288';
 
 export default defineConfig({
   testDir: './tests',
@@ -13,7 +14,7 @@ export default defineConfig({
   reporter: [['html', { open: 'never' }], ['list']],
 
   use: {
-    baseURL: 'http://localhost:5188',
+    baseURL: PLAYWRIGHT_BASE_URL,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },

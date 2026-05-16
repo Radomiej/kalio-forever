@@ -21,7 +21,7 @@ test.describe('AC-04: Persona CRUD', () => {
     });
     const persona = await createRes.json();
 
-    await page.goto('http://localhost:5188');
+    await page.goto('/');
     await page.getByTestId('nav-mind').click();
     // Click Personas tab in Mind section
     await page.getByRole('button', { name: 'Personas' }).click();

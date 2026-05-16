@@ -73,6 +73,7 @@ vi.mock('../../services/eventBus', () => ({
     onComplete: (h: (...args: unknown[]) => void) => capture('chat:complete', h),
     onError: (h: (...args: unknown[]) => void) => capture('chat:error', h),
     onToolConfirmation: (h: (...args: unknown[]) => void) => capture('tool:confirmation_required', h),
+    onToolConfirmationInvalidated: (h: (...args: unknown[]) => void) => capture('tool:confirmation_invalidated', h),
     onToolStart: (h: (...args: unknown[]) => void) => capture('tool:start', h),
     onToolResult: (h: (...args: unknown[]) => void) => capture('tool:result', h),
     onContext: (h: (...args: unknown[]) => void) => capture('chat:context', h),

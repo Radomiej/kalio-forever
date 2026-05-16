@@ -14,12 +14,14 @@ import { ChatGateway } from './chat.gateway';
 import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import { SessionsController } from './sessions.controller';
+import { ChatTestSupportController } from './chat-test-support.controller';
 import { AuditService } from './audit.service';
 import { AuditLogController } from './audit-log.controller';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
 import { LLMServiceAdapter } from './llm-service.adapter';
 import { ImageHydratorService } from './image-hydrator.service';
 import { SubagentRuntimeService } from './subagent-runtime.service';
+import { ChatTestSupportService } from './chat-test-support.service';
 import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
@@ -51,7 +53,7 @@ import {
  */
 @Module({
   imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule],
-  controllers: [SessionsController, AuditLogController],
+  controllers: [SessionsController, AuditLogController, ChatTestSupportController],
   providers: [
     // Handlers
     TextDeltaHandler,
@@ -64,6 +66,7 @@ import {
     ToolDispatchService,
     SessionManagerService,
     SessionsService,
+    ChatTestSupportService,
     ChatService,
     SessionPipelineService,
     ChatGateway,

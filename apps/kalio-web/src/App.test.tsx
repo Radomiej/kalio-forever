@@ -202,6 +202,16 @@ describe('App view state persistence', () => {
     expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
   });
 
+  it('shows a dedicated graph entry in the Talk sidebar and switches views without creating a session first', () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId('landing-to-chat'));
+    fireEvent.click(screen.getByTestId('talk-sidebar-graph-entry'));
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+  });
+
   it('REGRESSION: runtime config type accepts backend responses that include apiKey', () => {
     expect(CONFIG_WITH_API_KEY.apiKey).toBe('');
   });

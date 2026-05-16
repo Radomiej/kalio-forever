@@ -4,28 +4,39 @@
 # Zatrzymanie: Ctrl+C — czyści oba serwery
 
 param(
-    [switch]$UseMockLLM
+    [switch]$UseMockLLM,
+    [int]$BackendPort = 3016,
+    [int]$FrontendPort = 5188
 )
 
 $root = $PSScriptRoot
 $api  = Join-Path $root "apps\kalio-api"
 $web  = Join-Path $root "apps\kalio-web"
+$e2eEnvFile = Join-Path $root ".env.test"
 $nestJs = Join-Path $api "node_modules\@nestjs\cli\bin\nest.js"
 $viteJs = Join-Path $web "node_modules\vite\bin\vite.js"
-$BE_PORT = 3016
-$FE_PORT = 5188
+$BE_PORT = $BackendPort
+$FE_PORT = $FrontendPort
 $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $nodeCmd) { $nodeCmd = Get-Command node -ErrorAction SilentlyContinue }
 if (-not $nodeCmd) { Write-Host "[FAIL] node not found on PATH" -ForegroundColor Red; exit 1 }
 
-$previousLlmEnv = @{
+$previousEnv = @{
     LLM_PROVIDER = $env:LLM_PROVIDER
     LLM_API_KEY = $env:LLM_API_KEY
     LLM_BASE_URL = $env:LLM_BASE_URL
     LLM_MODEL = $env:LLM_MODEL
+    NODE_ENV = $env:NODE_ENV
+    PORT = $env:PORT
+    DATABASE_PATH = $env:DATABASE_PATH
+    WORKSPACE_ROOT = $env:WORKSPACE_ROOT
+    CORS_ORIGIN = $env:CORS_ORIGIN
+    VITE_API_URL = $env:VITE_API_URL
+    VITE_WS_URL = $env:VITE_WS_URL
+    VITE_PORT = $env:VITE_PORT
 }
 
-function Restore-LlmEnv {
+function Restore-EnvVars {
     param([hashtable]$Values)
 
     foreach ($entry in $Values.GetEnumerator()) {
@@ -43,6 +54,21 @@ if ($UseMockLLM) {
     $env:LLM_BASE_URL = 'mock'
     $env:LLM_MODEL = 'mock'
 }
+
+$apiOrigin = "http://localhost:$BE_PORT"
+$useDedicatedPorts = $BE_PORT -ne 3016 -or $FE_PORT -ne 5188
+
+if ($useDedicatedPorts) {
+    $env:NODE_ENV = 'test'
+    $env:DATABASE_PATH = './data/kalio-e2e.db'
+    $env:WORKSPACE_ROOT = './data/workspaces-e2e'
+    $env:CORS_ORIGIN = "http://localhost:$FE_PORT"
+}
+
+$env:PORT = "$BE_PORT"
+$env:VITE_API_URL = $apiOrigin
+$env:VITE_WS_URL = $apiOrigin
+$env:VITE_PORT = "$FE_PORT"
 
 function Get-PortOwners {
     param([int[]]$Ports)
@@ -147,8 +173,26 @@ if ($UseMockLLM) {
 Write-Host ""
 
 # --- Start backend (nest start --watch) ---
-$beProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList $nestJs, "start", "--watch" `
-    -WorkingDirectory $api -NoNewWindow -PassThru
+if ($useDedicatedPorts) {
+    Write-Host "  Building backend for dedicated E2E env..." -ForegroundColor DarkYellow
+    Push-Location $api
+    try {
+        & $nodeCmd.Source $nestJs build
+    } finally {
+        Pop-Location
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [FAIL] Backend build failed for dedicated E2E env." -ForegroundColor Red
+        Restore-EnvVars -Values $previousEnv
+        exit 1
+    }
+
+    $beProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList "--env-file=$e2eEnvFile", "dist/main.js" `
+        -WorkingDirectory $api -NoNewWindow -PassThru
+} else {
+    $beProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList $nestJs, "start", "--watch" `
+        -WorkingDirectory $api -NoNewWindow -PassThru
+}
 
 Write-Host "  Backend  -> http://localhost:$BE_PORT  (PID $($beProcess.Id))" -ForegroundColor Green
 
@@ -178,6 +222,14 @@ if ($retries -ge $maxRetries) {
     exit 1
 }
 Write-Host "  Backend ready!" -ForegroundColor Green
+
+if ($useDedicatedPorts) {
+    if ($null -eq $previousEnv.NODE_ENV) {
+        Remove-Item 'Env:NODE_ENV' -ErrorAction SilentlyContinue
+    } else {
+        Set-Item 'Env:NODE_ENV' $previousEnv.NODE_ENV
+    }
+}
 
 # --- Start frontend (vite dev) ---
 # IMPORTANT: @tailwindcss/oxide (Rust native module used by Tailwind CSS v4)
@@ -209,6 +261,6 @@ try {
     Write-Host ""
     Write-Host "Stopping stack..." -ForegroundColor Yellow
     Stop-KalioStack -BeProcess $beProcess -FeProcess $feProcess -Ports @($BE_PORT, $FE_PORT)
-    Restore-LlmEnv -Values $previousLlmEnv
+    Restore-EnvVars -Values $previousEnv
     Write-Host "[OK] Stack stopped." -ForegroundColor Green
 }

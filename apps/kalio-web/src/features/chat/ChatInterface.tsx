@@ -241,12 +241,15 @@ export function ChatInterface() {
     });
 
     const offConfirmationInvalidated = eventBus.onToolConfirmationInvalidated((payload) => {
+      const pendingConfirmation = useAgentStore.getState().pendingConfirmations[payload.sessionId];
+      const targetCallId = payload.toolCallId
+        ?? (pendingConfirmation?.requestId === payload.requestId ? pendingConfirmation.toolCallId : payload.requestId);
       setPendingConfirmation(payload.sessionId, null);
-      updateToolActivity(payload.toolCallId ?? payload.requestId, {
+      updateToolActivity(targetCallId, {
         status: payload.reason === 'cancelled' ? 'cancelled' : 'expired',
         finishedAt: Date.now(),
         result: {
-          callId: payload.toolCallId ?? payload.requestId,
+          callId: targetCallId,
           status: 'cancelled',
           ...(payload.message ? { errorMessage: payload.message } : {}),
         },

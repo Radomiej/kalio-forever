@@ -13,6 +13,7 @@ const OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['image_generate']);
 
 type SubagentAgentRunContext = NonNullable<StreamContext['agentRun']> & { autoApproveTools?: string[] };
 type ConfirmationResolutionStatus = 'resolved' | 'rejected' | 'not_found' | 'session_mismatch';
+type PendingMutationStatus = 'removed' | 'not_found' | 'session_mismatch';
 
 interface PendingConfirmation {
   sessionId: string;
@@ -164,6 +165,27 @@ export class ToolDispatchService {
     return Array.from(this.pending.values())
       .filter((pending) => pending.sessionId === sessionId)
       .map((pending) => pending.payload);
+  }
+
+  seedPendingConfirmation(payload: ToolConfirmationRequest): void {
+    this.pending.set(payload.requestId, {
+      sessionId: payload.sessionId,
+      payload,
+      emit: () => undefined,
+      resolve: () => undefined,
+      reject: () => undefined,
+    });
+  }
+
+  dropPendingConfirmation(requestId: string, sessionId?: string): PendingMutationStatus {
+    const pending = this.pending.get(requestId);
+    if (!pending) return 'not_found';
+    if (sessionId && pending.sessionId !== sessionId) {
+      return 'session_mismatch';
+    }
+
+    this.pending.delete(requestId);
+    return 'removed';
   }
 
   private awaitConfirmation(
