@@ -12,10 +12,9 @@
  */
 import { test, expect } from '@playwright/test';
 import { io, Socket } from 'socket.io-client';
-import { API_BASE } from './helpers/test-config';
+import { API_BASE, isMockLlm } from './helpers/test-config';
 
 const WS_BASE = API_BASE.replace('/api', '');
-const MOCK_LLM = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.LLM_PROVIDER === 'mock';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -90,7 +89,7 @@ test.describe('ECS / RA-App live integration', () => {
 
   // ── 2. run_raapp on seeded Interactive Q&A (stable GUI path) ─────────────
   test('run_raapp returns GUI block for Interactive Q&A', async ({ page }) => {
-    test.skip(MOCK_LLM, 'Mock LLM only echoes prompts and does not reliably launch RA-Apps through chat UI.');
+    test.skip(await isMockLlm(page.request), 'Mock LLM only echoes prompts and does not reliably launch RA-Apps through chat UI.');
 
     const socket = wsConnect(sessionId);
     await waitForEvent(socket, 'connect');
