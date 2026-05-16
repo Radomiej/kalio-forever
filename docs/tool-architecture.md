@@ -159,15 +159,17 @@ flowchart TD
 Current rules from the code:
 
 - Pending confirmations live in `ToolDispatchService.pending` and are keyed by generated `requestId` plus bound `sessionId`.
+- The backend is the source of truth for pending confirmations. Frontend `pendingConfirmations` state is only a live UI cache and can go stale after reconnect replay or after another client resolves the same request.
 - `ChatGateway` rejects `tool:confirm` and `tool:cancel` if the socket does not currently own the session.
 - The built-in auto-approve special case is `vfs_write` during a sub-agent run when:
   - `agentRun.agentType === 'subagent'`
   - `agentRun.vfsMode === 'isolated'`
   - `ctx.vfsSessionId === ctx.sessionId`
 - `run_subagent` can also pass an optional `autoApproveTools` allowlist for isolated child runs.
-- Only a narrow backend safelist is honored from that allowlist today: `image_generate` and `raapp_create`.
+- Only a narrow backend safelist is honored from that allowlist today: `image_generate`.
 - Unsupported tool names in `autoApproveTools` are ignored; shared-VFS child runs still require normal HITL confirmation.
 - Sub-agent confirmation requests currently use `timeoutMs = 0`; the runtime is optimized around isolated child writes or explicitly allowlisted safe child tools being auto-approved rather than timing out.
+- When a pending request disappears without a successful local confirm path, the backend now emits `tool:confirmation_invalidated` with a reason such as `timeout`, `cancelled`, `confirmed`, or `not_found`. Frontend approval UI should treat this as the terminal cleanup signal instead of assuming a local click resolved the request.
 
 ## Persistence and UI consequences
 
@@ -184,6 +186,12 @@ That leads to an important split:
 
 - `ToolActivity` is live UI state.
 - `tool_result` messages are durable history.
+- `tool:confirmation_required` / `tool:confirmation_invalidated` are ephemeral approval-state events, not durable history.
+
+One consequence is worth calling out explicitly:
+
+- reconnect replay can restore still-live approvals into the UI, but only backend invalidation or normal tool execution can authoritatively close them again.
+- stale approval buttons are therefore a protocol problem first, not a simple button-rendering problem.
 
 ## Tool filtering
 

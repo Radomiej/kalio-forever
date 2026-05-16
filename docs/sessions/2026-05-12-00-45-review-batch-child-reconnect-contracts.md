@@ -64,3 +64,9 @@ Live browser assessment:
 
 - If the next review batch still wants browser coverage for child reconnect approvals, add an explicit deterministic E2E seed path for pending child confirmations instead of relying on manual UI setup.
 - Revisit `raapp_create` auto-approve only with a concrete safety policy for filesystem writes and overwrite behavior.
+
+## Open follow-up risks
+
+- Stale confirmation remains unresolved at the protocol level until E2E can deterministically seed and invalidate replayed child approvals. The reconnect/ownership fix restored live child approvals correctly, but the broader requirement is that frontend approval UI must follow backend invalidation, not assume a local click resolved the request.
+- `raapp_create` child auto-approve was left open intentionally because it is a policy decision, not a proven reconnect regression. The tool itself is still confirmation-required because it creates durable catalog state.
+- Recommended direction: keep an explicit `tool:confirmation_invalidated` cleanup path for timeout, cancel, confirm-from-another-client, and not-found clicks; remove `raapp_create` from the child auto-approve safelist unless product explicitly accepts delegated durable catalog writes.
