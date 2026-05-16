@@ -35,7 +35,10 @@ import type { DrizzleService } from '../../database/drizzle.service';
 const ROOT = process.platform === 'win32' ? 'C:\\allowed' : '/allowed';
 const OUTSIDE = process.platform === 'win32' ? 'C:\\outside' : '/outside';
 const SYMLINK_PATH = [ROOT, 'link', 'secret.txt'].join(sep);
+const SYMLINK_DIR = [ROOT, 'link'].join(sep);
+const SYMLINK_NEW_FILE_PATH = [ROOT, 'link', 'new.txt'].join(sep);
 const REAL_PATH_OUTSIDE = [OUTSIDE, 'secret.txt'].join(sep);
+const REAL_NEW_PATH_OUTSIDE = [OUTSIDE, 'new.txt'].join(sep);
 const NORMAL_PATH = [ROOT, 'normal.txt'].join(sep);
 
 function makeDrizzleWithRoot(root: string): DrizzleService {
@@ -88,6 +91,19 @@ describe('AllowedPathsService.isAllowed — symlink bypass (BUG-3)', () => {
       expect(result).toBe(false);
     },
   );
+
+  it('rejects a missing write target whose deepest existing parent resolves outside the root', async () => {
+    vi.mocked(nodefs.existsSync).mockImplementation((p) => p === ROOT || p === OUTSIDE || p === SYMLINK_DIR);
+    vi.mocked(nodefs.realpathSync as (p: string) => string).mockImplementation((p) => {
+      if (p === SYMLINK_DIR) return OUTSIDE;
+      return p;
+    });
+
+    const result = await svc.isAllowed(SYMLINK_NEW_FILE_PATH, { allowMissingPath: true });
+
+    expect(result).toBe(false);
+    expect(REAL_NEW_PATH_OUTSIDE.startsWith(OUTSIDE)).toBe(true);
+  });
 
   it('rejects the exact ROOT path symlinked to outside', async () => {
     // Edge case: the root itself is a symlink to somewhere else —

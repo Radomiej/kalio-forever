@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AgentRunContext, ChatSession, ChatMessage, ID } from '@kalio/types';
+import { useAgentStore } from './agentStore';
 import type { AgentTurn, AgentTurnItem } from './sessionStore.helpers';
 import {
   getStoredSessionActiveTurnId,
@@ -100,6 +101,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // when the same session is re-selected (e.g. user clicks an already-active session
     // or auto-select fires for a session that's already loaded).
     if (get().activeSessionId === id) return;
+    useAgentStore.getState().setStreaming(false);
     const slice = resolveSessionSlice(get(), id);
     set({
       activeSessionId: id,

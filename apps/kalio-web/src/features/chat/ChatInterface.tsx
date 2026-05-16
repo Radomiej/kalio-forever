@@ -55,6 +55,7 @@ export function ChatInterface() {
   const activeContext = getContextForSession(activeSessionId);
   const [error, setError] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [awaitingFirstChunk, setAwaitingFirstChunk] = useState(false);
   const lastSentContentRef = useRef<string>('');
   const [personas, setPersonas] = useState<Persona[]>([]);
   const { updateSession } = useSessionStore();
@@ -83,6 +84,24 @@ export function ChatInterface() {
 
   const { tokenCount, needsCompact, compactMessages } = useContextUsage();
 
+  const hasPendingChunksForSession = (sessionId: string | null): boolean => {
+    if (!sessionId) return false;
+
+    const { streamingChunks, thinkingChunks, chunkSessionIds } = useSessionStore.getState();
+    const pendingChunkIds = new Set([
+      ...Object.keys(streamingChunks),
+      ...Object.keys(thinkingChunks),
+    ]);
+
+    for (const chunkId of pendingChunkIds) {
+      if (chunkSessionIds[chunkId] === sessionId) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
   useEffect(() => {
     if (!eventBus.connected) eventBus.connect();
 
@@ -90,6 +109,9 @@ export function ChatInterface() {
       const targetSessionId = chunk.sessionId ?? useSessionStore.getState().activeSessionId;
 
       if (!chunk.done) {
+        if (targetSessionId === useSessionStore.getState().activeSessionId) {
+          setAwaitingFirstChunk(false);
+        }
         appendChunk(chunk.messageId, chunk.delta, chunk.thinking, chunk.sessionId);
 
         if (targetSessionId) {
@@ -108,6 +130,9 @@ export function ChatInterface() {
           }
         }
       } else {
+        if (chunk.sessionId === useSessionStore.getState().activeSessionId) {
+          setAwaitingFirstChunk(false);
+        }
         finalizeChunk(chunk.messageId);
         // Only update UI state for the active session
         if (chunk.sessionId === useSessionStore.getState().activeSessionId) {
@@ -133,6 +158,9 @@ export function ChatInterface() {
 
     const offComplete = eventBus.onComplete((payload) => {
       console.debug('[EventBus] chat:complete', payload.messageId);
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setAwaitingFirstChunk(false);
+      }
       const { streamingChunks, thinkingChunks, finalizeChunk: doFinalize, chunkSessionIds } = useSessionStore.getState();
       const ids = new Set([...Object.keys(streamingChunks), ...Object.keys(thinkingChunks)])
       ids.forEach((id) => {
@@ -146,6 +174,9 @@ export function ChatInterface() {
 
     const offError = eventBus.onError((payload) => {
       console.error('[EventBus] chat:error', payload);
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setAwaitingFirstChunk(false);
+      }
       setStreaming(false);
       removeActiveAgentLoop(payload.sessionId);
       const { activeSessionId: currentActiveSessionId, getSessionActiveTurnId: getTurnId } = useSessionStore.getState();
@@ -230,7 +261,12 @@ export function ChatInterface() {
       console.log('[AgentDone]', payload.sessionId, payload.turnId);
       removeActiveAgentLoop(payload.sessionId, payload.agentRun);
       finalizeAgentTurn(payload.sessionId);
+      if (hasPendingChunksForSession(payload.sessionId)) {
+        flushThinkingChunks(payload.sessionId);
+        flushStreamingChunks(payload.sessionId);
+      }
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setAwaitingFirstChunk(false);
         setStreaming(false);
       }
       setPendingConfirmation(payload.sessionId, null); // Clear unanswered confirmations when turn ends
@@ -353,6 +389,7 @@ export function ChatInterface() {
 
   useEffect(() => {
     lastSentContentRef.current = '';
+    setAwaitingFirstChunk(false);
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -418,6 +455,7 @@ export function ChatInterface() {
     };
     addMessage(userMsg);
 
+    setAwaitingFirstChunk(true);
     setStreaming(true);
     console.debug('[ChatInterface] sendMessage', { sessionId: activeSessionId, content: content.slice(0, 60) });
 
@@ -437,8 +475,9 @@ export function ChatInterface() {
     setAgentTurns,
     setMessages,
     setPendingConfirmation,
-    setStreaming,
   });
+
+  const composerStreaming = isStreaming || awaitingFirstChunk || hasPendingChunksForSession(activeSessionId);
 
   const handleStop = () => {
     if (!activeSessionId) return;
@@ -503,7 +542,7 @@ export function ChatInterface() {
           <ChatWelcomeScreen
             activeSession={activeSession}
             activeSessionId={activeSessionId}
-            isStreaming={isStreaming}
+            isStreaming={composerStreaming}
             onPersonaChange={(personaId) => void handlePersonaChange(personaId)}
             onSend={handleSend}
             personas={personas}
@@ -523,7 +562,7 @@ export function ChatInterface() {
             )
         ))}
 
-        {isStreaming && activeToolActivities.length === 0 && messages.length === 0 && (
+        {composerStreaming && activeToolActivities.length === 0 && messages.length === 0 && (
           <div className="flex justify-start">
             <div className="bg-base-300 rounded-2xl px-4 py-2">
               <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
@@ -534,7 +573,7 @@ export function ChatInterface() {
         <div ref={bottomRef} />
       </div>
 
-      <ChatInput onSend={handleSend} disabled={isStreaming || !activeSessionId} isStreaming={isStreaming} onStop={handleStop} />
+      <ChatInput onSend={handleSend} disabled={composerStreaming || !activeSessionId} isStreaming={composerStreaming} onStop={handleStop} />
     </div>
   );
 }

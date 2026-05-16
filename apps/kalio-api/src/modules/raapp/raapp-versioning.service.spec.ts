@@ -169,6 +169,14 @@ describe('RAAppVersioningService', () => {
       const brokenBuf = Buffer.from('not a zip at all');
       await expect(service.saveAsDraft('broken-app', brokenBuf)).rejects.toThrow(/Invalid RA-App ZIP/);
     });
+
+    it('rejects slugs that would escape the user RA-App root', async () => {
+      const buf = await buildZip({ id: '../outside', name: 'Outside', version: '1.0.0' });
+
+      await expect(service.saveAsDraft('../outside', buf)).rejects.toThrow(/slug/i);
+
+      expect(fsSync.existsSync(path.join(tmpBase, 'outside'))).toBe(false);
+    });
   });
 
   // ── saveAsDraft validation (bug #4) ──────────────────────────────────────
@@ -518,6 +526,19 @@ describe('RAAppVersioningService', () => {
 
       expect(fsSync.existsSync(path.join(userDir, 'legacy-app.zip'))).toBe(false);
       expect(fsSync.existsSync(path.join(userDir, 'legacy-app', 'current.zip'))).toBe(true);
+    });
+
+    it('skips legacy ZIPs whose meta id is not a valid slug', async () => {
+      const userDir = path.join(tmpBase, 'user');
+      await fs.mkdir(userDir, { recursive: true });
+      const buf = await buildZip({ id: '../outside', name: 'Outside', version: '1.0.0' });
+      await fs.writeFile(path.join(userDir, 'outside.zip'), buf);
+
+      await service.init();
+
+      expect(service.getGroupBySlug('../outside')).toBeUndefined();
+      expect(fsSync.existsSync(path.join(userDir, 'outside.zip'))).toBe(true);
+      expect(fsSync.existsSync(path.join(tmpBase, 'outside'))).toBe(false);
     });
 
     it('migration is idempotent — does not double-migrate', async () => {

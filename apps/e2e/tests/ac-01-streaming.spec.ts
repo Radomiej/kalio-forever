@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE, isMockLlm } from './helpers/test-config';
+import { API_BASE, deleteSessionIfExists, selectSession } from './helpers/test-config';
 
 const LONG_STREAMING_PROMPT = `Repeat this text slowly: ${'HELLO '.repeat(80).trim()}`;
 
@@ -10,8 +10,6 @@ function uniqueSessionTitle(prefix: string): string {
 // AC-01: When user sends a message, assistant response streams token-by-token
 test.describe('AC-01: LLM streaming', () => {
   test('chat input is disabled while streaming and re-enables after response', async ({ page, request }) => {
-    test.skip(await isMockLlm(request), 'Mock LLM collapses the disabled-state window too aggressively for this UX timing assertion.');
-
     const title = uniqueSessionTitle('AC01 Streaming Test');
 
     // Pre-create session via API so the backend has a DB record
@@ -23,12 +21,7 @@ test.describe('AC-01: LLM streaming', () => {
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
-
-    // Select the session we created via API
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: title }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
+    await selectSession(page, session.id, title);
 
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });
@@ -49,7 +42,7 @@ test.describe('AC-01: LLM streaming', () => {
     expect(content?.trim().length).toBeGreaterThan(0);
 
     // Cleanup
-    await request.delete(`${API_BASE}/sessions/${session.id}`);
+    await deleteSessionIfExists(request, session.id);
   });
 
   test('error from server shows error banner and re-enables input', async ({ page, request }) => {
@@ -64,17 +57,13 @@ test.describe('AC-01: LLM streaming', () => {
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
-
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: title }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
+    await selectSession(page, session.id, title);
 
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });
 
     // Delete the session via API — the next message send will trigger SESSION_NOT_FOUND
-    await request.delete(`${API_BASE}/sessions/${session.id}`);
+    await deleteSessionIfExists(request, session.id);
 
     await chatInput.fill('trigger error');
     await page.getByTestId('chat-send-btn').click();
@@ -98,14 +87,10 @@ test.describe('AC-01: LLM streaming', () => {
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
-
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: title }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
+    await selectSession(page, session.id, title);
 
     // Delete the session from the backend WHILE it is active in the UI
-    await request.delete(`${API_BASE}/sessions/${session.id}`);
+    await deleteSessionIfExists(request, session.id);
 
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 5000 });

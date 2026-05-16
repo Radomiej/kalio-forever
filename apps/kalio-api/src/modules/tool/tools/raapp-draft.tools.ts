@@ -6,7 +6,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import yaml from 'js-yaml';
 import { nanoid } from 'nanoid';
 import type { ToolCallRequest } from '@kalio/types';
-import { Tool } from '../../../common/decorators/tool.decorator';
+import { ConfirmedTool, Tool } from '../../../common/decorators/tool.decorator';
 import { RAAppService } from '../../raapp/raapp.service';
 import { EffectsProcessorService } from '../../raapp/effects-processor.service';
 import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
@@ -28,7 +28,7 @@ import { EntityStore } from '../../raapp/entity-store';
  * 5. Backend loads draft from VFS, executes, and returns the final RAAppBlock.
  */
 @Injectable()
-@Tool({
+@ConfirmedTool({
   name: 'raapp_create_draft',
   description:
     'Create a draft RA-App from YAML/DSL source files and store it for user review. ' +
@@ -70,7 +70,6 @@ import { EntityStore } from '../../raapp/entity-store';
       },
     },
   },
-  requiresConfirmation: false,
 })
 export class RaAppCreateDraftTool {
   private readonly logger = new Logger(RaAppCreateDraftTool.name);
@@ -301,7 +300,7 @@ export class RaAppExecuteDslTool {
 // ─── raapp_publish_draft ─────────────────────────────────────────────────────
 
 @Injectable()
-@Tool({
+@ConfirmedTool({
   name: 'raapp_publish_draft',
   description:
     'Publish a raw VFS RA-App draft into the versioned release lifecycle. ' +
@@ -322,7 +321,6 @@ export class RaAppExecuteDslTool {
       },
     },
   },
-  requiresConfirmation: false,
 })
 export class RaAppPublishDraftTool {
   private readonly logger = new Logger(RaAppPublishDraftTool.name);

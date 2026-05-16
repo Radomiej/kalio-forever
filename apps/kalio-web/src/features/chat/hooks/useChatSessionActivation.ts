@@ -12,7 +12,6 @@ interface UseChatSessionActivationParams {
   setAgentTurns: (turns: ReturnType<typeof buildTurnsFromHistory>, sessionId?: string | null) => void;
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
   setPendingConfirmation: (sessionId: string, req: null) => void;
-  setStreaming: (streaming: boolean, messageId?: string) => void;
 }
 
 export function useChatSessionActivation({
@@ -22,15 +21,13 @@ export function useChatSessionActivation({
   setAgentTurns,
   setMessages,
   setPendingConfirmation,
-  setStreaming,
 }: UseChatSessionActivationParams) {
   useEffect(() => {
     if (!activeSessionId) return;
 
-    setStreaming(false);
     clearToolActivities(activeSessionId);
     setPendingConfirmation(activeSessionId, null);
-    console.debug('[ChatInterface] session activated', activeSessionId, '— streaming reset');
+    console.debug('[ChatInterface] session activated', activeSessionId);
 
     fetch(`/api/sessions/${activeSessionId}/messages`)
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
@@ -60,5 +57,5 @@ export function useChatSessionActivation({
     setPendingRAAppId(null);
     const pendingSession = sessions.find((session) => session.id === activeSessionId);
     handleSendRef.current(toSend, pendingSession?.personaId ?? 'default');
-  }, [activeSessionId, clearToolActivities, handleSendRef, setAgentTurns, setMessages, setPendingConfirmation, setStreaming]);
+  }, [activeSessionId, clearToolActivities, handleSendRef, setAgentTurns, setMessages, setPendingConfirmation]);
 }

@@ -70,6 +70,7 @@ export class GrepSearchTool {
 
       for (const absPath of allFiles) {
         if (matches.length >= maxResults) break;
+        if (!(await this.allowedPaths.isAllowed(absPath))) continue;
         const relPath = relative(root, absPath);
         if (globRe && !globRe.test(relPath) && !globRe.test(absPath)) continue;
 
@@ -130,6 +131,7 @@ export class FileSearchTool {
 
       for (const absPath of allFiles) {
         if (matched.length >= maxResults) break;
+        if (!(await this.allowedPaths.isAllowed(absPath))) continue;
         const relPath = relative(root, absPath);
         if (globRe.test(relPath) || globRe.test(absPath)) {
           matched.push(absPath);

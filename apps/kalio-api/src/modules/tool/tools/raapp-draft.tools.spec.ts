@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Reflector } from '@nestjs/core';
 import type { ToolCallRequest } from '@kalio/types';
-import { RaAppExecuteDslTool, RaAppPublishDraftTool } from './raapp-draft.tools';
+import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
+import { RaAppCreateDraftTool, RaAppExecuteDslTool, RaAppPublishDraftTool } from './raapp-draft.tools';
 
 function makeRequest(): ToolCallRequest {
   return {
@@ -10,6 +12,22 @@ function makeRequest(): ToolCallRequest {
     args: { draft_id: 'draft-1', inputs: {} },
   };
 }
+
+const reflector = new Reflector();
+
+describe('RA-App draft tool metadata', () => {
+  it('raapp_create_draft requires confirmation because it persists draft files in VFS', () => {
+    const metadata = reflector.get(TOOL_METADATA, RaAppCreateDraftTool);
+
+    expect(metadata.requiresConfirmation).toBe(true);
+  });
+
+  it('raapp_publish_draft requires confirmation because it persists a release', () => {
+    const metadata = reflector.get(TOOL_METADATA, RaAppPublishDraftTool);
+
+    expect(metadata.requiresConfirmation).toBe(true);
+  });
+});
 
 describe('RaAppExecuteDslTool', () => {
   let raapp: { execute: ReturnType<typeof vi.fn> };

@@ -165,6 +165,9 @@ const flushStreamingChunks = vi.fn();
 let mockActiveTurnId: string | null = null;
 let mockActiveSessionId = 'session-1';
 let mockPendingMessage: string | null = null;
+let mockStreamingChunks: Record<string, string> = {};
+let mockThinkingChunks: Record<string, string> = {};
+let mockChunkSessionIds: Record<string, string> = {};
 const mockSetPendingMessage = vi.fn();
 const mockSetPendingRAAppId = vi.fn();
 
@@ -215,9 +218,9 @@ vi.mock('../../store/sessionStore', () => ({
         setPendingMessage: mockSetPendingMessage,
         setPendingRAAppId: mockSetPendingRAAppId,
         updateSession: vi.fn(),
-        streamingChunks: {},
-        thinkingChunks: {},
-        chunkSessionIds: {},
+        streamingChunks: mockStreamingChunks,
+        thinkingChunks: mockThinkingChunks,
+        chunkSessionIds: mockChunkSessionIds,
         finalizeChunk: vi.fn(),
         flushStreamingChunks,
         getSessionActiveTurnId: () => mockActiveTurnId,
@@ -277,6 +280,9 @@ beforeEach(() => {
   mockActiveTurnId = null;
   mockActiveSessionId = 'session-1';
   mockPendingMessage = null;
+  mockStreamingChunks = {};
+  mockThinkingChunks = {};
+  mockChunkSessionIds = {};
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
   vi.clearAllMocks();
@@ -1060,6 +1066,20 @@ describe('REGRESSION: pendingConfirmations cleared on agent:done', () => {
 
     await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
 
+    expect(setStreaming).toHaveBeenCalledWith(false);
+  });
+
+  it('agent:done flushes pending chunks and stops streaming when chat:complete never arrived', async () => {
+    mockStreamingChunks = { 'msg-1': 'partial' };
+    mockChunkSessionIds = { 'msg-1': 'session-1' };
+
+    await renderChatInterface();
+    setStreaming.mockClear();
+    flushStreamingChunks.mockClear();
+
+    await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
+
+    expect(flushStreamingChunks).toHaveBeenCalledWith('session-1');
     expect(setStreaming).toHaveBeenCalledWith(false);
   });
 });

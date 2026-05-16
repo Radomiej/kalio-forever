@@ -54,7 +54,7 @@ export class RaAppGetTool {
 // ─── raapp_edit ───────────────────────────────────────────────────────────────
 
 @Injectable()
-@Tool({
+@ConfirmedTool({
   name: 'raapp_edit',
   description:
     'Create or update a VFS working copy for a stored user RA-App. ' +
@@ -76,7 +76,6 @@ export class RaAppGetTool {
       components_yml: { type: 'string', description: 'New components.yml content (optional).' },
     },
   },
-  requiresConfirmation: false,
 })
 export class RaAppEditTool {
   private readonly logger = new Logger(RaAppEditTool.name);

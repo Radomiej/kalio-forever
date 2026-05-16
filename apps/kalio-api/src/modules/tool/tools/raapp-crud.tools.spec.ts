@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Reflector } from '@nestjs/core';
 import type { ToolCallRequest } from '@kalio/types';
+import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 import { RaAppEditTool } from './raapp-crud.tools';
 
 function makeRequest(args: Record<string, unknown>): ToolCallRequest {
@@ -10,6 +12,8 @@ function makeRequest(args: Record<string, unknown>): ToolCallRequest {
     args,
   };
 }
+
+const reflector = new Reflector();
 
 describe('RaAppEditTool', () => {
   let raapp: {
@@ -49,6 +53,12 @@ describe('RaAppEditTool', () => {
       raapp as never,
       vfs as never,
     );
+  });
+
+  it('requires confirmation because it persists a VFS working copy', () => {
+    const metadata = reflector.get(TOOL_METADATA, RaAppEditTool);
+
+    expect(metadata.requiresConfirmation).toBe(true);
   });
 
   it('creates a VFS working copy instead of editing the release ZIP in place', async () => {

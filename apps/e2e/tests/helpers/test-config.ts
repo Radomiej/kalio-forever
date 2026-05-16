@@ -1,4 +1,4 @@
-import type { APIRequestContext } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 const PROCESS_ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
 
@@ -17,4 +17,26 @@ export async function isMockLlm(request: APIRequestContext): Promise<boolean> {
 
 	const config = await response.json() as LLMConfigResponse;
 	return config.source === 'env' && config.provider === 'mock';
+}
+
+export async function selectSession(page: Page, sessionId: string, title: string): Promise<void> {
+	const sessionItem = page.getByTestId('session-item').filter({ hasText: title }).first();
+	await expect(sessionItem).toBeVisible({ timeout: 5000 });
+	await sessionItem.evaluate((node) => {
+		if (!(node instanceof HTMLElement)) {
+			throw new Error('Session item is not clickable');
+		}
+
+		node.click();
+	});
+	await expect
+		.poll(
+			() => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')),
+			{ timeout: 5000 },
+		)
+		.toBe(sessionId);
+}
+
+export async function deleteSessionIfExists(request: APIRequestContext, sessionId: string): Promise<void> {
+	await request.delete(`${API_BASE}/sessions/${sessionId}`, { timeout: 5000 }).catch(() => undefined);
 }
