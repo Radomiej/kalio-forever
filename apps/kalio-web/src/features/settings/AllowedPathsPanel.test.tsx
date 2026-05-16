@@ -5,9 +5,6 @@ import type { AllowedPath } from '@kalio/types';
 import { AllowedPathsPanel } from './AllowedPathsPanel';
 
 type MockReply = Error | 204 | unknown;
-type DirectoryPickerWindow = Window & {
-  showDirectoryPicker?: () => Promise<{ name: string }>;
-};
 
 function installFetchQueue(routes: Record<string, MockReply[]>): ReturnType<typeof vi.fn> {
   const queues = new Map(Object.entries(routes));
