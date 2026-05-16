@@ -18,6 +18,17 @@ const CREDENTIALS_CIPHER_PREFIX = 'kalio-enc-v1';
 const CREDENTIALS_MASTER_KEY_ENV = 'CREDENTIALS_MASTER_KEY';
 const DEV_FALLBACK_CREDENTIALS_MASTER_KEY = 'kalio-dev-credentials-master-key-not-for-production';
 
+function toCredentialResponse(row: typeof credentials.$inferSelect): Credential {
+  return {
+    id: row.id,
+    name: row.name,
+    provider: row.provider as LLMProviderType,
+    createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : row.createdAt,
+    baseUrl: row.baseUrl ?? undefined,
+    model: row.model ?? undefined,
+  };
+}
+
 @Injectable()
 export class CredentialsService {
   private readonly logger = new Logger(CredentialsService.name);
@@ -31,12 +42,7 @@ export class CredentialsService {
 
   async findAll(): Promise<Credential[]> {
     const rows = await this.drizzle.db.select().from(credentials);
-    return rows.map(({ apiKey: _omit, ...rest }) => ({
-      ...rest,
-      createdAt: rest.createdAt instanceof Date ? rest.createdAt.getTime() : rest.createdAt,
-      baseUrl: rest.baseUrl ?? undefined,
-      model: rest.model ?? undefined,
-    }));
+    return rows.map((row) => toCredentialResponse(row));
   }
 
   async create(dto: CreateCredentialDto): Promise<Credential> {
@@ -50,13 +56,8 @@ export class CredentialsService {
       model: dto.model ?? null,
       createdAt: new Date(),
     });
-    const { apiKey: _omit, ...row } = (await this.drizzle.db.select().from(credentials).where(eq(credentials.id, id)).then((r) => r[0]))!;
-    return {
-      ...row,
-      createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : row.createdAt,
-      baseUrl: row.baseUrl ?? undefined,
-      model: row.model ?? undefined,
-    };
+    const row = (await this.drizzle.db.select().from(credentials).where(eq(credentials.id, id)).then((r) => r[0]))!;
+    return toCredentialResponse(row);
   }
 
   async remove(id: string): Promise<void> {
@@ -162,13 +163,8 @@ export class CredentialsService {
     const existing = await this.drizzle.db.select().from(credentials).where(eq(credentials.id, id)).then((r) => r[0]);
     if (!existing) throw new NotFoundException(`Credential ${id} not found`);
     await this.drizzle.db.update(credentials).set({ model }).where(eq(credentials.id, id));
-    const { apiKey: _omit, ...row } = (await this.drizzle.db.select().from(credentials).where(eq(credentials.id, id)).then((r) => r[0]))!;
-    return {
-      ...row,
-      createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : row.createdAt,
-      baseUrl: row.baseUrl ?? undefined,
-      model: row.model ?? undefined,
-    };
+    const row = (await this.drizzle.db.select().from(credentials).where(eq(credentials.id, id)).then((r) => r[0]))!;
+    return toCredentialResponse(row);
   }
 
   // ─── Generation settings ──────────────────────────────────────────────────────

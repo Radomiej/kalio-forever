@@ -2,7 +2,6 @@ import type {
   GuiAssignStatement,
   GuiBlock,
   GuiBlockItem,
-  GuiDocument,
   GuiModule,
   GuiNamedBlockStatement,
   GuiNode,

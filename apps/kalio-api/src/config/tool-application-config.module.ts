@@ -19,7 +19,9 @@ import { TOOL_DISPATCH_REGISTRY } from '../modules/tool/tool-dispatch-registry.p
 import { TOOL_CONFIGURATION_PROVIDERS, TOOL_PROVIDER_CLASSES } from '../modules/tool/tool.providers';
 import { ToolRegistryService } from '../modules/tool/tool-registry.service';
 
-function toMeta(reflector: Reflector, ToolClass: Function): ToolMeta {
+type ToolClass = (abstract new (...args: never[]) => object) & { name: string };
+
+function toMeta(reflector: Reflector, ToolClass: ToolClass): ToolMeta {
   const options = reflector.get<ToolOptions | undefined>(TOOL_METADATA, ToolClass as never);
   if (!options) {
     throw new Error(`Missing @Tool metadata on ${ToolClass.name}`);

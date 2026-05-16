@@ -245,7 +245,8 @@ export class SpawnSubagentTool {
   constructor(private readonly subagentTool: SubagentTool) {}
 
   async execute(request: ToolCallRequest): Promise<SubagentToolResult> {
-    const { childSessionId: _ignored, ...restArgs } = request.args;
+    const restArgs = { ...request.args };
+    delete restArgs['childSessionId'];
     return this.subagentTool.execute(buildDelegatedRequest(request, restArgs));
   }
 }

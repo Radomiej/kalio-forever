@@ -327,7 +327,9 @@ export class RAAppVersioningService implements OnModuleInit {
     try {
       meta = await this.extractMeta(buffer);
     } catch (err) {
-      throw new Error(`Invalid RA-App ZIP: could not parse meta.yml — ${(err as Error).message}`);
+      throw new Error(`Invalid RA-App ZIP: could not parse meta.yml — ${(err as Error).message}`, {
+        cause: err,
+      });
     }
 
     const resolved = this.resolveUserSlugPath(slug);
@@ -491,7 +493,9 @@ export class RAAppVersioningService implements OnModuleInit {
       try {
         return yaml.load(raw) as RAAppMeta;
       } catch (err) {
-        throw new Error(`meta.yml is not valid YAML: ${(err as Error).message}`);
+        throw new Error(`meta.yml is not valid YAML: ${(err as Error).message}`, {
+          cause: err,
+        });
       }
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {/* best effort */});

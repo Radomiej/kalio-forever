@@ -17,7 +17,8 @@ export class DrizzleMessageRepository implements IMessageRepository {
   constructor(private readonly drizzle: DrizzleService) {}
 
   /** Validates the session row exists. Throws if the session was deleted. */
-  async ensureSession(sessionId: string, _personaId: string): Promise<void> {
+  async ensureSession(sessionId: string, personaId: string): Promise<void> {
+    void personaId;
     const row = await this.drizzle.db
       .select({ id: sessions.id })
       .from(sessions)

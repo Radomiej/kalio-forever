@@ -302,7 +302,8 @@ export class RunRaAppTool {
 export class ListRaAppsTool {
   constructor(private readonly raapp: RAAppService) {}
 
-  execute(_request: ToolCallRequest): Promise<object> {
+  execute(request: ToolCallRequest): Promise<object> {
+    void request;
     const apps = this.raapp.getAll().map((a) => ({
       id: a.id,
       name: a.meta.name,

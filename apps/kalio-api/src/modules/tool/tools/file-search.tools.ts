@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   readdirSync, readFileSync, statSync, existsSync,
 } from 'node:fs';
-import { resolve, join, relative } from 'node:path';
+import { join, relative } from 'node:path';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';

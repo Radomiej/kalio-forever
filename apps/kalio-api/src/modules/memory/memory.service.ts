@@ -275,7 +275,7 @@ function splitTextIntoChunks(text: string): string[] {
   let start = 0;
 
   while (start < trimmed.length) {
-    let end = start + MAX_CHUNK_SIZE;
+    const end = start + MAX_CHUNK_SIZE;
 
     if (end >= trimmed.length) {
       chunks.push(trimmed.slice(start).trim());

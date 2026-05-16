@@ -1,7 +1,6 @@
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import yaml from 'js-yaml';
 import { nanoid } from 'nanoid';
@@ -206,24 +205,13 @@ export class RaAppExecuteDslTool {
     const draftBase = `drafts/${draftId}`;
 
     // Load draft files from VFS
-    let uiGui: string | null = null;
-    let uiYml: string | null = null;
-    let systemsYml: string | null = null;
+    const uiGui = this.readOptionalDraftFile(sessionId, draftBase, 'ui.gui');
+    const uiYml = this.readOptionalDraftFile(sessionId, draftBase, 'ui.yml');
+    const systemsYml = this.readOptionalDraftFile(sessionId, draftBase, 'systems.yml');
     let mode: 'display' | 'interactive' = 'display';
 
-    try {
-      uiGui = this.readOptionalDraftFile(sessionId, draftBase, 'ui.gui');
-      uiYml = this.readOptionalDraftFile(sessionId, draftBase, 'ui.yml');
-      systemsYml = this.readOptionalDraftFile(sessionId, draftBase, 'systems.yml');
-      const modeContent = this.readOptionalDraftFile(sessionId, draftBase, '.mode')?.trim();
-      if (modeContent === 'interactive') mode = 'interactive';
-    } catch (err) {
-      this.logger.error(`[raapp_execute_dsl] VFS read error for draft ${draftId}`, err);
-      return {
-        status: 'error',
-        message: `Could not load draft "${draftId}" from session VFS. Make sure raapp_create_draft was called first.`,
-      };
-    }
+    const modeContent = this.readOptionalDraftFile(sessionId, draftBase, '.mode')?.trim();
+    if (modeContent === 'interactive') mode = 'interactive';
 
     if (!uiGui && !uiYml) {
       return {

@@ -59,7 +59,8 @@ function getOptionalMcpPolicyArg(args: ToolCallRequest['args']): MCPPolicy | und
 export class PersonaListTool {
   constructor(private readonly personaService: PersonaService) {}
 
-  async execute(_request: ToolCallRequest): Promise<{ personas: { id: string; name: string; model: string; allowedTools: string[]; skillIds: string[]; mcpPolicy: MCPPolicy }[] }> {
+  async execute(request: ToolCallRequest): Promise<{ personas: { id: string; name: string; model: string; allowedTools: string[]; skillIds: string[]; mcpPolicy: MCPPolicy }[] }> {
+    void request;
     const all = await this.personaService.findAll();
     return {
       personas: all.map((p) => ({ id: p.id, name: p.name, model: p.model, allowedTools: p.allowedTools, skillIds: p.skillIds, mcpPolicy: p.mcpPolicy })),

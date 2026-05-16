@@ -230,13 +230,13 @@ export class RaAppTestTool {
       };
     }
 
-    let testsYml: string | null = null;
-    let systemsContent: string | null = null;
+    let testsYml: string | null;
+    let systemsContent: string | null;
 
     if (draftId) {
       try {
         testsYml = this.vfs.readFile(sessionId, `drafts/${draftId}/tests.yml`).content;
-      } catch (err) {
+      } catch {
         return {
           status: 'error',
           message: `Draft "${draftId}" has no tests.yml. Add a test suite to the draft first.`,

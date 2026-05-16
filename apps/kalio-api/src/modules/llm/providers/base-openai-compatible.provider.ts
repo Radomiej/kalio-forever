@@ -1,5 +1,5 @@
 import type { ILLMProvider } from '../llm.types';
-import type { LLMStreamChunk, LLMToolCall, LLMConfig } from '@kalio/types';
+import type { LLMStreamChunk, LLMToolCall } from '@kalio/types';
 import { Logger } from '@nestjs/common';
 import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../../common/utils/llm-provider-http.util';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
