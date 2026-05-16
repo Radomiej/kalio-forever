@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Loader2, RefreshCw, Check, AlertCircle } from 'lucide-react';
-import type { Credential } from '@kalio/types';
 import { ModelCombobox } from './ModelCombobox';
+import type { ActiveRuntimeConfig, LLMConfigWithSource } from './llm-panel.types';
 
 interface Props {
-  activeCredential: Credential | null;
-  onModelChange: (updated: Credential) => void;
+  activeRuntimeConfig: ActiveRuntimeConfig | null;
+  onRuntimeConfigChange: (updated: LLMConfigWithSource) => void;
 }
 
 interface GenSettings {
@@ -32,8 +32,10 @@ function sanitizeGenSettings(value: unknown): GenSettings {
 }
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
+  const method = opts?.method?.toUpperCase() ?? 'GET';
   const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    cache: method === 'GET' ? 'no-store' : undefined,
     ...opts,
   });
   if (!res.ok) {
@@ -44,11 +46,11 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function ModelSettingsSection({ activeCredential, onModelChange }: Props) {
+export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChange }: Props) {
   const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState<string>(activeCredential?.model ?? '');
+  const [selectedModel, setSelectedModel] = useState<string>(activeRuntimeConfig?.model ?? '');
   const [modelSaving, setModelSaving] = useState(false);
   const [modelSaved, setModelSaved] = useState(false);
 
@@ -58,48 +60,58 @@ export function ModelSettingsSection({ activeCredential, onModelChange }: Props)
   const [genSaved, setGenSaved] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
 
-  // Update selected model when active credential changes
+  // Keep the combobox in sync with the active runtime provider.
   useEffect(() => {
-    setSelectedModel(activeCredential?.model ?? '');
+    setSelectedModel(activeRuntimeConfig?.model ?? '');
+  }, [activeRuntimeConfig?.credentialId, activeRuntimeConfig?.model, activeRuntimeConfig?.source]);
+
+  useEffect(() => {
     setModelSaved(false);
-  }, [activeCredential?.id, activeCredential?.model]);
+  }, [activeRuntimeConfig?.credentialId, activeRuntimeConfig?.source]);
 
   // Load generation settings once
   useEffect(() => {
     setGenLoading(true);
     apiFetch<GenSettings>('/credentials/settings/generation')
       .then((s) => { setGenSettings(sanitizeGenSettings(s)); })
-      .catch(() => { /* use defaults */ })
+      .catch((err: unknown) => {
+        console.error(
+          '[ModelSettingsSection] Failed to load generation settings',
+          err instanceof Error ? err : new Error(String(err)),
+        );
+        setGenSettings(DEFAULT_GEN_SETTINGS);
+      })
       .finally(() => setGenLoading(false));
   }, []);
 
   const fetchModels = useCallback(async () => {
-    if (!activeCredential) return;
+    if (!activeRuntimeConfig) return;
     setModelsLoading(true);
     setModelsError(null);
     try {
-      const { models: list } = await apiFetch<{ models: string[] }>(`/credentials/${activeCredential.id}/models`);
+      const { models: list } = await apiFetch<{ models: string[] }>('/llm/active/models');
       setModels(list);
     } catch (e) {
       setModelsError(e instanceof Error ? e.message : 'Failed to load models');
     } finally {
       setModelsLoading(false);
     }
-  }, [activeCredential?.id]);
+  }, [activeRuntimeConfig?.credentialId, activeRuntimeConfig?.source]);
 
   useEffect(() => {
     void fetchModels();
   }, [fetchModels]);
 
   const handleModelSave = async () => {
-    if (!activeCredential || !selectedModel) return;
+    if (!activeRuntimeConfig || !selectedModel) return;
     setModelSaving(true);
+    setModelsError(null);
     try {
-      const updated = await apiFetch<Credential>(`/credentials/${activeCredential.id}/model`, {
-        method: 'PATCH',
+      const updated = await apiFetch<LLMConfigWithSource>('/llm/active/model', {
+        method: 'PUT',
         body: JSON.stringify({ model: selectedModel }),
       });
-      onModelChange(updated);
+      onRuntimeConfigChange(updated);
       setModelSaved(true);
       setTimeout(() => setModelSaved(false), 2000);
     } catch (e) {
@@ -143,19 +155,42 @@ export function ModelSettingsSection({ activeCredential, onModelChange }: Props)
   };
 
   return (
-    <div className="flex flex-col gap-5 border-t border-base-300 pt-4">
-      {/* ── Active Model ───────────────────────────────────────────────────────── */}
+    <div className="flex flex-col gap-5">
+      <div>
+        <h3 className="text-sm font-semibold mb-1">Active Provider</h3>
+        {!activeRuntimeConfig ? (
+          <p className="text-xs text-base-content/50 italic">
+            Select or configure an active provider before changing its model.
+          </p>
+        ) : (
+          <div className="rounded-lg border border-base-300 bg-base-200/30 p-3 flex flex-col gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="badge badge-sm badge-outline font-mono">{activeRuntimeConfig.provider}</span>
+              <span className="text-sm font-medium text-base-content">{activeRuntimeConfig.displayName}</span>
+              <span className="badge badge-ghost badge-xs ml-auto">
+                {activeRuntimeConfig.source === 'db' ? 'saved provider' : 'env fallback'}
+              </span>
+            </div>
+            <div className="text-xs text-base-content/60 flex flex-col gap-1">
+              <div>Current model: <span className="font-mono text-base-content/80">{activeRuntimeConfig.model || 'not set'}</span></div>
+              {activeRuntimeConfig.baseUrl ? (
+                <div>Base URL: <span className="font-mono text-base-content/80">{activeRuntimeConfig.baseUrl}</span></div>
+              ) : null}
+            </div>
+          </div>
+        )}
+      </div>
+
       <div>
         <h3 className="text-sm font-semibold mb-1">Active Model</h3>
-        {!activeCredential ? (
+        {!activeRuntimeConfig ? (
           <p className="text-xs text-base-content/50 italic">
-            Activate a provider above to select its model.
+            No active provider configured yet.
           </p>
         ) : (
           <div className="flex flex-col gap-2">
             <p className="text-xs text-base-content/60">
-              Model for <span className="font-medium text-base-content">{activeCredential.name}</span>
-              <span className="ml-1 badge badge-xs badge-outline font-mono">{activeCredential.provider}</span>
+              Select the runtime model used for new turns.
             </p>
 
             <div className="flex gap-2 items-start">
@@ -187,7 +222,7 @@ export function ModelSettingsSection({ activeCredential, onModelChange }: Props)
               <button
                 className={`btn btn-sm gap-1 ${modelSaved ? 'btn-success' : 'btn-primary'}`}
                 onClick={() => void handleModelSave()}
-                disabled={modelSaving || !selectedModel || selectedModel === activeCredential.model}
+                disabled={modelSaving || !selectedModel || selectedModel === activeRuntimeConfig.model}
                 data-testid="model-save"
               >
                 {modelSaving ? (

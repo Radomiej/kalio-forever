@@ -17,6 +17,7 @@ export function ChatInput({ onSend, disabled, isStreaming = false, onStop }: Cha
   const { activeSessionId, sessions } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const effectiveDisabled = disabled || isSendLocked;
+  const showStopButton = Boolean(onStop) && (isStreaming || isSendLocked);
 
   useEffect(() => {
     if (!isSendLocked) return;
@@ -83,7 +84,7 @@ export function ChatInput({ onSend, disabled, isStreaming = false, onStop }: Cha
             onKeyDown={handleKeyDown}
             onInput={handleInput}
           />
-          {isStreaming && onStop ? (
+          {showStopButton ? (
             <button
               data-testid="chat-stop-btn"
               className="btn btn-sm h-[32px] w-[32px] p-0 bg-error border-none text-white hover:bg-error/80 rounded-full shrink-0"

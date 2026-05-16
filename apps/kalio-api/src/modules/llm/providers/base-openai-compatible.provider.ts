@@ -1,19 +1,9 @@
 import type { ILLMProvider } from '../llm.types';
-import type { LLMMessage, LLMStreamChunk, LLMToolCall, LLMConfig } from '@kalio/types';
+import type { LLMStreamChunk, LLMToolCall } from '@kalio/types';
 import { Logger } from '@nestjs/common';
-
-const PROVIDER_BASE_URLS: Record<string, string> = {
-  openrouter: 'https://openrouter.ai/api/v1',
-  cometapi: 'https://api.cometapi.com/v1',
-  openai: 'https://api.openai.com/v1',
-  xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
-  ollama: 'http://localhost:11434/v1',
-};
-
-function resolveBaseUrl(provider: string, baseUrl?: string): string {
-  if (baseUrl) return baseUrl.replace(/\/$/, '');
-  return PROVIDER_BASE_URLS[provider] ?? 'https://api.openai.com/v1';
-}
+import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../../common/utils/llm-provider-http.util';
+import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
+import { getReasoningContent } from '../../../common/utils/context-managed-llm-message.util';
 
 let _toolCallCounter = 0;
 function uniqueToolCallId(): string {
@@ -36,35 +26,24 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     this.providerName = providerName;
     this.apiKey = apiKey;
     this.model = model;
-    this.baseUrl = resolveBaseUrl(providerName.toLowerCase(), baseUrl);
+    this.baseUrl = resolveLlmProviderBaseUrl(providerName.toLowerCase(), baseUrl);
   }
 
   async streamChat(
-    messages: LLMMessage[],
+    messages: ContextManagedLLMMessage[],
     tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
     onChunk: (chunk: LLMStreamChunk) => void,
     sessionId: string,
     messageId: string,
+    abortSignal?: AbortSignal,
   ): Promise<LLMToolCall[]> {
+    if (abortSignal?.aborted) {
+      return [];
+    }
+
     const body = JSON.stringify({
       model: this.model,
-      messages: messages.map((m) => {
-        if (m.role === 'tool' && m.toolCallId) {
-          return { role: 'tool', content: m.content, tool_call_id: m.toolCallId };
-        }
-        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
-          return {
-            role: 'assistant',
-            content: m.content || null,
-            tool_calls: m.toolCalls.map((tc) => ({
-              id: tc.id,
-              type: 'function',
-              function: { name: tc.name, arguments: JSON.stringify(tc.args) },
-            })),
-          };
-        }
-        return m;
-      }),
+      messages: messages.map((m) => this.buildRequestMessage(m)),
       stream: true,
       tools: tools.length > 0
         ? tools.map((t) => ({
@@ -79,6 +58,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       method: 'POST',
       headers: this.buildHeaders(),
       body,
+      signal: abortSignal,
     });
 
     if (!response.ok || !response.body) {
@@ -98,65 +78,72 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     let buffer = '';
     let debugChunkCount = 0;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const data = trimmed.slice(5).trim();
-        if (data === '[DONE]') {
-          onChunk({ delta: '', done: true, sessionId, messageId });
-          continue;
+    try {
+      while (true) {
+        if (abortSignal?.aborted) {
+          return [];
         }
+        const { done, value } = await reader.read();
+        if (done) break;
 
-        let parsed: Record<string, unknown>;
-        try {
-          parsed = JSON.parse(data) as Record<string, unknown>;
-        } catch {
-          this.logger.warn(`[${this.providerName}] Failed to parse SSE chunk: ${data.slice(0, 100)}`);
-          continue;
-        }
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
 
-        const choices = parsed['choices'] as Array<Record<string, unknown>> | undefined;
-        const delta = choices?.[0]?.['delta'] as Record<string, unknown> | undefined;
-        if (!delta) continue;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === '[DONE]') {
+            onChunk({ delta: '', done: true, sessionId, messageId });
+            continue;
+          }
 
-        // Debug: log delta keys on first few chunks to diagnose field names
-        debugChunkCount++;
-        if (debugChunkCount <= 3) {
-          this.logger.debug(`[${this.providerName}] delta keys: ${JSON.stringify(Object.keys(delta))}, reasoning_content=${JSON.stringify(delta['reasoning_content'])?.slice(0,40)}, content=${JSON.stringify(delta['content'])?.slice(0,40)}`);
-        }
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(data) as Record<string, unknown>;
+          } catch {
+            this.logger.warn(`[${this.providerName}] Failed to parse SSE chunk: ${data.slice(0, 100)}`);
+            continue;
+          }
 
-        const content = delta['content'];
-        if (typeof content === 'string' && content) {
-          onChunk({ delta: content, done: false, sessionId, messageId });
-        }
+          const choices = parsed['choices'] as Array<Record<string, unknown>> | undefined;
+          const delta = choices?.[0]?.['delta'] as Record<string, unknown> | undefined;
+          if (!delta) continue;
 
-        // Thinking / reasoning tokens (DeepSeek R1 / MiMo style)
-        const reasoning = delta['reasoning_content'];
-        if (typeof reasoning === 'string' && reasoning) {
-          onChunk({ delta: reasoning, done: false, sessionId, messageId, thinking: true });
-        }
+          // Debug: log delta keys on first few chunks to diagnose field names
+          debugChunkCount++;
+          if (debugChunkCount <= 3) {
+            this.logger.debug(`[${this.providerName}] delta keys: ${JSON.stringify(Object.keys(delta))}, reasoning_content=${JSON.stringify(delta['reasoning_content'])?.slice(0,40)}, content=${JSON.stringify(delta['content'])?.slice(0,40)}`);
+          }
 
-        const rawToolCalls = delta['tool_calls'] as Array<Record<string, unknown>> | undefined;
-        if (rawToolCalls) {
-          for (const tc of rawToolCalls) {
-            const idx = String(tc['index'] ?? 0);
-            const fn = tc['function'] as Record<string, unknown> | undefined;
-            if (!toolCallBuffers[idx]) {
-              toolCallBuffers[idx] = { name: '', argsRaw: '' };
+          const content = delta['content'];
+          if (typeof content === 'string' && content) {
+            onChunk({ delta: content, done: false, sessionId, messageId });
+          }
+
+          // Thinking / reasoning tokens (DeepSeek R1 / MiMo style)
+          const reasoning = delta['reasoning_content'];
+          if (typeof reasoning === 'string' && reasoning) {
+            onChunk({ delta: reasoning, done: false, sessionId, messageId, thinking: true });
+          }
+
+          const rawToolCalls = delta['tool_calls'] as Array<Record<string, unknown>> | undefined;
+          if (rawToolCalls) {
+            for (const tc of rawToolCalls) {
+              const idx = String(tc['index'] ?? 0);
+              const fn = tc['function'] as Record<string, unknown> | undefined;
+              if (!toolCallBuffers[idx]) {
+                toolCallBuffers[idx] = { name: '', argsRaw: '' };
+              }
+              if (typeof fn?.['name'] === 'string') toolCallBuffers[idx]!.name += fn['name'];
+              if (typeof fn?.['arguments'] === 'string') toolCallBuffers[idx]!.argsRaw += fn['arguments'];
             }
-            if (typeof fn?.['name'] === 'string') toolCallBuffers[idx]!.name += fn['name'];
-            if (typeof fn?.['arguments'] === 'string') toolCallBuffers[idx]!.argsRaw += fn['arguments'];
           }
         }
       }
+    } finally {
+      reader.releaseLock();
     }
 
     for (const [, buf] of Object.entries(toolCallBuffers)) {
@@ -179,11 +166,63 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
   protected buildHeaders(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${this.apiKey}`,
+      ...buildProviderCompatHeaders(this.providerName, this.apiKey || undefined),
     };
   }
 
   protected buildThinkingParams(): Record<string, unknown> {
     return {};
+  }
+
+  protected supportsReasoningContentHistory(): boolean {
+    return false;
+  }
+
+  private buildRequestMessage(message: ContextManagedLLMMessage): Record<string, unknown> {
+    if (message.role === 'tool' && message.toolCallId) {
+      return { role: 'tool', content: message.content, tool_call_id: message.toolCallId };
+    }
+
+    if (message.role === 'assistant') {
+      const reasoningContent = this.getReasoningContent(message);
+
+      if (message.toolCalls && message.toolCalls.length > 0) {
+        return {
+          role: 'assistant',
+          content: this.normalizeAssistantContent(message.content),
+          ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+          tool_calls: message.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+          })),
+        };
+      }
+
+      return {
+        role: 'assistant',
+        content: reasoningContent ? this.normalizeAssistantContent(message.content) : message.content,
+        ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+      };
+    }
+
+    return { role: message.role, content: message.content };
+  }
+
+  private getReasoningContent(message: ContextManagedLLMMessage): string | undefined {
+    if (!this.supportsReasoningContentHistory()) {
+      return undefined;
+    }
+
+    const reasoningContent = getReasoningContent(message);
+    if (reasoningContent.length === 0) {
+      return undefined;
+    }
+
+    return reasoningContent;
+  }
+
+  private normalizeAssistantContent(content: ContextManagedLLMMessage['content']): ContextManagedLLMMessage['content'] | null {
+    return typeof content === 'string' && content.length === 0 ? null : content;
   }
 }

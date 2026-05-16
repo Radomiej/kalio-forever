@@ -1,17 +1,19 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { LLMMessage, LLMStreamChunk, LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
+import type { LLMStreamChunk, LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
 import type { ILLMProvider, ProviderConfig } from './llm.types';
 import { createLLMProvider } from './providers/provider-factory';
 import { CredentialsService } from '../credentials/credentials.service';
+import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 
 export type { ILLMProvider } from './llm.types';
 
 @Injectable()
 export class LLMService {
   private readonly logger = new Logger(LLMService.name);
-  /** Fallback provider built from .env — always available */
-  private readonly envProvider: ILLMProvider;
+  /** Cached fallback provider built from the current effective .env config. */
+  private envProvider: ILLMProvider;
+  private envProviderKey: string;
   private readonly envConfig: ProviderConfig;
 
   constructor(
@@ -20,10 +22,13 @@ export class LLMService {
   ) {
     const provider = this.config.get<string>('LLM_PROVIDER', 'openai') as LLMProviderType;
     const apiKey = this.config.get<string>('LLM_API_KEY', 'mock');
-    const baseUrl = this.config.get<string>('LLM_BASE_URL', 'mock');
+    const configuredBaseUrl = this.config.get<string>('LLM_BASE_URL', 'mock');
     const model = this.config.get<string>('LLM_MODEL', 'mock');
 
+    const baseUrl = configuredBaseUrl === 'mock' ? undefined : configuredBaseUrl;
+
     this.envConfig = { provider, apiKey, model, baseUrl };
+    this.envProviderKey = this.getProviderConfigKey(this.envConfig);
     this.envProvider = createLLMProvider(this.envConfig);
 
     if (provider === 'mock' || apiKey === 'mock') {
@@ -31,6 +36,33 @@ export class LLMService {
     } else {
       this.logger.log(`LLM provider (env fallback): ${provider} / ${model}`);
     }
+  }
+
+  private getProviderConfigKey(config: ProviderConfig): string {
+    return [config.provider, config.apiKey, config.model, config.baseUrl ?? ''].join('::');
+  }
+
+  private normalizeEnvDisplayValue(value?: string): string {
+    return value === 'mock' ? '' : (value ?? '');
+  }
+
+  private async getEffectiveEnvConfig(): Promise<ProviderConfig> {
+    const modelOverride = await this.credentialsService.getEnvModelOverride();
+
+    return {
+      ...this.envConfig,
+      model: modelOverride ?? this.envConfig.model,
+      baseUrl: this.envConfig.baseUrl === 'mock' ? undefined : this.envConfig.baseUrl,
+    };
+  }
+
+  private getOrCreateEnvProvider(config: ProviderConfig): ILLMProvider {
+    const nextKey = this.getProviderConfigKey(config);
+    if (nextKey !== this.envProviderKey) {
+      this.envProvider = createLLMProvider(config);
+      this.envProviderKey = nextKey;
+    }
+    return this.envProvider;
   }
 
   /**
@@ -43,18 +75,21 @@ export class LLMService {
       this.logger.log(`LLM provider: ${dbConfig.provider} / ${dbConfig.model} (from DB)`);
       return { provider: createLLMProvider(dbConfig), config: dbConfig };
     }
-    return { provider: this.envProvider, config: this.envConfig };
+
+    const envConfig = await this.getEffectiveEnvConfig();
+    return { provider: this.getOrCreateEnvProvider(envConfig), config: envConfig };
   }
 
   async streamChat(
-    messages: LLMMessage[],
+    messages: ContextManagedLLMMessage[],
     tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
     onChunk: (chunk: LLMStreamChunk) => void,
     sessionId: string,
     messageId: string,
+    abortSignal?: AbortSignal,
   ): Promise<LLMToolCall[]> {
     const { provider } = await this.getActiveProvider();
-    return provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+    return provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortSignal);
   }
 
   async getConfig(): Promise<LLMConfig & { source: 'db' | 'env' }> {
@@ -68,13 +103,37 @@ export class LLMService {
         source: 'db',
       };
     }
+
+    const envConfig = await this.getEffectiveEnvConfig();
+
     return {
-      provider: this.config.get<string>('LLM_PROVIDER', 'openai') as LLMProviderType,
+      provider: envConfig.provider as LLMProviderType,
       apiKey: '',
-      baseUrl: this.config.get<string>('LLM_BASE_URL', ''),
-      model: this.config.get<string>('LLM_MODEL', ''),
+      baseUrl: this.normalizeEnvDisplayValue(envConfig.baseUrl),
+      model: this.normalizeEnvDisplayValue(envConfig.model),
       source: 'env',
     };
+  }
+
+  async getActiveModels(): Promise<string[]> {
+    const { config } = await this.getActiveProvider();
+    return this.credentialsService.getModelsForProviderConfig(config);
+  }
+
+  async updateActiveModel(model: string): Promise<LLMConfig & { source: 'db' | 'env' }> {
+    const normalizedModel = model.trim();
+    if (normalizedModel.length === 0) {
+      throw new BadRequestException('Model must be a non-empty string');
+    }
+
+    const activeCredentialId = await this.credentialsService.getActiveCredentialId();
+    if (activeCredentialId) {
+      await this.credentialsService.updateModel(activeCredentialId, normalizedModel);
+    } else {
+      await this.credentialsService.setEnvModelOverride(normalizedModel);
+    }
+
+    return this.getConfig();
   }
 
   createProvider(config: ProviderConfig): ILLMProvider {

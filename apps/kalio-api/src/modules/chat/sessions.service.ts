@@ -45,7 +45,6 @@ export class SessionsService {
       parentSessionId: dto.parentSessionId ?? null,
       parentTurnId: dto.parentTurnId ?? null,
       parentToolCallId: dto.parentToolCallId ?? null,
-      interlocutorLabel: dto.interlocutorLabel ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -61,6 +60,14 @@ export class SessionsService {
   async getMessages(sessionId: string): Promise<ChatMessage[]> {
     await this.assertExists(sessionId);
     return this.repo.loadHistory(sessionId);
+  }
+
+  async listChildren(parentSessionId: string): Promise<ChatSession[]> {
+    const rows = await this.drizzle.db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.parentSessionId, parentSessionId));
+    return rows.map(this.toChatSession);
   }
 
   async delete(id: string): Promise<void> {
@@ -102,7 +109,6 @@ export class SessionsService {
     parentSessionId?: string | null;
     parentTurnId?: string | null;
     parentToolCallId?: string | null;
-    interlocutorLabel?: string | null;
     createdAt: number | Date;
     updatedAt: number | Date;
   }> {
@@ -123,7 +129,6 @@ export class SessionsService {
     parentSessionId?: string | null;
     parentTurnId?: string | null;
     parentToolCallId?: string | null;
-    interlocutorLabel?: string | null;
     createdAt: number | Date;
     updatedAt: number | Date;
   }): ChatSession {
@@ -135,7 +140,6 @@ export class SessionsService {
       parentSessionId: row.parentSessionId ?? undefined,
       parentTurnId: row.parentTurnId ?? undefined,
       parentToolCallId: row.parentToolCallId ?? undefined,
-      interlocutorLabel: row.interlocutorLabel ?? undefined,
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),
     };

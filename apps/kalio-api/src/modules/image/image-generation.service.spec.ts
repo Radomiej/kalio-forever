@@ -28,8 +28,19 @@ function makeJsonResponse(body: unknown, ok = true, status = 200) {
   return {
     ok,
     status,
+    headers: new Headers({ 'content-type': 'application/json' }),
     json: async () => body,
     text: async () => JSON.stringify(body),
+  };
+}
+
+function makeTextResponse(body: string, ok = true, status = 200, contentType = 'text/html') {
+  return {
+    ok,
+    status,
+    headers: new Headers({ 'content-type': contentType }),
+    json: async () => JSON.parse(body),
+    text: async () => body,
   };
 }
 
@@ -241,6 +252,14 @@ describe('ImageGenerationService — error handling', () => {
     await expect(
       service.generate({ prompt: 'test', model: 'dall-e-3', apiKey: 'k', provider: 'openai' }),
     ).rejects.toThrow('No image data in response');
+  });
+
+  it('REGRESSION: throws a provider-shape error when a 200 response returns HTML instead of JSON', async () => {
+    fetchMock.mockResolvedValueOnce(makeTextResponse('<html><body>upstream error</body></html>'));
+
+    await expect(
+      service.generate({ prompt: 'test', model: 'flux-pro', apiKey: 'k', provider: 'cometapi' }),
+    ).rejects.toThrow('Expected JSON image response');
   });
 });
 

@@ -73,7 +73,7 @@ function resolveVersionedPath(existingPaths: string[], requestedPath: string): s
   const filename = lastSlash >= 0 ? requestedPath.slice(lastSlash + 1) : requestedPath;
   const dotIdx = filename.lastIndexOf('.');
   const ext = dotIdx >= 0 ? filename.slice(dotIdx) : '.png';
-  let baseName = (dotIdx >= 0 ? filename.slice(0, dotIdx) : filename).replace(/-v\d+$/, '');
+  const baseName = (dotIdx >= 0 ? filename.slice(0, dotIdx) : filename).replace(/-v\d+$/, '');
 
   const prefix = dir ? `${dir}/${baseName}` : baseName;
   let version = 1;
@@ -188,7 +188,9 @@ export class ImageEditTool {
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code === 'VFS_FILE_NOT_FOUND' || code === 'ENOENT') {
-          throw new Error(`Ref not found in VFS: "${ref.vfsPath}". Upload or generate it first.`);
+          throw new Error(`Ref not found in VFS: "${ref.vfsPath}". Upload or generate it first.`, {
+            cause: err,
+          });
         }
         throw err;
       }
@@ -218,7 +220,9 @@ export class ImageEditTool {
       });
     } catch (err) {
       this.logger.error('[image_edit] Network error', err instanceof Error ? err : new Error(String(err)));
-      throw new Error(`Network error: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(`Network error: ${err instanceof Error ? err.message : String(err)}`, {
+        cause: err,
+      });
     }
 
     if (!response.ok) {
@@ -252,7 +256,9 @@ export class ImageEditTool {
       this.vfs.writeBinary(vfsSessionId, vfsPath, binaryBuf);
     } catch (err) {
       this.logger.error('[image_edit] VFS write failed', err instanceof Error ? err : new Error(String(err)));
-      throw new Error(`Failed to save image to VFS: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(`Failed to save image to VFS: ${err instanceof Error ? err.message : String(err)}`, {
+        cause: err,
+      });
     }
 
     const durationMs = Date.now() - start;

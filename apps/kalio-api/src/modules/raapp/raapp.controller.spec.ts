@@ -1,6 +1,7 @@
+import { PassThrough } from 'node:stream';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { NotFoundException, ForbiddenException, BadRequestException, StreamableFile } from '@nestjs/common';
 import { RAAppController } from './raapp.controller';
 import { RAAppService } from './raapp.service';
 import { RAAppVersioningService } from './raapp-versioning.service';
@@ -46,6 +47,7 @@ describe('RAAppController', () => {
     deleteGroup: vi.fn(),
     discardDraft: vi.fn(),
     rollback: vi.fn(),
+    downloadRelease: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -279,6 +281,78 @@ describe('RAAppController', () => {
       const result = await controller.deleteGroup('my-app');
       expect(mockVersioningService.deleteGroup).toHaveBeenCalledWith('my-app');
       expect(result).toEqual({ ok: true });
+    });
+  });
+
+  describe('downloadRelease()', () => {
+    it('throws NotFoundException when group does not exist', () => {
+      mockVersioningService.getGroupBySlug.mockReturnValue(null);
+
+      expect(() =>
+        (
+          controller as unknown as {
+            downloadRelease: (slug: string, version: string, res: { set: ReturnType<typeof vi.fn> }) => StreamableFile;
+          }
+        ).downloadRelease('missing', '1.2.0', { set: vi.fn() }),
+      ).toThrow(NotFoundException);
+    });
+
+    it('streams the requested release zip with a versioned filename', () => {
+      const stream = new PassThrough();
+      const group = { slug: 'my-app', displayName: 'My App', currentVersion: null, draft: null, history: [] };
+      mockVersioningService.getGroupBySlug.mockReturnValue(group);
+      mockVersioningService.downloadRelease.mockReturnValue({
+        stream,
+        filename: 'my-app-1.2.0.zip',
+      });
+      const res = { set: vi.fn() };
+
+      const result = (
+        controller as unknown as {
+          downloadRelease: (slug: string, version: string, res: { set: ReturnType<typeof vi.fn> }) => StreamableFile;
+        }
+      ).downloadRelease('my-app', '1.2.0', res);
+
+      expect(mockVersioningService.downloadRelease).toHaveBeenCalledWith('my-app', '1.2.0');
+      expect(res.set).toHaveBeenCalledWith({
+        'Content-Type': 'application/zip',
+        'Content-Disposition': 'attachment; filename="my-app-1.2.0.zip"',
+      });
+      expect(result).toBeInstanceOf(StreamableFile);
+    });
+
+    it('maps missing release versions to NotFoundException', () => {
+      const group = { slug: 'my-app', displayName: 'My App', currentVersion: null, draft: null, history: [] };
+      mockVersioningService.getGroupBySlug.mockReturnValue(group);
+      mockVersioningService.downloadRelease.mockImplementation(() => {
+        throw new Error('Release version not found: 9.9.9');
+      });
+
+      expect(() =>
+        (
+          controller as unknown as {
+            downloadRelease: (slug: string, version: string, res: { set: ReturnType<typeof vi.fn> }) => StreamableFile;
+          }
+        ).downloadRelease('my-app', '9.9.9', { set: vi.fn() }),
+      ).toThrow(NotFoundException);
+    });
+
+    it('maps release-not-found error codes to NotFoundException without relying on message text', () => {
+      const group = { slug: 'my-app', displayName: 'My App', currentVersion: null, draft: null, history: [] };
+      mockVersioningService.getGroupBySlug.mockReturnValue(group);
+      mockVersioningService.downloadRelease.mockImplementation(() => {
+        const err = new Error('zip missing');
+        (err as NodeJS.ErrnoException).code = 'RAAPP_RELEASE_NOT_FOUND';
+        throw err;
+      });
+
+      expect(() =>
+        (
+          controller as unknown as {
+            downloadRelease: (slug: string, version: string, res: { set: ReturnType<typeof vi.fn> }) => StreamableFile;
+          }
+        ).downloadRelease('my-app', '9.9.9', { set: vi.fn() }),
+      ).toThrow(NotFoundException);
     });
   });
 

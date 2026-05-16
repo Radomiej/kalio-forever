@@ -3,6 +3,10 @@
 # Uzycie: .\start-dev.ps1
 # Zatrzymanie: Ctrl+C — czyści oba serwery
 
+param(
+    [switch]$UseMockLLM
+)
+
 $root = $PSScriptRoot
 $api  = Join-Path $root "apps\kalio-api"
 $web  = Join-Path $root "apps\kalio-web"
@@ -13,6 +17,32 @@ $FE_PORT = 5188
 $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $nodeCmd) { $nodeCmd = Get-Command node -ErrorAction SilentlyContinue }
 if (-not $nodeCmd) { Write-Host "[FAIL] node not found on PATH" -ForegroundColor Red; exit 1 }
+
+$previousLlmEnv = @{
+    LLM_PROVIDER = $env:LLM_PROVIDER
+    LLM_API_KEY = $env:LLM_API_KEY
+    LLM_BASE_URL = $env:LLM_BASE_URL
+    LLM_MODEL = $env:LLM_MODEL
+}
+
+function Restore-LlmEnv {
+    param([hashtable]$Values)
+
+    foreach ($entry in $Values.GetEnumerator()) {
+        if ($null -eq $entry.Value) {
+            Remove-Item "Env:$($entry.Key)" -ErrorAction SilentlyContinue
+        } else {
+            Set-Item "Env:$($entry.Key)" $entry.Value
+        }
+    }
+}
+
+if ($UseMockLLM) {
+    $env:LLM_PROVIDER = 'mock'
+    $env:LLM_API_KEY = 'mock'
+    $env:LLM_BASE_URL = 'mock'
+    $env:LLM_MODEL = 'mock'
+}
 
 function Get-PortOwners {
     param([int[]]$Ports)
@@ -111,6 +141,9 @@ Write-Host ""
 Write-Host "Kalio v2 - dev environment" -ForegroundColor Cyan
 Write-Host "  kalio-api  ->  http://localhost:$BE_PORT" -ForegroundColor Green
 Write-Host "  kalio-web  ->  http://localhost:$FE_PORT" -ForegroundColor Green
+if ($UseMockLLM) {
+    Write-Host "  llm-mode   ->  mock" -ForegroundColor DarkYellow
+}
 Write-Host ""
 
 # --- Start backend (nest start --watch) ---
@@ -176,5 +209,6 @@ try {
     Write-Host ""
     Write-Host "Stopping stack..." -ForegroundColor Yellow
     Stop-KalioStack -BeProcess $beProcess -FeProcess $feProcess -Ports @($BE_PORT, $FE_PORT)
+    Restore-LlmEnv -Values $previousLlmEnv
     Write-Host "[OK] Stack stopped." -ForegroundColor Green
 }

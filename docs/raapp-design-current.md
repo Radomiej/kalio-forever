@@ -1,6 +1,14 @@
 # RA-App Design - stan aktualny
 
-Ten dokument opisuje aktualny model RA-App w Kalio.
+Ten dokument opisuje runtime i powierzchnie renderowania RA-App w Kalio.
+Jesli chcesz zrozumiec aktualny VFS-first workflow roboczy, wersjonowany release lane,
+porownanie z legacy V1 oraz status testow przed merge, zacznij od
+`raapp-v2-architecture-current.md`.
+
+Jesli chcesz zrozumiec finalny workflow pracy z designem i prototypami
+(`vfs_write` + `design_preview` + draft/publish lane), zacznij od
+`design-tools-architecture-current.md`.
+
 Najwazniejsze jest rozroznienie trzech rzeczy, ktore latwo pomylic:
 
 1. inline wynik toola w historii czatu

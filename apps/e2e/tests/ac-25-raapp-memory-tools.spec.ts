@@ -1,17 +1,16 @@
 import { test, expect } from '@playwright/test';
-
-const BASE = 'http://localhost:3016';
+import { API_BASE } from './helpers/test-config';
 
 test.describe('AC-25: RAApp and Memory tools registered', () => {
   test('GET /api/tools returns 22 tools', async ({ request }) => {
-    const res = await request.get(`${BASE}/api/tools`);
+    const res = await request.get(`${API_BASE}/tools`);
     expect(res.ok()).toBe(true);
     const tools: { name: string }[] = await res.json();
     expect(tools.length).toBeGreaterThanOrEqual(22);
   });
 
   test('raapp_create and raapp_compile tools are registered', async ({ request }) => {
-    const res = await request.get(`${BASE}/api/tools`);
+    const res = await request.get(`${API_BASE}/tools`);
     const tools: { name: string; requiresConfirmation: boolean }[] = await res.json();
     const names = tools.map((t) => t.name);
 
@@ -25,7 +24,7 @@ test.describe('AC-25: RAApp and Memory tools registered', () => {
   });
 
   test('memory_ingest, memory_search, memory_ingest_conversation tools are registered', async ({ request }) => {
-    const res = await request.get(`${BASE}/api/tools`);
+    const res = await request.get(`${API_BASE}/tools`);
     const tools: { name: string; requiresConfirmation: boolean }[] = await res.json();
     const names = tools.map((t) => t.name);
 
@@ -43,7 +42,7 @@ test.describe('AC-25: RAApp and Memory tools registered', () => {
   });
 
   test('all 22 expected tool names are present', async ({ request }) => {
-    const res = await request.get(`${BASE}/api/tools`);
+    const res = await request.get(`${API_BASE}/tools`);
     const tools: { name: string }[] = await res.json();
     const names = tools.map((t) => t.name);
 

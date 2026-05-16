@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { useAgentStore } from './agentStore';
 import { useSessionStore } from './sessionStore';
 
 function resetStore() {
@@ -13,6 +14,10 @@ function resetStore() {
     streamingChunks: {},
     thinkingChunks: {},
     chunkSessionIds: {},
+  });
+  useAgentStore.setState({
+    isStreaming: false,
+    streamingMessageId: undefined,
   });
 }
 
@@ -190,6 +195,19 @@ describe('REGRESSION: setActiveSession clears in-flight agent state', () => {
     useSessionStore.getState().setActiveSession('session-B');
 
     expect(useSessionStore.getState().messages).toHaveLength(0);
+  });
+
+  it('clears agent streaming state on session switch', () => {
+    useSessionStore.setState({ activeSessionId: 'session-A' });
+    useAgentStore.setState({
+      isStreaming: true,
+      streamingMessageId: 'msg-streaming',
+    });
+
+    useSessionStore.getState().setActiveSession('session-B');
+
+    expect(useAgentStore.getState().isStreaming).toBe(false);
+    expect(useAgentStore.getState().streamingMessageId).toBeUndefined();
   });
 });
 

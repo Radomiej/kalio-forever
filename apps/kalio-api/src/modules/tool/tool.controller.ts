@@ -1,5 +1,4 @@
 import { Body, Controller, Get, NotFoundException, OnModuleInit, Optional, Param, Patch } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
 import type { ToolMeta } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { toolOverrides } from '../../database/schema';

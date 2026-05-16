@@ -139,7 +139,6 @@ export interface ChatSession {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
-  interlocutorLabel?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -151,7 +150,6 @@ export interface CreateSessionDto {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
-  interlocutorLabel?: string;
 }
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
@@ -174,6 +172,8 @@ export interface AgentRunContext {
   vfsMode?: VFSMode;
   vfsSessionId?: ID;
   label?: string;
+  autoApproveTools?: string[];
+  subagentDepth?: number;
 }
 
 export interface SubagentCopiedFile {
@@ -227,7 +227,7 @@ export interface ToolConfirmationRequest {
   sessionId: ID;
   toolName: string;
   args: Record<string, unknown>;
-  timeoutMs: number;          // default 30000
+  timeoutMs: number;          // confirmation timeout in ms; 0 disables timeout
   agentRun?: AgentRunContext;
 }
 
@@ -310,7 +310,7 @@ export interface MCPServer {
 }
 
 export interface MCPTool {
-  name: string;               // namespaced: "{serverId}::{toolName}"
+  name: string;               // runtime name: "mcp_<serverId>_<toolName>"
   description: string;
   serverId: ID;
   requiresConfirmation: boolean;

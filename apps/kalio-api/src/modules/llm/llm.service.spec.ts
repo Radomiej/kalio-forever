@@ -18,6 +18,11 @@ describe('LLMService - DB credential overrides env', () => {
   function buildCredentialsMock() {
     return {
       getActiveProviderConfig: vi.fn(),
+      getActiveCredentialId: vi.fn().mockResolvedValue(null),
+      updateModel: vi.fn(),
+      getEnvModelOverride: vi.fn().mockResolvedValue(null),
+      setEnvModelOverride: vi.fn(),
+      getModelsForProviderConfig: vi.fn().mockResolvedValue([]),
       getContextWindowSize: vi.fn().mockResolvedValue(32000),
     };
   }
@@ -79,6 +84,16 @@ describe('LLMService - DB credential overrides env', () => {
       expect(config.provider).toBe('openai');
       expect(config.model).toBe('env-gpt-4');
       expect(config.baseUrl).toBe('https://env.openai.com/v1');
+    });
+
+    it('should apply the env model override when no DB credential is active', async () => {
+      credentialsService.getActiveProviderConfig.mockResolvedValue(null);
+      credentialsService.getEnvModelOverride.mockResolvedValue('env-override-model');
+
+      const config = await service.getConfig();
+
+      expect(config.source).toBe('env');
+      expect(config.model).toBe('env-override-model');
     });
 
     it('should not expose API key in getConfig regardless of source', async () => {
@@ -189,6 +204,116 @@ describe('LLMService - DB credential overrides env', () => {
         'msg-1',
       );
       expect(Array.isArray(result)).toBe(true);
+    });
+
+    it('refreshes the env provider when the env model override changes', async () => {
+      credentialsService.getActiveProviderConfig.mockResolvedValue(null);
+      credentialsService.getEnvModelOverride.mockResolvedValue('env-override-model');
+
+      const originalFetch = globalThis.fetch;
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response('data: [DONE]\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      );
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      try {
+        await service.streamChat(
+          [{ role: 'user', content: 'hello' }],
+          [],
+          () => {},
+          'session-1',
+          'msg-1',
+        );
+
+        const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+        const body = JSON.parse(String(requestInit?.body)) as { model: string };
+
+        expect(body.model).toBe('env-override-model');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it('REGRESSION: does not rebuild the fallback env provider on first use when the configured baseUrl is mock', async () => {
+      const mockCreds = buildCredentialsMock();
+      mockCreds.getActiveProviderConfig.mockResolvedValue(null);
+
+      const moduleWithMockBaseUrl = await Test.createTestingModule({
+        providers: [
+          LLMService,
+          {
+            provide: ConfigService,
+            useValue: buildConfigMock({
+              LLM_PROVIDER: 'mock',
+              LLM_API_KEY: 'mock',
+              LLM_BASE_URL: 'mock',
+              LLM_MODEL: 'mock-model',
+            }),
+          },
+          { provide: CredentialsService, useValue: mockCreds },
+        ],
+      }).compile();
+
+      const mockBaseUrlService = moduleWithMockBaseUrl.get<LLMService>(LLMService);
+      const initialProviderKey = (mockBaseUrlService as unknown as { envProviderKey: string }).envProviderKey;
+
+      await mockBaseUrlService.streamChat(
+        [{ role: 'user', content: 'hello' }],
+        [],
+        () => {},
+        'session-1',
+        'msg-1',
+      );
+
+      expect((mockBaseUrlService as unknown as { envProviderKey: string }).envProviderKey).toBe(initialProviderKey);
+    });
+  });
+
+  describe('getActiveModels()', () => {
+    it('loads models for the effective runtime config', async () => {
+      credentialsService.getActiveProviderConfig.mockResolvedValue(null);
+      credentialsService.getEnvModelOverride.mockResolvedValue('env-override-model');
+      credentialsService.getModelsForProviderConfig.mockResolvedValue(['env-override-model']);
+
+      await expect(service.getActiveModels()).resolves.toEqual(['env-override-model']);
+      expect(credentialsService.getModelsForProviderConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'openai', model: 'env-override-model' }),
+      );
+    });
+  });
+
+  describe('updateActiveModel()', () => {
+    it('updates the active DB credential when one is selected', async () => {
+      credentialsService.getActiveCredentialId.mockResolvedValue('cred-1');
+      credentialsService.getActiveProviderConfig.mockResolvedValue({
+        provider: 'openai',
+        apiKey: 'db-api-key',
+        model: 'gpt-4o-next',
+        baseUrl: 'https://db.openai.com/v1',
+      });
+
+      const config = await service.updateActiveModel('gpt-4o-next');
+
+      expect(credentialsService.updateModel).toHaveBeenCalledWith('cred-1', 'gpt-4o-next');
+      expect(credentialsService.setEnvModelOverride).not.toHaveBeenCalled();
+      expect(config.model).toBe('gpt-4o-next');
+      expect(config.source).toBe('db');
+    });
+
+    it('stores an env model override when no DB credential is active', async () => {
+      credentialsService.getActiveCredentialId.mockResolvedValue(null);
+      credentialsService.getActiveProviderConfig.mockResolvedValue(null);
+      credentialsService.getEnvModelOverride.mockResolvedValue('mimo-v2-thinking');
+
+      const config = await service.updateActiveModel('mimo-v2-thinking');
+
+      expect(credentialsService.setEnvModelOverride).toHaveBeenCalledWith('mimo-v2-thinking');
+      expect(credentialsService.updateModel).not.toHaveBeenCalled();
+      expect(config.model).toBe('mimo-v2-thinking');
+      expect(config.source).toBe('env');
     });
   });
 

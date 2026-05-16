@@ -70,4 +70,18 @@ describe('ChatInput', () => {
 
     expect(onSend).toHaveBeenCalledTimes(2);
   });
+
+  it('REGRESSION: shows stop button while the local send lock is active before parent streaming state propagates', () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    render(<ChatInput onSend={onSend} disabled={false} isStreaming={false} onStop={onStop} />);
+
+    const input = screen.getByTestId('chat-input');
+    fireEvent.change(input, { target: { value: 'first prompt' } });
+    fireEvent.click(screen.getByTestId('chat-send-btn'));
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('chat-stop-btn')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-send-btn')).not.toBeInTheDocument();
+  });
 });

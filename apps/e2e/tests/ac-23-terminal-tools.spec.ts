@@ -1,10 +1,9 @@
 import { test, expect } from '@playwright/test';
-
-const BASE = 'http://localhost:3016';
+import { API_BASE } from './helpers/test-config';
 
 test.describe('AC-23: Terminal tools registration', () => {
   test('all 4 terminal tools are registered', async ({ request }) => {
-    const res = await request.get(`${BASE}/api/tools`);
+    const res = await request.get(`${API_BASE}/tools`);
     expect(res.ok()).toBe(true);
     const tools: { name: string; requiresConfirmation: boolean }[] = await res.json();
     const names = tools.map((t) => t.name);
@@ -16,7 +15,7 @@ test.describe('AC-23: Terminal tools registration', () => {
   });
 
   test('terminal_spawn and terminal_kill require confirmation', async ({ request }) => {
-    const res = await request.get(`${BASE}/api/tools`);
+    const res = await request.get(`${API_BASE}/tools`);
     const tools: { name: string; requiresConfirmation: boolean }[] = await res.json();
 
     const spawn = tools.find((t) => t.name === 'terminal_spawn');
@@ -26,7 +25,7 @@ test.describe('AC-23: Terminal tools registration', () => {
   });
 
   test('terminal_list and terminal_output do not require confirmation', async ({ request }) => {
-    const res = await request.get(`${BASE}/api/tools`);
+    const res = await request.get(`${API_BASE}/tools`);
     const tools: { name: string; requiresConfirmation: boolean }[] = await res.json();
 
     const list = tools.find((t) => t.name === 'terminal_list');

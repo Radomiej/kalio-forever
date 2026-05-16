@@ -1,10 +1,13 @@
 import { useState, useCallback } from 'react';
 
 export function useTileIcons(_type: string) {
+  void _type;
   const [icons, setIcons] = useState<Record<string, string>>({});
   const [generating, setGenerating] = useState<string | null>(null);
 
   const generateIcon = useCallback(async (id: string, _name: string, _description?: string) => {
+    void _name;
+    void _description;
     setGenerating(id);
     // Placeholder for icon generation
     // In the full implementation, this would call an API to generate icons

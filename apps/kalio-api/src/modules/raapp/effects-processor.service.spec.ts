@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
+import vm from 'node:vm';
+import { ConfigService } from '@nestjs/config';
 import { EffectsProcessorService } from './effects-processor.service';
 import { NativeSystemRegistry } from './native/native-system-registry.service';
 import { AuditService } from '../chat/audit.service';
@@ -9,6 +11,23 @@ const makeAuditService = () => ({
   log: vi.fn().mockResolvedValue(undefined),
 });
 
+async function createEffectsProcessorFixture(timeoutMs = 1000) {
+  const module: TestingModule = await Test.createTestingModule({
+    providers: [
+      EffectsProcessorService,
+      NativeSystemRegistry,
+      { provide: AuditService, useFactory: makeAuditService },
+      { provide: ConfigService, useValue: { get: vi.fn().mockReturnValue(timeoutMs) } },
+    ],
+  }).compile();
+
+  return {
+    service: module.get(EffectsProcessorService),
+    registry: module.get(NativeSystemRegistry),
+    audit: module.get(AuditService) as unknown as ReturnType<typeof makeAuditService>,
+  };
+}
+
 describe('EffectsProcessorService', () => {
   let service: EffectsProcessorService;
   let registry: NativeSystemRegistry;
@@ -16,17 +35,7 @@ describe('EffectsProcessorService', () => {
   const ctx: NativeSessionContext = { sessionId: 'sess-123' };
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        EffectsProcessorService,
-        NativeSystemRegistry,
-        { provide: AuditService, useFactory: makeAuditService },
-      ],
-    }).compile();
-
-    service = module.get(EffectsProcessorService);
-    registry = module.get(NativeSystemRegistry);
-    audit = module.get(AuditService) as unknown as ReturnType<typeof makeAuditService>;
+    ({ service, registry, audit } = await createEffectsProcessorFixture());
   });
 
   describe('empty / null systems.yml', () => {
@@ -74,6 +83,56 @@ systems:
       const { output } = await service.processSystemsYaml(yaml, {}, ctx);
       // Should not throw — result is undefined
       expect(output['result']).toBeUndefined();
+    });
+
+    it('uses VM timeout from config', async () => {
+      const timedFixture = await createEffectsProcessorFixture(7);
+      const runSpy = vi.spyOn(vm, 'runInContext');
+      const yaml = `
+systems:
+  - id: s1
+    effects:
+      - assign:
+          target: output.result
+          expression: "1 + 1"
+`;
+
+      try {
+        await timedFixture.service.processSystemsYaml(yaml, {}, ctx);
+
+        expect(runSpy).toHaveBeenCalledWith(
+          '__result = (1 + 1)',
+          expect.any(Object),
+          expect.objectContaining({ timeout: 7 }),
+        );
+      } finally {
+        runSpy.mockRestore();
+      }
+    });
+
+    it('caps oversized VM timeouts from config to a safe maximum', async () => {
+      const timedFixture = await createEffectsProcessorFixture(999_999_999);
+      const runSpy = vi.spyOn(vm, 'runInContext');
+      const yaml = `
+systems:
+  - id: s1
+    effects:
+      - assign:
+          target: output.result
+          expression: "1 + 1"
+`;
+
+      try {
+        await timedFixture.service.processSystemsYaml(yaml, {}, ctx);
+
+        expect(runSpy).toHaveBeenCalledWith(
+          '__result = (1 + 1)',
+          expect.any(Object),
+          expect.objectContaining({ timeout: 30_000 }),
+        );
+      } finally {
+        runSpy.mockRestore();
+      }
     });
   });
 
@@ -341,6 +400,125 @@ systems:
       const { output } = await service.processSystemsYaml(yaml, {}, ctx);
       // The set effect after unknown should still execute
       expect(output['ok']).toBe(true);
+    });
+  });
+
+  // ── ECS effects ─────────────────────────────────────────────────────────────
+
+  describe('ECS — create_entity / set_field / delete_entity', () => {
+    it('creates an entity and includes it in the entities snapshot', async () => {
+      const yaml = `
+systems:
+  - id: s1
+    effects:
+      - create_entity:
+          id: player
+          components:
+            stats:
+              hp: 100
+              attack: 15
+`;
+      const entityStore = new (await import('./entity-store').then((m) => m.EntityStore))();
+      const { entities } = await service.processSystemsYaml(yaml, {}, ctx, entityStore);
+      expect(entities).toHaveLength(1);
+      expect(entities[0].id).toBe('player');
+      expect(entities[0].components['stats']['hp']).toBe(100);
+    });
+
+    it('set_field updates a component field on an existing entity', async () => {
+      const yaml = `
+systems:
+  - id: setup
+    effects:
+      - create_entity:
+          id: dragon
+          components:
+            stats:
+              hp: 200
+  - id: damage
+    effects:
+      - set_field:
+          entity_id: dragon
+          component: stats
+          field: hp
+          value: 183
+`;
+      const entityStore = new (await import('./entity-store').then((m) => m.EntityStore))();
+      const { entities } = await service.processSystemsYaml(yaml, {}, ctx, entityStore);
+      const dragon = entities.find((e) => e.id === 'dragon');
+      expect(dragon?.components['stats']['hp']).toBe(183);
+    });
+
+    it('delete_entity removes the entity', async () => {
+      const yaml = `
+systems:
+  - id: setup
+    effects:
+      - create_entity:
+          id: goblin
+  - id: remove
+    effects:
+      - delete_entity:
+          id: goblin
+`;
+      const entityStore = new (await import('./entity-store').then((m) => m.EntityStore))();
+      const { entities } = await service.processSystemsYaml(yaml, {}, ctx, entityStore);
+      expect(entities.find((e) => e.id === 'goblin')).toBeUndefined();
+    });
+
+    it('query loop runs effects once per matching entity', async () => {
+      const yaml = `
+systems:
+  - id: setup
+    effects:
+      - create_entity:
+          id: warrior
+          components:
+            combat: {}
+      - create_entity:
+          id: mage
+          components:
+            combat: {}
+      - create_entity:
+          id: merchant
+          components:
+            shop: {}
+  - id: buff-fighters
+    query: [combat]
+    effects:
+      - set_field:
+          entity_id: entity_id
+          component: combat
+          field: buffed
+          value: true
+`;
+      const entityStore = new (await import('./entity-store').then((m) => m.EntityStore))();
+      const { entities } = await service.processSystemsYaml(yaml, {}, ctx, entityStore);
+      const warrior = entities.find((e) => e.id === 'warrior');
+      const mage = entities.find((e) => e.id === 'mage');
+      const merchant = entities.find((e) => e.id === 'merchant');
+      // warrior and mage have combat — should be buffed
+      expect(warrior?.components['combat']['buffed']).toBe(true);
+      expect(mage?.components['combat']['buffed']).toBe(true);
+      // merchant has no combat component — query should not match
+      expect(merchant?.components['combat']).toBeUndefined();
+    });
+
+    it('VM_MATH is available in expressions — floor, max, min', async () => {
+      const yaml = `
+systems:
+  - id: s1
+    effects:
+      - assign:
+          target: output.damage
+          expression: "max(1, 15 - 8)"
+      - assign:
+          target: output.floored
+          expression: "floor(3.9)"
+`;
+      const { output } = await service.processSystemsYaml(yaml, {}, ctx);
+      expect(output['damage']).toBe(7);
+      expect(output['floored']).toBe(3);
     });
   });
 });

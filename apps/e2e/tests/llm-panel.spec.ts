@@ -8,11 +8,33 @@ async function openLLMPanel(page: Page) {
   await expect(page.getByTestId('settings-modal')).toBeVisible();
   await page.getByTestId('settings-tab-llm').click();
   await expect(page.getByTestId('llm-panel')).toBeVisible();
+  await expect(page.getByTestId('add-provider-btn')).toBeVisible({ timeout: 10_000 });
 }
 
 // ── Helper: clean up a credential by id via API ───────────────────────────────
 async function deleteCredential(page: Page, id: string) {
   await page.request.delete(`${API_BASE}/credentials/${id}`);
+}
+
+async function getActiveCredentialId(page: Page): Promise<string | null> {
+  const response = await page.request.get(`${API_BASE}/credentials/active`);
+  const payload = await response.json() as { credentialId?: string | null };
+  return payload.credentialId ?? null;
+}
+
+async function restoreActiveCredential(page: Page, credentialId: string | null) {
+  if (credentialId) {
+    await page.request.put(`${API_BASE}/credentials/active/${credentialId}`);
+    return;
+  }
+
+  await page.request.delete(`${API_BASE}/credentials/active`);
+}
+
+async function getRuntimeModel(page: Page): Promise<string> {
+  const response = await page.request.get(`${API_BASE}/llm/config`);
+  const payload = await response.json() as { model?: string };
+  return payload.model ?? '';
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -51,6 +73,7 @@ test.describe('LLMPanel E2E', () => {
     await page.getByTestId('add-provider-btn').click();
     await page.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.getByTestId('add-provider-form')).not.toBeVisible();
+    await expect(page.getByTestId('add-provider-btn')).toBeVisible();
     expect(await page.getByTestId(/^provider-row-/).count()).toBe(initialRows);
   });
 
@@ -92,6 +115,43 @@ test.describe('LLMPanel E2E', () => {
     }
   });
 
+  test('can switch back to the env fallback after activating a saved credential', async ({ page }) => {
+    const previousActiveId = await getActiveCredentialId(page);
+    await page.request.delete(`${API_BASE}/credentials/active`);
+    const envModel = await getRuntimeModel(page);
+
+    const res = await page.request.post(`${API_BASE}/credentials`, {
+      data: {
+        name: 'E2E Env Fallback Test',
+        provider: 'ollama',
+        apiKey: 'local',
+        model: 'e2e-saved-model-switch-check',
+      },
+    });
+    const cred = await res.json() as { id: string };
+
+    try {
+      await openLLMPanel(page);
+      const row = page.getByTestId(`provider-row-${cred.id}`);
+      await expect(row).toBeVisible();
+
+      await row.locator('button').first().click();
+      await expect(row.getByText('active')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('model-selector')).toHaveValue('e2e-saved-model-switch-check');
+
+      const envFallbackRow = page.getByTestId('provider-row-env');
+      await expect(envFallbackRow).toBeVisible();
+      await page.getByTestId('provider-activate-env').click();
+
+      await expect(envFallbackRow).toContainText('active', { timeout: 5000 });
+      await expect(row).not.toContainText('active');
+      await expect(page.getByTestId('model-selector')).toHaveValue(envModel);
+    } finally {
+      await restoreActiveCredential(page, previousActiveId);
+      await deleteCredential(page, cred.id);
+    }
+  });
+
   test('deleting a credential removes it from the list', async ({ page }) => {
     const res = await page.request.post(`${API_BASE}/credentials`, {
       data: { name: 'E2E Delete Test', provider: 'ollama', apiKey: 'local', model: 'llama3.2' },
@@ -100,7 +160,7 @@ test.describe('LLMPanel E2E', () => {
 
     await openLLMPanel(page);
     const row = page.getByTestId(`provider-row-${cred.id}`);
-    await expect(row).toBeVisible();
+    await expect(row).toBeVisible({ timeout: 10_000 });
 
     // Click the trash/delete button (last button in row)
     await row.locator('button').last().click();

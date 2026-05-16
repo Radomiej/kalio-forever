@@ -5,10 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import extractZip from 'extract-zip';
-import archiver from 'archiver';
 import yaml from 'js-yaml';
 import type { RAAppBlock, RAAppResult } from '@kalio/types';
-import { RAAppSandboxService } from './raapp-sandbox.service';
 import { compileGui } from './gui/guiDslExpand';
 import { GuiParseError } from './gui/guiDslParser';
 
@@ -63,6 +61,17 @@ function hasCatalogEntries(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+function getRenderableScore(app: LoadedRAApp): number {
+  let score = 0;
+  if (app.htmlContent) score += 1;
+  if (app.guiContent) score += 1;
+  return score;
+}
+
+function isDirectoryOrigin(app: LoadedRAApp): boolean {
+  return !app.zipPath.endsWith('.zip');
 }
 
 function cleanTitle(value: string): string {
@@ -120,10 +129,7 @@ export class RAAppService implements OnModuleInit {
   private readonly coreDir: string;
   private readonly userDir: string;
 
-  constructor(
-    private readonly sandbox: RAAppSandboxService,
-    private readonly config: ConfigService,
-  ) {
+  constructor(private readonly config: ConfigService) {
     const configuredBase = this.config.get<string | undefined>('RA_APPS_PATH', undefined);
     const runtimeBase = path.resolve(configuredBase ?? DEFAULT_RUNTIME_RA_APPS_PATH);
 
@@ -148,6 +154,44 @@ export class RAAppService implements OnModuleInit {
     await fs.mkdir(this.userDir, { recursive: true });
     await this.loadFromDir(this.coreDir, 'core');
     await this.loadFromDir(this.userDir, 'user');
+  }
+
+  private storeLoadedApp(app: LoadedRAApp): LoadedRAApp {
+    const existing = this.loaded.get(app.id);
+    if (!existing) {
+      this.loaded.set(app.id, app);
+      return app;
+    }
+
+    const existingScore = getRenderableScore(existing);
+    const incomingScore = getRenderableScore(app);
+
+    if (incomingScore < existingScore) {
+      this.logger.warn(
+        `[RAAppService] Keeping existing RA-App ${app.id}; duplicate ${app.zipPath} is less renderable (${incomingScore} < ${existingScore})`,
+      );
+      return existing;
+    }
+
+    if (incomingScore === existingScore && isDirectoryOrigin(existing) && !isDirectoryOrigin(app)) {
+      this.logger.warn(
+        `[RAAppService] Keeping unpacked RA-App ${app.id}; duplicate archive ${app.zipPath} would overwrite equivalent content`,
+      );
+      return existing;
+    }
+
+    if (incomingScore > existingScore || !isDirectoryOrigin(existing) && isDirectoryOrigin(app)) {
+      this.logger.warn(
+        `[RAAppService] Replacing duplicate RA-App ${app.id} with ${app.zipPath}`,
+      );
+    } else if (incomingScore === existingScore) {
+      this.logger.warn(
+        `[RAAppService] Replacing duplicate RA-App ${app.id} with ${app.zipPath} (equivalent renderable content)` ,
+      );
+    }
+
+    this.loaded.set(app.id, app);
+    return app;
   }
 
   private async loadFromDir(dir: string, source: 'core' | 'user'): Promise<void> {
@@ -238,11 +282,11 @@ export class RAAppService implements OnModuleInit {
       updatedAt: stats.mtimeMs,
     };
 
-    this.loaded.set(meta.id, app);
+    const storedApp = this.storeLoadedApp(app);
     this.logger.log(
-      `RA-App loaded: ${meta.id} v${meta.version ?? '?'} (${source}) html=${htmlContent != null} gui=${guiContent != null}`,
+      `RA-App loaded: ${storedApp.id} v${storedApp.meta.version ?? '?'} (${source}) html=${storedApp.htmlContent != null} gui=${storedApp.guiContent != null}`,
     );
-    return app;
+    return storedApp;
   }
 
   private async loadZip(zipPath: string, source: 'core' | 'user'): Promise<LoadedRAApp> {
@@ -270,93 +314,40 @@ export class RAAppService implements OnModuleInit {
     return this.loadZip(zipPath, 'user');
   }
 
-  async saveGeneratedApp(input: SaveGeneratedAppInput): Promise<LoadedRAApp> {
-    const sessionPart = input.sessionId.trim().slice(0, 8) || 'session';
-    const appId = `generated-${sessionPart}-${randomUUID().slice(0, 8)}`;
-    const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
-    const zipPath = path.join(this.userDir, `${appId}.zip`);
-
-    try {
-      await fs.mkdir(tmpDir, { recursive: true });
-
-      const meta: RAAppMeta = {
-        id: appId,
-        name: deriveGeneratedAppName(input),
-        description: 'Auto-saved by raapp_create tool',
-        version: '1.0.0',
-        tags: ['generated', 'raapp-create'],
-        expose_as_tool: false,
-        execution: {
-          render_as: input.mode,
-        },
-      };
-
-      await fs.writeFile(path.join(tmpDir, 'meta.yml'), yaml.dump(meta), 'utf-8');
-
-      if (input.type === 'gui') {
-        await fs.writeFile(path.join(tmpDir, 'ui.gui'), input.content, 'utf-8');
-      } else {
-        await fs.writeFile(path.join(tmpDir, 'main.html'), input.content, 'utf-8');
-      }
-
-      await new Promise<void>((resolve, reject) => {
-        const output = fsSync.createWriteStream(zipPath);
-        const arc = archiver('zip', { zlib: { level: 6 } });
-        output.on('close', resolve);
-        output.on('error', reject);
-        arc.on('error', reject);
-        arc.pipe(output);
-        arc.directory(tmpDir, false);
-        void arc.finalize();
-      });
-
-      const loaded = await this.loadZip(zipPath, 'user');
-      this.logger.log(`[RAAppService] Saved generated app ${loaded.id} (${input.type}, mode=${input.mode})`);
-      return loaded;
-    } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true });
-    }
-  }
-
   async delete(id: string): Promise<void> {
     const app = this.loaded.get(id);
     if (!app) return;
     if (app.source === 'core') throw new Error(`Cannot delete core RA-App: ${id}`);
-    await fs.unlink(app.zipPath);
+    await fs.rm(app.zipPath, { recursive: true, force: true });
     this.loaded.delete(id);
   }
 
-  async executeSystems(systemsContent: string, inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
+  /**
+   * Extract the source files from a stored RA-App ZIP and return them as
+   * a string record.  Only the well-known text files are included.
+   */
+  async getSourceFiles(id: string): Promise<Record<string, string>> {
+    const app = this.loaded.get(id);
+    if (!app) throw new Error(`RA-App not found: ${id}`);
+
+    const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
     try {
-      const parsed = yaml.load(systemsContent) as {
-        systems?: Array<{
-          id: string;
-          effects?: Array<{
-            assign?: { target: string; expression: string };
-          }>;
-        }>;
-      };
-      const systems = parsed?.systems ?? [];
-
-      let jsCode = `const input = ${JSON.stringify(inputs)};\nconst output = {};\n`;
-      for (const system of systems) {
-        for (const effect of system.effects ?? []) {
-          const assign = effect.assign;
-          if (!assign) continue;
-          const targetKey = assign.target.replace(/^output\./, '');
-          const expr = (assign.expression ?? '').replace(/\s+/g, ' ').trim();
-          jsCode += `output['${targetKey}'] = ${expr};\n`;
-        }
+      if (app.zipPath.endsWith('.zip')) {
+        await extractZip(app.zipPath, { dir: tmpDir });
+      } else {
+        // Directory-based app — copy directly
+        await fs.cp(app.zipPath, tmpDir, { recursive: true });
       }
-      jsCode += 'return JSON.stringify(output);';
-
-      const result = await this.sandbox.execute(jsCode);
-      return JSON.parse(result) as Record<string, unknown>;
-    } catch (err) {
-      this.logger.warn(
-        `[RAAppService] System execution error: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return {};
+      const candidates = ['meta.yml', 'systems.yml', 'ui.gui', 'ui.yml', 'tests.yml', 'components.yml'];
+      const result: Record<string, string> = {};
+      for (const name of candidates) {
+        try {
+          result[name] = await fs.readFile(path.join(tmpDir, name), 'utf-8');
+        } catch { /* file absent — skip */ }
+      }
+      return result;
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
     }
   }
 

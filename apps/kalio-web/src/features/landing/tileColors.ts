@@ -27,7 +27,8 @@ function hashString(str: string): number {
 }
 
 export function tileColorFromId(id: string): { bg: string; text: string } {
-  const index = hashString(id) % METRO_PALETTE.length;
+  const safeId = typeof id === 'string' ? id : '';
+  const index = hashString(safeId) % METRO_PALETTE.length;
   return METRO_PALETTE[index];
 }
 

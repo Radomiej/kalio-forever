@@ -1,10 +1,9 @@
 import { test, expect } from '@playwright/test';
-
-const BASE = 'http://localhost:3016';
+import { API_BASE } from './helpers/test-config';
 
 test.describe('AC-24: All tools available by default (empty skills)', () => {
   test('GET /api/tools returns at least 17 tools', async ({ request }) => {
-    const res = await request.get(`${BASE}/api/tools`);
+    const res = await request.get(`${API_BASE}/tools`);
     expect(res.ok()).toBe(true);
     const tools: { name: string }[] = await res.json();
     // 11 original + 2 file search + 4 terminal = 17
@@ -12,7 +11,7 @@ test.describe('AC-24: All tools available by default (empty skills)', () => {
   });
 
   test('all expected tool names are present', async ({ request }) => {
-    const res = await request.get(`${BASE}/api/tools`);
+    const res = await request.get(`${API_BASE}/tools`);
     const tools: { name: string }[] = await res.json();
     const names = tools.map((t) => t.name);
 

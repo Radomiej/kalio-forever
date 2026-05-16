@@ -62,6 +62,7 @@ async function emitEvent(event: string, payload: unknown) {
 
 // Spies declared via vi.hoisted() so they're initialized before vi.mock factories run
 const mockSendMessage = vi.hoisted(() => vi.fn());
+const mockConversationFilesBar = vi.hoisted(() => vi.fn());
 
 // ── eventBus mock ─────────────────────────────────────────────────────────────
 vi.mock('../../services/eventBus', () => ({
@@ -164,6 +165,9 @@ const flushStreamingChunks = vi.fn();
 let mockActiveTurnId: string | null = null;
 let mockActiveSessionId = 'session-1';
 let mockPendingMessage: string | null = null;
+let mockStreamingChunks: Record<string, string> = {};
+let mockThinkingChunks: Record<string, string> = {};
+let mockChunkSessionIds: Record<string, string> = {};
 const mockSetPendingMessage = vi.fn();
 const mockSetPendingRAAppId = vi.fn();
 
@@ -214,9 +218,9 @@ vi.mock('../../store/sessionStore', () => ({
         setPendingMessage: mockSetPendingMessage,
         setPendingRAAppId: mockSetPendingRAAppId,
         updateSession: vi.fn(),
-        streamingChunks: {},
-        thinkingChunks: {},
-        chunkSessionIds: {},
+        streamingChunks: mockStreamingChunks,
+        thinkingChunks: mockThinkingChunks,
+        chunkSessionIds: mockChunkSessionIds,
         finalizeChunk: vi.fn(),
         flushStreamingChunks,
         getSessionActiveTurnId: () => mockActiveTurnId,
@@ -256,7 +260,12 @@ vi.mock('./ToolActivityRow', () => ({ ToolActivityRow: () => null }));
 vi.mock('./ChatInput', () => ({ ChatInput: () => null }));
 vi.mock('./TokenBadge', () => ({ TokenBadge: () => null }));
 vi.mock('./ContextStats', () => ({ ContextStats: () => null }));
-vi.mock('../vfs/ConversationFilesBar', () => ({ ConversationFilesBar: () => null }));
+vi.mock('../vfs/ConversationFilesBar', () => ({
+  ConversationFilesBar: (props: { sessionId: string; refreshSignal: number }) => {
+    mockConversationFilesBar(props);
+    return null;
+  },
+}));
 vi.mock('./AgentTurnBubble', () => ({ AgentTurnBubble: () => null }));
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -271,7 +280,11 @@ beforeEach(() => {
   mockActiveTurnId = null;
   mockActiveSessionId = 'session-1';
   mockPendingMessage = null;
+  mockStreamingChunks = {};
+  mockThinkingChunks = {};
+  mockChunkSessionIds = {};
   agentStoreState.activeAgentLoops = {};
+  agentStoreState.toolActivities = [];
   vi.clearAllMocks();
 });
 
@@ -397,6 +410,66 @@ describe('ChatInterface event wiring', () => {
     }));
   });
 
+  it.each(['image_generate', 'image_edit'])(
+    'refreshes the VFS file bar after successful %s results',
+    async (toolName) => {
+      await renderChatInterface();
+
+      expect(mockConversationFilesBar).toHaveBeenCalled();
+      expect(mockConversationFilesBar.mock.lastCall?.[0]).toMatchObject({
+        sessionId: 'session-1',
+        refreshSignal: 0,
+      });
+
+      agentStoreState.toolActivities = [{ callId: `call-${toolName}`, toolName }];
+
+      await emitEvent('tool:result', {
+        callId: `call-${toolName}`,
+        status: 'success',
+        data: { output_type: 'image', path: 'images/hero.png' },
+        sessionId: 'session-1',
+      });
+
+      expect(mockConversationFilesBar.mock.lastCall?.[0]).toMatchObject({
+        sessionId: 'session-1',
+        refreshSignal: 1,
+      });
+    },
+  );
+
+  it('REGRESSION: refreshes the VFS file bar after a successful shared-mode subagent result', async () => {
+    await renderChatInterface();
+
+    expect(mockConversationFilesBar).toHaveBeenCalled();
+    expect(mockConversationFilesBar.mock.lastCall?.[0]).toMatchObject({
+      sessionId: 'session-1',
+      refreshSignal: 0,
+    });
+
+    agentStoreState.toolActivities = [{ callId: 'call-subagent-shared', toolName: 'run_subagent' }];
+
+    await emitEvent('tool:result', {
+      callId: 'call-subagent-shared',
+      status: 'success',
+      sessionId: 'session-1',
+      data: {
+        childSessionId: 'child-session',
+        parentSessionId: 'session-1',
+        vfsMode: 'shared',
+        vfsSessionId: 'session-1',
+        copiedFiles: [],
+        result: 'Created shared files',
+        taskId: 'task-1',
+        durationMs: 1234,
+      },
+    });
+
+    expect(mockConversationFilesBar.mock.lastCall?.[0]).toMatchObject({
+      sessionId: 'session-1',
+      refreshSignal: 1,
+    });
+  });
+
   it('session:created adds subagent session to the store', async () => {
     await renderChatInterface();
 
@@ -406,12 +479,43 @@ describe('ChatInterface event wiring', () => {
         title: 'Sub-agent: demo',
         kind: 'subagent',
         parentSessionId: 'session-1',
-        interlocutorLabel: 'Master agent',
         createdAt: 1,
         updatedAt: 1,
       });
 
     expect(addSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'child-session', kind: 'subagent' }));
+  });
+
+  it('ignores tool:result streaming state changes from a different session', async () => {
+    mockActiveSessionId = 'session-1';
+    await renderChatInterface();
+    setStreaming.mockClear();
+
+    await emitEvent('tool:result', {
+      callId: 'call-background',
+      status: 'success',
+      data: { ok: true },
+      sessionId: 'session-2',
+    });
+
+    expect(setStreaming).not.toHaveBeenCalled();
+    expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-2',
+      toolCallId: 'call-background',
+    }));
+  });
+
+  it('ignores chat:complete streaming state changes from a different session', async () => {
+    mockActiveSessionId = 'session-1';
+    await renderChatInterface();
+    setStreaming.mockClear();
+
+    await emitEvent('chat:complete', {
+      sessionId: 'session-2',
+      messageId: 'msg-background',
+    });
+
+    expect(setStreaming).not.toHaveBeenCalled();
   });
 });
 
@@ -954,5 +1058,28 @@ describe('REGRESSION: pendingConfirmations cleared on agent:done', () => {
     await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
 
     expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+  });
+
+  it('agent:done for the active session stops streaming even when chat:complete never arrived', async () => {
+    await renderChatInterface();
+    setStreaming.mockClear();
+
+    await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
+
+    expect(setStreaming).toHaveBeenCalledWith(false);
+  });
+
+  it('agent:done flushes pending chunks and stops streaming when chat:complete never arrived', async () => {
+    mockStreamingChunks = { 'msg-1': 'partial' };
+    mockChunkSessionIds = { 'msg-1': 'session-1' };
+
+    await renderChatInterface();
+    setStreaming.mockClear();
+    flushStreamingChunks.mockClear();
+
+    await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
+
+    expect(flushStreamingChunks).toHaveBeenCalledWith('session-1');
+    expect(setStreaming).toHaveBeenCalledWith(false);
   });
 });

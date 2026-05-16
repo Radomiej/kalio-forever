@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import type { AgentRunContext, LLMMessage, SubagentCopiedFile, ToolMeta } from '@kalio/types';
+import type { AgentRunContext, SubagentCopiedFile, ToolMeta } from '@kalio/types';
 import { TurnState } from './turn-state';
 import { StreamProcessorService } from './stream-processor.service';
 import { ToolDispatchService } from './tool-dispatch.service';
@@ -27,7 +27,7 @@ If a tool returns download URLs or other directly usable URLs for created artifa
 If a tool partially succeeds (for example, it saves a file but its textual result is weak), inspect the VFS if needed and still produce a final summary.
 Do not ask clarifying questions. Work autonomously end-to-end.`;
 
-type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number };
+type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number; autoApproveTools?: string[] };
 
 function abortReason(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error('Sub-agent execution aborted');
@@ -88,6 +88,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       vfsMode: request.vfsMode,
       vfsSessionId,
       label: 'Sub-agent',
+      autoApproveTools: request.autoApproveTools,
       subagentDepth,
     };
 
@@ -99,7 +100,6 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           kind: 'subagent',
           parentSessionId: request.parentSessionId,
           parentToolCallId: request.parentToolCallId,
-          interlocutorLabel: 'Master agent',
         });
 
     if (childSession.kind !== 'subagent') {
@@ -246,14 +246,17 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         emit: params.emit ?? (() => undefined),
         agentRun: params.agentRun,
       };
-      const rawHistory = await this.sessionManager.loadHistory(params.childSessionId);
-      const history: LLMMessage[] = [{ role: 'system', content: systemPrompt }, ...rawHistory];
+      const { history } = await this.sessionManager.loadHistoryForLLM(params.childSessionId, {
+        systemPrompt,
+        toolMetas: params.tools,
+      });
 
       for await (const chunk of this.llmSource.stream({
         messages: history,
         tools: params.tools,
         sessionId: params.childSessionId,
         messageId,
+        abortSignal: params.abortSignal,
       })) {
         if (params.abortSignal.aborted) {
           throw abortReason(params.abortSignal);

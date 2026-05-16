@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RunRaAppTool, ListRaAppsTool, RaAppCreateTool } from './raapp.tools';
 import type { RAAppService } from '../../raapp/raapp.service';
 import type { LoadedRAApp } from '../../raapp/raapp.service';
+import type { RAAppVersioningService } from '../../raapp/raapp-versioning.service';
 import type { ToolCallRequest } from '@kalio/types';
 import type { EffectsProcessorService } from '../../raapp/effects-processor.service';
 import type { RAAppHITLService } from '../../raapp/raapp-hitl.service';
@@ -54,11 +55,11 @@ describe('RunRaAppTool', () => {
     raapp = {
       getById: vi.fn(),
       getAll: vi.fn().mockReturnValue([]),
+      init: vi.fn().mockResolvedValue(undefined),
       execute: vi.fn(),
-      executeSystems: vi.fn().mockResolvedValue({}),
     };
     const mockEffectsProcessor = {
-      processSystemsYaml: vi.fn().mockResolvedValue({ output: {}, pendingApprovals: [] }),
+      processSystemsYaml: vi.fn().mockResolvedValue({ output: {}, pendingApprovals: [], entities: [] }),
     } as unknown as EffectsProcessorService;
     const mockHITL = {
       savePendingApprovals: vi.fn().mockResolvedValue([]),
@@ -84,6 +85,60 @@ describe('RunRaAppTool', () => {
 
     expect(result.status).toBe('error');
     expect(result.message as string).toContain('no renderable content');
+  });
+
+  it('reloads the RA-App catalog once before failing missing-content apps', async () => {
+    const staleApp = makeApp({
+      id: 'visual-calculator',
+      htmlContent: null,
+      guiContent: null,
+      systemsContent: 'systems:\n  - id: calc',
+    });
+    const refreshedApp = makeApp({
+      id: 'visual-calculator',
+      htmlContent: null,
+      guiContent: 'vbox { label { text = "[output.result]" } }',
+      systemsContent: 'systems:\n  - id: calc',
+      appMode: 'display',
+    });
+    (raapp.getById as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(staleApp)
+      .mockReturnValueOnce(refreshedApp);
+    (raapp.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'ready',
+      renderedContent: '{"nodes":[],"data":{}}',
+    });
+
+    const result = await tool.execute(makeRequest({ id: 'visual-calculator', inputs: { a: 12, b: 4, operation: 'add' } })) as Record<string, unknown>;
+
+    expect(raapp.init).toHaveBeenCalledOnce();
+    expect(result.status).toBe('ready');
+    expect(result.type).toBe('gui');
+  });
+
+  it('returns the existing no-renderable-content error when catalog reload itself fails', async () => {
+    (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeApp({ id: 'visual-calculator', htmlContent: null, guiContent: null }),
+    );
+    (raapp.init as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('disk busy'));
+
+    const result = await tool.execute(makeRequest({ id: 'visual-calculator' })) as Record<string, unknown>;
+
+    expect(raapp.init).toHaveBeenCalledOnce();
+    expect(result.status).toBe('error');
+    expect(result.message).toBe('RA-App "visual-calculator" has no renderable content (missing main.html, index.html, or ui.gui in the zip).');
+  });
+
+  it('returns a disappeared-after-reload error when catalog reload succeeds but the app is gone', async () => {
+    (raapp.getById as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(makeApp({ id: 'visual-calculator', htmlContent: null, guiContent: null }))
+      .mockReturnValueOnce(undefined);
+
+    const result = await tool.execute(makeRequest({ id: 'visual-calculator' })) as Record<string, unknown>;
+
+    expect(raapp.init).toHaveBeenCalledOnce();
+    expect(result.status).toBe('error');
+    expect(result.message).toBe('RA-App "visual-calculator" disappeared after catalog reload. Please try again.');
   });
 
   it('returns ready block with correct structure when app executes successfully', async () => {
@@ -150,7 +205,7 @@ describe('RunRaAppTool', () => {
     // effectsProcessor mock is set up in beforeEach to return { output: {}, pendingApprovals: [] }
     // Override with a result for this test
     const mockEffectsProcessor = {
-      processSystemsYaml: vi.fn().mockResolvedValue({ output: { result: 8 }, pendingApprovals: [] }),
+      processSystemsYaml: vi.fn().mockResolvedValue({ output: { result: 8 }, pendingApprovals: [], entities: [] }),
     } as unknown as EffectsProcessorService;
     const mockHITL = {
       savePendingApprovals: vi.fn().mockResolvedValue([]),
@@ -164,6 +219,7 @@ describe('RunRaAppTool', () => {
       app.systemsContent,
       { a: 5, b: 3 },
       expect.objectContaining({ sessionId: expect.any(String) }),
+      expect.any(Object), // EntityStore instance
     );
     expect(raapp.execute).toHaveBeenCalledWith(
       { type: 'gui', mode: 'display', content: app.guiContent },
@@ -218,16 +274,34 @@ describe('REGRESSION: ra-apps persona skills include run_raapp and list_raapps',
 });
 
 describe('RaAppCreateTool', () => {
-  it('forwards optional title when saving generated app', async () => {
+  it('publishes optional-title apps through versioned release storage', async () => {
     const execute = vi.fn().mockResolvedValue({ status: 'ready', renderedContent: '<html></html>' });
-    const saveGeneratedApp = vi.fn().mockResolvedValue({ id: 'generated-1' });
+    const init = vi.fn().mockResolvedValue(undefined);
+    const saveGeneratedApp = vi.fn();
+    const saveAsDraft = vi.fn().mockResolvedValue({
+      slug: 'generated-sid-1-12345678',
+      name: 'Kocia Strona',
+      source: 'user',
+      current: {
+        version: '1.0.0',
+        status: 'current',
+        zipPath: '/tmp/current.zip',
+        createdAt: 1,
+        meta: { id: 'generated-sid-1-12345678', name: 'Kocia Strona', version: '1.0.0' },
+      },
+      history: [],
+    });
     const raapp = {
       execute,
+      init,
       saveGeneratedApp,
     } as unknown as RAAppService;
-    const tool = new RaAppCreateTool(raapp);
+    const versioning = {
+      saveAsDraft,
+    } as unknown as RAAppVersioningService;
+    const tool = new RaAppCreateTool(raapp, versioning);
 
-    await tool.execute({
+    const result = await tool.execute({
       callId: 'call-1',
       sessionId: 'sid-1',
       toolName: 'raapp_create',
@@ -237,7 +311,7 @@ describe('RaAppCreateTool', () => {
         mode: 'display',
         title: 'Kocia Strona',
       },
-    });
+    }) as Record<string, unknown>;
 
     expect(execute).toHaveBeenCalledWith({
       type: 'html',
@@ -245,12 +319,14 @@ describe('RaAppCreateTool', () => {
       content: '<html><head><title>Koty</title></head></html>',
     });
 
-    expect(saveGeneratedApp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: 'Kocia Strona',
-      }),
+    expect(saveAsDraft).toHaveBeenCalledWith(
+      expect.stringMatching(/^generated-sid-1-/),
+      expect.any(Buffer),
     );
+    expect(saveGeneratedApp).not.toHaveBeenCalled();
+    expect(init).toHaveBeenCalledOnce();
+    expect(result.storedAppId).toMatch(/^generated-sid-1-/);
 
-    expect(execute.mock.invocationCallOrder[0]).toBeLessThan(saveGeneratedApp.mock.invocationCallOrder[0]);
+    expect(execute.mock.invocationCallOrder[0]).toBeLessThan(saveAsDraft.mock.invocationCallOrder[0]);
   });
 });

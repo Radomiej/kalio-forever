@@ -45,6 +45,7 @@ interface SessionManagerMock {
   persistAssistantMessage: ReturnType<typeof vi.fn>;
   saveToolResult?: ReturnType<typeof vi.fn>;
   loadHistory: ReturnType<typeof vi.fn>;
+  loadHistoryForLLM: ReturnType<typeof vi.fn>;
 }
 
 async function buildService(
@@ -77,7 +78,13 @@ async function buildService(
       },
       { provide: AuditService, useValue: { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) } },
       { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
-      { provide: CredentialsService, useValue: { getMaxToolAttempts: vi.fn().mockResolvedValue(8) } },
+      {
+        provide: CredentialsService,
+        useValue: {
+          getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+          getContextWindowSize: vi.fn().mockResolvedValue(32000),
+        },
+      },
       { provide: LLM_SOURCE, useValue: llmSource },
       { provide: TOOL_REGISTRY, useValue: [] },
     ],
@@ -111,6 +118,10 @@ describe('ChatService — event ordering (integration)', () => {
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockImplementation(async () => [...history]),
+      loadHistoryForLLM: vi.fn().mockImplementation(async (_sessionId: string, options: { systemPrompt: string }) => ({
+        history: options.systemPrompt ? [{ role: 'system', content: options.systemPrompt }] : [],
+        unboundedHistoryCount: options.systemPrompt ? 1 : 0,
+      })),
     };
     toolDispatch = {
       getToolMetas: vi.fn().mockReturnValue([

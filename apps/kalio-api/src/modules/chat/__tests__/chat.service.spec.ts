@@ -14,6 +14,7 @@ import type { LLMMessage } from '@kalio/types';
 import { PersonaService } from '../../persona/persona.service';
 import { SkillsService } from '../../skills/skills.service';
 import { CredentialsService } from '../../credentials/credentials.service';
+import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 
 async function* makeStream(chunks: InternalLLMChunk[]): AsyncIterable<InternalLLMChunk> {
   for (const chunk of chunks) {
@@ -33,23 +34,34 @@ describe('ChatService', () => {
     persistAssistantMessage: ReturnType<typeof vi.fn>;
     saveToolResult: ReturnType<typeof vi.fn>;
     loadHistory: ReturnType<typeof vi.fn>;
+    loadHistoryForLLM: ReturnType<typeof vi.fn>;
   };
   let toolDispatch: { getToolMetas: ReturnType<typeof vi.fn>; dispatch: ReturnType<typeof vi.fn> };
   let personaService: Partial<PersonaService>;
-  let credentialsService: Pick<CredentialsService, 'getMaxToolAttempts'>;
+  let credentialsService: {
+    getMaxToolAttempts: ReturnType<typeof vi.fn>;
+    getContextWindowSize: ReturnType<typeof vi.fn>;
+  };
   let auditService: Partial<AuditService>;
   let emit: ReturnType<typeof vi.fn>;
 
-  const historyMessages: LLMMessage[] = [];
+  const historyMessages: ContextManagedLLMMessage[] = [];
 
   beforeEach(async () => {
     emit = vi.fn() as ReturnType<typeof vi.fn>;
+    historyMessages.length = 0;
     sessionManager = {
       ensureSession: vi.fn().mockResolvedValue(undefined),
       persistUserMessage: vi.fn().mockResolvedValue({ id: 'u1', sessionId: 'sid', role: 'user', content: 'hi', createdAt: 1 }),
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockResolvedValue(historyMessages),
+      loadHistoryForLLM: vi.fn().mockImplementation(async (_sessionId: string, options: { systemPrompt: string }) => ({
+        history: options.systemPrompt
+          ? [{ role: 'system', content: options.systemPrompt } satisfies ContextManagedLLMMessage, ...historyMessages]
+          : [...historyMessages],
+        unboundedHistoryCount: options.systemPrompt ? historyMessages.length + 1 : historyMessages.length,
+      })),
     };
     toolDispatch = {
       getToolMetas: vi.fn().mockReturnValue([]),
@@ -60,6 +72,7 @@ describe('ChatService', () => {
     };
     credentialsService = {
       getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+      getContextWindowSize: vi.fn().mockResolvedValue(32000),
     };
     auditService = {
       log: vi.fn().mockResolvedValue('audit-id'),
@@ -142,6 +155,51 @@ describe('ChatService', () => {
     expect(llmSource.stream).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'sid' }),
     );
+  });
+
+  it('REGRESSION: routes main chat history through the shared managed-history path before streaming', async () => {
+    const managedHistory: ContextManagedLLMMessage[] = [
+      { role: 'system', content: 'managed system prompt' },
+      { role: 'user', content: 'latest user prompt' },
+    ];
+    sessionManager.loadHistoryForLLM.mockResolvedValue({
+      history: managedHistory,
+      unboundedHistoryCount: 5,
+    });
+
+    const llmSource = makeLLMSource([]);
+    await buildService(llmSource);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    expect(sessionManager.loadHistoryForLLM).toHaveBeenCalledWith('sid', expect.objectContaining({
+      systemPrompt: expect.any(String),
+      toolMetas: [],
+    }));
+    const params = (llmSource.stream as ReturnType<typeof vi.fn>).mock.calls[0][0] as LLMSourceParams;
+    expect(params.messages).toEqual(managedHistory);
+  });
+
+  it('REGRESSION: counts assistant reasoning content inside the same context compaction path', async () => {
+    sessionManager.loadHistoryForLLM.mockResolvedValue({
+      history: [
+        { role: 'system', content: 'managed system prompt' },
+        { role: 'user', content: 'latest user prompt' },
+      ],
+      unboundedHistoryCount: 3,
+    });
+
+    const llmSource = makeLLMSource([]);
+    await buildService(llmSource);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    const params = (llmSource.stream as ReturnType<typeof vi.fn>).mock.calls[0][0] as LLMSourceParams;
+
+    expect(
+      params.messages.some(
+        (message) => message.role === 'assistant' && typeof message.reasoningContent === 'string',
+      ),
+    ).toBe(false);
+    expect(params.messages.some((message) => message.role === 'user' && message.content === 'latest user prompt')).toBe(true);
   });
 
   it('processes each chunk via StreamProcessorService', async () => {
@@ -275,6 +333,66 @@ describe('ChatService', () => {
     await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
     // After the turn finishes, the controller should be cleaned up; calling abort is a no-op
     expect(() => service.abort('sid')).not.toThrow();
+  });
+
+  it('keeps the newer controller when overlapping turns share a session id', async () => {
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let streamCallCount = 0;
+
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(async function* (params: LLMSourceParams) {
+        const callIndex = ++streamCallCount;
+        yield { type: 'text_delta', delta: callIndex === 1 ? 'first' : 'second' };
+
+        if (callIndex === 1) {
+          await firstGate;
+          yield { type: 'done' };
+          return;
+        }
+
+        const outcome = await Promise.race([
+          secondGate.then(() => 'released' as const),
+          new Promise<'aborted'>((resolve) => {
+            params.abortSignal?.addEventListener('abort', () => resolve('aborted'), { once: true });
+          }),
+        ]);
+
+        if (outcome === 'released') {
+          yield { type: 'done' };
+        }
+      }),
+    };
+
+    await buildService(llmSource);
+
+    const firstTurn = service.handleTurn('sid', 'first', 'p1', emit as EmitFn);
+    await Promise.resolve();
+
+    const secondTurn = service.handleTurn('sid', 'second', 'p1', emit as EmitFn);
+    await Promise.resolve();
+
+    releaseFirst();
+    await firstTurn;
+
+    const controllers = (service as unknown as { abortControllers: Map<string, AbortController> }).abortControllers;
+
+    try {
+      expect(controllers.has('sid')).toBe(true);
+    } finally {
+      if (controllers.has('sid')) {
+        service.abort('sid');
+      } else {
+        releaseSecond();
+      }
+      await secondTurn;
+    }
   });
 
   // ─── hadContent tracking ────────────────────────────────────────────────────

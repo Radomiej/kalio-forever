@@ -18,7 +18,11 @@ export class PersonaService implements OnApplicationBootstrap {
     const personasConfig = this.loadPersonasConfig();
 
     for (const [id, config] of Object.entries(personasConfig)) {
-      const existing = await this.drizzle.db.select({ id: personas.id }).from(personas).where(eq(personas.id, id)).then((r) => r[0]);
+      const existing = await this.drizzle.db
+        .select({ id: personas.id, systemPrompt: personas.systemPrompt })
+        .from(personas)
+        .where(eq(personas.id, id))
+        .then((r) => r[0]);
       
       if (!existing) {
         await this.drizzle.db.insert(personas).values({
@@ -33,15 +37,57 @@ export class PersonaService implements OnApplicationBootstrap {
         });
         this.logger.log(`Seeded ${id} persona`);
       } else {
-        await this.drizzle.db.update(personas).set({
+        const updatePayload: {
+          name: string;
+          allowedTools: string[];
+          skillIds: string[];
+          updatedAt: Date;
+          systemPrompt?: string;
+        } = {
           name: config.name,
           allowedTools: config.allowedTools,
           skillIds: config.skillIds ?? [],
           updatedAt: now,
-        }).where(eq(personas.id, id));
+        };
+
+        if (this.shouldRefreshSeededSystemPrompt(id, existing.systemPrompt, config.systemPrompt)) {
+          updatePayload.systemPrompt = config.systemPrompt;
+        }
+
+        await this.drizzle.db.update(personas).set(updatePayload).where(eq(personas.id, id));
         this.logger.log(`Updated ${id} persona`);
       }
     }
+  }
+
+  private shouldRefreshSeededSystemPrompt(
+    personaId: string,
+    existingPrompt: string | null | undefined,
+    nextPrompt: string,
+  ): boolean {
+    if (personaId !== 'designer' || typeof existingPrompt !== 'string') {
+      return false;
+    }
+
+    if (existingPrompt === nextPrompt) {
+      return false;
+    }
+
+    const matchesRigidLegacyPrompt = existingPrompt.includes('Build every app using this structure:')
+      && existingPrompt.includes('Dark theme by default')
+      && existingPrompt.includes('Every app MUST have at least 2 pages with working navigation');
+
+    const matchesPreviousVfsFirstSeed = existingPrompt.includes(
+      'When the user asks for a prototype page or website, do not jump straight to raapp_create. Work in VFS first and finish with a design_preview result.',
+    ) && existingPrompt.includes(
+      'Use the exact tool names: vfs_list, vfs_read, vfs_write, design_preview, raapp_create',
+    ) && existingPrompt.includes(
+      'Never mention or attempt file_write, file_read, write_file, read_file, or other aliases - they do not exist here',
+    ) && !existingPrompt.includes('image_generate')
+      && !existingPrompt.includes('image_view')
+      && !existingPrompt.includes('image_edit');
+
+    return matchesRigidLegacyPrompt || matchesPreviousVfsFirstSeed;
   }
 
   private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model: string; allowedTools: string[]; skillIds?: string[] }> {

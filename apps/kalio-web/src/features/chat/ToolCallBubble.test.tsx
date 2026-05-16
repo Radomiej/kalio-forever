@@ -7,8 +7,8 @@
  * 3. LiveToolCallBubble auto-expands when RA-App result arrives after mount
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
-import { HistoryToolCallBubble, LiveToolCallBubble } from './ToolCallBubble';
+import { render, screen, act, fireEvent } from '@testing-library/react';
+import { HistoryToolCallBubble, LiveToolCallBubble, extractRAAppBlock } from './ToolCallBubble';
 import type { ToolActivity } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 
@@ -56,6 +56,23 @@ function makeActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
 // ── HistoryToolCallBubble tests ───────────────────────────────────────────────
 
 describe('REGRESSION: HistoryToolCallBubble — RA-App widget inside chip', () => {
+  it('preserves vfsPath when extracting html RA-App blocks', () => {
+    const block = extractRAAppBlock({
+      status: 'ready',
+      type: 'html',
+      mode: 'display',
+      content: '',
+      vfsPath: 'design/preview.html',
+    });
+
+    expect(block).toMatchObject({
+      type: 'html',
+      mode: 'display',
+      content: '',
+      vfsPath: 'design/preview.html',
+    });
+  });
+
   it('renders RAAppRenderer when content has RA-App block', () => {
     render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={false} />);
     expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();
@@ -123,6 +140,28 @@ describe('LiveToolCallBubble — status indicator only (no widget)', () => {
     render(<LiveToolCallBubble activity={activity} />);
     expect(screen.getByText('run_raapp')).toBeInTheDocument();
   });
+
+  it('REGRESSION: ToolActivity accepts backend agentRun metadata for auto-approve and subagent depth', () => {
+    const activity: ToolActivity = {
+      callId: 'call-subagent',
+      toolName: 'run_subagent',
+      args: { objective: 'Design a landing page' },
+      status: 'running',
+      startedAt: Date.now(),
+      agentRun: {
+        agentRunId: 'subagent-run-1',
+        agentType: 'subagent',
+        parentSessionId: 'session-1',
+        parentToolCallId: 'call-parent',
+        autoApproveTools: ['image_generate'],
+        subagentDepth: 1,
+      },
+    };
+
+    render(<LiveToolCallBubble activity={activity} />);
+
+    expect(screen.getByText('run_subagent')).toBeInTheDocument();
+  });
 });
 
 // ── HistoryToolCallBubble args display ────────────────────────────────────────
@@ -176,6 +215,68 @@ describe('HistoryToolCallBubble — tool input args display', () => {
 });
 
 describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
+  it('REGRESSION: ignores malformed copiedFiles payloads instead of treating them as subagent results', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="run_subagent"
+        content={JSON.stringify({
+          childSessionId: 'sub-1',
+          parentSessionId: 'p-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'sub-1',
+          copiedFiles: null,
+          result: 'Completed',
+          taskId: 't-1',
+          durationMs: 1000,
+        })}
+      />,
+    );
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /toggle details/i }));
+    });
+
+    expect(screen.getByText(/"copiedFiles": null/)).toBeInTheDocument();
+    expect(apiClient.get).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: aborts the child transcript request on unmount', async () => {
+    const abortSpy = vi.fn();
+    vi.mocked(apiClient.get).mockImplementationOnce((...args: unknown[]) => {
+      const config = args[1] as { signal?: AbortSignal } | undefined;
+      config?.signal?.addEventListener('abort', abortSpy);
+      return new Promise(() => undefined) as Promise<{ data: never[] }>;
+    });
+
+    let unmount!: () => void;
+    await act(async () => {
+      ({ unmount } = render(
+        <HistoryToolCallBubble
+          toolName="run_subagent"
+          content={JSON.stringify({
+            childSessionId: 'sub-1',
+            parentSessionId: 'p-1',
+            vfsMode: 'isolated',
+            vfsSessionId: 'sub-1',
+            copiedFiles: [],
+            result: 'Completed',
+            taskId: 't-1',
+            durationMs: 1000,
+          })}
+        />,
+      ));
+    });
+
+    const requestConfig = vi.mocked(apiClient.get).mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined;
+    expect(requestConfig?.signal).toBeDefined();
+
+    await act(async () => {
+      unmount();
+    });
+
+    expect(abortSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('loads child session messages and renders latest raapp_create result', async () => {
     vi.mocked(apiClient.get).mockResolvedValueOnce({
       data: [
@@ -212,5 +313,159 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
     );
 
     expect(await screen.findByTestId('raapp-renderer')).toBeInTheDocument();
+  });
+
+  it('renders generated child images from the subagent transcript', async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({
+      data: [
+        {
+          id: 'tool-image-1',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-image-1',
+          content: JSON.stringify({
+            output_type: 'image',
+            image_url: 'data:image/png;base64,AAAA',
+            path: 'images/hero-coffee.png',
+            message: 'Generated hero image',
+          }),
+          createdAt: Date.now(),
+        },
+        {
+          id: 'tool-image-2',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-image-2',
+          content: JSON.stringify({
+            output_type: 'image',
+            image_url: 'data:image/png;base64,BBBB',
+            path: 'images/menu-collage.png',
+            message: 'Generated menu collage',
+          }),
+          createdAt: Date.now() + 1,
+        },
+      ],
+    } as never);
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_subagent"
+        content={JSON.stringify({
+          childSessionId: 'sub-1',
+          parentSessionId: 'p-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'sub-1',
+          copiedFiles: [],
+          result: 'Completed',
+          taskId: 't-1',
+          durationMs: 1000,
+        })}
+      />,
+    );
+
+    expect(await screen.findByAltText('Generated hero image')).toBeInTheDocument();
+    expect(screen.getByAltText('Generated menu collage')).toBeInTheDocument();
+    expect(screen.getByText('images/hero-coffee.png')).toBeInTheDocument();
+    expect(screen.getByText('images/menu-collage.png')).toBeInTheDocument();
+  });
+
+  it('REGRESSION: deduplicates child images by VFS path when the path is available', async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({
+      data: [
+        {
+          id: 'tool-image-1',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-image-1',
+          content: JSON.stringify({
+            output_type: 'image',
+            image_url: 'data:image/png;base64,AAAA',
+            path: 'images/hero-coffee.png',
+            message: 'Generated hero image',
+          }),
+          createdAt: Date.now(),
+        },
+        {
+          id: 'tool-image-2',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-image-2',
+          content: JSON.stringify({
+            output_type: 'image',
+            image_url: 'data:image/png;base64,BBBB',
+            path: 'images/hero-coffee.png',
+            message: 'Generated hero image',
+          }),
+          createdAt: Date.now() + 1,
+        },
+      ],
+    } as never);
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_subagent"
+        content={JSON.stringify({
+          childSessionId: 'sub-1',
+          parentSessionId: 'p-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'sub-1',
+          copiedFiles: [],
+          result: 'Completed',
+          taskId: 't-1',
+          durationMs: 1000,
+        })}
+      />,
+    );
+
+    expect((await screen.findAllByAltText('Generated hero image')).length).toBe(1);
+    expect(screen.getAllByText('images/hero-coffee.png')).toHaveLength(1);
+  });
+
+  it('keeps the child preview visible while collapsing verbose result details by default', async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({
+      data: [
+        {
+          id: 'tool-1',
+          sessionId: 'sub-1',
+          role: 'tool_result',
+          toolCallId: 'child-call-1',
+          content: JSON.stringify({
+            status: 'ready',
+            type: 'html',
+            mode: 'display',
+            content: '',
+            vfsPath: 'design/preview.html',
+          }),
+          createdAt: Date.now(),
+        },
+      ],
+    } as never);
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_subagent"
+        content={JSON.stringify({
+          childSessionId: 'sub-1',
+          parentSessionId: 'p-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'sub-1',
+          copiedFiles: [{ fromPath: 'design/preview.html', toPath: 'sub-agents/sub-1/design/preview.html', sizeBytes: 321 }],
+          result: 'Verbose implementation summary',
+          taskId: 't-1',
+          durationMs: 1000,
+        })}
+      />,
+    );
+
+    expect(await screen.findByTestId('raapp-renderer')).toBeInTheDocument();
+    expect(screen.queryByText('Verbose implementation summary')).not.toBeInTheDocument();
+    expect(screen.queryByText('sub-agents/sub-1/design/preview.html')).not.toBeInTheDocument();
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /toggle sub-agent details/i }));
+    });
+
+    expect(screen.getByText('Verbose implementation summary')).toBeInTheDocument();
+    expect(screen.getByText('sub-agents/sub-1/design/preview.html')).toBeInTheDocument();
   });
 });
