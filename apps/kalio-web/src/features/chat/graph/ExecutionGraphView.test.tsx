@@ -1,15 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatSession } from '@kalio/types';
+import type { ChatMessage, ChatSession, Persona, ToolConfirmationRequest } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
+import type { AgentTurn } from '../../../store/sessionStore';
+import { buildTurnsFromHistory } from '../chatUtils';
 import { ExecutionGraphView } from './ExecutionGraphView';
 
 type SessionStateShape = {
   activeSessionId: string | null;
-  messages: unknown[];
-  agentTurns: unknown[];
+  messages: ChatMessage[];
+  agentTurns: AgentTurn[];
   sessions: ChatSession[];
-  sessionMessages: Record<string, unknown[]>;
+  sessionMessages: Record<string, ChatMessage[]>;
+  sessionAgentTurns: Record<string, AgentTurn[]>;
   setActiveSession: ReturnType<typeof vi.fn>;
 };
 
@@ -27,21 +30,35 @@ type AgentLoopShape = {
 type AgentStateShape = {
   toolActivities: ToolActivity[];
   activeAgentLoops: Record<string, AgentLoopShape>;
+  pendingConfirmations: Record<string, ToolConfirmationRequest>;
+  setPendingConfirmation: ReturnType<typeof vi.fn>;
 };
 
-const { sessionState, agentState } = vi.hoisted(() => ({
+const {
+  sessionState,
+  agentState,
+  apiGetMock,
+  confirmToolMock,
+  cancelToolMock,
+} = vi.hoisted(() => ({
   sessionState: {
     activeSessionId: null as string | null,
-    messages: [] as unknown[],
-    agentTurns: [] as unknown[],
+    messages: [] as ChatMessage[],
+    agentTurns: [] as AgentTurn[],
     sessions: [] as ChatSession[],
-    sessionMessages: {} as Record<string, unknown[]>,
+    sessionMessages: {} as Record<string, ChatMessage[]>,
+    sessionAgentTurns: {} as Record<string, AgentTurn[]>,
     setActiveSession: vi.fn(),
   },
   agentState: {
     toolActivities: [] as ToolActivity[],
     activeAgentLoops: {} as Record<string, AgentLoopShape>,
+    pendingConfirmations: {} as Record<string, ToolConfirmationRequest>,
+    setPendingConfirmation: vi.fn(),
   },
+  apiGetMock: vi.fn(),
+  confirmToolMock: vi.fn(),
+  cancelToolMock: vi.fn(),
 }));
 
 vi.mock('../../../store/sessionStore', () => ({
@@ -52,11 +69,51 @@ vi.mock('../../../store/agentStore', () => ({
   useAgentStore: (selector?: (state: AgentStateShape) => unknown) => selector ? selector(agentState) : agentState,
 }));
 
+vi.mock('../../../services/apiClient', () => ({
+  apiClient: {
+    get: apiGetMock,
+  },
+}));
+
+vi.mock('../../../services/eventBus', () => ({
+  eventBus: {
+    confirmTool: confirmToolMock,
+    cancelTool: cancelToolMock,
+  },
+}));
+
+function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
+  return {
+    id: 'msg-1',
+    sessionId: 'session-1',
+    role: 'assistant',
+    content: '',
+    createdAt: 1,
+    ...overrides,
+  } as ChatMessage;
+}
+
+function makePersona(overrides: Partial<Persona> = {}): Persona {
+  return {
+    id: 'default',
+    name: 'RaBuilder',
+    systemPrompt: 'You are a builder.',
+    model: 'gpt-4.1',
+    allowedTools: [],
+    skillIds: [],
+    mcpPolicy: 'deny_all',
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
 describe('ExecutionGraphView empty-session state', () => {
   beforeEach(() => {
     sessionState.activeSessionId = null;
     sessionState.messages = [];
     sessionState.agentTurns = [];
+    sessionState.sessionAgentTurns = {};
     sessionState.sessions = [
       {
         id: 'session-1',
@@ -76,6 +133,7 @@ describe('ExecutionGraphView empty-session state', () => {
     ];
     sessionState.sessionMessages = {};
     sessionState.setActiveSession.mockReset();
+    apiGetMock.mockResolvedValue({ data: [makePersona(), makePersona({ id: 'persona-child', name: 'UX Designer', model: 'claude-sonnet-4.6' })] });
 
     agentState.toolActivities = [
       {
@@ -99,6 +157,10 @@ describe('ExecutionGraphView empty-session state', () => {
         },
       },
     };
+    agentState.pendingConfirmations = {};
+    agentState.setPendingConfirmation.mockReset();
+    confirmToolMock.mockReset();
+    cancelToolMock.mockReset();
   });
 
   it('shows session suggestions and live agent activity when no session is selected', () => {
@@ -125,5 +187,111 @@ describe('ExecutionGraphView empty-session state', () => {
 
     expect(screen.getByRole('heading', { name: 'Execution Graph' })).toBeInTheDocument();
     expect(screen.getByText('No execution nodes yet for this session.')).toBeInTheDocument();
+  });
+
+  it('shows Accept actions for awaiting-confirmation tool nodes', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Delete draft file', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-delete-1', name: 'vfs_delete', args: { path: 'draft.txt' } }],
+      }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [
+      {
+        callId: 'call-delete-1',
+        toolName: 'vfs_delete',
+        args: { path: 'draft.txt' },
+        sessionId: 'session-1',
+        status: 'awaiting_confirmation',
+        startedAt: 2,
+      },
+    ];
+    agentState.pendingConfirmations = {
+      'session-1': {
+        requestId: 'req-1',
+        toolCallId: 'call-delete-1',
+        sessionId: 'session-1',
+        toolName: 'vfs_delete',
+        args: { path: 'draft.txt' },
+        timeoutMs: 0,
+      },
+    };
+
+    render(<ExecutionGraphView />);
+
+    fireEvent.click(screen.getByTestId('graph-node-tool:call-delete-1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept tool request' }));
+
+    expect(confirmToolMock).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
+    expect(agentState.setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+  });
+
+  it('expands individual tools when zoomed in and groups them when zoomed out', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Build graph layout', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [
+          { id: 'call-list-1', name: 'list_tools', args: {} },
+          { id: 'call-preview-1', name: 'design_preview', args: { mode: 'ui' } },
+        ],
+      }),
+      makeMessage({ id: 'tr1', role: 'tool_result', toolCallId: 'call-list-1', content: JSON.stringify({ ok: true }), createdAt: 3 }),
+      makeMessage({ id: 'tr2', role: 'tool_result', toolCallId: 'call-preview-1', content: JSON.stringify({ ok: true }), createdAt: 4 }),
+      makeMessage({ id: 'a2', role: 'assistant', content: 'Done.', createdAt: 5 }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1').map((turn) => ({
+      ...turn,
+      agentRun: { agentRunId: 'master-1', agentType: 'master' as const, label: 'RaBuilder' },
+    }));
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [
+      {
+        callId: 'call-list-1',
+        toolName: 'list_tools',
+        args: {},
+        sessionId: 'session-1',
+        status: 'success',
+        startedAt: 2,
+        finishedAt: 3,
+        result: { callId: 'call-list-1', status: 'success', data: { ok: true } },
+      },
+      {
+        callId: 'call-preview-1',
+        toolName: 'design_preview',
+        args: { mode: 'ui' },
+        sessionId: 'session-1',
+        status: 'success',
+        startedAt: 3,
+        finishedAt: 4,
+        result: { callId: 'call-preview-1', status: 'success', data: { ok: true } },
+      },
+    ];
+
+    render(<ExecutionGraphView />);
+
+    expect(screen.getByTestId('graph-node-tool:call-list-1')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-tool:call-preview-1')).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByTestId('graph-zoom-out'));
+    fireEvent.click(await screen.findByTestId('graph-zoom-out'));
+    fireEvent.click(await screen.findByTestId('graph-zoom-out'));
+
+    expect(await screen.findByTestId(`graph-node-tool-group:${sessionState.agentTurns[0]?.id}`)).toBeInTheDocument();
   });
 });

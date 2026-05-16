@@ -1,57 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  ArrowRight, Bot, Boxes, BrainCircuit, CheckCircle2, FileCode2, FileImage, FolderTree, MessageSquareText, Wrench, Zap,
+  ArrowRight, BrainCircuit, FileCode2, FileImage, MessageSquareText, Wrench, Zap,
 } from 'lucide-react';
+import type { Persona } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
+import { apiClient } from '../../../services/apiClient';
+import { eventBus } from '../../../services/eventBus';
 import {
   buildExecutionGraphModel,
-  type ExecutionGraphNode,
-  type ExecutionGraphNodeKind,
   type ExecutionGraphNodePayload,
 } from './executionGraphModel';
-
-const NODE_COLORS: Record<ExecutionGraphNodeKind, string> = {
-  prompt: 'from-sky-600/85 to-cyan-500/75 border-sky-300/40',
-  turn: 'from-violet-600/85 to-fuchsia-500/75 border-violet-200/40',
-  'tool-group': 'from-emerald-600/80 to-teal-500/75 border-emerald-200/40',
-  tool: 'from-amber-600/85 to-orange-500/75 border-amber-200/40',
-  subagent: 'from-indigo-600/85 to-violet-500/75 border-indigo-200/40',
-  artifact: 'from-slate-600/85 to-slate-500/75 border-slate-200/40',
-  'final-answer': 'from-green-700/85 to-emerald-500/75 border-emerald-100/45',
-};
+import { ExecutionGraphBoard } from './ExecutionGraphBoard';
 
 function prettyPrint(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 }
 
-function nodeIcon(kind: ExecutionGraphNodeKind) {
-  switch (kind) {
-    case 'prompt':
-      return <MessageSquareText size={16} />;
-    case 'turn':
-      return <Bot size={16} />;
-    case 'tool-group':
-      return <Boxes size={16} />;
-    case 'tool':
-      return <Wrench size={16} />;
-    case 'subagent':
-      return <BrainCircuit size={16} />;
-    case 'artifact':
-      return <FolderTree size={16} />;
-    case 'final-answer':
-      return <CheckCircle2 size={16} />;
-  }
-}
-
-function statusTone(status: ExecutionGraphNode['status']): string {
-  if (status === 'error') return 'text-rose-200';
-  if (status === 'running') return 'text-amber-100';
-  if (status === 'success') return 'text-emerald-100';
-  return 'text-slate-200';
-}
-
-function statusLabel(status: ExecutionGraphNode['status']): string {
+function statusLabel(status: 'idle' | 'running' | 'success' | 'error'): string {
   if (status === 'error') return 'error';
   if (status === 'running') return 'running';
   if (status === 'success') return 'ready';
@@ -77,40 +43,6 @@ function payloadTitle(payload: ExecutionGraphNodePayload): string {
   }
 }
 
-function GraphNodeCard({
-  node,
-  selected,
-  onSelect,
-}: {
-  node: ExecutionGraphNode;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-testid={`graph-node-${node.id}`}
-      className={`absolute text-left rounded-[22px] border bg-gradient-to-br px-4 py-3 shadow-[0_18px_30px_rgba(2,12,27,0.28)] transition-all ${NODE_COLORS[node.kind]} ${selected ? 'ring-2 ring-sky-300/85 scale-[1.01]' : 'hover:scale-[1.01] hover:shadow-[0_20px_34px_rgba(2,12,27,0.34)]'}`}
-      style={{ left: node.x, top: node.y, width: node.width, minHeight: node.height }}
-      onClick={onSelect}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className={`inline-flex items-center gap-2 text-sm font-semibold ${statusTone(node.status)}`}>
-            {nodeIcon(node.kind)}
-            <span className="truncate">{node.title}</span>
-          </div>
-          <p className="mt-2 text-sm text-white/90 line-clamp-2 break-words">{node.subtitle}</p>
-        </div>
-        <span className="rounded-full border border-white/15 bg-black/15 px-2 py-1 text-[10px] uppercase tracking-[0.22em] text-white/80">
-          {statusLabel(node.status)}
-        </span>
-      </div>
-      {node.detail && <p className="mt-3 text-xs text-white/72 line-clamp-2 break-words">{node.detail}</p>}
-    </button>
-  );
-}
-
 function InspectorRow({ label, value }: { label: string; value: string | null | undefined }) {
   if (!value) return null;
   return (
@@ -133,10 +65,23 @@ function formatLoopLabel(
 }
 
 export function ExecutionGraphView() {
-  const { activeSessionId, messages, agentTurns, sessions, sessionMessages, setActiveSession } = useSessionStore();
-  const { toolActivities, activeAgentLoops } = useAgentStore();
-  const [collapseTools, setCollapseTools] = useState(true);
+  const { activeSessionId, messages, agentTurns, sessions, sessionMessages, sessionAgentTurns, setActiveSession } = useSessionStore();
+  const { toolActivities, activeAgentLoops, pendingConfirmations, setPendingConfirmation } = useAgentStore();
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [zoom, setZoom] = useState(1);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiClient
+      .get<Persona[]>('/api/personas')
+      .then((response) => setPersonas(response.data))
+      .catch((err: unknown) => console.error('[ExecutionGraphView] personas load failed', err));
+  }, []);
+
+  const collapseTools = zoom <= 0.8;
+  const decreaseZoom = () => setZoom((value) => Math.max(0.55, Number((value - 0.15).toFixed(2))));
+  const increaseZoom = () => setZoom((value) => Math.min(1.6, Number((value + 0.15).toFixed(2))));
+  const resetZoom = () => setZoom(1);
 
   const runningLoops = Object.values(activeAgentLoops);
   const runningToolActivities = toolActivities.filter((activity) => isLiveTool(activity));
@@ -156,11 +101,37 @@ export function ExecutionGraphView() {
         <div className="flex flex-wrap items-center gap-2 justify-end">
           <button
             type="button"
-            className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${collapseTools ? 'border-sky-500 bg-sky-500/12 text-sky-300' : 'border-base-300 text-base-content/70 hover:text-base-content'}`}
-            onClick={() => setCollapseTools((value) => !value)}
+            data-testid="graph-zoom-out"
+            className="rounded-full border border-base-300 px-3 py-1.5 text-sm text-base-content/75 transition-colors hover:text-base-content"
+            onClick={decreaseZoom}
           >
-            Collapse tools
+            -
           </button>
+          <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-3 py-1.5 text-xs uppercase tracking-[0.22em] text-sky-300">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            data-testid="graph-zoom-in"
+            className="rounded-full border border-base-300 px-3 py-1.5 text-sm text-base-content/75 transition-colors hover:text-base-content"
+            onClick={increaseZoom}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            data-testid="graph-zoom-reset"
+            className="rounded-full border border-base-300 px-3 py-1.5 text-sm text-base-content/75 transition-colors hover:text-base-content"
+            onClick={resetZoom}
+          >
+            Reset
+          </button>
+          <span className={`rounded-full border px-3 py-1.5 text-xs uppercase tracking-[0.22em] ${collapseTools ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200' : 'border-base-300 text-base-content/45'}`}>
+            {collapseTools ? 'tools grouped' : 'tools expanded'}
+          </span>
+          <span className="rounded-full border border-base-300 px-3 py-1.5 text-xs uppercase tracking-[0.22em] text-base-content/45">
+            drag to pan
+          </span>
           <span className="rounded-full border border-base-300 px-3 py-1.5 text-xs uppercase tracking-[0.22em] text-base-content/45">
             {runningLoops.length} agent{runningLoops.length === 1 ? '' : 's'} live
           </span>
@@ -320,6 +291,8 @@ export function ExecutionGraphView() {
     activeAgentLoops,
     sessions,
     sessionMessages,
+    sessionAgentTurns,
+    personas,
     collapseTools,
   });
 
@@ -327,6 +300,9 @@ export function ExecutionGraphView() {
     ? selectedNodeId
     : model.defaultSelectedNodeId;
   const selectedNode = model.nodes.find((node) => node.id === effectiveSelectedId) ?? null;
+  const selectedConfirmation = selectedNode?.payload.kind === 'tool' && selectedNode.payload.confirmationRequired
+    ? pendingConfirmations[selectedNode.sessionId ?? activeSessionId ?? ''] ?? null
+    : null;
 
   if (model.nodes.length === 0) {
     return (
@@ -365,50 +341,12 @@ export function ExecutionGraphView() {
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {header}
 
-        <div className="flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.10),_transparent_42%),linear-gradient(rgba(56,189,248,0.08)_1px,_transparent_1px),linear-gradient(90deg,_rgba(56,189,248,0.08)_1px,_transparent_1px)] bg-[length:100%_100%,40px_40px,40px_40px] bg-[#0a1220]">
-          <div className="relative" style={{ width: model.board.width, height: model.board.height }}>
-            <svg className="absolute inset-0 overflow-visible" width={model.board.width} height={model.board.height} aria-hidden="true">
-              <defs>
-                <marker id="graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(125, 211, 252, 0.85)" />
-                </marker>
-              </defs>
-              {model.edges.map((edge) => {
-                const source = model.nodes.find((node) => node.id === edge.sourceId);
-                const target = model.nodes.find((node) => node.id === edge.targetId);
-                if (!source || !target) return null;
-
-                const startX = source.x + source.width;
-                const startY = source.y + source.height / 2;
-                const endX = target.x;
-                const endY = target.y + target.height / 2;
-                const delta = Math.max((endX - startX) / 2, 40);
-                const path = `M ${startX} ${startY} C ${startX + delta} ${startY}, ${endX - delta} ${endY}, ${endX} ${endY}`;
-
-                return (
-                  <path
-                    key={edge.id}
-                    d={path}
-                    fill="none"
-                    markerEnd="url(#graph-arrow)"
-                    stroke={edge.style === 'dashed' ? 'rgba(148,163,184,0.6)' : 'rgba(125,211,252,0.9)'}
-                    strokeDasharray={edge.style === 'dashed' ? '7 8' : undefined}
-                    strokeWidth={edge.style === 'dashed' ? 2 : 3}
-                  />
-                );
-              })}
-            </svg>
-
-            {model.nodes.map((node) => (
-              <GraphNodeCard
-                key={node.id}
-                node={node}
-                selected={node.id === effectiveSelectedId}
-                onSelect={() => setSelectedNodeId(node.id)}
-              />
-            ))}
-          </div>
-        </div>
+        <ExecutionGraphBoard
+          model={model}
+          selectedNodeId={effectiveSelectedId}
+          onSelectNode={setSelectedNodeId}
+          zoom={zoom}
+        />
       </div>
 
       <aside className="w-[24rem] shrink-0 border-l border-base-300 bg-base-100 overflow-y-auto">
@@ -428,9 +366,17 @@ export function ExecutionGraphView() {
 
               {selectedNode.payload.kind === 'turn' && (
                 <>
+                  <InspectorRow label="Persona" value={selectedNode.payload.actorLabel} />
+                  <InspectorRow label="Model" value={selectedNode.payload.modelLabel} />
                   <InspectorRow label="Tools" value={String(selectedNode.payload.toolCount)} />
                   <InspectorRow label="Thinking" value={String(selectedNode.payload.thinkingCount)} />
                   <InspectorRow label="Preview" value={selectedNode.payload.textPreview} />
+                </>
+              )}
+
+              {selectedNode.payload.kind === 'tool' && (
+                <>
+                  <InspectorRow label="Confirm" value={selectedNode.payload.confirmationRequired ? 'accept required' : 'not required'} />
                 </>
               )}
 
@@ -449,6 +395,9 @@ export function ExecutionGraphView() {
 
               {selectedNode.payload.kind === 'subagent' && (
                 <>
+                  <InspectorRow label="Persona" value={selectedNode.payload.actorLabel} />
+                  <InspectorRow label="Model" value={selectedNode.payload.modelLabel} />
+                  <InspectorRow label="Context" value={selectedNode.payload.inputPrompt} />
                   <InspectorRow label="Mode" value={selectedNode.payload.result.vfsMode ?? 'shared'} />
                   <InspectorRow label="Artifacts" value={`${selectedNode.payload.copiedFiles.length} file(s)`} />
                   {selectedNode.payload.transcript.length > 0 && (
@@ -480,18 +429,46 @@ export function ExecutionGraphView() {
               )}
             </section>
 
-            {selectedNode.payload.kind === 'subagent' && selectedNode.sessionId && selectedNode.sessionId !== activeSessionId && (
+            {(selectedNode.payload.kind === 'subagent' && selectedNode.sessionId && selectedNode.sessionId !== activeSessionId) || selectedConfirmation ? (
               <section className="rounded-[22px] border border-base-300 bg-base-200/35 px-5 py-4 space-y-3">
                 <h4 className="text-xl font-black tracking-tight">Actions</h4>
-                <button
-                  type="button"
-                  className="w-full rounded-xl bg-sky-500/85 hover:bg-sky-500 text-white px-4 py-3 text-sm font-medium transition-colors"
-                  onClick={() => setActiveSession(selectedNode.sessionId ?? null)}
-                >
-                  Open child chat
-                </button>
+                {selectedNode.payload.kind === 'subagent' && selectedNode.sessionId && selectedNode.sessionId !== activeSessionId && (
+                  <button
+                    type="button"
+                    className="w-full rounded-xl bg-sky-500/85 hover:bg-sky-500 text-white px-4 py-3 text-sm font-medium transition-colors"
+                    onClick={() => setActiveSession(selectedNode.sessionId ?? null)}
+                  >
+                    Open child chat
+                  </button>
+                )}
+                {selectedConfirmation && (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Accept tool request"
+                      className="w-full rounded-xl bg-emerald-500/85 hover:bg-emerald-500 text-white px-4 py-3 text-sm font-medium transition-colors"
+                      onClick={() => {
+                        eventBus.confirmTool({ requestId: selectedConfirmation.requestId, sessionId: selectedConfirmation.sessionId });
+                        setPendingConfirmation(selectedConfirmation.sessionId, null);
+                      }}
+                    >
+                      Accept tool request
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Cancel tool request"
+                      className="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-sm font-medium transition-colors hover:bg-base-200"
+                      onClick={() => {
+                        eventBus.cancelTool({ requestId: selectedConfirmation.requestId, sessionId: selectedConfirmation.sessionId });
+                        setPendingConfirmation(selectedConfirmation.sessionId, null);
+                      }}
+                    >
+                      Cancel tool request
+                    </button>
+                  </>
+                )}
               </section>
-            )}
+            ) : null}
 
             <section className="rounded-[22px] border border-base-300 bg-base-200/35 px-5 py-4 space-y-3">
               <div className="flex items-center gap-2">

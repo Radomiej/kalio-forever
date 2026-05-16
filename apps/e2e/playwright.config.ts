@@ -1,7 +1,20 @@
+import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
-const CI = (globalThis as any).process?.env.CI;
-const PLAYWRIGHT_BASE_URL = (globalThis as any).process?.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5288';
+const PROCESS = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+const repoRoot = resolve(__dirname, '../..');
+
+if (PROCESS?.env) {
+  PROCESS.env.PLAYWRIGHT_BASE_URL ??= 'http://localhost:5288';
+  PROCESS.env.PLAYWRIGHT_API_ORIGIN ??= 'http://localhost:3316';
+  PROCESS.env.TEST_API_URL ??= `${PROCESS.env.PLAYWRIGHT_API_ORIGIN}/api`;
+  PROCESS.env.DATABASE_PATH ??= resolve(repoRoot, 'data/kalio-e2e.db');
+  PROCESS.env.WORKSPACE_ROOT ??= resolve(repoRoot, 'data/workspaces-e2e');
+  PROCESS.env.CREDENTIALS_MASTER_KEY ??= 'playwright-test-master-key-32-chars-minimum';
+}
+
+const CI = PROCESS?.env?.CI;
+const PLAYWRIGHT_BASE_URL = PROCESS?.env?.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
 
 export default defineConfig({
   testDir: './tests',
@@ -17,6 +30,13 @@ export default defineConfig({
     baseURL: PLAYWRIGHT_BASE_URL,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
+  },
+
+  webServer: {
+    command: 'pnpm run stack:playwright',
+    url: PLAYWRIGHT_BASE_URL,
+    reuseExistingServer: !CI,
+    timeout: 240_000,
   },
 
   projects: [
