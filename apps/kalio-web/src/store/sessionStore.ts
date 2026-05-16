@@ -189,7 +189,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const hadThinking = s.thinkingChunks[messageId] !== undefined;
       if (hadThinking) {
         const thinkingContent = s.thinkingChunks[messageId];
-        const { [messageId]: _removed, ...restThinking } = s.thinkingChunks;
+        const nextThinkingChunks = { ...s.thinkingChunks };
+        delete nextThinkingChunks[messageId];
         const nextMessagesWithThinking = nextMessages.map((message) =>
           message.id === messageId ? { ...message, thinking: thinkingContent } : message,
         );
@@ -200,7 +201,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             [targetSessionId]: nextMessagesWithThinking,
           },
           messages: targetSessionId === s.activeSessionId ? nextMessagesWithThinking : s.messages,
-          thinkingChunks: restThinking,
+          thinkingChunks: nextThinkingChunks,
           streamingChunks: {
             ...s.streamingChunks,
             [messageId]: (s.streamingChunks[messageId] ?? '') + delta,
@@ -227,9 +228,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const targetSessionId = s.chunkSessionIds[messageId];
       const finalContent = s.streamingChunks[messageId] ?? '';
       const finalThinking = s.thinkingChunks[messageId] ?? '';
-      const { [messageId]: _sc, ...restStreaming } = s.streamingChunks;
-      const { [messageId]: _tc, ...restThinking } = s.thinkingChunks;
-      const { [messageId]: _csi, ...restChunkSessionIds } = s.chunkSessionIds;
+      const nextStreamingChunks = { ...s.streamingChunks };
+      delete nextStreamingChunks[messageId];
+      const nextThinkingChunks = { ...s.thinkingChunks };
+      delete nextThinkingChunks[messageId];
+      const nextChunkSessionIds = { ...s.chunkSessionIds };
+      delete nextChunkSessionIds[messageId];
       const nextSessionMessages = targetSessionId
         ? getStoredSessionMessages(s, targetSessionId).map((message) =>
             message.id === messageId
@@ -238,9 +242,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           )
         : [];
       return {
-        chunkSessionIds: restChunkSessionIds,
-        streamingChunks: restStreaming,
-        thinkingChunks: restThinking,
+        chunkSessionIds: nextChunkSessionIds,
+        streamingChunks: nextStreamingChunks,
+        thinkingChunks: nextThinkingChunks,
         sessionMessages: targetSessionId
           ? {
               ...s.sessionMessages,
@@ -311,18 +315,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   removeSession: (id) =>
     set((s) => {
-      const { [id]: _removedMessages, ...sessionMessages } = s.sessionMessages;
-      const { [id]: _removedTurns, ...sessionAgentTurns } = s.sessionAgentTurns;
-      const { [id]: _removedTurnId, ...sessionActiveTurnIds } = s.sessionActiveTurnIds;
+      const nextSessionMessages = { ...s.sessionMessages };
+      delete nextSessionMessages[id];
+      const nextSessionAgentTurns = { ...s.sessionAgentTurns };
+      delete nextSessionAgentTurns[id];
+      const nextSessionActiveTurnIds = { ...s.sessionActiveTurnIds };
+      delete nextSessionActiveTurnIds[id];
       return {
         sessions: s.sessions.filter((sess) => sess.id !== id),
         activeSessionId: s.activeSessionId === id ? null : s.activeSessionId,
         messages: s.activeSessionId === id ? [] : s.messages,
         agentTurns: s.activeSessionId === id ? [] : s.agentTurns,
         activeTurnId: s.activeSessionId === id ? null : s.activeTurnId,
-        sessionMessages,
-        sessionAgentTurns,
-        sessionActiveTurnIds,
+        sessionMessages: nextSessionMessages,
+        sessionAgentTurns: nextSessionAgentTurns,
+        sessionActiveTurnIds: nextSessionActiveTurnIds,
       };
     }),
 

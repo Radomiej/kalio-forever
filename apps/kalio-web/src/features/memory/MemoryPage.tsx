@@ -15,49 +15,51 @@ export function MemoryPage() {
   const [ingestText, setIngestText] = useState('');
   const [ingesting, setIngesting] = useState(false);
   const [stats, setStats] = useState<{ count: number; size: number } | null>(null);
-
-  // Load personas on mount
-  useEffect(() => {
-    apiClient
-      .get<Persona[]>('/api/personas')
-      .then((r) => {
-        setPersonas(r.data);
-        if (r.data.length > 0 && !selectedPersonaId) {
-          setSelectedPersonaId(r.data[0]!.id);
-        }
-      })
-      .catch((err) => console.error('[MemoryPage] failed to load personas', err));
-  }, [selectedPersonaId]);
-
-  // Load stats when persona changes
-  useEffect(() => {
-    if (!selectedPersonaId) return;
-    setResults([]);
-    setBrowseMode(false);
-    loadStats();
-  }, [selectedPersonaId]);
+  const activePersonaId = selectedPersonaId && personas.some((persona) => persona.id === selectedPersonaId)
+    ? selectedPersonaId
+    : (personas[0]?.id ?? '');
 
   const loadStats = useCallback(() => {
-    if (!selectedPersonaId) return;
+    if (!activePersonaId) return;
     apiClient
-      .get<MemorySearchResult[]>(`/api/memory/${selectedPersonaId}`)
+      .get<MemorySearchResult[]>(`/api/memory/${activePersonaId}`)
       .then((r) => {
         const entries = r.data;
         const totalSize = entries.reduce((acc, item) => acc + item.content.length, 0);
         setStats({ count: entries.length, size: totalSize });
       })
       .catch(() => setStats(null));
-  }, [selectedPersonaId]);
+  }, [activePersonaId]);
+
+  // Load personas on mount
+  useEffect(() => {
+    apiClient
+      .get<Persona[]>('/api/personas')
+      .then((r) => setPersonas(r.data))
+      .catch((err) => console.error('[MemoryPage] failed to load personas', err));
+  }, []);
+
+  // Load stats when persona changes
+  useEffect(() => {
+    if (!activePersonaId) return;
+    loadStats();
+  }, [activePersonaId, loadStats]);
+
+  const handlePersonaChange = (nextPersonaId: string) => {
+    setSelectedPersonaId(nextPersonaId);
+    setResults([]);
+    setBrowseMode(false);
+  };
 
   const handleSearch = async () => {
-    if (!selectedPersonaId || !query.trim()) return;
+    if (!activePersonaId || !query.trim()) return;
     setBrowseMode(false);
     setLoading(true);
     try {
       const { data } = await apiClient.get<MemorySearchResult[]>('/api/memory/search', {
         params: {
           query: query.trim(),
-          personaId: selectedPersonaId,
+          personaId: activePersonaId,
           limit: 10,
           mode,
         },
@@ -72,12 +74,12 @@ export function MemoryPage() {
   };
 
   const handleIngest = async () => {
-    if (!selectedPersonaId || !ingestText.trim()) return;
+    if (!activePersonaId || !ingestText.trim()) return;
     setIngesting(true);
     try {
       const { data } = await apiClient.post<MemoryIngestResult>('/api/memory/ingest', {
         text: ingestText.trim(),
-        personaId: selectedPersonaId,
+        personaId: activePersonaId,
       });
       setIngestText('');
       setIngestOpen(false);
@@ -92,11 +94,11 @@ export function MemoryPage() {
   };
 
   const handleBrowseAll = async () => {
-    if (!selectedPersonaId) return;
+    if (!activePersonaId) return;
     setLoading(true);
     setBrowseMode(true);
     try {
-      const { data } = await apiClient.get<MemorySearchResult[]>(`/api/memory/${selectedPersonaId}`);
+      const { data } = await apiClient.get<MemorySearchResult[]>(`/api/memory/${activePersonaId}`);
       setResults(data);
     } catch (err) {
       console.error('[MemoryPage] browse all failed', err);
@@ -106,10 +108,11 @@ export function MemoryPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {    if (!selectedPersonaId) return;
+  const handleDelete = async (id: string) => {
+    if (!activePersonaId) return;
     if (!confirm('Delete this memory entry?')) return;
     try {
-      await apiClient.delete(`/api/memory/${selectedPersonaId}/${id}`);
+      await apiClient.delete(`/api/memory/${activePersonaId}/${id}`);
       setResults((prev) => prev.filter((r) => r.id !== id));
       loadStats();
     } catch (err) {
@@ -117,7 +120,7 @@ export function MemoryPage() {
     }
   };
 
-  const selectedPersona = personas.find((p) => p.id === selectedPersonaId);
+  const selectedPersona = personas.find((p) => p.id === activePersonaId);
 
   return (
     <div data-testid="memory-page" className="flex flex-col h-full overflow-hidden bg-base-100">
@@ -131,8 +134,8 @@ export function MemoryPage() {
           {/* Persona Selector */}
           <select
             className="select select-bordered select-sm"
-            value={selectedPersonaId}
-            onChange={(e) => setSelectedPersonaId(e.target.value)}
+            value={activePersonaId}
+            onChange={(e) => handlePersonaChange(e.target.value)}
             data-testid="memory-persona-select"
           >
             <option value="">Select persona...</option>

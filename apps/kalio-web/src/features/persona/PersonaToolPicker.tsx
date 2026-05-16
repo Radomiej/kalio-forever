@@ -59,7 +59,6 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await fetch('/api/tools');
       const data: ToolMeta[] = await res.json() as ToolMeta[];
@@ -98,7 +97,11 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
 
   const toggleTool = (name: string) => {
     const next = new Set(selectedSet);
-    next.has(name) ? next.delete(name) : next.add(name);
+    if (next.has(name)) {
+      next.delete(name);
+    } else {
+      next.add(name);
+    }
     onChange([...next], mcpPolicy);
   };
 
@@ -106,13 +109,23 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
     const names = group.tools.map((t) => t.name);
     const allOn = names.every((n) => selectedSet.has(n));
     const next = new Set(selectedSet);
-    names.forEach((n) => (allOn ? next.delete(n) : next.add(n)));
+    names.forEach((name) => {
+      if (allOn) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+    });
     onChange([...next], mcpPolicy);
   };
 
   const toggleMcpTool = (name: string) => {
     const next = new Set(selectedSet);
-    next.has(name) ? next.delete(name) : next.add(name);
+    if (next.has(name)) {
+      next.delete(name);
+    } else {
+      next.add(name);
+    }
     onChange([...next], 'allow_list');
   };
 

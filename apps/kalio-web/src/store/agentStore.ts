@@ -173,10 +173,11 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
         return { toolActivities: [], sessionToolActivities: {} };
       }
 
-      const { [sessionId]: _removed, ...rest } = s.sessionToolActivities;
+      const nextSessionToolActivities = { ...s.sessionToolActivities };
+      delete nextSessionToolActivities[sessionId];
       return {
         toolActivities: s.toolActivities.filter((activity) => activity.sessionId !== sessionId),
-        sessionToolActivities: rest,
+        sessionToolActivities: nextSessionToolActivities,
       };
     }),
 
@@ -234,8 +235,9 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
 
   removeActiveAgentLoop: (sessionId, agentRun) =>
     set((s) => {
-      const { [agentRun?.agentRunId ?? sessionId]: _removed, ...rest } = s.activeAgentLoops;
-      return { activeAgentLoops: rest };
+      const nextActiveAgentLoops = { ...s.activeAgentLoops };
+      delete nextActiveAgentLoops[agentRun?.agentRunId ?? sessionId];
+      return { activeAgentLoops: nextActiveAgentLoops };
     }),
   hasActiveLoopForSession: (sessionId) => {
     if (!sessionId) return false;
@@ -256,7 +258,8 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
 
   clearCLIAgentOutput: (callId) =>
     set((s) => {
-      const { [callId]: _removed, ...rest } = s.cliAgentOutput;
-      return { cliAgentOutput: rest };
+      const nextCliAgentOutput = { ...s.cliAgentOutput };
+      delete nextCliAgentOutput[callId];
+      return { cliAgentOutput: nextCliAgentOutput };
     }),
 }));

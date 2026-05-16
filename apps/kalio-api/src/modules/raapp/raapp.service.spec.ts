@@ -113,43 +113,52 @@ describe('RAAppService', () => {
     });
 
     it('logs when an equal-score duplicate replaces an existing app', async () => {
-      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-equal-dup-'));
-      const coreDir = path.join(tempRoot, 'core');
-      const firstZipSourceDir = path.join(tempRoot, 'visual-calculator-a');
-      const secondZipSourceDir = path.join(tempRoot, 'visual-calculator-b');
-      const firstZipPath = path.join(coreDir, 'a-visual-calculator.zip');
-      const secondZipPath = path.join(coreDir, 'b-visual-calculator.zip');
-
-      await fs.mkdir(coreDir, { recursive: true });
-      await fs.mkdir(firstZipSourceDir, { recursive: true });
-      await fs.mkdir(secondZipSourceDir, { recursive: true });
-
-      const meta = [
-        'id: visual-calculator',
-        'name: Visual Calculator',
-        'version: "1.0"',
-        'description: Duplicate loader logging fixture',
-        'execution:',
-        '  render_as: display',
-      ].join('\n');
-
-      await fs.writeFile(path.join(firstZipSourceDir, 'meta.yml'), meta, 'utf8');
-      await fs.writeFile(path.join(firstZipSourceDir, 'ui.gui'), 'vbox { label { text = "first" } }', 'utf8');
-      await fs.writeFile(path.join(secondZipSourceDir, 'meta.yml'), meta, 'utf8');
-      await fs.writeFile(path.join(secondZipSourceDir, 'ui.gui'), 'vbox { label { text = "second" } }', 'utf8');
-      await archiveDirectoryToZip({ sourceDir: firstZipSourceDir, zipPath: firstZipPath });
-      await archiveDirectoryToZip({ sourceDir: secondZipSourceDir, zipPath: secondZipPath });
-
-      const isolatedService = await createService({ RA_APPS_PATH: tempRoot });
+      const isolatedService = await createService();
       const warnSpy = vi.spyOn((isolatedService as unknown as { logger: { warn: (message: string) => void } }).logger, 'warn');
+      const storeLoadedApp = (
+        isolatedService as unknown as { storeLoadedApp: (app: LoadedRAApp) => LoadedRAApp }
+      ).storeLoadedApp.bind(isolatedService);
+      const baseMeta = {
+        id: 'visual-calculator',
+        name: 'Visual Calculator',
+        version: '1.0',
+        description: 'Duplicate loader logging fixture',
+        execution: {
+          render_as: 'display',
+        },
+      };
 
       try {
-        await isolatedService.init();
+        storeLoadedApp({
+          id: 'visual-calculator',
+          zipPath: 'core/a-visual-calculator.zip',
+          meta: baseMeta,
+          source: 'core',
+          htmlContent: null,
+          guiContent: 'vbox { label { text = "first" } }',
+          systemsContent: null,
+          appMode: 'display',
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        storeLoadedApp({
+          id: 'visual-calculator',
+          zipPath: 'core/b-visual-calculator.zip',
+          meta: baseMeta,
+          source: 'core',
+          htmlContent: null,
+          guiContent: 'vbox { label { text = "second" } }',
+          systemsContent: null,
+          appMode: 'display',
+          createdAt: 2,
+          updatedAt: 2,
+        });
 
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Replacing duplicate RA-App visual-calculator'));
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Replacing duplicate RA-App visual-calculator'),
+        );
       } finally {
         warnSpy.mockRestore();
-        await fs.rm(tempRoot, { recursive: true, force: true });
       }
     });
   });

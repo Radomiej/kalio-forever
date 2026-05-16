@@ -20,7 +20,6 @@ export function ImageResultRenderer({ data }: { data: ImageResultData }) {
   return (
     <div className="mt-2 space-y-1">
       <div className="relative group inline-block">
-        {/* eslint-disable-next-line jsx-a11y/img-redundant-alt */}
         <img
           src={data.image_url}
           alt={data.message ?? 'Generated image'}

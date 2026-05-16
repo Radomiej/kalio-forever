@@ -135,18 +135,32 @@ export function MCPPanel({ onOpenSettings }: MCPPanelProps) {
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    apiClient
-      .get<MCPServer[]>('/api/mcp/servers')
-      .then((r) => setServers([...new Map(r.data.map((s) => [s.id, s])).values()]))
-      .catch((err: unknown) => console.error('[MCPPanel] load failed', err))
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    try {
+      const response = await apiClient.get<MCPServer[]>('/api/mcp/servers');
+      setServers([...new Map(response.data.map((server) => [server.id, server])).values()]);
+    } catch (err: unknown) {
+      console.error('[MCPPanel] load failed', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  const refresh = useCallback(() => {
+    setLoading(true);
+    void load();
+  }, [load]);
+
+  const handleRestarted = useCallback((serverId: string) => {
+    void serverId;
+    refresh();
+  }, [refresh]);
+
   useEffect(() => {
-    load();
-    const interval = setInterval(load, 8000);
+    void load();
+    const interval = setInterval(() => {
+      void load();
+    }, 8000);
     return () => clearInterval(interval);
   }, [load]);
 
@@ -163,7 +177,7 @@ export function MCPPanel({ onOpenSettings }: MCPPanelProps) {
         <div className="flex items-center gap-1">
           <button
             className="btn btn-ghost btn-xs"
-            onClick={load}
+            onClick={refresh}
             disabled={loading}
             title="Refresh"
           >
@@ -199,7 +213,7 @@ export function MCPPanel({ onOpenSettings }: MCPPanelProps) {
           </div>
         )}
         {servers.map((s) => (
-          <ServerRow key={s.id} server={s} onRestart={load} />
+          <ServerRow key={s.id} server={s} onRestart={handleRestarted} />
         ))}
       </div>
     </div>

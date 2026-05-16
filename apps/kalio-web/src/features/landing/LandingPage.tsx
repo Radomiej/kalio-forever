@@ -42,7 +42,6 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
   const setPendingMessage = useSessionStore((s) => s.setPendingMessage);
 
   useEffect(() => {
-    setLoading(true);
     Promise.all([
       getRAAppGroups().catch(() => []),
       getRAApps().catch(() => []),

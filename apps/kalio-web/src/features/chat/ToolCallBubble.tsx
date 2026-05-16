@@ -58,9 +58,6 @@ function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
   useEffect(() => {
     let cancelled = false;
     const abortController = new AbortController();
-    setChildRaapp(null);
-    setChildImages([]);
-    setDetailsOpen(false);
 
     void apiClient.get<ChatMessage[]>(`/api/sessions/${result.childSessionId}/messages`, {
       signal: abortController.signal,
@@ -284,7 +281,7 @@ function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
 // tool_result ChatMessage lands in the session store.
 
 export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
-  const [open, setOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const elapsed = activity.finishedAt != null ? activity.finishedAt - activity.startedAt : null;
   const toolActivities = useAgentStore((s) => s.toolActivities);
   const descendantActivities = useMemo(
@@ -304,12 +301,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
             }),
     [activity.callId, activity.toolName, toolActivities],
   );
-
-  useEffect(() => {
-    if (descendantActivities.length > 0) {
-      setOpen(true);
-    }
-  }, [descendantActivities.length]);
+  const open = manualOpen ?? (descendantActivities.length > 0);
 
   // Awaiting confirmation gets its own dedicated inline bubble with action buttons
   if (activity.status === 'awaiting_confirmation') {
@@ -338,7 +330,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
       elapsed={elapsed}
       expandable={expandable}
       open={open}
-      onToggle={() => setOpen((v) => !v)}
+      onToggle={() => setManualOpen((value) => !(value ?? (descendantActivities.length > 0)))}
     >
       {descendantActivities.length > 0 && (
         <div className="space-y-2 rounded border border-base-300/60 bg-base-200/50 px-2 py-2">
@@ -411,10 +403,9 @@ export function HistoryToolCallBubble({
   const imageResult = extractImageResult(parsed);
   const subagentResult = isSubagent ? extractSubagentResult(parsed) : null;
   const hasArgs = args != null && Object.keys(args).length > 0;
-  const [open, setOpen] = useState(() => (raapp != null && !isAnswered) || cliResult != null || imageResult != null || subagentResult != null);
-  useEffect(() => {
-    if (isAnswered) setOpen(false);
-  }, [isAnswered]);
+  const defaultOpen = (raapp != null && !isAnswered) || cliResult != null || imageResult != null || subagentResult != null;
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+  const open = isAnswered ? false : (manualOpen ?? defaultOpen);
 
   const hasResult = !raapp && !cliResult && !imageResult && !subagentResult && content.length > 0;
   const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || imageResult != null || subagentResult != null;
@@ -440,7 +431,7 @@ export function HistoryToolCallBubble({
         }
         expandable={expandable}
         open={open}
-        onToggle={() => setOpen((v) => !v)}
+        onToggle={() => setManualOpen((value) => !(value ?? defaultOpen))}
       >
         {hasArgs && (
           <div className="font-mono bg-base-200/60 rounded px-2 py-1 text-xs text-base-content/50">
@@ -461,11 +452,11 @@ export function HistoryToolCallBubble({
           <TerminalOutputBlock
             result={cliResult}
             isExpanded={open}
-            onToggle={() => setOpen((v) => !v)}
+            onToggle={() => setManualOpen((value) => !(value ?? defaultOpen))}
             agentId={args?.['agentId'] as string | undefined}
           />
         )}
-        {subagentResult && <SubagentResultBlock result={subagentResult} />}
+        {subagentResult && <SubagentResultBlock key={subagentResult.childSessionId} result={subagentResult} />}
         {imageResult && <ImageResultRenderer data={imageResult} />}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}
       </Chip>

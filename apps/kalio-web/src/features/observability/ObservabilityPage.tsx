@@ -164,7 +164,7 @@ export function ObservabilityPage() {
   ) as Record<string, string>;
 
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedTypes, setSelectedTypes] = useState<Set<AuditType>>(new Set(ALL_TYPES));
@@ -175,7 +175,6 @@ export function ObservabilityPage() {
   const [atBottom, setAtBottom] = useState(true);
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       const range = TIME_RANGES.find((r) => r.id === timeRange);
       const params = new URLSearchParams({ limit: '500' });
@@ -196,6 +195,11 @@ export function ObservabilityPage() {
       setLoading(false);
     }
   }, [timeRange, selectedTypes]);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    await load();
+  }, [load]);
 
   const clearLogs = async () => {
     if (!window.confirm('Clear all audit log entries? This cannot be undone.')) return;
@@ -278,7 +282,7 @@ export function ObservabilityPage() {
           </div>
           <button
             className={`btn btn-ghost btn-xs gap-1 ${loading ? 'opacity-60' : ''}`}
-            onClick={() => { void load(); }}
+            onClick={() => { void refresh(); }}
             title="Refresh now"
             disabled={loading}
           >
