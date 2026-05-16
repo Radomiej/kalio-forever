@@ -82,6 +82,20 @@ vi.mock('../../../services/eventBus', () => ({
   },
 }));
 
+vi.mock('../../raapp/RAAppRenderer', () => ({
+  RAAppRenderer: ({
+    block,
+    sessionId,
+  }: {
+    block: { type: string; content: string; vfsPath?: string };
+    sessionId?: string;
+  }) => (
+    <div data-testid="graph-raapp-renderer">
+      {block.type}:{sessionId ?? 'none'}:{block.vfsPath ?? block.content}
+    </div>
+  ),
+}));
+
 function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
   return {
     id: 'msg-1',
@@ -353,5 +367,45 @@ describe('ExecutionGraphView empty-session state', () => {
     fireEvent.mouseUp(document);
 
     expect(inspector.style.width).toBe('464px');
+  });
+
+  it('renders a real preview panel for preview-capable tool nodes and a miniature in the node', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Build calculator preview', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-preview-1', name: 'design_preview', args: { filePath: 'calculator/index.html' } }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-preview-1',
+        content: JSON.stringify({
+          status: 'ready',
+          type: 'html',
+          vfsPath: 'calculator/index.html',
+          content: '<main><h1>Calculator preview</h1></main>',
+        }),
+        createdAt: 3,
+      }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [];
+
+    render(<ExecutionGraphView />);
+
+    expect(await screen.findByTestId('graph-node-preview-tool:call-preview-1')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('graph-node-tool:call-preview-1'));
+
+    expect(await screen.findByTestId('graph-live-preview')).toBeInTheDocument();
+    expect(await screen.findByTestId('graph-raapp-renderer')).toHaveTextContent('html:session-1:calculator/index.html');
   });
 });

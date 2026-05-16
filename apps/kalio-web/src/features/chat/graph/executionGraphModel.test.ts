@@ -484,4 +484,50 @@ describe('buildExecutionGraphModel', () => {
     expect(artifactNode?.payload.kind).toBe('artifact');
     expect(artifactNode?.payload.kind === 'artifact' ? artifactNode.payload.artifact.preview : null).toContain('Calculator preview');
   });
+
+  it('places the final response on the right as the chat outcome without dashed links from tools', () => {
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Build a calculator app', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-list-1', name: 'list_tools', args: {} }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-list-1',
+        content: JSON.stringify({ tools: ['vfs_read', 'vfs_write'] }),
+        createdAt: 3,
+      }),
+      makeMessage({ id: 'a2', role: 'assistant', content: 'The calculator has been built.', createdAt: 4 }),
+    ];
+
+    const turns = buildTurnsFromHistory(messages, 'session-1');
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns,
+      toolActivities: [],
+      activeAgentLoops: {},
+      sessions: [makeSession()],
+      sessionMessages: {
+        'session-1': messages,
+      },
+      collapseTools: false,
+    });
+
+    const turnNode = model.nodes.find((node) => node.kind === 'turn');
+    const finalNode = model.nodes.find((node) => node.kind === 'final-answer');
+    const nonFinalMaxColumn = Math.max(...model.nodes.filter((node) => node.kind !== 'final-answer').map((node) => node.column));
+    const dashedToFinal = model.edges.filter((edge) => edge.targetId === finalNode?.id && edge.style === 'dashed');
+
+    expect(finalNode?.title).toBe('Final response');
+    expect(finalNode?.subtitle).toBe('Last chat reply');
+    expect(finalNode?.column).toBeGreaterThan(turnNode?.column ?? -1);
+    expect(finalNode?.column).toBeGreaterThan(nonFinalMaxColumn);
+    expect(finalNode?.row).toBe(turnNode?.row);
+    expect(dashedToFinal).toEqual([]);
+  });
 });

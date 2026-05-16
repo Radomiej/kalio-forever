@@ -97,4 +97,50 @@ describe('ExecutionGraphBoard', () => {
     expect(viewport.firstElementChild).toHaveClass('min-w-full');
     expect(viewport.firstElementChild).toHaveClass('min-h-full');
   });
+
+  it('renders cards with a fixed grid height so stacked tool nodes do not overlap', () => {
+    render(
+      <ExecutionGraphBoard
+        model={makeModel()}
+        selectedNodeId="turn-1"
+        onSelectNode={noop}
+        zoom={1}
+      />,
+    );
+
+    const turnNode = screen.getByTestId('graph-node-turn-1');
+
+    expect(turnNode.style.height).toBe('80px');
+  });
+
+  it('shows a miniature preview inside preview-capable tool nodes', () => {
+    const model = makeModel();
+    model.nodes[1] = {
+      ...model.nodes[1],
+      payload: {
+        kind: 'tool',
+        toolName: 'design_preview',
+        args: { filePath: 'calculator/index.html' },
+        activity: null,
+        result: {
+          status: 'ready',
+          type: 'html',
+          content: '<main><h1>Calculator preview</h1></main>',
+          vfsPath: 'calculator/index.html',
+        },
+        confirmationRequired: false,
+      },
+    };
+
+    render(
+      <ExecutionGraphBoard
+        model={model}
+        selectedNodeId="tool-1"
+        onSelectNode={noop}
+        zoom={1}
+      />,
+    );
+
+    expect(screen.getByTestId('graph-node-preview-tool-1')).toBeInTheDocument();
+  });
 });

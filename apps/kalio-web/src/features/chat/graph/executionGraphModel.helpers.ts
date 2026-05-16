@@ -3,9 +3,9 @@ import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
 
 export const NODE_WIDTH = 220;
-export const NODE_HEIGHT = 102;
+export const NODE_HEIGHT = 132;
 export const COLUMN_GAP = 68;
-export const ROW_GAP = 34;
+export const ROW_GAP = 40;
 export const BOARD_PADDING_X = 28;
 export const BOARD_PADDING_Y = 28;
 

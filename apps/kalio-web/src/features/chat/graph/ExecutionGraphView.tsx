@@ -12,6 +12,7 @@ import {
   type ExecutionGraphNodePayload,
 } from './executionGraphModel';
 import { ExecutionGraphBoard } from './ExecutionGraphBoard';
+import { ExecutionGraphPreviewPanel } from './ExecutionGraphPreview';
 
 function prettyPrint(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
@@ -39,7 +40,7 @@ function payloadTitle(payload: ExecutionGraphNodePayload): string {
     case 'artifact':
       return 'Artifact payload';
     case 'final-answer':
-      return 'Final answer';
+      return 'Final response';
   }
 }
 
@@ -135,7 +136,7 @@ export function ExecutionGraphView() {
       <div className="px-5 py-4 border-b border-base-300 bg-base-100 flex flex-wrap items-start justify-between gap-4 shrink-0">
         <div>
           <h2 className="text-2xl font-black tracking-tight">Execution Graph</h2>
-          <p className="text-sm text-base-content/45">Prompt roots, orchestration turns, tools, subagents, artifacts and final answers.</p>
+          <p className="text-sm text-base-content/45">Prompt roots, orchestration turns, tools, subagents, artifacts and final responses.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 justify-end">
@@ -410,6 +411,8 @@ export function ExecutionGraphView() {
               <p className="mt-1 text-sm text-base-content/55">selected: {selectedNode.title}</p>
             </div>
 
+            <ExecutionGraphPreviewPanel node={selectedNode} fallbackSessionId={activeSessionId} />
+
             <section className="rounded-[22px] border border-base-300 bg-base-200/35 px-5 py-4 space-y-3">
               <h4 className="text-xl font-black tracking-tight">{payloadTitle(selectedNode.payload)}</h4>
               <InspectorRow label="Status" value={statusLabel(selectedNode.status)} />
@@ -478,7 +481,7 @@ export function ExecutionGraphView() {
               )}
 
               {selectedNode.payload.kind === 'final-answer' && (
-                <InspectorRow label="Answer" value={selectedNode.payload.message?.content ?? 'Awaiting answer'} />
+                <InspectorRow label="Reply" value={selectedNode.payload.message?.content ?? 'Awaiting reply'} />
               )}
             </section>
 

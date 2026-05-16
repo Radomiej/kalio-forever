@@ -530,16 +530,18 @@ export function buildExecutionGraphModel({
     }
 
     if (finalMessage) {
-      const placeFinalBelow = outcomeIds.length > 0 || turnToolItems.length > 1;
+      const branchMaxColumn = nodes
+        .slice(nodes.findIndex((node) => node.id === turnNode.id))
+        .reduce((value, node) => Math.max(value, node.column), baseColumn);
       const finalNode = addNode({
         id: `final:${turn.id}`,
         kind: 'final-answer',
-        title: 'Final answer',
-        subtitle: 'Summary and persisted reply',
+        title: 'Final response',
+        subtitle: 'Last chat reply',
         detail: finalMessage.content,
         status: turn.done ? 'success' : 'running',
-        column: placeFinalBelow ? baseColumn + 1 : baseColumn + 2,
-        row: placeFinalBelow ? maxRow + 1 : startRow,
+        column: branchMaxColumn + 1,
+        row: startRow,
         turnId: turn.id,
         payload: {
           kind: 'final-answer',
@@ -548,7 +550,6 @@ export function buildExecutionGraphModel({
         },
       });
       addEdge(turnNode.id, finalNode.id);
-      outcomeIds.forEach((outcomeId) => addEdge(outcomeId, finalNode.id, 'dashed'));
       maxRow = Math.max(maxRow, finalNode.row);
     }
 

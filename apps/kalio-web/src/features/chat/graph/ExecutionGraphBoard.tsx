@@ -7,6 +7,7 @@ import {
   type ExecutionGraphNode,
   type ExecutionGraphNodeKind,
 } from './executionGraphModel';
+import { GraphNodePreviewThumbnail, extractGraphNodePreview } from './ExecutionGraphPreview';
 
 const NODE_COLORS: Record<ExecutionGraphNodeKind, string> = {
   prompt: 'from-sky-600/85 to-cyan-500/75 border-sky-300/40',
@@ -51,13 +52,6 @@ function statusLabel(status: ExecutionGraphNode['status']): string {
   return 'idle';
 }
 
-function previewRaApp(value: string | undefined): string | null {
-  if (!value) return null;
-  const stripped = value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!stripped) return 'Interactive preview ready';
-  return stripped.slice(0, 140);
-}
-
 function buildEdgePath(source: ExecutionGraphNode, target: ExecutionGraphNode): string {
   const targetIsToolBranch = target.kind === 'tool' || target.kind === 'tool-group';
 
@@ -89,9 +83,7 @@ function GraphNodeCard({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const raappPreview = node.payload.kind === 'artifact' && node.payload.artifact.kind === 'raapp'
-    ? previewRaApp(node.payload.artifact.preview)
-    : null;
+  const preview = extractGraphNodePreview(node);
   const turnBadges = node.payload.kind === 'turn'
     ? [
         `${node.payload.toolCount} tool${node.payload.toolCount === 1 ? '' : 's'}`,
@@ -104,8 +96,8 @@ function GraphNodeCard({
       type="button"
       data-testid={`graph-node-${node.id}`}
       data-graph-node-card="true"
-      className={`absolute text-left rounded-[22px] border bg-gradient-to-br px-4 py-3 shadow-[0_18px_30px_rgba(2,12,27,0.28)] transition-all ${NODE_COLORS[node.kind]} ${selected ? 'ring-2 ring-sky-300/85 scale-[1.01]' : 'hover:scale-[1.01] hover:shadow-[0_20px_34px_rgba(2,12,27,0.34)]'}`}
-      style={{ left: node.x, top: node.y, width: node.width, minHeight: node.height }}
+      className={`absolute overflow-hidden text-left rounded-[22px] border bg-gradient-to-br px-4 py-3 shadow-[0_18px_30px_rgba(2,12,27,0.28)] transition-all ${NODE_COLORS[node.kind]} ${selected ? 'ring-2 ring-sky-300/85 scale-[1.01]' : 'hover:scale-[1.01] hover:shadow-[0_20px_34px_rgba(2,12,27,0.34)]'}`}
+      style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
       onClick={onSelect}
     >
       <div className="flex items-start justify-between gap-3">
@@ -137,12 +129,10 @@ function GraphNodeCard({
         </div>
       )}
 
-      {raappPreview ? (
-        <div className="mt-3 rounded-2xl border border-white/10 bg-black/15 px-3 py-2 text-[10px] leading-5 text-white/75 line-clamp-4 break-words">
-          {raappPreview}
-        </div>
+      {preview ? (
+        <GraphNodePreviewThumbnail node={node} />
       ) : node.detail ? (
-        <p className="mt-3 text-xs text-white/72 line-clamp-3 break-words">{node.detail}</p>
+        <p className="mt-3 text-xs text-white/72 line-clamp-2 break-words">{node.detail}</p>
       ) : null}
     </button>
   );
