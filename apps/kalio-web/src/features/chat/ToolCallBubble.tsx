@@ -189,9 +189,11 @@ function Chip({
 function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
   const [argsOpen, setArgsOpen] = useState(false);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
+  const toolArgProgress = useAgentStore((s) => s.toolArgProgress);
   const setPendingConfirmation = useAgentStore((s) => s.setPendingConfirmation);
   const updateToolActivity = useAgentStore((s) => s.updateToolActivity);
   const confirmation = Object.values(pendingConfirmations).find((pending) => pending.toolCallId === activity.callId);
+  const matchingToolProgress = toolArgProgress?.toolName === activity.toolName ? toolArgProgress : null;
 
   const isMatch = confirmation != null;
 
@@ -239,6 +241,21 @@ function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
       {argPreview && !argsOpen && (
         <div className="mt-1 font-mono text-[10px] text-base-content/30 truncate" data-testid="args-preview">
           {argPreview}
+        </div>
+      )}
+
+      {matchingToolProgress && (
+        <div data-testid="tool-arg-progress-indicator" className="mt-1 font-mono text-[10px] text-base-content/45">
+          {matchingToolProgress.totalChars > 0 ? (
+            <>
+              Writing <span className="text-base-content/65">{activity.toolName}</span>…{' '}
+              {matchingToolProgress.totalChars.toLocaleString()} chars · {matchingToolProgress.charsPerSec.toLocaleString()}/s
+            </>
+          ) : (
+            <>
+              Preparing <span className="text-base-content/65">{activity.toolName}</span>…
+            </>
+          )}
         </div>
       )}
 

@@ -22,12 +22,14 @@ const mockUpdateToolActivity = vi.fn();
 let mockPendingConfirmations: Record<string, ToolConfirmationRequest> = {};
 let mockActiveSessionId = 'session-1';
 let mockToolActivities: ToolActivity[] = [];
+let mockToolArgProgress: { toolName: string; totalChars: number; charsPerSec: number } | null = null;
 
 vi.mock('../../store/agentStore', () => ({
   useAgentStore: (selector: (s: unknown) => unknown) =>
     selector({
       pendingConfirmations: mockPendingConfirmations,
       toolActivities: mockToolActivities,
+      toolArgProgress: mockToolArgProgress,
       setPendingConfirmation: mockSetPendingConfirmation,
       updateToolActivity: mockUpdateToolActivity,
       setCanvasOpen: vi.fn(),
@@ -94,6 +96,7 @@ beforeEach(() => {
   mockPendingConfirmations = {};
   mockActiveSessionId = 'session-1';
   mockToolActivities = [];
+  mockToolArgProgress = null;
   vi.clearAllMocks();
   mockApiGet.mockResolvedValue({ data: [] });
 });
@@ -222,6 +225,15 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
 
     expect(screen.queryByTestId('args-preview')).toBeNull();
     expect(screen.queryByTestId('confirmation-args-toggle')).toBeNull();
+  });
+
+  it('REGRESSION: awaiting confirmation keeps showing synthetic Preparing progress when no arg chunks were streamed', () => {
+    mockPendingConfirmations = { 'session-1': makeConfirmation() };
+    mockToolArgProgress = { toolName: 'vfs_write', totalChars: 0, charsPerSec: 0 };
+
+    render(<LiveToolCallBubble activity={makeActivity()} />);
+
+    expect(screen.getByTestId('tool-arg-progress-indicator')).toHaveTextContent(/Preparing\s+vfs_write/i);
   });
 });
 

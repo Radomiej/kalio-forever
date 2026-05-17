@@ -121,8 +121,8 @@ async function runLiveRaappFlow(page: Page, request: APIRequestContext): Promise
     const agentBubble = page.getByTestId('agent-turn-bubble').first();
     await expect(agentBubble).toBeVisible({ timeout: 20_000 });
 
-    const loadingIndicator = agentBubble.getByTestId('turn-loading-indicator');
-    await expect(loadingIndicator).toBeVisible({ timeout: 30_000 });
+    const progressIndicators = agentBubble.locator('[data-testid="turn-loading-indicator"], [data-testid="tool-arg-progress-indicator"]');
+    await expect(progressIndicators.first()).toBeVisible({ timeout: 30_000 });
 
     const loopDeadline = Date.now() + 60_000;
     let raappStartSeenAt: number | null = null;
@@ -132,10 +132,10 @@ async function runLiveRaappFlow(page: Page, request: APIRequestContext): Promise
       }
 
       try {
-        const text = (await loadingIndicator.textContent())?.trim();
-        if (text) {
-          seenIndicatorTexts.push(text);
-        }
+        const texts = (await progressIndicators.allTextContents())
+          .map((text) => text.trim())
+          .filter((text) => text.length > 0);
+        seenIndicatorTexts.push(...texts);
       } catch {
         // indicator may disappear once tool:start fires
       }
