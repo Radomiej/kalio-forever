@@ -174,6 +174,19 @@ const clearAgentTurns = vi.fn();
 const clearPendingChunks = vi.fn();
 const flushStreamingChunks = vi.fn();
 const getSessionMessages = vi.fn(() => [] as ChatMessage[]);
+const updateSession = vi.fn((sessionId: string, patch: { title?: string; personaId?: string }) => {
+  mockSessions = mockSessions.map((session) =>
+    session.id === sessionId ? { ...session, ...patch } : session,
+  );
+});
+
+function createMockSessions() {
+  return [
+    { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
+    { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
+    { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
+  ];
+}
 
 // Mutable activeTurnId so tests can control what the store returns
 let mockActiveTurnId: string | null = null;
@@ -182,27 +195,25 @@ let mockPendingMessage: string | null = null;
 let mockStreamingChunks: Record<string, string> = {};
 let mockThinkingChunks: Record<string, string> = {};
 let mockChunkSessionIds: Record<string, string> = {};
+let mockMessages: ChatMessage[] = [];
+let mockSessions = createMockSessions();
 const mockSetPendingMessage = vi.fn();
 const mockSetPendingRAAppId = vi.fn();
 
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: Object.assign(
     () => ({
-      messages: [],
+      messages: mockMessages,
       agentTurns: [],
       activeTurnId: mockActiveTurnId,
       activeSessionId: mockActiveSessionId,
-      sessions: [
-        { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
-        { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
-        { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
-      ],
+      sessions: mockSessions,
       addMessage,
       addSession,
       appendChunk: vi.fn(),
       finalizeChunk: vi.fn(),
       setMessages,
-      updateSession: vi.fn(),
+      updateSession,
       setAgentTurns,
       startAgentTurn,
       addTurnItem,
@@ -219,21 +230,17 @@ vi.mock('../../store/sessionStore', () => ({
     }),
     {
       getState: () => ({
-        messages: [],
+        messages: mockMessages,
         agentTurns: [],
         activeTurnId: mockActiveTurnId,
         activeSessionId: mockActiveSessionId,
-        sessions: [
-          { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
-          { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
-          { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
-        ],
+        sessions: mockSessions,
         pendingMessage: mockPendingMessage,
         addSession,
         pendingRAAppId: null,
         setPendingMessage: mockSetPendingMessage,
         setPendingRAAppId: mockSetPendingRAAppId,
-        updateSession: vi.fn(),
+        updateSession,
         streamingChunks: mockStreamingChunks,
         thinkingChunks: mockThinkingChunks,
         chunkSessionIds: mockChunkSessionIds,
@@ -301,6 +308,8 @@ beforeEach(() => {
   mockStreamingChunks = {};
   mockThinkingChunks = {};
   mockChunkSessionIds = {};
+  mockMessages = [];
+  mockSessions = createMockSessions();
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
   vi.clearAllMocks();
@@ -618,6 +627,44 @@ describe('ChatInterface event wiring', () => {
     });
 
     expect(setStreaming).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: first assistant reply still triggers title generation after optimistic preview title', async () => {
+    const firstPrompt = 'Build a dashboard that tracks agent loop progress across subagents';
+    mockSessions = mockSessions.map((session) =>
+      session.id === 'session-1'
+        ? { ...session, title: 'Build a dashboard that tracks agent loop progress…' }
+        : session,
+    );
+    mockMessages = [
+      { id: 'user-1', sessionId: 'session-1', role: 'user', content: firstPrompt, createdAt: 1 },
+      { id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'Done', createdAt: 2 },
+    ];
+
+    const fetchMock = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ title: 'Generated Title' }) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await renderChatInterface();
+    addLlmActivity.mockClear();
+    updateLlmActivity.mockClear();
+    updateSession.mockClear();
+
+    await emitEvent('chat:chunk', {
+      sessionId: 'session-1',
+      messageId: 'assistant-1',
+      delta: '',
+      done: true,
+    });
+
+    expect(addLlmActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'title-gen', status: 'running' }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/session-1/generate-title', { method: 'POST' });
+    expect(updateSession).toHaveBeenCalledWith('session-1', { title: 'Generated Title' });
+    expect(updateLlmActivity).toHaveBeenCalledWith(
+      'title-gen',
+      expect.objectContaining({ status: 'done' }),
+    );
   });
 });
 

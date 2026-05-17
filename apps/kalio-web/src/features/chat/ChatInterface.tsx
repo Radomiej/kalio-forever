@@ -23,6 +23,28 @@ import {
 
 export { computeAnsweredCallIds } from './chatUtils';
 
+const DEFAULT_SESSION_TITLE = 'New Chat';
+
+function buildOptimisticSessionTitle(content: string): string {
+  const preview = content.slice(0, 50).trim();
+  return preview + (content.length > 50 ? '…' : '');
+}
+
+function shouldRequestGeneratedTitle(sessionTitle: string, sessionMessages: ChatMessage[]): boolean {
+  const userMessages = sessionMessages.filter((message) => message.role === 'user');
+  const assistantMessages = sessionMessages.filter((message) => message.role === 'assistant');
+
+  if (userMessages.length !== 1 || assistantMessages.length !== 1) {
+    return false;
+  }
+
+  if (sessionTitle === DEFAULT_SESSION_TITLE || sessionTitle === '') {
+    return true;
+  }
+
+  return sessionTitle === buildOptimisticSessionTitle(userMessages[0].content);
+}
+
 export function ChatInterface() {
   const {
     messages, activeSessionId, sessions, addMessage, addSession, appendChunk, finalizeChunk, setMessages,
@@ -167,10 +189,10 @@ export function ChatInterface() {
         // Only update UI state for the active session
         if (chunk.sessionId === useSessionStore.getState().activeSessionId) {
           setStreaming(false);
-          // After first assistant reply, generate a real title via LLM
-          const { sessions, activeSessionId: sid } = useSessionStore.getState();
+          // After the first assistant reply, replace the optimistic preview title.
+          const { sessions, activeSessionId: sid, messages: sessionMessages } = useSessionStore.getState();
           const session = sessions.find((s) => s.id === sid);
-          if (sid && session && (session.title === 'New Chat' || session.title === '')) {
+          if (sid && session && shouldRequestGeneratedTitle(session.title, sessionMessages)) {
             addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: Date.now() });
             fetch(`/api/sessions/${sid}/generate-title`, { method: 'POST' })
               .then((r) => r.json())
@@ -546,8 +568,8 @@ export function ChatInterface() {
     // Auto-generate title from first message if session still has default title
     const { sessions, updateSession } = useSessionStore.getState();
     const session = sessions.find((s) => s.id === activeSessionId);
-    if (session && session.title === 'New Chat' && messages.length === 0) {
-      const generatedTitle = content.slice(0, 50).trim() + (content.length > 50 ? '…' : '');
+    if (session && session.title === DEFAULT_SESSION_TITLE && messages.length === 0) {
+      const generatedTitle = buildOptimisticSessionTitle(content);
       void updateSession(activeSessionId, { title: generatedTitle });
     }
 

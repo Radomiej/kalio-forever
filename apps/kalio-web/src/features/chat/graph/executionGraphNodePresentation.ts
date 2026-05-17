@@ -9,6 +9,135 @@ export interface GraphNodeMetadataItem {
 
 type GraphNodePresentationInput = Pick<ExecutionGraphNode, 'kind' | 'title' | 'subtitle' | 'detail' | 'payload'>;
 
+interface GraphNodeSizingProfile {
+  baseHeight: number;
+  headlineCharsPerLine: number;
+  headlineMaxLines: number;
+  supportingCharsPerLine: number;
+  supportingMaxLines: number;
+  metadataColumns: 1 | 2;
+  metadataRowHeight: number;
+  previewHeightBonus: {
+    raapp: number;
+    image: number;
+  };
+  maxHeight: number;
+}
+
+const TOOL_ARG_LABELS: Record<string, string> = {
+  inputPrompt: 'Prompt',
+  prompt: 'Prompt',
+  task: 'Task',
+  instruction: 'Instruction',
+  message: 'Message',
+  filePath: 'File',
+  path: 'Path',
+  vfsPath: 'Path',
+  outputPath: 'Output',
+  targetPath: 'Target',
+  mode: 'Mode',
+  vfsMode: 'VFS',
+  persona: 'Persona',
+  personaId: 'Persona',
+  childSessionId: 'Child',
+  parentSessionId: 'Parent',
+  command: 'Command',
+};
+
+const TOOL_ARG_PRIORITY = [
+  'inputPrompt',
+  'prompt',
+  'task',
+  'instruction',
+  'persona',
+  'personaId',
+  'filePath',
+  'path',
+  'vfsMode',
+  'mode',
+  'command',
+];
+
+const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = {
+  prompt: {
+    baseHeight: 96,
+    headlineCharsPerLine: 24,
+    headlineMaxLines: 5,
+    supportingCharsPerLine: 34,
+    supportingMaxLines: 4,
+    metadataColumns: 1,
+    metadataRowHeight: 34,
+    previewHeightBonus: { raapp: 104, image: 92 },
+    maxHeight: 280,
+  },
+  turn: {
+    baseHeight: 98,
+    headlineCharsPerLine: 26,
+    headlineMaxLines: 4,
+    supportingCharsPerLine: 32,
+    supportingMaxLines: 7,
+    metadataColumns: 2,
+    metadataRowHeight: 36,
+    previewHeightBonus: { raapp: 108, image: 94 },
+    maxHeight: 330,
+  },
+  'tool-group': {
+    baseHeight: 90,
+    headlineCharsPerLine: 28,
+    headlineMaxLines: 3,
+    supportingCharsPerLine: 34,
+    supportingMaxLines: 3,
+    metadataColumns: 1,
+    metadataRowHeight: 34,
+    previewHeightBonus: { raapp: 96, image: 88 },
+    maxHeight: 220,
+  },
+  tool: {
+    baseHeight: 90,
+    headlineCharsPerLine: 26,
+    headlineMaxLines: 3,
+    supportingCharsPerLine: 32,
+    supportingMaxLines: 4,
+    metadataColumns: 2,
+    metadataRowHeight: 34,
+    previewHeightBonus: { raapp: 110, image: 96 },
+    maxHeight: 360,
+  },
+  subagent: {
+    baseHeight: 114,
+    headlineCharsPerLine: 22,
+    headlineMaxLines: 6,
+    supportingCharsPerLine: 30,
+    supportingMaxLines: 7,
+    metadataColumns: 1,
+    metadataRowHeight: 38,
+    previewHeightBonus: { raapp: 112, image: 96 },
+    maxHeight: 360,
+  },
+  artifact: {
+    baseHeight: 96,
+    headlineCharsPerLine: 25,
+    headlineMaxLines: 4,
+    supportingCharsPerLine: 32,
+    supportingMaxLines: 5,
+    metadataColumns: 1,
+    metadataRowHeight: 34,
+    previewHeightBonus: { raapp: 104, image: 92 },
+    maxHeight: 320,
+  },
+  'final-answer': {
+    baseHeight: 98,
+    headlineCharsPerLine: 26,
+    headlineMaxLines: 4,
+    supportingCharsPerLine: 32,
+    supportingMaxLines: 5,
+    metadataColumns: 1,
+    metadataRowHeight: 34,
+    previewHeightBonus: { raapp: 100, image: 90 },
+    maxHeight: 280,
+  },
+};
+
 function estimateLines(value: string | undefined, charsPerLine: number, maxLines: number): number {
   if (!value) {
     return 0;
@@ -28,7 +157,7 @@ function formatMetadataValue(value: unknown): string {
     if (normalized.length <= 30) {
       return normalized;
     }
-    return `${normalized.slice(0, 27)}...`;
+    return `${normalized.slice(0, 27).trimEnd()}...`;
   }
 
   if (typeof value === 'number' || typeof value === 'boolean') {
@@ -50,13 +179,50 @@ function formatMetadataValue(value: unknown): string {
   return '-';
 }
 
-function hasInlinePreview(node: GraphNodePresentationInput): boolean {
+function formatMetadataLabel(value: string): string {
+  const direct = TOOL_ARG_LABELS[value];
+  if (direct) {
+    return direct;
+  }
+
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => (part.length <= 3 ? part.toUpperCase() : `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`))
+    .join(' ');
+}
+
+function orderToolArgs(entries: Array<[string, unknown]>): Array<[string, unknown]> {
+  return [...entries].sort(([left], [right]) => {
+    const leftPriority = TOOL_ARG_PRIORITY.indexOf(left);
+    const rightPriority = TOOL_ARG_PRIORITY.indexOf(right);
+
+    if (leftPriority === -1 && rightPriority === -1) {
+      return left.localeCompare(right);
+    }
+    if (leftPriority === -1) {
+      return 1;
+    }
+    if (rightPriority === -1) {
+      return -1;
+    }
+
+    return leftPriority - rightPriority;
+  });
+}
+
+function getInlinePreviewKind(node: GraphNodePresentationInput): 'raapp' | 'image' | null {
   if (node.payload.kind === 'artifact') {
-    return node.payload.artifact.kind === 'raapp' || node.payload.artifact.kind === 'image';
+    if (node.payload.artifact.kind === 'raapp' || node.payload.artifact.kind === 'image') {
+      return node.payload.artifact.kind;
+    }
+    return null;
   }
 
   if (node.payload.kind !== 'tool' || !node.payload.result || typeof node.payload.result !== 'object') {
-    return false;
+    return null;
   }
 
   const candidate = node.payload.result as Record<string, unknown>;
@@ -68,14 +234,14 @@ function hasInlinePreview(node: GraphNodePresentationInput): boolean {
       : null;
 
   if (candidate.status === 'ready' && (type === 'html' || type === 'gui')) {
-    return true;
+    return 'raapp';
   }
 
   if (!vfsPath) {
-    return false;
+    return null;
   }
 
-  return /\.(html|png|jpg|jpeg|gif|webp|svg)$/i.test(vfsPath);
+  return /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(vfsPath) ? 'image' : /\.(html)$/i.test(vfsPath) ? 'raapp' : null;
 }
 
 export function getGraphNodeHeading(node: GraphNodePresentationInput): {
@@ -115,9 +281,9 @@ export function getGraphNodeMetadata(node: GraphNodePresentationInput): GraphNod
       return items;
     }
     case 'tool': {
-      const args: GraphNodeMetadataItem[] = Object.entries(node.payload.args)
+      const args: GraphNodeMetadataItem[] = orderToolArgs(Object.entries(node.payload.args))
         .slice(0, 4)
-        .map(([label, value]) => ({ label, value: formatMetadataValue(value), tone: 'default' }));
+        .map(([label, value]) => ({ label: formatMetadataLabel(label), value: formatMetadataValue(value), tone: 'default' }));
 
       if (node.payload.confirmationRequired) {
         args.unshift({ label: 'Approval', value: 'Accept required', tone: 'warning' });
@@ -159,30 +325,50 @@ export function getGraphNodeMetadata(node: GraphNodePresentationInput): GraphNod
   }
 }
 
+export function getGraphNodeMetadataColumnCount(
+  node: GraphNodePresentationInput,
+  metadata: GraphNodeMetadataItem[] = getGraphNodeMetadata(node),
+): 1 | 2 {
+  const profile = NODE_SIZING[node.kind];
+  const previewKind = getInlinePreviewKind(node);
+
+  if (profile.metadataColumns === 1 || metadata.length <= 1) {
+    return 1;
+  }
+
+  if (previewKind || metadata.some((item) => item.value.length > 18)) {
+    return 1;
+  }
+
+  return 2;
+}
+
 export function estimateGraphNodeHeight(node: GraphNodePresentationInput): number {
   const { eyebrow, headline, supporting } = getGraphNodeHeading(node);
   const metadata = getGraphNodeMetadata(node);
-  const headlineCharsPerLine = node.kind === 'prompt' || node.kind === 'subagent' ? 24 : 28;
+  const profile = NODE_SIZING[node.kind];
+  const metadataColumns = getGraphNodeMetadataColumnCount(node, metadata);
+  const previewKind = getInlinePreviewKind(node);
 
-  let height = 92;
-  height += Math.max(0, estimateLines(eyebrow, 24, 2) - 1) * 14;
-  height += Math.max(1, estimateLines(headline, headlineCharsPerLine, 5)) * 20;
+  let height = profile.baseHeight;
+  height += Math.max(0, estimateLines(eyebrow, 24, 2) - 1) * 12;
+  height += Math.max(1, estimateLines(headline, profile.headlineCharsPerLine, profile.headlineMaxLines)) * 20;
 
   if (supporting) {
-    height += estimateLines(supporting, 34, 6) * 16 + 10;
+    height += estimateLines(supporting, profile.supportingCharsPerLine, profile.supportingMaxLines) * 16 + 12;
   }
 
   if (metadata.length > 0) {
-    const metadataRows = Math.ceil(metadata.length / 2);
-    const longValueRows = metadata.filter((item) => item.value.length > 18).length;
-    height += metadataRows * 34 + Math.min(longValueRows, metadataRows) * 10 + 8;
+    const metadataRows = Math.ceil(metadata.length / metadataColumns);
+    const longValueRows = Math.ceil(metadata.filter((item) => item.value.length > 18).length / metadataColumns);
+    height += metadataRows * profile.metadataRowHeight + Math.min(longValueRows, metadataRows) * 12 + 10;
   }
 
-  if (hasInlinePreview(node)) {
-    height += 82;
+  if (previewKind) {
+    height += previewKind === 'raapp' ? profile.previewHeightBonus.raapp : profile.previewHeightBonus.image;
   }
 
-  return Math.max(NODE_HEIGHT, Math.min(height, 320));
+  return Math.max(NODE_HEIGHT, Math.min(height, profile.maxHeight));
 }
 
 export function applyGraphNodeLayout(nodes: ExecutionGraphNode[]): { width: number; height: number } {
