@@ -20,27 +20,27 @@ const CONFIG: CLIAgentConfig = {
   extraArgs: [],
 };
 
-function installFetchMock() {
+function installFetchMock(adapter: CLIAgentAdapterInfo = ADAPTER, config: CLIAgentConfig = CONFIG) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, opts?: RequestInit) => {
       const method = opts?.method?.toUpperCase() ?? 'GET';
 
       if (method === 'GET' && url === '/api/cli-agents') {
-        return new Response(JSON.stringify([ADAPTER]), {
+        return new Response(JSON.stringify([adapter]), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (method === 'GET' && url === `/api/cli-agents/${ADAPTER.id}/config`) {
-        return new Response(JSON.stringify(CONFIG), {
+      if (method === 'GET' && url === `/api/cli-agents/${adapter.id}/config`) {
+        return new Response(JSON.stringify(config), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (method === 'PUT' && url === `/api/cli-agents/${ADAPTER.id}/config`) {
+      if (method === 'PUT' && url === `/api/cli-agents/${adapter.id}/config`) {
         return new Response(String(opts?.body ?? '{}'), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -52,9 +52,9 @@ function installFetchMock() {
   );
 }
 
-function getPutBody(): CLIAgentConfig {
+function getPutBody(agentId = ADAPTER.id): CLIAgentConfig {
   const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
-  const putCall = calls.find(([url, opts]) => url === `/api/cli-agents/${ADAPTER.id}/config` && opts?.method === 'PUT');
+  const putCall = calls.find(([url, opts]) => url === `/api/cli-agents/${agentId}/config` && opts?.method === 'PUT');
   expect(putCall).toBeDefined();
   return JSON.parse((putCall![1]?.body as string) ?? '{}') as CLIAgentConfig;
 }
@@ -63,6 +63,23 @@ describe('CLIAgentPanel', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     installFetchMock();
+  });
+
+  it('renders Codex with a codex-specific CLI path hint', async () => {
+    installFetchMock({
+      id: 'codex',
+      displayName: 'Codex CLI',
+      installUrl: 'https://example.com/codex',
+      available: true,
+      version: '0.130.0',
+    });
+
+    render(<CLIAgentPanel />);
+
+    await screen.findByText('Codex CLI');
+    await waitFor(() => {
+      expect(screen.getAllByRole('textbox')[0]).toHaveAttribute('placeholder', 'e.g. /usr/local/bin/codex');
+    });
   });
 
   it('does not serialize an empty timeout as 0 (REGRESSION)', async () => {

@@ -5,7 +5,7 @@ interface ConnectBody {
   botToken: string;
 }
 
-@Controller('api/relay/telegram')
+@Controller('relay/telegram')
 export class TelegramController {
   constructor(private readonly telegram: TelegramRelayService) {}
 

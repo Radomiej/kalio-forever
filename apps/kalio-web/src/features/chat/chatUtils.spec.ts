@@ -83,6 +83,55 @@ describe('mergeFetchedMessages', () => {
     expect(turns).toHaveLength(1);
     expect(turns[0]).toMatchObject({ promptMessageId: 'u-local' });
   });
+
+  it('REGRESSION: collapses a persisted user prompt onto the optimistic local copy once history catches up', () => {
+    const currentMessages = [
+      makeMsg({ id: 'u-local', role: 'user', content: 'Build a calculator app', createdAt: 10 }),
+    ];
+    const loadedMessages = [
+      makeMsg({ id: 'u-server', role: 'user', content: 'Build a calculator app', createdAt: 12 }),
+    ];
+
+    const merged = mergeFetchedMessages(currentMessages, loadedMessages);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      id: 'u-local',
+      role: 'user',
+      content: 'Build a calculator app',
+    });
+  });
+
+  it('REGRESSION: collapses a persisted tool_result onto the optimistic local copy by toolCallId', () => {
+    const currentMessages = [
+      makeMsg({
+        id: 'tr-local',
+        role: 'tool_result',
+        content: '{"status":"ready","source":"local"}',
+        toolCallId: 'call-123',
+        createdAt: 30,
+      }),
+    ];
+    const loadedMessages = [
+      makeMsg({
+        id: 'tr-server',
+        role: 'tool_result',
+        content: '{"status":"ready","source":"server"}',
+        toolCallId: 'call-123',
+        createdAt: 35,
+      }),
+    ];
+
+    const merged = mergeFetchedMessages(currentMessages, loadedMessages);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      id: 'tr-local',
+      role: 'tool_result',
+      toolCallId: 'call-123',
+      content: '{"status":"ready","source":"local"}',
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

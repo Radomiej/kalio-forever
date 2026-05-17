@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ChatSession, Persona, ToolConfirmationRequest } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
@@ -96,6 +96,14 @@ vi.mock('../../raapp/RAAppRenderer', () => ({
   ),
 }));
 
+async function renderExecutionGraphView(): Promise<void> {
+  await act(async () => {
+    render(<ExecutionGraphView />);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
   return {
     id: 'msg-1',
@@ -177,8 +185,8 @@ describe('ExecutionGraphView empty-session state', () => {
     cancelToolMock.mockReset();
   });
 
-  it('shows session suggestions and live agent activity when no session is selected', () => {
-    render(<ExecutionGraphView />);
+  it('shows session suggestions and live agent activity when no session is selected', async () => {
+    await renderExecutionGraphView();
 
     expect(screen.getByText('Pick a session or inspect live activity')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open session Main UI task from graph overview' })).toBeInTheDocument();
@@ -186,18 +194,18 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(screen.getAllByText('run_subagent').length).toBeGreaterThan(0);
   });
 
-  it('opens a suggested session from the empty graph state', () => {
-    render(<ExecutionGraphView />);
+  it('opens a suggested session from the empty graph state', async () => {
+    await renderExecutionGraphView();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open session Main UI task from graph overview' }));
 
     expect(sessionState.setActiveSession).toHaveBeenCalledWith('session-1');
   });
 
-  it('keeps the graph shell visible when the active session has no execution nodes yet', () => {
+  it('keeps the graph shell visible when the active session has no execution nodes yet', async () => {
     sessionState.activeSessionId = 'session-1';
 
-    render(<ExecutionGraphView />);
+    await renderExecutionGraphView();
 
     expect(screen.getByRole('heading', { name: 'Execution Graph' })).toBeInTheDocument();
     expect(screen.getByText('No execution nodes yet for this session.')).toBeInTheDocument();
@@ -240,7 +248,7 @@ describe('ExecutionGraphView empty-session state', () => {
       },
     };
 
-    render(<ExecutionGraphView />);
+    await renderExecutionGraphView();
 
     fireEvent.click(screen.getByTestId('graph-node-tool:call-delete-1'));
     fireEvent.click(await screen.findByRole('button', { name: 'Accept tool request' }));
@@ -297,7 +305,7 @@ describe('ExecutionGraphView empty-session state', () => {
       },
     ];
 
-    render(<ExecutionGraphView />);
+    await renderExecutionGraphView();
 
     expect(screen.getByTestId('graph-node-tool:call-list-1')).toBeInTheDocument();
     expect(screen.getByTestId('graph-node-tool:call-preview-1')).toBeInTheDocument();
@@ -329,7 +337,7 @@ describe('ExecutionGraphView empty-session state', () => {
     sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
     agentState.toolActivities = [];
 
-    render(<ExecutionGraphView />);
+    await renderExecutionGraphView();
 
     fireEvent.wheel(await screen.findByTestId('execution-graph-viewport'), { deltaY: -120 });
 
@@ -356,7 +364,7 @@ describe('ExecutionGraphView empty-session state', () => {
     sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
     agentState.toolActivities = [];
 
-    render(<ExecutionGraphView />);
+    await renderExecutionGraphView();
 
     const inspector = await screen.findByTestId('execution-graph-inspector');
 
@@ -399,7 +407,7 @@ describe('ExecutionGraphView empty-session state', () => {
     sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
     agentState.toolActivities = [];
 
-    render(<ExecutionGraphView />);
+    await renderExecutionGraphView();
 
     expect(await screen.findByTestId('graph-node-preview-tool:call-preview-1')).toBeInTheDocument();
 

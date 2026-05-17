@@ -23,29 +23,93 @@ export function computeAnsweredCallIds(messages: ChatMessage[]): Set<string> {
   return answered;
 }
 
+function buildMessageSyncKey(message: ChatMessage): string | null {
+  if (message.role === 'tool_result') {
+    return message.toolCallId ? `tool_result:${message.sessionId}:${message.toolCallId}` : null;
+  }
+
+  if (message.role === 'user') {
+    const attachmentsKey = (message.attachments ?? [])
+      .map((attachment) => `${attachment.path}:${attachment.mimeType}`)
+      .join('|');
+    return `user:${message.sessionId}:${attachmentsKey}:${message.content}`;
+  }
+
+  return null;
+}
+
+function mergeMessageCopies(currentMessage: ChatMessage, loadedMessage: ChatMessage): ChatMessage {
+  return {
+    ...loadedMessage,
+    ...currentMessage,
+    content: currentMessage.content || loadedMessage.content,
+    thinking: currentMessage.thinking ?? loadedMessage.thinking,
+    toolCalls: currentMessage.toolCalls ?? loadedMessage.toolCalls,
+    toolCallId: currentMessage.toolCallId ?? loadedMessage.toolCallId,
+    attachments: currentMessage.attachments ?? loadedMessage.attachments,
+    streaming: currentMessage.streaming ?? loadedMessage.streaming,
+    createdAt: Math.min(currentMessage.createdAt, loadedMessage.createdAt),
+  };
+}
+
+function shiftUnmatchedMessage(
+  messages: ChatMessage[] | undefined,
+  matchedLoadedIds: Set<string>,
+): ChatMessage | undefined {
+  while (messages && messages.length > 0) {
+    const candidate = messages.shift();
+    if (candidate && !matchedLoadedIds.has(candidate.id)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
 export function mergeFetchedMessages(currentMessages: ChatMessage[], loadedMessages: ChatMessage[]): ChatMessage[] {
   const merged = new Map<string, ChatMessage>();
+  const matchedLoadedIds = new Set<string>();
+  const loadedBySyncKey = new Map<string, ChatMessage[]>();
 
-  loadedMessages.forEach((message) => {
+  [...loadedMessages]
+    .sort((left, right) => left.createdAt - right.createdAt)
+    .forEach((message) => {
     merged.set(message.id, message);
-  });
 
-  currentMessages.forEach((message) => {
+      const syncKey = buildMessageSyncKey(message);
+      if (!syncKey) {
+        return;
+      }
+
+      const bucket = loadedBySyncKey.get(syncKey) ?? [];
+      bucket.push(message);
+      loadedBySyncKey.set(syncKey, bucket);
+    });
+
+  [...currentMessages]
+    .sort((left, right) => left.createdAt - right.createdAt)
+    .forEach((message) => {
     const existing = merged.get(message.id);
     if (!existing) {
+      const syncKey = buildMessageSyncKey(message);
+      const matchedLoaded = syncKey
+        ? shiftUnmatchedMessage(loadedBySyncKey.get(syncKey), matchedLoadedIds)
+        : undefined;
+
+      if (matchedLoaded) {
+        matchedLoadedIds.add(matchedLoaded.id);
+        merged.delete(matchedLoaded.id);
+        merged.set(message.id, mergeMessageCopies(message, matchedLoaded));
+        return;
+      }
+
       merged.set(message.id, message);
       return;
     }
 
-    merged.set(message.id, {
-      ...existing,
-      ...message,
-      content: message.content || existing.content,
-      thinking: message.thinking ?? existing.thinking,
-      streaming: message.streaming ?? existing.streaming,
-      toolCallId: message.toolCallId ?? existing.toolCallId,
+      matchedLoadedIds.add(existing.id);
+      merged.set(message.id, mergeMessageCopies(message, existing));
     });
-  });
 
   return [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
 }

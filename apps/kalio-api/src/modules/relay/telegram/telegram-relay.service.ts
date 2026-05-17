@@ -7,6 +7,13 @@ import { escapeMarkdownV2, splitMessage } from './telegram.utils';
 
 const KEY_BOT_TOKEN = 'relay.telegram.bot_token';
 const KEY_CHAT_ID = 'relay.telegram.chat_id';
+const TELEGRAM_COMMANDS = [
+  { command: 'start', description: 'Show connection status' },
+  { command: 'register', description: 'Link this chat to Kalio' },
+  { command: 'status', description: 'Show active sessions' },
+  { command: 'stop', description: 'Stop all running sessions' },
+  { command: 'help', description: 'Show available commands' },
+] as const;
 
 @Injectable()
 export class TelegramRelayService extends RemoteRelayChannel implements OnModuleInit, OnModuleDestroy {
@@ -84,6 +91,8 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
 
   private async startBot(token: string): Promise<void> {
     const bot = new Bot(token);
+    await bot.api.deleteWebhook();
+    await bot.api.setMyCommands(TELEGRAM_COMMANDS);
     const me = await bot.api.getMe();
     this.bot = bot;
     this.botUsername = me.username;
@@ -117,7 +126,7 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
     bot.command('start', async (ctx) => {
       if (!this.chatId) {
         await ctx.reply(
-          'Welcome to Kalio\! Send /register to link this chat and receive notifications\.',
+          'Welcome to Kalio\! Send any message or /register to link this chat and receive notifications\.',
           { parse_mode: 'MarkdownV2' },
         );
       } else {
@@ -128,24 +137,27 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
     });
 
     bot.command('register', async (ctx) => {
-      const newChatId = String(ctx.chat.id);
-      this.chatId = newChatId;
-      await this.settings.set(KEY_CHAT_ID, newChatId).catch((err: unknown) => {
+      try {
+        await this.persistChatId(String(ctx.chat.id));
+        await ctx.reply(
+          'Registered\! Kalio notifications will be sent to this chat\.',
+          { parse_mode: 'MarkdownV2' },
+        );
+      } catch (err) {
         this.logger.error(
-          'Failed to persist chat_id',
+          'Failed to register Telegram chat',
           err instanceof Error ? err : new Error(String(err)),
         );
-      });
-      this.logger.log(`Telegram chat registered: ${newChatId}`);
-      await ctx.reply(
-        'Registered\! Kalio notifications will be sent to this chat\.',
-        { parse_mode: 'MarkdownV2' },
-      );
+        await ctx.reply('Failed to register this chat\. Try again in a moment\.', {
+          parse_mode: 'MarkdownV2',
+        });
+      }
     });
 
     bot.command('help', async (ctx) => {
       await ctx.reply(
-        '/register \- Link this chat to receive notifications\n' +
+        'Send any message to auto\-register this chat\n\n' +
+          '/register \- Link this chat to receive notifications\n' +
           '/status \- Show active sessions\n' +
           '/stop \- Stop all running sessions\n' +
           '/help \- Show this message',
@@ -188,14 +200,39 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
       }
     });
 
-    // Fallback: only fires for non-command messages (all commands above already consumed their routes)
-    bot.on('message', async (ctx) => {
+    const handleTextContact = async (ctx: { chat: { id: number }; reply: (text: string, extra?: { parse_mode: 'MarkdownV2' }) => Promise<unknown> }) => {
+      const incomingChatId = String(ctx.chat.id);
+
       if (!this.chatId) {
+        await this.persistChatId(incomingChatId);
         await ctx.reply(
-          'Send /register to link this chat to your Kalio instance\\.',
+          'Registered\\! Kalio notifications will be sent to this chat\\.',
           { parse_mode: 'MarkdownV2' },
         );
+        return;
       }
-    });
+
+      if (this.chatId === incomingChatId) {
+        await ctx.reply(
+          'Kalio is connected\\. Use /status, /stop or /help\\.',
+          { parse_mode: 'MarkdownV2' },
+        );
+        return;
+      }
+
+      await ctx.reply(
+        'This bot is already linked to another chat\\. Send /register here if you want to move it\\.',
+        { parse_mode: 'MarkdownV2' },
+      );
+    };
+
+    bot.on('message:text', handleTextContact);
+    bot.on('channel_post:text', handleTextContact);
+  }
+
+  private async persistChatId(chatId: string): Promise<void> {
+    this.chatId = chatId;
+    await this.settings.set(KEY_CHAT_ID, chatId);
+    this.logger.log(`Telegram chat registered: ${chatId}`);
   }
 }

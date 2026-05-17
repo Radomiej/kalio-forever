@@ -152,7 +152,7 @@ function AdapterCard({ info }: AdapterCardProps) {
             <input
               type="text"
               className="input input-bordered input-xs font-mono"
-              placeholder="e.g. /usr/local/bin/copilot"
+              placeholder={`e.g. /usr/local/bin/${info.id}`}
               value={merged.cliPath ?? ''}
               onChange={(e) => setDraft((d: ConfigDraft) => ({
                 ...d,

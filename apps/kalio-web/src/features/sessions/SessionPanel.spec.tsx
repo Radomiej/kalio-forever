@@ -7,7 +7,7 @@
  * - AlertTriangle disappears when pendingConfirmations entry is removed
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { SessionPanel } from './SessionPanel';
 import type { ToolConfirmationRequest } from '@kalio/types';
 
@@ -60,10 +60,18 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+async function renderSessionPanel(): Promise<void> {
+  await act(async () => {
+    render(<SessionPanel />);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe('SessionPanel — pending confirmation indicator', () => {
-  it('shows warning icon on session row when pendingConfirmations has entry for that session', () => {
+  it('shows warning icon on session row when pendingConfirmations has entry for that session', async () => {
     mockPendingConfirmations = {
       'session-1': {
         requestId: 'req-1',
@@ -75,21 +83,21 @@ describe('SessionPanel — pending confirmation indicator', () => {
       },
     };
 
-    render(<SessionPanel />);
+    await renderSessionPanel();
 
     expect(screen.getByTestId('session-pending-confirmation-session-1')).toBeDefined();
   });
 
-  it('does NOT show warning icon when session has no pending confirmation', () => {
+  it('does NOT show warning icon when session has no pending confirmation', async () => {
     mockPendingConfirmations = {};
 
-    render(<SessionPanel />);
+    await renderSessionPanel();
 
     expect(screen.queryByTestId('session-pending-confirmation-session-1')).toBeNull();
     expect(screen.queryByTestId('session-pending-confirmation-session-2')).toBeNull();
   });
 
-  it('shows warning icon only on the session that has a pending confirmation, not others', () => {
+  it('shows warning icon only on the session that has a pending confirmation, not others', async () => {
     mockPendingConfirmations = {
       'session-2': {
         requestId: 'req-2',
@@ -101,7 +109,7 @@ describe('SessionPanel — pending confirmation indicator', () => {
       },
     };
 
-    render(<SessionPanel />);
+    await renderSessionPanel();
 
     expect(screen.queryByTestId('session-pending-confirmation-session-1')).toBeNull();
     expect(screen.getByTestId('session-pending-confirmation-session-2')).toBeDefined();

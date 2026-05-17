@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Reflector } from '@nestjs/core';
 import { RunCliAgentTool } from './run-cli-agent.tool';
 import type { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 import type { CLIAgentService } from '../../cli-agent/cli-agent.service';
 import type { ToolCallRequest } from '@kalio/types';
+import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
 function makeRequest(args: Record<string, unknown>): ToolCallRequest {
   return { callId: 'call-cli', sessionId: 'sess-1', toolName: 'run_cli_agent', args };
@@ -18,6 +20,16 @@ function makeCLIAgentService(result?: Partial<{ output: string; exitCode: number
     run: vi.fn().mockResolvedValue({ ...defaults, ...result }),
   } as unknown as CLIAgentService;
 }
+
+describe('RunCliAgentTool metadata', () => {
+  const reflector = new Reflector();
+
+  it('publishes codex in the agentId enum (REGRESSION)', () => {
+    const metadata = reflector.get(TOOL_METADATA, RunCliAgentTool);
+
+    expect(metadata.parameters.properties.agentId.enum).toContain('codex');
+  });
+});
 
 describe('RunCliAgentTool', () => {
   let tool: RunCliAgentTool;
@@ -59,6 +71,20 @@ describe('RunCliAgentTool', () => {
 
     expect(cliAgent.run).toHaveBeenCalledWith(
       'gemini',
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      expect.any(Number),
+    );
+  });
+
+  it('passes explicit codex agentId through to CLIAgentService (REGRESSION)', async () => {
+    await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', agentId: 'codex' }));
+
+    expect(cliAgent.run).toHaveBeenCalledWith(
+      'codex',
       expect.any(String),
       expect.any(String),
       expect.any(String),

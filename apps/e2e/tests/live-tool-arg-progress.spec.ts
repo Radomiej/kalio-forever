@@ -92,7 +92,7 @@ async function runLiveRaappFlow(page: Page, request: APIRequestContext): Promise
     expect(llmConfig.source).toBe('db');
 
     const createSession = await request.post(`${API_BASE}/sessions`, {
-      data: { title: sessionTitle, personaId: 'ra-apps' },
+      data: { title: sessionTitle, personaId: 'designer' },
     });
     expect(createSession.ok()).toBeTruthy();
     const session = await createSession.json() as { id: string };
@@ -105,6 +105,7 @@ async function runLiveRaappFlow(page: Page, request: APIRequestContext): Promise
     socket.on('chat:error', (data) => chatErrors.push({ at: Date.now(), data }));
 
     await waitFor(() => (socket?.connected ? true : undefined), 10_000, 'socket connect');
+    socket.emit('session:identify', { sessionId });
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
@@ -113,7 +114,7 @@ async function runLiveRaappFlow(page: Page, request: APIRequestContext): Promise
     const chatInput = page.getByTestId('chat-input');
     await expect(chatInput).toBeEnabled({ timeout: 10_000 });
     await chatInput.fill(
-      'Użyj wyłącznie narzędzia raapp_create. Stwórz dużą interaktywną aplikację HTML "Task Planner Pro" jako pojedynczy plik z rozbudowanym CSS i JavaScript, tabelą zadań, filtrowaniem, formularzem, panelem statystyk i lokalnym stanem. Wygeneruj dużo kodu i nie odpowiadaj zwykłym tekstem.',
+      'Opublikuj to bezpośrednio jako RA-App HTML używając dokładnie narzędzia raapp_create. Nie używaj VFS ani design_preview. Stwórz dużą interaktywną aplikację "Task Planner Pro" jako pojedynczy dokument HTML z rozbudowanym CSS i JavaScript, tabelą zadań, filtrowaniem, formularzem, panelem statystyk i lokalnym stanem. Wygeneruj dużo kodu i nie odpowiadaj zwykłym tekstem.',
     );
     await page.getByTestId('chat-send-btn').click();
 
@@ -124,6 +125,7 @@ async function runLiveRaappFlow(page: Page, request: APIRequestContext): Promise
     await expect(loadingIndicator).toBeVisible({ timeout: 30_000 });
 
     const loopDeadline = Date.now() + 60_000;
+    let raappStartSeenAt: number | null = null;
     while (Date.now() < loopDeadline) {
       if (chatErrors.length > 0) {
         break;
@@ -141,7 +143,13 @@ async function runLiveRaappFlow(page: Page, request: APIRequestContext): Promise
       const sawRaappProgress = progressEvents.some((event) => event.data.toolName === 'raapp_create');
       const sawRaappStart = toolStarts.some((event) => event.data.toolName === 'raapp_create')
         || confirmations.some((event) => event.data.toolName === 'raapp_create');
+      if (sawRaappStart && raappStartSeenAt === null) {
+        raappStartSeenAt = Date.now();
+      }
       if (sawRaappProgress && sawRaappStart) {
+        break;
+      }
+      if (raappStartSeenAt !== null && Date.now() - raappStartSeenAt >= 2000) {
         break;
       }
 
@@ -152,11 +160,11 @@ async function runLiveRaappFlow(page: Page, request: APIRequestContext): Promise
   } finally {
     socket?.disconnect();
     if (sessionId) {
-      await deleteSessionIfExists(request, sessionId);
+      await deleteSessionIfExists(request, sessionId).catch(() => undefined);
     }
-    await restoreActiveCredential(request, previousActiveCredentialId);
+    await restoreActiveCredential(request, previousActiveCredentialId).catch(() => undefined);
     if (createdCredentialId) {
-      await request.delete(`${API_BASE}/credentials/${createdCredentialId}`);
+      await request.delete(`${API_BASE}/credentials/${createdCredentialId}`).catch(() => undefined);
     }
   }
 }

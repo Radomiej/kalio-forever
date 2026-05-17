@@ -4,6 +4,7 @@ import type { CLIAgentAdapterInfo, CLIAgentResult, SocketEvents } from '@kalio/t
 import { CopilotAdapter } from './adapters/copilot.adapter';
 import { GeminiAdapter } from './adapters/gemini.adapter';
 import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
+import { CodexAdapter } from './adapters/codex.adapter';
 import type { ICLIAgentAdapter } from './adapters/cli-agent.adapter';
 import { CLIAgentConfigService } from './cli-agent-config.service';
 import { compressOutput } from './output-compressor';
@@ -25,11 +26,13 @@ export class CLIAgentService implements OnApplicationBootstrap {
     copilot: CopilotAdapter,
     gemini: GeminiAdapter,
     claude: ClaudeCodeAdapter,
+    codex: CodexAdapter,
   ) {
     this.adapters = new Map<string, ICLIAgentAdapter>([
       [copilot.id, copilot],
       [gemini.id, gemini],
       [claude.id, claude],
+      [codex.id, codex],
     ]);
   }
 
@@ -84,7 +87,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
   /**
    * Execute a CLI agent headlessly.
    *
-   * @param agentId   One of: 'copilot' | 'gemini' | 'claude'
+  * @param agentId   One of: 'copilot' | 'gemini' | 'claude' | 'codex'
    * @param prompt    Task description sent to the CLI agent.
    * @param workdir   Working directory — must be validated by caller.
    * @param callId    Tool call ID used for progress event correlation.

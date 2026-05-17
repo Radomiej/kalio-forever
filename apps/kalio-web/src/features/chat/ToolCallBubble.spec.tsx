@@ -98,6 +98,14 @@ beforeEach(() => {
   mockApiGet.mockResolvedValue({ data: [] });
 });
 
+async function renderAndFlush(ui: React.ReactElement): Promise<void> {
+  await act(async () => {
+    render(ui);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe('LiveToolCallBubble — awaiting_confirmation', () => {
@@ -218,7 +226,7 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
 });
 
 describe('HistoryToolCallBubble — run_subagent', () => {
-  it('shows child session, VFS mode, and copied count while keeping copied file paths collapsed by default', () => {
+  it('shows child session, VFS mode, and copied count while keeping copied file paths collapsed by default', async () => {
     const content = JSON.stringify({
       result: 'created index.html',
       taskId: 'task-1',
@@ -230,7 +238,7 @@ describe('HistoryToolCallBubble — run_subagent', () => {
       durationMs: 12,
     });
 
-    render(<HistoryToolCallBubble toolName="run_subagent" content={content} args={{ vfsMode: 'isolated' }} />);
+    await renderAndFlush(<HistoryToolCallBubble toolName="run_subagent" content={content} args={{ vfsMode: 'isolated' }} />);
 
     expect(screen.getByText('session')).toBeDefined();
     expect(screen.getByText('sub-child-1')).toBeDefined();

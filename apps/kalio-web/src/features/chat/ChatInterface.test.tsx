@@ -444,6 +444,45 @@ describe('ChatInterface event wiring', () => {
     );
   });
 
+  it('REGRESSION: tool:arg_progress updates toolArgProgress in agentStore for the active session', async () => {
+    await renderChatInterface();
+    setToolArgProgress.mockClear();
+
+    await emitEvent('tool:arg_progress', {
+      sessionId: 'session-1',
+      toolName: 'raapp_create',
+      totalChars: 2048,
+      charsPerSec: 512,
+    });
+
+    expect(setToolArgProgress).toHaveBeenCalledWith({
+      toolName: 'raapp_create',
+      totalChars: 2048,
+      charsPerSec: 512,
+    });
+  });
+
+  it('REGRESSION: tool:confirmation_required synthesizes Preparing fallback before any arg progress arrives', async () => {
+    await renderChatInterface();
+    setPendingConfirmation.mockClear();
+    setToolArgProgress.mockClear();
+
+    await emitEvent('tool:confirmation_required', {
+      requestId: 'req-fallback',
+      toolCallId: 'call-fallback',
+      sessionId: 'session-1',
+      toolName: 'raapp_create',
+      args: { type: 'html', content: '<!DOCTYPE html><html></html>' },
+      timeoutMs: 30000,
+    });
+
+    expect(setToolArgProgress).toHaveBeenCalledWith({
+      toolName: 'raapp_create',
+      totalChars: 0,
+      charsPerSec: 0,
+    });
+  });
+
   it('REGRESSION: tool:confirmation_invalidated with reason confirmed returns the activity to running', async () => {
     const childAgentRun = {
       agentRunId: 'subagent-run-confirm',
@@ -1341,6 +1380,16 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     );
 
     vi.unstubAllGlobals();
+  });
+
+  it('REGRESSION: reconnect only clears tool activities for the reloaded session', async () => {
+    await renderChatInterface();
+    clearToolActivities.mockClear();
+
+    await emitEvent('socket:reconnect', undefined);
+
+    expect(clearToolActivities).toHaveBeenCalledWith('session-1');
+    expect(clearToolActivities).not.toHaveBeenCalledWith();
   });
 });
 

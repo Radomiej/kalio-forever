@@ -8,7 +8,7 @@ import { CLIAgentService } from '../../cli-agent/cli-agent.service';
 const MAX_TIMEOUT_MS = 1_200_000;
 /** Default timeout: 10 minutes */
 const DEFAULT_TIMEOUT_MS = 600_000;
-const SUPPORTED_AGENT_IDS = new Set(['copilot', 'gemini', 'claude']);
+const SUPPORTED_AGENT_IDS = new Set(['copilot', 'gemini', 'claude', 'codex']);
 
 function getNonEmptyStringArg(args: ToolCallRequest['args'], key: 'prompt' | 'workdir'): string {
   const rawValue = args[key];
@@ -24,7 +24,7 @@ function getAgentIdArg(args: ToolCallRequest['args']): string {
     return 'copilot';
   }
   if (typeof rawValue !== 'string' || !SUPPORTED_AGENT_IDS.has(rawValue)) {
-    throw new Error('INVALID_AGENT_ID: agentId must be one of "copilot", "gemini", or "claude"');
+    throw new Error('INVALID_AGENT_ID: agentId must be one of "copilot", "gemini", "claude", or "codex"');
   }
   return rawValue;
 }
@@ -44,7 +44,7 @@ function getTimeoutArg(args: ToolCallRequest['args']): number {
 @Tool({
   name: 'run_cli_agent',
   description:
-    'Run a CLI coding agent (Copilot, Gemini, Claude Code) to autonomously complete a coding task in a ' +
+    'Run a CLI coding agent (Copilot, Gemini, Claude Code, Codex) to autonomously complete a coding task in a ' +
     'real project directory. The agent can read, write, and edit files and run shell commands. ' +
     'Use this to delegate implementation tasks, bug fixes, refactors, or test writing. ' +
     'Requires workdir to be in the AllowedPaths list. Returns the full agent output and exit code.',
@@ -56,8 +56,8 @@ function getTimeoutArg(args: ToolCallRequest['args']): number {
         type: 'string',
         description:
           'Which CLI agent to use. Supported: "copilot" (GitHub Copilot CLI), "gemini" (Google Gemini CLI), ' +
-          '"claude" (Anthropic Claude Code). Defaults to "copilot" if omitted.',
-        enum: ['copilot', 'gemini', 'claude'],
+          '"claude" (Anthropic Claude Code), "codex" (OpenAI Codex CLI). Defaults to "copilot" if omitted.',
+        enum: ['copilot', 'gemini', 'claude', 'codex'],
       },
       prompt: {
         type: 'string',

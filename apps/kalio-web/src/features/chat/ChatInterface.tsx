@@ -28,7 +28,7 @@ export function ChatInterface() {
     messages, activeSessionId, sessions, addMessage, addSession, appendChunk, finalizeChunk, setMessages,
     agentTurns, startAgentTurn, addTurnItem, finalizeAgentTurn,
     setAgentTurns, markAgentTurnError, removeLastAgentTurn, flushThinkingChunks, flushStreamingChunks,
-    getSessionActiveTurnId, getSessionAgentTurns,
+    getSessionActiveTurnId, getSessionAgentTurns, clearPendingChunks,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
@@ -395,9 +395,10 @@ export function ChatInterface() {
       console.log('[ChatInterface] socket reconnected — resetting streaming state');
       backendHealth.reportSuccess();
       setStreaming(false);
-      clearToolActivities();
       const { activeSessionId: sid } = useSessionStore.getState();
       if (sid) {
+        clearPendingChunks(sid);
+        clearToolActivities(sid);
         removeActiveAgentLoop(sid);
         setPendingConfirmation(sid, null);
         // Identify immediately so the server can abort if the socket drops again
@@ -439,7 +440,7 @@ export function ChatInterface() {
       offRaAppNative();
       offReconnect();
     };
-  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput, clearToolActivities, addSession, backendHealth, getSessionActiveTurnId, getSessionAgentTurns, hasActiveLoopForSession]);
+  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput, clearToolActivities, addSession, backendHealth, getSessionActiveTurnId, getSessionAgentTurns, hasActiveLoopForSession, clearPendingChunks]);
 
   useEffect(() => {
     lastSentContentRef.current = '';

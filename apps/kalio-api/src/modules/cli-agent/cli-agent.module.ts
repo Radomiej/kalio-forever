@@ -5,6 +5,7 @@ import { CLIAgentController } from './cli-agent.controller';
 import { CopilotAdapter } from './adapters/copilot.adapter';
 import { GeminiAdapter } from './adapters/gemini.adapter';
 import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
+import { CodexAdapter } from './adapters/codex.adapter';
 
 @Module({
   controllers: [CLIAgentController],
@@ -14,6 +15,7 @@ import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
     CopilotAdapter,
     GeminiAdapter,
     ClaudeCodeAdapter,
+    CodexAdapter,
   ],
   exports: [CLIAgentService, CLIAgentConfigService],
 })
