@@ -245,6 +245,14 @@ export function ChatInterface() {
       const targetCallId = payload.toolCallId
         ?? (pendingConfirmation?.requestId === payload.requestId ? pendingConfirmation.toolCallId : payload.requestId);
       setPendingConfirmation(payload.sessionId, null);
+      if (payload.reason === 'confirmed') {
+        updateToolActivity(targetCallId, {
+          status: 'running',
+          finishedAt: undefined,
+          result: undefined,
+        });
+        return;
+      }
       updateToolActivity(targetCallId, {
         status: payload.reason === 'cancelled' ? 'cancelled' : 'expired',
         finishedAt: Date.now(),

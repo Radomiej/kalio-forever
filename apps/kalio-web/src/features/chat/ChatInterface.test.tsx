@@ -369,6 +369,51 @@ describe('ChatInterface event wiring', () => {
     );
   });
 
+  it('REGRESSION: tool:confirmation_invalidated with reason confirmed returns the activity to running', async () => {
+    const childAgentRun = {
+      agentRunId: 'subagent-run-confirm',
+      agentType: 'subagent' as const,
+      parentSessionId: 'session-1',
+    };
+
+    await renderChatInterface();
+
+    await emitEvent('tool:start', {
+      callId: 'call-confirmed',
+      toolName: 'run_cli_agent',
+      args: { agentId: 'copilot', workdir: 'C:/repo' },
+      sessionId: 'child-session',
+      agentRun: childAgentRun,
+    });
+
+    await emitEvent('tool:confirmation_required', {
+      requestId: 'req-confirmed',
+      toolCallId: 'call-confirmed',
+      sessionId: 'child-session',
+      toolName: 'run_cli_agent',
+      args: { agentId: 'copilot', workdir: 'C:/repo' },
+      timeoutMs: 0,
+      agentRun: childAgentRun,
+    });
+
+    setPendingConfirmation.mockClear();
+    updateToolActivity.mockClear();
+
+    await emitEvent('tool:confirmation_invalidated', {
+      requestId: 'req-confirmed',
+      toolCallId: 'call-confirmed',
+      sessionId: 'child-session',
+      reason: 'confirmed',
+      agentRun: childAgentRun,
+    });
+
+    expect(setPendingConfirmation).toHaveBeenCalledWith('child-session', null);
+    expect(updateToolActivity).toHaveBeenCalledWith(
+      'call-confirmed',
+      expect.objectContaining({ status: 'running' }),
+    );
+  });
+
   it('chat:context event calls setContext with systemPrompt and toolNames', async () => {
     await renderChatInterface();
 
