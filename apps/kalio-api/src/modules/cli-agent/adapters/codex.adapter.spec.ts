@@ -11,9 +11,9 @@ describe('CodexAdapter', () => {
 
   it('builds a non-interactive workspace-write exec invocation', () => {
     expect(adapter.buildArgs('fix the failing test', '/repo', ['--skip-git-repo-check'])).toEqual([
+      '-a', 'never',
       'exec',
       '--sandbox', 'workspace-write',
-      '--ask-for-approval', 'never',
       '--color', 'never',
       '--skip-git-repo-check',
       'fix the failing test',

@@ -18,9 +18,9 @@ export class CodexAdapter implements ICLIAgentAdapter {
 
   buildArgs(prompt: string, _workdir: string, extra: string[] = []): string[] {
     return [
+      '-a', 'never',
       'exec',
       '--sandbox', 'workspace-write',
-      '--ask-for-approval', 'never',
       '--color', 'never',
       ...extra,
       prompt,

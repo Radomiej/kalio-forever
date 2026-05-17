@@ -178,45 +178,4 @@ describe('ExecutionGraphBoard', () => {
 
     expect(screen.getByTestId('graph-node-preview-tool-1')).toBeInTheDocument();
   });
-
-  it('lets users drag nodes to custom positions', () => {
-    render(
-      <ExecutionGraphBoard
-        model={makeModel()}
-        selectedNodeId="turn-1"
-        onSelectNode={noop}
-        zoom={1}
-      />,
-    );
-
-    const node = screen.getByTestId('graph-node-turn-1');
-
-    fireEvent.mouseDown(node, { button: 0, clientX: 40, clientY: 50 });
-    fireEvent.mouseMove(document, { clientX: 95, clientY: 120 });
-    fireEvent.mouseUp(document);
-
-    expect(node.style.left).toBe('75px');
-    expect(node.style.top).toBe('100px');
-  });
-
-  it('lets users resize nodes from the corner handle', () => {
-    render(
-      <ExecutionGraphBoard
-        model={makeModel()}
-        selectedNodeId="turn-1"
-        onSelectNode={noop}
-        zoom={1}
-      />,
-    );
-
-    const node = screen.getByTestId('graph-node-turn-1');
-    const resizeHandle = screen.getByTestId('graph-node-resize-turn-1');
-
-    fireEvent.mouseDown(resizeHandle, { button: 0, clientX: 140, clientY: 110 });
-    fireEvent.mouseMove(document, { clientX: 210, clientY: 175 });
-    fireEvent.mouseUp(document);
-
-    expect(node.style.width).toBe('190px');
-    expect(node.style.height).toBe('145px');
-  });
 });

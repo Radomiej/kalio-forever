@@ -18,11 +18,11 @@ export class GeminiAdapter implements ICLIAgentAdapter {
 
   buildArgs(prompt: string, workdir: string, extra: string[] = []): string[] {
     // -p = print/non-interactive mode; --output-format text = plain text output
-    // --add-dir grants file access to the working directory
+    // --include-directories grants file access to the working directory
     return [
       '-p', prompt,
       '--output-format', 'text',
-      '--add-dir', workdir,
+      '--include-directories', workdir,
       ...extra,
     ];
   }

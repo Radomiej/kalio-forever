@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { RunCliAgentTool } from './run-cli-agent.tool';
 import type { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 import type { CLIAgentService } from '../../cli-agent/cli-agent.service';
+import type { RunCliAgentRequest } from '../../cli-agent/cli-agent.types';
 import type { ToolCallRequest } from '@kalio/types';
 import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
@@ -56,13 +57,14 @@ describe('RunCliAgentTool', () => {
     await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app' }));
 
     expect(cliAgent.run).toHaveBeenCalledWith(
-      'copilot',
-      'task',
-      '/projects/app',
-      'call-cli',
-      'sess-1',
-      undefined,
-      600_000,
+      expect.objectContaining<Partial<RunCliAgentRequest>>({
+        agentId: 'copilot',
+        prompt: 'task',
+        workdir: '/projects/app',
+        callId: 'call-cli',
+        sessionId: 'sess-1',
+        timeoutMs: 600_000,
+      }),
     );
   });
 
@@ -70,13 +72,7 @@ describe('RunCliAgentTool', () => {
     await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', agentId: 'gemini' }));
 
     expect(cliAgent.run).toHaveBeenCalledWith(
-      'gemini',
-      expect.any(String),
-      expect.any(String),
-      expect.any(String),
-      expect.any(String),
-      undefined,
-      expect.any(Number),
+      expect.objectContaining<Partial<RunCliAgentRequest>>({ agentId: 'gemini' }),
     );
   });
 
@@ -84,13 +80,7 @@ describe('RunCliAgentTool', () => {
     await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', agentId: 'codex' }));
 
     expect(cliAgent.run).toHaveBeenCalledWith(
-      'codex',
-      expect.any(String),
-      expect.any(String),
-      expect.any(String),
-      expect.any(String),
-      undefined,
-      expect.any(Number),
+      expect.objectContaining<Partial<RunCliAgentRequest>>({ agentId: 'codex' }),
     );
   });
 
@@ -109,8 +99,8 @@ describe('RunCliAgentTool', () => {
   it('caps timeoutMs at 1 200 000 before passing to CLIAgentService', async () => {
     await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', timeoutMs: 9_999_999 }));
 
-    const call = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
-    expect(call[6]).toBe(1_200_000);
+    const request = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as RunCliAgentRequest;
+    expect(request.timeoutMs).toBe(1_200_000);
   });
 
   it('passes _emit from ToolCallRequest as progress emitter', async () => {
@@ -120,7 +110,8 @@ describe('RunCliAgentTool', () => {
     await tool.execute(req);
 
     // The progress wrapper passed to cliAgent.run should call _emit
-    const progressFn = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0][5] as ((event: string, data: unknown) => void) | undefined;
+    const request = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as RunCliAgentRequest;
+    const progressFn = request.emitFn as ((event: string, data: unknown) => void) | undefined;
     expect(progressFn).toBeDefined();
     progressFn!('cli_agent:progress', { callId: 'c', sessionId: 's', agentId: 'copilot', chunk: 'x' });
     expect(emitFn).toHaveBeenCalledWith('cli_agent:progress', expect.objectContaining({ chunk: 'x' }));

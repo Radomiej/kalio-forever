@@ -173,6 +173,7 @@ const addTurnItem = vi.fn();
 const clearAgentTurns = vi.fn();
 const clearPendingChunks = vi.fn();
 const flushStreamingChunks = vi.fn();
+const getSessionMessages = vi.fn(() => [] as ChatMessage[]);
 
 // Mutable activeTurnId so tests can control what the store returns
 let mockActiveTurnId: string | null = null;
@@ -208,6 +209,7 @@ vi.mock('../../store/sessionStore', () => ({
       finalizeAgentTurn,
       clearAgentTurns,
       clearPendingChunks,
+      getSessionMessages,
       getSessionActiveTurnId: () => mockActiveTurnId,
       getSessionAgentTurns: () => [],
       markAgentTurnError,
@@ -236,6 +238,7 @@ vi.mock('../../store/sessionStore', () => ({
         thinkingChunks: mockThinkingChunks,
         chunkSessionIds: mockChunkSessionIds,
         clearPendingChunks,
+        getSessionMessages,
         finalizeChunk: vi.fn(),
         flushStreamingChunks,
         getSessionActiveTurnId: () => mockActiveTurnId,
