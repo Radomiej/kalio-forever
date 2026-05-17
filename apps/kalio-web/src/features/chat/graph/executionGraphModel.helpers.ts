@@ -172,13 +172,6 @@ export function buildToolSnapshots(messages: ChatMessage[], toolActivities: Tool
   return snapshots;
 }
 
-export function positionFor(column: number, row: number): { x: number; y: number } {
-  return {
-    x: BOARD_PADDING_X + column * (NODE_WIDTH + COLUMN_GAP),
-    y: BOARD_PADDING_Y + row * (NODE_HEIGHT + ROW_GAP),
-  };
-}
-
 export function getFinalAnswerMessage(turn: AgentTurn, messageById: Map<string, ChatMessage>): ChatMessage | null {
   const textMessageIds = turn.items
     .filter((item): item is Extract<AgentTurn['items'][number], { kind: 'text' }> => item.kind === 'text')

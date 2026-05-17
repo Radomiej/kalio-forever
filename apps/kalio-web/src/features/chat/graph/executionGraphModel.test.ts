@@ -3,6 +3,7 @@ import type { ChatMessage, ChatSession, Persona } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
 import { buildTurnsFromHistory } from '../chatUtils';
 import { buildExecutionGraphModel } from './executionGraphModel';
+import { NODE_HEIGHT, ROW_GAP } from './executionGraphModel.helpers';
 
 function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -483,6 +484,47 @@ describe('buildExecutionGraphModel', () => {
 
     expect(artifactNode?.payload.kind).toBe('artifact');
     expect(artifactNode?.payload.kind === 'artifact' ? artifactNode.payload.artifact.preview : null).toContain('Calculator preview');
+  });
+
+  it('grows dense turn nodes and pushes lower tool rows below their actual rendered height', () => {
+    const longReply = 'The calculator has a responsive shell, keyboard support, layered visual hierarchy, focus states, hover states, and a polished preview surface for each execution step. '.repeat(4);
+
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Build the calculator app', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-preview-1', name: 'design_preview', args: { filePath: 'calculator/index.html', mode: 'desktop' } }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-preview-1',
+        content: JSON.stringify({ status: 'ready', type: 'html', renderedContent: '<main>Preview</main>' }),
+        createdAt: 3,
+      }),
+      makeMessage({ id: 'a2', role: 'assistant', content: longReply, createdAt: 4 }),
+    ];
+
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns: buildTurnsFromHistory(messages, 'session-1'),
+      toolActivities: [],
+      activeAgentLoops: {},
+      sessions: [makeSession()],
+      sessionMessages: {
+        'session-1': messages,
+      },
+      collapseTools: false,
+    });
+
+    const turnNode = model.nodes.find((node) => node.kind === 'turn');
+    const toolNode = model.nodes.find((node) => node.id === 'tool:call-preview-1');
+
+    expect(turnNode?.height).toBeGreaterThan(NODE_HEIGHT);
+    expect(toolNode?.y).toBe((turnNode?.y ?? 0) + (turnNode?.height ?? 0) + ROW_GAP);
   });
 
   it('places the final response on the right as the chat outcome without dashed links from tools', () => {

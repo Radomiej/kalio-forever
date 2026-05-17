@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ExecutionGraphModel } from './executionGraphModel';
 import { ExecutionGraphBoard } from './ExecutionGraphBoard';
@@ -111,6 +111,41 @@ describe('ExecutionGraphBoard', () => {
     const turnNode = screen.getByTestId('graph-node-turn-1');
 
     expect(turnNode.style.height).toBe('80px');
+  });
+
+  it('translates the graph stage while dragging so panning is not limited by scroll boundaries', () => {
+    render(
+      <ExecutionGraphBoard
+        model={makeModel()}
+        selectedNodeId="turn-1"
+        onSelectNode={noop}
+        zoom={1}
+      />,
+    );
+
+    const viewport = screen.getByTestId('execution-graph-viewport');
+    const stage = screen.getByTestId('execution-graph-stage');
+
+    fireEvent.mouseDown(viewport, { button: 0, clientX: 200, clientY: 160 });
+    fireEvent.mouseMove(viewport, { clientX: 278, clientY: 224 });
+
+    expect(stage.style.transform).toContain('translate(78px, 64px)');
+  });
+
+  it('renders turn metadata as labeled fields so actor and model do not blend into the body copy', () => {
+    render(
+      <ExecutionGraphBoard
+        model={makeModel()}
+        selectedNodeId="turn-1"
+        onSelectNode={noop}
+        zoom={1}
+      />,
+    );
+
+    expect(screen.getByText('Agent')).toBeInTheDocument();
+    expect(screen.getAllByText('RaBuilder').length).toBeGreaterThan(0);
+    expect(screen.getByText('Model')).toBeInTheDocument();
+    expect(screen.getByText('gpt-4.1')).toBeInTheDocument();
   });
 
   it('shows a miniature preview inside preview-capable tool nodes', () => {

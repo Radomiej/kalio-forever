@@ -3,23 +3,18 @@ import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
 import {
   basename,
-  BOARD_PADDING_X,
-  BOARD_PADDING_Y,
   buildToolSnapshots,
-  COLUMN_GAP,
   extractArtifactFromData,
   extractSubagentContextPrompt,
   extractSubagentResult,
   getFinalAnswerMessage,
   getTurnStatus,
-  NODE_HEIGHT,
   NODE_WIDTH,
-  positionFor,
-  ROW_GAP,
   statusFromActivity,
   type ExecutionGraphArtifact,
   type ExecutionGraphNodeStatus,
 } from './executionGraphModel.helpers';
+import { applyGraphNodeLayout, estimateGraphNodeHeight } from './executionGraphNodePresentation';
 
 export type { ExecutionGraphArtifact, ExecutionGraphArtifactKind, ExecutionGraphNodeStatus } from './executionGraphModel.helpers';
 
@@ -263,13 +258,14 @@ export function buildExecutionGraphModel({
       return existing;
     }
 
-    const position = positionFor(node.column, node.row);
     const nextNode: ExecutionGraphNode = {
       ...node,
-      ...position,
+      x: 0,
+      y: 0,
       width: NODE_WIDTH,
-      height: NODE_HEIGHT,
+      height: NODE_WIDTH,
     };
+    nextNode.height = estimateGraphNodeHeight(nextNode);
     nodeById.set(node.id, nextNode);
     nodes.push(nextNode);
     return nextNode;
@@ -609,16 +605,12 @@ export function buildExecutionGraphModel({
     currentRow = renderTurn(promptNode.id, turn, currentRow, 1, new Set([turn.sessionId])) + 3;
   });
 
-  const maxColumn = nodes.reduce((value, node) => Math.max(value, node.column), 0);
-  const maxRow = nodes.reduce((value, node) => Math.max(value, node.row), 0);
+  const board = applyGraphNodeLayout(nodes);
 
   return {
     nodes,
     edges,
-    board: {
-      width: BOARD_PADDING_X * 2 + (maxColumn + 1) * NODE_WIDTH + maxColumn * COLUMN_GAP,
-      height: BOARD_PADDING_Y * 2 + (maxRow + 1) * NODE_HEIGHT + maxRow * ROW_GAP,
-    },
+    board,
     defaultSelectedNodeId: nodes[0]?.id ?? null,
   };
 }

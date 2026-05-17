@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent, type WheelEvent } from 'react';
+import { useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import {
   Bot, Boxes, BrainCircuit, CheckCircle2, FolderTree, MessageSquareText, Wrench,
 } from 'lucide-react';
@@ -8,6 +8,7 @@ import {
   type ExecutionGraphNodeKind,
 } from './executionGraphModel';
 import { GraphNodePreviewThumbnail, extractGraphNodePreview } from './ExecutionGraphPreview';
+import { getGraphNodeHeading, getGraphNodeMetadata } from './executionGraphNodePresentation';
 
 const NODE_COLORS: Record<ExecutionGraphNodeKind, string> = {
   prompt: 'from-sky-600/85 to-cyan-500/75 border-sky-300/40',
@@ -84,12 +85,8 @@ function GraphNodeCard({
   onSelect: () => void;
 }) {
   const preview = extractGraphNodePreview(node);
-  const turnBadges = node.payload.kind === 'turn'
-    ? [
-        `${node.payload.toolCount} tool${node.payload.toolCount === 1 ? '' : 's'}`,
-        `${node.payload.thinkingCount} thinking`,
-      ]
-    : [];
+  const { eyebrow, headline, supporting } = getGraphNodeHeading(node);
+  const metadata = getGraphNodeMetadata(node);
 
   return (
     <button
@@ -101,38 +98,43 @@ function GraphNodeCard({
       onClick={onSelect}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className={`inline-flex items-center gap-2 text-sm font-semibold ${statusTone(node.status)}`}>
+        <div className="min-w-0 flex-1">
+          <div className={`inline-flex max-w-full items-center gap-2 rounded-full border border-white/12 bg-black/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${statusTone(node.status)}`}>
             {nodeIcon(node.kind)}
-            <span className="truncate">{node.title}</span>
+            <span className="truncate">{eyebrow}</span>
           </div>
-          <p className="mt-2 text-sm font-medium text-white/92 line-clamp-2 break-words">{node.subtitle}</p>
+          <p className="mt-3 text-[15px] font-semibold leading-snug text-white line-clamp-4 break-words">{headline}</p>
         </div>
         <span className="rounded-full border border-white/15 bg-black/15 px-2 py-1 text-[10px] uppercase tracking-[0.22em] text-white/80">
           {statusLabel(node.status)}
         </span>
       </div>
 
-      {turnBadges.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {turnBadges.map((badge) => (
-            <span key={badge} className="rounded-full border border-white/15 bg-black/15 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-white/75">
-              {badge}
-            </span>
-          ))}
-        </div>
-      )}
+      {supporting ? (
+        <p className="mt-3 text-xs leading-5 text-slate-100/72 line-clamp-5 break-words">{supporting}</p>
+      ) : null}
 
-      {node.payload.kind === 'tool' && node.payload.confirmationRequired && (
-        <div className="mt-3 inline-flex items-center rounded-full border border-amber-200/20 bg-black/15 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-amber-100">
-          Accept required
-        </div>
+      {metadata.length > 0 && (
+        <dl className="mt-3 grid grid-cols-2 gap-2">
+          {metadata.map((item) => {
+            const toneClass = item.tone === 'warning'
+              ? 'border-amber-200/20 bg-amber-950/25'
+              : item.tone === 'accent'
+                ? 'border-sky-200/18 bg-sky-950/25'
+                : 'border-white/12 bg-black/15';
+
+            return (
+              <div key={`${item.label}:${item.value}`} className={`rounded-2xl border px-2.5 py-2 ${toneClass}`}>
+                <dt className="text-[10px] uppercase tracking-[0.18em] text-sky-100/70">{item.label}</dt>
+                <dd className="mt-1 text-xs font-medium leading-5 text-white/94 break-words line-clamp-2">{item.value}</dd>
+              </div>
+            );
+          })}
+        </dl>
       )}
 
       {preview ? (
         <GraphNodePreviewThumbnail node={node} />
-      ) : node.detail ? (
-        <p className="mt-3 text-xs text-white/72 line-clamp-2 break-words">{node.detail}</p>
       ) : null}
     </button>
   );
@@ -153,14 +155,60 @@ export function ExecutionGraphBoard({
   zoom,
   onWheelZoom,
 }: ExecutionGraphBoardProps) {
-  const viewportRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{
+    pointerId: number;
     startX: number;
     startY: number;
-    scrollLeft: number;
-    scrollTop: number;
+    panX: number;
+    panY: number;
   } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+
+  const updatePan = (clientX: number, clientY: number) => {
+    const dragState = dragStateRef.current;
+    if (!dragState) {
+      return;
+    }
+
+    setPan({
+      x: dragState.panX + (clientX - dragState.startX),
+      y: dragState.panY + (clientY - dragState.startY),
+    });
+  };
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest('[data-graph-node-card="true"]')) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    };
+    setDragging(true);
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    updatePan(event.clientX, event.clientY);
+  };
+
+  const stopDragging = (event: PointerEvent<HTMLDivElement>) => {
+    if (dragStateRef.current && event.currentTarget.hasPointerCapture(dragStateRef.current.pointerId)) {
+      event.currentTarget.releasePointerCapture(dragStateRef.current.pointerId);
+    }
+    dragStateRef.current = null;
+    setDragging(false);
+  };
 
   const handleMouseDown = (event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
@@ -172,32 +220,21 @@ export function ExecutionGraphBoard({
       return;
     }
 
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-
     dragStateRef.current = {
+      pointerId: -1,
       startX: event.clientX,
       startY: event.clientY,
-      scrollLeft: viewport.scrollLeft,
-      scrollTop: viewport.scrollTop,
+      panX: pan.x,
+      panY: pan.y,
     };
     setDragging(true);
   };
 
   const handleMouseMove = (event: MouseEvent<HTMLDivElement>) => {
-    const viewport = viewportRef.current;
-    const dragState = dragStateRef.current;
-    if (!viewport || !dragState) {
-      return;
-    }
-
-    viewport.scrollLeft = dragState.scrollLeft - (event.clientX - dragState.startX);
-    viewport.scrollTop = dragState.scrollTop - (event.clientY - dragState.startY);
+    updatePan(event.clientX, event.clientY);
   };
 
-  const stopDragging = () => {
+  const stopMouseDragging = () => {
     dragStateRef.current = null;
     setDragging(false);
   };
@@ -213,13 +250,16 @@ export function ExecutionGraphBoard({
 
   return (
     <div
-      ref={viewportRef}
       data-testid="execution-graph-viewport"
-      className={`flex-1 overflow-auto overscroll-none bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.10),_transparent_42%),linear-gradient(rgba(56,189,248,0.08)_1px,_transparent_1px),linear-gradient(90deg,_rgba(56,189,248,0.08)_1px,_transparent_1px)] bg-[length:100%_100%,40px_40px,40px_40px] bg-[#0a1220] ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+      className={`flex-1 overflow-hidden overscroll-none select-none touch-none bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.10),_transparent_42%),linear-gradient(rgba(56,189,248,0.08)_1px,_transparent_1px),linear-gradient(90deg,_rgba(56,189,248,0.08)_1px,_transparent_1px)] bg-[length:100%_100%,40px_40px,40px_40px] bg-[#0a1220] ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={stopDragging}
+      onPointerCancel={stopDragging}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
-      onMouseUp={stopDragging}
-      onMouseLeave={stopDragging}
+      onMouseUp={stopMouseDragging}
+      onMouseLeave={stopMouseDragging}
       onWheel={handleWheel}
     >
       <div
@@ -230,44 +270,50 @@ export function ExecutionGraphBoard({
         }}
       >
         <div
-          className="relative origin-top-left"
-          style={{ width: model.board.width, height: model.board.height, transform: `scale(${zoom})` }}
+          data-testid="execution-graph-stage"
+          className="relative origin-top-left will-change-transform"
+          style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}
         >
-          <svg className="absolute inset-0 overflow-visible" width={model.board.width} height={model.board.height} aria-hidden="true">
-            <defs>
-              <marker id="graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(125, 211, 252, 0.85)" />
-              </marker>
-            </defs>
-            {model.edges.map((edge) => {
-              const source = model.nodes.find((node) => node.id === edge.sourceId);
-              const target = model.nodes.find((node) => node.id === edge.targetId);
-              if (!source || !target) return null;
-              const path = buildEdgePath(source, target);
+          <div
+            className="relative origin-top-left"
+            style={{ width: model.board.width, height: model.board.height, transform: `scale(${zoom})` }}
+          >
+            <svg className="absolute inset-0 overflow-visible" width={model.board.width} height={model.board.height} aria-hidden="true">
+              <defs>
+                <marker id="graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(125, 211, 252, 0.85)" />
+                </marker>
+              </defs>
+              {model.edges.map((edge) => {
+                const source = model.nodes.find((node) => node.id === edge.sourceId);
+                const target = model.nodes.find((node) => node.id === edge.targetId);
+                if (!source || !target) return null;
+                const path = buildEdgePath(source, target);
 
-              return (
-                <path
-                  key={edge.id}
-                  data-testid={`graph-edge-${edge.id}`}
-                  d={path}
-                  fill="none"
-                  markerEnd="url(#graph-arrow)"
-                  stroke={edge.style === 'dashed' ? 'rgba(148,163,184,0.6)' : 'rgba(125,211,252,0.9)'}
-                  strokeDasharray={edge.style === 'dashed' ? '7 8' : undefined}
-                  strokeWidth={edge.style === 'dashed' ? 2 : 3}
-                />
-              );
-            })}
-          </svg>
+                return (
+                  <path
+                    key={edge.id}
+                    data-testid={`graph-edge-${edge.id}`}
+                    d={path}
+                    fill="none"
+                    markerEnd="url(#graph-arrow)"
+                    stroke={edge.style === 'dashed' ? 'rgba(148,163,184,0.6)' : 'rgba(125,211,252,0.9)'}
+                    strokeDasharray={edge.style === 'dashed' ? '7 8' : undefined}
+                    strokeWidth={edge.style === 'dashed' ? 2 : 3}
+                  />
+                );
+              })}
+            </svg>
 
-          {model.nodes.map((node) => (
-            <GraphNodeCard
-              key={node.id}
-              node={node}
-              selected={node.id === selectedNodeId}
-              onSelect={() => onSelectNode(node.id)}
-            />
-          ))}
+            {model.nodes.map((node) => (
+              <GraphNodeCard
+                key={node.id}
+                node={node}
+                selected={node.id === selectedNodeId}
+                onSelect={() => onSelectNode(node.id)}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>
