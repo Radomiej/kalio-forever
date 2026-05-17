@@ -106,7 +106,12 @@ export class LLMServiceAdapter implements ILLMSource {
       .streamChat(
         params.messages,
         toolMetas,
-        chunk => {
+        {
+          sessionId: params.sessionId,
+          messageId: params.messageId,
+          abortSignal: controller.signal,
+          onToolArgChunk,
+          onChunk: (chunk) => {
           if (chunk.delta) {
             if (chunk.thinking) {
               enqueue({ type: 'thinking_delta', delta: chunk.delta });
@@ -114,11 +119,8 @@ export class LLMServiceAdapter implements ILLMSource {
               enqueue({ type: 'text_delta', delta: chunk.delta });
             }
           }
+          },
         },
-        params.sessionId,
-        params.messageId,
-        controller.signal,
-        onToolArgChunk,
       )
       .then(toolCalls => {
         if (controller.signal.aborted) {

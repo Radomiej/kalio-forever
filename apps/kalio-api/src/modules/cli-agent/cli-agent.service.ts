@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { spawn, execFile } from 'node:child_process';
-import type { CLIAgentAdapterInfo, CLIAgentResult, SocketEvents } from '@kalio/types';
+import type { CLIAgentAdapterInfo, CLIAgentResult } from '@kalio/types';
 import { CopilotAdapter } from './adapters/copilot.adapter';
 import { GeminiAdapter } from './adapters/gemini.adapter';
 import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
@@ -8,8 +8,9 @@ import { CodexAdapter } from './adapters/codex.adapter';
 import type { ICLIAgentAdapter } from './adapters/cli-agent.adapter';
 import { CLIAgentConfigService } from './cli-agent-config.service';
 import { compressOutput } from './output-compressor';
+import type { ProgressEmitFn, RunCliAgentRequest } from './cli-agent.types';
 
-export type ProgressEmitFn = (event: 'cli_agent:progress', data: SocketEvents['cli_agent:progress']) => void;
+export type { ProgressEmitFn } from './cli-agent.types';
 
 /** Max timeout cap: 20 minutes */
 const MAX_TIMEOUT_MS = 1_200_000;
@@ -86,24 +87,10 @@ export class CLIAgentService implements OnApplicationBootstrap {
 
   /**
    * Execute a CLI agent headlessly.
-   *
-  * @param agentId   One of: 'copilot' | 'gemini' | 'claude' | 'codex'
-   * @param prompt    Task description sent to the CLI agent.
-   * @param workdir   Working directory — must be validated by caller.
-   * @param callId    Tool call ID used for progress event correlation.
-   * @param sessionId Chat session — included in progress events.
-   * @param emitFn    Optional: called with 'cli_agent:progress' for each stdout/stderr chunk.
-   * @param timeoutMs Optional timeout override; capped at MAX_TIMEOUT_MS.
+   * @param request  See {@link RunCliAgentRequest} for field docs.
    */
-  async run(
-    agentId: string,
-    prompt: string,
-    workdir: string,
-    callId: string,
-    sessionId: string,
-    emitFn?: ProgressEmitFn,
-    timeoutMs?: number,
-  ): Promise<CLIAgentResult> {
+  async run(request: RunCliAgentRequest): Promise<CLIAgentResult> {
+    const { agentId, prompt, workdir, callId, sessionId, emitFn, timeoutMs } = request;
     const adapter = this.adapters.get(agentId);
     if (!adapter) {
       throw new Error(`Unknown CLI agent: "${agentId}". Available: ${[...this.adapters.keys()].join(', ')}`);

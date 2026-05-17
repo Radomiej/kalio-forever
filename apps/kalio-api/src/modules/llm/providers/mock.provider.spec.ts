@@ -14,7 +14,7 @@ describe('MockLLMProvider', () => {
     ];
 
     await expect(
-      provider.streamChat(messages, [], onChunk, 'session-1', 'message-1'),
+      provider.streamChat(messages, [], { sessionId: 'session-1', messageId: 'message-1', onChunk }),
     ).rejects.toThrow(/429|quota exhausted|Too Many Requests/i);
     expect(onChunk).not.toHaveBeenCalled();
   });
@@ -33,11 +33,7 @@ describe('MockLLMProvider', () => {
     const toolCalls = await provider.streamChat(
       messages,
       [{ name: 'raapp_create', description: 'Create an app', parameters: {} }],
-      onChunk,
-      'session-1',
-      'message-1',
-      undefined,
-      onToolArgChunk,
+      { sessionId: 'session-1', messageId: 'message-1', onChunk, onToolArgChunk },
     );
 
     expect(onChunk).not.toHaveBeenCalled();

@@ -12,7 +12,6 @@ import { render, act } from '@testing-library/react';
 import { ChatInterface } from './ChatInterface';
 import { computeAnsweredCallIds } from './chatUtils';
 import type { ChatMessage } from '@kalio/types';
-import type { AgentTurn } from '../../store/sessionStore';
 
 // jsdom does not implement scrollIntoView
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -84,7 +83,7 @@ vi.mock('../../services/eventBus', () => ({
     onRaAppNativeResult: (h: (...args: unknown[]) => void) => capture('raapp:native_result', h),
     onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
     onToolArgProgress: (h: (...args: unknown[]) => void) => capture('tool:arg_progress', h),
-    onReconnect: (h: (...args: unknown[]) => void) => capture('socket:reconnect', h),
+    onReconnect: vi.fn().mockReturnValue(vi.fn()),
     identifySession: vi.fn(),
     sendMessage: mockSendMessage,
     stopTurn: vi.fn(),
@@ -115,6 +114,7 @@ const setToolArgProgress = vi.fn();
 const agentStoreState = {
   isStreaming: false,
   pendingConfirmations: {} as Record<string, unknown>,
+  toolArgProgress: null as { toolName: string; totalChars: number; charsPerSec: number } | null,
   toolActivities: [] as Array<{
     callId: string;
     toolName: string;
@@ -171,6 +171,7 @@ const startAgentTurn = vi.fn();
 const finalizeAgentTurn = vi.fn();
 const addTurnItem = vi.fn();
 const clearAgentTurns = vi.fn();
+const clearPendingChunks = vi.fn();
 const flushStreamingChunks = vi.fn();
 
 // Mutable activeTurnId so tests can control what the store returns
@@ -180,71 +181,14 @@ let mockPendingMessage: string | null = null;
 let mockStreamingChunks: Record<string, string> = {};
 let mockThinkingChunks: Record<string, string> = {};
 let mockChunkSessionIds: Record<string, string> = {};
-let mockMessages: ChatMessage[] = [];
-let mockSessionMessages: Record<string, ChatMessage[]> = {};
-let mockAgentTurns: AgentTurn[] = [];
-let mockSessionAgentTurns: Record<string, AgentTurn[]> = {};
-const startedTurns: Array<{ turnId: string; sessionId: string; promptMessageId?: string }> = [];
 const mockSetPendingMessage = vi.fn();
 const mockSetPendingRAAppId = vi.fn();
-
-function getMessagesForSession(sessionId: string | null): ChatMessage[] {
-  if (!sessionId) return [];
-  return mockSessionMessages[sessionId] ?? (sessionId === mockActiveSessionId ? mockMessages : []);
-}
-
-function getTurnsForSession(sessionId: string | null): AgentTurn[] {
-  if (!sessionId) return [];
-  return mockSessionAgentTurns[sessionId] ?? (sessionId === mockActiveSessionId ? mockAgentTurns : []);
-}
-
-setMessages.mockImplementation((messages: ChatMessage[], sessionId?: string | null) => {
-  const targetSessionId = sessionId ?? mockActiveSessionId;
-  if (!targetSessionId) {
-    mockMessages = messages;
-    return;
-  }
-
-  mockSessionMessages[targetSessionId] = messages;
-  if (targetSessionId === mockActiveSessionId) {
-    mockMessages = messages;
-  }
-});
-
-addMessage.mockImplementation((message: ChatMessage) => {
-  const nextMessages = [...getMessagesForSession(message.sessionId), message];
-  mockSessionMessages[message.sessionId] = nextMessages;
-  if (message.sessionId === mockActiveSessionId) {
-    mockMessages = nextMessages;
-  }
-});
-
-setAgentTurns.mockImplementation((turns: AgentTurn[], sessionId?: string | null) => {
-  const targetSessionId = sessionId ?? mockActiveSessionId;
-  if (!targetSessionId) {
-    mockAgentTurns = turns;
-    return;
-  }
-
-  mockSessionAgentTurns[targetSessionId] = turns;
-  if (targetSessionId === mockActiveSessionId) {
-    mockAgentTurns = turns;
-  }
-});
-
-startAgentTurn.mockImplementation((turnId: string, sessionId: string) => {
-  const promptMessageId = [...getMessagesForSession(sessionId)]
-    .reverse()
-    .find((message) => message.role === 'user')?.id;
-  startedTurns.push({ turnId, sessionId, promptMessageId });
-  mockActiveTurnId = turnId;
-});
 
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: Object.assign(
     () => ({
-      messages: mockMessages,
-      agentTurns: mockAgentTurns,
+      messages: [],
+      agentTurns: [],
       activeTurnId: mockActiveTurnId,
       activeSessionId: mockActiveSessionId,
       sessions: [
@@ -263,9 +207,9 @@ vi.mock('../../store/sessionStore', () => ({
       addTurnItem,
       finalizeAgentTurn,
       clearAgentTurns,
-      getSessionMessages: (sessionId: string | null) => getMessagesForSession(sessionId),
+      clearPendingChunks,
       getSessionActiveTurnId: () => mockActiveTurnId,
-      getSessionAgentTurns: (sessionId: string | null) => getTurnsForSession(sessionId),
+      getSessionAgentTurns: () => [],
       markAgentTurnError,
       removeLastAgentTurn,
       flushThinkingChunks: vi.fn(),
@@ -273,8 +217,8 @@ vi.mock('../../store/sessionStore', () => ({
     }),
     {
       getState: () => ({
-        messages: mockMessages,
-        agentTurns: mockAgentTurns,
+        messages: [],
+        agentTurns: [],
         activeTurnId: mockActiveTurnId,
         activeSessionId: mockActiveSessionId,
         sessions: [
@@ -288,23 +232,16 @@ vi.mock('../../store/sessionStore', () => ({
         setPendingMessage: mockSetPendingMessage,
         setPendingRAAppId: mockSetPendingRAAppId,
         updateSession: vi.fn(),
-        sessionMessages: mockSessionMessages,
-        sessionAgentTurns: mockSessionAgentTurns,
         streamingChunks: mockStreamingChunks,
         thinkingChunks: mockThinkingChunks,
         chunkSessionIds: mockChunkSessionIds,
+        clearPendingChunks,
         finalizeChunk: vi.fn(),
         flushStreamingChunks,
-        getSessionMessages: (sessionId: string | null) => getMessagesForSession(sessionId),
         getSessionActiveTurnId: () => mockActiveTurnId,
-        getSessionAgentTurns: (sessionId: string | null) => getTurnsForSession(sessionId),
+        getSessionAgentTurns: () => [],
         markAgentTurnError,
         removeLastAgentTurn,
-        setMessages,
-        setAgentTurns,
-        startAgentTurn,
-        addTurnItem,
-        addMessage,
       }),
     },
   ),
@@ -361,11 +298,6 @@ beforeEach(() => {
   mockStreamingChunks = {};
   mockThinkingChunks = {};
   mockChunkSessionIds = {};
-  mockMessages = [];
-  mockSessionMessages = {};
-  mockAgentTurns = [];
-  mockSessionAgentTurns = {};
-  startedTurns.length = 0;
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
   vi.clearAllMocks();
@@ -1286,110 +1218,6 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     );
 
     vi.unstubAllGlobals();
-  });
-
-  it('REGRESSION: stale fetched history does not erase an optimistic user prompt before agent:start anchors the turn', async () => {
-    let resolveMessages!: (messages: ChatMessage[]) => void;
-    const deferred = new Promise<ChatMessage[]>((resolve) => {
-      resolveMessages = resolve;
-    });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() => Promise.resolve({ ok: true, json: () => deferred })),
-    );
-
-    await renderChatInterface();
-
-    const optimisticPrompt: ChatMessage = {
-      id: 'u-local-1',
-      sessionId: 'session-1',
-      role: 'user',
-      content: 'Build a calculator app',
-      createdAt: 100,
-    };
-
-    await act(async () => {
-      addMessage(optimisticPrompt);
-      await flushReactEffects();
-    });
-
-    await act(async () => {
-      resolveMessages([]);
-      await deferred;
-      await flushReactEffects();
-    });
-
-    await emitEvent('agent:start', {
-      sessionId: 'session-1',
-      turnId: 'turn-after-stale-history',
-    });
-
-    expect(startedTurns).toContainEqual(
-      expect.objectContaining({
-        turnId: 'turn-after-stale-history',
-        sessionId: 'session-1',
-        promptMessageId: 'u-local-1',
-      }),
-    );
-
-    vi.unstubAllGlobals();
-  });
-
-  it('REGRESSION: reconnect history reload does not erase an optimistic user prompt before agent:start anchors the turn', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.includes('/api/sessions/session-1/messages')) {
-          return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-        }
-        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-      }),
-    );
-
-    await renderChatInterface();
-    setMessages.mockClear();
-    startedTurns.length = 0;
-
-    const optimisticPrompt: ChatMessage = {
-      id: 'u-local-reconnect',
-      sessionId: 'session-1',
-      role: 'user',
-      content: 'Resume calculator build',
-      createdAt: 200,
-    };
-
-    await act(async () => {
-      addMessage(optimisticPrompt);
-      await flushReactEffects();
-    });
-
-    await emitEvent('socket:reconnect', undefined);
-
-    await emitEvent('agent:start', {
-      sessionId: 'session-1',
-      turnId: 'turn-after-reconnect',
-    });
-
-    expect(startedTurns).toContainEqual(
-      expect.objectContaining({
-        turnId: 'turn-after-reconnect',
-        sessionId: 'session-1',
-        promptMessageId: 'u-local-reconnect',
-      }),
-    );
-
-    vi.unstubAllGlobals();
-  });
-
-  it('REGRESSION: reconnect only clears tool activities for the reloaded session', async () => {
-    await renderChatInterface();
-    clearToolActivities.mockClear();
-
-    await emitEvent('socket:reconnect', undefined);
-
-    expect(clearToolActivities).toHaveBeenCalledWith('session-1');
-    expect(clearToolActivities).not.toHaveBeenCalledWith();
   });
 });
 

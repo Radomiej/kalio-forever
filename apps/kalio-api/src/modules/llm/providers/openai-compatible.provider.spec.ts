@@ -48,7 +48,7 @@ describe('OpenAICompatibleProvider', () => {
       });
 
       // Act
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       // BUG: Current implementation has empty catch block at line 66 that silently ignores parse errors
@@ -92,7 +92,7 @@ describe('OpenAICompatibleProvider', () => {
       });
 
       // Act
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       // BUG: Current implementation has empty catch block at line 98 that silently ignores parse errors
@@ -129,7 +129,7 @@ describe('OpenAICompatibleProvider', () => {
         body: mockStream,
       });
 
-      await provider.streamChat(messages, tools, vi.fn(), 'sess-123', 'msg-456');
+      await provider.streamChat(messages, tools, { sessionId: 'sess-123', messageId: 'msg-456', onChunk: vi.fn() });
 
       const request = mockFetch.mock.calls[0]?.[1] as { body: string };
       const parsed = JSON.parse(request.body) as { messages: Array<Record<string, unknown>> };
@@ -173,7 +173,7 @@ describe('OpenAICompatibleProvider', () => {
       });
 
       // Act
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       expect(onChunk).toHaveBeenCalledWith({
@@ -230,7 +230,7 @@ describe('OpenAICompatibleProvider', () => {
       });
 
       // Act
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       expect(result).toHaveLength(1);
@@ -267,7 +267,7 @@ describe('OpenAICompatibleProvider', () => {
         body: { getReader: () => reader },
       });
 
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortController.signal);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk, abortSignal: abortController.signal });
 
       expect(result).toEqual([]);
       expect(reader.releaseLock).toHaveBeenCalledOnce();
@@ -291,7 +291,7 @@ describe('OpenAICompatibleProvider', () => {
 
       // Act & Assert
       await expect(
-        provider.streamChat(messages, tools, onChunk, sessionId, messageId),
+        provider.streamChat(messages, tools, { sessionId, messageId, onChunk }),
       ).rejects.toThrow('[openai] LLM request failed: 500 Internal Server Error - ');
     });
 
@@ -311,7 +311,7 @@ describe('OpenAICompatibleProvider', () => {
 
       // Act & Assert
       await expect(
-        provider.streamChat(messages, tools, onChunk, sessionId, messageId),
+        provider.streamChat(messages, tools, { sessionId, messageId, onChunk }),
       ).rejects.toThrow('[openai] LLM request failed');
     });
   });

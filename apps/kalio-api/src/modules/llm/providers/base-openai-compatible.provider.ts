@@ -1,5 +1,5 @@
-import type { ILLMProvider } from '../llm.types';
-import type { LLMStreamChunk, LLMToolCall } from '@kalio/types';
+import type { ILLMProvider, LLMToolDef, StreamChatOptions } from '../llm.types';
+import type { LLMToolCall } from '@kalio/types';
 import { Logger } from '@nestjs/common';
 import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../../common/utils/llm-provider-http.util';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
@@ -31,13 +31,10 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
   async streamChat(
     messages: ContextManagedLLMMessage[],
-    tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
-    onChunk: (chunk: LLMStreamChunk) => void,
-    sessionId: string,
-    messageId: string,
-    abortSignal?: AbortSignal,
-    onToolArgChunk?: (toolName: string, deltaChars: number) => void,
+    tools: LLMToolDef[],
+    options: StreamChatOptions,
   ): Promise<LLMToolCall[]> {
+    const { sessionId, messageId, onChunk, onToolArgChunk, abortSignal } = options;
     if (abortSignal?.aborted) {
       return [];
     }

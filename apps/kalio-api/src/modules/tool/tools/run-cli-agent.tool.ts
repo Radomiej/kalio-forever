@@ -109,16 +109,16 @@ export class RunCliAgentTool {
     // Wire up progress streaming if the calling context provided an emitter
     const emitFn = request._emit;
 
-    return this.cliAgent.run(
+    return this.cliAgent.run({
       agentId,
       prompt,
       workdir,
-      request.callId,
-      request.sessionId,
-      emitFn
+      callId: request.callId,
+      sessionId: request.sessionId,
+      emitFn: emitFn
         ? (event, data) => { emitFn(event, data); }
         : undefined,
       timeoutMs,
-    );
+    });
   }
 }

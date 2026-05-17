@@ -1,12 +1,12 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { LLMStreamChunk, LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
-import type { ILLMProvider, ProviderConfig } from './llm.types';
+import type { LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
+import type { ILLMProvider, ProviderConfig, LLMToolDef, StreamChatOptions } from './llm.types';
 import { createLLMProvider } from './providers/provider-factory';
 import { CredentialsService } from '../credentials/credentials.service';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 
-export type { ILLMProvider } from './llm.types';
+export type { ILLMProvider, StreamChatOptions, LLMToolDef } from './llm.types';
 
 @Injectable()
 export class LLMService {
@@ -82,15 +82,11 @@ export class LLMService {
 
   async streamChat(
     messages: ContextManagedLLMMessage[],
-    tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
-    onChunk: (chunk: LLMStreamChunk) => void,
-    sessionId: string,
-    messageId: string,
-    abortSignal?: AbortSignal,
-    onToolArgChunk?: (toolName: string, deltaChars: number) => void,
+    tools: LLMToolDef[],
+    options: StreamChatOptions,
   ): Promise<LLMToolCall[]> {
     const { provider } = await this.getActiveProvider();
-    return provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortSignal, onToolArgChunk);
+    return provider.streamChat(messages, tools, options);
   }
 
   async getConfig(): Promise<LLMConfig & { source: 'db' | 'env' }> {

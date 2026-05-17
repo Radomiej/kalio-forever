@@ -10,6 +10,7 @@ import type { CLIAgentConfigService } from './cli-agent-config.service';
 import type { CopilotAdapter } from './adapters/copilot.adapter';
 import type { GeminiAdapter } from './adapters/gemini.adapter';
 import type { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
+import type { CodexAdapter } from './adapters/codex.adapter';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn(), execFile: vi.fn() }));
 import * as childProcess from 'node:child_process';
@@ -61,6 +62,7 @@ describe('CLIAgentService', () => {
       makeAdapter('copilot') as unknown as CopilotAdapter,
       makeAdapter('gemini') as unknown as GeminiAdapter,
       makeAdapter('claude') as unknown as ClaudeCodeAdapter,
+      makeAdapter('codex') as unknown as CodexAdapter,
     );
   });
 
@@ -70,20 +72,20 @@ describe('CLIAgentService', () => {
   });
 
   it('throws for unknown agentId — no spawn', async () => {
-    await expect(service.run('unknown', 'task', '/w', 'c', 's')).rejects.toThrow('Unknown CLI agent');
+    await expect(service.run({ agentId: 'unknown', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's' })).rejects.toThrow('Unknown CLI agent');
     expect(childProcess.spawn).not.toHaveBeenCalled();
   });
 
   it('throws when adapter is disabled — no spawn', async () => {
     vi.mocked(configService.getConfig).mockResolvedValue(makeConfig({ enabled: false }));
-    await expect(service.run('copilot', 'task', '/w', 'c', 's')).rejects.toThrow('disabled');
+    await expect(service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's' })).rejects.toThrow('disabled');
     expect(childProcess.spawn).not.toHaveBeenCalled();
   });
 
   it('resolves with exitCode=0 on successful run', async () => {
     const fakeProc = makeFakeProc();
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
-    const p = service.run('copilot', 'task', '/w', 'c', 's');
+    const p = service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's' });
     await new Promise((r) => setTimeout(r, 0));
     fakeProc.emit('close', 0);
     const result = await p;
@@ -96,7 +98,7 @@ describe('CLIAgentService', () => {
     const fakeProc = makeFakeProc();
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
 
-    const p = service.run('copilot', 'task', '/w', 'c', 's', undefined, 200);
+    const p = service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's', timeoutMs: 200 });
     // Flush pending microtasks so getConfig resolves and spawn is called before we advance timers
     await Promise.resolve(); await Promise.resolve();
     vi.advanceTimersByTime(300);
@@ -110,7 +112,7 @@ describe('CLIAgentService', () => {
   it('removes stdout/stderr data listeners on spawn error', async () => {
     const fakeProc = makeFakeProc();
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
-    const p = service.run('copilot', 'task', '/w', 'c', 's');
+    const p = service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's' });
     await new Promise((r) => setTimeout(r, 0));
     fakeProc.emit('error', new Error('ENOENT'));
     await expect(p).rejects.toThrow('ENOENT');
@@ -122,7 +124,7 @@ describe('CLIAgentService', () => {
     const fakeProc = makeFakeProc();
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
     const emitFn = vi.fn();
-    const p = service.run('copilot', 'task', '/w', 'callId', 'sess-1', emitFn);
+    const p = service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'callId', sessionId: 'sess-1', emitFn });
     await new Promise((r) => setTimeout(r, 0));
     fakeProc.stdout.emit('data', Buffer.from('hello'));
     fakeProc.emit('close', 0);

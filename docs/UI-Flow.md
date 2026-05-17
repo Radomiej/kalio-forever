@@ -396,7 +396,7 @@ Aktualne opcje:
 
 Wazne:
 
-- GitHub Copilot CLI jest traktowany jako opcjonalny external coding agent,
+- CLI agenci (GitHub Copilot CLI, Gemini CLI, Claude Code, Codex CLI) sa traktowani jako opcjonalni external coding agents,
 - CLI agent wymaga `Allowed Paths`, bo inaczej nie ma gdzie legalnie czytac i pisac plikow.
 
 ### 5.6 MCP Servers

@@ -699,5 +699,15 @@ describe('PersonaService', () => {
       expect(config['designer']?.name).toBe('UX Designer');
       expect(config['dev']?.name).toBe('Fullstack Dev');
     });
+
+    it('seeds the dev persona prompt with multi-agent run_cli_agent guidance', () => {
+      const config = (
+        service as unknown as { loadPersonasConfig(): Record<string, { systemPrompt: string }> }
+      ).loadPersonasConfig();
+
+      expect(config['dev']?.systemPrompt).toContain('Codex CLI');
+      expect(config['dev']?.systemPrompt).toContain('defaults to Copilot');
+      expect(config['dev']?.systemPrompt).not.toContain('delegates a coding task to GitHub Copilot CLI (copilot -p)');
+    });
   });
 });

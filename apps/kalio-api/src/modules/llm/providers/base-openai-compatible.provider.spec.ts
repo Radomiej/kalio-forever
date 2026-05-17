@@ -49,7 +49,7 @@ describe('BaseOpenAICompatibleProvider', () => {
       });
 
       // Act
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       // FIXED: Implementation now logs a warning when SSE data JSON parse fails
@@ -84,7 +84,7 @@ describe('BaseOpenAICompatibleProvider', () => {
       });
 
       // Act
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       // Should log the error but continue processing valid data
@@ -117,7 +117,7 @@ describe('BaseOpenAICompatibleProvider', () => {
         body: mockStream,
       });
 
-      await keylessProvider.streamChat(messages, tools, vi.fn(), 'sess-123', 'msg-456');
+      await keylessProvider.streamChat(messages, tools, { sessionId: 'sess-123', messageId: 'msg-456', onChunk: vi.fn() });
 
       expect(mockFetch).toHaveBeenCalledWith(
         'https://api.test.com/chat/completions',
@@ -152,7 +152,7 @@ describe('BaseOpenAICompatibleProvider', () => {
         body: mockStream,
       });
 
-      await xiaomiProvider.streamChat(messages, tools, vi.fn(), 'sess-123', 'msg-456');
+      await xiaomiProvider.streamChat(messages, tools, { sessionId: 'sess-123', messageId: 'msg-456', onChunk: vi.fn() });
 
       const request = mockFetch.mock.calls[0]?.[1] as { body: string };
       const parsed = JSON.parse(request.body) as { messages: Array<Record<string, unknown>> };
@@ -205,7 +205,7 @@ describe('BaseOpenAICompatibleProvider', () => {
       });
 
       // Act
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       // BUG: Current implementation uses Date.now() for ID, which could collide for calls in same ms
@@ -251,7 +251,7 @@ describe('BaseOpenAICompatibleProvider', () => {
       });
 
       // Act
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       const ids = result.map((tc) => tc.id);
@@ -292,7 +292,7 @@ describe('BaseOpenAICompatibleProvider', () => {
         body: mockStream,
       });
 
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId, undefined, onToolArgChunk);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk, onToolArgChunk });
 
       expect(onToolArgChunk).toHaveBeenCalledWith('raapp_create', 0);
     });
@@ -321,7 +321,7 @@ describe('BaseOpenAICompatibleProvider', () => {
         body: { getReader: () => reader },
       });
 
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortController.signal);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk, abortSignal: abortController.signal });
 
       expect(result).toEqual([]);
       expect(reader.releaseLock).toHaveBeenCalledOnce();
@@ -351,7 +351,7 @@ describe('BaseOpenAICompatibleProvider', () => {
       });
 
       // Act
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       expect(onChunk).toHaveBeenCalledWith({
