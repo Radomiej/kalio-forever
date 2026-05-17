@@ -34,7 +34,7 @@ function shouldRequestGeneratedTitle(sessionTitle: string, sessionMessages: Chat
   const userMessages = sessionMessages.filter((message) => message.role === 'user');
   const assistantMessages = sessionMessages.filter((message) => message.role === 'assistant');
 
-  if (userMessages.length !== 1 || assistantMessages.length !== 1) {
+  if (userMessages.length !== 1 || assistantMessages.length < 1) {
     return false;
   }
 
@@ -157,6 +157,34 @@ export function ChatInterface() {
       setToolArgProgress({ toolName, totalChars: 0, charsPerSec: 0 });
     };
 
+    const requestGeneratedTitleIfNeeded = (sessionId: string | null) => {
+      const {
+        sessions,
+        activeSessionId: currentActiveSessionId,
+        messages: sessionMessages,
+      } = useSessionStore.getState();
+
+      if (!sessionId || sessionId !== currentActiveSessionId) {
+        return;
+      }
+
+      const session = sessions.find((item) => item.id === sessionId);
+      if (!session || !shouldRequestGeneratedTitle(session.title, sessionMessages)) {
+        return;
+      }
+
+      addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: Date.now() });
+      fetch(`/api/sessions/${sessionId}/generate-title`, { method: 'POST' })
+        .then((r) => r.json())
+        .then((data: { title: string }) => {
+          useSessionStore.getState().updateSession(sessionId, { title: data.title });
+          updateLlmActivity('title-gen', { status: 'done', finishedAt: Date.now() });
+        })
+        .catch(() => {
+          updateLlmActivity('title-gen', { status: 'error', finishedAt: Date.now() });
+        });
+    };
+
     const offChunk = eventBus.onChunk((chunk) => {
       const targetSessionId = chunk.sessionId ?? useSessionStore.getState().activeSessionId;
 
@@ -189,21 +217,6 @@ export function ChatInterface() {
         // Only update UI state for the active session
         if (chunk.sessionId === useSessionStore.getState().activeSessionId) {
           setStreaming(false);
-          // After the first assistant reply, replace the optimistic preview title.
-          const { sessions, activeSessionId: sid, messages: sessionMessages } = useSessionStore.getState();
-          const session = sessions.find((s) => s.id === sid);
-          if (sid && session && shouldRequestGeneratedTitle(session.title, sessionMessages)) {
-            addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: Date.now() });
-            fetch(`/api/sessions/${sid}/generate-title`, { method: 'POST' })
-              .then((r) => r.json())
-              .then((data: { title: string }) => {
-                useSessionStore.getState().updateSession(sid, { title: data.title });
-                updateLlmActivity('title-gen', { status: 'done', finishedAt: Date.now() });
-              })
-              .catch(() => {
-                updateLlmActivity('title-gen', { status: 'error', finishedAt: Date.now() });
-              });
-          }
         }
       }
     });
@@ -221,6 +234,7 @@ export function ChatInterface() {
       });
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
         setStreaming(false);
+        requestGeneratedTitleIfNeeded(payload.sessionId);
       }
     });
 

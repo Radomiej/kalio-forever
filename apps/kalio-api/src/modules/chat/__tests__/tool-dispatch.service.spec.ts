@@ -4,6 +4,7 @@ import { ToolDispatchService } from '../tool-dispatch.service';
 import { TurnState } from '../turn-state';
 import { TOOL_REGISTRY } from '../chat.tokens';
 import { MCPService } from '../../mcp/mcp.service';
+import { HitlPolicyService } from '../../hitl/hitl-policy.service';
 import type { StreamContext } from '../interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from '../interfaces/tool-registry-entry.interface';
 
@@ -327,6 +328,66 @@ describe('ToolDispatchService', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe('dispatch — configurable HITL policy', () => {
+    it('skips manual confirmation when the global policy approves the tool (bypass)', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'bypass' }),
+      };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
+        ],
+      }).compile();
+
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      const result = await scopedService.dispatch('c-bypass', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(result.status).toBe('success');
+      expect(hitlPolicy.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'tool',
+        sessionId: 'sid',
+        name: 'dangerous_tool',
+        args: { path: 'demo.txt' },
+      }));
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns cancelled when the global auto HITL policy rejects the tool', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({
+          status: 'rejected',
+          source: 'auto',
+          reason: 'The args request a destructive write outside the allowed plan.',
+        }),
+      };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
+        ],
+      }).compile();
+
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      const result = await scopedService.dispatch('c-auto-reject', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(result.status).toBe('cancelled');
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).not.toHaveBeenCalled();
     });
   });
 

@@ -11,9 +11,10 @@ import { VfsNativeSystems } from './native/systems/vfs.systems';
 import { RAAppVersioningService } from './raapp-versioning.service';
 import { VFSModule } from '../vfs/vfs.module';
 import { AuditService } from '../chat/audit.service';
+import { HitlModule } from '../hitl/hitl.module';
 
 @Module({
-  imports: [VFSModule, ConfigModule],
+  imports: [VFSModule, ConfigModule, HitlModule],
   controllers: [RAAppController],
   providers: [
     RAAppService,

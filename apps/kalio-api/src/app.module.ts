@@ -17,6 +17,7 @@ import { SearchModule } from './modules/search/search.module';
 import { CLIAgentModule } from './modules/cli-agent/cli-agent.module';
 import { ImageModule } from './modules/image/image.module';
 import { RelayModule } from './modules/relay/relay.module';
+import { HitlModule } from './modules/hitl/hitl.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { RelayModule } from './modules/relay/relay.module';
     SearchModule,
     CLIAgentModule,
     ImageModule,
+    HitlModule,
     RelayModule,
   ],
 })

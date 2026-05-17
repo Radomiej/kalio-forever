@@ -629,7 +629,7 @@ describe('ChatInterface event wiring', () => {
     expect(setStreaming).not.toHaveBeenCalled();
   });
 
-  it('REGRESSION: first assistant reply still triggers title generation after optimistic preview title', async () => {
+  it('REGRESSION: first completed turn still triggers title generation after optimistic preview title', async () => {
     const firstPrompt = 'Build a dashboard that tracks agent loop progress across subagents';
     mockSessions = mockSessions.map((session) =>
       session.id === 'session-1'
@@ -638,7 +638,8 @@ describe('ChatInterface event wiring', () => {
     );
     mockMessages = [
       { id: 'user-1', sessionId: 'session-1', role: 'user', content: firstPrompt, createdAt: 1 },
-      { id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'Done', createdAt: 2 },
+      { id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'Need a tool call first', createdAt: 2 },
+      { id: 'assistant-2', sessionId: 'session-1', role: 'assistant', content: 'Done', createdAt: 3 },
     ];
 
     const fetchMock = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ title: 'Generated Title' }) }));
@@ -649,11 +650,9 @@ describe('ChatInterface event wiring', () => {
     updateLlmActivity.mockClear();
     updateSession.mockClear();
 
-    await emitEvent('chat:chunk', {
+    await emitEvent('chat:complete', {
       sessionId: 'session-1',
-      messageId: 'assistant-1',
-      delta: '',
-      done: true,
+      messageId: 'assistant-2',
     });
 
     expect(addLlmActivity).toHaveBeenCalledWith(

@@ -32,6 +32,7 @@ import { MCPModule } from '../mcp/mcp.module';
 import { SkillsModule } from '../skills/skills.module';
 import { CredentialsModule } from '../credentials/credentials.module';
 import { RelayModule } from '../relay/relay.module';
+import { HitlModule } from '../hitl/hitl.module';
 import { TelegramRelayService } from '../relay/telegram/telegram-relay.service';
 import { TOOL_DISPATCH_REGISTRY, type ToolDispatchRegistryPort } from '../tool/tool-dispatch-registry.port';
 import { SUBAGENT_RUNTIME } from '../tool/subagent-runtime.port';
@@ -55,7 +56,7 @@ import {
  *   TOOL_REGISTRY     → Tool dispatch registry port exported by ToolModule
  */
 @Module({
-  imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, RelayModule],
+  imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, HitlModule, RelayModule],
   controllers: [SessionsController, AuditLogController, ChatTestSupportController],
   providers: [
     // Handlers

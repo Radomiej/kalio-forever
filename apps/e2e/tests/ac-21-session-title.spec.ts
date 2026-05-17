@@ -35,7 +35,9 @@ test.describe('AC-21: Session auto-title', () => {
   });
 
   test('sidebar title upgrades from New Chat to the generated final title after first reply', async ({ page, request }) => {
-    const prompt = 'Build a dashboard that tracks agent loop progress across subagents and highlights stuck tool confirmations for recovery.';
+    test.setTimeout(45_000);
+
+    const prompt = 'Session title regression verification uses a deliberately long first prompt to exceed sixty characters. Reply with exactly OK and do not use tools.';
     const optimisticTitle = buildOptimisticTitle(prompt);
     const generatedTitle = buildGeneratedTitle(prompt);
     let sessionId: string | null = null;

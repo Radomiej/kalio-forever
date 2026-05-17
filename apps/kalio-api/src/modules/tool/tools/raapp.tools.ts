@@ -227,6 +227,7 @@ export class RunRaAppTool {
       }
       // Execute system effects (including call_native) to compute derived outputs
       let pendingApprovals: import('@kalio/types').RaAppPendingApproval[] = [];
+      let nativeResults: import('@kalio/types').RaAppNativeResult[] = [];
       if (appToRun.systemsContent) {
         const entityStore = new EntityStore();
         const effectsResult = await this.effectsProcessor.processSystemsYaml(
@@ -243,13 +244,13 @@ export class RunRaAppTool {
         }
 
         if (effectsResult.pendingApprovals.length > 0) {
-          await this.hitl.savePendingApprovals(request.callId, sessionId, effectsResult.pendingApprovals);
-          pendingApprovals = effectsResult.pendingApprovals.map((a) => ({
-            id: a.id,
-            system: a.system,
-            displayLabel: a.displayLabel,
-            args: a.args,
-          }));
+          const resolvedApprovals = await this.hitl.resolvePendingApprovals(
+            request.callId,
+            sessionId,
+            effectsResult.pendingApprovals,
+          );
+          pendingApprovals = resolvedApprovals.pendingApprovals;
+          nativeResults = resolvedApprovals.nativeResults;
         }
       }
       const data = { output: outputData };
@@ -265,6 +266,7 @@ export class RunRaAppTool {
         content: appToRun.guiContent,
         renderedContent: result.renderedContent,
         ...(pendingApprovals.length > 0 ? { pendingApprovals } : {}),
+        ...(nativeResults.length > 0 ? { nativeResults } : {}),
       };
     }
 

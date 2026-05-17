@@ -206,9 +206,13 @@ interface ToolCallRequest {
 Codex-specific execution notes:
 
 - The Codex adapter runs `codex exec` in non-interactive mode.
-- Default flags are `--sandbox workspace-write --ask-for-approval never --color never`.
+- Default flags are `-a never exec --sandbox workspace-write --color never`.
 - Kalio still enforces the outer `Allowed Paths` guardrail before the CLI process starts.
 - `--skip-git-repo-check` is intentionally not hardcoded; use adapter `extraArgs` only when you explicitly want Codex to run outside a Git repo.
+
+Gemini-specific execution notes:
+
+- The Gemini adapter now uses `--include-directories <workdir>`; newer Gemini CLI builds reject the older `--add-dir` flag.
 
 ---
 

@@ -4,6 +4,7 @@ import { RAAppHITLService } from './raapp-hitl.service';
 import { NativeSystemRegistry } from './native/native-system-registry.service';
 import { AuditService } from '../chat/audit.service';
 import { DrizzleService } from '../../database/drizzle.service';
+import { HitlPolicyService } from '../hitl/hitl-policy.service';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import * as schema from '../../database/schema';
@@ -36,10 +37,14 @@ describe('RAAppHITLService', () => {
   let service: RAAppHITLService;
   let registry: NativeSystemRegistry;
   let drizzleSvc: DrizzleService;
+  let hitlPolicy: { resolveApproval: ReturnType<typeof vi.fn> };
   const auditMock = { log: vi.fn().mockResolvedValue(undefined) };
 
   beforeEach(async () => {
     drizzleSvc = makeTestDrizzle();
+    hitlPolicy = {
+      resolveApproval: vi.fn().mockResolvedValue({ status: 'manual', source: 'manual' }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -47,6 +52,7 @@ describe('RAAppHITLService', () => {
         NativeSystemRegistry,
         { provide: DrizzleService, useValue: drizzleSvc },
         { provide: AuditService, useValue: auditMock },
+        { provide: HitlPolicyService, useValue: hitlPolicy },
       ],
     }).compile();
 
@@ -219,6 +225,49 @@ describe('RAAppHITLService', () => {
     it('returns empty when session has no pending approvals', async () => {
       const pending = await service.getPendingForSession('sess-empty');
       expect(pending).toHaveLength(0);
+    });
+  });
+
+  describe('resolvePendingApprovals()', () => {
+    it('auto-executes the whole batch when the global policy bypasses RA-App approvals', async () => {
+      registry.register({
+        id: 'test_write',
+        description: 'write test',
+        approval_required: true,
+        input_schema: {},
+        handler: async (args) => ({ written: args['path'] }),
+      });
+      hitlPolicy.resolveApproval.mockResolvedValue({ status: 'approved', source: 'bypass' });
+
+      const result = await service.resolvePendingApprovals('tc-bypass', 'sess-bypass', [
+        { id: 'bypass-1', system: 'test_write', args: { path: 'file.txt' }, displayLabel: 'Write file.txt' },
+      ]);
+
+      expect(result.pendingApprovals).toEqual([]);
+      expect(result.nativeResults).toEqual([
+        expect.objectContaining({ id: 'bypass-1', status: 'executed', result: { written: 'file.txt' } }),
+      ]);
+      await expect(service.getPendingForSession('sess-bypass')).resolves.toHaveLength(0);
+    });
+
+    it('falls back to manual when any auto evaluation rejects the RA-App approval batch', async () => {
+      hitlPolicy.resolveApproval
+        .mockResolvedValueOnce({ status: 'approved', source: 'auto', reason: 'First op is safe.' })
+        .mockResolvedValueOnce({ status: 'rejected', source: 'auto', reason: 'Second op is risky.' });
+
+      const approvals: PendingApproval[] = [
+        { id: 'auto-1', system: 'test_write', args: { path: 'safe.txt' }, displayLabel: 'Write safe.txt' },
+        { id: 'auto-2', system: 'test_delete', args: { path: 'danger.txt' }, displayLabel: 'Delete danger.txt' },
+      ];
+
+      const result = await service.resolvePendingApprovals('tc-auto', 'sess-auto', approvals);
+
+      expect(result.nativeResults).toEqual([]);
+      expect(result.pendingApprovals).toEqual([
+        expect.objectContaining({ id: 'auto-1', system: 'test_write' }),
+        expect.objectContaining({ id: 'auto-2', system: 'test_delete' }),
+      ]);
+      await expect(service.getPendingForSession('sess-auto')).resolves.toHaveLength(2);
     });
   });
 });

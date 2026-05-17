@@ -6,6 +6,7 @@ import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from './interfaces/tool-registry-entry.interface';
 import { TOOL_REGISTRY } from './chat.tokens';
 import { MCPService } from '../mcp/mcp.service';
+import { HitlPolicyService } from '../hitl/hitl-policy.service';
 
 const HITL_TIMEOUT_MS = 600_000;
 const BUILTIN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
@@ -38,6 +39,7 @@ export class ToolDispatchService {
   constructor(
     @Inject(TOOL_REGISTRY) tools: ToolRegistryEntry[],
     @Optional() @Inject(MCPService) private readonly mcpService: MCPService | null,
+    @Optional() @Inject(HitlPolicyService) private readonly hitlPolicy: HitlPolicyService | null,
   ) {
     this.toolMap = new Map(tools.map(t => [t.meta.name, t]));
     this.logger.log(`Tool registry loaded: [${[...this.toolMap.keys()].join(', ')}]`);
@@ -72,8 +74,8 @@ export class ToolDispatchService {
           // Check requiresConfirmation for MCP tools the same way native tools do
           const mcpMeta = this.mcpService.getToolByName(toolName);
           if (mcpMeta?.requiresConfirmation) {
-            const confirmed = await this.awaitConfirmation(callId, toolName, args, ctx);
-            if (!confirmed) {
+            const approved = await this.approveOrRequestConfirmation(callId, toolName, args, ctx);
+            if (!approved) {
               return this.withMeta({ callId, status: 'cancelled' }, toolName, ctx);
             }
           }
@@ -96,8 +98,8 @@ export class ToolDispatchService {
     }
 
     if (entry.meta.requiresConfirmation && !this.canAutoApprove(toolName, ctx)) {
-      const confirmed = await this.awaitConfirmation(callId, toolName, args, ctx);
-      if (!confirmed) {
+      const approved = await this.approveOrRequestConfirmation(callId, toolName, args, ctx);
+      if (!approved) {
         return this.withMeta({ callId, status: 'cancelled' }, toolName, ctx);
       }
     }
@@ -242,6 +244,49 @@ export class ToolDispatchService {
         },
       });
     });
+  }
+
+  private async approveOrRequestConfirmation(
+    callId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    ctx: StreamContext,
+  ): Promise<boolean> {
+    if (this.canAutoApprove(toolName, ctx)) {
+      return true;
+    }
+
+    if (this.hitlPolicy) {
+      try {
+        const resolution = await this.hitlPolicy.resolveApproval({
+          kind: 'tool',
+          sessionId: ctx.sessionId,
+          name: toolName,
+          args,
+          agentRun: ctx.agentRun,
+          toolCallId: callId,
+        });
+
+        if (resolution.status === 'approved') {
+          return true;
+        }
+
+        if (resolution.status === 'rejected') {
+          this.logger.log(
+            `Global HITL policy rejected tool [${toolName}] for session ${ctx.sessionId}${resolution.reason ? `: ${resolution.reason}` : ''}`,
+          );
+          return false;
+        }
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        this.logger.error(
+          `Global HITL policy failed for tool [${toolName}] session=${ctx.sessionId}`,
+          error,
+        );
+      }
+    }
+
+    return this.awaitConfirmation(callId, toolName, args, ctx);
   }
 
   private canAutoApprove(toolName: string, ctx: StreamContext): boolean {

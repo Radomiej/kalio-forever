@@ -32,7 +32,7 @@ describe('RA-App draft tool metadata', () => {
 describe('RaAppExecuteDslTool', () => {
   let raapp: { execute: ReturnType<typeof vi.fn> };
   let effectsProcessor: { processSystemsYaml: ReturnType<typeof vi.fn> };
-  let hitl: { savePendingApprovals: ReturnType<typeof vi.fn> };
+  let hitl: { savePendingApprovals: ReturnType<typeof vi.fn>; resolvePendingApprovals: ReturnType<typeof vi.fn> };
   let vfs: { readFile: ReturnType<typeof vi.fn> };
   let tool: RaAppExecuteDslTool;
 
@@ -45,6 +45,7 @@ describe('RaAppExecuteDslTool', () => {
     };
     hitl = {
       savePendingApprovals: vi.fn().mockResolvedValue(undefined),
+      resolvePendingApprovals: vi.fn().mockResolvedValue({ pendingApprovals: [], nativeResults: [] }),
     };
     vfs = {
       readFile: vi.fn((sessionId: string, filePath: string) => {
@@ -92,6 +93,41 @@ describe('RaAppExecuteDslTool', () => {
       expect.stringContaining('[raapp_execute_dsl] Unexpected VFS read error for drafts/draft-1/systems.yml'),
       expect.any(Error),
     );
+  });
+
+  it('returns nativeResults without pendingApprovals when draft GUI approvals resolve server-side', async () => {
+    vfs.readFile.mockImplementation((sessionId: string, filePath: string) => {
+      if (filePath.endsWith('ui.gui')) return { sessionId, filePath, content: 'window { label { text = "Hello" } }' };
+      if (filePath.endsWith('systems.yml')) return { sessionId, filePath, content: 'systems: []' };
+      const err = new Error(`missing: ${filePath}`) as NodeJS.ErrnoException;
+      err.code = 'VFS_FILE_NOT_FOUND';
+      throw err;
+    });
+    effectsProcessor.processSystemsYaml.mockResolvedValue({
+      output: {},
+      pendingApprovals: [
+        { id: 'approval-1', system: 'test_write', args: { path: 'draft.txt' }, displayLabel: 'Write draft.txt' },
+      ],
+      entities: [],
+    });
+    hitl.resolvePendingApprovals.mockResolvedValue({
+      pendingApprovals: [],
+      nativeResults: [
+        { id: 'approval-1', system: 'test_write', status: 'executed', result: { path: 'draft.txt' } },
+      ],
+    });
+
+    const result = await tool.execute(makeRequest()) as Record<string, unknown>;
+
+    expect(hitl.resolvePendingApprovals).toHaveBeenCalledWith(
+      'call-1',
+      'sess-1',
+      expect.arrayContaining([expect.objectContaining({ id: 'approval-1' })]),
+    );
+    expect(result.pendingApprovals).toBeUndefined();
+    expect(result.nativeResults).toEqual([
+      expect.objectContaining({ id: 'approval-1', status: 'executed' }),
+    ]);
   });
 });
 
