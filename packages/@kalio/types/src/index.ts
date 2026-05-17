@@ -531,6 +531,10 @@ export interface SocketEvents {
   // CLI Agent streaming — server → client
   'cli_agent:progress': { callId: ID; sessionId: ID; agentId: string; chunk: string };
 
+  // Tool argument generation progress — server → client
+  // Emitted ~once per second while the LLM streams tool call arguments (before tool:start).
+  'tool:arg_progress': { toolName: string; totalChars: number; charsPerSec: number; sessionId: ID };
+
 }
 
 // ─── CLI Agent ────────────────────────────────────────────────────────────────
@@ -674,7 +678,8 @@ export type AuditType =
   | 'tool_result'
   | 'error'
   | 'raapp_native_call'
-  | 'raapp_native_approved';
+  | 'raapp_native_approved'
+  | 'escalation';
 
 export interface AuditLogEntry {
   id: ID;

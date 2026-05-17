@@ -15,6 +15,7 @@ export interface ILLMProvider {
     sessionId: string,
     messageId: string,
     abortSignal?: AbortSignal,
+    onToolArgChunk?: (toolName: string, deltaChars: number) => void,
   ): Promise<LLMToolCall[]>;
 }
 

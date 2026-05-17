@@ -3,7 +3,7 @@ import type { MutableRefObject } from 'react';
 import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
-import { buildTurnsFromHistory } from '../chatUtils';
+import { buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
 
 interface UseChatSessionActivationParams {
   activeSessionId: string | null;
@@ -33,9 +33,11 @@ export function useChatSessionActivation({
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
       .then((data: ChatMessage[]) => {
         if (useSessionStore.getState().activeSessionId !== activeSessionId) return;
-        setMessages(data);
+        const currentMessages = useSessionStore.getState().getSessionMessages(activeSessionId);
+        const mergedMessages = mergeFetchedMessages(currentMessages, data);
+        setMessages(mergedMessages);
         if (!useAgentStore.getState().hasActiveLoopForSession(activeSessionId)) {
-          setAgentTurns(buildTurnsFromHistory(data, activeSessionId));
+          setAgentTurns(buildTurnsFromHistory(mergedMessages, activeSessionId));
         }
       })
       .catch((err: unknown) => {

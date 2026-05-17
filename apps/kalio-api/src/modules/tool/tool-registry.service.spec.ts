@@ -42,6 +42,7 @@ import { ImageEditTool } from './tools/image-edit.tool';
 import { ImageViewTool } from './tools/image-view.tool';
 import { SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool } from './tools/skill.tools';
 import { PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool } from './tools/persona.tools';
+import { EscalateTool } from './tools/escalate.tool';
 
 /** Create a stub whose constructor is the real class (so @Tool metadata is present) */
 function stub<T extends abstract new (...a: never[]) => object>(Cls: T): InstanceType<T> {
@@ -107,6 +108,7 @@ describe('ToolRegistryService — all tools registered', () => {
       stub(PersonaCreateTool),
       stub(PersonaUpdateTool),
       stub(PersonaDeleteTool),
+      stub(EscalateTool),
     );
   });
 
@@ -143,6 +145,8 @@ describe('ToolRegistryService — all tools registered', () => {
     'skill_list', 'skill_read', 'skill_create', 'skill_update', 'skill_delete',
     // Personas
     'persona_list', 'persona_create', 'persona_update', 'persona_delete',
+    // Escalate
+    'escalate',
   ];
 
   it('exposes every expected tool via getAllTools()', () => {

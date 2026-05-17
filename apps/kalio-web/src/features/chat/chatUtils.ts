@@ -23,6 +23,33 @@ export function computeAnsweredCallIds(messages: ChatMessage[]): Set<string> {
   return answered;
 }
 
+export function mergeFetchedMessages(currentMessages: ChatMessage[], loadedMessages: ChatMessage[]): ChatMessage[] {
+  const merged = new Map<string, ChatMessage>();
+
+  loadedMessages.forEach((message) => {
+    merged.set(message.id, message);
+  });
+
+  currentMessages.forEach((message) => {
+    const existing = merged.get(message.id);
+    if (!existing) {
+      merged.set(message.id, message);
+      return;
+    }
+
+    merged.set(message.id, {
+      ...existing,
+      ...message,
+      content: message.content || existing.content,
+      thinking: message.thinking ?? existing.thinking,
+      streaming: message.streaming ?? existing.streaming,
+      toolCallId: message.toolCallId ?? existing.toolCallId,
+    });
+  });
+
+  return [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
+}
+
 /**
  * Reconstructs a list of AgentTurns from persisted messages.
  *

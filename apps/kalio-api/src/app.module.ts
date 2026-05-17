@@ -16,6 +16,7 @@ import { ChatModule } from './modules/chat/chat.module';
 import { SearchModule } from './modules/search/search.module';
 import { CLIAgentModule } from './modules/cli-agent/cli-agent.module';
 import { ImageModule } from './modules/image/image.module';
+import { RelayModule } from './modules/relay/relay.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { ImageModule } from './modules/image/image.module';
     SearchModule,
     CLIAgentModule,
     ImageModule,
+    RelayModule,
   ],
 })
 export class AppModule {}

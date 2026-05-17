@@ -87,9 +87,10 @@ export class LLMService {
     sessionId: string,
     messageId: string,
     abortSignal?: AbortSignal,
+    onToolArgChunk?: (toolName: string, deltaChars: number) => void,
   ): Promise<LLMToolCall[]> {
     const { provider } = await this.getActiveProvider();
-    return provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortSignal);
+    return provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortSignal, onToolArgChunk);
   }
 
   async getConfig(): Promise<LLMConfig & { source: 'db' | 'env' }> {

@@ -146,8 +146,8 @@ export const auditLog = sqliteTable('audit_log', {
   id:         text('id').primaryKey(),
   sessionId:  text('session_id'),
   type:       text('type', {
-    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'error', 'raapp_native_call', 'raapp_native_approved'],
-  }).notNull().$type<'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error' | 'raapp_native_call' | 'raapp_native_approved'>(),
+    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'error', 'raapp_native_call', 'raapp_native_approved', 'escalation'],
+  }).notNull().$type<'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error' | 'raapp_native_call' | 'raapp_native_approved' | 'escalation'>(),
   label:      text('label').notNull(),
   data:       text('data', { mode: 'json' }).$type<Record<string, unknown>>(),
   durationMs: integer('duration_ms'),

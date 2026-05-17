@@ -10,7 +10,7 @@ import { AgentTurnBubble } from './AgentTurnBubble';
 import { ChatInput } from './ChatInput';
 import { useContextUsage } from './hooks/useContextUsage';
 import { useChatSessionActivation } from './hooks/useChatSessionActivation';
-import { computeAnsweredCallIds, buildConversationTimeline, buildTurnsFromHistory } from './chatUtils';
+import { computeAnsweredCallIds, buildConversationTimeline, buildTurnsFromHistory, mergeFetchedMessages } from './chatUtils';
 import { apiClient } from '../../services/apiClient';
 import type { ChatMessage, Persona } from '@kalio/types';
 import {
@@ -406,10 +406,15 @@ export function ChatInterface() {
           .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
           .then((data: ChatMessage[]) => {
             if (useSessionStore.getState().activeSessionId !== sid) return;
-            const { setMessages: doSetMessages, setAgentTurns: doSetAgentTurns } = useSessionStore.getState();
-            doSetMessages(data);
+            const {
+              getSessionMessages,
+              setMessages: doSetMessages,
+              setAgentTurns: doSetAgentTurns,
+            } = useSessionStore.getState();
+            const mergedMessages = mergeFetchedMessages(getSessionMessages(sid), data);
+            doSetMessages(mergedMessages);
             if (!useAgentStore.getState().hasActiveLoopForSession(sid)) {
-              doSetAgentTurns(buildTurnsFromHistory(data, sid));
+              doSetAgentTurns(buildTurnsFromHistory(mergedMessages, sid));
             }
           })
           .catch((err: unknown) => {

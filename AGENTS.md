@@ -203,6 +203,8 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Do not add net-new behavior to files already over the hard size limit without extracting or shrinking the touched slice in the same change.
 - When frontend and backend intentionally duplicate a runtime rule, update both sides in the same change and keep the sync note aligned.
 - In Vitest, shared mock refs used inside `vi.mock()` factories should come from `vi.hoisted()`; Zustand mocks used outside React must expose `.getState()`.
+- On Windows, do not run `vite dev` with redirected/piped stdout/stderr; this can trigger `@tailwindcss/oxide` crashes.
+- For Playwright on Windows, avoid autostarting Vite dev server from Playwright `webServer`; use built frontend + `vite preview` when scripting startup.
 
 ---
 

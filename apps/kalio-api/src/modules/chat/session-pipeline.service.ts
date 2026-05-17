@@ -138,6 +138,10 @@ export class SessionPipelineService {
     });
   }
 
+  getActiveSessionIds(): ReadonlySet<string> {
+    return new Set(this.active.keys());
+  }
+
   /**
    * Cancel the in-flight turn (if any) and drop any queued items for the
    * given session. Used on socket disconnect.

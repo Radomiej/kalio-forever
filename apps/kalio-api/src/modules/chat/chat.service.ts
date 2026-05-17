@@ -236,6 +236,14 @@ export class ChatService {
               data: { callId: tc.id, status: result.status },
               durationMs: Math.round(performance.now() - toolStart),
             });
+            if (tc.name === 'escalate' && result.status === 'success') {
+              void this.audit.log({
+                sessionId,
+                type: 'escalation',
+                label: 'Agent Escalation',
+                data: { message: (result.data as Record<string, unknown>)?.['message'] as string },
+              });
+            }
             if (result.status !== 'cancelled') {
               const content =
                 result.status === 'success'

@@ -22,9 +22,14 @@ pnpm turbo run test               # unit tests all
 pnpm turbo run typecheck          # tsc --noEmit all
 pnpm audit:report                 # static audit + prioritized report
 .\start-dev.ps1                   # API :3016 + web :5188
+pnpm turbo run lint               # lint all
+pnpm turbo run test:e2e           # Playwright E2E
 ```
 
-For single-file iteration: `cd apps/kalio-api && node_modules\.bin\tsc.CMD --noEmit`
+Single-file or narrow-scope iteration:
+- Backend typecheck (current package): `cd apps/kalio-api && node_modules\.bin\tsc.CMD --noEmit`
+- Frontend single test: `cd apps/kalio-web && npm run test -- src/features/<feature>/<file>.spec.ts`
+- E2E single spec: `cd apps/e2e && npx playwright test tests/<spec>.spec.ts`
 
 ## Layout
 
@@ -73,6 +78,17 @@ export class MyTool {
 - Register in `ToolModule` providers array
 - Prefer `@ConfirmedTool(...)` for mutating or persistent tools so confirmation policy stays consistent
 - `requiresConfirmation: true` for destructive operations (delete, exec, overwrite)
+
+## Link-First Docs
+
+Prefer linking to focused architecture docs instead of duplicating long explanations:
+
+- `docs/application-architecture-current.md` (system map)
+- `docs/chat-streaming-tools-architecture.md` (chat + streaming)
+- `docs/tool-architecture.md` (tool registry + execution)
+- `docs/mcp-architecture.md` (MCP integration)
+- `docs/raapp-design-current.md` and `docs/raapp-v2-architecture-current.md` (RA-App pipeline)
+- `docs/database-schema-diagram.md` (DB relationships)
 
 ### Socket.IO event flow
 ```
@@ -148,6 +164,11 @@ window.parent.postMessage({ type: 'kalio_send_message', content: 'user answer' }
 - Pre-existing failing test: `raapp.service.spec.ts` — 7 failures due to missing `ConfigService` mock — do NOT fix unless specifically asked
 - Shared refs used inside `vi.mock()` factories should come from `vi.hoisted()`
 - Zustand mocks touched from callbacks or services must expose `.getState()` to match runtime usage
+
+### Windows gotchas
+
+- Do not run `vite dev` with redirected or piped stdout/stderr on Windows; this can crash `@tailwindcss/oxide`.
+- For scripted E2E startup on Windows, prefer frontend build + `vite preview` over Playwright `webServer` with `vite dev`.
 
 ### Test-driven bug fixes & review changes
 

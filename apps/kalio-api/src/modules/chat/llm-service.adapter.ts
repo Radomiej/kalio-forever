@@ -1,10 +1,44 @@
 import { Injectable } from '@nestjs/common';
 import { LLMService } from '../llm/llm.service';
 import type { ILLMSource, LLMSourceParams } from './interfaces/llm-source.interface';
-import type { InternalLLMChunk } from './interfaces/llm-chunk.types';
+import type { InternalLLMChunk, ToolArgProgressChunk } from './interfaces/llm-chunk.types';
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+interface RateWindow { t: number; chars: number }
+
+/**
+ * Returns a callback that tracks tool-argument generation rate and emits
+ * ToolArgProgressChunk via `enqueue` at most once per `intervalMs`.
+ * Uses a sliding window of `windowMs` ms to compute chars/sec.
+ */
+function makeToolArgRateTracker(
+  enqueue: (chunk: ToolArgProgressChunk) => void,
+  windowMs = 5000,
+  intervalMs = 1000,
+): (toolName: string, deltaChars: number) => void {
+  const window: RateWindow[] = [];
+  const totals = new Map<string, number>();
+  let lastEmitAt = 0;
+
+  return (toolName: string, deltaChars: number): void => {
+    const now = Date.now();
+    window.push({ t: now, chars: deltaChars });
+    const cutoff = now - windowMs;
+    while (window.length > 0 && window[0]!.t < cutoff) window.shift();
+    totals.set(toolName, (totals.get(toolName) ?? 0) + deltaChars);
+
+    if (now - lastEmitAt >= intervalMs) {
+      lastEmitAt = now;
+      const windowChars = window.reduce((s, e) => s + e.chars, 0);
+      const oldestT = window[0]?.t ?? now;
+      const actualWindowSec = Math.max(1, (now - oldestT) / 1000);
+      const charsPerSec = Math.round(windowChars / actualWindowSec);
+      enqueue({ type: 'tool_arg_progress', toolName, totalChars: totals.get(toolName) ?? 0, charsPerSec });
+    }
+  };
 }
 
 /**
@@ -66,6 +100,8 @@ export class LLMServiceAdapter implements ILLMSource {
     }
 
     // Fire the stream — do NOT await here so we can yield concurrently
+    const onToolArgChunk = makeToolArgRateTracker(chunk => enqueue(chunk));
+
     void this.llm
       .streamChat(
         params.messages,
@@ -82,6 +118,7 @@ export class LLMServiceAdapter implements ILLMSource {
         params.sessionId,
         params.messageId,
         controller.signal,
+        onToolArgChunk,
       )
       .then(toolCalls => {
         if (controller.signal.aborted) {

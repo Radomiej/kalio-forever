@@ -261,6 +261,42 @@ describe('BaseOpenAICompatibleProvider', () => {
   });
 
   describe('streamChat - Normal Operation', () => {
+    it('REGRESSION: emits tool intent when function name streams before arguments', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'build a calculator' }];
+      const tools = [{ name: 'raapp_create', description: 'Create an app', parameters: {} }];
+      const onChunk = vi.fn();
+      const onToolArgChunk = vi.fn();
+      const sessionId = 'sess-123';
+      const messageId = 'msg-456';
+
+      const mockStream = new ReadableStream({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"raapp_create"}}]}}]}\n\n',
+            ),
+          );
+          controller.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"title\\":\\"Calculator\\"}"}}]}}]}\n\n',
+            ),
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await provider.streamChat(messages, tools, onChunk, sessionId, messageId, undefined, onToolArgChunk);
+
+      expect(onToolArgChunk).toHaveBeenCalledWith('raapp_create', 0);
+    });
+
     it('should release the reader lock when abort happens mid-stream', async () => {
       const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
       const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];

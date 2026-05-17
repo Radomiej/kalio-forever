@@ -21,7 +21,7 @@ Najwazniejsze jest rozroznienie trzech rzeczy, ktore latwo pomylic:
 - `raapp_create` zwraca inline blok do czatu i jednoczesnie zapisuje wygenerowany app do katalogu RA-App.
 - `raapp_create` jest dzis narzedziem wymagajacym potwierdzenia, bo zapisuje stan na dysku.
 - Zapisane appki zyja poza sesyjnym VFS.
-- Nowy write path dla `raapp_create` przechodzi przez `RAAppVersioningService.saveAsDraft(...)`; legacy flat ZIPs sa juz tylko sciezka kompatybilnosci i migracji, nie biezacym lane zapisu dla tego toola.
+- Katalog RA-App ma dwa poziomy: plaskie appki ladowane przez `RAAppService` oraz wersjonowane grupy zarzadzane przez `RAAppVersioningService`.
 - Interaktywne HTML RA-App rozmawiaja z czatem przez `window.parent.postMessage(...)` przechwytywane w `HtmlIframeRenderer`.
 - Natywne efekty RA-App z approvalem przechodza przez `RAAppHITLService` i wracaja na frontend jako `raapp:native_result`.
 
@@ -51,7 +51,7 @@ Aktualny flow nie konczy sie na samym renderze w czacie.
 `raapp_create` robi dwa skutki uboczne:
 
 - przygotowuje blok do inline renderu
-- buduje ZIP artefakt i zapisuje go jako draft wersjonowanej user appki przez `RAAppVersioningService.saveAsDraft(...)`
+- zapisuje wygenerowany app do katalogu user RA-App
 
 ```mermaid
 sequenceDiagram
@@ -61,7 +61,6 @@ sequenceDiagram
     participant User as User
     participant Tool as RaAppCreateTool
     participant RA as RAAppService
-    participant Versioning as RAAppVersioningService
     participant FE as ToolCallBubble and RAAppRenderer
 
     LLM->>Chat: tool call raapp_create
@@ -70,8 +69,8 @@ sequenceDiagram
     User-->>Dispatch: tool:confirm
     Dispatch->>Tool: execute(request)
     Tool->>RA: execute(block)
-    Tool->>Versioning: saveAsDraft(generatedId, zipBuffer)
-    Tool->>RA: init()
+    Tool->>RA: saveGeneratedApp(...)
+    RA-->>Tool: stored app metadata
     Tool-->>Chat: ToolResult(status=success, type, mode, content, renderedContent, storedAppId)
     Chat-->>FE: tool:result
     FE->>FE: render inline RA-App block
@@ -81,7 +80,6 @@ Praktyczna konsekwencja:
 
 - to nie jest tylko "chwilowy widget w jednej sesji"
 - po sukcesie masz tez zapisany artefakt, ktory moze wejsc do katalogu RA-App
-- child auto-approve dla `raapp_create` nie powinien byc traktowany jako domyslna regula bezpieczenstwa RA-App; to byl waski wyjatek policy, a nie invariant architektury.
 
 ## `run_raapp`: realny runtime HTML vs GUI
 

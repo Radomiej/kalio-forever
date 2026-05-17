@@ -21,6 +21,7 @@ export type AgentStartHandler = (payload: SocketEvents['agent:start']) => void;
 export type AgentDoneHandler = (payload: SocketEvents['agent:done']) => void;
 export type RaAppNativeResultHandler = (payload: SocketEvents['raapp:native_result']) => void;
 export type CLIAgentProgressHandler = (payload: SocketEvents['cli_agent:progress']) => void;
+export type ToolArgProgressHandler = (payload: SocketEvents['tool:arg_progress']) => void;
 export type ReconnectHandler = () => void;
 export type DisconnectHandler = (reason: string) => void;
 
@@ -243,6 +244,14 @@ export class KalioSDK {
     };
     this.socket.on('cli_agent:progress', wrappedHandler);
     return () => this.socket.off('cli_agent:progress', wrappedHandler);
+  }
+
+  onToolArgProgress(handler: ToolArgProgressHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['tool:arg_progress']) => {
+      handler(payload);
+    };
+    this.socket.on('tool:arg_progress', wrappedHandler);
+    return () => this.socket.off('tool:arg_progress', wrappedHandler);
   }
 
   /**

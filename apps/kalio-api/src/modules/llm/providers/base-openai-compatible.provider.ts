@@ -36,6 +36,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     sessionId: string,
     messageId: string,
     abortSignal?: AbortSignal,
+    onToolArgChunk?: (toolName: string, deltaChars: number) => void,
   ): Promise<LLMToolCall[]> {
     if (abortSignal?.aborted) {
       return [];
@@ -136,8 +137,14 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
               if (!toolCallBuffers[idx]) {
                 toolCallBuffers[idx] = { name: '', argsRaw: '' };
               }
-              if (typeof fn?.['name'] === 'string') toolCallBuffers[idx]!.name += fn['name'];
-              if (typeof fn?.['arguments'] === 'string') toolCallBuffers[idx]!.argsRaw += fn['arguments'];
+              if (typeof fn?.['name'] === 'string') {
+                toolCallBuffers[idx]!.name += fn['name'];
+                onToolArgChunk?.(toolCallBuffers[idx]!.name, 0);
+              }
+              if (typeof fn?.['arguments'] === 'string') {
+                toolCallBuffers[idx]!.argsRaw += fn['arguments'];
+                onToolArgChunk?.(toolCallBuffers[idx]!.name, fn['arguments'].length);
+              }
             }
           }
         }

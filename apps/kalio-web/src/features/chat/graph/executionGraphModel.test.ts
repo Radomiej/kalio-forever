@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage, ChatSession, Persona } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
+import type { AgentTurn } from '../../../store/sessionStore';
 import { buildTurnsFromHistory } from '../chatUtils';
 import { buildExecutionGraphModel } from './executionGraphModel';
 import { NODE_HEIGHT, ROW_GAP } from './executionGraphModel.helpers';
@@ -571,5 +572,65 @@ describe('buildExecutionGraphModel', () => {
     expect(finalNode?.column).toBeGreaterThan(nonFinalMaxColumn);
     expect(finalNode?.row).toBe(turnNode?.row);
     expect(dashedToFinal).toEqual([]);
+  });
+
+  it('REGRESSION: does not render a historical fallback entry when the turn is anchored to a real prompt', () => {
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Resume the calculator build', createdAt: 1 }),
+      makeMessage({ id: 'a1', role: 'assistant', content: 'Calculator restored.', createdAt: 2 }),
+    ];
+
+    const turns = buildTurnsFromHistory(messages, 'session-1');
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns,
+      toolActivities: [],
+      activeAgentLoops: {},
+      sessions: [makeSession()],
+      sessionMessages: {
+        'session-1': messages,
+      },
+    });
+
+    expect(model.nodes.filter((node) => node.kind === 'prompt').map((node) => node.id)).toEqual(['prompt:u1']);
+    expect(model.nodes.some((node) => node.id.startsWith('prompt:lead:'))).toBe(false);
+    expect(model.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceId: 'prompt:u1', targetId: `turn:${turns[0]?.id}` }),
+    ]));
+  });
+
+  it('keeps the historical fallback entry only for genuinely orphaned turns', () => {
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Visible prompt', createdAt: 1 }),
+      makeMessage({ id: 'a1', role: 'assistant', content: 'Recovered orphan turn', createdAt: 2 }),
+    ];
+    const turns: AgentTurn[] = [
+      {
+        id: 'turn-orphan',
+        sessionId: 'session-1',
+        promptMessageId: 'missing-user',
+        items: [{ kind: 'text', messageId: 'a1' }],
+        done: true,
+      },
+    ];
+
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns,
+      toolActivities: [],
+      activeAgentLoops: {},
+      sessions: [makeSession()],
+      sessionMessages: {
+        'session-1': messages,
+      },
+    });
+
+    expect(model.nodes.filter((node) => node.kind === 'prompt').map((node) => node.id)).toEqual([
+      'prompt:u1',
+      'prompt:lead:turn-orphan',
+    ]);
+    expect(model.nodes.find((node) => node.id === 'prompt:lead:turn-orphan')?.subtitle).toBe('Turn restored without an anchored user prompt');
   });
 });

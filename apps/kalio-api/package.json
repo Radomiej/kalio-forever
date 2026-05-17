@@ -33,6 +33,7 @@
     "extract-zip": "^2.0.1",
     "joi": "^17.13.0",
     "js-yaml": "^4.1.1",
+    "grammy": "^1.42.0",
     "nanoid": "^5.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.0",

@@ -1,8 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { TextDeltaHandler } from './handlers/text-delta.handler';
 import { ThinkingDeltaHandler } from './handlers/thinking-delta.handler';
 import { ToolCallHandler } from './handlers/tool-call.handler';
 import { DoneHandler } from './handlers/done.handler';
+import { ToolArgProgressHandler } from './handlers/tool-arg-progress.handler';
 import { abortCheckMiddleware } from './middleware/abort-check.middleware';
 import { errorBoundaryMiddleware } from './middleware/error-boundary.middleware';
 import { metricsMiddleware } from './middleware/metrics.middleware';
@@ -30,6 +31,8 @@ import { RAAppModule } from '../raapp/raapp.module';
 import { MCPModule } from '../mcp/mcp.module';
 import { SkillsModule } from '../skills/skills.module';
 import { CredentialsModule } from '../credentials/credentials.module';
+import { RelayModule } from '../relay/relay.module';
+import { TelegramRelayService } from '../relay/telegram/telegram-relay.service';
 import { TOOL_DISPATCH_REGISTRY, type ToolDispatchRegistryPort } from '../tool/tool-dispatch-registry.port';
 import { SUBAGENT_RUNTIME } from '../tool/subagent-runtime.port';
 import {
@@ -52,7 +55,7 @@ import {
  *   TOOL_REGISTRY     → Tool dispatch registry port exported by ToolModule
  */
 @Module({
-  imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule],
+  imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, RelayModule],
   controllers: [SessionsController, AuditLogController, ChatTestSupportController],
   providers: [
     // Handlers
@@ -60,6 +63,7 @@ import {
     ThinkingDeltaHandler,
     ToolCallHandler,
     DoneHandler,
+    ToolArgProgressHandler,
 
     // Services
     StreamProcessorService,
@@ -84,8 +88,9 @@ import {
         thinkingDelta: ThinkingDeltaHandler,
         toolCall: ToolCallHandler,
         done: DoneHandler,
-      ) => [textDelta, thinkingDelta, toolCall, done],
-      inject: [TextDeltaHandler, ThinkingDeltaHandler, ToolCallHandler, DoneHandler],
+        toolArgProgress: ToolArgProgressHandler,
+      ) => [textDelta, thinkingDelta, toolCall, done, toolArgProgress],
+      inject: [TextDeltaHandler, ThinkingDeltaHandler, ToolCallHandler, DoneHandler, ToolArgProgressHandler],
     },
 
     // STREAM_MIDDLEWARES: ordered pipeline (outermost first)
@@ -120,4 +125,25 @@ import {
   ],
   exports: [ChatService, ChatGateway, ToolDispatchService, SessionManagerService, SessionsService, SubagentRuntimeService, SUBAGENT_RUNTIME],
 })
-export class ChatModule {}
+export class ChatModule implements OnModuleInit {
+  constructor(
+    private readonly telegramRelay: TelegramRelayService,
+    private readonly pipeline: SessionPipelineService,
+  ) {}
+
+  onModuleInit(): void {
+    this.telegramRelay.setCommandHandlers({
+      stopAll: async () => {
+        for (const id of this.pipeline.getActiveSessionIds()) {
+          this.pipeline.stop(id);
+        }
+      },
+      getStatus: async () => {
+        const ids = this.pipeline.getActiveSessionIds();
+        return ids.size === 0
+          ? 'No active sessions.'
+          : `Active sessions:\n${[...ids].join('\n')}`;
+      },
+    });
+  }
+}

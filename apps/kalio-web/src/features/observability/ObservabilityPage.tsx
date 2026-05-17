@@ -17,6 +17,7 @@ const TYPE_CONFIG: Record<AuditType, { icon: React.ReactNode; cls: string; bg: s
   error:                { icon: <XCircle size={12} />,       cls: 'text-error',       bg: 'bg-error/10',       short: 'Error',   label: 'Error' },
   raapp_native_call:    { icon: <Zap size={12} />,           cls: 'text-warning',     bg: 'bg-warning/10',     short: 'RA call', label: 'RA-App Native Call' },
   raapp_native_approved:{ icon: <CheckCircle2 size={12} />,  cls: 'text-warning',     bg: 'bg-warning/10',     short: 'RA ok',   label: 'RA-App Approved' },
+  escalation:           { icon: <Zap size={12} />,           cls: 'text-error',       bg: 'bg-error/10',       short: '🔴 Alert', label: 'Escalation' },
 };
 
 const ALL_TYPES = Object.keys(TYPE_CONFIG) as AuditType[];

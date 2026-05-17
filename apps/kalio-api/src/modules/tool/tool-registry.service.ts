@@ -28,6 +28,7 @@ import { ImageEditTool } from './tools/image-edit.tool';
 import { ImageViewTool } from './tools/image-view.tool';
 import { SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool } from './tools/skill.tools';
 import { PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool } from './tools/persona.tools';
+import { EscalateTool } from './tools/escalate.tool';
 
 /** Minimal registry entry shape — structurally compatible with chat module's ToolRegistryEntry. */
 export interface ToolEntry {
@@ -101,6 +102,7 @@ export class ToolRegistryService {
     private readonly personaCreate: PersonaCreateTool,
     private readonly personaUpdate: PersonaUpdateTool,
     private readonly personaDelete: PersonaDeleteTool,
+    private readonly escalate: EscalateTool,
   ) {
     const all: object[] = [
       vfsWrite, vfsRead, vfsList, vfsGrepSearch, vfsFileSearch, subagent, spawnSubagent, messageSubagent,
@@ -120,6 +122,7 @@ export class ToolRegistryService {
       imageGenerate, imageEdit, imageView,
       skillList, skillRead, skillCreate, skillUpdate, skillDelete,
       personaList, personaCreate, personaUpdate, personaDelete,
+      escalate,
     ];
     this.entries = all.map(t => this.toEntry(t));
   }
