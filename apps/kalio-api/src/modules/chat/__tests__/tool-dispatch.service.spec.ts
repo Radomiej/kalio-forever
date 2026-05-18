@@ -362,6 +362,30 @@ describe('ToolDispatchService', () => {
       expect(entry.execute).toHaveBeenCalledTimes(1);
     });
 
+    it('passes the turn abortSignal into global HITL approval evaluation', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'bypass' }),
+      };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
+        ],
+      }).compile();
+
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      await scopedService.dispatch('c-abort', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(hitlPolicy.resolveApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ abortSignal: ctx.abortSignal }),
+      );
+    });
+
     it('returns cancelled when the global auto HITL policy rejects the tool', async () => {
       const entry = makeEntry('dangerous_tool', true, { done: true });
       const hitlPolicy = {

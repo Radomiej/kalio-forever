@@ -129,6 +129,76 @@ describe('RaAppExecuteDslTool', () => {
       expect.objectContaining({ id: 'approval-1', status: 'executed' }),
     ]);
   });
+
+  it('applies auto-approved native output patches back into draft GUI bindings', async () => {
+    vfs.readFile.mockImplementation((sessionId: string, filePath: string) => {
+      if (filePath.endsWith('ui.gui')) return { sessionId, filePath, content: 'window { label { text = "[output.writeResult.path]" } }' };
+      if (filePath.endsWith('systems.yml')) return { sessionId, filePath, content: 'systems: []' };
+      const err = new Error(`missing: ${filePath}`) as NodeJS.ErrnoException;
+      err.code = 'VFS_FILE_NOT_FOUND';
+      throw err;
+    });
+    effectsProcessor.processSystemsYaml.mockResolvedValue({
+      output: { result: 8 },
+      pendingApprovals: [
+        {
+          id: 'approval-1',
+          system: 'test_write',
+          args: { path: 'draft.txt' },
+          outputPath: 'output.writeResult',
+          displayLabel: 'Write draft.txt',
+        },
+      ],
+      entities: [],
+    });
+    hitl.resolvePendingApprovals.mockResolvedValue({
+      pendingApprovals: [],
+      nativeResults: [
+        { id: 'approval-1', system: 'test_write', status: 'executed', result: { path: 'draft.txt' } },
+      ],
+      outputPatches: [
+        { outputPath: 'output.writeResult', value: { path: 'draft.txt' } },
+      ],
+    });
+
+    await tool.execute(makeRequest());
+
+    expect(raapp.execute).toHaveBeenCalledWith(
+      { type: 'gui', mode: 'display', content: 'window { label { text = "[output.writeResult.path]" } }' },
+      { output: { writeResult: { path: 'draft.txt' }, result: 8 } },
+    );
+  });
+
+  it('passes request abortSignal into draft GUI native approval resolution', async () => {
+    vfs.readFile.mockImplementation((sessionId: string, filePath: string) => {
+      if (filePath.endsWith('ui.gui')) return { sessionId, filePath, content: 'window { label { text = "Hello" } }' };
+      if (filePath.endsWith('systems.yml')) return { sessionId, filePath, content: 'systems: []' };
+      const err = new Error(`missing: ${filePath}`) as NodeJS.ErrnoException;
+      err.code = 'VFS_FILE_NOT_FOUND';
+      throw err;
+    });
+    effectsProcessor.processSystemsYaml.mockResolvedValue({
+      output: {},
+      pendingApprovals: [
+        { id: 'approval-1', system: 'test_write', args: { path: 'draft.txt' }, displayLabel: 'Write draft.txt' },
+      ],
+      entities: [],
+    });
+    hitl.resolvePendingApprovals.mockResolvedValue({ pendingApprovals: [], nativeResults: [], outputPatches: [] });
+    const abortController = new AbortController();
+
+    await tool.execute({
+      ...makeRequest(),
+      abortSignal: abortController.signal,
+    } as ToolCallRequest);
+
+    expect(hitl.resolvePendingApprovals).toHaveBeenCalledWith(
+      'call-1',
+      'sess-1',
+      expect.any(Array),
+      abortController.signal,
+    );
+  });
 });
 
 describe('RaAppPublishDraftTool', () => {

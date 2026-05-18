@@ -269,5 +269,33 @@ describe('RAAppHITLService', () => {
       ]);
       await expect(service.getPendingForSession('sess-auto')).resolves.toHaveLength(2);
     });
+
+    it('returns output patches for auto-executed approvals with output paths', async () => {
+      registry.register({
+        id: 'test_write',
+        description: 'write test',
+        approval_required: true,
+        input_schema: {},
+        handler: async (args) => ({ written: args['path'] }),
+      });
+      hitlPolicy.resolveApproval.mockResolvedValue({ status: 'approved', source: 'bypass' });
+
+      const result = await service.resolvePendingApprovals('tc-bypass', 'sess-bypass', [
+        {
+          id: 'bypass-1',
+          system: 'test_write',
+          args: { path: 'file.txt' },
+          outputPath: 'output.writeResult',
+          displayLabel: 'Write file.txt',
+        },
+      ]);
+
+      expect(result.outputPatches).toEqual([
+        {
+          outputPath: 'output.writeResult',
+          value: { written: 'file.txt' },
+        },
+      ]);
+    });
   });
 });

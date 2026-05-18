@@ -5,6 +5,7 @@ import type { ContextManagedLLMMessage } from '../../../common/utils/context-man
 const MOCK_ERROR_429_TRIGGER = '[[mock:error:429]]';
 const MOCK_ERROR_429_MESSAGE = '[MockLLM] LLM request failed: 429 Too Many Requests - { "error": { "code": "429", "message": "quota exhausted", "type": "limitation" } }';
 const MOCK_RAAPP_CREATE_NO_ARG_PROGRESS_TRIGGER = '[[mock:tool:raapp_create:no-arg-progress]]';
+const MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER = '[[mock:tool:vfs_write:no-arg-progress]]';
 
 function contentToText(content: ContextManagedLLMMessage['content']): string {
   if (typeof content === 'string') {
@@ -47,6 +48,17 @@ export class MockLLMProvider implements ILLMProvider {
           type: 'html',
           mode: 'interactive',
           content: '<!DOCTYPE html><html><head><title>Mock Tool Intent</title></head><body><h1>Mock Tool Intent</h1></body></html>',
+        },
+      }];
+    }
+
+    if (lastMessage.includes(MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER)) {
+      return [{
+        id: `mock_tool_${Date.now()}`,
+        name: 'vfs_write',
+        args: {
+          filePath: 'e2e/mock-tool-trigger.txt',
+          content: 'mock-trigger-confirmation',
         },
       }];
     }

@@ -16,6 +16,7 @@ import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import { SessionsController } from './sessions.controller';
 import { ChatTestSupportController } from './chat-test-support.controller';
+import { ChatTestSupportRaAppController } from './chat-test-support-raapp.controller';
 import { AuditService } from './audit.service';
 import { AuditLogController } from './audit-log.controller';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
@@ -57,7 +58,7 @@ import {
  */
 @Module({
   imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, HitlModule, RelayModule],
-  controllers: [SessionsController, AuditLogController, ChatTestSupportController],
+  controllers: [SessionsController, AuditLogController, ChatTestSupportController, ChatTestSupportRaAppController],
   providers: [
     // Handlers
     TextDeltaHandler,

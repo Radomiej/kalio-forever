@@ -73,6 +73,29 @@ describe('REGRESSION: HistoryToolCallBubble — RA-App widget inside chip', () =
     });
   });
 
+  it('preserves nativeResults when extracting RA-App blocks', () => {
+    const block = extractRAAppBlock({
+      status: 'ready',
+      type: 'gui',
+      mode: 'display',
+      content: '{"nodes":[],"data":{}}',
+      nativeResults: [
+        {
+          id: 'native-1',
+          system: 'vfs_write',
+          status: 'executed',
+          result: { path: 'drafts/result.txt' },
+        },
+      ],
+    });
+
+    expect(block).toMatchObject({
+      nativeResults: [
+        expect.objectContaining({ system: 'vfs_write', status: 'executed' }),
+      ],
+    });
+  });
+
   it('renders RAAppRenderer when content has RA-App block', () => {
     render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={false} />);
     expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();

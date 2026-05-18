@@ -61,13 +61,13 @@ function installFetchMock(initialConfig = { mode: 'manual', autoPersonaId: null 
   );
 }
 
-function getPutBody(): { mode: string; autoPersonaId: string | null } | null {
+function getPutBody(): Record<string, unknown> | null {
   const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
   const putCall = calls.find(([url, opts]) => url === '/api/hitl/config' && opts?.method === 'PUT');
   if (!putCall) {
     return null;
   }
-  return JSON.parse(String(putCall[1]?.body ?? '{}')) as { mode: string; autoPersonaId: string | null };
+  return JSON.parse(String(putCall[1]?.body ?? '{}')) as Record<string, unknown>;
 }
 
 describe('HITLSettingsPanel', () => {
@@ -104,5 +104,19 @@ describe('HITLSettingsPanel', () => {
       expect(screen.getByText('Choose a persona for auto approvals.')).toBeInTheDocument();
     });
     expect(getPutBody()).toBeNull();
+  });
+
+  it('does not send stale autoPersonaId when saving manual mode', async () => {
+    installFetchMock({ mode: 'auto', autoPersonaId: 'ops-persona' });
+    const user = userEvent.setup();
+    render(<HITLSettingsPanel />);
+
+    await screen.findByText('HITL Approvals');
+    await user.click(screen.getByLabelText('Manual'));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(getPutBody()).toEqual({ mode: 'manual' });
+    });
   });
 });

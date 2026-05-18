@@ -48,4 +48,34 @@ describe('MockLLMProvider', () => {
       }),
     ]);
   });
+
+  it('returns a deterministic vfs_write tool call without arg-progress chunks for HITL e2e', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const onToolArgChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Please trigger HITL tool intent [[mock:tool:vfs_write:no-arg-progress]]',
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'vfs_write', description: 'Write to VFS', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-1', onChunk, onToolArgChunk },
+    );
+
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onToolArgChunk).not.toHaveBeenCalled();
+    expect(toolCalls).toEqual([
+      expect.objectContaining({
+        name: 'vfs_write',
+        args: {
+          filePath: 'e2e/mock-tool-trigger.txt',
+          content: 'mock-trigger-confirmation',
+        },
+      }),
+    ]);
+  });
 });

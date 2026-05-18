@@ -66,4 +66,18 @@ describe('HitlConfigService', () => {
 
     await expect(service.updateConfig({ mode: 'auto', autoPersonaId: 'missing' })).rejects.toThrow(BadRequestException);
   });
+
+  it('allows switching to manual when the previously saved auto persona no longer exists', async () => {
+    await expect(service.updateConfig({ mode: 'auto', autoPersonaId: 'reviewer-persona' })).resolves.toEqual({
+      mode: 'auto',
+      autoPersonaId: 'reviewer-persona',
+    });
+
+    personaService.findOne.mockRejectedValue(new NotFoundException('missing persona'));
+
+    await expect(service.updateConfig({ mode: 'manual' })).resolves.toEqual({
+      mode: 'manual',
+      autoPersonaId: 'reviewer-persona',
+    });
+  });
 });
