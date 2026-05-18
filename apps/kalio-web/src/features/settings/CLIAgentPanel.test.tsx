@@ -10,6 +10,7 @@ const ADAPTER: CLIAgentAdapterInfo = {
   installUrl: 'https://example.com/install',
   available: true,
   version: '1.0.0',
+  supportsModelSelection: false,
 };
 
 const CONFIG: CLIAgentConfig = {
@@ -17,6 +18,7 @@ const CONFIG: CLIAgentConfig = {
   cliPath: '',
   timeoutMs: 600000,
   maxOutputChars: 16000,
+  model: '',
   extraArgs: [],
 };
 
@@ -72,6 +74,7 @@ describe('CLIAgentPanel', () => {
       installUrl: 'https://example.com/codex',
       available: true,
       version: '0.130.0',
+      supportsModelSelection: true,
     });
 
     render(<CLIAgentPanel />);
@@ -132,6 +135,27 @@ describe('CLIAgentPanel', () => {
 
     await waitFor(() => {
       expect(getPutBody().cliPath ?? '').toBe('');
+    });
+  });
+
+  it('saves a trimmed model override for model-capable agents', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      id: 'codex',
+      displayName: 'Codex CLI',
+      installUrl: 'https://example.com/codex',
+      available: true,
+      version: '0.130.0',
+      supportsModelSelection: true,
+    });
+    render(<CLIAgentPanel />);
+
+    const modelInput = await screen.findByPlaceholderText('e.g. gpt-5.2');
+    fireEvent.change(modelInput, { target: { value: '  gpt-5.2  ' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(getPutBody('codex').model).toBe('gpt-5.2');
     });
   });
 

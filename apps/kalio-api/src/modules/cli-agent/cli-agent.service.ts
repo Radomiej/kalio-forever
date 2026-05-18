@@ -10,17 +10,69 @@ import type { ICLIAgentAdapter } from './adapters/cli-agent.adapter';
 import { CLIAgentConfigService } from './cli-agent-config.service';
 import { compressOutput } from './output-compressor';
 import type { ProgressEmitFn, RunCliAgentRequest } from './cli-agent.types';
+import { CLIAgentPtyService } from './cli-agent-pty.service';
 
 export type { ProgressEmitFn } from './cli-agent.types';
 
 /** Max timeout cap: 20 minutes */
 const MAX_TIMEOUT_MS = 1_200_000;
+/** Slow CLI agents commonly need auth/model startup time before producing useful output. */
+const SLOW_AGENT_MIN_TIMEOUT_MS = 180_000;
+const SLOW_AGENT_IDS = new Set(['gemini', 'codex']);
 const EXIT_FALLBACK_GRACE_MS = 250;
 export const CLI_AGENT_STOPPED_ERROR = 'CLI_AGENT_STOPPED';
+const WINDOWS_POWERSHELL_EXE = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+
+function normalizeTimeoutMs(agentId: string, timeoutMs: number): number {
+  const cappedTimeout = Math.min(timeoutMs, MAX_TIMEOUT_MS);
+  if (SLOW_AGENT_IDS.has(agentId)) {
+    return Math.max(cappedTimeout, SLOW_AGENT_MIN_TIMEOUT_MS);
+  }
+  return cappedTimeout;
+}
+
+function quotePowerShellArg(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function parseJsonLine(line: string): unknown | null {
+  try {
+    return JSON.parse(line) as unknown;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function extractCodexAgentMessage(output: string): string | null {
+  let lastMessage: string | null = null;
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{')) {
+      continue;
+    }
+
+    const parsed = parseJsonLine(trimmed);
+    if (!parsed || typeof parsed !== 'object') {
+      continue;
+    }
+
+    const event = parsed as { type?: unknown; item?: unknown };
+    if (event.type !== 'item.completed' || !event.item || typeof event.item !== 'object') {
+      continue;
+    }
+
+    const item = event.item as { type?: unknown; text?: unknown };
+    if (item.type === 'agent_message' && typeof item.text === 'string') {
+      lastMessage = item.text;
+    }
+  }
+
+  return lastMessage?.trim() || null;
+}
 
 interface ActiveRunState {
   sessionId: string;
-  proc: ChildProcess;
+  proc: { kill(signal?: string | number): unknown; exitCode?: number | null };
   stopRequested: boolean;
 }
 
@@ -38,6 +90,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
     gemini: GeminiAdapter,
     claude: ClaudeCodeAdapter,
     codex: CodexAdapter,
+    private readonly pty: CLIAgentPtyService,
   ) {
     this.adapters = new Map<string, ICLIAgentAdapter>([
       [copilot.id, copilot],
@@ -72,6 +125,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
       installUrl: adapter.installUrl,
       available: probe.available,
       version: probe.version,
+      supportsModelSelection: adapter.supportsModelSelection,
     };
     this.probeCache.set(agentId, info);
     return info;
@@ -101,7 +155,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
 
   stop(sessionId: string): boolean {
     const activeRun = this.activeRuns.get(sessionId);
-    if (!activeRun || activeRun.proc.exitCode !== null) {
+    if (!activeRun || (activeRun.proc.exitCode !== undefined && activeRun.proc.exitCode !== null)) {
       return false;
     }
 
@@ -129,17 +183,29 @@ export class CLIAgentService implements OnApplicationBootstrap {
       );
     }
 
-    const effectiveTimeout = Math.min(timeoutMs ?? agentConfig.timeoutMs, MAX_TIMEOUT_MS);
+    const effectiveTimeout = normalizeTimeoutMs(agentId, timeoutMs ?? agentConfig.timeoutMs);
 
     const platform = process.platform;
     const executable = agentConfig.cliPath || adapter.executable(platform);
-    const wrapperArgs = adapter.wrapperArgs(platform);
-    const promptArgs = adapter.buildArgs(prompt, workdir, agentConfig.extraArgs);
+    const wrapperArgs = agentConfig.cliPath ? [] : adapter.wrapperArgs(platform);
+    const model = adapter.supportsModelSelection ? (request.model ?? agentConfig.model) : '';
+    const promptArgs = adapter.buildArgs(prompt, workdir, agentConfig.extraArgs, model);
     const allArgs = [...wrapperArgs, ...promptArgs];
 
     this.logger.log(
       `[${agentId}] spawn: ${executable} (timeout=${effectiveTimeout}ms, cwd=${workdir})`,
     );
+
+    if (agentId === 'codex') {
+      const ptyLaunch = this.buildCodexPtyLaunch(platform, agentConfig.cliPath, promptArgs);
+      return this.runCodexWithPty({
+        request,
+        executable: ptyLaunch.executable,
+        allArgs: ptyLaunch.args,
+        effectiveTimeout,
+        maxOutputChars: agentConfig.maxOutputChars,
+      });
+    }
 
     const startedAt = Date.now();
 
@@ -264,6 +330,67 @@ export class CLIAgentService implements OnApplicationBootstrap {
       proc.on('exit', exitHandler);
       proc.on('close', closeHandler);
     });
+  }
+
+  private buildCodexPtyLaunch(
+    platform: NodeJS.Platform,
+    cliPath: string,
+    promptArgs: string[],
+  ): { executable: string; args: string[] } {
+    if (platform !== 'win32') {
+      return { executable: cliPath || 'codex', args: promptArgs };
+    }
+
+    const codexCommand = cliPath || 'codex';
+    const command = `& ${quotePowerShellArg(codexCommand)} ${promptArgs.map(quotePowerShellArg).join(' ')}`;
+    return {
+      executable: WINDOWS_POWERSHELL_EXE,
+      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
+    };
+  }
+
+  private async runCodexWithPty(params: {
+    request: RunCliAgentRequest;
+    executable: string;
+    allArgs: string[];
+    effectiveTimeout: number;
+    maxOutputChars: number;
+  }): Promise<CLIAgentResult> {
+    const { request, executable, allArgs, effectiveTimeout, maxOutputChars } = params;
+    let activeRunState: ActiveRunState | null = null;
+
+    try {
+      const result = await this.pty.run({
+        agentId: request.agentId,
+        executable,
+        args: allArgs,
+        workdir: request.workdir,
+        callId: request.callId,
+        sessionId: request.sessionId,
+        timeoutMs: effectiveTimeout,
+        maxOutputChars,
+        emitFn: request.emitFn,
+        onStart: (proc) => {
+          activeRunState = {
+            sessionId: request.sessionId,
+            proc,
+            stopRequested: false,
+          };
+          this.activeRuns.set(request.sessionId, activeRunState);
+        },
+      });
+      const codexAgentMessage = extractCodexAgentMessage(result.output);
+
+      if (this.activeRuns.get(request.sessionId)?.stopRequested) {
+        throw new Error(CLI_AGENT_STOPPED_ERROR);
+      }
+
+      return codexAgentMessage ? { ...result, output: codexAgentMessage } : result;
+    } finally {
+      if (activeRunState && this.activeRuns.get(request.sessionId) === activeRunState) {
+        this.activeRuns.delete(request.sessionId);
+      }
+    }
   }
 
   /**

@@ -22,6 +22,10 @@ function normalizeCliPath(value: string): string {
   return normalizeOptionalText(value) ?? '';
 }
 
+function normalizeModel(value: string): string {
+  return normalizeOptionalText(value) ?? '';
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -40,6 +44,13 @@ function normalizeExtraArgs(value: string): string[] {
     .split('\n')
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function modelPlaceholder(agentId: string): string {
+  if (agentId === 'gemini') return 'e.g. gemini-2.5-pro';
+  if (agentId === 'codex') return 'e.g. gpt-5.2';
+  if (agentId === 'claude') return 'e.g. opus';
+  return 'Optional model name';
 }
 
 function AdapterCard({ info }: AdapterCardProps) {
@@ -72,6 +83,7 @@ function AdapterCard({ info }: AdapterCardProps) {
         ...config,
         ...draft,
         cliPath: normalizeCliPath(draft.cliPath ?? config.cliPath),
+        model: normalizeModel(draft.model ?? config.model),
         timeoutMs: clampNumber(typeof draft.timeoutMs === 'number' ? draft.timeoutMs : config.timeoutMs, TIMEOUT_MIN_MS, TIMEOUT_MAX_MS),
         maxOutputChars: clampNumber(
           typeof draft.maxOutputChars === 'number' ? draft.maxOutputChars : config.maxOutputChars,
@@ -160,6 +172,22 @@ function AdapterCard({ info }: AdapterCardProps) {
               }))}
             />
           </div>
+
+          {info.supportsModelSelection && (
+            <div className="form-control gap-1">
+              <label className="label-text text-xs text-base-content/60">Model override (optional)</label>
+              <input
+                type="text"
+                className="input input-bordered input-xs font-mono"
+                placeholder={modelPlaceholder(info.id)}
+                value={merged.model ?? ''}
+                onChange={(e) => setDraft((d: ConfigDraft) => ({
+                  ...d,
+                  model: normalizeModel(e.target.value),
+                }))}
+              />
+            </div>
+          )}
 
           <div className="form-control gap-1">
             <label className="label-text text-xs text-base-content/60">Timeout (ms)</label>

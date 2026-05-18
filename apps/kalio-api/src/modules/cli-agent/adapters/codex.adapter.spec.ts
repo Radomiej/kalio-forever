@@ -10,11 +10,13 @@ describe('CodexAdapter', () => {
   });
 
   it('builds a non-interactive workspace-write exec invocation', () => {
-    expect(adapter.buildArgs('fix the failing test', '/repo', ['--skip-git-repo-check'])).toEqual([
+    expect(adapter.buildArgs('fix the failing test', '/repo', ['--skip-git-repo-check'], 'gpt-5.2')).toEqual([
       '-a', 'never',
       'exec',
       '--sandbox', 'workspace-write',
       '--color', 'never',
+      '--json',
+      '--model', 'gpt-5.2',
       '--skip-git-repo-check',
       'fix the failing test',
     ]);

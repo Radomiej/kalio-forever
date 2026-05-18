@@ -6,13 +6,13 @@ import type { Persona } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
-import { eventBus } from '../../../services/eventBus';
 import {
   buildExecutionGraphModel,
   type ExecutionGraphNodePayload,
 } from './executionGraphModel';
 import { ExecutionGraphBoard } from './ExecutionGraphBoard';
 import { ExecutionGraphPreviewPanel } from './ExecutionGraphPreview';
+import { GraphInspectorActions } from './GraphInspectorActions';
 
 function prettyPrint(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
@@ -499,46 +499,13 @@ export function ExecutionGraphView() {
               )}
             </section>
 
-            {((selectedNode.payload.kind === 'subagent' || selectedNode.payload.kind === 'cli-agent') && selectedNode.sessionId && selectedNode.sessionId !== activeSessionId) || selectedConfirmation ? (
-              <section className="rounded-[22px] border border-base-300 bg-base-200/35 px-5 py-4 space-y-3">
-                <h4 className="text-xl font-black tracking-tight">Actions</h4>
-                {(selectedNode.payload.kind === 'subagent' || selectedNode.payload.kind === 'cli-agent') && selectedNode.sessionId && selectedNode.sessionId !== activeSessionId && (
-                  <button
-                    type="button"
-                    className="w-full rounded-xl bg-sky-500/85 hover:bg-sky-500 text-white px-4 py-3 text-sm font-medium transition-colors"
-                    onClick={() => setActiveSession(selectedNode.sessionId ?? null)}
-                  >
-                    Open child chat
-                  </button>
-                )}
-                {selectedConfirmation && (
-                  <>
-                    <button
-                      type="button"
-                      aria-label="Accept tool request"
-                      className="w-full rounded-xl bg-emerald-500/85 hover:bg-emerald-500 text-white px-4 py-3 text-sm font-medium transition-colors"
-                      onClick={() => {
-                        eventBus.confirmTool({ requestId: selectedConfirmation.requestId, sessionId: selectedConfirmation.sessionId });
-                        setPendingConfirmation(selectedConfirmation.sessionId, null);
-                      }}
-                    >
-                      Accept tool request
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Cancel tool request"
-                      className="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-sm font-medium transition-colors hover:bg-base-200"
-                      onClick={() => {
-                        eventBus.cancelTool({ requestId: selectedConfirmation.requestId, sessionId: selectedConfirmation.sessionId });
-                        setPendingConfirmation(selectedConfirmation.sessionId, null);
-                      }}
-                    >
-                      Cancel tool request
-                    </button>
-                  </>
-                )}
-              </section>
-            ) : null}
+            <GraphInspectorActions
+              node={selectedNode}
+              activeSessionId={activeSessionId}
+              selectedConfirmation={selectedConfirmation}
+              setActiveSession={setActiveSession}
+              setPendingConfirmation={setPendingConfirmation}
+            />
 
             <section className="rounded-[22px] border border-base-300 bg-base-200/35 px-5 py-4 space-y-3">
               <div className="flex items-center gap-2">

@@ -329,6 +329,52 @@ describe('ToolDispatchService', () => {
         vi.useRealTimers();
       }
     });
+
+    it('REGRESSION: aborting a subagent HITL wait invalidates confirmation and returns cancelled', async () => {
+      const entry = makeEntry('dangerous_tool', true, { ok: true });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const abortController = new AbortController();
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'sub-session',
+        vfsSessionId: 'sub-session',
+        abortSignal: abortController.signal,
+        agentRun: {
+          agentRunId: 'sub-run-abort',
+          agentType: 'subagent' as const,
+          parentSessionId: 'master-session',
+          vfsMode: 'shared' as const,
+        },
+      };
+
+      const dispatchPromise = scopedService.dispatch('c1', 'dangerous_tool', {}, ctx);
+
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.objectContaining({
+        toolName: 'dangerous_tool',
+        sessionId: 'sub-session',
+        timeoutMs: 0,
+      }));
+
+      abortController.abort();
+
+      const result = await Promise.race([
+        dispatchPromise,
+        new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+      ]);
+
+      expect(result).toEqual(expect.objectContaining({ status: 'cancelled' }));
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_invalidated', expect.objectContaining({
+        reason: 'cancelled',
+        message: expect.stringContaining('aborted'),
+      }));
+      expect(entry.execute).not.toHaveBeenCalled();
+    });
   });
 
   describe('dispatch — configurable HITL policy', () => {

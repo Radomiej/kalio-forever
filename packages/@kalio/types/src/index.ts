@@ -579,6 +579,7 @@ export interface CLIAgentAdapterInfo {
   installUrl: string;
   available: boolean;
   version: string | null;
+  supportsModelSelection?: boolean;
 }
 
 /** Per-adapter configuration stored at ~/.kalio/cli-agents/{id}.json */
@@ -591,6 +592,8 @@ export interface CLIAgentConfig {
   timeoutMs: number;
   /** Max output chars kept for LLM history. Default: 16 000. */
   maxOutputChars: number;
+  /** Optional model override passed to adapters that support model selection. */
+  model: string;
   /** Extra CLI args appended after the adapter's default args. */
   extraArgs: string[];
 }

@@ -6,14 +6,18 @@ import type { ILLMSource, LLMSourceParams } from '../interfaces/llm-source.inter
 import type { InternalLLMChunk } from '../interfaces/llm-chunk.types';
 import type { StreamContext } from '../interfaces/stream-context.interface';
 import type { StreamProcessorService } from '../stream-processor.service';
-import type { ToolDispatchService } from '../tool-dispatch.service';
+import { ToolDispatchService } from '../tool-dispatch.service';
 import type { SessionManagerService } from '../session-manager.service';
 import type { SessionsService } from '../sessions.service';
 import type { VFSService } from '../../vfs/vfs.service';
 import type { PersonaService } from '../../persona/persona.service';
+import { RunCliAgentTool } from '../../tool/tools/run-cli-agent.tool';
+import type { RunCliAgentRequest } from '../../cli-agent/cli-agent.types';
+import { parseRawXmlToolCall } from '../raw-tool-call.parser';
 
 const tools: ToolMeta[] = [
   { name: 'run_subagent', description: 'spawn child', parameters: {}, requiresConfirmation: false },
+  { name: 'run_cli_agent', description: 'run CLI child', parameters: {}, requiresConfirmation: true },
   { name: 'vfs_write', description: 'write file', parameters: {}, requiresConfirmation: true },
 ];
 
@@ -42,6 +46,13 @@ function makeProcessor(sessionManager: Pick<SessionManagerService, 'persistAssis
         ctx.state.addToolCall({ id: chunk.callId, name: chunk.name, args: chunk.args });
       }
       if (chunk.type === 'done') {
+        if (ctx.state.toolCalls.length === 0) {
+          const parsedToolCall = parseRawXmlToolCall(ctx.state.text);
+          if (parsedToolCall) {
+            ctx.state.addToolCall(parsedToolCall);
+            ctx.state.replaceText('');
+          }
+        }
         await sessionManager.persistAssistantMessage(ctx.sessionId, ctx.messageId, ctx.state as TurnState);
       }
     }),
@@ -505,5 +516,203 @@ describe('SubagentRuntimeService nested subagents', () => {
       expect.objectContaining({ agentRun: expect.objectContaining({ subagentDepth: 1 }) }),
       expect.arrayContaining([expect.objectContaining({ name: 'run_subagent' })]),
     );
+  });
+
+  it('REGRESSION: dispatches a CLI tool call emitted as raw XML from a child subagent', async () => {
+    const rawToolCall = [
+      '<tool_call>',
+      '<name>run_cli_agent</name>',
+      '<parameters>',
+      '<agentId>gemini</agentId>',
+      '<workdir>C:\\Projekty\\ProjectPlanner</workdir>',
+      '<prompt>Inspect the project and report status.</prompt>',
+      '</parameters>',
+      '</tool_call>',
+    ].join('');
+    const persistedAssistantSnapshots: Array<{ text: string; toolCalls: unknown[] }> = [];
+    const llmSource: ILLMSource = {
+      stream: vi.fn((params: LLMSourceParams) => {
+        const hasToolResult = params.messages.some((message) => message.role === 'tool');
+        if (!hasToolResult) {
+          return streamFrom([{ type: 'text_delta', delta: rawToolCall }, { type: 'done' }]);
+        }
+        return streamFrom([{ type: 'text_delta', delta: 'CLI finished.' }, { type: 'done' }]);
+      }),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn(async (_sessionId: string, _messageId: string, state: TurnState) => {
+        persistedAssistantSnapshots.push({
+          text: state.text,
+          toolCalls: [...state.toolCalls],
+        });
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn()
+        .mockResolvedValueOnce({ history: [{ role: 'user', content: 'delegate to CLI' }], unboundedHistoryCount: 1 })
+        .mockResolvedValueOnce({ history: [{ role: 'tool', content: '{"output":"ok"}', toolCallId: 'xml-tool-call-1' }], unboundedHistoryCount: 1 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const toolDispatch = {
+      dispatch: vi.fn(async (callId: string, toolName: string, args: Record<string, unknown>): Promise<ToolResult> => ({
+        callId,
+        status: 'success',
+        data: { output: 'ok', exitCode: 0, durationMs: 10, agentId: args['agentId'] },
+      })),
+      getToolMetas: vi.fn(),
+    };
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      toolDispatch as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-cli-xml',
+      objective: 'delegate to CLI',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+    });
+
+    expect(toolDispatch.dispatch).toHaveBeenCalledWith(
+      expect.any(String),
+      'run_cli_agent',
+      {
+        agentId: 'gemini',
+        workdir: 'C:\\Projekty\\ProjectPlanner',
+        prompt: 'Inspect the project and report status.',
+      },
+      expect.anything(),
+      expect.arrayContaining([expect.objectContaining({ name: 'run_cli_agent' })]),
+    );
+    expect(sessionManager.saveToolResult).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.stringContaining('"output":"ok"'),
+    );
+    expect(persistedAssistantSnapshots[0]).toEqual({
+      text: '',
+      toolCalls: [
+        expect.objectContaining({
+          name: 'run_cli_agent',
+          args: expect.objectContaining({ agentId: 'gemini' }),
+        }),
+      ],
+    });
+    expect(result.result).toBe('CLI finished.');
+  });
+
+  it('REGRESSION: raw XML run_cli_agent flows through real dispatch and run_cli_agent tool', async () => {
+    const rawToolCall = [
+      '<tool_call>',
+      '<name>run_cli_agent</name>',
+      '<parameters>',
+      '<agentId>gemini</agentId>',
+      '<workdir>C:\\Projekty\\kalio-forever</workdir>',
+      '<timeoutMs>120000</timeoutMs>',
+      '<prompt>Read package.json only.</prompt>',
+      '</parameters>',
+      '</tool_call>',
+    ].join('');
+    const llmSource: ILLMSource = {
+      stream: vi.fn((params: LLMSourceParams) => {
+        const hasToolResult = params.messages.some((message) => message.role === 'tool');
+        if (!hasToolResult) {
+          return streamFrom([{ type: 'text_delta', delta: rawToolCall }, { type: 'done' }]);
+        }
+        return streamFrom([{ type: 'text_delta', delta: 'CLI result received.' }, { type: 'done' }]);
+      }),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn()
+        .mockResolvedValueOnce({ history: [{ role: 'user', content: 'delegate to CLI' }], unboundedHistoryCount: 1 })
+        .mockResolvedValueOnce({ history: [{ role: 'tool', content: '{"output":"kalio-forever"}', toolCallId: 'xml-tool-call-1' }], unboundedHistoryCount: 1 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const cliAgent = {
+      getAdapter: vi.fn().mockReturnValue({ displayName: 'Gemini CLI' }),
+      run: vi.fn().mockResolvedValue({
+        output: 'kalio-forever',
+        exitCode: 0,
+        durationMs: 25,
+        agentId: 'gemini',
+      }),
+    };
+    const cliAgentSessions = {
+      createChildSession: vi.fn().mockResolvedValue({
+        id: 'cli-child-1',
+        personaId: 'default',
+        title: 'Gemini CLI',
+        kind: 'cli-agent',
+        parentSessionId: 'sub-session',
+        parentToolCallId: 'xml-tool-call-1',
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    };
+    const runCliAgentTool = new RunCliAgentTool(
+      { isAllowed: vi.fn().mockResolvedValue(true) } as never,
+      cliAgent as never,
+      cliAgentSessions as never,
+    );
+    const dispatch = new ToolDispatchService(
+      [{
+        meta: tools.find((tool) => tool.name === 'run_cli_agent')!,
+        execute: (request) => runCliAgentTool.execute(request),
+      }],
+      null,
+      { resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'test' }) } as never,
+    );
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      dispatch,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async () => makeSession('sub-session', 'master')) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-cli-real-dispatch',
+      objective: 'delegate to CLI',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+      emit: vi.fn(),
+    });
+
+    expect(cliAgent.run).toHaveBeenCalledWith(expect.objectContaining<Partial<RunCliAgentRequest>>({
+      agentId: 'gemini',
+      workdir: 'C:\\Projekty\\kalio-forever',
+      prompt: 'Read package.json only.',
+      timeoutMs: 180000,
+      sessionId: 'cli-child-1',
+    }));
+    expect(cliAgentSessions.saveToolResult).toHaveBeenCalledWith(
+      'cli-child-1',
+      expect.any(String),
+      expect.stringContaining('"childSessionId":"cli-child-1"'),
+    );
+    expect(sessionManager.saveToolResult).toHaveBeenCalledWith(
+      expect.stringMatching(/^sub-/),
+      expect.any(String),
+      expect.stringContaining('"output":"kalio-forever"'),
+    );
+    expect(result.result).toBe('CLI result received.');
   });
 });

@@ -21,6 +21,15 @@ $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $nodeCmd) { $nodeCmd = Get-Command node -ErrorAction SilentlyContinue }
 if (-not $nodeCmd) { Write-Host "[FAIL] node not found on PATH" -ForegroundColor Red; exit 1 }
 
+# Some Windows shells expose both Path and PATH in the process environment.
+# Start-Process builds a case-insensitive dictionary and fails on that duplicate.
+$processPath = [Environment]::GetEnvironmentVariable('Path', 'Process')
+if (-not $processPath) { $processPath = [Environment]::GetEnvironmentVariable('PATH', 'Process') }
+if ($processPath) {
+    [Environment]::SetEnvironmentVariable('PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('Path', $processPath, 'Process')
+}
+
 $previousEnv = @{
     LLM_PROVIDER = $env:LLM_PROVIDER
     LLM_API_KEY = $env:LLM_API_KEY

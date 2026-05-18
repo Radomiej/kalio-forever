@@ -3,6 +3,7 @@ import type { ChunkHandler } from '../interfaces/chunk-handler.interface';
 import type { DoneChunk } from '../interfaces/llm-chunk.types';
 import type { StreamContext } from '../interfaces/stream-context.interface';
 import { SessionManagerService } from '../session-manager.service';
+import { parseRawXmlToolCall } from '../raw-tool-call.parser';
 
 @Injectable()
 export class DoneHandler implements ChunkHandler<DoneChunk> {
@@ -11,6 +12,14 @@ export class DoneHandler implements ChunkHandler<DoneChunk> {
   constructor(private readonly sessionManager: SessionManagerService) {}
 
   async handle(_chunk: DoneChunk, ctx: StreamContext): Promise<void> {
+    if (ctx.state.toolCalls.length === 0 && ctx.agentRun?.agentType === 'subagent') {
+      const parsedToolCall = parseRawXmlToolCall(ctx.state.text);
+      if (parsedToolCall) {
+        ctx.state.addToolCall(parsedToolCall);
+        ctx.state.replaceText('');
+      }
+    }
+
     const hasAssistantPayload =
       ctx.state.text.trim().length > 0 ||
       ctx.state.thinking.trim().length > 0 ||

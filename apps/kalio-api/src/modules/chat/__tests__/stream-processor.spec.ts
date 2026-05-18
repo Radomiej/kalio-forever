@@ -112,6 +112,36 @@ describe('StreamProcessorService', () => {
     expect(sessionManager.persistAssistantMessage).toHaveBeenCalled();
   });
 
+  it('REGRESSION: converts subagent raw XML tool-call text before persisting the assistant iteration', async () => {
+    const ctx = makeCtx();
+    Object.assign(ctx, { agentRun: { agentRunId: 'sub-1', agentType: 'subagent' as const } });
+    ctx.state.appendText([
+      '<tool_call>',
+      '<name>run_cli_agent</name>',
+      '<parameters>',
+      '<agentId>gemini</agentId>',
+      '<workdir>C:\\Projekty\\ProjectPlanner</workdir>',
+      '<prompt>Inspect the project.</prompt>',
+      '</parameters>',
+      '</tool_call>',
+    ].join(''));
+
+    await processor.process({ type: 'done' }, ctx);
+
+    expect(ctx.state.text).toBe('');
+    expect(ctx.state.toolCalls).toEqual([
+      expect.objectContaining({
+        name: 'run_cli_agent',
+        args: {
+          agentId: 'gemini',
+          workdir: 'C:\\Projekty\\ProjectPlanner',
+          prompt: 'Inspect the project.',
+        },
+      }),
+    ]);
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledWith('sid', 'mid', ctx.state);
+  });
+
   it('skips handler when abort signal is set (abortCheckMiddleware)', async () => {
     const ctx = makeCtx(true);
     await processor.process({ type: 'text_delta', delta: 'x' }, ctx);

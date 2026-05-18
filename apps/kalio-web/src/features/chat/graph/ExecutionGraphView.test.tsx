@@ -416,4 +416,54 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(await screen.findByTestId('graph-live-preview')).toBeInTheDocument();
     expect(await screen.findByTestId('graph-raapp-renderer')).toHaveTextContent('html:session-1:calculator/index.html');
   });
+
+  it('REGRESSION: hides unwired CLI steering controls for CLI-agent child nodes', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Inspect repo with CLI agent', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex', prompt: 'Inspect repo', workdir: 'C:/repo' } }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-cli-1',
+        content: JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'running',
+          lastPrompt: 'Inspect repo',
+          updatedAt: 3,
+        }),
+        createdAt: 3,
+      }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = {
+      'session-1': messages,
+      'cli-child-1': [makeMessage({ id: 'cli-msg-1', sessionId: 'cli-child-1', role: 'assistant', content: 'Working', createdAt: 4 })],
+    };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Main', createdAt: 1, updatedAt: 4 },
+      { id: 'cli-child-1', personaId: 'default', title: 'Codex CLI child', kind: 'cli-agent', parentSessionId: 'session-1', createdAt: 2, updatedAt: 4 },
+    ];
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [];
+
+    await renderExecutionGraphView();
+
+    fireEvent.click(screen.getByTestId('graph-node-cli-agent:cli-child-1'));
+
+    expect(screen.getByRole('button', { name: 'Open child chat' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send CLI follow-up' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop CLI session' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Needs backend route')).not.toBeInTheDocument();
+  });
 });

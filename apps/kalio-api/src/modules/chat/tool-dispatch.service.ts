@@ -231,19 +231,46 @@ export class ToolDispatchService {
           }, timeoutMs)
         : null;
 
+      const cleanupAbortListener = () => {
+        ctx.abortSignal?.removeEventListener('abort', handleAbort);
+      };
+
+      const handleAbort = () => {
+        const pending = this.pending.get(requestId);
+        if (pending) {
+          this.pending.delete(requestId);
+          this.emitConfirmationInvalidated(
+            pending,
+            'cancelled',
+            `Tool confirmation aborted for ${toolName}.`,
+          );
+        }
+        if (timeout) clearTimeout(timeout);
+        cleanupAbortListener();
+        resolve(false);
+      };
+
       this.pending.set(requestId, {
         sessionId: ctx.sessionId,
         payload,
         emit: ctx.emit,
         resolve: () => {
           if (timeout) clearTimeout(timeout);
+          cleanupAbortListener();
           resolve(true);
         },
         reject: () => {
           if (timeout) clearTimeout(timeout);
+          cleanupAbortListener();
           resolve(false);
         },
       });
+
+      if (ctx.abortSignal?.aborted) {
+        handleAbort();
+        return;
+      }
+      ctx.abortSignal?.addEventListener('abort', handleAbort, { once: true });
     });
   }
 

@@ -10,12 +10,13 @@ describe('GeminiAdapter', () => {
   });
 
   it('builds a non-interactive invocation with include-directories and yolo approvals', () => {
-    expect(adapter.buildArgs('fix the failing test', '/repo', ['--model', 'gemini-2.5-pro'])).toEqual([
+    expect(adapter.buildArgs('fix the failing test', '/repo', ['--debug'], 'gemini-2.5-pro')).toEqual([
       '-p', 'fix the failing test',
       '--output-format', 'text',
       '--include-directories', '/repo',
       '--approval-mode', 'yolo',
       '--model', 'gemini-2.5-pro',
+      '--debug',
     ]);
   });
 

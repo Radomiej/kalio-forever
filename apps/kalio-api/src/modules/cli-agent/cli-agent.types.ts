@@ -18,4 +18,6 @@ export interface RunCliAgentRequest {
   emitFn?: ProgressEmitFn;
   /** Optional timeout override in ms; capped at MAX_TIMEOUT_MS inside the service. */
   timeoutMs?: number;
+  /** Optional model override for adapters that support model selection. */
+  model?: string;
 }

@@ -105,6 +105,14 @@ describe('RunCliAgentTool', () => {
     );
   });
 
+  it('passes an explicit model override through to CLIAgentService', async () => {
+    await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', agentId: 'codex', model: 'gpt-5.2' }));
+
+    expect(cliAgent.run).toHaveBeenCalledWith(
+      expect.objectContaining<Partial<RunCliAgentRequest>>({ agentId: 'codex', model: 'gpt-5.2' }),
+    );
+  });
+
   it('returns CLIAgentResult from CLIAgentService unchanged', async () => {
     cliAgent = makeCLIAgentService({ output: 'Files updated.', exitCode: 0, durationMs: 1234, agentId: 'copilot' });
     tool = new RunCliAgentTool(allowedPaths, cliAgent, cliAgentSessions);
@@ -115,6 +123,21 @@ describe('RunCliAgentTool', () => {
     expect(result.output).toBe('Files updated.');
     expect(result.durationMs).toBe(1234);
     expect(result.agentId).toBe('copilot');
+  });
+
+  it('REGRESSION: throws after persisting the result when the CLI exits non-zero', async () => {
+    cliAgent = makeCLIAgentService({ output: 'rate limit exceeded', exitCode: 1, durationMs: 2345, agentId: 'gemini' });
+    tool = new RunCliAgentTool(allowedPaths, cliAgent, cliAgentSessions);
+
+    await expect(
+      tool.execute(makeRequest({ prompt: 'do task', workdir: '/projects/app', agentId: 'gemini' })),
+    ).rejects.toThrow('CLI_AGENT_FAILED');
+
+    expect(cliAgentSessions.saveToolResult).toHaveBeenCalledWith(
+      'cli-child-1',
+      'call-cli',
+      expect.stringContaining('"exitCode":1'),
+    );
   });
 
   it('creates a durable cli-agent child session, persists the prompt/result there, and returns childSessionId', async () => {
@@ -158,6 +181,34 @@ describe('RunCliAgentTool', () => {
     expect(request.timeoutMs).toBe(1_200_000);
   });
 
+  it('raises too-short Gemini timeouts to the slow-agent minimum', async () => {
+    await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', agentId: 'gemini', timeoutMs: 60_000 }));
+
+    const request = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as RunCliAgentRequest;
+    expect(request.timeoutMs).toBe(180_000);
+  });
+
+  it('REGRESSION: accepts positive integer timeoutMs strings from raw XML tool calls', async () => {
+    await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', agentId: 'gemini', timeoutMs: '120000' }));
+
+    const request = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as RunCliAgentRequest;
+    expect(request.timeoutMs).toBe(180_000);
+  });
+
+  it('raises too-short Codex timeouts to the slow-agent minimum', async () => {
+    await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', agentId: 'codex', timeoutMs: 60_000 }));
+
+    const request = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as RunCliAgentRequest;
+    expect(request.timeoutMs).toBe(180_000);
+  });
+
+  it('keeps short Copilot timeouts unchanged', async () => {
+    await tool.execute(makeRequest({ prompt: 'task', workdir: '/projects/app', agentId: 'copilot', timeoutMs: 60_000 }));
+
+    const request = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as RunCliAgentRequest;
+    expect(request.timeoutMs).toBe(60_000);
+  });
+
   it('passes _emit from ToolCallRequest as progress emitter', async () => {
     const emitFn = vi.fn();
     const req: ToolCallRequest = { ...makeRequest({ prompt: 'task', workdir: '/projects/app' }), _emit: emitFn };
@@ -179,6 +230,8 @@ describe('RunCliAgentTool', () => {
     { label: 'workdir is whitespace', args: { prompt: 'task', workdir: '   ' }, error: 'INVALID_WORKDIR' },
     { label: 'workdir is numeric', args: { prompt: 'task', workdir: 123 }, error: 'INVALID_WORKDIR' },
     { label: 'agentId is unsupported', args: { prompt: 'task', workdir: '/projects/app', agentId: 'cursor' }, error: 'INVALID_AGENT_ID' },
+    { label: 'model is numeric', args: { prompt: 'task', workdir: '/projects/app', model: 123 }, error: 'INVALID_MODEL' },
+    { label: 'timeout is non-numeric string', args: { prompt: 'task', workdir: '/projects/app', timeoutMs: 'abc' }, error: 'INVALID_TIMEOUT_MS' },
     { label: 'timeout is zero', args: { prompt: 'task', workdir: '/projects/app', timeoutMs: 0 }, error: 'INVALID_TIMEOUT_MS' },
     { label: 'timeout is negative', args: { prompt: 'task', workdir: '/projects/app', timeoutMs: -1 }, error: 'INVALID_TIMEOUT_MS' },
     { label: 'timeout is fractional', args: { prompt: 'task', workdir: '/projects/app', timeoutMs: 1.5 }, error: 'INVALID_TIMEOUT_MS' },

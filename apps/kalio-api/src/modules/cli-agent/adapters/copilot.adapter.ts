@@ -6,6 +6,7 @@ export class CopilotAdapter implements ICLIAgentAdapter {
   readonly id = 'copilot';
   readonly displayName = 'GitHub Copilot CLI';
   readonly installUrl = 'https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line';
+  readonly supportsModelSelection = false;
 
   executable(platform: NodeJS.Platform): string {
     // On Windows copilot is a .cmd shim — must be run via cmd /c
