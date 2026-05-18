@@ -19,6 +19,7 @@ function makeService() {
     findOne: vi.fn().mockResolvedValue(mockPersona),
     create: vi.fn().mockResolvedValue(mockPersona),
     update: vi.fn().mockResolvedValue(mockPersona),
+    validateGraphConfig: vi.fn().mockResolvedValue({ ok: true, errors: [] }),
     remove: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -68,6 +69,26 @@ describe('PersonaController', () => {
       const result = await controller.update('persona-1', dto);
       expect(svc.update).toHaveBeenCalledWith('persona-1', dto);
       expect(result).toEqual(mockPersona);
+    });
+  });
+
+  describe('validateGraph()', () => {
+    it('delegates graph validation to the persona service', async () => {
+      const graphConfig = {
+        version: 1,
+        entryNodeId: 'router-1',
+        maxSteps: 6,
+        nodes: [
+          { id: 'router-1', type: 'router', label: 'Router' },
+          { id: 'final-1', type: 'final', label: 'Done' },
+        ],
+        edges: [{ id: 'edge-1', sourceNodeId: 'router-1', targetNodeId: 'final-1' }],
+      };
+
+      const result = await controller.validateGraph('persona-1', graphConfig);
+
+      expect(svc.validateGraphConfig).toHaveBeenCalledWith('persona-1', graphConfig);
+      expect(result).toEqual({ ok: true, errors: [] });
     });
   });
 

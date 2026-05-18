@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { CLIAgentResult, CLIAgentSessionSnapshot, ChatMessage, ToolCallRequest, ToolResult } from '@kalio/types';
 import { nanoid } from 'nanoid';
+import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 import { CLIAgentService, CLI_AGENT_STOPPED_ERROR } from './cli-agent.service';
 import { CLIAgentSessionService } from './cli-agent-session.service';
 
@@ -38,9 +39,12 @@ export class CLIAgentSessionRuntimeService {
   constructor(
     private readonly cliAgent: CLIAgentService,
     private readonly sessions: CLIAgentSessionService,
+    private readonly allowedPaths: AllowedPathsService,
   ) {}
 
   async spawnSession(params: SpawnSessionParams): Promise<CLIAgentSessionSnapshot> {
+    await this.assertAllowedWorkdir(params.workdir);
+
     const childSession = await this.sessions.createChildSession({
       parentSessionId: params.parentSessionId,
       parentToolCallId: params.parentToolCallId,
@@ -77,6 +81,8 @@ export class CLIAgentSessionRuntimeService {
     if (!metadata) {
       throw new Error(`CLI_AGENT_SESSION_METADATA_MISSING: ${childSession.id}`);
     }
+
+    await this.assertAllowedWorkdir(metadata.workdir);
 
     if (this.cliAgent.isRunning(childSession.id)) {
       if (!params.interruptRunning) {
@@ -467,5 +473,12 @@ export class CLIAgentSessionRuntimeService {
 
   private tailText(value: string): string {
     return value.length <= SESSION_OUTPUT_LIMIT ? value : value.slice(-SESSION_OUTPUT_LIMIT);
+  }
+
+  private async assertAllowedWorkdir(workdir: string): Promise<void> {
+    const allowed = await this.allowedPaths.isAllowed(workdir);
+    if (!allowed) {
+      throw new Error(`ACCESS_DENIED: workdir is not in AllowedPaths: ${workdir}. Add it via Settings → Allowed Paths first.`);
+    }
   }
 }

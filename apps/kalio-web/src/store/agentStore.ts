@@ -136,10 +136,17 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
 
   addToolActivity: (activity) =>
     set((s) => {
+      const durableCliTools = new Set([
+        'spawn_cli_agent',
+        'message_cli_agent',
+        'get_cli_agent_status',
+        'stop_cli_agent',
+      ]);
       // If the same callId already exists (e.g. added by onToolConfirmation before tool:start fires),
       // replace it instead of appending — prevents duplicate React keys.
       // Auto-open the Canvas when a CLI agent starts so streaming is immediately visible.
       const shouldOpenCanvas = activity.toolName === 'run_cli_agent'
+        || durableCliTools.has(activity.toolName)
         || activity.toolName === 'run_subagent'
         || activity.agentRun?.agentType === 'subagent';
       const autoOpen = shouldOpenCanvas ? { canvasOpen: true } : {};

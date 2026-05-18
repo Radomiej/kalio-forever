@@ -189,6 +189,27 @@ describe('SubagentTool', () => {
     expect(registry.getToolsForSkills).toHaveBeenCalledWith(['vfs_read', 'vfs_write']);
   });
 
+  it('REGRESSION: inherits the parent-visible toolset when personaId is omitted', async () => {
+    const parentVisibleTools = [makeTool('run_cli_agent'), makeTool('run_subagent')];
+
+    await tool.execute({
+      ...makeRequest({ objective: 'delegate one CLI task' }, 'master-session'),
+      availableTools: parentVisibleTools,
+    });
+
+    expect(personaService.getSessionConfig).not.toHaveBeenCalled();
+    expect(runtime.runSubagent).toHaveBeenCalledWith(expect.objectContaining({
+      availableTools: parentVisibleTools,
+    }));
+    expect((runtime.runSubagent.mock.calls[0]?.[0] as { personaId?: string } | undefined)?.personaId).toBeUndefined();
+  });
+
+  it('REGRESSION: does not force the default persona onto an existing child when personaId is omitted', async () => {
+    await tool.execute(makeRequest({ objective: 'continue task', childSessionId: 'sub-existing' }, 'master-session'));
+
+    expect((runtime.runSubagent.mock.calls[0]?.[0] as { personaId?: string } | undefined)?.personaId).toBeUndefined();
+  });
+
   it('works with the public ToolRegistryService API that exposes getEntries()', async () => {
     const entry = {
       meta: makeTool('vfs_read'),

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
+import { AllowedPathsModule } from '../allowed-paths/allowed-paths.module';
 import { CLIAgentService } from './cli-agent.service';
 import { CLIAgentConfigService } from './cli-agent-config.service';
 import { CLIAgentController } from './cli-agent.controller';
@@ -11,7 +12,7 @@ import { CLIAgentSessionService } from './cli-agent-session.service';
 import { CLIAgentSessionRuntimeService } from './cli-agent-session-runtime.service';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, AllowedPathsModule],
   controllers: [CLIAgentController],
   providers: [
     CLIAgentService,

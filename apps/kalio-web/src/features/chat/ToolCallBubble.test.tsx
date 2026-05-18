@@ -185,6 +185,36 @@ describe('LiveToolCallBubble — status indicator only (no widget)', () => {
 
     expect(screen.getByText('run_subagent')).toBeInTheDocument();
   });
+
+  it('renders durable CLI session snapshots instead of raw JSON blobs', () => {
+    const activity = makeActivity({
+      toolName: 'spawn_cli_agent',
+      status: 'success',
+      finishedAt: Date.now(),
+      result: {
+        callId: 'call-cli-session',
+        status: 'success',
+        data: {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'running',
+          lastPrompt: 'Inspect the repository',
+          updatedAt: Date.now(),
+          activeCallId: 'cli-run-1',
+          lastOutput: 'Scanning files...',
+        },
+      },
+    });
+
+    render(<LiveToolCallBubble activity={activity} />);
+
+    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getAllByText('cli-child-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('Scanning files...')).toBeInTheDocument();
+    expect(screen.queryByText(/"childSessionId": "cli-child-1"/)).not.toBeInTheDocument();
+  });
 });
 
 // ── HistoryToolCallBubble args display ────────────────────────────────────────
@@ -490,5 +520,30 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
 
     expect(screen.getByText('Verbose implementation summary')).toBeInTheDocument();
     expect(screen.getByText('sub-agents/sub-1/design/preview.html')).toBeInTheDocument();
+  });
+
+  it('renders durable CLI session status for message_cli_agent history results without requiring an exit code', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="message_cli_agent"
+        content={JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'running',
+          lastPrompt: 'Continue with tests',
+          updatedAt: Date.now(),
+          activeCallId: 'cli-run-2',
+          lastOutput: 'Running focused tests...',
+        })}
+        args={{ childSessionId: 'cli-child-1', prompt: 'Continue with tests' }}
+      />,
+    );
+
+    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getAllByText('cli-child-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('Running focused tests...')).toBeInTheDocument();
+    expect(screen.queryByText(/"activeCallId": "cli-run-2"/)).not.toBeInTheDocument();
   });
 });

@@ -63,6 +63,7 @@ async function emitEvent(event: string, payload: unknown) {
 // Spies declared via vi.hoisted() so they're initialized before vi.mock factories run
 const mockSendMessage = vi.hoisted(() => vi.fn());
 const mockConversationFilesBar = vi.hoisted(() => vi.fn());
+const mockIdentifySession = vi.hoisted(() => vi.fn());
 
 // ── eventBus mock ─────────────────────────────────────────────────────────────
 vi.mock('../../services/eventBus', () => ({
@@ -83,8 +84,8 @@ vi.mock('../../services/eventBus', () => ({
     onRaAppNativeResult: (h: (...args: unknown[]) => void) => capture('raapp:native_result', h),
     onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
     onToolArgProgress: (h: (...args: unknown[]) => void) => capture('tool:arg_progress', h),
-    onReconnect: vi.fn().mockReturnValue(vi.fn()),
-    identifySession: vi.fn(),
+    onReconnect: (h: (...args: unknown[]) => void) => capture('socket:reconnect', h),
+    identifySession: mockIdentifySession,
     sendMessage: mockSendMessage,
     stopTurn: vi.fn(),
     confirmTool: vi.fn(),
@@ -316,6 +317,36 @@ beforeEach(() => {
 });
 
 describe('ChatInterface event wiring', () => {
+  it('REGRESSION: identifies the active session on mount', async () => {
+    await renderChatInterface();
+
+    expect(mockIdentifySession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('REGRESSION: re-identifies when the active session changes', async () => {
+    const { rerender } = await renderChatInterface();
+    mockIdentifySession.mockClear();
+
+    mockActiveSessionId = 'session-2';
+    await rerenderChatInterface(rerender);
+
+    expect(mockIdentifySession).toHaveBeenCalledTimes(1);
+    expect(mockIdentifySession).toHaveBeenCalledWith('session-2');
+  });
+
+  it('REGRESSION: reconnect re-identifies the active session and reloads its history', async () => {
+    await renderChatInterface();
+    mockIdentifySession.mockClear();
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockClear();
+
+    await emitEvent('socket:reconnect', undefined);
+
+    expect(mockIdentifySession).toHaveBeenCalledTimes(1);
+    expect(mockIdentifySession).toHaveBeenCalledWith('session-1');
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+  });
+
   it('REGRESSION: tool:start creates a running activity in agentStore', async () => {
     await renderChatInterface();
 

@@ -1,6 +1,7 @@
 import type {
   ChatMessage,
   CLIAgentResult,
+  CLIAgentSessionSnapshot,
   RAAppBlock,
   RaAppNativeResult,
   RaAppPendingApproval,
@@ -43,6 +44,45 @@ export function extractCLIAgentResult(data: unknown): CLIAgentResult | null {
     };
   }
   return null;
+}
+
+export function extractCLIAgentSessionSnapshot(data: unknown): CLIAgentSessionSnapshot | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d['childSessionId'] !== 'string' || typeof d['agentId'] !== 'string') {
+    return null;
+  }
+
+  const derivedStatus = typeof d['status'] === 'string'
+    ? d['status']
+    : typeof d['exitCode'] === 'number'
+      ? d['exitCode'] === 0
+        ? 'completed'
+        : 'failed'
+      : 'idle';
+
+  return {
+    childSessionId: d['childSessionId'],
+    parentSessionId: typeof d['parentSessionId'] === 'string' ? d['parentSessionId'] : '',
+    agentId: d['agentId'],
+    workdir: typeof d['workdir'] === 'string' ? d['workdir'] : '',
+    status: derivedStatus as CLIAgentSessionSnapshot['status'],
+    lastPrompt: typeof d['lastPrompt'] === 'string' ? d['lastPrompt'] : '',
+    updatedAt: typeof d['updatedAt'] === 'number' ? d['updatedAt'] : 0,
+    startedAt: typeof d['startedAt'] === 'number' ? d['startedAt'] : undefined,
+    completedAt: typeof d['completedAt'] === 'number' ? d['completedAt'] : undefined,
+    activeCallId: typeof d['activeCallId'] === 'string' ? d['activeCallId'] : undefined,
+    lastOutput: typeof d['lastOutput'] === 'string'
+      ? d['lastOutput']
+      : typeof d['output'] === 'string'
+        ? d['output']
+        : undefined,
+    lastExitCode: typeof d['lastExitCode'] === 'number'
+      ? d['lastExitCode']
+      : typeof d['exitCode'] === 'number'
+        ? d['exitCode']
+        : undefined,
+  };
 }
 
 export function extractImageResult(data: unknown): ImageResultData | null {

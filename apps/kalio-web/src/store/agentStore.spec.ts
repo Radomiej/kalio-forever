@@ -106,6 +106,21 @@ describe('addToolActivity — Canvas auto-open for run_cli_agent', () => {
     expect(useAgentStore.getState().canvasOpen).toBe(true);
   });
 
+  it('opens canvas when a durable CLI tool activity is added', () => {
+    useAgentStore.getState().addToolActivity(makeActivity('spawn_cli_agent'));
+    expect(useAgentStore.getState().canvasOpen).toBe(true);
+  });
+
+  it('opens canvas for durable CLI follow-up tools too', () => {
+    const toolNames = ['message_cli_agent', 'get_cli_agent_status', 'stop_cli_agent'];
+
+    toolNames.forEach((toolName) => {
+      useAgentStore.setState({ canvasOpen: false, toolActivities: [] });
+      useAgentStore.getState().addToolActivity(makeActivity(toolName));
+      expect(useAgentStore.getState().canvasOpen).toBe(true);
+    });
+  });
+
   it('does NOT open canvas for other tool activities', () => {
     useAgentStore.getState().addToolActivity(makeActivity('vfs_write'));
     expect(useAgentStore.getState().canvasOpen).toBe(false);

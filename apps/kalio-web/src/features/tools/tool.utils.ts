@@ -2,13 +2,22 @@ import type { ToolMeta } from '@kalio/types';
 
 // ─── tool group definitions ───────────────────────────────────────────────────
 
+const AGENT_TOOLS = new Set([
+  'run_subagent',
+  'run_cli_agent',
+  'spawn_cli_agent',
+  'message_cli_agent',
+  'get_cli_agent_status',
+  'stop_cli_agent',
+]);
+
 interface ToolGroup {
   label: string;
   match: (name: string) => boolean;
 }
 
 const TOOL_GROUPS: ToolGroup[] = [
-  { label: 'Agent',              match: (n) => n === 'run_subagent' || n === 'run_cli_agent' },
+  { label: 'Agent',              match: (n) => AGENT_TOOLS.has(n) },
   { label: 'Virtual Filesystem', match: (n) => n.startsWith('vfs_') },
   { label: 'Filesystem',         match: (n) => n.startsWith('fs_') },
   { label: 'Key-Value Store',    match: (n) => n.startsWith('kv_') },

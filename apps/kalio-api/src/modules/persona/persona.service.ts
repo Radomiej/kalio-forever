@@ -6,6 +6,8 @@ import type { Persona, PersonaKV, PersonaSessionConfig, CreatePersonaDto, Update
 import { DrizzleService } from '../../database/drizzle.service';
 import { personas, personaKV } from '../../database/schema';
 import { eq } from 'drizzle-orm';
+import type { PersonaGraphValidationResult } from './persona-graph-config';
+import { validatePersonaGraphConfig } from './persona-graph-config';
 
 @Injectable()
 export class PersonaService implements OnApplicationBootstrap {
@@ -162,6 +164,11 @@ export class PersonaService implements OnApplicationBootstrap {
   async remove(id: string): Promise<void> {
     await this.findOne(id);
     await this.drizzle.db.delete(personas).where(eq(personas.id, id));
+  }
+
+  async validateGraphConfig(personaId: string, graphConfig: unknown): Promise<PersonaGraphValidationResult> {
+    await this.findOne(personaId);
+    return validatePersonaGraphConfig(graphConfig);
   }
 
   async getSessionConfig(personaId: string): Promise<PersonaSessionConfig | null> {

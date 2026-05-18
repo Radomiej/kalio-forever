@@ -3,6 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { PersonaService } from './persona.service';
 import { DrizzleService } from '../../database/drizzle.service';
 import { NotFoundException } from '@nestjs/common';
+import type { PersonaGraphConfig } from './persona-graph-config';
 
 // Regression test for: Persona KV Lookup Inefficiency
 // Issue: setKV queries all KV rows for persona then filters client-side
@@ -131,6 +132,54 @@ describe('PersonaService', () => {
         api_key: 'secret123',
         endpoint: 'https://api.example.com',
       });
+    });
+  });
+
+  describe('validateGraphConfig', () => {
+    it('validates a graph for an existing persona', async () => {
+      const personaId = 'persona-123';
+      const personaRow = [{
+        id: personaId,
+        name: 'Test Persona',
+        systemPrompt: 'You are helpful',
+        model: 'gpt-4',
+        allowedTools: ['vfs_write'],
+        skillIds: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }];
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(personaRow),
+        }),
+      });
+
+      const graphConfig: PersonaGraphConfig = {
+        version: 1,
+        entryNodeId: 'router-1',
+        maxSteps: 6,
+        nodes: [
+          { id: 'router-1', type: 'router', label: 'Router' },
+          { id: 'final-1', type: 'final', label: 'Done' },
+        ],
+        edges: [{ id: 'edge-1', sourceNodeId: 'router-1', targetNodeId: 'final-1' }],
+      };
+
+      const result = await service.validateGraphConfig(personaId, graphConfig);
+
+      expect(result.ok).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('throws NotFoundException when persona does not exist', async () => {
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await expect(service.validateGraphConfig('missing-persona', {})).rejects.toThrow(NotFoundException);
     });
   });
 
