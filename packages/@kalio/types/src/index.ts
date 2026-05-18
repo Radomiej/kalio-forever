@@ -135,7 +135,7 @@ export interface ChatSession {
   id: ID;
   personaId: ID;
   title: string;              // auto-generated from first message
-  kind?: 'chat' | 'subagent';
+  kind?: 'chat' | 'subagent' | 'cli-agent';
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
@@ -146,7 +146,7 @@ export interface ChatSession {
 export interface CreateSessionDto {
   personaId: ID;
   title?: string;
-  kind?: 'chat' | 'subagent';
+  kind?: 'chat' | 'subagent' | 'cli-agent';
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
@@ -552,6 +552,24 @@ export interface CLIAgentResult {
   exitCode: number;     // 0 = success, non-zero = failure
   durationMs: number;   // wall-clock time of the CLI run
   agentId: string;      // which adapter was used: 'copilot' | 'gemini' | 'claude' | …
+  childSessionId?: ID;
+}
+
+export type CLIAgentSessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
+
+export interface CLIAgentSessionSnapshot {
+  childSessionId: ID;
+  parentSessionId: ID;
+  agentId: string;
+  workdir: string;
+  status: CLIAgentSessionStatus;
+  lastPrompt: string;
+  updatedAt: Timestamp;
+  startedAt?: Timestamp;
+  completedAt?: Timestamp;
+  activeCallId?: ID;
+  lastOutput?: string;
+  lastExitCode?: number;
 }
 
 /** Probe/availability info for a single CLI agent adapter. */

@@ -82,6 +82,18 @@ describe('CLIAgentPanel', () => {
     });
   });
 
+  it('shows the recommended durable CLI stack for forever-loop supervision', async () => {
+    render(<CLIAgentPanel />);
+
+    await screen.findByText('CLI Coding Agents');
+
+    expect(screen.getByText(/Gemini -> Copilot -> Codex/i)).toBeInTheDocument();
+    expect(screen.getByText(/spawn_cli_agent/i)).toBeInTheDocument();
+    expect(screen.getByText(/message_cli_agent/i)).toBeInTheDocument();
+    expect(screen.getByText(/get_cli_agent_status/i)).toBeInTheDocument();
+    expect(screen.getByText(/stop_cli_agent/i)).toBeInTheDocument();
+  });
+
   it('does not serialize an empty timeout as 0 (REGRESSION)', async () => {
     const user = userEvent.setup();
     render(<CLIAgentPanel />);

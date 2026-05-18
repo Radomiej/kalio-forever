@@ -1,8 +1,9 @@
-import type { ChatMessage, ChatSession, Persona, SubagentCopiedFile, SubagentToolResult } from '@kalio/types';
+import type { ChatMessage, ChatSession, CLIAgentSessionSnapshot, Persona, SubagentCopiedFile, SubagentToolResult } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
 import {
   basename,
+  extractCLIAgentSessionResult,
   buildToolSnapshots,
   extractArtifactFromData,
   extractSubagentContextPrompt,
@@ -24,6 +25,7 @@ export type ExecutionGraphNodeKind =
   | 'tool-group'
   | 'tool'
   | 'subagent'
+  | 'cli-agent'
   | 'artifact'
   | 'final-answer';
 
@@ -73,6 +75,13 @@ type SubagentPayload = {
   inputPrompt: string | null;
 };
 
+type CliAgentPayload = {
+  kind: 'cli-agent';
+  snapshot: CLIAgentSessionSnapshot;
+  transcript: ChatMessage[];
+  inputPrompt: string | null;
+};
+
 type ArtifactPayload = {
   kind: 'artifact';
   artifact: ExecutionGraphArtifact;
@@ -90,6 +99,7 @@ export type ExecutionGraphNodePayload =
   | ToolPayload
   | ToolGroupPayload
   | SubagentPayload
+  | CliAgentPayload
   | ArtifactPayload
   | FinalAnswerPayload;
 
@@ -214,6 +224,7 @@ export function buildExecutionGraphModel({
   messages,
   turns,
   toolActivities,
+  activeAgentLoops,
   sessions,
   sessionMessages,
   sessionAgentTurns = {},
@@ -237,6 +248,7 @@ export function buildExecutionGraphModel({
   const messageById = new Map(messages.map((message) => [message.id, message]));
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
   const personaById = new Map(personas.map((persona) => [persona.id, persona]));
+  const activeLoopSessionIds = new Set(Object.values(activeAgentLoops).map((loop) => loop.sessionId));
   const knownPromptIds = new Set(promptMessages.map((message) => message.id));
   const turnsByPromptId = new Map<string, AgentTurn[]>();
   const leadingTurns: AgentTurn[] = [];
@@ -368,7 +380,7 @@ export function buildExecutionGraphModel({
             subagentResult.vfsMode === 'isolated' ? 'isolated VFS' : 'shared VFS',
             subagentResult.result,
           ].filter(Boolean).join(' • '),
-          status: statusFromActivity(snapshot.activity, true),
+          status: activeLoopSessionIds.has(subagentResult.childSessionId) ? 'running' : statusFromActivity(snapshot.activity, true),
           column: branchColumn,
           row: subagentRow,
           sessionId: subagentResult.childSessionId,
@@ -411,6 +423,47 @@ export function buildExecutionGraphModel({
           outcomeIds.push(artifactNode.id);
           maxRow = Math.max(maxRow, artifactRow);
         });
+
+        return { outcomeIds, maxRow };
+      }
+
+      const cliAgentResult = extractCLIAgentSessionResult(snapshot.result);
+      if (cliAgentResult) {
+        const childSession = sessionById.get(cliAgentResult.childSessionId) ?? null;
+        const cliRow = Math.max(branchStartRow - 1, 0);
+        const cliNode = addNode({
+          id: `cli-agent:${cliAgentResult.childSessionId}`,
+          kind: 'cli-agent',
+          title: childSession?.title ?? `${cliAgentResult.agentId} CLI`,
+          subtitle: cliAgentResult.lastPrompt || extractSubagentContextPrompt(snapshot.args) || 'CLI session',
+          detail: [
+            cliAgentResult.agentId,
+            cliAgentResult.workdir,
+            cliAgentResult.lastOutput,
+          ].filter(Boolean).join(' • '),
+          status: activeLoopSessionIds.has(cliAgentResult.childSessionId) ? 'running' : statusFromActivity(snapshot.activity, true),
+          column: branchColumn,
+          row: cliRow,
+          sessionId: cliAgentResult.childSessionId,
+          callId,
+          payload: {
+            kind: 'cli-agent',
+            snapshot: {
+              ...cliAgentResult,
+              parentSessionId: cliAgentResult.parentSessionId || sessionId,
+            },
+            transcript: allSessionMessages[cliAgentResult.childSessionId] ?? [],
+            inputPrompt: cliAgentResult.lastPrompt || extractSubagentContextPrompt(snapshot.args),
+          },
+        });
+        addEdge(sourceNodeId, cliNode.id);
+        outcomeIds.push(cliNode.id);
+        maxRow = cliRow;
+
+        const nestedMaxRow = renderNestedSessionTurns(cliNode.id, cliAgentResult.childSessionId, cliRow, branchColumn + 1);
+        if (nestedMaxRow >= cliRow) {
+          maxRow = Math.max(maxRow, nestedMaxRow);
+        }
 
         return { outcomeIds, maxRow };
       }

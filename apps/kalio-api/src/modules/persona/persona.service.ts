@@ -65,11 +65,19 @@ export class PersonaService implements OnApplicationBootstrap {
     existingPrompt: string | null | undefined,
     nextPrompt: string,
   ): boolean {
-    if (personaId !== 'designer' || typeof existingPrompt !== 'string') {
+    if (typeof existingPrompt !== 'string') {
       return false;
     }
 
     if (existingPrompt === nextPrompt) {
+      return false;
+    }
+
+    if (this.matchesLegacyCliPrompt(personaId, existingPrompt)) {
+      return true;
+    }
+
+    if (personaId !== 'designer') {
       return false;
     }
 
@@ -88,6 +96,29 @@ export class PersonaService implements OnApplicationBootstrap {
       && !existingPrompt.includes('image_edit');
 
     return matchesRigidLegacyPrompt || matchesPreviousVfsFirstSeed;
+  }
+
+  private matchesLegacyCliPrompt(personaId: string, existingPrompt: string): boolean {
+    if (existingPrompt.includes('spawn_cli_agent')) {
+      return false;
+    }
+
+    if (personaId === 'orchestrator') {
+      return existingPrompt.includes('Prefer run_subagent for bounded research, analysis, and specialist reasoning.')
+        && existingPrompt.includes('Use run_cli_agent only for concrete implementation tasks with explicit acceptance criteria.');
+    }
+
+    if (personaId === 'dev') {
+      return existingPrompt.includes('run_cli_agent: delegates a coding task to one of the configured CLI coding agents')
+        && existingPrompt.includes('## Workflow');
+    }
+
+    if (personaId === 'jony') {
+      return existingPrompt.includes('If delegation is needed, use run_subagent or run_cli_agent with precise acceptance criteria.')
+        && existingPrompt.includes('Never leave the task half-done when tools allow completion.');
+    }
+
+    return false;
   }
 
   private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model: string; allowedTools: string[]; skillIds?: string[] }> {

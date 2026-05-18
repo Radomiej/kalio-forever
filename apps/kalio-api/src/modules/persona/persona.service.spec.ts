@@ -709,5 +709,75 @@ describe('PersonaService', () => {
       expect(config['dev']?.systemPrompt).toContain('defaults to Copilot');
       expect(config['dev']?.systemPrompt).not.toContain('delegates a coding task to GitHub Copilot CLI (copilot -p)');
     });
+
+    it('publishes durable CLI session tools and stack guidance for orchestrator-facing personas', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { allowedTools: string[]; systemPrompt: string }>;
+        }
+      ).loadPersonasConfig();
+
+      for (const personaId of ['orchestrator', 'dev', 'jony'] as const) {
+        expect(config[personaId]?.allowedTools).toEqual(
+          expect.arrayContaining(['spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'stop_cli_agent']),
+        );
+        expect(config[personaId]?.systemPrompt).toContain('spawn_cli_agent');
+        expect(config[personaId]?.systemPrompt).toContain('message_cli_agent');
+        expect(config[personaId]?.systemPrompt).toContain('get_cli_agent_status');
+        expect(config[personaId]?.systemPrompt).toContain('stop_cli_agent');
+        expect(config[personaId]?.systemPrompt).toContain('Gemini -> Copilot -> Codex');
+      }
+    });
+  });
+
+  describe('onApplicationBootstrap — CLI session prompt refresh', () => {
+    it('refreshes the seeded orchestrator prompt when the stored prompt still matches the older run_cli_agent-only guidance', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        orchestrator: {
+          name: 'Orchestrator',
+          systemPrompt: 'new orchestrator prompt with spawn_cli_agent and Gemini -> Copilot -> Codex',
+          model: '',
+          allowedTools: ['run_subagent', 'spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'stop_cli_agent'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'orchestrator',
+            systemPrompt: [
+              'Prefer run_subagent for bounded research, analysis, and specialist reasoning.',
+              'Use run_cli_agent only for concrete implementation tasks with explicit acceptance criteria.',
+              'Do not directly edit files unless delegation is unnecessary and the task is trivial.',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemPrompt: 'new orchestrator prompt with spawn_cli_agent and Gemini -> Copilot -> Codex',
+        }),
+      );
+    });
   });
 });

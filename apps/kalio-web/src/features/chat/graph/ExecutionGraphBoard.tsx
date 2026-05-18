@@ -16,6 +16,7 @@ const NODE_COLORS: Record<ExecutionGraphNodeKind, string> = {
   'tool-group': 'from-emerald-600/80 to-teal-500/75 border-emerald-200/40',
   tool: 'from-amber-600/85 to-orange-500/75 border-amber-200/40',
   subagent: 'from-indigo-600/85 to-violet-500/75 border-indigo-200/40',
+  'cli-agent': 'from-cyan-700/85 to-sky-500/75 border-cyan-200/40',
   artifact: 'from-slate-600/85 to-slate-500/75 border-slate-200/40',
   'final-answer': 'from-green-700/85 to-emerald-500/75 border-emerald-100/45',
 };
@@ -62,6 +63,13 @@ const NODE_TEXT_TONES: Record<ExecutionGraphNodeKind, {
     accentLabel: 'text-indigo-100/72',
     accentValue: 'text-indigo-50',
   },
+  'cli-agent': {
+    eyebrow: 'text-cyan-50/90',
+    headline: 'text-cyan-50',
+    supporting: 'text-cyan-50/78',
+    accentLabel: 'text-cyan-100/72',
+    accentValue: 'text-cyan-50',
+  },
   artifact: {
     eyebrow: 'text-slate-50/90',
     headline: 'text-slate-50',
@@ -89,6 +97,8 @@ function nodeIcon(kind: ExecutionGraphNodeKind) {
     case 'tool':
       return <Wrench size={16} />;
     case 'subagent':
+      return <BrainCircuit size={16} />;
+    case 'cli-agent':
       return <BrainCircuit size={16} />;
     case 'artifact':
       return <FolderTree size={16} />;

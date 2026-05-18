@@ -3,6 +3,7 @@ import type { ToolCallRequest, CLIAgentResult } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 import { CLIAgentService } from '../../cli-agent/cli-agent.service';
+import { CLIAgentSessionService } from '../../cli-agent/cli-agent-session.service';
 
 /** Max timeout cap: 20 minutes */
 const MAX_TIMEOUT_MS = 1_200_000;
@@ -38,6 +39,16 @@ function getTimeoutArg(args: ToolCallRequest['args']): number {
     throw new Error('INVALID_TIMEOUT_MS: timeoutMs must be a positive integer');
   }
   return Math.min(rawValue, MAX_TIMEOUT_MS);
+}
+
+function buildChildSessionTitle(agentLabel: string, prompt: string): string {
+  const trimmedPrompt = prompt.trim();
+  if (trimmedPrompt.length === 0) {
+    return agentLabel;
+  }
+
+  const preview = trimmedPrompt.slice(0, 48);
+  return `${agentLabel}: ${preview}${trimmedPrompt.length > 48 ? '…' : ''}`;
 }
 
 @Injectable()
@@ -85,6 +96,7 @@ export class RunCliAgentTool {
   constructor(
     private readonly allowedPaths: AllowedPathsService,
     private readonly cliAgent: CLIAgentService,
+    private readonly cliAgentSessions: CLIAgentSessionService,
   ) {}
 
   async execute(request: ToolCallRequest): Promise<CLIAgentResult> {
@@ -106,19 +118,59 @@ export class RunCliAgentTool {
       `[run_cli_agent] agentId=${agentId} workdir=${workdir} timeout=${timeoutMs}ms`,
     );
 
-    // Wire up progress streaming if the calling context provided an emitter
-    const emitFn = request._emit;
-
-    return this.cliAgent.run({
+    const childSession = await this.cliAgentSessions.createChildSession({
+      parentSessionId: request.sessionId,
+      parentToolCallId: request.callId,
       agentId,
-      prompt,
-      workdir,
-      callId: request.callId,
-      sessionId: request.sessionId,
-      emitFn: emitFn
-        ? (event, data) => { emitFn(event, data); }
-        : undefined,
-      timeoutMs,
+      title: buildChildSessionTitle(
+        this.cliAgent.getAdapter(agentId)?.displayName ?? `${agentId} CLI`,
+        prompt,
+      ),
     });
+
+    request._emit?.('session:created', childSession);
+    await this.cliAgentSessions.persistUserMessage(childSession.id, prompt);
+
+    try {
+      const result = await this.cliAgent.run({
+        agentId,
+        prompt,
+        workdir,
+        callId: request.callId,
+        sessionId: childSession.id,
+        emitFn: request._emit,
+        timeoutMs,
+      });
+
+      const persistedResult: CLIAgentResult = {
+        ...result,
+        childSessionId: childSession.id,
+      };
+
+      await this.cliAgentSessions.saveToolResult(
+        childSession.id,
+        request.callId,
+        JSON.stringify(persistedResult),
+      );
+
+      return persistedResult;
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      const failureResult: CLIAgentResult = {
+        output: error.message,
+        exitCode: 1,
+        durationMs: 0,
+        agentId,
+        childSessionId: childSession.id,
+      };
+
+      await this.cliAgentSessions.saveToolResult(
+        childSession.id,
+        request.callId,
+        JSON.stringify(failureResult),
+      );
+
+      throw error;
+    }
   }
 }

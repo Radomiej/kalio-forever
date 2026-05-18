@@ -1,4 +1,4 @@
-import type { ChatMessage, SubagentToolResult } from '@kalio/types';
+import type { ChatMessage, CLIAgentSessionSnapshot, SubagentToolResult } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
 
@@ -51,6 +51,45 @@ export function extractSubagentResult(data: unknown): SubagentToolResult | null 
     return null;
   }
   return candidate as unknown as SubagentToolResult;
+}
+
+export function extractCLIAgentSessionResult(data: unknown): CLIAgentSessionSnapshot | null {
+  if (!data || typeof data !== 'object') return null;
+  const candidate = data as Record<string, unknown>;
+  if (typeof candidate['childSessionId'] !== 'string' || typeof candidate['agentId'] !== 'string') {
+    return null;
+  }
+
+  const derivedStatus = typeof candidate['status'] === 'string'
+    ? candidate['status']
+    : typeof candidate['exitCode'] === 'number'
+      ? candidate['exitCode'] === 0
+        ? 'completed'
+        : 'failed'
+      : 'idle';
+
+  return {
+    childSessionId: candidate['childSessionId'],
+    parentSessionId: typeof candidate['parentSessionId'] === 'string' ? candidate['parentSessionId'] : '',
+    agentId: candidate['agentId'],
+    workdir: typeof candidate['workdir'] === 'string' ? candidate['workdir'] : '',
+    status: derivedStatus as CLIAgentSessionSnapshot['status'],
+    lastPrompt: typeof candidate['lastPrompt'] === 'string' ? candidate['lastPrompt'] : '',
+    updatedAt: typeof candidate['updatedAt'] === 'number' ? candidate['updatedAt'] : 0,
+    startedAt: typeof candidate['startedAt'] === 'number' ? candidate['startedAt'] : undefined,
+    completedAt: typeof candidate['completedAt'] === 'number' ? candidate['completedAt'] : undefined,
+    activeCallId: typeof candidate['activeCallId'] === 'string' ? candidate['activeCallId'] : undefined,
+    lastOutput: typeof candidate['lastOutput'] === 'string'
+      ? candidate['lastOutput']
+      : typeof candidate['output'] === 'string'
+        ? candidate['output']
+        : undefined,
+    lastExitCode: typeof candidate['lastExitCode'] === 'number'
+      ? candidate['lastExitCode']
+      : typeof candidate['exitCode'] === 'number'
+        ? candidate['exitCode']
+        : undefined,
+  };
 }
 
 export function extractSubagentContextPrompt(args: Record<string, unknown>): string | null {

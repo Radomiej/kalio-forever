@@ -271,11 +271,24 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
         )}
         {visibleSessions.map((s) => {
           const personaName = getPersonaName(s.personaId);
-          const isSubagent = s.kind === 'subagent';
+          const isChildSession = Boolean(s.parentSessionId);
+          const sessionKindBadge = s.kind === 'subagent'
+            ? {
+                label: 'Sub-agent',
+                className: 'text-sky-300 bg-sky-500/10 border border-sky-500/20',
+                testId: `subagent-session-badge-${s.id}`,
+              }
+            : s.kind === 'cli-agent'
+              ? {
+                  label: 'CLI agent',
+                  className: 'text-amber-300 bg-amber-500/10 border border-amber-500/20',
+                  testId: `cli-agent-session-badge-${s.id}`,
+                }
+              : null;
           return (
             <div
               key={s.id}
-              className={`group flex items-start gap-1 px-3 py-2 cursor-pointer border-b border-base-300/40 last:border-0 hover:bg-base-200/50 transition-colors ${isSubagent ? 'pl-6 border-l border-l-sky-500/20' : ''} ${
+              className={`group flex items-start gap-1 px-3 py-2 cursor-pointer border-b border-base-300/40 last:border-0 hover:bg-base-200/50 transition-colors ${isChildSession ? 'pl-6 border-l border-l-sky-500/20' : ''} ${
                 activeSessionId === s.id ? 'bg-sky-500/10 border-l-2 border-l-sky-500' : ''
               }`}
               onClick={() => void selectSession(s.id)}
@@ -306,12 +319,12 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
                     <span className="flex-1 text-xs truncate">
                       {s.title || `Session ${s.id.slice(0, 6)}`}
                     </span>
-                    {isSubagent && (
+                    {sessionKindBadge && (
                       <span
-                        className="text-[9px] text-sky-300 bg-sky-500/10 border border-sky-500/20 rounded px-1 py-0.5 leading-none shrink-0"
-                        data-testid={`subagent-session-badge-${s.id}`}
+                        className={`text-[9px] rounded px-1 py-0.5 leading-none shrink-0 ${sessionKindBadge.className}`}
+                        data-testid={sessionKindBadge.testId}
                       >
-                        Sub-agent
+                        {sessionKindBadge.label}
                       </span>
                     )}
                     {pendingConfirmations[s.id] && (

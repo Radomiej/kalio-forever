@@ -288,6 +288,17 @@ export function CLIAgentPanel() {
         </button>
       </div>
 
+      <div className="rounded-xl border border-sky-500/20 bg-sky-500/8 px-4 py-3 text-sm text-base-content/75">
+        <p>
+          Recommended durable supervision stack for forever loops and repo browsing: <strong>Gemini -&gt; Copilot -&gt; Codex</strong>.
+        </p>
+        <p className="mt-2 text-xs text-base-content/60">
+          Add the repo under Settings -&gt; Allowed Paths, then let the parent agent keep a child session alive with <code className="font-mono">spawn_cli_agent</code>,
+          steer it with <code className="font-mono">message_cli_agent</code>, inspect it with <code className="font-mono">get_cli_agent_status</code>,
+          and interrupt it with <code className="font-mono">stop_cli_agent</code>.
+        </p>
+      </div>
+
       {loadError && (
         <div className="alert alert-error text-sm">{loadError}</div>
       )}

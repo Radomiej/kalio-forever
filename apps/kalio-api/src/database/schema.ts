@@ -18,7 +18,7 @@ export const sessions = sqliteTable('sessions', {
   id:          text('id').primaryKey(),
   personaId:   text('persona_id').notNull().references(() => personas.id, { onDelete: 'cascade' }),
   title:       text('title').notNull().default(''),
-  kind:        text('kind', { enum: ['chat', 'subagent'] }).notNull().default('chat'),
+  kind:        text('kind', { enum: ['chat', 'subagent', 'cli-agent'] }).notNull().default('chat'),
   parentSessionId: text('parent_session_id'),
   parentTurnId: text('parent_turn_id'),
   parentToolCallId: text('parent_tool_call_id'),

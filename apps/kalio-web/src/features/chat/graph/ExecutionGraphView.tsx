@@ -37,6 +37,8 @@ function payloadTitle(payload: ExecutionGraphNodePayload): string {
       return 'Grouped tools';
     case 'subagent':
       return 'Subagent summary';
+    case 'cli-agent':
+      return 'CLI agent summary';
     case 'artifact':
       return 'Artifact payload';
     case 'final-answer':
@@ -127,7 +129,7 @@ export function ExecutionGraphView() {
   const runningLoops = Object.values(activeAgentLoops);
   const runningToolActivities = toolActivities.filter((activity) => isLiveTool(activity));
   const sessionTitleById = new Map(sessions.map((session) => [session.id, session.title]));
-  const selectableSessions = sessions.filter((session) => session.kind !== 'subagent');
+  const selectableSessions = sessions.filter((session) => session.kind !== 'subagent' && session.kind !== 'cli-agent');
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
   const graphSurfaceClassName = 'flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.08),_transparent_42%),linear-gradient(rgba(56,189,248,0.06)_1px,_transparent_1px),linear-gradient(90deg,_rgba(56,189,248,0.06)_1px,_transparent_1px)] bg-[length:100%_100%,40px_40px,40px_40px] bg-[#0a1220] p-6';
 
@@ -262,7 +264,7 @@ export function ExecutionGraphView() {
               onClick={() => setActiveSession(session.id)}
             >
               <p className="text-sm font-medium text-base-content/90">{session.title}</p>
-              <p className="mt-1 text-xs uppercase tracking-[0.2em] text-base-content/45">{session.kind === 'subagent' ? 'subagent session' : 'chat session'}</p>
+              <p className="mt-1 text-xs uppercase tracking-[0.2em] text-base-content/45">{session.kind === 'subagent' ? 'subagent session' : session.kind === 'cli-agent' ? 'cli agent session' : 'chat session'}</p>
             </button>
           ))}
         </div>
@@ -449,13 +451,25 @@ export function ExecutionGraphView() {
                 </div>
               )}
 
-              {selectedNode.payload.kind === 'subagent' && (
+              {(selectedNode.payload.kind === 'subagent' || selectedNode.payload.kind === 'cli-agent') && (
                 <>
-                  <InspectorRow label="Persona" value={selectedNode.payload.actorLabel} />
-                  <InspectorRow label="Model" value={selectedNode.payload.modelLabel} />
-                  <InspectorRow label="Context" value={selectedNode.payload.inputPrompt} />
-                  <InspectorRow label="Mode" value={selectedNode.payload.result.vfsMode ?? 'shared'} />
-                  <InspectorRow label="Artifacts" value={`${selectedNode.payload.copiedFiles.length} file(s)`} />
+                  {selectedNode.payload.kind === 'subagent' ? (
+                    <>
+                      <InspectorRow label="Persona" value={selectedNode.payload.actorLabel} />
+                      <InspectorRow label="Model" value={selectedNode.payload.modelLabel} />
+                      <InspectorRow label="Context" value={selectedNode.payload.inputPrompt} />
+                      <InspectorRow label="Mode" value={selectedNode.payload.result.vfsMode ?? 'shared'} />
+                      <InspectorRow label="Artifacts" value={`${selectedNode.payload.copiedFiles.length} file(s)`} />
+                    </>
+                  ) : (
+                    <>
+                      <InspectorRow label="Agent" value={selectedNode.payload.snapshot.agentId} />
+                      <InspectorRow label="Workdir" value={selectedNode.payload.snapshot.workdir} />
+                      <InspectorRow label="Prompt" value={selectedNode.payload.inputPrompt} />
+                      <InspectorRow label="Exit" value={selectedNode.payload.snapshot.lastExitCode !== undefined ? String(selectedNode.payload.snapshot.lastExitCode) : undefined} />
+                      <InspectorRow label="Output" value={selectedNode.payload.snapshot.lastOutput} />
+                    </>
+                  )}
                   {selectedNode.payload.transcript.length > 0 && (
                     <div>
                       <p className="text-sm text-base-content/45 mb-2">Transcript tail</p>
@@ -485,10 +499,10 @@ export function ExecutionGraphView() {
               )}
             </section>
 
-            {(selectedNode.payload.kind === 'subagent' && selectedNode.sessionId && selectedNode.sessionId !== activeSessionId) || selectedConfirmation ? (
+            {((selectedNode.payload.kind === 'subagent' || selectedNode.payload.kind === 'cli-agent') && selectedNode.sessionId && selectedNode.sessionId !== activeSessionId) || selectedConfirmation ? (
               <section className="rounded-[22px] border border-base-300 bg-base-200/35 px-5 py-4 space-y-3">
                 <h4 className="text-xl font-black tracking-tight">Actions</h4>
-                {selectedNode.payload.kind === 'subagent' && selectedNode.sessionId && selectedNode.sessionId !== activeSessionId && (
+                {(selectedNode.payload.kind === 'subagent' || selectedNode.payload.kind === 'cli-agent') && selectedNode.sessionId && selectedNode.sessionId !== activeSessionId && (
                   <button
                     type="button"
                     className="w-full rounded-xl bg-sky-500/85 hover:bg-sky-500 text-white px-4 py-3 text-sm font-medium transition-colors"

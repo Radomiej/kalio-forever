@@ -36,6 +36,7 @@ import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from
 import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
+import { GetCliAgentStatusTool, MessageCliAgentTool, SpawnCliAgentTool, StopCliAgentTool } from './tools/cli-agent-session.tools';
 import { RunCliAgentTool } from './tools/run-cli-agent.tool';
 import { ImageGenerateTool } from './tools/image-generate.tool';
 import { ImageEditTool } from './tools/image-edit.tool';
@@ -95,6 +96,10 @@ describe('ToolRegistryService — all tools registered', () => {
       stub(WebSearchTool),
       stub(ListToolsTool),
       stub(GetToolDetailsTool),
+      stub(SpawnCliAgentTool),
+      stub(MessageCliAgentTool),
+      stub(GetCliAgentStatusTool),
+      stub(StopCliAgentTool),
       stub(RunCliAgentTool),
       stub(ImageGenerateTool),
       stub(ImageEditTool),
@@ -138,6 +143,7 @@ describe('ToolRegistryService — all tools registered', () => {
     // Meta
     'list_tools', 'get_tool_details',
     // CLI Agent
+    'spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'stop_cli_agent',
     'run_cli_agent',
     // Image
     'image_generate', 'image_edit', 'image_view',

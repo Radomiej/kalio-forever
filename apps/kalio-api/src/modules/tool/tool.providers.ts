@@ -19,6 +19,7 @@ import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from
 import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
+import { GetCliAgentStatusTool, MessageCliAgentTool, SpawnCliAgentTool, StopCliAgentTool } from './tools/cli-agent-session.tools';
 import { RunCliAgentTool } from './tools/run-cli-agent.tool';
 import { ImageGenerateTool } from './tools/image-generate.tool';
 import { ImageEditTool } from './tools/image-edit.tool';
@@ -45,6 +46,7 @@ export const TOOL_PROVIDER_CLASSES = [
   MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
   WebSearchTool,
   ListToolsTool, GetToolDetailsTool,
+  SpawnCliAgentTool, MessageCliAgentTool, GetCliAgentStatusTool, StopCliAgentTool,
   RunCliAgentTool,
   ImageGenerateTool, ImageEditTool, ImageViewTool,
   SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool,

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { spawn, execFile } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import type { CLIAgentAdapterInfo, CLIAgentResult } from '@kalio/types';
 import { CopilotAdapter } from './adapters/copilot.adapter';
 import { GeminiAdapter } from './adapters/gemini.adapter';
@@ -15,6 +16,13 @@ export type { ProgressEmitFn } from './cli-agent.types';
 /** Max timeout cap: 20 minutes */
 const MAX_TIMEOUT_MS = 1_200_000;
 const EXIT_FALLBACK_GRACE_MS = 250;
+export const CLI_AGENT_STOPPED_ERROR = 'CLI_AGENT_STOPPED';
+
+interface ActiveRunState {
+  sessionId: string;
+  proc: ChildProcess;
+  stopRequested: boolean;
+}
 
 @Injectable()
 export class CLIAgentService implements OnApplicationBootstrap {
@@ -22,6 +30,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
   private readonly adapters: Map<string, ICLIAgentAdapter>;
   /** Probe results cached at startup and on explicit refresh. */
   private readonly probeCache = new Map<string, CLIAgentAdapterInfo>();
+  private readonly activeRuns = new Map<string, ActiveRunState>();
 
   constructor(
     private readonly config: CLIAgentConfigService,
@@ -86,6 +95,21 @@ export class CLIAgentService implements OnApplicationBootstrap {
     return [...this.adapters.keys()];
   }
 
+  isRunning(sessionId: string): boolean {
+    return this.activeRuns.has(sessionId);
+  }
+
+  stop(sessionId: string): boolean {
+    const activeRun = this.activeRuns.get(sessionId);
+    if (!activeRun || activeRun.proc.exitCode !== null) {
+      return false;
+    }
+
+    activeRun.stopRequested = true;
+    activeRun.proc.kill('SIGTERM');
+    return true;
+  }
+
   /**
    * Execute a CLI agent headlessly.
    * @param request  See {@link RunCliAgentRequest} for field docs.
@@ -132,6 +156,13 @@ export class CLIAgentService implements OnApplicationBootstrap {
       // Signal EOF on stdin immediately — CLI agents are non-interactive
       proc.stdin?.end();
 
+      const activeRunState: ActiveRunState = {
+        sessionId,
+        proc,
+        stopRequested: false,
+      };
+      this.activeRuns.set(sessionId, activeRunState);
+
       let rawOutput = '';
       const MAX_BUFFER = 4 * 1024 * 1024; // 4 MB hard cap
       let settled = false;
@@ -156,6 +187,9 @@ export class CLIAgentService implements OnApplicationBootstrap {
           clearTimeout(exitFallbackTimer);
           exitFallbackTimer = null;
         }
+        if (this.activeRuns.get(sessionId) === activeRunState) {
+          this.activeRuns.delete(sessionId);
+        }
         proc.stdout.off('data', onData);
         proc.stderr.off('data', onData);
         proc.removeListener('close', closeHandler);
@@ -169,6 +203,11 @@ export class CLIAgentService implements OnApplicationBootstrap {
         }
         settled = true;
         cleanup();
+
+        if (activeRunState.stopRequested) {
+          reject(new Error(CLI_AGENT_STOPPED_ERROR));
+          return;
+        }
 
         const durationMs = Date.now() - startedAt;
         const exitCode = code ?? 1;

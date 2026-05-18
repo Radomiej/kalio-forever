@@ -56,7 +56,7 @@ export class AllowedPathsService {
     const rows = await this.drizzle.db.select().from(allowedPaths);
     for (const row of rows) {
       const root = this.normalizeAndValidate(row.path);
-      if (resolved.startsWith(root + sep) || resolved === root) {
+      if (this.isPathWithinRoot(resolved, root)) {
         return true;
       }
     }
@@ -103,5 +103,12 @@ export class AllowedPathsService {
 
     const existingParent = realpathSync(current);
     return normalize(resolve(existingParent, ...missingSegments));
+  }
+
+  private isPathWithinRoot(targetPath: string, rootPath: string): boolean {
+    const normalizedTarget = process.platform === 'win32' ? targetPath.toLowerCase() : targetPath;
+    const normalizedRoot = process.platform === 'win32' ? rootPath.toLowerCase() : rootPath;
+
+    return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(normalizedRoot + sep);
   }
 }

@@ -356,6 +356,103 @@ describe('buildExecutionGraphModel', () => {
     ]));
   });
 
+  it('renders cli-agent child sessions as dedicated graph nodes and marks them running when the child loop is active', () => {
+    const cliAgentResult = {
+      childSessionId: 'cli-child-1',
+      parentSessionId: 'session-1',
+      agentId: 'codex',
+      workdir: 'C:/repo',
+      status: 'running',
+      lastPrompt: 'Inspect the repo and summarize the architecture',
+      updatedAt: 8,
+      startedAt: 6,
+      activeCallId: 'cli-run-1',
+      lastOutput: 'Scanning files...',
+      output: 'Scanning files...',
+      exitCode: 0,
+      durationMs: 0,
+    };
+
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Inspect the repository with Codex', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex', prompt: 'Inspect repo', workdir: 'C:/repo' } }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-cli-1',
+        content: JSON.stringify(cliAgentResult),
+        createdAt: 3,
+      }),
+      makeMessage({ id: 'a2', role: 'assistant', content: 'Codex is running in the child session.', createdAt: 4 }),
+    ];
+
+    const turns = buildTurnsFromHistory(messages, 'session-1');
+    const toolActivities: ToolActivity[] = [
+      {
+        callId: 'call-cli-1',
+        toolName: 'spawn_cli_agent',
+        args: { agentId: 'codex', prompt: 'Inspect repo', workdir: 'C:/repo' },
+        sessionId: 'session-1',
+        status: 'success',
+        startedAt: 2,
+        finishedAt: 3,
+        result: {
+          callId: 'call-cli-1',
+          status: 'success',
+          data: cliAgentResult,
+        },
+      },
+    ];
+
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns,
+      toolActivities,
+      activeAgentLoops: {
+        'cli-run-1': {
+          sessionId: 'cli-child-1',
+          turnId: 'cli-turn-1',
+          startedAt: 6,
+        },
+      },
+      sessions: [
+        makeSession(),
+        makeSession({ id: 'cli-child-1', title: 'Codex CLI child', kind: 'cli-agent', parentSessionId: 'session-1', updatedAt: 8 }),
+      ],
+      sessionMessages: {
+        'session-1': messages,
+        'cli-child-1': [
+          makeMessage({ id: 'cu1', sessionId: 'cli-child-1', role: 'user', content: 'Inspect repo', createdAt: 5 }),
+          makeMessage({ id: 'ca1', sessionId: 'cli-child-1', role: 'assistant', content: '', toolCalls: [{ id: 'cli-run-1', name: 'run_cli_agent', args: { agentId: 'codex', workdir: 'C:/repo' } }], createdAt: 6 }),
+        ],
+      },
+      sessionAgentTurns: {
+        'session-1': turns,
+        'cli-child-1': buildTurnsFromHistory([
+          makeMessage({ id: 'cu1', sessionId: 'cli-child-1', role: 'user', content: 'Inspect repo', createdAt: 5 }),
+          makeMessage({ id: 'ca1', sessionId: 'cli-child-1', role: 'assistant', content: '', toolCalls: [{ id: 'cli-run-1', name: 'run_cli_agent', args: { agentId: 'codex', workdir: 'C:/repo' } }], createdAt: 6 }),
+        ], 'cli-child-1'),
+      },
+    });
+
+    const cliNode = model.nodes.find((node) => node.id === 'cli-agent:cli-child-1');
+
+    expect(cliNode).toMatchObject({
+      kind: 'cli-agent',
+      status: 'running',
+      sessionId: 'cli-child-1',
+    });
+    expect(model.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceId: 'tool:call-cli-1', targetId: 'cli-agent:cli-child-1' }),
+    ]));
+  });
+
   it('marks awaiting-confirmation tools so the graph can render Accept actions', () => {
     const messages: ChatMessage[] = [
       makeMessage({ id: 'u1', role: 'user', content: 'Delete the draft file', createdAt: 1 }),

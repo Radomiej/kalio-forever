@@ -114,6 +114,17 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     previewHeightBonus: { raapp: 112, image: 96 },
     maxHeight: 360,
   },
+  'cli-agent': {
+    baseHeight: 114,
+    headlineCharsPerLine: 22,
+    headlineMaxLines: 6,
+    supportingCharsPerLine: 30,
+    supportingMaxLines: 7,
+    metadataColumns: 1,
+    metadataRowHeight: 38,
+    previewHeightBonus: { raapp: 112, image: 96 },
+    maxHeight: 360,
+  },
   artifact: {
     baseHeight: 96,
     headlineCharsPerLine: 25,
@@ -249,7 +260,7 @@ export function getGraphNodeHeading(node: GraphNodePresentationInput): {
   headline: string;
   supporting: string | null;
 } {
-  const headlineUsesSubtitle = node.kind === 'prompt' || node.kind === 'turn' || node.kind === 'subagent' || node.kind === 'final-answer';
+  const headlineUsesSubtitle = node.kind === 'prompt' || node.kind === 'turn' || node.kind === 'subagent' || node.kind === 'cli-agent' || node.kind === 'final-answer';
   const headline = headlineUsesSubtitle ? node.subtitle : node.title;
   const eyebrow = headlineUsesSubtitle ? node.title : node.subtitle;
 
@@ -306,6 +317,22 @@ export function getGraphNodeMetadata(node: GraphNodePresentationInput): GraphNod
 
       items.push({ label: 'VFS', value: node.payload.result.vfsMode, tone: 'default' });
       items.push({ label: 'Files', value: String(node.payload.copiedFiles.length), tone: 'default' });
+
+      return items;
+    }
+    case 'cli-agent': {
+      const items: GraphNodeMetadataItem[] = [
+        { label: 'Agent', value: node.payload.snapshot.agentId, tone: 'accent' },
+        { label: 'Status', value: node.payload.snapshot.status, tone: node.payload.snapshot.status === 'running' ? 'warning' : 'default' },
+      ];
+
+      if (node.payload.snapshot.workdir) {
+        items.push({ label: 'Workdir', value: basename(node.payload.snapshot.workdir), tone: 'default' });
+      }
+
+      if (node.payload.snapshot.lastExitCode !== undefined) {
+        items.push({ label: 'Exit', value: String(node.payload.snapshot.lastExitCode), tone: 'default' });
+      }
 
       return items;
     }

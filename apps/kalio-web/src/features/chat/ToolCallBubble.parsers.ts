@@ -30,15 +30,16 @@ export function extractCLIAgentResult(data: unknown): CLIAgentResult | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
   if (
-    typeof d['output'] === 'string' &&
-    typeof d['exitCode'] === 'number' &&
-    typeof d['durationMs'] === 'number'
+    (typeof d['output'] === 'string' || typeof d['lastOutput'] === 'string') &&
+    (typeof d['exitCode'] === 'number' || typeof d['lastExitCode'] === 'number') &&
+    (typeof d['durationMs'] === 'number' || typeof d['updatedAt'] === 'number')
   ) {
     return {
-      output: d['output'],
-      exitCode: d['exitCode'],
-      durationMs: d['durationMs'],
+      output: typeof d['output'] === 'string' ? d['output'] : (d['lastOutput'] as string),
+      exitCode: typeof d['exitCode'] === 'number' ? d['exitCode'] : (d['lastExitCode'] as number),
+      durationMs: typeof d['durationMs'] === 'number' ? d['durationMs'] : 0,
       agentId: typeof d['agentId'] === 'string' ? d['agentId'] : 'copilot',
+      childSessionId: typeof d['childSessionId'] === 'string' ? d['childSessionId'] : undefined,
     };
   }
   return null;

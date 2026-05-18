@@ -22,6 +22,7 @@ import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from
 import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
+import { GetCliAgentStatusTool, MessageCliAgentTool, SpawnCliAgentTool, StopCliAgentTool } from './tools/cli-agent-session.tools';
 import { RunCliAgentTool } from './tools/run-cli-agent.tool';
 import { ImageGenerateTool } from './tools/image-generate.tool';
 import { ImageEditTool } from './tools/image-edit.tool';
@@ -89,6 +90,10 @@ export class ToolRegistryService {
     private readonly webSearch: WebSearchTool,
     private readonly listTools: ListToolsTool,
     private readonly getToolDetails: GetToolDetailsTool,
+    private readonly spawnCliAgent: SpawnCliAgentTool,
+    private readonly messageCliAgent: MessageCliAgentTool,
+    private readonly getCliAgentStatus: GetCliAgentStatusTool,
+    private readonly stopCliAgent: StopCliAgentTool,
     private readonly runCliAgent: RunCliAgentTool,
     private readonly imageGenerate: ImageGenerateTool,
     private readonly imageEdit: ImageEditTool,
@@ -118,6 +123,7 @@ export class ToolRegistryService {
       memoryIngest, memorySearch, memoryIngestConversation,
       webSearch,
       listTools, getToolDetails,
+      spawnCliAgent, messageCliAgent, getCliAgentStatus, stopCliAgent,
       runCliAgent,
       imageGenerate, imageEdit, imageView,
       skillList, skillRead, skillCreate, skillUpdate, skillDelete,
