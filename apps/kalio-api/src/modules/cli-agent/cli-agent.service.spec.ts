@@ -120,6 +120,26 @@ describe('CLIAgentService', () => {
     expect(fakeProc.stderr.off).toHaveBeenCalledWith('data', expect.any(Function));
   });
 
+  it('resolves after process exit even when close never arrives', async () => {
+    vi.useFakeTimers();
+    const fakeProc = makeFakeProc();
+    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
+
+    const p = service.run({ agentId: 'gemini', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's', timeoutMs: 1_000 });
+    await Promise.resolve(); await Promise.resolve();
+
+    fakeProc.stdout.emit('data', Buffer.from('Error executing tool read_file: File not found.'));
+    fakeProc.emit('exit', 1);
+
+    vi.advanceTimersByTime(1_100);
+
+    await expect(p).resolves.toMatchObject({
+      exitCode: 1,
+      agentId: 'gemini',
+      output: expect.stringContaining('File not found.'),
+    });
+  });
+
   it('calls emitFn with cli_agent:progress from stdout', async () => {
     const fakeProc = makeFakeProc();
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);

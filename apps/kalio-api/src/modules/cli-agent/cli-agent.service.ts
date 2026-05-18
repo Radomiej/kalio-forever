@@ -14,6 +14,7 @@ export type { ProgressEmitFn } from './cli-agent.types';
 
 /** Max timeout cap: 20 minutes */
 const MAX_TIMEOUT_MS = 1_200_000;
+const EXIT_FALLBACK_GRACE_MS = 250;
 
 @Injectable()
 export class CLIAgentService implements OnApplicationBootstrap {
@@ -133,6 +134,8 @@ export class CLIAgentService implements OnApplicationBootstrap {
 
       let rawOutput = '';
       const MAX_BUFFER = 4 * 1024 * 1024; // 4 MB hard cap
+      let settled = false;
+      let exitFallbackTimer: NodeJS.Timeout | null = null;
 
       const onData = (chunk: Buffer | string): void => {
         const str = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
@@ -147,11 +150,26 @@ export class CLIAgentService implements OnApplicationBootstrap {
         }
       };
 
-      proc.stdout.on('data', onData);
-      proc.stderr.on('data', onData);
-
-      const closeHandler = (code: number | null): void => {
+      const cleanup = (): void => {
         clearTimeout(timer);
+        if (exitFallbackTimer) {
+          clearTimeout(exitFallbackTimer);
+          exitFallbackTimer = null;
+        }
+        proc.stdout.off('data', onData);
+        proc.stderr.off('data', onData);
+        proc.removeListener('close', closeHandler);
+        proc.removeListener('exit', exitHandler);
+        proc.removeListener('error', errorHandler);
+      };
+
+      const finalize = (code: number | null): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+
         const durationMs = Date.now() - startedAt;
         const exitCode = code ?? 1;
         const output = compressOutput(rawOutput.trim(), agentConfig.maxOutputChars);
@@ -161,26 +179,50 @@ export class CLIAgentService implements OnApplicationBootstrap {
         resolve({ output, exitCode, durationMs, agentId });
       };
 
+      proc.stdout.on('data', onData);
+      proc.stderr.on('data', onData);
+
+      const closeHandler = (code: number | null): void => {
+        finalize(code);
+      };
+
+      const exitHandler = (code: number | null): void => {
+        if (settled || exitFallbackTimer) {
+          return;
+        }
+
+        // Some CLIs exit cleanly but keep stdio open briefly or indefinitely via descendants.
+        // Wait a moment for the normal 'close' event, then finalize from 'exit' to avoid hanging the tool.
+        exitFallbackTimer = setTimeout(() => {
+          finalize(code);
+        }, EXIT_FALLBACK_GRACE_MS);
+      };
+
+      const errorHandler = (err: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        this.logger.error(`[${agentId}] spawn error: ${err.message}`);
+        reject(err);
+      };
+
       const timer = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
         // Guard: only kill if the process is still running (exitCode is null when running)
         if (proc.exitCode === null) {
           proc.kill('SIGTERM');
         }
-        proc.stdout.off('data', onData);
-        proc.stderr.off('data', onData);
-        proc.removeListener('close', closeHandler);
+        cleanup();
         reject(new Error(`CLI agent "${agentId}" timed out after ${effectiveTimeout}ms`));
       }, effectiveTimeout);
 
-      proc.on('error', (err) => {
-        clearTimeout(timer);
-        proc.stdout.off('data', onData);
-        proc.stderr.off('data', onData);
-        proc.removeListener('close', closeHandler);
-        this.logger.error(`[${agentId}] spawn error: ${err.message}`);
-        reject(err);
-      });
-
+      proc.on('error', errorHandler);
+      proc.on('exit', exitHandler);
       proc.on('close', closeHandler);
     });
   }

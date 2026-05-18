@@ -213,6 +213,7 @@ Codex-specific execution notes:
 Gemini-specific execution notes:
 
 - The Gemini adapter now uses `--include-directories <workdir>`; newer Gemini CLI builds reject the older `--add-dir` flag.
+- Kalio also passes `--approval-mode yolo` by default for Gemini. The human confirmation still happens at the outer `run_cli_agent` gate in Kalio; `yolo` only prevents Gemini CLI from stalling on its own nested shell/file approvals after that point.
 
 ---
 
