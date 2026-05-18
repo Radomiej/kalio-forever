@@ -2,6 +2,7 @@ import type {
   ChatMessage,
   CLIAgentResult,
   RAAppBlock,
+  RaAppNativeResult,
   RaAppPendingApproval,
   SubagentToolResult,
 } from '@kalio/types';
@@ -17,6 +18,9 @@ export function extractRAAppBlock(data: unknown): RAAppBlock | null {
       content: (d['renderedContent'] as string | undefined) ?? (d['content'] as string),
       vfsPath: typeof d['vfsPath'] === 'string' ? d['vfsPath'] : undefined,
       pendingApprovals: (d['pendingApprovals'] as RaAppPendingApproval[] | undefined) ?? [],
+      nativeResults: Array.isArray(d['nativeResults'])
+        ? d['nativeResults'] as RaAppNativeResult[]
+        : [],
     };
   }
   return null;

@@ -1,4 +1,4 @@
-import type { RAAppBlock, RaAppPendingApproval } from '@kalio/types';
+import type { RAAppBlock, RaAppNativeResult, RaAppPendingApproval } from '@kalio/types';
 import { RAAppRenderer } from '../../raapp/RAAppRenderer';
 import { extractImageResult, extractRAAppBlock } from '../ToolCallBubble.parsers';
 import type { ExecutionGraphNode } from './executionGraphModel';
@@ -53,6 +53,9 @@ function normalizeRAAppBlock(data: unknown): RAAppBlock | null {
     vfsPath,
     pendingApprovals: Array.isArray(candidate['pendingApprovals'])
       ? candidate['pendingApprovals'] as RaAppPendingApproval[]
+      : [],
+    nativeResults: Array.isArray(candidate['nativeResults'])
+      ? candidate['nativeResults'] as RaAppNativeResult[]
       : [],
   } satisfies RAAppBlock;
 }

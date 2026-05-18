@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { nanoid } from 'nanoid';
-import type { RAAppBlock, RAAppResult, ChatMessage } from '@kalio/types';
+import type { RAAppBlock, RAAppResult, ChatMessage, RaAppNativeResult } from '@kalio/types';
 import { HtmlIframeRenderer } from './HtmlIframeRenderer';
 import { VfsHtmlRenderer } from './VfsHtmlRenderer';
 import { isHtmlString, findHtmlInData, injectEngineCDN } from './raappRendererUtils';
@@ -14,6 +14,45 @@ interface RAAppRendererProps {
   block: RAAppBlock;
   result?: RAAppResult;
   sessionId?: string;
+}
+
+function stringifyNativeResult(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function NativeResultsPanel({ results }: { results: RaAppNativeResult[] }) {
+  if (results.length === 0) {
+    return null;
+  }
+
+  return (
+    <div data-testid="raapp-native-results" className="mt-3 rounded-xl border border-base-300/70 bg-base-200/50 p-3 text-xs">
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-base-content/55">Native operations</div>
+      <div className="space-y-2">
+        {results.map((result) => (
+          <div key={result.id} className="rounded-lg border border-base-300/60 bg-base-100/70 p-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-mono text-[11px] text-base-content/80">{result.system}</span>
+              <span className="text-[10px] uppercase tracking-wide text-base-content/45">{result.status}</span>
+            </div>
+            <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[11px] text-base-content/65">
+              {result.status === 'error'
+                ? result.error ?? 'Execution failed'
+                : stringifyNativeResult(result.result)}
+            </pre>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) {
@@ -57,6 +96,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
   }
 
   const pendingApprovals = block.pendingApprovals ?? result?.pendingApprovals ?? [];
+  const nativeResults = block.nativeResults ?? result?.nativeResults ?? [];
 
   const content = result?.renderedContent ?? block.content;
 
@@ -64,6 +104,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
     pendingApprovals.length > 0 ? (
       <RaAppHITLOverlay pendingApprovals={pendingApprovals} />
     ) : null;
+  const nativeResultsPanel = <NativeResultsPanel results={nativeResults} />;
 
   if (block.type === 'html') {
     const previewSessionId = sessionId ?? activeSessionId;
@@ -71,6 +112,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
       return (
         <>
           <VfsHtmlRenderer sessionId={previewSessionId} vfsPath={block.vfsPath} title="RA-App" />
+          {nativeResultsPanel}
           {hitlOverlay}
         </>
       );
@@ -79,6 +121,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
     return (
       <>
         <HtmlIframeRenderer html={html} title="RA-App" />
+        {nativeResultsPanel}
         {hitlOverlay}
       </>
     );
@@ -100,6 +143,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
         return (
           <>
             <GuiDslRenderer payload={parsed as GuiDslPayload} onAction={handleGuiAction} />
+            {nativeResultsPanel}
             {hitlOverlay}
           </>
         );
@@ -113,6 +157,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
       return (
         <>
           <HtmlIframeRenderer html={content} title="RA-App" />
+          {nativeResultsPanel}
           {hitlOverlay}
         </>
       );
@@ -124,6 +169,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
         return (
           <>
             <HtmlIframeRenderer html={sniffed} title="RA-App" />
+            {nativeResultsPanel}
             {hitlOverlay}
           </>
         );
@@ -138,6 +184,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
       <div data-testid="raapp-gui" className="rounded border border-base-300 p-3 text-xs whitespace-pre-wrap font-mono">
         {content}
       </div>
+      {nativeResultsPanel}
       {hitlOverlay}
     </>
   );

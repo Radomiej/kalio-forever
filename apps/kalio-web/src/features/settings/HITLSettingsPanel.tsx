@@ -78,12 +78,13 @@ export function HITLSettingsPanel() {
     setError(null);
     setSaved(false);
     try {
+      const payload: { mode: HitlMode; autoPersonaId?: string | null } = { mode: config.mode };
+      if (config.mode === 'auto') {
+        payload.autoPersonaId = config.autoPersonaId;
+      }
       const updated = await apiFetch<HitlConfig>('/hitl/config', {
         method: 'PUT',
-        body: JSON.stringify({
-          mode: config.mode,
-          autoPersonaId: config.autoPersonaId,
-        }),
+        body: JSON.stringify(payload),
       });
       setConfig({
         mode: updated.mode,

@@ -208,6 +208,12 @@ export interface ToolCallRequest {
    * progress events before the final tool:result arrives.
    */
   readonly _emit?: <K extends keyof SocketEvents>(event: K, data: SocketEvents[K]) => void;
+  /**
+   * Backend-only: abort signal for the originating turn.
+   * Tools and approval helpers can use this to stop follow-up work when the
+   * user interrupts the parent turn.
+   */
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface ToolResult {
@@ -371,6 +377,7 @@ export interface RAAppBlock {
   vfsPath?: string;           // optional: load content from VFS path
   actions?: RAAppAction[];    // only for mode='interactive'
   pendingApprovals?: RaAppPendingApproval[];  // populated when call_native needs HITL
+  nativeResults?: RaAppNativeResult[];
 }
 
 export interface RAAppResult {
@@ -383,6 +390,7 @@ export interface RAAppResult {
   };
   requiresHITL?: boolean;     // true when mode='interactive' and has actions
   pendingApprovals?: RaAppPendingApproval[];  // populated by EffectsProcessorService
+  nativeResults?: RaAppNativeResult[];
 }
 
 // ─── GUI DSL (rendered wire format) ─────────────────────────────────────────

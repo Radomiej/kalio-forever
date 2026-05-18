@@ -115,6 +115,7 @@ export class HitlDecisionService {
     await this.llmService.streamChat(messages, [], {
       sessionId: `hitl:${input.request.sessionId}`,
       messageId: nanoid(),
+      abortSignal: input.request.abortSignal,
       onChunk: (chunk) => {
         if (!chunk.thinking) {
           rawResponse += chunk.delta;

@@ -115,6 +115,7 @@ export class ToolDispatchService {
         agentRun: ctx.agentRun,
         // Pass the socket emitter so streaming tools can push progress events
         _emit: ctx.emit as ToolCallRequest['_emit'],
+        abortSignal: ctx.abortSignal,
       };
       const data = await entry.execute(req);
       return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
@@ -263,6 +264,7 @@ export class ToolDispatchService {
           sessionId: ctx.sessionId,
           name: toolName,
           args,
+          abortSignal: ctx.abortSignal,
           agentRun: ctx.agentRun,
           toolCallId: callId,
         });

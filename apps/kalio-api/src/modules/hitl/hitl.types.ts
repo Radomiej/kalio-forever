@@ -23,6 +23,7 @@ export interface HitlApprovalRequest {
   sessionId: string;
   name: string;
   args: Record<string, unknown>;
+  abortSignal?: AbortSignal;
   agentRun?: AgentRunContext;
   displayLabel?: string;
   toolCallId?: string;

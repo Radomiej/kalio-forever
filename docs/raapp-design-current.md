@@ -23,7 +23,8 @@ Najwazniejsze jest rozroznienie trzech rzeczy, ktore latwo pomylic:
 - Zapisane appki zyja poza sesyjnym VFS.
 - Katalog RA-App ma dwa poziomy: plaskie appki ladowane przez `RAAppService` oraz wersjonowane grupy zarzadzane przez `RAAppVersioningService`.
 - Interaktywne HTML RA-App rozmawiaja z czatem przez `window.parent.postMessage(...)` przechwytywane w `HtmlIframeRenderer`.
-- Natywne efekty RA-App z approvalem przechodza przez `RAAppHITLService` i wracaja na frontend jako `raapp:native_result`.
+- Natywne efekty RA-App z approvalem przechodza przez `RAAppHITLService`; manualne decyzje wracaja jako `raapp:native_result`, a auto-zatwierdzone batch-e wracaja od razu w `tool_result.nativeResults`.
+- Auto-zatwierdzone `call_native` z `outputPath` sa patchowane z powrotem do `data.output` przed renderem GUI, wiec bindingi `output.*` dzialaja tak samo w trybie manual i auto.
 
 ## Co jest czym
 
@@ -31,7 +32,7 @@ Najwazniejsze jest rozroznienie trzech rzeczy, ktore latwo pomylic:
 | --- | --- | --- | --- |
 | Inline RA-App block | `ToolResult` / `tool_result` message | Historia czatu | `ToolCallBubble` -> `RAAppRenderer` |
 | Stored RA-App | `RAAppService` / `RAAppVersioningService` | `RA_APPS_PATH/core` i `RA_APPS_PATH/user` | `RAAppManager` przez REST |
-| Pending native approvals | `raapp_pending_approvals` + `RAAppHITLService` | DB | inline pending approvals plus `raapp:native_result` |
+| Pending native approvals | `raapp_pending_approvals` + `RAAppHITLService` | DB | inline pending approvals, inline `nativeResults` dla auto-sciezki, plus `raapp:native_result` dla pozniejszych decyzji manualnych |
 
 ## Modulowy podzial odpowiedzialnosci
 
@@ -200,6 +201,12 @@ window.parent.postMessage({ type: 'kalio_send_message', content: 'user answer' }
 Inline RA-App moze wygenerowac pending approvals dla natywnych systemow.
 To nie jest wykonywane bezposrednio w iframe. Najpierw approval trafia do bazy, a potem UI wysyla decyzje przez socket.
 
+Jest tez druga sciezka: jezeli globalny HITL policy auto-zatwierdzi caly batch,
+backend nadal zapisuje approvale, ale od razu wykonuje wszystkie natywne wywolania,
+zwraca `nativeResults` w tym samym `tool_result` i aplikuje `outputPath` patch-e
+z powrotem do `data.output` jeszcze przed `raapp.execute(...)`.
+Frontend nie widzi wtedy pending approvals, ale moze pokazac wykonane wyniki inline.
+
 ```mermaid
 sequenceDiagram
     participant Result as tool_result with pendingApprovals
@@ -232,6 +239,7 @@ Wazne szczegoly z implementacji:
 - approve wykonuje realny natywny system dopiero po zatwierdzeniu
 - cancel nie wykonuje efektu, ale zwraca wynik do UI tak, zeby bubble mogla sie zaktualizowac
 - `ChatInterface` aktualizuje istniejacy `tool_result` message zamiast tworzyc nowy typ historii
+- auto-sciezka `resolvePendingApprovals()` zwraca jednoczesnie `nativeResults` i `outputPatches`; `RunRaAppTool` oraz `RaAppExecuteDslTool` musza zastosowac patch-e przed finalnym renderem GUI
 
 ## Co jest prawda dzis, a co nie
 

@@ -14,6 +14,7 @@ import type { RAAppMeta } from '../../raapp/raapp.service';
 import { archiveDirectoryToZip } from '../../raapp/zip-archive.util';
 import { VFSService } from '../../vfs/vfs.service';
 import { EntityStore } from '../../raapp/entity-store';
+import { applyRaAppOutputPatches } from '../../raapp/raapp-output-patches.util';
 
 // ─── raapp_create_draft ───────────────────────────────────────────────────────
 
@@ -240,13 +241,21 @@ export class RaAppExecuteDslTool {
             outputData['entities'] = effectsResult.entities;
           }
           if (effectsResult.pendingApprovals.length > 0) {
-            const resolvedApprovals = await this.hitl.resolvePendingApprovals(
-              request.callId,
-              sessionId,
-              effectsResult.pendingApprovals,
-            );
+            const resolvedApprovals = request.abortSignal
+              ? await this.hitl.resolvePendingApprovals(
+                  request.callId,
+                  sessionId,
+                  effectsResult.pendingApprovals,
+                  request.abortSignal,
+                )
+              : await this.hitl.resolvePendingApprovals(
+                  request.callId,
+                  sessionId,
+                  effectsResult.pendingApprovals,
+                );
             pendingApprovals = resolvedApprovals.pendingApprovals;
             nativeResults = resolvedApprovals.nativeResults;
+            applyRaAppOutputPatches(outputData, resolvedApprovals.outputPatches);
           }
         } catch (err) {
           this.logger.error(`[raapp_execute_dsl] Systems execution error`, err);

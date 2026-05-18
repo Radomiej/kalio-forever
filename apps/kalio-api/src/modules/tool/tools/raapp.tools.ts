@@ -14,6 +14,7 @@ import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
 import { RAAppVersioningService } from '../../raapp/raapp-versioning.service';
 import { archiveDirectoryToZip } from '../../raapp/zip-archive.util';
 import { EntityStore } from '../../raapp/entity-store';
+import { applyRaAppOutputPatches } from '../../raapp/raapp-output-patches.util';
 
 function createGeneratedAppId(sessionId: string): string {
   const sessionPart = sessionId.trim().slice(0, 8) || 'session';
@@ -244,13 +245,21 @@ export class RunRaAppTool {
         }
 
         if (effectsResult.pendingApprovals.length > 0) {
-          const resolvedApprovals = await this.hitl.resolvePendingApprovals(
-            request.callId,
-            sessionId,
-            effectsResult.pendingApprovals,
-          );
+          const resolvedApprovals = request.abortSignal
+            ? await this.hitl.resolvePendingApprovals(
+                request.callId,
+                sessionId,
+                effectsResult.pendingApprovals,
+                request.abortSignal,
+              )
+            : await this.hitl.resolvePendingApprovals(
+                request.callId,
+                sessionId,
+                effectsResult.pendingApprovals,
+              );
           pendingApprovals = resolvedApprovals.pendingApprovals;
           nativeResults = resolvedApprovals.nativeResults;
+          applyRaAppOutputPatches(outputData, resolvedApprovals.outputPatches);
         }
       }
       const data = { output: outputData };

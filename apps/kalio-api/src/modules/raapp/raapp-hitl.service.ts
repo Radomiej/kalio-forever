@@ -8,6 +8,7 @@ import type { PendingApproval } from './effects-processor.service';
 import { AuditService } from '../chat/audit.service';
 import { HitlPolicyService } from '../hitl/hitl-policy.service';
 import type { RaAppNativeResult, RaAppPendingApproval } from '@kalio/types';
+import type { RaAppOutputPatch } from './raapp-output-patches.util';
 
 export interface SavedApproval {
   id: string;
@@ -34,6 +35,7 @@ export interface ApproveResult {
 export interface ResolvePendingApprovalsResult {
   pendingApprovals: RaAppPendingApproval[];
   nativeResults: RaAppNativeResult[];
+  outputPatches: RaAppOutputPatch[];
 }
 
 /**
@@ -146,15 +148,17 @@ export class RAAppHITLService {
     toolCallId: string,
     sessionId: string,
     approvals: PendingApproval[],
+    abortSignal?: AbortSignal,
   ): Promise<ResolvePendingApprovalsResult> {
     if (approvals.length === 0) {
       return {
         pendingApprovals: [],
         nativeResults: [],
+        outputPatches: [],
       };
     }
 
-    const shouldAutoExecute = await this.shouldAutoExecuteBatch(toolCallId, sessionId, approvals);
+    const shouldAutoExecute = await this.shouldAutoExecuteBatch(toolCallId, sessionId, approvals, abortSignal);
     await this.savePendingApprovals(toolCallId, sessionId, approvals);
 
     if (!shouldAutoExecute) {
@@ -166,6 +170,7 @@ export class RAAppHITLService {
           args: approval.args,
         })),
         nativeResults: [],
+        outputPatches: [],
       };
     }
 
@@ -173,6 +178,7 @@ export class RAAppHITLService {
       approvals.map((approval) => approval.id),
       sessionId,
     );
+    const outputPatches = this.buildOutputPatches(approvals, results);
 
     return {
       pendingApprovals: [],
@@ -183,6 +189,7 @@ export class RAAppHITLService {
         result: result.result,
         error: result.error,
       })),
+      outputPatches,
     };
   }
 
@@ -245,6 +252,7 @@ export class RAAppHITLService {
     toolCallId: string,
     sessionId: string,
     approvals: PendingApproval[],
+    abortSignal?: AbortSignal,
   ): Promise<boolean> {
     if (!this.hitlPolicy) {
       return false;
@@ -256,11 +264,33 @@ export class RAAppHITLService {
         sessionId,
         name: approval.system,
         args: approval.args,
+        abortSignal,
         displayLabel: approval.displayLabel,
         toolCallId,
       })),
     );
 
     return resolutions.length > 0 && resolutions.every((resolution) => resolution.status === 'approved');
+  }
+
+  private buildOutputPatches(
+    approvals: PendingApproval[],
+    results: ApproveResult[],
+  ): RaAppOutputPatch[] {
+    const approvalsById = new Map(approvals.map((approval) => [approval.id, approval]));
+
+    return results.flatMap((result) => {
+      const approval = approvalsById.get(result.id);
+      if (!approval?.outputPath) {
+        return [];
+      }
+
+      return [{
+        outputPath: approval.outputPath,
+        value: result.status === 'executed'
+          ? result.result
+          : { error: result.error ?? 'Execution failed' },
+      }];
+    });
   }
 }

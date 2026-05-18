@@ -48,7 +48,7 @@ export class HitlConfigService {
       throw new BadRequestException('Auto HITL mode requires a configured persona.');
     }
 
-    if (nextAutoPersonaId !== null) {
+    if (nextMode === 'auto' && nextAutoPersonaId !== null) {
       await this.ensurePersonaExists(nextAutoPersonaId);
     }
 
