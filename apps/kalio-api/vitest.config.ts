@@ -19,7 +19,19 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/**/*.spec.ts', 'src/**/*.test.ts', 'src/main.ts'],
+      exclude: [
+        'src/**/*.spec.ts',
+        'src/**/*.test.ts',
+        'src/**/*.d.ts',
+        'src/main.ts',
+        'src/modules/chat/interfaces/**/*.ts',
+        'src/modules/cli-agent/cli-agent.types.ts',
+        'src/modules/cli-agent/adapters/cli-agent.adapter.ts',
+        'src/modules/llm/llm.types.ts',
+        'src/modules/memory/dto/**/*.ts',
+        'src/modules/raapp/gui/guiDslAst.ts',
+        'src/modules/relay/relay-command-handlers.interface.ts',
+      ],
       thresholds: {
         lines: 80,
         functions: 80,

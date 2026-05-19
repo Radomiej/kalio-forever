@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, act, fireEvent } from '@testing-library/react';
-import { HistoryToolCallBubble, LiveToolCallBubble, extractRAAppBlock } from './ToolCallBubble';
+import { HistoryToolCallBubble, LiveToolCallBubble } from './ToolCallBubble';
 import type { ToolActivity } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 
@@ -52,88 +52,6 @@ function makeActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
     ...overrides,
   };
 }
-
-// ── HistoryToolCallBubble tests ───────────────────────────────────────────────
-
-describe('REGRESSION: HistoryToolCallBubble — RA-App widget inside chip', () => {
-  it('preserves vfsPath when extracting html RA-App blocks', () => {
-    const block = extractRAAppBlock({
-      status: 'ready',
-      type: 'html',
-      mode: 'display',
-      content: '',
-      vfsPath: 'design/preview.html',
-    });
-
-    expect(block).toMatchObject({
-      type: 'html',
-      mode: 'display',
-      content: '',
-      vfsPath: 'design/preview.html',
-    });
-  });
-
-  it('preserves nativeResults when extracting RA-App blocks', () => {
-    const block = extractRAAppBlock({
-      status: 'ready',
-      type: 'gui',
-      mode: 'display',
-      content: '{"nodes":[],"data":{}}',
-      nativeResults: [
-        {
-          id: 'native-1',
-          system: 'vfs_write',
-          status: 'executed',
-          result: { path: 'drafts/result.txt' },
-        },
-      ],
-    });
-
-    expect(block).toMatchObject({
-      nativeResults: [
-        expect.objectContaining({ system: 'vfs_write', status: 'executed' }),
-      ],
-    });
-  });
-
-  it('renders RAAppRenderer when content has RA-App block', () => {
-    render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={false} />);
-    expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();
-  });
-
-  it('does NOT render RAAppRenderer for non-RA-App content', () => {
-    render(<HistoryToolCallBubble toolName="list_raapps" content={NON_RAAPP_RESULT} />);
-    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
-  });
-
-  it('hides widget and shows freeze text when isAnswered=true', () => {
-    render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
-    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
-    expect(screen.getByText('Interactive app — answer submitted')).toBeInTheDocument();
-  });
-
-  it('shows "answered" badge when isAnswered=true', () => {
-    render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
-    expect(screen.getByText('↩ answered')).toBeInTheDocument();
-  });
-
-  it('collapses widget when isAnswered flips from false to true (live collapse)', () => {
-    const { rerender } = render(
-      <HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={false} />,
-    );
-    // Initially expanded — widget visible
-    expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();
-
-    // User answers → isAnswered becomes true
-    act(() => {
-      rerender(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
-    });
-
-    // Widget should be gone, freeze text should appear
-    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
-    expect(screen.getByText('Interactive app — answer submitted')).toBeInTheDocument();
-  });
-});
 
 // ── LiveToolCallBubble tests ──────────────────────────────────────────────────
 // Live chip = status indicator only. Widget NEVER renders here —

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -6,6 +7,10 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '../../..');
 const apiDir = resolve(repoRoot, 'apps/kalio-api');
 const envFilePath = resolve(repoRoot, '.env.test');
+
+if (existsSync(envFilePath)) {
+  process.loadEnvFile?.(envFilePath);
+}
 
 const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
 const apiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? 'http://localhost:3316';
@@ -193,7 +198,7 @@ async function main() {
   await runPnpm('Frontend build', ['--filter', 'kalio-web', 'build'], frontendEnv);
 
   console.log(`[playwright-stack] starting backend on ${apiUrl.origin}`);
-  spawnManaged('backend', process.execPath, [`--env-file=${envFilePath}`, 'dist/main.js'], apiDir, backendEnv);
+  spawnManaged('backend', process.execPath, ['dist/main.js'], apiDir, backendEnv);
   await waitForUrl(`${apiUrl.origin}/api/health`, 60_000);
 
   console.log(`[playwright-stack] starting frontend preview on ${webUrl.origin}`);

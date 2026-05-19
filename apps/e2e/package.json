@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "stack:playwright": "node ./scripts/start-playwright-stack.mjs",
+    "test": "node --test ./scripts/start-playwright-stack.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report"

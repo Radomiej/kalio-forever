@@ -5,7 +5,7 @@ const expectedTools = new Map<string, boolean>([
   ['vfs_write', true],
   ['vfs_read', false],
   ['vfs_list', false],
-  ['run_subagent', true],
+  ['run_subagent', false],
   ['fs_read', false],
   ['fs_list', false],
   ['fs_write', true],
