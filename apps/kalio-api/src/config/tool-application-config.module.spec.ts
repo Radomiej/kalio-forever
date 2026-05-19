@@ -20,6 +20,11 @@ import { TOOL_DISPATCH_REGISTRY } from '../modules/tool/tool-dispatch-registry.p
 import { TOOL_PROVIDER_CLASSES } from '../modules/tool/tool.providers';
 import { ToolRegistryService } from '../modules/tool/tool-registry.service';
 
+type ToolCatalog = {
+  getAllTools: () => Array<{ name: string }>;
+  getToolsForSkills: (skills: string[]) => Array<{ name: string }>;
+};
+
 describe('ToolApplicationConfigModule', () => {
   it('composes every tool dependency module exactly once', () => {
     const imports = (Reflect.getMetadata(MODULE_METADATA.IMPORTS, ToolApplicationConfigModule) as unknown[]) ?? [];
@@ -50,7 +55,7 @@ describe('ToolApplicationConfigModule', () => {
     expect(catalogProvider?.inject).toEqual([Reflector]);
     expect(registryProvider).toEqual({ provide: TOOL_DISPATCH_REGISTRY, useExisting: ToolRegistryService });
 
-    const catalog = (catalogProvider?.useFactory as (reflector: Reflector) => { getAllTools: () => Array<{ name: string }>; getToolsForSkills: (skills: string[]) => Array<{ name: string }>; })(new Reflector());
+    const catalog = (catalogProvider?.useFactory as (reflector: Reflector) => ToolCatalog)(new Reflector());
 
     expect(catalog.getAllTools()).toHaveLength(TOOL_PROVIDER_CLASSES.length);
     expect(catalog.getToolsForSkills(['vfs_read', 'persona_delete']).map((tool) => tool.name)).toEqual(['vfs_read', 'persona_delete']);

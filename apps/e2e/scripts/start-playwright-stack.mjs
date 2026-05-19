@@ -40,6 +40,7 @@ export function loadOptionalEnvFile(envFilePath = getEnvFilePath()) {
     return false;
   }
 
+  // Keep CI-provided values; only load missing vars from .env.test.
   loadEnv({ path: envFilePath, override: false });
   return true;
 }

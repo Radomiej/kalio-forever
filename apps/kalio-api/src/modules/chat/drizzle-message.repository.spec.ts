@@ -8,6 +8,26 @@ describe('DrizzleMessageRepository', () => {
   let selectMessagesResult: ReturnType<typeof vi.fn>;
   let insertValues: ReturnType<typeof vi.fn>;
 
+  function createSessionQueryMock() {
+    return {
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          then: selectSessionResult,
+        }),
+      }),
+    };
+  }
+
+  function createMessagesQueryMock() {
+    return {
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          orderBy: selectMessagesResult,
+        }),
+      }),
+    };
+  }
+
   beforeEach(() => {
     selectSessionResult = vi.fn();
     selectMessagesResult = vi.fn();
@@ -16,22 +36,10 @@ describe('DrizzleMessageRepository', () => {
     const db = {
       select: vi.fn((selection?: unknown) => {
         if (selection) {
-          return {
-            from: vi.fn().mockReturnValue({
-              where: vi.fn().mockReturnValue({
-                then: selectSessionResult,
-              }),
-            }),
-          };
+          return createSessionQueryMock();
         }
 
-        return {
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({
-              orderBy: selectMessagesResult,
-            }),
-          }),
-        };
+        return createMessagesQueryMock();
       }),
       insert: vi.fn().mockReturnValue({
         values: insertValues,
