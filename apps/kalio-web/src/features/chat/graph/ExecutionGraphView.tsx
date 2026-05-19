@@ -360,7 +360,7 @@ export function ExecutionGraphView() {
                 <h3 className="mt-3 text-3xl font-black tracking-tight">No execution nodes yet for this session.</h3>
                 <p className="mt-3 text-sm text-sky-100/70">
                   {activeSession
-                    ? `Session \"${activeSession.title}\" is active in Graph view, but nothing has executed yet.`
+                    ? `Session "${activeSession.title}" is active in Graph view, but nothing has executed yet.`
                     : 'This session is active in Graph view, but nothing has executed yet.'}
                 </p>
                 <p className="mt-3 text-sm text-sky-100/70">

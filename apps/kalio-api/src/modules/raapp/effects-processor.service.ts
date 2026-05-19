@@ -220,7 +220,7 @@ export class EffectsProcessorService {
     effect: RawEffect,
     ctx: EffectRunContext,
   ): Promise<void> {
-    const { input, output, pendingApprovals, sessionCtx, entityStore } = ctx;
+    const { input, output, entityStore } = ctx;
     // assign: { target, expression }
     if ('assign' in effect) {
       const { target, expression } = (effect as AssignEffect).assign;

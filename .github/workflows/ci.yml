@@ -38,6 +38,13 @@ jobs:
 
   backend:
     runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      DATABASE_PATH: /tmp/kalio-backend-ci.db
+      MEMORY_DB_PATH: /tmp/kalio-backend-ci-memory
+      WORKSPACE_ROOT: /tmp/kalio-backend-workspace
+      CREDENTIALS_MASTER_KEY: ci-test-master-key-32-chars-minimum
+      LLM_PROVIDER: mock
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

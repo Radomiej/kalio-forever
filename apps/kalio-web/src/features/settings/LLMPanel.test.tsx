@@ -313,8 +313,7 @@ describe('LLMPanel', () => {
     await user.click(screen.getByRole('button', { name: 'BitNet' }));
 
     const nameInput = screen.getByRole('textbox', { name: /name/i });
-    await user.clear(nameInput);
-    await user.type(nameInput, 'Local BitNet');
+    fireEvent.change(nameInput, { target: { value: 'Local BitNet' } });
     await user.click(screen.getByTestId('add-provider-submit'));
 
     await waitFor(() => expect(screen.getByTestId('provider-row-c-bitnet')).toBeInTheDocument());
@@ -411,9 +410,8 @@ describe('LLMPanel', () => {
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
     const nameInput = screen.getByRole('textbox', { name: /name/i });
-    await user.clear(nameInput);
-    await user.type(nameInput, 'New Key');
-    await user.type(screen.getByTestId('add-provider-apikey'), 'sk-test');
+    fireEvent.change(nameInput, { target: { value: 'New Key' } });
+    fireEvent.change(screen.getByTestId('add-provider-apikey'), { target: { value: 'sk-test' } });
     await user.click(screen.getByTestId('add-provider-submit'));
     await waitFor(() => expect(screen.getByTestId(`provider-row-${created.id}`)).toBeInTheDocument());
     // form should be hidden after submit

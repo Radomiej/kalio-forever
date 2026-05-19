@@ -186,7 +186,7 @@ describe('TelegramRelayService', () => {
       { parse_mode: 'MarkdownV2' },
     );
     expect(reply).toHaveBeenCalledWith(
-      'Registered\! Kalio notifications will be sent to this chat\.',
+      'Registered\\! Kalio notifications will be sent to this chat\\.',
       { parse_mode: 'MarkdownV2' },
     );
     expect(reply).toHaveBeenCalledWith(

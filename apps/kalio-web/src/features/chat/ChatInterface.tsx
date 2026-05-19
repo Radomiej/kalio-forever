@@ -299,6 +299,7 @@ export function ChatInterface() {
       // Tool is awaiting confirmation — log it as an activity
       addToolActivity({
         callId: req.toolCallId,
+        requestId: req.requestId,
         toolName: req.toolName,
         args: req.args,
         sessionId: req.sessionId,
@@ -309,9 +310,15 @@ export function ChatInterface() {
     });
 
     const offConfirmationInvalidated = eventBus.onToolConfirmationInvalidated((payload) => {
-      const pendingConfirmation = useAgentStore.getState().pendingConfirmations[payload.sessionId];
+      const agentState = useAgentStore.getState();
+      const pendingConfirmation = agentState.pendingConfirmations[payload.sessionId];
+      const staleActivity = agentState
+        .getToolActivitiesForSession(payload.sessionId)
+        .find((activity) => activity.requestId === payload.requestId);
       const targetCallId = payload.toolCallId
-        ?? (pendingConfirmation?.requestId === payload.requestId ? pendingConfirmation.toolCallId : payload.requestId);
+        ?? (pendingConfirmation?.requestId === payload.requestId
+          ? pendingConfirmation.toolCallId
+          : staleActivity?.callId ?? payload.requestId);
       setPendingConfirmation(payload.sessionId, null);
       if (payload.reason !== 'confirmed') {
         clearToolArgProgressTracking(payload.sessionId);

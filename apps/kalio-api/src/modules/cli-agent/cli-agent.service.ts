@@ -1,6 +1,5 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { spawn, execFile } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
 import type { CLIAgentAdapterInfo, CLIAgentResult } from '@kalio/types';
 import { CopilotAdapter } from './adapters/copilot.adapter';
 import { GeminiAdapter } from './adapters/gemini.adapter';
@@ -9,7 +8,7 @@ import { CodexAdapter } from './adapters/codex.adapter';
 import type { ICLIAgentAdapter } from './adapters/cli-agent.adapter';
 import { CLIAgentConfigService } from './cli-agent-config.service';
 import { compressOutput } from './output-compressor';
-import type { ProgressEmitFn, RunCliAgentRequest } from './cli-agent.types';
+import type { RunCliAgentRequest } from './cli-agent.types';
 import { CLIAgentPtyService } from './cli-agent-pty.service';
 
 export type { ProgressEmitFn } from './cli-agent.types';
@@ -38,7 +37,7 @@ function quotePowerShellArg(value: string): string {
 function parseJsonLine(line: string): unknown | null {
   try {
     return JSON.parse(line) as unknown;
-  } catch (_err) {
+  } catch {
     return null;
   }
 }

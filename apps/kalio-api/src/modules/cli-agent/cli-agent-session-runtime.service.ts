@@ -145,8 +145,9 @@ export class CLIAgentSessionRuntimeService {
   async stopSession(
     parentSessionId: string,
     childSessionId: string,
-    _emit?: ToolCallRequest['_emit'],
+    emit?: ToolCallRequest['_emit'],
   ): Promise<CLIAgentSessionSnapshot> {
+    void emit;
     const childSession = await this.sessions.getChildSession(parentSessionId, childSessionId);
     if (!childSession || childSession.kind !== 'cli-agent') {
       throw new Error(`CLI_AGENT_SESSION_NOT_FOUND: ${childSessionId}`);

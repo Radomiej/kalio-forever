@@ -5,6 +5,7 @@ export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success'
 
 export interface ToolActivity {
   callId: string;
+  requestId?: string;
   toolName: string;
   args: Record<string, unknown>;
   sessionId?: string;

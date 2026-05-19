@@ -3,7 +3,7 @@
  * Required by Telegram's MarkdownV2 parse mode.
  */
 export function escapeMarkdownV2(text: string): string {
-  return text.replace(/[_*[\]()~`>#+=|{}.!\-]/g, (c) => `\\${c}`);
+  return text.replace(/[-_*[\]()~`>#+=|{}.!]/g, (c) => `\\${c}`);
 }
 
 /**

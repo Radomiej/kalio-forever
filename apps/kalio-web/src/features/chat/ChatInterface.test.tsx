@@ -119,10 +119,11 @@ const agentStoreState = {
   toolArgProgress: null as { toolName: string; totalChars: number; charsPerSec: number } | null,
   toolActivities: [] as Array<{
     callId: string;
+    requestId?: string;
     toolName: string;
     args?: Record<string, unknown>;
     sessionId?: string;
-    status?: 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled';
+    status?: 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled' | 'expired';
     startedAt?: number;
   }>,
   llmActivities: [],
@@ -546,6 +547,35 @@ describe('ChatInterface event wiring', () => {
     expect(updateToolActivity).toHaveBeenCalledWith(
       'call-confirmed',
       expect.objectContaining({ status: 'running' }),
+    );
+  });
+
+  it('REGRESSION: stale confirmation invalidation resolves callId after pending state was cleared', async () => {
+    await renderChatInterface();
+    agentStoreState.toolActivities = [
+      {
+        callId: 'call-stale',
+        requestId: 'req-stale',
+        toolName: 'image_generate',
+        args: { prompt: 'Generate a coffee poster' },
+        sessionId: 'session-1',
+        status: 'awaiting_confirmation',
+        startedAt: Date.now(),
+      },
+    ];
+    agentStoreState.pendingConfirmations = {};
+    updateToolActivity.mockClear();
+
+    await emitEvent('tool:confirmation_invalidated', {
+      requestId: 'req-stale',
+      sessionId: 'session-1',
+      reason: 'expired',
+      message: 'Tool confirmation expired or was already handled.',
+    });
+
+    expect(updateToolActivity).toHaveBeenCalledWith(
+      'call-stale',
+      expect.objectContaining({ status: 'expired' }),
     );
   });
 

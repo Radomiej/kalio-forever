@@ -126,11 +126,11 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
     bot.command('start', async (ctx) => {
       if (!this.chatId) {
         await ctx.reply(
-          'Welcome to Kalio\! Send any message or /register to link this chat and receive notifications\.',
+          'Welcome to Kalio\\! Send any message or /register to link this chat and receive notifications\\.',
           { parse_mode: 'MarkdownV2' },
         );
       } else {
-        await ctx.reply('Kalio is connected\. Use /help to see available commands\.', {
+        await ctx.reply('Kalio is connected\\. Use /help to see available commands\\.', {
           parse_mode: 'MarkdownV2',
         });
       }
@@ -140,7 +140,7 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
       try {
         await this.persistChatId(String(ctx.chat.id));
         await ctx.reply(
-          'Registered\! Kalio notifications will be sent to this chat\.',
+          'Registered\\! Kalio notifications will be sent to this chat\\.',
           { parse_mode: 'MarkdownV2' },
         );
       } catch (err) {
@@ -148,7 +148,7 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
           'Failed to register Telegram chat',
           err instanceof Error ? err : new Error(String(err)),
         );
-        await ctx.reply('Failed to register this chat\. Try again in a moment\.', {
+        await ctx.reply('Failed to register this chat\\. Try again in a moment\\.', {
           parse_mode: 'MarkdownV2',
         });
       }
@@ -156,11 +156,11 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
 
     bot.command('help', async (ctx) => {
       await ctx.reply(
-        'Send any message to auto\-register this chat\n\n' +
-          '/register \- Link this chat to receive notifications\n' +
-          '/status \- Show active sessions\n' +
-          '/stop \- Stop all running sessions\n' +
-          '/help \- Show this message',
+        'Send any message to auto-register this chat\n\n' +
+          '/register - Link this chat to receive notifications\n' +
+          '/status - Show active sessions\n' +
+          '/stop - Stop all running sessions\n' +
+          '/help - Show this message',
         { parse_mode: 'MarkdownV2' },
       );
     });

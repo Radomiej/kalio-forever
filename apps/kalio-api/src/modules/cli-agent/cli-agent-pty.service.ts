@@ -59,8 +59,6 @@ export class CLIAgentPtyService {
       let rawOutput = '';
       let settled = false;
       const maxBuffer = 4 * 1024 * 1024;
-      let exitSubscription: { dispose(): void } | void;
-
       const dataSubscription = proc.onData((chunk) => {
         const cleanedChunk = stripTerminalControlCodes(chunk);
         if (rawOutput.length < maxBuffer) {
@@ -93,7 +91,7 @@ export class CLIAgentPtyService {
         resolve({ output, exitCode, durationMs, agentId: request.agentId });
       };
 
-      exitSubscription = proc.onExit((event) => {
+      const exitSubscription = proc.onExit((event) => {
         finalize(event.exitCode);
       });
 
@@ -114,7 +112,10 @@ export class CLIAgentPtyService {
       return (await import('@lydell/node-pty')) as unknown as PtyModule;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new Error(`PTY_UNAVAILABLE: install or repair @lydell/node-pty to run interactive CLI agents. ${message}`);
+      throw new Error(
+        `PTY_UNAVAILABLE: install or repair @lydell/node-pty to run interactive CLI agents. ${message}`,
+        { cause: err },
+      );
     }
   }
 }
