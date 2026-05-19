@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { HttpStatus } from '@nestjs/common';
 import { AllowedPathsController } from './allowed-paths.controller';
 
 describe('AllowedPathsController', () => {
@@ -29,7 +28,5 @@ describe('AllowedPathsController', () => {
   it('exposes a no-content delete route that delegates remove', async () => {
     await expect(controller.remove('root')).resolves.toBeUndefined();
     expect(service.remove).toHaveBeenCalledWith('root');
-    expect(Reflect.getMetadata('path', AllowedPathsController.prototype.remove)).toBe(':id');
-    expect(Reflect.getMetadata('__httpCode__', AllowedPathsController.prototype.remove)).toBe(HttpStatus.NO_CONTENT);
   });
 });

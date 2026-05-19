@@ -42,10 +42,11 @@ describe('start-playwright-stack', () => {
 
   it('loads .env.test into process.env without overriding CI-provided values', () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'playwright-stack-'));
+    const envFilePath = getEnvFilePath(repoRoot);
     TEMP_DIRS.push(repoRoot);
 
     writeFileSync(
-      getEnvFilePath(repoRoot),
+      envFilePath,
       [
         'PLAYWRIGHT_BASE_URL=http://localhost:6200',
         'PLAYWRIGHT_API_ORIGIN=http://localhost:4216',
@@ -59,7 +60,7 @@ describe('start-playwright-stack', () => {
     delete process.env.PLAYWRIGHT_API_ORIGIN;
     delete process.env.PLAYWRIGHT_LOADED_FROM_FILE;
 
-    const loaded = loadOptionalEnvFile(getEnvFilePath(repoRoot));
+    const loaded = loadOptionalEnvFile(envFilePath);
     const runtime = createStackRuntime(repoRoot);
 
     assert.equal(loaded, true);

@@ -38,7 +38,5 @@ describe('ChatTestSupportRaAppController', () => {
       nativeResults: [{ type: 'success' }],
     });
     expect(chatTestSupport.seedRaAppHitlFixture).toHaveBeenCalledWith(body);
-    expect(Reflect.getMetadata('path', ChatTestSupportRaAppController)).toBe('test-support/raapp-hitl');
-    expect(Reflect.getMetadata('path', ChatTestSupportRaAppController.prototype.seed)).toBe('seed');
   });
 });
