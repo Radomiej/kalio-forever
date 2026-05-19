@@ -68,6 +68,7 @@ describe('AllowedPathsPanel', () => {
   });
 
   it('adds a path on Enter and removes it again', async () => {
+    const user = userEvent.setup();
     const createdPath: AllowedPath = {
       id: 'path-2',
       path: '/workspace/new-dir',
@@ -82,7 +83,7 @@ describe('AllowedPathsPanel', () => {
     render(<AllowedPathsPanel />);
 
     const input = await screen.findByTestId('allowed-path-input');
-    await userEvent.type(input, '/workspace/new-dir{enter}');
+    await user.type(input, '/workspace/new-dir{enter}');
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -96,7 +97,7 @@ describe('AllowedPathsPanel', () => {
     expect(input).toHaveValue('');
     expect(await screen.findByText('/workspace/new-dir')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByTestId('allowed-path-remove-path-2'));
+    await user.click(screen.getByTestId('allowed-path-remove-path-2'));
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(
@@ -107,6 +108,7 @@ describe('AllowedPathsPanel', () => {
   });
 
   it('shows a manual-entry error when the native directory picker is unavailable', async () => {
+    const user = userEvent.setup();
     installFetchQueue({
       'GET /api/allowed-paths': [[]],
     });
@@ -114,13 +116,14 @@ describe('AllowedPathsPanel', () => {
     render(<AllowedPathsPanel />);
 
     const input = await screen.findByTestId('allowed-path-input');
-    await userEvent.click(screen.getByTitle('Pick folder (if browser supports it)'));
+    await user.click(screen.getByTitle('Pick folder (if browser supports it)'));
 
     expect(await screen.findByText(/Native folder picker is not available/i)).toBeInTheDocument();
     expect(input).toHaveFocus();
   });
 
   it('uses the native picker result as a hint and surfaces unexpected picker errors', async () => {
+    const user = userEvent.setup();
     installFetchQueue({
       'GET /api/allowed-paths': [[], []],
     });
@@ -131,7 +134,7 @@ describe('AllowedPathsPanel', () => {
     setDirectoryPicker(successPicker);
 
     const input = await screen.findByTestId('allowed-path-input');
-    await userEvent.click(screen.getByTitle('Pick folder (if browser supports it)'));
+    await user.click(screen.getByTitle('Pick folder (if browser supports it)'));
 
     await waitFor(() => {
       expect(successPicker).toHaveBeenCalled();
@@ -146,12 +149,13 @@ describe('AllowedPathsPanel', () => {
 
     rerender(<AllowedPathsPanel />);
     await screen.findByTestId('allowed-path-input');
-    await userEvent.click(screen.getByTitle('Pick folder (if browser supports it)'));
+    await user.click(screen.getByTitle('Pick folder (if browser supports it)'));
 
     expect(await screen.findByText('Picker crashed')).toBeInTheDocument();
   });
 
   it('ignores AbortError from the native directory picker', async () => {
+    const user = userEvent.setup();
     installFetchQueue({
       'GET /api/allowed-paths': [[]],
     });
@@ -166,7 +170,7 @@ describe('AllowedPathsPanel', () => {
     render(<AllowedPathsPanel />);
 
     await screen.findByTestId('allowed-path-input');
-    await userEvent.click(screen.getByTitle('Pick folder (if browser supports it)'));
+    await user.click(screen.getByTitle('Pick folder (if browser supports it)'));
 
     await waitFor(() => {
       expect(picker).toHaveBeenCalled();

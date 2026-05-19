@@ -44,6 +44,7 @@ describe('MCPPanel', () => {
   });
 
   it('deduplicates loaded servers, shows counts, and opens settings from the header', async () => {
+    const user = userEvent.setup();
     apiGet.mockResolvedValueOnce({
       data: [SERVER_ALPHA, { ...SERVER_ALPHA, toolCount: 999 }, SERVER_BETA],
     });
@@ -56,11 +57,12 @@ describe('MCPPanel', () => {
     expect(await screen.findByText('2 servers · 1000 tools')).toBeInTheDocument();
     expect(screen.getByText('Socket closed')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByTestId('mcp-open-settings'));
+    await user.click(screen.getByTestId('mcp-open-settings'));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
   it('loads tools on expansion and strips backend MCP prefixes from tool names', async () => {
+    const user = userEvent.setup();
     const tools: MCPTool[] = [
       {
         name: 'mcp_alpha_read_file',
@@ -96,7 +98,7 @@ describe('MCPPanel', () => {
 
     render(<MCPPanel onOpenSettings={vi.fn()} />);
 
-    await userEvent.click(await screen.findByRole('button', { name: /Alpha/i }));
+    await user.click(await screen.findByRole('button', { name: /Alpha/i }));
 
     expect(await screen.findByText('read_file')).toBeInTheDocument();
     expect(screen.getByText('list_prompts')).toBeInTheDocument();
@@ -104,6 +106,7 @@ describe('MCPPanel', () => {
   });
 
   it('restarts a server and refreshes the list afterwards', async () => {
+    const user = userEvent.setup();
     apiGet
       .mockResolvedValueOnce({ data: [SERVER_ALPHA] })
       .mockResolvedValueOnce({ data: [{ ...SERVER_ALPHA, status: 'connecting' }] });
@@ -112,7 +115,7 @@ describe('MCPPanel', () => {
     render(<MCPPanel onOpenSettings={vi.fn()} />);
 
     await screen.findByText('Alpha');
-    await userEvent.click(screen.getByTestId('mcp-restart'));
+    await user.click(screen.getByTestId('mcp-restart'));
 
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith('/api/mcp/servers/alpha/restart');
@@ -121,13 +124,14 @@ describe('MCPPanel', () => {
   });
 
   it('shows the empty state action when no servers are configured', async () => {
+    const user = userEvent.setup();
     apiGet.mockResolvedValueOnce({ data: [] });
     const onOpenSettings = vi.fn();
 
     render(<MCPPanel onOpenSettings={onOpenSettings} />);
 
     expect(await screen.findByText(/No MCP servers configured/i)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /Configure in Settings/i }));
+    await user.click(screen.getByRole('button', { name: /Configure in Settings/i }));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 });
