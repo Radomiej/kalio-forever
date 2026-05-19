@@ -186,6 +186,9 @@ async function terminateProcess(child) {
   if (process.platform === 'win32') {
     const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' });
     await once(killer, 'exit');
+    if (child.exitCode === null && !child.killed) {
+      child.kill();
+    }
     await Promise.race([
       once(child, 'exit'),
       new Promise((resolvePromise) => {

@@ -10,7 +10,7 @@ import { AgentTurnBubble } from './AgentTurnBubble';
 import { ChatInput } from './ChatInput';
 import { useContextUsage } from './hooks/useContextUsage';
 import { useChatSessionActivation } from './hooks/useChatSessionActivation';
-import { computeAnsweredCallIds, buildConversationTimeline, buildTurnsFromHistory } from './chatUtils';
+import { computeAnsweredCallIds, buildConversationTimeline, buildTurnsFromHistory, mergeFetchedMessages } from './chatUtils';
 import { apiClient } from '../../services/apiClient';
 import type { ChatMessage, Persona } from '@kalio/types';
 import {
@@ -452,6 +452,22 @@ export function ChatInterface() {
       appendCLIAgentChunk(payload.callId, payload.chunk);
     });
 
+    const offSessionStatus = eventBus.onSessionStatus((payload) => {
+      if (!payload.active || !payload.turnId) {
+        return;
+      }
+      if (!useAgentStore.getState().hasActiveLoopForSession(payload.sessionId)) {
+        addActiveAgentLoop(payload.sessionId, payload.turnId);
+      }
+      if (!useSessionStore.getState().getSessionActiveTurnId(payload.sessionId)) {
+        startAgentTurn(payload.turnId, payload.sessionId);
+      }
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setAwaitingFirstChunk(false);
+        setStreaming(true);
+      }
+    });
+
     const offSessionCreated = eventBus.onSessionCreated((session) => {
       if (!useSessionStore.getState().sessions.some((item) => item.id === session.id)) {
         addSession(session);
@@ -496,9 +512,11 @@ export function ChatInterface() {
           .then((data: ChatMessage[]) => {
             if (useSessionStore.getState().activeSessionId !== sid) return;
             const { setMessages: doSetMessages, setAgentTurns: doSetAgentTurns } = useSessionStore.getState();
-            doSetMessages(data);
+            const currentMessages = useSessionStore.getState().getSessionMessages(sid);
+            const mergedMessages = mergeFetchedMessages(currentMessages, data);
+            doSetMessages(mergedMessages);
             if (!useAgentStore.getState().hasActiveLoopForSession(sid)) {
-              doSetAgentTurns(buildTurnsFromHistory(data, sid));
+              doSetAgentTurns(buildTurnsFromHistory(mergedMessages, sid));
             }
           })
           .catch((err: unknown) => {
@@ -520,6 +538,7 @@ export function ChatInterface() {
       offContext();
       offToolResult();
       offCLIAgentProgress();
+      offSessionStatus();
       offSessionCreated();
       offRaAppNative();
       offReconnect();

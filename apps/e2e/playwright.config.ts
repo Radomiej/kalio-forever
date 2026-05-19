@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
-const PROCESS = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+const PROCESS = (globalThis as { process?: { env?: Record<string, string | undefined>; platform?: string } }).process;
 const repoRoot = resolve(__dirname, '../..');
 
 if (PROCESS?.env) {
@@ -15,6 +15,7 @@ if (PROCESS?.env) {
 
 const CI = PROCESS?.env?.CI;
 const PLAYWRIGHT_BASE_URL = PROCESS?.env?.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
+const packageManagerCommand = PROCESS?.platform === 'win32' ? 'corepack pnpm' : 'pnpm';
 
 export default defineConfig({
   testDir: './tests',
@@ -33,7 +34,7 @@ export default defineConfig({
   },
 
   webServer: {
-    command: 'pnpm run stack:playwright',
+    command: `${packageManagerCommand} run stack:playwright`,
     url: PLAYWRIGHT_BASE_URL,
     reuseExistingServer: !CI,
     timeout: 240_000,

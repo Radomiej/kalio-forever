@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { nanoid } from 'nanoid';
 import type { SocketEvents } from '@kalio/types';
 import { ChatService } from './chat.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
@@ -10,11 +11,20 @@ const QUEUE_CAP = 10;
 
 interface ActiveSlot {
   donePromise: Promise<void>;
+  turnId: string;
+  startedAt: number;
 }
 
 interface QueuedItem {
   payload: ChatSendPayload;
   emit: EmitFn;
+}
+
+export interface SessionRuntimeStatus {
+  sessionId: string;
+  active: boolean;
+  turnId?: string;
+  queueLength: number;
 }
 
 /**
@@ -58,15 +68,15 @@ export class SessionPipelineService {
     //   { kind: 'wait', wait: Promise } → interrupt fired, must drain
     //                                      the prior turn before dispatching
     const decision = await this.mutex.runExclusive<
-      | { kind: 'dispatch' }
+      | { kind: 'dispatch'; turnId: string }
       | { kind: 'queued' }
       | { kind: 'rejected' }
-      | { kind: 'interrupt'; prior: Promise<void> }
+      | { kind: 'interrupt'; prior: Promise<void>; turnId: string }
     >(sid, async () => {
       if (isInterrupt && this.active.has(sid)) {
         this.chat.abort(sid);
         const slot = this.active.get(sid);
-        return { kind: 'interrupt', prior: slot?.donePromise ?? Promise.resolve() };
+        return { kind: 'interrupt', prior: slot?.donePromise ?? Promise.resolve(), turnId: nanoid() };
       }
       if (this.active.has(sid)) {
         const queue = this.queues.get(sid) ?? [];
@@ -90,8 +100,9 @@ export class SessionPipelineService {
       }
       // Idle session: claim the active slot before releasing the lock so
       // any concurrent submit will see us as active.
-      this.active.set(sid, { donePromise: Promise.resolve() });
-      return { kind: 'dispatch' };
+      const turnId = nanoid();
+      this.active.set(sid, { donePromise: Promise.resolve(), turnId, startedAt: Date.now() });
+      return { kind: 'dispatch', turnId };
     });
 
     if (decision.kind === 'queued' || decision.kind === 'rejected') return;
@@ -106,11 +117,11 @@ export class SessionPipelineService {
       // Re-claim the slot atomically before dispatching the interrupting
       // payload (the prior turn just released it).
       await this.mutex.runExclusive(sid, async () => {
-        this.active.set(sid, { donePromise: Promise.resolve() });
+        this.active.set(sid, { donePromise: Promise.resolve(), turnId: decision.turnId, startedAt: Date.now() });
       });
     }
 
-    await this.runWithDrain(payload, emit);
+    await this.runWithDrain(payload, emit, decision.turnId);
   }
 
   /**
@@ -142,6 +153,17 @@ export class SessionPipelineService {
     return new Set(this.active.keys());
   }
 
+  getSessionStatus(sessionId: string): SessionRuntimeStatus {
+    const slot = this.active.get(sessionId);
+    const queueLength = this.queues.get(sessionId)?.length ?? 0;
+    return {
+      sessionId,
+      active: Boolean(slot),
+      ...(slot ? { turnId: slot.turnId } : {}),
+      queueLength,
+    };
+  }
+
   /**
    * Cancel the in-flight turn (if any) and drop any queued items for the
    * given session. Used on socket disconnect.
@@ -153,16 +175,16 @@ export class SessionPipelineService {
     this.queues.delete(sessionId);
   }
 
-  private async runWithDrain(payload: ChatSendPayload, emit: EmitFn): Promise<void> {
+  private async runWithDrain(payload: ChatSendPayload, emit: EmitFn, turnId: string): Promise<void> {
     const sid = payload.sessionId;
-    let current: { payload: ChatSendPayload; emit: EmitFn } | null = { payload, emit };
+    let current: { payload: ChatSendPayload; emit: EmitFn; turnId: string } | null = { payload, emit, turnId };
     while (current) {
-      await this.runOne(current.payload, current.emit);
+      await this.runOne(current.payload, current.emit, current.turnId);
       // Pop next queued item OR release active slot, atomically.
       // Without the mutex a concurrent submit could observe `active=false`
       // (briefly between iterations) and start a parallel drain.
       current = await this.mutex.runExclusive<
-        { payload: ChatSendPayload; emit: EmitFn } | null
+        { payload: ChatSendPayload; emit: EmitFn; turnId: string } | null
       >(sid, async () => {
         const queue = this.queues.get(sid);
         if (!queue || queue.length === 0) {
@@ -172,15 +194,18 @@ export class SessionPipelineService {
         }
         const next = queue.shift()!;
         // Keep `active` set so concurrent submits enqueue rather than dispatch.
-        return next;
+        const nextTurnId = nanoid();
+        this.active.set(sid, { donePromise: Promise.resolve(), turnId: nextTurnId, startedAt: Date.now() });
+        return { ...next, turnId: nextTurnId };
       });
     }
   }
 
-  private async runOne(payload: ChatSendPayload, emit: EmitFn): Promise<void> {
+  private async runOne(payload: ChatSendPayload, emit: EmitFn, turnId: string): Promise<void> {
     const sid = payload.sessionId;
+    const startedAt = this.active.get(sid)?.startedAt ?? Date.now();
     const donePromise = this.chat
-      .handleTurn(sid, payload.content, payload.personaId, emit, payload.attachments)
+      .handleTurn(sid, payload.content, payload.personaId, emit, payload.attachments, turnId)
       .catch((err) => {
         // ChatService.handleTurn already swallows its own errors, but be
         // defensive so a thrown error never wedges the pipeline state.
@@ -190,7 +215,7 @@ export class SessionPipelineService {
       });
 
     // Update donePromise so an interrupt waiter can observe completion.
-    this.active.set(sid, { donePromise });
+    this.active.set(sid, { donePromise, turnId, startedAt });
     await donePromise;
   }
 }

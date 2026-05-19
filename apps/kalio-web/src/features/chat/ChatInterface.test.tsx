@@ -84,6 +84,7 @@ vi.mock('../../services/eventBus', () => ({
     onRaAppNativeResult: (h: (...args: unknown[]) => void) => capture('raapp:native_result', h),
     onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
     onToolArgProgress: (h: (...args: unknown[]) => void) => capture('tool:arg_progress', h),
+    onSessionStatus: (h: (...args: unknown[]) => void) => capture('session:status', h),
     onReconnect: (h: (...args: unknown[]) => void) => capture('socket:reconnect', h),
     identifySession: mockIdentifySession,
     sendMessage: mockSendMessage,
@@ -241,6 +242,8 @@ vi.mock('../../store/sessionStore', () => ({
         pendingRAAppId: null,
         setPendingMessage: mockSetPendingMessage,
         setPendingRAAppId: mockSetPendingRAAppId,
+        setMessages,
+        setAgentTurns,
         updateSession,
         streamingChunks: mockStreamingChunks,
         thinkingChunks: mockThinkingChunks,
@@ -345,6 +348,49 @@ describe('ChatInterface event wiring', () => {
     expect(mockIdentifySession).toHaveBeenCalledTimes(1);
     expect(mockIdentifySession).toHaveBeenCalledWith('session-1');
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+  });
+
+  it('REGRESSION: reconnect history reload merges server history with local optimistic messages', async () => {
+    const localMessage: ChatMessage = {
+      id: 'local-user-1',
+      sessionId: 'session-1',
+      role: 'user',
+      content: 'still local',
+      createdAt: 10,
+    };
+    mockMessages = [localMessage];
+    await renderChatInterface();
+    setMessages.mockClear();
+    setAgentTurns.mockClear();
+    getSessionMessages.mockReturnValueOnce([localMessage]);
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([]),
+    });
+
+    await emitEvent('socket:reconnect', undefined);
+
+    expect(setMessages).toHaveBeenCalledWith([localMessage]);
+    expect(setAgentTurns).toHaveBeenCalledWith(
+      expect.any(Array),
+    );
+  });
+
+  it('REGRESSION: active session status replay restores the live agent turn after reconnect', async () => {
+    await renderChatInterface();
+
+    await emitEvent('session:status', {
+      sessionId: 'session-1',
+      active: true,
+      turnId: 'turn-restored',
+      queueLength: 0,
+    });
+
+    expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-restored');
+    expect(startAgentTurn).toHaveBeenCalledWith('turn-restored', 'session-1');
+    expect(setStreaming).toHaveBeenCalledWith(true);
   });
 
   it('REGRESSION: tool:start creates a running activity in agentStore', async () => {

@@ -28,6 +28,7 @@ describe('ChatGateway', () => {
       submit: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
       abortAll: vi.fn(),
+      getSessionStatus: vi.fn().mockReturnValue({ sessionId: 'session-1', active: false, queueLength: 0 }),
     } as unknown as SessionPipelineService;
 
     sessions = {
@@ -235,6 +236,24 @@ describe('ChatGateway', () => {
       gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
 
       expect(client.emit).toHaveBeenCalledWith('tool:confirmation_required', pending);
+    });
+
+    it('REGRESSION: replays active runtime status for the re-identified session', async () => {
+      (pipeline.getSessionStatus as ReturnType<typeof vi.fn>).mockReturnValue({
+        sessionId: 'session-2',
+        active: true,
+        turnId: 'turn-live',
+        queueLength: 2,
+      });
+
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
+
+      expect(client.emit).toHaveBeenCalledWith('session:status', {
+        sessionId: 'session-2',
+        active: true,
+        turnId: 'turn-live',
+        queueLength: 2,
+      });
     });
 
     it('REGRESSION: re-identifying the master session replays child confirmations and lets the socket confirm them', async () => {

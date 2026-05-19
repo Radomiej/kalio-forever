@@ -47,13 +47,14 @@ export class ChatService {
     personaId: string,
     emit: EmitFn,
     attachments?: import('@kalio/types').ChatAttachment[],
+    suppliedTurnId?: string,
   ): Promise<void> {
     const controller = new AbortController();
     this.abortControllers.set(sessionId, controller);
 
     const firstMessageId = nanoid();
     let lastMessageId = firstMessageId;
-    const turnId = nanoid();
+    const turnId = suppliedTurnId ?? nanoid();
     // Tracks whether at least one chat:chunk was emitted so the FE can
     // choose between appending an error to an existing bubble (hadContent=true)
     // vs rolling back an empty bubble and offering retry (hadContent=false).

@@ -532,6 +532,7 @@ export interface SocketEvents {
   // Sessions — server → client
   'session:created': ChatSession;
   'session:updated': Pick<ChatSession, 'id' | 'title' | 'updatedAt'>;
+  'session:status': { sessionId: ID; active: boolean; turnId?: ID; queueLength: number };
 
   // Session re-registration — client → server (sent after reconnect)
   'session:identify': { sessionId: ID };

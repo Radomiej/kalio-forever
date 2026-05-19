@@ -16,7 +16,13 @@ const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
 const apiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? 'http://localhost:3316';
 const webUrl = new URL(baseUrl);
 const apiUrl = new URL(apiOrigin);
-const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+const pnpmCandidates = process.platform === 'win32'
+  ? [
+      { command: 'pnpm.cmd', argsPrefix: [] },
+      { command: 'corepack.cmd', argsPrefix: ['pnpm'] },
+    ]
+  : [{ command: 'pnpm', argsPrefix: [] }];
+let selectedPnpm = pnpmCandidates[0];
 
 const sharedEnv = {
   ...process.env,
@@ -68,35 +74,47 @@ function quoteShellArg(arg) {
 }
 
 function spawnProcess(command, args, options) {
-  if (process.platform !== 'win32' || command !== pnpmCommand) {
-    return spawn(command, args, options);
+  if (process.platform === 'win32' && command.endsWith('.cmd')) {
+    const cmd = process.env.ComSpec ?? 'cmd.exe';
+    const commandLine = [command.replace(/\.cmd$/i, ''), ...args].map(quoteShellArg).join(' ');
+    return spawn(cmd, ['/d', '/s', '/c', commandLine], options);
   }
 
-  const cmd = process.env.ComSpec ?? 'cmd.exe';
-  const commandLine = ['pnpm', ...args].map(quoteShellArg).join(' ');
-  return spawn(cmd, ['/d', '/s', '/c', commandLine], options);
+  return spawn(command, args, options);
 }
 
 async function runPnpm(label, args, env) {
-  await new Promise((resolvePromise, reject) => {
-    const child = spawnProcess(pnpmCommand, args, {
-      cwd: repoRoot,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+  const failures = [];
 
-    attachOutput(child);
+  for (const candidate of pnpmCandidates) {
+    try {
+      await new Promise((resolvePromise, reject) => {
+        const child = spawnProcess(candidate.command, [...candidate.argsPrefix, ...args], {
+          cwd: repoRoot,
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
 
-    child.once('error', reject);
-    child.once('exit', (code, signal) => {
-      if (code === 0) {
-        resolvePromise();
-        return;
-      }
+        attachOutput(child);
 
-      reject(new Error(`${label} failed with ${renderExit(code, signal)}`));
-    });
-  });
+        child.once('error', reject);
+        child.once('exit', (code, signal) => {
+          if (code === 0) {
+            resolvePromise();
+            return;
+          }
+
+          reject(new Error(`${candidate.command} exited with ${renderExit(code, signal)}`));
+        });
+      });
+      selectedPnpm = candidate;
+      return;
+    } catch (err) {
+      failures.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  throw new Error(`${label} failed: ${failures.join('; ')}`);
 }
 
 async function waitForUrl(url, timeoutMs) {
@@ -204,8 +222,8 @@ async function main() {
   console.log(`[playwright-stack] starting frontend preview on ${webUrl.origin}`);
   spawnManaged(
     'frontend',
-    pnpmCommand,
-    ['--filter', 'kalio-web', 'exec', 'vite', 'preview', '--host', webUrl.hostname, '--port', webUrl.port || '5288', '--strictPort'],
+    selectedPnpm.command,
+    [...selectedPnpm.argsPrefix, '--filter', 'kalio-web', 'exec', 'vite', 'preview', '--host', webUrl.hostname, '--port', webUrl.port || '5288', '--strictPort'],
     repoRoot,
     frontendEnv,
   );
