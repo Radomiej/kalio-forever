@@ -1,43 +1,12 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { config as loadEnv } from 'dotenv';
 
-const scriptDir = dirname(fileURLToPath(import.meta.url));
+const scriptPath = fileURLToPath(import.meta.url);
+const scriptDir = dirname(scriptPath);
 const repoRoot = resolve(scriptDir, '../../..');
-const apiDir = resolve(repoRoot, 'apps/kalio-api');
-const envFilePath = resolve(repoRoot, '.env.test');
-
-const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
-const apiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? 'http://localhost:3316';
-const webUrl = new URL(baseUrl);
-const apiUrl = new URL(apiOrigin);
-const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-
-const sharedEnv = {
-  ...process.env,
-  NODE_ENV: 'test',
-  LLM_PROVIDER: process.env.LLM_PROVIDER ?? 'mock',
-  LLM_API_KEY: process.env.LLM_API_KEY ?? 'mock',
-  LLM_BASE_URL: process.env.LLM_BASE_URL ?? 'mock',
-  LLM_MODEL: process.env.LLM_MODEL ?? 'mock',
-  CREDENTIALS_MASTER_KEY: process.env.CREDENTIALS_MASTER_KEY ?? 'playwright-test-master-key-32-chars-minimum',
-};
-
-const backendEnv = {
-  ...sharedEnv,
-  PORT: apiUrl.port || '3316',
-  DATABASE_PATH: process.env.DATABASE_PATH ?? './data/kalio-e2e.db',
-  WORKSPACE_ROOT: process.env.WORKSPACE_ROOT ?? './data/workspaces-e2e',
-  CORS_ORIGIN: webUrl.origin,
-};
-
-const frontendEnv = {
-  ...process.env,
-  VITE_API_URL: apiUrl.origin,
-  VITE_WS_URL: apiUrl.origin,
-  VITE_PORT: webUrl.port || '5288',
-};
-
 const managedChildren = [];
 let shuttingDown = false;
 
@@ -62,7 +31,67 @@ function quoteShellArg(arg) {
   return `"${arg.replace(/"/g, '\\"')}"`;
 }
 
+export function getEnvFilePath(baseRepoRoot = repoRoot) {
+  return resolve(baseRepoRoot, '.env.test');
+}
+
+export function loadOptionalEnvFile(envFilePath = getEnvFilePath()) {
+  if (!existsSync(envFilePath)) {
+    return false;
+  }
+
+  loadEnv({ path: envFilePath, override: false });
+  return true;
+}
+
+export function getBackendStartArgs() {
+  return ['dist/main.js'];
+}
+
+export function createStackRuntime(baseRepoRoot = repoRoot) {
+  loadOptionalEnvFile(getEnvFilePath(baseRepoRoot));
+
+  const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
+  const apiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? 'http://localhost:3316';
+  const webUrl = new URL(baseUrl);
+  const apiUrl = new URL(apiOrigin);
+  const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+  const sharedEnv = {
+    ...process.env,
+    NODE_ENV: 'test',
+    LLM_PROVIDER: process.env.LLM_PROVIDER ?? 'mock',
+    LLM_API_KEY: process.env.LLM_API_KEY ?? 'mock',
+    LLM_BASE_URL: process.env.LLM_BASE_URL ?? 'mock',
+    LLM_MODEL: process.env.LLM_MODEL ?? 'mock',
+    CREDENTIALS_MASTER_KEY: process.env.CREDENTIALS_MASTER_KEY ?? 'playwright-test-master-key-32-chars-minimum',
+  };
+  const backendEnv = {
+    ...sharedEnv,
+    PORT: apiUrl.port || '3316',
+    DATABASE_PATH: process.env.DATABASE_PATH ?? './data/kalio-e2e.db',
+    WORKSPACE_ROOT: process.env.WORKSPACE_ROOT ?? './data/workspaces-e2e',
+    CORS_ORIGIN: webUrl.origin,
+  };
+  const frontendEnv = {
+    ...process.env,
+    VITE_API_URL: apiUrl.origin,
+    VITE_WS_URL: apiUrl.origin,
+    VITE_PORT: webUrl.port || '5288',
+  };
+
+  return {
+    apiDir: resolve(baseRepoRoot, 'apps/kalio-api'),
+    apiUrl,
+    backendEnv,
+    frontendEnv,
+    pnpmCommand,
+    webUrl,
+  };
+}
+
 function spawnProcess(command, args, options) {
+  const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+
   if (process.platform !== 'win32' || command !== pnpmCommand) {
     return spawn(command, args, options);
   }
@@ -74,6 +103,7 @@ function spawnProcess(command, args, options) {
 
 async function runPnpm(label, args, env) {
   await new Promise((resolvePromise, reject) => {
+    const { pnpmCommand } = createStackRuntime();
     const child = spawnProcess(pnpmCommand, args, {
       cwd: repoRoot,
       env,
@@ -186,6 +216,8 @@ process.on('SIGTERM', () => {
 });
 
 async function main() {
+  const { apiDir, apiUrl, backendEnv, frontendEnv, pnpmCommand, webUrl } = createStackRuntime();
+
   console.log('[playwright-stack] building backend');
   await runPnpm('Backend build', ['--filter', 'kalio-api', 'build'], backendEnv);
 
@@ -193,7 +225,7 @@ async function main() {
   await runPnpm('Frontend build', ['--filter', 'kalio-web', 'build'], frontendEnv);
 
   console.log(`[playwright-stack] starting backend on ${apiUrl.origin}`);
-  spawnManaged('backend', process.execPath, [`--env-file=${envFilePath}`, 'dist/main.js'], apiDir, backendEnv);
+  spawnManaged('backend', process.execPath, getBackendStartArgs(), apiDir, backendEnv);
   await waitForUrl(`${apiUrl.origin}/api/health`, 60_000);
 
   console.log(`[playwright-stack] starting frontend preview on ${webUrl.origin}`);
@@ -209,7 +241,9 @@ async function main() {
   console.log('[playwright-stack] backend and frontend are ready');
 }
 
-main().catch(async (err) => {
-  console.error('[playwright-stack] failed to start', err);
-  await shutdown(1);
-});
+if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
+  main().catch(async (err) => {
+    console.error('[playwright-stack] failed to start', err);
+    await shutdown(1);
+  });
+}

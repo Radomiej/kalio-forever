@@ -1,58 +1,44 @@
-import type { RaAppNativeResult, RaAppPendingApproval } from '@kalio/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatTestSupportRaAppController } from './chat-test-support-raapp.controller';
 
-function makeService() {
-  return {
-    seedRaAppHitlFixture: vi.fn(),
-  };
-}
-
 describe('ChatTestSupportRaAppController', () => {
-  let service: ReturnType<typeof makeService>;
   let controller: ChatTestSupportRaAppController;
+  let chatTestSupport: {
+    seedRaAppHitlFixture: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
-    service = makeService();
-    controller = new ChatTestSupportRaAppController(service as never);
+    chatTestSupport = {
+      seedRaAppHitlFixture: vi.fn().mockResolvedValue({
+        toolCallId: 'tool-1',
+        pendingApprovals: [{ id: 'approval-1' }],
+        nativeResults: [{ type: 'success' }],
+      }),
+    };
+    controller = new ChatTestSupportRaAppController(chatTestSupport as never);
   });
 
-  it('delegates seeded RA-App HITL payloads to ChatTestSupportService', async () => {
-    const response: {
-      toolCallId: string;
-      pendingApprovals: RaAppPendingApproval[];
-      nativeResults: RaAppNativeResult[];
-    } = {
-      toolCallId: 'tc-1',
-      pendingApprovals: [{
-        id: 'approval-1',
-        system: 'vfs_write',
-        displayLabel: 'Write file',
-        args: { path: 'file.txt' },
-      }],
-      nativeResults: [],
-    };
-    service.seedRaAppHitlFixture.mockResolvedValue(response);
-
+  it('forwards the seed payload to ChatTestSupportService', async () => {
     const body = {
-      sessionId: 'sess-1',
-      toolCallId: 'tc-1',
-      promptMessage: 'Prompt',
-      assistantMessage: 'Assistant',
+      sessionId: 'session-1',
+      toolCallId: 'tool-1',
+      promptMessage: 'prompt',
+      assistantMessage: 'assistant',
       block: {
         type: 'html' as const,
         mode: 'interactive' as const,
-        content: '<html></html>',
+        content: '<div>hello</div>',
       },
-      approvals: [{
-        id: 'approval-1',
-        system: 'vfs_write',
-        displayLabel: 'Write file',
-        args: { path: 'file.txt' },
-      }],
+      approvals: [],
     };
 
-    await expect(controller.seed(body)).resolves.toEqual(response);
-    expect(service.seedRaAppHitlFixture).toHaveBeenCalledWith(body);
+    await expect(controller.seed(body)).resolves.toEqual({
+      toolCallId: 'tool-1',
+      pendingApprovals: [{ id: 'approval-1' }],
+      nativeResults: [{ type: 'success' }],
+    });
+    expect(chatTestSupport.seedRaAppHitlFixture).toHaveBeenCalledWith(body);
+    expect(Reflect.getMetadata('path', ChatTestSupportRaAppController)).toBe('test-support/raapp-hitl');
+    expect(Reflect.getMetadata('path', ChatTestSupportRaAppController.prototype.seed)).toBe('seed');
   });
 });
