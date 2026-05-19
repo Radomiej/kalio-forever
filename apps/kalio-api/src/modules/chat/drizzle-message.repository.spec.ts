@@ -58,8 +58,13 @@ describe('DrizzleMessageRepository', () => {
     });
   });
 
-  it('maps stored rows to chat messages and persists new messages', async () => {
+  it('returns without error when ensureSession finds the session', async () => {
     selectSessionResult.mockResolvedValue({ id: 'session-1' });
+
+    await expect(repository.ensureSession('session-1', 'persona-1')).resolves.toBeUndefined();
+  });
+
+  it('maps stored rows to chat messages', async () => {
     selectMessagesResult.mockResolvedValue([
       {
         id: 'msg-1',
@@ -74,7 +79,6 @@ describe('DrizzleMessageRepository', () => {
       },
     ]);
 
-    await expect(repository.ensureSession('session-1', 'persona-1')).resolves.toBeUndefined();
     await expect(repository.loadHistory('session-1')).resolves.toEqual([
       {
         id: 'msg-1',
@@ -88,7 +92,9 @@ describe('DrizzleMessageRepository', () => {
         createdAt: 1_700_000_000_000,
       },
     ]);
+  });
 
+  it('persists new messages with nullable optional fields', async () => {
     const message: ChatMessage = {
       id: 'msg-2',
       sessionId: 'session-1',

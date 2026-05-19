@@ -3,12 +3,13 @@ import { ChatTestSupportRaAppController } from './chat-test-support-raapp.contro
 
 describe('ChatTestSupportRaAppController', () => {
   let controller: ChatTestSupportRaAppController;
-  let chatTestSupport: {
-    seedRaAppHitlFixture: ReturnType<typeof vi.fn>;
-  };
 
   beforeEach(() => {
-    chatTestSupport = {
+    controller = new ChatTestSupportRaAppController({ seedRaAppHitlFixture: vi.fn() } as never);
+  });
+
+  it('forwards the seed payload to ChatTestSupportService', async () => {
+    const chatTestSupport = {
       seedRaAppHitlFixture: vi.fn().mockResolvedValue({
         toolCallId: 'tool-1',
         pendingApprovals: [{ id: 'approval-1' }],
@@ -16,9 +17,7 @@ describe('ChatTestSupportRaAppController', () => {
       }),
     };
     controller = new ChatTestSupportRaAppController(chatTestSupport as never);
-  });
 
-  it('forwards the seed payload to ChatTestSupportService', async () => {
     const body = {
       sessionId: 'session-1',
       toolCallId: 'tool-1',

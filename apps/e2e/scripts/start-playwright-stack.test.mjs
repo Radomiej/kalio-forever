@@ -38,6 +38,7 @@ describe('start-playwright-stack', () => {
 
     assert.equal(getEnvFilePath(repoRoot), join(repoRoot, '.env.test'));
     assert.equal(loadOptionalEnvFile(getEnvFilePath(repoRoot)), false);
+    assert.equal(process.env.PLAYWRIGHT_LOADED_FROM_FILE, undefined);
   });
 
   it('loads .env.test into process.env without overriding CI-provided values', () => {
