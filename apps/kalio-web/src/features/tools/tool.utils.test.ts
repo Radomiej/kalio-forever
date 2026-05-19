@@ -15,6 +15,10 @@ describe('groupToolsByPrefix', () => {
   it('groups tools into the expected buckets in declaration order', () => {
     const result = groupToolsByPrefix([
       makeTool('run_subagent'),
+      makeTool('spawn_cli_agent'),
+      makeTool('message_cli_agent'),
+      makeTool('get_cli_agent_status'),
+      makeTool('stop_cli_agent'),
       makeTool('vfs_read'),
       makeTool('fs_write'),
       makeTool('kv_get'),
@@ -43,6 +47,14 @@ describe('groupToolsByPrefix', () => {
       'Images',
       'Skills',
       'Persona',
+    ]);
+
+    expect(result[0]?.tools.map((tool) => tool.name)).toEqual([
+      'run_subagent',
+      'spawn_cli_agent',
+      'message_cli_agent',
+      'get_cli_agent_status',
+      'stop_cli_agent',
     ]);
   });
 
@@ -73,5 +85,24 @@ describe('groupToolsByPrefix', () => {
     expect(result).toHaveLength(1);
     expect(result[0]?.label).toBe('Agent');
     expect(result[0]?.tools).toHaveLength(2);
+  });
+
+  it('keeps durable CLI session tools in the Agent bucket', () => {
+    const result = groupToolsByPrefix([
+      makeTool('spawn_cli_agent'),
+      makeTool('message_cli_agent'),
+      makeTool('get_cli_agent_status'),
+      makeTool('stop_cli_agent'),
+      makeTool('custom_tool'),
+    ]);
+
+    expect(result[0]).toMatchObject({ label: 'Agent' });
+    expect(result[0]?.tools.map((tool) => tool.name)).toEqual([
+      'spawn_cli_agent',
+      'message_cli_agent',
+      'get_cli_agent_status',
+      'stop_cli_agent',
+    ]);
+    expect(result[1]).toMatchObject({ label: 'Other' });
   });
 });

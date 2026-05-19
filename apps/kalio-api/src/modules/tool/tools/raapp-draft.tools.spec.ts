@@ -32,7 +32,7 @@ describe('RA-App draft tool metadata', () => {
 describe('RaAppExecuteDslTool', () => {
   let raapp: { execute: ReturnType<typeof vi.fn> };
   let effectsProcessor: { processSystemsYaml: ReturnType<typeof vi.fn> };
-  let hitl: { savePendingApprovals: ReturnType<typeof vi.fn> };
+  let hitl: { savePendingApprovals: ReturnType<typeof vi.fn>; resolvePendingApprovals: ReturnType<typeof vi.fn> };
   let vfs: { readFile: ReturnType<typeof vi.fn> };
   let tool: RaAppExecuteDslTool;
 
@@ -45,6 +45,7 @@ describe('RaAppExecuteDslTool', () => {
     };
     hitl = {
       savePendingApprovals: vi.fn().mockResolvedValue(undefined),
+      resolvePendingApprovals: vi.fn().mockResolvedValue({ pendingApprovals: [], nativeResults: [] }),
     };
     vfs = {
       readFile: vi.fn((sessionId: string, filePath: string) => {
@@ -91,6 +92,111 @@ describe('RaAppExecuteDslTool', () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('[raapp_execute_dsl] Unexpected VFS read error for drafts/draft-1/systems.yml'),
       expect.any(Error),
+    );
+  });
+
+  it('returns nativeResults without pendingApprovals when draft GUI approvals resolve server-side', async () => {
+    vfs.readFile.mockImplementation((sessionId: string, filePath: string) => {
+      if (filePath.endsWith('ui.gui')) return { sessionId, filePath, content: 'window { label { text = "Hello" } }' };
+      if (filePath.endsWith('systems.yml')) return { sessionId, filePath, content: 'systems: []' };
+      const err = new Error(`missing: ${filePath}`) as NodeJS.ErrnoException;
+      err.code = 'VFS_FILE_NOT_FOUND';
+      throw err;
+    });
+    effectsProcessor.processSystemsYaml.mockResolvedValue({
+      output: {},
+      pendingApprovals: [
+        { id: 'approval-1', system: 'test_write', args: { path: 'draft.txt' }, displayLabel: 'Write draft.txt' },
+      ],
+      entities: [],
+    });
+    hitl.resolvePendingApprovals.mockResolvedValue({
+      pendingApprovals: [],
+      nativeResults: [
+        { id: 'approval-1', system: 'test_write', status: 'executed', result: { path: 'draft.txt' } },
+      ],
+    });
+
+    const result = await tool.execute(makeRequest()) as Record<string, unknown>;
+
+    expect(hitl.resolvePendingApprovals).toHaveBeenCalledWith(
+      'call-1',
+      'sess-1',
+      expect.arrayContaining([expect.objectContaining({ id: 'approval-1' })]),
+    );
+    expect(result.pendingApprovals).toBeUndefined();
+    expect(result.nativeResults).toEqual([
+      expect.objectContaining({ id: 'approval-1', status: 'executed' }),
+    ]);
+  });
+
+  it('applies auto-approved native output patches back into draft GUI bindings', async () => {
+    vfs.readFile.mockImplementation((sessionId: string, filePath: string) => {
+      if (filePath.endsWith('ui.gui')) return { sessionId, filePath, content: 'window { label { text = "[output.writeResult.path]" } }' };
+      if (filePath.endsWith('systems.yml')) return { sessionId, filePath, content: 'systems: []' };
+      const err = new Error(`missing: ${filePath}`) as NodeJS.ErrnoException;
+      err.code = 'VFS_FILE_NOT_FOUND';
+      throw err;
+    });
+    effectsProcessor.processSystemsYaml.mockResolvedValue({
+      output: { result: 8 },
+      pendingApprovals: [
+        {
+          id: 'approval-1',
+          system: 'test_write',
+          args: { path: 'draft.txt' },
+          outputPath: 'output.writeResult',
+          displayLabel: 'Write draft.txt',
+        },
+      ],
+      entities: [],
+    });
+    hitl.resolvePendingApprovals.mockResolvedValue({
+      pendingApprovals: [],
+      nativeResults: [
+        { id: 'approval-1', system: 'test_write', status: 'executed', result: { path: 'draft.txt' } },
+      ],
+      outputPatches: [
+        { outputPath: 'output.writeResult', value: { path: 'draft.txt' } },
+      ],
+    });
+
+    await tool.execute(makeRequest());
+
+    expect(raapp.execute).toHaveBeenCalledWith(
+      { type: 'gui', mode: 'display', content: 'window { label { text = "[output.writeResult.path]" } }' },
+      { output: { writeResult: { path: 'draft.txt' }, result: 8 } },
+    );
+  });
+
+  it('passes request abortSignal into draft GUI native approval resolution', async () => {
+    vfs.readFile.mockImplementation((sessionId: string, filePath: string) => {
+      if (filePath.endsWith('ui.gui')) return { sessionId, filePath, content: 'window { label { text = "Hello" } }' };
+      if (filePath.endsWith('systems.yml')) return { sessionId, filePath, content: 'systems: []' };
+      const err = new Error(`missing: ${filePath}`) as NodeJS.ErrnoException;
+      err.code = 'VFS_FILE_NOT_FOUND';
+      throw err;
+    });
+    effectsProcessor.processSystemsYaml.mockResolvedValue({
+      output: {},
+      pendingApprovals: [
+        { id: 'approval-1', system: 'test_write', args: { path: 'draft.txt' }, displayLabel: 'Write draft.txt' },
+      ],
+      entities: [],
+    });
+    hitl.resolvePendingApprovals.mockResolvedValue({ pendingApprovals: [], nativeResults: [], outputPatches: [] });
+    const abortController = new AbortController();
+
+    await tool.execute({
+      ...makeRequest(),
+      abortSignal: abortController.signal,
+    } as ToolCallRequest);
+
+    expect(hitl.resolvePendingApprovals).toHaveBeenCalledWith(
+      'call-1',
+      'sess-1',
+      expect.any(Array),
+      abortController.signal,
     );
   });
 });

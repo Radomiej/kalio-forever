@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { eq, and, inArray } from 'drizzle-orm';
 import { DrizzleService } from '../../database/drizzle.service';
 import { raappPendingApprovals } from '../../database/schema';
@@ -6,6 +6,9 @@ import { NativeSystemRegistry } from './native/native-system-registry.service';
 import type { NativeSessionContext } from './native/native-system-registry.service';
 import type { PendingApproval } from './effects-processor.service';
 import { AuditService } from '../chat/audit.service';
+import { HitlPolicyService } from '../hitl/hitl-policy.service';
+import type { RaAppNativeResult, RaAppPendingApproval } from '@kalio/types';
+import type { RaAppOutputPatch } from './raapp-output-patches.util';
 
 export interface SavedApproval {
   id: string;
@@ -29,6 +32,12 @@ export interface ApproveResult {
   error?: string;
 }
 
+export interface ResolvePendingApprovalsResult {
+  pendingApprovals: RaAppPendingApproval[];
+  nativeResults: RaAppNativeResult[];
+  outputPatches: RaAppOutputPatch[];
+}
+
 /**
  * Manages the lifecycle of RA-App pending approvals:
  * save → approve/cancel → execute → store result.
@@ -41,6 +50,7 @@ export class RAAppHITLService {
     private readonly drizzle: DrizzleService,
     private readonly nativeRegistry: NativeSystemRegistry,
     private readonly audit: AuditService,
+    @Optional() @Inject(HitlPolicyService) private readonly hitlPolicy: HitlPolicyService | null,
   ) {}
 
   async savePendingApprovals(
@@ -134,6 +144,55 @@ export class RAAppHITLService {
     return results;
   }
 
+  async resolvePendingApprovals(
+    toolCallId: string,
+    sessionId: string,
+    approvals: PendingApproval[],
+    abortSignal?: AbortSignal,
+  ): Promise<ResolvePendingApprovalsResult> {
+    if (approvals.length === 0) {
+      return {
+        pendingApprovals: [],
+        nativeResults: [],
+        outputPatches: [],
+      };
+    }
+
+    const shouldAutoExecute = await this.shouldAutoExecuteBatch(toolCallId, sessionId, approvals, abortSignal);
+    await this.savePendingApprovals(toolCallId, sessionId, approvals);
+
+    if (!shouldAutoExecute) {
+      return {
+        pendingApprovals: approvals.map((approval) => ({
+          id: approval.id,
+          system: approval.system,
+          displayLabel: approval.displayLabel,
+          args: approval.args,
+        })),
+        nativeResults: [],
+        outputPatches: [],
+      };
+    }
+
+    const results = await this.executeApproved(
+      approvals.map((approval) => approval.id),
+      sessionId,
+    );
+    const outputPatches = this.buildOutputPatches(approvals, results);
+
+    return {
+      pendingApprovals: [],
+      nativeResults: results.map((result) => ({
+        id: result.id,
+        system: result.system,
+        status: result.status,
+        result: result.result,
+        error: result.error,
+      })),
+      outputPatches,
+    };
+  }
+
   async cancelApprovals(requestIds: string[], sessionId: string): Promise<{ toolCallId: string }> {
     if (requestIds.length === 0) return { toolCallId: '' };
 
@@ -187,5 +246,51 @@ export class RAAppHITLService {
       result: r.result as Record<string, unknown> | undefined,
       createdAt: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt as unknown as number),
     }));
+  }
+
+  private async shouldAutoExecuteBatch(
+    toolCallId: string,
+    sessionId: string,
+    approvals: PendingApproval[],
+    abortSignal?: AbortSignal,
+  ): Promise<boolean> {
+    if (!this.hitlPolicy) {
+      return false;
+    }
+
+    const resolutions = await Promise.all(
+      approvals.map((approval) => this.hitlPolicy!.resolveApproval({
+        kind: 'raapp_native',
+        sessionId,
+        name: approval.system,
+        args: approval.args,
+        abortSignal,
+        displayLabel: approval.displayLabel,
+        toolCallId,
+      })),
+    );
+
+    return resolutions.length > 0 && resolutions.every((resolution) => resolution.status === 'approved');
+  }
+
+  private buildOutputPatches(
+    approvals: PendingApproval[],
+    results: ApproveResult[],
+  ): RaAppOutputPatch[] {
+    const approvalsById = new Map(approvals.map((approval) => [approval.id, approval]));
+
+    return results.flatMap((result) => {
+      const approval = approvalsById.get(result.id);
+      if (!approval?.outputPath) {
+        return [];
+      }
+
+      return [{
+        outputPath: approval.outputPath,
+        value: result.status === 'executed'
+          ? result.result
+          : { error: result.error ?? 'Execution failed' },
+      }];
+    });
   }
 }

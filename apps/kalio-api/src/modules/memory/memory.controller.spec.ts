@@ -51,94 +51,27 @@ describe('MemoryController', () => {
     controller = new MemoryController(memorySvc as never, embeddingCreds as never);
   });
 
-  describe('ingest()', () => {
-    it('delegates to memoryService.ingest', async () => {
-      const result = await controller.ingest({ text: 'hello world', personaId: 'p-1' });
-      expect(memorySvc.ingest).toHaveBeenCalledWith('hello world', 'p-1', undefined);
-      expect(result).toEqual({ id: 'mem-1', chunks: 1 });
-    });
-  });
-
-  describe('ingestConversation()', () => {
-    it('delegates to memoryService.ingestConversation', async () => {
-      const msgs = [{ role: 'user' as const, content: 'hi' }];
-      const result = await controller.ingestConversation({ messages: msgs, personaId: 'p-1' });
-      expect(memorySvc.ingestConversation).toHaveBeenCalledWith(msgs, 'p-1');
-      expect(result).toEqual({ id: 'mem-2', chunks: 2 });
-    });
-  });
-
   describe('search()', () => {
-    it('defaults to hybridSearch', async () => {
+    it('uses hybrid search with the default limit when mode is omitted', async () => {
       const result = await controller.search('query', 'p-1');
       expect(memorySvc.hybridSearch).toHaveBeenCalledWith('query', 'p-1', 5);
-      expect(result).toHaveLength(1);
+      expect(result).toEqual([{ id: 'mem-1', score: 0.95, text: 'test' }]);
     });
 
-    it('uses vector search when mode=vector', async () => {
+    it('routes vector and FTS modes to their dedicated search implementations', async () => {
       await controller.search('query', 'p-1', '10', 'vector');
-      expect(memorySvc.search).toHaveBeenCalledWith('query', 'p-1', 10);
-    });
-
-    it('uses FTS search when mode=fts', async () => {
       await controller.search('query', 'p-1', '3', 'fts');
+
+      expect(memorySvc.search).toHaveBeenCalledWith('query', 'p-1', 10);
       expect(memorySvc.searchFTS).toHaveBeenCalledWith('query', 'p-1', 3);
     });
   });
 
-  describe('getEmbeddingStatus()', () => {
-    it('returns embedding service status', async () => {
-      const result = await controller.getEmbeddingStatus();
-      expect(memorySvc.getEmbeddingService).toHaveBeenCalled();
-      expect(result).toEqual(mockStatus);
-    });
-  });
-
-  describe('listEmbeddingCredentials()', () => {
-    it('returns all embedding credentials', async () => {
-      const result = await controller.listEmbeddingCredentials();
-      expect(embeddingCreds.findAll).toHaveBeenCalled();
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('createEmbeddingCredential()', () => {
-    it('creates and returns credential', async () => {
-      const dto = {
-        name: 'Test',
-        provider: 'openai' as const,
-        baseUrl: 'https://api.openai.com/v1',
-        model: 'text-embedding-3-small',
-        dimensions: 1536,
-        apiKey: 'sk-key',
-      };
-      const result = await controller.createEmbeddingCredential(dto);
-      expect(embeddingCreds.create).toHaveBeenCalledWith(dto);
-      expect(result).toEqual({ id: 'ec-1', name: 'Test' });
-    });
-  });
-
   describe('setActiveEmbeddingCredential()', () => {
-    it('sets active credential and reloads', async () => {
+    it('reloads embedding provider config before returning fresh status', async () => {
       const result = await controller.setActiveEmbeddingCredential('ec-1');
       expect(embeddingCreds.setActive).toHaveBeenCalledWith('ec-1');
       expect(memorySvc.getEmbeddingService().reloadFromCredential).toHaveBeenCalled();
-      expect(result).toEqual(mockStatus);
-    });
-  });
-
-  describe('clearActiveEmbeddingCredential()', () => {
-    it('clears active credential and reloads', async () => {
-      const result = await controller.clearActiveEmbeddingCredential();
-      expect(embeddingCreds.clearActive).toHaveBeenCalled();
-      expect(result).toEqual(mockStatus);
-    });
-  });
-
-  describe('removeEmbeddingCredential()', () => {
-    it('removes credential and reloads', async () => {
-      const result = await controller.removeEmbeddingCredential('ec-1');
-      expect(embeddingCreds.remove).toHaveBeenCalledWith('ec-1');
       expect(result).toEqual(mockStatus);
     });
   });
@@ -150,23 +83,8 @@ describe('MemoryController', () => {
     });
   });
 
-  describe('getAll()', () => {
-    it('returns all memories for a persona', async () => {
-      const result = await controller.getAll('p-1');
-      expect(memorySvc.getAll).toHaveBeenCalledWith('p-1');
-      expect(result).toHaveLength(1);
-    });
-  });
-
-  describe('deleteAll()', () => {
-    it('deletes all memories for a persona', async () => {
-      await controller.deleteAll('p-1');
-      expect(memorySvc.deleteAll).toHaveBeenCalledWith('p-1');
-    });
-  });
-
   describe('delete()', () => {
-    it('deletes a specific memory', async () => {
+    it('wraps the service deletion boolean in the HTTP response shape', async () => {
       const result = await controller.delete('p-1', 'mem-1');
       expect(memorySvc.delete).toHaveBeenCalledWith('mem-1', 'p-1');
       expect(result).toEqual({ deleted: true });

@@ -1,5 +1,6 @@
 import { ChevronDown, Terminal, CheckCircle2, XCircle } from 'lucide-react';
 import type { CLIAgentResult } from '@kalio/types';
+import { AGENT_LABELS } from './cli-agent-labels';
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -8,13 +9,6 @@ function formatDuration(ms: number): string {
   const s = Math.round((ms % 60_000) / 1000);
   return `${m}m ${s}s`;
 }
-
-/** Maps adapter id → display name */
-const AGENT_LABELS: Record<string, string> = {
-  copilot: 'GitHub Copilot CLI',
-  gemini: 'Google Gemini CLI',
-  claude: 'Claude Code',
-};
 
 interface Props {
   result: CLIAgentResult;

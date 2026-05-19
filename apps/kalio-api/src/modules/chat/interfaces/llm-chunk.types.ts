@@ -26,8 +26,17 @@ export interface DoneChunk {
   type: 'done';
 }
 
+/** Progress update while LLM is streaming tool call arguments (before tool:start fires) */
+export interface ToolArgProgressChunk {
+  type: 'tool_arg_progress';
+  toolName: string;
+  totalChars: number;
+  charsPerSec: number;
+}
+
 export type InternalLLMChunk =
   | TextDeltaChunk
   | ThinkingDeltaChunk
   | ToolCallChunk
-  | DoneChunk;
+  | DoneChunk
+  | ToolArgProgressChunk;

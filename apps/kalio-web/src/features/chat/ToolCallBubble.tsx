@@ -18,7 +18,7 @@ import type { ToolActivity } from '../../store/agentStore';
 import { useAgentStore } from '../../store/agentStore';
 import { eventBus } from '../../services/eventBus';
 import { apiClient } from '../../services/apiClient';
-import type { ChatMessage, RAAppBlock, SubagentToolResult } from '@kalio/types';
+import type { ChatMessage, CLIAgentSessionSnapshot, RAAppBlock, SubagentToolResult } from '@kalio/types';
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
 import { TerminalOutputBlock } from './TerminalOutputBlock';
 import { LiveCLIAgentBlock } from './LiveCLIAgentBlock';
@@ -26,6 +26,7 @@ import { ImageResultRenderer, type ImageResultData } from './ImageResultRenderer
 import {
   extractChildToolPreviews,
   extractCLIAgentResult,
+  extractCLIAgentSessionSnapshot,
   extractImageResult,
   extractRAAppBlock,
   extractSubagentResult,
@@ -33,6 +34,13 @@ import {
 } from './ToolCallBubble.parsers';
 
 export { extractRAAppBlock } from './ToolCallBubble.parsers';
+
+const DURABLE_CLI_AGENT_TOOLS = new Set([
+  'spawn_cli_agent',
+  'message_cli_agent',
+  'get_cli_agent_status',
+  'stop_cli_agent',
+]);
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -131,6 +139,48 @@ function SubagentResultBlock({ result }: { result: SubagentToolResult }) {
   );
 }
 
+function CLIAgentSessionStatusBlock({ snapshot }: { snapshot: CLIAgentSessionSnapshot }) {
+  const statusTone = snapshot.status === 'failed'
+    ? 'text-error'
+    : snapshot.status === 'stopped'
+      ? 'text-warning'
+      : snapshot.status === 'completed'
+        ? 'text-success'
+        : snapshot.status === 'running'
+          ? 'text-info'
+          : 'text-base-content/60';
+
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] font-mono text-base-content/60 bg-base-200/60 rounded px-2 py-1.5">
+        <span className="text-base-content/35">session</span>
+        <span className="truncate">{snapshot.childSessionId}</span>
+        <span className="text-base-content/35">status</span>
+        <span className={statusTone}>{snapshot.status}</span>
+        <span className="text-base-content/35">agent</span>
+        <span>{snapshot.agentId}</span>
+        {snapshot.lastExitCode !== undefined && (
+          <>
+            <span className="text-base-content/35">exit</span>
+            <span>{snapshot.lastExitCode}</span>
+          </>
+        )}
+        {snapshot.workdir.trim().length > 0 && (
+          <>
+            <span className="text-base-content/35">workdir</span>
+            <span className="truncate">{snapshot.workdir}</span>
+          </>
+        )}
+      </div>
+      {snapshot.lastOutput && (
+        <pre className="text-[11px] text-base-content/70 bg-neutral/60 rounded px-2 py-1.5 max-h-60 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed">
+          {snapshot.lastOutput}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 // ─── Chip chrome ─────────────────────────────────────────────────────────────
 
 function Chip({
@@ -189,9 +239,11 @@ function Chip({
 function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
   const [argsOpen, setArgsOpen] = useState(false);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
+  const toolArgProgress = useAgentStore((s) => s.toolArgProgress);
   const setPendingConfirmation = useAgentStore((s) => s.setPendingConfirmation);
   const updateToolActivity = useAgentStore((s) => s.updateToolActivity);
   const confirmation = Object.values(pendingConfirmations).find((pending) => pending.toolCallId === activity.callId);
+  const matchingToolProgress = toolArgProgress?.toolName === activity.toolName ? toolArgProgress : null;
 
   const isMatch = confirmation != null;
 
@@ -239,6 +291,21 @@ function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
       {argPreview && !argsOpen && (
         <div className="mt-1 font-mono text-[10px] text-base-content/30 truncate" data-testid="args-preview">
           {argPreview}
+        </div>
+      )}
+
+      {matchingToolProgress && (
+        <div data-testid="tool-arg-progress-indicator" className="mt-1 font-mono text-[10px] text-base-content/45">
+          {matchingToolProgress.totalChars > 0 ? (
+            <>
+              Writing <span className="text-base-content/65">{activity.toolName}</span>…{' '}
+              {matchingToolProgress.totalChars.toLocaleString()} chars · {matchingToolProgress.charsPerSec.toLocaleString()}/s
+            </>
+          ) : (
+            <>
+              Preparing <span className="text-base-content/65">{activity.toolName}</span>…
+            </>
+          )}
         </div>
       )}
 
@@ -301,7 +368,6 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
             }),
     [activity.callId, activity.toolName, toolActivities],
   );
-  const open = manualOpen ?? (descendantActivities.length > 0);
 
   // Awaiting confirmation gets its own dedicated inline bubble with action buttons
   if (activity.status === 'awaiting_confirmation') {
@@ -313,24 +379,39 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
       <Loader2 size={12} className="text-sky-400 animate-spin shrink-0" />
     ) : activity.status === 'success' ? (
       <CheckCircle2 size={12} className="text-success shrink-0" />
+    ) : activity.status === 'expired' ? (
+      <AlertTriangle size={12} className="text-warning shrink-0" />
     ) : (
       <XCircle size={12} className={activity.status === 'cancelled' ? 'text-base-content/40 shrink-0' : 'text-error shrink-0'} />
     );
 
+  const badge = activity.status === 'expired'
+    ? <span className="text-[10px] font-mono text-warning/70 bg-warning/10 rounded px-1">confirmation expired</span>
+    : undefined;
+
   const hasArgs = Object.keys(activity.args).length > 0;
-  const hasNonRaappResult = activity.result?.data != null && extractRAAppBlock(activity.result.data) == null && extractImageResult(activity.result.data) == null;
   const isRunningCliAgent = activity.toolName === 'run_cli_agent' && activity.status === 'running';
-  const expandable = hasArgs || hasNonRaappResult || isRunningCliAgent || descendantActivities.length > 0;
+  const cliSessionSnapshot = DURABLE_CLI_AGENT_TOOLS.has(activity.toolName) && activity.result?.data != null
+    ? extractCLIAgentSessionSnapshot(activity.result.data)
+    : null;
+  const hasNonRaappResult = activity.result?.data != null
+    && extractRAAppBlock(activity.result.data) == null
+    && extractImageResult(activity.result.data) == null
+    && cliSessionSnapshot == null;
+  const defaultOpen = descendantActivities.length > 0 || isRunningCliAgent || cliSessionSnapshot != null;
+  const open = manualOpen ?? defaultOpen;
+  const expandable = hasArgs || hasNonRaappResult || isRunningCliAgent || descendantActivities.length > 0 || cliSessionSnapshot != null;
   const imageResult = activity.result?.data != null ? extractImageResult(activity.result.data) : null;
 
   return (
     <Chip
       icon={icon}
       toolName={activity.toolName}
+      badge={badge}
       elapsed={elapsed}
       expandable={expandable}
       open={open}
-      onToggle={() => setManualOpen((value) => !(value ?? (descendantActivities.length > 0)))}
+      onToggle={() => setManualOpen((value) => !(value ?? defaultOpen))}
     >
       {descendantActivities.length > 0 && (
         <div className="space-y-2 rounded border border-base-300/60 bg-base-200/50 px-2 py-2">
@@ -350,6 +431,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
           agentId={(activity.args['agentId'] as string | undefined) ?? 'copilot'}
         />
       )}
+      {cliSessionSnapshot && <CLIAgentSessionStatusBlock snapshot={cliSessionSnapshot} />}
       {imageResult && <ImageResultRenderer data={imageResult} />}
       {hasArgs && (
         <div className="font-mono bg-base-200/60 rounded px-2 py-1 text-xs text-base-content/50">
@@ -390,6 +472,7 @@ export function HistoryToolCallBubble({
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
   const isSubagent = toolName === 'run_subagent';
   const isCliAgent = toolName === 'run_cli_agent';
+  const isDurableCliAgent = DURABLE_CLI_AGENT_TOOLS.has(toolName);
 
   let parsed: unknown;
   try {
@@ -400,15 +483,16 @@ export function HistoryToolCallBubble({
 
   const raapp = extractRAAppBlock(parsed);
   const cliResult = isCliAgent ? extractCLIAgentResult(parsed) : null;
+  const cliSessionSnapshot = isDurableCliAgent ? extractCLIAgentSessionSnapshot(parsed) : null;
   const imageResult = extractImageResult(parsed);
   const subagentResult = isSubagent ? extractSubagentResult(parsed) : null;
   const hasArgs = args != null && Object.keys(args).length > 0;
-  const defaultOpen = (raapp != null && !isAnswered) || cliResult != null || imageResult != null || subagentResult != null;
+  const defaultOpen = (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || subagentResult != null;
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const open = isAnswered ? false : (manualOpen ?? defaultOpen);
 
-  const hasResult = !raapp && !cliResult && !imageResult && !subagentResult && content.length > 0;
-  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || imageResult != null || subagentResult != null;
+  const hasResult = !raapp && !cliResult && !cliSessionSnapshot && !imageResult && !subagentResult && content.length > 0;
+  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || subagentResult != null;
 
   return (
     <>
@@ -418,7 +502,7 @@ export function HistoryToolCallBubble({
         badge={
           <>
             {isAnswered && <span className="text-[10px] font-mono text-base-content/40 bg-base-200/60 rounded px-1">↩ answered</span>}
-            {isSubagent && (
+            {(isSubagent || cliSessionSnapshot != null) && (
               <button
                 className="ml-1 text-[10px] text-sky-400/60 hover:text-sky-400 flex items-center gap-0.5"
                 title="View in canvas"
@@ -456,6 +540,7 @@ export function HistoryToolCallBubble({
             agentId={args?.['agentId'] as string | undefined}
           />
         )}
+        {cliSessionSnapshot && <CLIAgentSessionStatusBlock snapshot={cliSessionSnapshot} />}
         {subagentResult && <SubagentResultBlock key={subagentResult.childSessionId} result={subagentResult} />}
         {imageResult && <ImageResultRenderer data={imageResult} />}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}

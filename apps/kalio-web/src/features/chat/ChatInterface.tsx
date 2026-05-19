@@ -10,7 +10,7 @@ import { AgentTurnBubble } from './AgentTurnBubble';
 import { ChatInput } from './ChatInput';
 import { useContextUsage } from './hooks/useContextUsage';
 import { useChatSessionActivation } from './hooks/useChatSessionActivation';
-import { computeAnsweredCallIds, buildConversationTimeline, buildTurnsFromHistory } from './chatUtils';
+import { computeAnsweredCallIds, buildConversationTimeline, buildTurnsFromHistory, mergeFetchedMessages } from './chatUtils';
 import { apiClient } from '../../services/apiClient';
 import type { ChatMessage, Persona } from '@kalio/types';
 import {
@@ -23,12 +23,34 @@ import {
 
 export { computeAnsweredCallIds } from './chatUtils';
 
+const DEFAULT_SESSION_TITLE = 'New Chat';
+
+function buildOptimisticSessionTitle(content: string): string {
+  const preview = content.slice(0, 50).trim();
+  return preview + (content.length > 50 ? '…' : '');
+}
+
+function shouldRequestGeneratedTitle(sessionTitle: string, sessionMessages: ChatMessage[]): boolean {
+  const userMessages = sessionMessages.filter((message) => message.role === 'user');
+  const assistantMessages = sessionMessages.filter((message) => message.role === 'assistant');
+
+  if (userMessages.length !== 1 || assistantMessages.length < 1) {
+    return false;
+  }
+
+  if (sessionTitle === DEFAULT_SESSION_TITLE || sessionTitle === '') {
+    return true;
+  }
+
+  return sessionTitle === buildOptimisticSessionTitle(userMessages[0].content);
+}
+
 export function ChatInterface() {
   const {
     messages, activeSessionId, sessions, addMessage, addSession, appendChunk, finalizeChunk, setMessages,
     agentTurns, startAgentTurn, addTurnItem, finalizeAgentTurn,
     setAgentTurns, markAgentTurnError, removeLastAgentTurn, flushThinkingChunks, flushStreamingChunks,
-    getSessionActiveTurnId, getSessionAgentTurns,
+    getSessionActiveTurnId, getSessionAgentTurns, clearPendingChunks,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
@@ -36,6 +58,7 @@ export function ChatInterface() {
     isStreaming,
     setStreaming,
     setPendingConfirmation,
+    setToolArgProgress,
     addToolActivity,
     updateToolActivity,
     clearToolActivities,
@@ -58,6 +81,7 @@ export function ChatInterface() {
   const [awaitingFirstChunk, setAwaitingFirstChunk] = useState(false);
   const lastSentContentRef = useRef<string>('');
   const [personas, setPersonas] = useState<Persona[]>([]);
+  const toolArgProgressSeenRef = useRef<Record<string, Set<string>>>({});
   const { updateSession } = useSessionStore();
 
   useEffect(() => {
@@ -105,6 +129,62 @@ export function ChatInterface() {
   useEffect(() => {
     if (!eventBus.connected) eventBus.connect();
 
+    const markToolArgProgressSeen = (sessionId: string, toolName: string) => {
+      const seenForSession = toolArgProgressSeenRef.current[sessionId] ?? new Set<string>();
+      seenForSession.add(toolName);
+      toolArgProgressSeenRef.current[sessionId] = seenForSession;
+    };
+
+    const clearToolArgProgressTracking = (sessionId?: string | null) => {
+      if (!sessionId) {
+        toolArgProgressSeenRef.current = {};
+        setToolArgProgress(null);
+        return;
+      }
+      delete toolArgProgressSeenRef.current[sessionId];
+      if (sessionId === useSessionStore.getState().activeSessionId) {
+        setToolArgProgress(null);
+      }
+    };
+
+    const ensureSyntheticToolIntent = (sessionId: string | null | undefined, toolName: string) => {
+      if (!sessionId || sessionId !== useSessionStore.getState().activeSessionId) {
+        return;
+      }
+      if (toolArgProgressSeenRef.current[sessionId]?.has(toolName)) {
+        return;
+      }
+      setToolArgProgress({ toolName, totalChars: 0, charsPerSec: 0 });
+    };
+
+    const requestGeneratedTitleIfNeeded = (sessionId: string | null) => {
+      const {
+        sessions,
+        activeSessionId: currentActiveSessionId,
+        messages: sessionMessages,
+      } = useSessionStore.getState();
+
+      if (!sessionId || sessionId !== currentActiveSessionId) {
+        return;
+      }
+
+      const session = sessions.find((item) => item.id === sessionId);
+      if (!session || !shouldRequestGeneratedTitle(session.title, sessionMessages)) {
+        return;
+      }
+
+      addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: Date.now() });
+      fetch(`/api/sessions/${sessionId}/generate-title`, { method: 'POST' })
+        .then((r) => r.json())
+        .then((data: { title: string }) => {
+          useSessionStore.getState().updateSession(sessionId, { title: data.title });
+          updateLlmActivity('title-gen', { status: 'done', finishedAt: Date.now() });
+        })
+        .catch(() => {
+          updateLlmActivity('title-gen', { status: 'error', finishedAt: Date.now() });
+        });
+    };
+
     const offChunk = eventBus.onChunk((chunk) => {
       const targetSessionId = chunk.sessionId ?? useSessionStore.getState().activeSessionId;
 
@@ -137,21 +217,6 @@ export function ChatInterface() {
         // Only update UI state for the active session
         if (chunk.sessionId === useSessionStore.getState().activeSessionId) {
           setStreaming(false);
-          // After first assistant reply, generate a real title via LLM
-          const { sessions, activeSessionId: sid } = useSessionStore.getState();
-          const session = sessions.find((s) => s.id === sid);
-          if (sid && session && (session.title === 'New Chat' || session.title === '')) {
-            addLlmActivity({ id: 'title-gen', label: 'Generating title…', status: 'running', startedAt: Date.now() });
-            fetch(`/api/sessions/${sid}/generate-title`, { method: 'POST' })
-              .then((r) => r.json())
-              .then((data: { title: string }) => {
-                useSessionStore.getState().updateSession(sid, { title: data.title });
-                updateLlmActivity('title-gen', { status: 'done', finishedAt: Date.now() });
-              })
-              .catch(() => {
-                updateLlmActivity('title-gen', { status: 'error', finishedAt: Date.now() });
-              });
-          }
         }
       }
     });
@@ -169,6 +234,7 @@ export function ChatInterface() {
       });
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
         setStreaming(false);
+        requestGeneratedTitleIfNeeded(payload.sessionId);
       }
     });
 
@@ -178,9 +244,34 @@ export function ChatInterface() {
         setAwaitingFirstChunk(false);
       }
       setStreaming(false);
-      removeActiveAgentLoop(payload.sessionId);
       const { activeSessionId: currentActiveSessionId, getSessionActiveTurnId: getTurnId } = useSessionStore.getState();
       const targetSessionId = payload.sessionId ?? currentActiveSessionId;
+      if (targetSessionId) {
+        clearToolArgProgressTracking(targetSessionId);
+        removeActiveAgentLoop(targetSessionId);
+        setPendingConfirmation(targetSessionId, null);
+
+        const terminalToolStatus = payload.code === 'INTERRUPTED' ? 'cancelled' : 'error';
+        const finishedAt = Date.now();
+        const activeActivities = getToolActivitiesForSession(targetSessionId).filter(
+          (activity) => activity.status === 'running' || activity.status === 'awaiting_confirmation',
+        );
+
+        activeActivities.forEach((activity) => {
+          updateToolActivity(activity.callId, {
+            status: terminalToolStatus,
+            finishedAt,
+            result: {
+              callId: activity.callId,
+              status: terminalToolStatus,
+              ...(terminalToolStatus === 'error'
+                ? { errorCode: payload.code, errorMessage: payload.message }
+                : {}),
+            },
+          });
+        });
+      }
+
       const activeTurnId = getTurnId(targetSessionId);
       if (!activeTurnId) {
         // Error before agent turn opened (e.g. QUEUE_FULL) → floating banner
@@ -204,9 +295,11 @@ export function ChatInterface() {
 
     const offConfirmation = eventBus.onToolConfirmation((req) => {
       setPendingConfirmation(req.sessionId, req);
+      ensureSyntheticToolIntent(req.sessionId, req.toolName);
       // Tool is awaiting confirmation — log it as an activity
       addToolActivity({
         callId: req.toolCallId,
+        requestId: req.requestId,
         toolName: req.toolName,
         args: req.args,
         sessionId: req.sessionId,
@@ -216,9 +309,43 @@ export function ChatInterface() {
       });
     });
 
+    const offConfirmationInvalidated = eventBus.onToolConfirmationInvalidated((payload) => {
+      const agentState = useAgentStore.getState();
+      const pendingConfirmation = agentState.pendingConfirmations[payload.sessionId];
+      const staleActivity = agentState
+        .getToolActivitiesForSession(payload.sessionId)
+        .find((activity) => activity.requestId === payload.requestId);
+      const targetCallId = payload.toolCallId
+        ?? (pendingConfirmation?.requestId === payload.requestId
+          ? pendingConfirmation.toolCallId
+          : staleActivity?.callId ?? payload.requestId);
+      setPendingConfirmation(payload.sessionId, null);
+      if (payload.reason !== 'confirmed') {
+        clearToolArgProgressTracking(payload.sessionId);
+      }
+      if (payload.reason === 'confirmed') {
+        updateToolActivity(targetCallId, {
+          status: 'running',
+          finishedAt: undefined,
+          result: undefined,
+        });
+        return;
+      }
+      updateToolActivity(targetCallId, {
+        status: payload.reason === 'cancelled' ? 'cancelled' : 'expired',
+        finishedAt: Date.now(),
+        result: {
+          callId: targetCallId,
+          status: 'cancelled',
+          ...(payload.message ? { errorMessage: payload.message } : {}),
+        },
+      });
+    });
+
     const offToolStart = eventBus.onToolStart((payload) => {
       console.log('[ToolStart]', payload.toolName, 'callId:', payload.callId, 'args:', payload.args);
       const payloadSessionId = payload.sessionId ?? useSessionStore.getState().activeSessionId;
+      ensureSyntheticToolIntent(payloadSessionId, payload.toolName);
       // Thinking is over once the agent calls a tool — flush any live thinkingChunks
       // so the ThinkingBlock stops animating (isThinkingStreaming → false).
       flushThinkingChunks(payloadSessionId);
@@ -247,10 +374,24 @@ export function ChatInterface() {
           }
         }
       }
+      clearToolArgProgressTracking(payloadSessionId);
+    });
+
+    const offToolArgProgress = eventBus.onToolArgProgress((payload) => {
+      markToolArgProgressSeen(payload.sessionId, payload.toolName);
+      if (payload.sessionId !== useSessionStore.getState().activeSessionId) {
+        return;
+      }
+      setToolArgProgress({
+        toolName: payload.toolName,
+        totalChars: payload.totalChars,
+        charsPerSec: payload.charsPerSec,
+      });
     });
 
     const offAgentStart = eventBus.onAgentStart((payload) => {
       console.log('[AgentStart]', payload.sessionId, payload.turnId);
+      clearToolArgProgressTracking(payload.sessionId);
       addActiveAgentLoop(payload.sessionId, payload.turnId, payload.agentRun);
       startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun);
       clearToolActivities(payload.sessionId); // Fresh turn = fresh tool activities
@@ -260,6 +401,7 @@ export function ChatInterface() {
     const offAgentDone = eventBus.onAgentDone((payload) => {
       console.log('[AgentDone]', payload.sessionId, payload.turnId);
       removeActiveAgentLoop(payload.sessionId, payload.agentRun);
+      clearToolArgProgressTracking(payload.sessionId);
       finalizeAgentTurn(payload.sessionId);
       if (hasPendingChunksForSession(payload.sessionId)) {
         flushThinkingChunks(payload.sessionId);
@@ -280,6 +422,7 @@ export function ChatInterface() {
       console.log('[ToolResult]', result.callId, 'status:', result.status, result.status !== 'success' ? `error: ${result.errorCode}` : '');
       const activeSessionId = useSessionStore.getState().activeSessionId;
       const resultSessionId = result.sessionId ?? activeSessionId;
+      clearToolArgProgressTracking(resultSessionId);
       updateToolActivity(result.callId, {
         status: result.status === 'success' ? 'success' : result.status === 'cancelled' ? 'cancelled' : 'error',
         finishedAt: Date.now(),
@@ -316,6 +459,22 @@ export function ChatInterface() {
       appendCLIAgentChunk(payload.callId, payload.chunk);
     });
 
+    const offSessionStatus = eventBus.onSessionStatus((payload) => {
+      if (!payload.active || !payload.turnId) {
+        return;
+      }
+      if (!useAgentStore.getState().hasActiveLoopForSession(payload.sessionId)) {
+        addActiveAgentLoop(payload.sessionId, payload.turnId);
+      }
+      if (!useSessionStore.getState().getSessionActiveTurnId(payload.sessionId)) {
+        startAgentTurn(payload.turnId, payload.sessionId);
+      }
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setAwaitingFirstChunk(false);
+        setStreaming(true);
+      }
+    });
+
     const offSessionCreated = eventBus.onSessionCreated((session) => {
       if (!useSessionStore.getState().sessions.some((item) => item.id === session.id)) {
         addSession(session);
@@ -348,6 +507,7 @@ export function ChatInterface() {
       backendHealth.reportSuccess();
       setStreaming(false);
       clearToolActivities();
+      clearToolArgProgressTracking();
       const { activeSessionId: sid } = useSessionStore.getState();
       if (sid) {
         removeActiveAgentLoop(sid);
@@ -359,9 +519,11 @@ export function ChatInterface() {
           .then((data: ChatMessage[]) => {
             if (useSessionStore.getState().activeSessionId !== sid) return;
             const { setMessages: doSetMessages, setAgentTurns: doSetAgentTurns } = useSessionStore.getState();
-            doSetMessages(data);
+            const currentMessages = useSessionStore.getState().getSessionMessages(sid);
+            const mergedMessages = mergeFetchedMessages(currentMessages, data);
+            doSetMessages(mergedMessages);
             if (!useAgentStore.getState().hasActiveLoopForSession(sid)) {
-              doSetAgentTurns(buildTurnsFromHistory(data, sid));
+              doSetAgentTurns(buildTurnsFromHistory(mergedMessages, sid));
             }
           })
           .catch((err: unknown) => {
@@ -375,21 +537,26 @@ export function ChatInterface() {
       offComplete();
       offError();
       offConfirmation();
+      offConfirmationInvalidated();
       offToolStart();
+      offToolArgProgress();
       offAgentStart();
       offAgentDone();
       offContext();
       offToolResult();
       offCLIAgentProgress();
+      offSessionStatus();
       offSessionCreated();
       offRaAppNative();
       offReconnect();
     };
-  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput, clearToolActivities, addSession, backendHealth, getSessionActiveTurnId, getSessionAgentTurns, hasActiveLoopForSession]);
+  }, [appendChunk, finalizeChunk, setStreaming, setPendingConfirmation, setToolArgProgress, addToolActivity, updateToolActivity, setContext, startAgentTurn, addTurnItem, finalizeAgentTurn, markAgentTurnError, removeLastAgentTurn, addActiveAgentLoop, removeActiveAgentLoop, appendCLIAgentChunk, clearCLIAgentOutput, clearToolActivities, addSession, backendHealth, getSessionActiveTurnId, getSessionAgentTurns, hasActiveLoopForSession, clearPendingChunks]);
 
   useEffect(() => {
     lastSentContentRef.current = '';
     setAwaitingFirstChunk(false);
+    toolArgProgressSeenRef.current = {};
+    setToolArgProgress(null);
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -441,8 +608,8 @@ export function ChatInterface() {
     // Auto-generate title from first message if session still has default title
     const { sessions, updateSession } = useSessionStore.getState();
     const session = sessions.find((s) => s.id === activeSessionId);
-    if (session && session.title === 'New Chat' && messages.length === 0) {
-      const generatedTitle = content.slice(0, 50).trim() + (content.length > 50 ? '…' : '');
+    if (session && session.title === DEFAULT_SESSION_TITLE && messages.length === 0) {
+      const generatedTitle = buildOptimisticSessionTitle(content);
       void updateSession(activeSessionId, { title: generatedTitle });
     }
 

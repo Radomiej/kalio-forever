@@ -19,12 +19,14 @@ import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from
 import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
+import { GetCliAgentStatusTool, MessageCliAgentTool, SpawnCliAgentTool, StopCliAgentTool } from './tools/cli-agent-session.tools';
 import { RunCliAgentTool } from './tools/run-cli-agent.tool';
 import { ImageGenerateTool } from './tools/image-generate.tool';
 import { ImageEditTool } from './tools/image-edit.tool';
 import { ImageViewTool } from './tools/image-view.tool';
 import { SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool } from './tools/skill.tools';
 import { PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool } from './tools/persona.tools';
+import { EscalateTool } from './tools/escalate.tool';
 import { KVStoreService } from './kv-store.service';
 import { TerminalService } from './terminal.service';
 import { ToolRegistryService } from './tool-registry.service';
@@ -44,10 +46,12 @@ export const TOOL_PROVIDER_CLASSES = [
   MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
   WebSearchTool,
   ListToolsTool, GetToolDetailsTool,
+  SpawnCliAgentTool, MessageCliAgentTool, GetCliAgentStatusTool, StopCliAgentTool,
   RunCliAgentTool,
   ImageGenerateTool, ImageEditTool, ImageViewTool,
   SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool,
   PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool,
+  EscalateTool,
 ] as const;
 
 export const TOOL_CONFIGURATION_PROVIDERS: Provider[] = [

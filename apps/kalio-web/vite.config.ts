@@ -3,6 +3,10 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'node:path';
 
+const vitePort = Number.parseInt(process.env['VITE_PORT'] ?? '5188', 10);
+const apiOrigin = process.env['VITE_API_URL'] ?? 'http://localhost:3016';
+const wsOrigin = process.env['VITE_WS_URL'] ?? apiOrigin;
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   optimizeDeps: {
@@ -16,13 +20,13 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5188,
+    port: Number.isNaN(vitePort) ? 5188 : vitePort,
     watch: {
       ignored: ['**/*.spec.ts', '**/*.spec.tsx', '**/*.test.ts', '**/*.test.tsx'],
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:3016',
+        target: apiOrigin,
         changeOrigin: true,
         configure: (proxy) => {
           proxy.on('error', (err) => {
@@ -31,7 +35,7 @@ export default defineConfig({
         },
       },
       '/socket.io': {
-        target: 'http://localhost:3016',
+        target: wsOrigin,
         ws: true,
         changeOrigin: true,
         configure: (proxy) => {

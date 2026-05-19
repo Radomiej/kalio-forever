@@ -1,5 +1,5 @@
-import type { ILLMProvider } from '../llm.types';
-import type { LLMStreamChunk, LLMToolCall } from '@kalio/types';
+import type { ILLMProvider, LLMToolDef, StreamChatOptions } from '../llm.types';
+import type { LLMToolCall } from '@kalio/types';
 import { Logger } from '@nestjs/common';
 import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../../common/utils/llm-provider-http.util';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
@@ -31,12 +31,10 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
   async streamChat(
     messages: ContextManagedLLMMessage[],
-    tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
-    onChunk: (chunk: LLMStreamChunk) => void,
-    sessionId: string,
-    messageId: string,
-    abortSignal?: AbortSignal,
+    tools: LLMToolDef[],
+    options: StreamChatOptions,
   ): Promise<LLMToolCall[]> {
+    const { sessionId, messageId, onChunk, onToolArgChunk, abortSignal } = options;
     if (abortSignal?.aborted) {
       return [];
     }
@@ -136,8 +134,14 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
               if (!toolCallBuffers[idx]) {
                 toolCallBuffers[idx] = { name: '', argsRaw: '' };
               }
-              if (typeof fn?.['name'] === 'string') toolCallBuffers[idx]!.name += fn['name'];
-              if (typeof fn?.['arguments'] === 'string') toolCallBuffers[idx]!.argsRaw += fn['arguments'];
+              if (typeof fn?.['name'] === 'string') {
+                toolCallBuffers[idx]!.name += fn['name'];
+                onToolArgChunk?.(toolCallBuffers[idx]!.name, 0);
+              }
+              if (typeof fn?.['arguments'] === 'string') {
+                toolCallBuffers[idx]!.argsRaw += fn['arguments'];
+                onToolArgChunk?.(toolCallBuffers[idx]!.name, fn['arguments'].length);
+              }
             }
           }
         }

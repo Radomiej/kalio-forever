@@ -10,6 +10,7 @@ import { apiClient } from '../../services/apiClient';
 import { eventBus } from '../../services/eventBus';
 import type { ChatMessage, SubagentCopiedFile, SubagentToolResult } from '@kalio/types';
 import { ImageResultRenderer, type ImageResultData } from './ImageResultRenderer';
+import { mergeFetchedMessages } from './chatUtils';
 
 interface SubagentCanvasPreview {
   sessionId: string;
@@ -86,33 +87,6 @@ function buildSubagentPreviews(messages: ChatMessage[], toolActivities: ToolActi
   return [...previews.values()].sort(
     (left, right) => (sessionUpdatedAt.get(left.sessionId) ?? 0) - (sessionUpdatedAt.get(right.sessionId) ?? 0),
   );
-}
-
-function mergeFetchedMessages(currentMessages: ChatMessage[], loadedMessages: ChatMessage[]): ChatMessage[] {
-  const merged = new Map<string, ChatMessage>();
-
-  loadedMessages.forEach((message) => {
-    merged.set(message.id, message);
-  });
-
-  currentMessages.forEach((message) => {
-    const existing = merged.get(message.id);
-    if (!existing) {
-      merged.set(message.id, message);
-      return;
-    }
-
-    merged.set(message.id, {
-      ...existing,
-      ...message,
-      content: message.content || existing.content,
-      thinking: message.thinking ?? existing.thinking,
-      streaming: message.streaming ?? existing.streaming,
-      toolCallId: message.toolCallId ?? existing.toolCallId,
-    });
-  });
-
-  return [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
 }
 
 function SubagentConversationCard({
@@ -392,17 +366,28 @@ export function CanvasPanel() {
   const masterActivities = toolActivities.filter((activity) => activity.agentRun?.agentType !== 'subagent');
   const subagentActivities = toolActivities.filter((activity) => activity.agentRun?.agentType === 'subagent');
   const subagentPreviews = buildSubagentPreviews(messages, toolActivities, activeAgentLoops, sessions);
+  const childPreviewSessionIds = Array.from(
+    new Set(
+      subagentPreviews
+        .map((preview) => preview.sessionId)
+        .filter((sessionId) => sessionId !== activeSessionId),
+    ),
+  ).sort();
+  const childPreviewSessionKey = childPreviewSessionIds.join('|');
+  const identifiedChildPreviewSessionIdsRef = useRef<Set<string>>(new Set());
   // Show toggle only when agent has activity or canvas is already open
   const showToggle = isStreaming || toolActivities.length > 0 || subagentLoops.length > 0 || subagentPreviews.length > 0 || open;
 
   useEffect(() => {
     if (!eventBus.connected) return;
-    subagentPreviews.forEach((preview) => {
-      if (preview.sessionId !== activeSessionId) {
-        eventBus.identifySession(preview.sessionId);
+    const previousChildPreviewSessionIds = identifiedChildPreviewSessionIdsRef.current;
+    childPreviewSessionIds.forEach((sessionId) => {
+      if (sessionId !== activeSessionId && !previousChildPreviewSessionIds.has(sessionId)) {
+        eventBus.identifySession(sessionId);
       }
     });
-  }, [activeSessionId, subagentPreviews]);
+    identifiedChildPreviewSessionIdsRef.current = new Set(childPreviewSessionIds);
+  }, [activeSessionId, childPreviewSessionKey]);
 
   useEffect(() => {
     let cancelled = false;

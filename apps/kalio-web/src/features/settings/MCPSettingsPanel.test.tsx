@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MCPSettingsPanel } from './MCPSettingsPanel';
 import type { MCPServer } from '@kalio/types';
@@ -122,8 +122,8 @@ describe('MCPSettingsPanel', () => {
     await waitFor(() => screen.getByTestId('mcp-add-toggle'));
     await user.click(screen.getByTestId('mcp-add-toggle'));
     await screen.findByTestId('mcp-add-form');
-    await user.type(screen.getByTestId('mcp-form-name'), 'New HTTP Server');
-    await user.type(screen.getByTestId('mcp-form-url'), 'https://mcp.test.com/sse');
+    fireEvent.change(screen.getByTestId('mcp-form-name'), { target: { value: 'New HTTP Server' } });
+    fireEvent.change(screen.getByTestId('mcp-form-url'), { target: { value: 'https://mcp.test.com/sse' } });
     await user.click(screen.getByTestId('mcp-form-submit'));
     await waitFor(() => {
       const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];

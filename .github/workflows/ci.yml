@@ -38,6 +38,13 @@ jobs:
 
   backend:
     runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      DATABASE_PATH: /tmp/kalio-backend-ci.db
+      MEMORY_DB_PATH: /tmp/kalio-backend-ci-memory
+      WORKSPACE_ROOT: /tmp/kalio-backend-workspace
+      CREDENTIALS_MASTER_KEY: ci-test-master-key-32-chars-minimum
+      LLM_PROVIDER: mock
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -112,14 +119,14 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CI: 'true'
-      NODE_ENV: test
-      TEST_API_URL: http://127.0.0.1:3016/api
+      PLAYWRIGHT_BASE_URL: http://localhost:5288
+      PLAYWRIGHT_API_ORIGIN: http://localhost:3316
+      TEST_API_URL: http://localhost:3316/api
       LLM_PROVIDER: mock
       CREDENTIALS_MASTER_KEY: ci-test-master-key-32-chars-minimum
       WORKSPACE_ROOT: /tmp/kalio-ci-workspace
       DATABASE_PATH: /tmp/kalio-ci.db
       MEMORY_DB_PATH: /tmp/kalio-ci-memory
-      PORT: 3016
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -138,19 +145,6 @@ jobs:
 
       - name: Build workspace packages
         run: pnpm --filter @kalio/types --filter @kalio/sdk build
-
-      - name: Build API
-        run: pnpm --filter kalio-api build
-
-      - name: Start API server
-        run: pnpm --filter kalio-api start &
-
-      - name: Start web dev server
-        run: pnpm --filter kalio-web dev &
-
-      - name: Wait for servers
-        run: |
-          npx wait-on http://127.0.0.1:3016/api/health http://localhost:5188 --timeout 60000
 
       - name: Install Playwright browsers
         run: pnpm --filter @kalio/e2e exec playwright install --with-deps chromium

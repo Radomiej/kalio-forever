@@ -135,7 +135,7 @@ export interface ChatSession {
   id: ID;
   personaId: ID;
   title: string;              // auto-generated from first message
-  kind?: 'chat' | 'subagent';
+  kind?: 'chat' | 'subagent' | 'cli-agent';
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
@@ -146,7 +146,7 @@ export interface ChatSession {
 export interface CreateSessionDto {
   personaId: ID;
   title?: string;
-  kind?: 'chat' | 'subagent';
+  kind?: 'chat' | 'subagent' | 'cli-agent';
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
@@ -208,6 +208,12 @@ export interface ToolCallRequest {
    * progress events before the final tool:result arrives.
    */
   readonly _emit?: <K extends keyof SocketEvents>(event: K, data: SocketEvents[K]) => void;
+  /**
+   * Backend-only: abort signal for the originating turn.
+   * Tools and approval helpers can use this to stop follow-up work when the
+   * user interrupts the parent turn.
+   */
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface ToolResult {
@@ -228,6 +234,15 @@ export interface ToolConfirmationRequest {
   toolName: string;
   args: Record<string, unknown>;
   timeoutMs: number;          // confirmation timeout in ms; 0 disables timeout
+  agentRun?: AgentRunContext;
+}
+
+export interface ToolConfirmationInvalidated {
+  requestId: string;
+  toolCallId?: string;
+  sessionId: ID;
+  reason: 'timeout' | 'cancelled' | 'confirmed' | 'not_found' | 'replay_stale';
+  message?: string;
   agentRun?: AgentRunContext;
 }
 
@@ -362,6 +377,7 @@ export interface RAAppBlock {
   vfsPath?: string;           // optional: load content from VFS path
   actions?: RAAppAction[];    // only for mode='interactive'
   pendingApprovals?: RaAppPendingApproval[];  // populated when call_native needs HITL
+  nativeResults?: RaAppNativeResult[];
 }
 
 export interface RAAppResult {
@@ -374,6 +390,7 @@ export interface RAAppResult {
   };
   requiresHITL?: boolean;     // true when mode='interactive' and has actions
   pendingApprovals?: RaAppPendingApproval[];  // populated by EffectsProcessorService
+  nativeResults?: RaAppNativeResult[];
 }
 
 // ─── GUI DSL (rendered wire format) ─────────────────────────────────────────
@@ -483,6 +500,7 @@ export interface SocketEvents {
 
   // Tool HITL — server → client
   'tool:confirmation_required': ToolConfirmationRequest;
+  'tool:confirmation_invalidated': ToolConfirmationInvalidated;
 
   // Tool HITL — client → server
   'tool:confirm': { requestId: string; sessionId: ID };
@@ -514,12 +532,17 @@ export interface SocketEvents {
   // Sessions — server → client
   'session:created': ChatSession;
   'session:updated': Pick<ChatSession, 'id' | 'title' | 'updatedAt'>;
+  'session:status': { sessionId: ID; active: boolean; turnId?: ID; queueLength: number };
 
   // Session re-registration — client → server (sent after reconnect)
   'session:identify': { sessionId: ID };
 
   // CLI Agent streaming — server → client
   'cli_agent:progress': { callId: ID; sessionId: ID; agentId: string; chunk: string };
+
+  // Tool argument generation progress — server → client
+  // Emitted ~once per second while the LLM streams tool call arguments (before tool:start).
+  'tool:arg_progress': { toolName: string; totalChars: number; charsPerSec: number; sessionId: ID };
 
 }
 
@@ -530,6 +553,24 @@ export interface CLIAgentResult {
   exitCode: number;     // 0 = success, non-zero = failure
   durationMs: number;   // wall-clock time of the CLI run
   agentId: string;      // which adapter was used: 'copilot' | 'gemini' | 'claude' | …
+  childSessionId?: ID;
+}
+
+export type CLIAgentSessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
+
+export interface CLIAgentSessionSnapshot {
+  childSessionId: ID;
+  parentSessionId: ID;
+  agentId: string;
+  workdir: string;
+  status: CLIAgentSessionStatus;
+  lastPrompt: string;
+  updatedAt: Timestamp;
+  startedAt?: Timestamp;
+  completedAt?: Timestamp;
+  activeCallId?: ID;
+  lastOutput?: string;
+  lastExitCode?: number;
 }
 
 /** Probe/availability info for a single CLI agent adapter. */
@@ -539,6 +580,7 @@ export interface CLIAgentAdapterInfo {
   installUrl: string;
   available: boolean;
   version: string | null;
+  supportsModelSelection?: boolean;
 }
 
 /** Per-adapter configuration stored at ~/.kalio/cli-agents/{id}.json */
@@ -551,6 +593,8 @@ export interface CLIAgentConfig {
   timeoutMs: number;
   /** Max output chars kept for LLM history. Default: 16 000. */
   maxOutputChars: number;
+  /** Optional model override passed to adapters that support model selection. */
+  model: string;
   /** Extra CLI args appended after the adapter's default args. */
   extraArgs: string[];
 }
@@ -664,7 +708,8 @@ export type AuditType =
   | 'tool_result'
   | 'error'
   | 'raapp_native_call'
-  | 'raapp_native_approved';
+  | 'raapp_native_approved'
+  | 'escalation';
 
 export interface AuditLogEntry {
   id: ID;

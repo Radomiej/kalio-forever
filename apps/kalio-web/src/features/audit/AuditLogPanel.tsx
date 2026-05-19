@@ -10,6 +10,7 @@ const TYPE_CONFIG: Record<AuditLogEntry['type'], { icon: React.ReactNode; cls: s
   error:                { icon: <XCircle size={12} />,       cls: 'text-error',       short: 'Error' },
   raapp_native_call:    { icon: <Zap size={12} />,           cls: 'text-warning',     short: 'RA call' },
   raapp_native_approved:{ icon: <CheckCircle2 size={12} />,  cls: 'text-warning',     short: 'RA ok' },
+  escalation:           { icon: <Zap size={12} />,           cls: 'text-error',       short: '🔴 Alert' },
 };
 
 function formatTime(ts: number) {

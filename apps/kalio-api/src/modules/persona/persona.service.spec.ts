@@ -3,6 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { PersonaService } from './persona.service';
 import { DrizzleService } from '../../database/drizzle.service';
 import { NotFoundException } from '@nestjs/common';
+import type { PersonaGraphConfig } from './persona-graph-config';
 
 // Regression test for: Persona KV Lookup Inefficiency
 // Issue: setKV queries all KV rows for persona then filters client-side
@@ -131,6 +132,54 @@ describe('PersonaService', () => {
         api_key: 'secret123',
         endpoint: 'https://api.example.com',
       });
+    });
+  });
+
+  describe('validateGraphConfig', () => {
+    it('validates a graph for an existing persona', async () => {
+      const personaId = 'persona-123';
+      const personaRow = [{
+        id: personaId,
+        name: 'Test Persona',
+        systemPrompt: 'You are helpful',
+        model: 'gpt-4',
+        allowedTools: ['vfs_write'],
+        skillIds: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }];
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(personaRow),
+        }),
+      });
+
+      const graphConfig: PersonaGraphConfig = {
+        version: 1,
+        entryNodeId: 'router-1',
+        maxSteps: 6,
+        nodes: [
+          { id: 'router-1', type: 'router', label: 'Router' },
+          { id: 'final-1', type: 'final', label: 'Done' },
+        ],
+        edges: [{ id: 'edge-1', sourceNodeId: 'router-1', targetNodeId: 'final-1' }],
+      };
+
+      const result = await service.validateGraphConfig(personaId, graphConfig);
+
+      expect(result.ok).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('throws NotFoundException when persona does not exist', async () => {
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await expect(service.validateGraphConfig('missing-persona', {})).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -698,6 +747,86 @@ describe('PersonaService', () => {
       expect(config['builder']?.name).toBe('RaBuilder');
       expect(config['designer']?.name).toBe('UX Designer');
       expect(config['dev']?.name).toBe('Fullstack Dev');
+    });
+
+    it('seeds the dev persona prompt with multi-agent run_cli_agent guidance', () => {
+      const config = (
+        service as unknown as { loadPersonasConfig(): Record<string, { systemPrompt: string }> }
+      ).loadPersonasConfig();
+
+      expect(config['dev']?.systemPrompt).toContain('Codex CLI');
+      expect(config['dev']?.systemPrompt).toContain('defaults to Copilot');
+      expect(config['dev']?.systemPrompt).not.toContain('delegates a coding task to GitHub Copilot CLI (copilot -p)');
+    });
+
+    it('publishes durable CLI session tools and stack guidance for orchestrator-facing personas', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { allowedTools: string[]; systemPrompt: string }>;
+        }
+      ).loadPersonasConfig();
+
+      for (const personaId of ['orchestrator', 'dev', 'jony'] as const) {
+        expect(config[personaId]?.allowedTools).toEqual(
+          expect.arrayContaining(['spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'stop_cli_agent']),
+        );
+        expect(config[personaId]?.systemPrompt).toContain('spawn_cli_agent');
+        expect(config[personaId]?.systemPrompt).toContain('message_cli_agent');
+        expect(config[personaId]?.systemPrompt).toContain('get_cli_agent_status');
+        expect(config[personaId]?.systemPrompt).toContain('stop_cli_agent');
+        expect(config[personaId]?.systemPrompt).toContain('Gemini -> Copilot -> Codex');
+      }
+    });
+  });
+
+  describe('onApplicationBootstrap — CLI session prompt refresh', () => {
+    it('refreshes the seeded orchestrator prompt when the stored prompt still matches the older run_cli_agent-only guidance', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        orchestrator: {
+          name: 'Orchestrator',
+          systemPrompt: 'new orchestrator prompt with spawn_cli_agent and Gemini -> Copilot -> Codex',
+          model: '',
+          allowedTools: ['run_subagent', 'spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'stop_cli_agent'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'orchestrator',
+            systemPrompt: [
+              'Prefer run_subagent for bounded research, analysis, and specialist reasoning.',
+              'Use run_cli_agent only for concrete implementation tasks with explicit acceptance criteria.',
+              'Do not directly edit files unless delegation is unnecessary and the task is trivial.',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemPrompt: 'new orchestrator prompt with spawn_cli_agent and Gemini -> Copilot -> Codex',
+        }),
+      );
     });
   });
 });

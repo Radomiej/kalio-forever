@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Persona, CreatePersonaDto, UpdatePersonaDto } from '@kalio/types';
 import { PersonaService } from './persona.service';
+import type { PersonaGraphValidationResult } from './persona-graph-config';
 
 @Controller('personas')
 export class PersonaController {
@@ -29,6 +30,11 @@ export class PersonaController {
   @Post()
   create(@Body() dto: CreatePersonaDto): Promise<Persona> {
     return this.personaService.create(dto);
+  }
+
+  @Post(':id/graph/validate')
+  validateGraph(@Param('id') id: string, @Body() graphConfig: unknown): Promise<PersonaGraphValidationResult> {
+    return this.personaService.validateGraphConfig(id, graphConfig);
   }
 
   @Put(':id')

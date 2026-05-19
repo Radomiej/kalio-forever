@@ -63,6 +63,7 @@ describe('RunRaAppTool', () => {
     } as unknown as EffectsProcessorService;
     const mockHITL = {
       savePendingApprovals: vi.fn().mockResolvedValue([]),
+      resolvePendingApprovals: vi.fn().mockResolvedValue({ pendingApprovals: [], nativeResults: [] }),
     } as unknown as RAAppHITLService;
     tool = new RunRaAppTool(raapp as RAAppService, mockEffectsProcessor, mockHITL);
   });
@@ -209,6 +210,7 @@ describe('RunRaAppTool', () => {
     } as unknown as EffectsProcessorService;
     const mockHITL = {
       savePendingApprovals: vi.fn().mockResolvedValue([]),
+      resolvePendingApprovals: vi.fn().mockResolvedValue({ pendingApprovals: [], nativeResults: [] }),
     } as unknown as RAAppHITLService;
     tool = new RunRaAppTool(raapp as RAAppService, mockEffectsProcessor, mockHITL);
 
@@ -224,6 +226,144 @@ describe('RunRaAppTool', () => {
     expect(raapp.execute).toHaveBeenCalledWith(
       { type: 'gui', mode: 'display', content: app.guiContent },
       { output: { a: 5, b: 3, result: 8 } },
+    );
+  });
+
+  it('returns nativeResults without pendingApprovals when HITL resolves GUI native calls server-side', async () => {
+    const app = makeApp({
+      id: 'visual-calculator',
+      guiContent: 'vbox { label { text = "[output.result]" } }',
+      htmlContent: null,
+      systemsContent: 'systems:\n  - id: calc',
+      appMode: 'display',
+    });
+    (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(app);
+    (raapp.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'ready',
+      renderedContent: '{"nodes":[],"data":{}}',
+    });
+    const mockEffectsProcessor = {
+      processSystemsYaml: vi.fn().mockResolvedValue({
+        output: { result: 8 },
+        pendingApprovals: [
+          { id: 'approval-1', system: 'test_write', args: { path: 'result.txt' }, displayLabel: 'Write result.txt' },
+        ],
+        entities: [],
+      }),
+    } as unknown as EffectsProcessorService;
+    const mockHITL = {
+      savePendingApprovals: vi.fn().mockResolvedValue([]),
+      resolvePendingApprovals: vi.fn().mockResolvedValue({
+        pendingApprovals: [],
+        nativeResults: [
+          { id: 'approval-1', system: 'test_write', status: 'executed', result: { path: 'result.txt' } },
+        ],
+      }),
+    } as unknown as RAAppHITLService;
+    tool = new RunRaAppTool(raapp as RAAppService, mockEffectsProcessor, mockHITL);
+
+    const result = await tool.execute(makeRequest({ id: 'visual-calculator', inputs: { a: 5, b: 3 } })) as Record<string, unknown>;
+
+    expect(mockHITL.resolvePendingApprovals).toHaveBeenCalledWith(
+      'call_test',
+      'sess-test',
+      expect.arrayContaining([expect.objectContaining({ id: 'approval-1' })]),
+    );
+    expect(result.pendingApprovals).toBeUndefined();
+    expect(result.nativeResults).toEqual([
+      expect.objectContaining({ id: 'approval-1', status: 'executed' }),
+    ]);
+  });
+
+  it('applies auto-approved native output patches back into GUI output bindings', async () => {
+    const app = makeApp({
+      id: 'visual-calculator',
+      guiContent: 'vbox { label { text = "[output.writeResult.path]" } }',
+      htmlContent: null,
+      systemsContent: 'systems:\n  - id: calc',
+      appMode: 'display',
+    });
+    (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(app);
+    (raapp.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'ready',
+      renderedContent: '{"nodes":[],"data":{}}',
+    });
+    const mockEffectsProcessor = {
+      processSystemsYaml: vi.fn().mockResolvedValue({
+        output: { result: 8 },
+        pendingApprovals: [
+          {
+            id: 'approval-1',
+            system: 'test_write',
+            args: { path: 'result.txt' },
+            outputPath: 'output.writeResult',
+            displayLabel: 'Write result.txt',
+          },
+        ],
+        entities: [],
+      }),
+    } as unknown as EffectsProcessorService;
+    const mockHITL = {
+      savePendingApprovals: vi.fn().mockResolvedValue([]),
+      resolvePendingApprovals: vi.fn().mockResolvedValue({
+        pendingApprovals: [],
+        nativeResults: [
+          { id: 'approval-1', system: 'test_write', status: 'executed', result: { path: 'result.txt' } },
+        ],
+        outputPatches: [
+          { outputPath: 'output.writeResult', value: { path: 'result.txt' } },
+        ],
+      }),
+    } as unknown as RAAppHITLService;
+    tool = new RunRaAppTool(raapp as RAAppService, mockEffectsProcessor, mockHITL);
+
+    await tool.execute(makeRequest({ id: 'visual-calculator', inputs: { a: 5, b: 3 } }));
+
+    expect(raapp.execute).toHaveBeenCalledWith(
+      { type: 'gui', mode: 'display', content: app.guiContent },
+      { output: { a: 5, b: 3, result: 8, writeResult: { path: 'result.txt' } } },
+    );
+  });
+
+  it('passes request abortSignal into GUI native approval resolution', async () => {
+    const app = makeApp({
+      id: 'visual-calculator',
+      guiContent: 'vbox { label { text = "[output.result]" } }',
+      htmlContent: null,
+      systemsContent: 'systems:\n  - id: calc',
+      appMode: 'display',
+    });
+    (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(app);
+    (raapp.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'ready',
+      renderedContent: '{"nodes":[],"data":{}}',
+    });
+    const mockEffectsProcessor = {
+      processSystemsYaml: vi.fn().mockResolvedValue({
+        output: { result: 8 },
+        pendingApprovals: [
+          { id: 'approval-1', system: 'test_write', args: { path: 'result.txt' }, displayLabel: 'Write result.txt' },
+        ],
+        entities: [],
+      }),
+    } as unknown as EffectsProcessorService;
+    const mockHITL = {
+      savePendingApprovals: vi.fn().mockResolvedValue([]),
+      resolvePendingApprovals: vi.fn().mockResolvedValue({ pendingApprovals: [], nativeResults: [], outputPatches: [] }),
+    } as unknown as RAAppHITLService;
+    tool = new RunRaAppTool(raapp as RAAppService, mockEffectsProcessor, mockHITL);
+    const abortController = new AbortController();
+
+    await tool.execute({
+      ...makeRequest({ id: 'visual-calculator', inputs: { a: 5, b: 3 } }),
+      abortSignal: abortController.signal,
+    } as ToolCallRequest);
+
+    expect(mockHITL.resolvePendingApprovals).toHaveBeenCalledWith(
+      'call_test',
+      'sess-test',
+      expect.any(Array),
+      abortController.signal,
     );
   });
 });

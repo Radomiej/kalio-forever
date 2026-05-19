@@ -7,7 +7,7 @@
  * session reload.
  */
 import { describe, it, expect } from 'vitest';
-import { buildConversationTimeline, buildTurnsFromHistory, computeAnsweredCallIds } from './chatUtils';
+import { buildConversationTimeline, buildTurnsFromHistory, computeAnsweredCallIds, mergeFetchedMessages } from './chatUtils';
 import type { ChatMessage } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
 
@@ -21,6 +21,118 @@ function makeMsg(overrides: Partial<ChatMessage>): ChatMessage {
     ...overrides,
   } as ChatMessage;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// mergeFetchedMessages
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('mergeFetchedMessages', () => {
+  it('REGRESSION: preserves an optimistic user prompt when fetched history is stale or empty', () => {
+    const currentMessages = [
+      makeMsg({ id: 'u-local', role: 'user', content: 'Build a calculator app', createdAt: 10 }),
+    ];
+
+    const merged = mergeFetchedMessages(currentMessages, []);
+
+    expect(merged).toEqual(currentMessages);
+  });
+
+  it('REGRESSION: keeps local message metadata when the fetched copy lags behind', () => {
+    const currentMessages = [
+      makeMsg({
+        id: 'a1',
+        role: 'assistant',
+        content: 'Local richer copy',
+        thinking: 'thinking locally',
+        streaming: true,
+        createdAt: 20,
+      }),
+      makeMsg({ id: 'tr-local', role: 'tool_result', content: '{}', toolCallId: 'call-local', createdAt: 30 }),
+    ];
+
+    const loadedMessages = [
+      makeMsg({ id: 'a1', role: 'assistant', content: 'Persisted text', createdAt: 20 }),
+      makeMsg({ id: 'u1', role: 'user', content: 'Original prompt', createdAt: 10 }),
+      makeMsg({ id: 'tr-local', role: 'tool_result', content: '{}', createdAt: 30 }),
+    ];
+
+    const merged = mergeFetchedMessages(currentMessages, loadedMessages);
+    const mergedAssistant = merged.find((message) => message.id === 'a1');
+    const mergedToolResult = merged.find((message) => message.id === 'tr-local');
+
+    expect(merged.map((message) => message.id)).toEqual(['u1', 'a1', 'tr-local']);
+    expect(mergedAssistant).toMatchObject({
+      content: 'Local richer copy',
+      thinking: 'thinking locally',
+      streaming: true,
+    });
+    expect(mergedToolResult).toMatchObject({ toolCallId: 'call-local' });
+  });
+
+  it('REGRESSION: merged history can rebuild an anchored turn from a stale server snapshot', () => {
+    const currentMessages = [
+      makeMsg({ id: 'u-local', role: 'user', content: 'Build a calculator app', createdAt: 10 }),
+    ];
+    const loadedMessages = [
+      makeMsg({ id: 'a1', role: 'assistant', content: 'Done.', createdAt: 20 }),
+    ];
+
+    const merged = mergeFetchedMessages(currentMessages, loadedMessages);
+    const turns = buildTurnsFromHistory(merged, 's1');
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({ promptMessageId: 'u-local' });
+  });
+
+  it('REGRESSION: collapses a persisted user prompt onto the optimistic local copy once history catches up', () => {
+    const currentMessages = [
+      makeMsg({ id: 'u-local', role: 'user', content: 'Build a calculator app', createdAt: 10 }),
+    ];
+    const loadedMessages = [
+      makeMsg({ id: 'u-server', role: 'user', content: 'Build a calculator app', createdAt: 12 }),
+    ];
+
+    const merged = mergeFetchedMessages(currentMessages, loadedMessages);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      id: 'u-local',
+      role: 'user',
+      content: 'Build a calculator app',
+    });
+  });
+
+  it('REGRESSION: collapses a persisted tool_result onto the optimistic local copy by toolCallId', () => {
+    const currentMessages = [
+      makeMsg({
+        id: 'tr-local',
+        role: 'tool_result',
+        content: '{"status":"ready","source":"local"}',
+        toolCallId: 'call-123',
+        createdAt: 30,
+      }),
+    ];
+    const loadedMessages = [
+      makeMsg({
+        id: 'tr-server',
+        role: 'tool_result',
+        content: '{"status":"ready","source":"server"}',
+        toolCallId: 'call-123',
+        createdAt: 35,
+      }),
+    ];
+
+    const merged = mergeFetchedMessages(currentMessages, loadedMessages);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      id: 'tr-local',
+      role: 'tool_result',
+      toolCallId: 'call-123',
+      content: '{"status":"ready","source":"local"}',
+    });
+  });
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // buildTurnsFromHistory

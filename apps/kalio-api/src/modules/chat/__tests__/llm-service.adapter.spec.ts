@@ -15,9 +15,9 @@ function makeLLM(plan: FakeStream): LLMService {
     async (
       _msgs: unknown,
       _tools: unknown,
-      onChunk: (c: LLMStreamChunk) => void,
+      options: { onChunk: (c: LLMStreamChunk) => void },
     ): Promise<LLMToolCall[]> => {
-      for (const c of plan.chunks) onChunk(c);
+      for (const c of plan.chunks) options.onChunk(c);
       if (plan.error) throw plan.error;
       return plan.toolCalls;
     },
@@ -106,22 +106,19 @@ describe('LLMServiceAdapter', () => {
       streamChat: vi.fn().mockImplementation(async (
         _msgs: unknown,
         _tools: unknown,
-        onChunk: (c: LLMStreamChunk) => void,
-        _sessionId: string,
-        _messageId: string,
-        abortSignal?: AbortSignal,
+        options: { onChunk: (c: LLMStreamChunk) => void; abortSignal?: AbortSignal },
       ): Promise<LLMToolCall[]> => {
-        upstreamAbortSignal = abortSignal;
+        upstreamAbortSignal = options.abortSignal;
         upstreamChunks.push('first');
-        onChunk({ delta: 'first', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
+        options.onChunk({ delta: 'first', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
         await new Promise<void>((resolve) => {
           release = resolve;
         });
-        if (abortSignal?.aborted) {
+        if (options.abortSignal?.aborted) {
           return [];
         }
         upstreamChunks.push('second');
-        onChunk({ delta: 'second', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
+        options.onChunk({ delta: 'second', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
         return [];
       }),
     } as unknown as LLMService;
@@ -164,16 +161,13 @@ describe('LLMServiceAdapter', () => {
       streamChat: vi.fn().mockImplementation(async (
         _msgs: unknown,
         _tools: unknown,
-        onChunk: (c: LLMStreamChunk) => void,
-        _sessionId: string,
-        _messageId: string,
-        abortSignal?: AbortSignal,
+        options: { onChunk: (c: LLMStreamChunk) => void; abortSignal?: AbortSignal },
       ): Promise<LLMToolCall[]> => {
-        onChunk({ delta: 'first', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
+        options.onChunk({ delta: 'first', thinking: false, done: false, sessionId: 'sid', messageId: 'mid' });
         await new Promise<void>((resolve) => {
           release = resolve;
         });
-        if (abortSignal?.aborted) {
+        if (options.abortSignal?.aborted) {
           const error = new Error('stream aborted');
           error.name = 'AbortError';
           throw error;

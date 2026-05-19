@@ -10,6 +10,7 @@ const ADAPTER: CLIAgentAdapterInfo = {
   installUrl: 'https://example.com/install',
   available: true,
   version: '1.0.0',
+  supportsModelSelection: false,
 };
 
 const CONFIG: CLIAgentConfig = {
@@ -17,30 +18,31 @@ const CONFIG: CLIAgentConfig = {
   cliPath: '',
   timeoutMs: 600000,
   maxOutputChars: 16000,
+  model: '',
   extraArgs: [],
 };
 
-function installFetchMock() {
+function installFetchMock(adapter: CLIAgentAdapterInfo = ADAPTER, config: CLIAgentConfig = CONFIG) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, opts?: RequestInit) => {
       const method = opts?.method?.toUpperCase() ?? 'GET';
 
       if (method === 'GET' && url === '/api/cli-agents') {
-        return new Response(JSON.stringify([ADAPTER]), {
+        return new Response(JSON.stringify([adapter]), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (method === 'GET' && url === `/api/cli-agents/${ADAPTER.id}/config`) {
-        return new Response(JSON.stringify(CONFIG), {
+      if (method === 'GET' && url === `/api/cli-agents/${adapter.id}/config`) {
+        return new Response(JSON.stringify(config), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (method === 'PUT' && url === `/api/cli-agents/${ADAPTER.id}/config`) {
+      if (method === 'PUT' && url === `/api/cli-agents/${adapter.id}/config`) {
         return new Response(String(opts?.body ?? '{}'), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -52,9 +54,9 @@ function installFetchMock() {
   );
 }
 
-function getPutBody(): CLIAgentConfig {
+function getPutBody(agentId = ADAPTER.id): CLIAgentConfig {
   const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
-  const putCall = calls.find(([url, opts]) => url === `/api/cli-agents/${ADAPTER.id}/config` && opts?.method === 'PUT');
+  const putCall = calls.find(([url, opts]) => url === `/api/cli-agents/${agentId}/config` && opts?.method === 'PUT');
   expect(putCall).toBeDefined();
   return JSON.parse((putCall![1]?.body as string) ?? '{}') as CLIAgentConfig;
 }
@@ -63,6 +65,36 @@ describe('CLIAgentPanel', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     installFetchMock();
+  });
+
+  it('renders Codex with a codex-specific CLI path hint', async () => {
+    installFetchMock({
+      id: 'codex',
+      displayName: 'Codex CLI',
+      installUrl: 'https://example.com/codex',
+      available: true,
+      version: '0.130.0',
+      supportsModelSelection: true,
+    });
+
+    render(<CLIAgentPanel />);
+
+    await screen.findByText('Codex CLI');
+    await waitFor(() => {
+      expect(screen.getAllByRole('textbox')[0]).toHaveAttribute('placeholder', 'e.g. /usr/local/bin/codex');
+    });
+  });
+
+  it('shows the recommended durable CLI stack for forever-loop supervision', async () => {
+    render(<CLIAgentPanel />);
+
+    await screen.findByText('CLI Coding Agents');
+
+    expect(screen.getByText(/Gemini -> Copilot -> Codex/i)).toBeInTheDocument();
+    expect(screen.getByText(/spawn_cli_agent/i)).toBeInTheDocument();
+    expect(screen.getByText(/message_cli_agent/i)).toBeInTheDocument();
+    expect(screen.getByText(/get_cli_agent_status/i)).toBeInTheDocument();
+    expect(screen.getByText(/stop_cli_agent/i)).toBeInTheDocument();
   });
 
   it('does not serialize an empty timeout as 0 (REGRESSION)', async () => {
@@ -103,6 +135,27 @@ describe('CLIAgentPanel', () => {
 
     await waitFor(() => {
       expect(getPutBody().cliPath ?? '').toBe('');
+    });
+  });
+
+  it('saves a trimmed model override for model-capable agents', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      id: 'codex',
+      displayName: 'Codex CLI',
+      installUrl: 'https://example.com/codex',
+      available: true,
+      version: '0.130.0',
+      supportsModelSelection: true,
+    });
+    render(<CLIAgentPanel />);
+
+    const modelInput = await screen.findByPlaceholderText('e.g. gpt-5.2');
+    fireEvent.change(modelInput, { target: { value: '  gpt-5.2  ' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(getPutBody('codex').model).toBe('gpt-5.2');
     });
   });
 

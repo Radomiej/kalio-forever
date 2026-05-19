@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MCPAddServerForm } from './MCPAddServerForm';
 
@@ -9,13 +9,12 @@ describe('MCPAddServerForm', () => {
   });
 
   it('rejects a whitespace-only server name before submit (REGRESSION)', async () => {
-    const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<MCPAddServerForm onSubmit={onSubmit} onCancel={vi.fn()} />);
 
-    await user.type(screen.getByTestId('mcp-form-name'), '   ');
-    await user.type(screen.getByTestId('mcp-form-url'), 'https://mcp.example.com/sse');
-    await user.click(screen.getByTestId('mcp-form-submit'));
+    fireEvent.change(screen.getByTestId('mcp-form-name'), { target: { value: '   ' } });
+    fireEvent.change(screen.getByTestId('mcp-form-url'), { target: { value: 'https://mcp.example.com/sse' } });
+    fireEvent.click(screen.getByTestId('mcp-form-submit'));
 
     await waitFor(() => {
       expect(onSubmit).not.toHaveBeenCalled();
@@ -56,10 +55,10 @@ describe('MCPAddServerForm', () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<MCPAddServerForm onSubmit={onSubmit} onCancel={vi.fn()} />);
 
-    await user.type(screen.getByTestId('mcp-form-name'), 'My MCP');
+    fireEvent.change(screen.getByTestId('mcp-form-name'), { target: { value: 'My MCP' } });
     await user.click(screen.getByTestId('mcp-form-transport-stdio'));
-    await user.type(screen.getByTestId('mcp-form-command'), 'npx');
-    await user.type(screen.getByTestId('mcp-form-args'), '--root "C:\\Program Files\\Repo"');
+    fireEvent.change(screen.getByTestId('mcp-form-command'), { target: { value: 'npx' } });
+    fireEvent.change(screen.getByTestId('mcp-form-args'), { target: { value: '--root "C:\\Program Files\\Repo"' } });
     await user.click(screen.getByTestId('mcp-form-submit'));
 
     await waitFor(() => {
@@ -74,10 +73,10 @@ describe('MCPAddServerForm', () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<MCPAddServerForm onSubmit={onSubmit} onCancel={vi.fn()} />);
 
-    await user.type(screen.getByTestId('mcp-form-name'), 'My MCP');
+    fireEvent.change(screen.getByTestId('mcp-form-name'), { target: { value: 'My MCP' } });
     await user.click(screen.getByTestId('mcp-form-transport-stdio'));
-    await user.type(screen.getByTestId('mcp-form-command'), 'npx');
-    await user.type(screen.getByTestId('mcp-form-args'), '--message "She said \\"hello\\"" --flag');
+    fireEvent.change(screen.getByTestId('mcp-form-command'), { target: { value: 'npx' } });
+    fireEvent.change(screen.getByTestId('mcp-form-args'), { target: { value: '--message "She said \\"hello\\"" --flag' } });
     await user.click(screen.getByTestId('mcp-form-submit'));
 
     await waitFor(() => {

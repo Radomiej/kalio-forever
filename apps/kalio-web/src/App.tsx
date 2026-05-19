@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { ChatInterface } from './features/chat/ChatInterface';
 import { CanvasPanel } from './features/chat/CanvasPanel';
+import { ExecutionGraphView } from './features/chat/graph/ExecutionGraphView';
 import { ConversationPanel } from './features/sessions/ConversationPanel';
 import { ConversationManagerPanel } from './features/sessions/ConversationManagerPanel';
 import { PersonaPanel } from './features/persona/PersonaPanel';
@@ -26,12 +27,14 @@ import { useSettingsStore } from './features/settings/settingsStore';
 
 type ActiveSection = 'landing' | 'talk' | 'tools' | 'mind' | 'observe';
 type TalkTab = 'conversations' | 'agents';
+type TalkView = 'conversation' | 'graph';
 type ToolsTab = 'native' | 'mcp' | 'raapps';
 type MindTab = 'memory' | 'files' | 'skills' | 'personas';
 
 type AppViewState = {
   activeSection: ActiveSection;
   talkTab: TalkTab;
+  talkView: TalkView;
   toolsTab: ToolsTab;
   mindTab: MindTab;
   selectedSkillId: string | null;
@@ -42,10 +45,16 @@ const APP_VIEW_STATE_STORAGE_KEY = 'kalio:app-view-state';
 const DEFAULT_APP_VIEW_STATE: AppViewState = {
   activeSection: 'landing',
   talkTab: 'conversations',
+  talkView: 'conversation',
   toolsTab: 'native',
   mindTab: 'memory',
   selectedSkillId: null,
 };
+
+const TALK_VIEW_OPTIONS: ReadonlyArray<{ id: TalkView; label: string }> = [
+  { id: 'conversation', label: 'Conversation' },
+  { id: 'graph', label: 'Graph' },
+];
 
 function isActiveSection(value: unknown): value is ActiveSection {
   return value === 'landing' || value === 'talk' || value === 'tools' || value === 'mind' || value === 'observe';
@@ -53,6 +62,10 @@ function isActiveSection(value: unknown): value is ActiveSection {
 
 function isTalkTab(value: unknown): value is TalkTab {
   return value === 'conversations' || value === 'agents';
+}
+
+function isTalkView(value: unknown): value is TalkView {
+  return value === 'conversation' || value === 'graph';
 }
 
 function isToolsTab(value: unknown): value is ToolsTab {
@@ -78,6 +91,7 @@ function loadAppViewState(): AppViewState {
     return {
       activeSection: isActiveSection(parsed.activeSection) ? parsed.activeSection : DEFAULT_APP_VIEW_STATE.activeSection,
       talkTab: isTalkTab(parsed.talkTab) ? parsed.talkTab : DEFAULT_APP_VIEW_STATE.talkTab,
+      talkView: isTalkView(parsed.talkView) ? parsed.talkView : DEFAULT_APP_VIEW_STATE.talkView,
       toolsTab: isToolsTab(parsed.toolsTab) ? parsed.toolsTab : DEFAULT_APP_VIEW_STATE.toolsTab,
       mindTab: isMindTab(parsed.mindTab) ? parsed.mindTab : DEFAULT_APP_VIEW_STATE.mindTab,
       selectedSkillId: typeof parsed.selectedSkillId === 'string' ? parsed.selectedSkillId : null,
@@ -98,6 +112,7 @@ export function App() {
   const initialViewState = loadAppViewState();
   const [activeSection, setActiveSection] = useState<ActiveSection>(initialViewState.activeSection);
   const [talkTab, setTalkTab] = useState<TalkTab>(initialViewState.talkTab);
+  const [talkView, setTalkView] = useState<TalkView>(initialViewState.talkView);
   const [toolsTab, setToolsTab] = useState<ToolsTab>(initialViewState.toolsTab);
   const [mindTab, setMindTab] = useState<MindTab>(initialViewState.mindTab);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(initialViewState.selectedSkillId);
@@ -137,12 +152,13 @@ export function App() {
     const nextState: AppViewState = {
       activeSection,
       talkTab,
+      talkView,
       toolsTab,
       mindTab,
       selectedSkillId,
     };
     window.sessionStorage.setItem(APP_VIEW_STATE_STORAGE_KEY, JSON.stringify(nextState));
-  }, [activeSection, mindTab, selectedSkillId, talkTab, toolsTab]);
+  }, [activeSection, mindTab, selectedSkillId, talkTab, talkView, toolsTab]);
 
   const goHome = () => {
     setActiveSection('landing');
@@ -255,6 +271,26 @@ export function App() {
                   </button>
                 ))}
               </div>
+              <div className="border-b border-base-300 bg-base-100/80 px-3 py-3 shrink-0">
+                <p className="text-[10px] uppercase tracking-[0.24em] text-base-content/40">View</p>
+                <div className="mt-2 grid grid-cols-2 gap-2" data-testid="talk-sidebar-view-switcher">
+                  {TALK_VIEW_OPTIONS.map((view) => (
+                    <button
+                      key={view.id}
+                      type="button"
+                      data-testid={`talk-sidebar-${view.id}-entry`}
+                      className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                        talkView === view.id
+                          ? 'border-sky-500 bg-sky-500/14 text-sky-300 shadow-[0_0_0_1px_rgba(14,165,233,0.15)]'
+                          : 'border-base-300 bg-base-100 text-base-content/65 hover:text-base-content hover:border-base-content/20'
+                      }`}
+                      onClick={() => setTalkView(view.id)}
+                    >
+                      {view.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="flex-1 overflow-hidden">
                 {talkTab === 'conversations' && (
                   <ConversationPanel onSelect={() => {}} />
@@ -264,13 +300,42 @@ export function App() {
                 )}
               </div>
             </div>
-            {/* Chat area */}
-            <div className="flex-1 overflow-hidden min-w-0">
-              <ChatInterface />
-            </div>
-            {/* Canvas — only rendered inside talk section, hidden when navigating away */}
-            <div className="relative flex">
-              <CanvasPanel />
+            <div className="flex-1 min-w-0 flex overflow-hidden">
+              <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+                <div className="border-b border-base-300 bg-base-100/90 backdrop-blur supports-[backdrop-filter]:bg-base-100/75 px-4 py-2 flex items-center justify-between gap-4 shrink-0">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.24em] text-base-content/40">Talk view</p>
+                    </div>
+                    {TALK_VIEW_OPTIONS.map((view) => (
+                      <button
+                        key={view.id}
+                        type="button"
+                        data-testid={`talk-view-${view.id}`}
+                        className={`rounded-full min-w-[8.5rem] px-4 py-2 text-sm font-medium border transition-colors ${
+                          talkView === view.id
+                            ? 'border-sky-500 bg-sky-500/14 text-sky-300 shadow-[0_0_0_1px_rgba(14,165,233,0.15)]'
+                            : 'border-base-300 text-base-content/65 hover:text-base-content hover:border-base-content/20 bg-base-100/55'
+                        }`}
+                        onClick={() => setTalkView(view.id)}
+                      >
+                        {view.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-base-content/45">Conversation and graph are two views of the same Talk state, so live sockets and stream state remain intact.</p>
+                </div>
+
+                <div className="flex-1 overflow-hidden min-h-0">
+                  {talkView === 'conversation' ? <ChatInterface /> : <ExecutionGraphView />}
+                </div>
+              </div>
+
+              {talkView === 'conversation' && (
+                <div className="relative flex">
+                  <CanvasPanel />
+                </div>
+              )}
             </div>
           </div>
 

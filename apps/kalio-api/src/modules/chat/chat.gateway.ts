@@ -68,11 +68,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
 
     replayPendingConfirmations(payload.sessionId);
+    client.emit('session:status', this.pipeline.getSessionStatus(payload.sessionId));
 
     const descendantSessionIds = await this.collectDescendantSessionIds(payload.sessionId);
     descendantSessionIds.forEach((sessionId) => {
       this.subscribeSocketToSession(client.id, sessionId);
       replayPendingConfirmations(sessionId);
+      client.emit('session:status', this.pipeline.getSessionStatus(sessionId));
     });
 
     this.logger.log(`Session re-identified: ${payload.sessionId} for socket ${client.id}`);
@@ -118,7 +120,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.warn(`tool:confirm rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
-    this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId);
+    const status = this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId);
+    if (status === 'not_found') {
+      client.emit('tool:confirmation_invalidated', {
+        requestId: payload.requestId,
+        sessionId: payload.sessionId,
+        reason: 'not_found',
+        message: 'This approval is no longer active.',
+      } satisfies SocketEvents['tool:confirmation_invalidated']);
+    }
   }
 
   @SubscribeMessage('tool:cancel')
@@ -131,7 +141,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.warn(`tool:cancel rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
-    this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId);
+    const status = this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId);
+    if (status === 'not_found') {
+      client.emit('tool:confirmation_invalidated', {
+        requestId: payload.requestId,
+        sessionId: payload.sessionId,
+        reason: 'not_found',
+        message: 'This approval is no longer active.',
+      } satisfies SocketEvents['tool:confirmation_invalidated']);
+    }
   }
 
   @SubscribeMessage('raapp:approve')

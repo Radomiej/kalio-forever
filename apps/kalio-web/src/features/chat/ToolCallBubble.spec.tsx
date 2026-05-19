@@ -22,12 +22,14 @@ const mockUpdateToolActivity = vi.fn();
 let mockPendingConfirmations: Record<string, ToolConfirmationRequest> = {};
 let mockActiveSessionId = 'session-1';
 let mockToolActivities: ToolActivity[] = [];
+let mockToolArgProgress: { toolName: string; totalChars: number; charsPerSec: number } | null = null;
 
 vi.mock('../../store/agentStore', () => ({
   useAgentStore: (selector: (s: unknown) => unknown) =>
     selector({
       pendingConfirmations: mockPendingConfirmations,
       toolActivities: mockToolActivities,
+      toolArgProgress: mockToolArgProgress,
       setPendingConfirmation: mockSetPendingConfirmation,
       updateToolActivity: mockUpdateToolActivity,
       setCanvasOpen: vi.fn(),
@@ -94,9 +96,18 @@ beforeEach(() => {
   mockPendingConfirmations = {};
   mockActiveSessionId = 'session-1';
   mockToolActivities = [];
+  mockToolArgProgress = null;
   vi.clearAllMocks();
   mockApiGet.mockResolvedValue({ data: [] });
 });
+
+async function renderAndFlush(ui: React.ReactElement): Promise<void> {
+  await act(async () => {
+    render(ui);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
@@ -215,10 +226,19 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
     expect(screen.queryByTestId('args-preview')).toBeNull();
     expect(screen.queryByTestId('confirmation-args-toggle')).toBeNull();
   });
+
+  it('REGRESSION: awaiting confirmation keeps showing synthetic Preparing progress when no arg chunks were streamed', () => {
+    mockPendingConfirmations = { 'session-1': makeConfirmation() };
+    mockToolArgProgress = { toolName: 'vfs_write', totalChars: 0, charsPerSec: 0 };
+
+    render(<LiveToolCallBubble activity={makeActivity()} />);
+
+    expect(screen.getByTestId('tool-arg-progress-indicator')).toHaveTextContent(/Preparing\s+vfs_write/i);
+  });
 });
 
 describe('HistoryToolCallBubble — run_subagent', () => {
-  it('shows child session, VFS mode, and copied count while keeping copied file paths collapsed by default', () => {
+  it('shows child session, VFS mode, and copied count while keeping copied file paths collapsed by default', async () => {
     const content = JSON.stringify({
       result: 'created index.html',
       taskId: 'task-1',
@@ -230,7 +250,7 @@ describe('HistoryToolCallBubble — run_subagent', () => {
       durationMs: 12,
     });
 
-    render(<HistoryToolCallBubble toolName="run_subagent" content={content} args={{ vfsMode: 'isolated' }} />);
+    await renderAndFlush(<HistoryToolCallBubble toolName="run_subagent" content={content} args={{ vfsMode: 'isolated' }} />);
 
     expect(screen.getByText('session')).toBeDefined();
     expect(screen.getByText('sub-child-1')).toBeDefined();

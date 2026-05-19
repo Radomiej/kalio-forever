@@ -36,12 +36,14 @@ import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from
 import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
+import { GetCliAgentStatusTool, MessageCliAgentTool, SpawnCliAgentTool, StopCliAgentTool } from './tools/cli-agent-session.tools';
 import { RunCliAgentTool } from './tools/run-cli-agent.tool';
 import { ImageGenerateTool } from './tools/image-generate.tool';
 import { ImageEditTool } from './tools/image-edit.tool';
 import { ImageViewTool } from './tools/image-view.tool';
 import { SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool } from './tools/skill.tools';
 import { PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool } from './tools/persona.tools';
+import { EscalateTool } from './tools/escalate.tool';
 
 /** Create a stub whose constructor is the real class (so @Tool metadata is present) */
 function stub<T extends abstract new (...a: never[]) => object>(Cls: T): InstanceType<T> {
@@ -94,6 +96,10 @@ describe('ToolRegistryService — all tools registered', () => {
       stub(WebSearchTool),
       stub(ListToolsTool),
       stub(GetToolDetailsTool),
+      stub(SpawnCliAgentTool),
+      stub(MessageCliAgentTool),
+      stub(GetCliAgentStatusTool),
+      stub(StopCliAgentTool),
       stub(RunCliAgentTool),
       stub(ImageGenerateTool),
       stub(ImageEditTool),
@@ -107,6 +113,7 @@ describe('ToolRegistryService — all tools registered', () => {
       stub(PersonaCreateTool),
       stub(PersonaUpdateTool),
       stub(PersonaDeleteTool),
+      stub(EscalateTool),
     );
   });
 
@@ -136,6 +143,7 @@ describe('ToolRegistryService — all tools registered', () => {
     // Meta
     'list_tools', 'get_tool_details',
     // CLI Agent
+    'spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'stop_cli_agent',
     'run_cli_agent',
     // Image
     'image_generate', 'image_edit', 'image_view',
@@ -143,6 +151,8 @@ describe('ToolRegistryService — all tools registered', () => {
     'skill_list', 'skill_read', 'skill_create', 'skill_update', 'skill_delete',
     // Personas
     'persona_list', 'persona_create', 'persona_update', 'persona_delete',
+    // Escalate
+    'escalate',
   ];
 
   it('exposes every expected tool via getAllTools()', () => {

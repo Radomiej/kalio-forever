@@ -2,6 +2,7 @@ import { io, Socket } from 'socket.io-client';
 import type {
   SocketEvents,
   LLMStreamChunk,
+  ToolConfirmationInvalidated,
   ToolConfirmationRequest,
   ToolResult,
   ChatSession,
@@ -11,6 +12,7 @@ export type ChunkHandler = (chunk: LLMStreamChunk) => void;
 export type CompleteHandler = (payload: SocketEvents['chat:complete']) => void;
 export type ErrorHandler = (payload: SocketEvents['chat:error']) => void;
 export type ConfirmationHandler = (req: ToolConfirmationRequest) => void;
+export type ConfirmationInvalidatedHandler = (payload: ToolConfirmationInvalidated) => void;
 export type ToolStartHandler = (payload: SocketEvents['tool:start']) => void;
 export type ToolResultHandler = (result: ToolResult) => void;
 export type SessionCreatedHandler = (session: ChatSession) => void;
@@ -19,6 +21,8 @@ export type AgentStartHandler = (payload: SocketEvents['agent:start']) => void;
 export type AgentDoneHandler = (payload: SocketEvents['agent:done']) => void;
 export type RaAppNativeResultHandler = (payload: SocketEvents['raapp:native_result']) => void;
 export type CLIAgentProgressHandler = (payload: SocketEvents['cli_agent:progress']) => void;
+export type ToolArgProgressHandler = (payload: SocketEvents['tool:arg_progress']) => void;
+export type SessionStatusHandler = (payload: SocketEvents['session:status']) => void;
 export type ReconnectHandler = () => void;
 export type DisconnectHandler = (reason: string) => void;
 
@@ -148,6 +152,19 @@ export class KalioSDK {
     return () => this.socket.off('tool:confirmation_required', wrappedHandler);
   }
 
+  onToolConfirmationInvalidated(handler: ConfirmationInvalidatedHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['tool:confirmation_invalidated']) => {
+      console.groupCollapsed(`[Thread] ℹ️ CONFIRMATION INVALIDATED: ${payload.requestId} → ${payload.reason}`);
+      if (payload.message) {
+        console.log('message:', payload.message);
+      }
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('tool:confirmation_invalidated', wrappedHandler);
+    return () => this.socket.off('tool:confirmation_invalidated', wrappedHandler);
+  }
+
   onToolStart(handler: ToolStartHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['tool:start']) => {
       this.toolCallCount++;
@@ -228,6 +245,22 @@ export class KalioSDK {
     };
     this.socket.on('cli_agent:progress', wrappedHandler);
     return () => this.socket.off('cli_agent:progress', wrappedHandler);
+  }
+
+  onToolArgProgress(handler: ToolArgProgressHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['tool:arg_progress']) => {
+      handler(payload);
+    };
+    this.socket.on('tool:arg_progress', wrappedHandler);
+    return () => this.socket.off('tool:arg_progress', wrappedHandler);
+  }
+
+  onSessionStatus(handler: SessionStatusHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['session:status']) => {
+      handler(payload);
+    };
+    this.socket.on('session:status', wrappedHandler);
+    return () => this.socket.off('session:status', wrappedHandler);
   }
 
   /**

@@ -9,7 +9,7 @@ interface FakeRow {
   id: string;
   personaId: string;
   title: string;
-  kind?: 'chat' | 'subagent';
+  kind?: 'chat' | 'subagent' | 'cli-agent';
   parentSessionId?: string | null;
   parentTurnId?: string | null;
   parentToolCallId?: string | null;

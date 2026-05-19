@@ -72,6 +72,10 @@ flowchart LR
 | `chat:stop` | FE -> BE | Abort the active turn and drop queued follow-ups for that session |
 | `session:identify` | FE -> BE | Re-subscribe the socket to a session after reconnect or when watching a child session |
 
+`chat:stop` is not only a socket-level cancel. The same `AbortSignal` now flows through
+`ToolDispatchService`, auto-HITL evaluation, and RA-App native approval auto-resolution,
+so interrupting a turn also stops secondary approval LLM calls spawned inside that turn.
+
 ## End-to-end sequence
 
 ```mermaid
@@ -273,3 +277,4 @@ That design has a few consequences:
 - `chat:stop` must clear queued follow-ups as well as aborting the current run.
 - `session:identify` must be sent both after reconnect and when the UI starts watching another session.
 - `tool:start` and `tool:result` ordering must stay stable, because the frontend uses those to build turn items and persistent result messages.
+- The turn abort signal must reach auto-HITL helpers and nested tool-side approval checks, otherwise `chat:stop` only cancels top-level streaming while background approval work keeps running.

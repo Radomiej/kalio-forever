@@ -306,4 +306,34 @@ describe('sessionStore — session-isolated streaming (REGRESSION)', () => {
     expect(useSessionStore.getState().chunkSessionIds['msg-A']).toBeUndefined();
     expect(useSessionStore.getState().streamingChunks['msg-A']).toBeUndefined();
   });
+
+  it('clearPendingChunks removes stale chunk tracking only for the targeted session', () => {
+    useSessionStore.setState({
+      activeSessionId: 'sess-A',
+      streamingChunks: {
+        'msg-A': 'partial from A',
+        'msg-B': 'partial from B',
+      },
+      thinkingChunks: {
+        'msg-A': 'thinking from A',
+        'msg-B': 'thinking from B',
+      },
+      chunkSessionIds: {
+        'msg-A': 'sess-A',
+        'msg-B': 'sess-B',
+      },
+    });
+
+    useSessionStore.getState().clearPendingChunks('sess-A');
+
+    expect(useSessionStore.getState().streamingChunks).toEqual({
+      'msg-B': 'partial from B',
+    });
+    expect(useSessionStore.getState().thinkingChunks).toEqual({
+      'msg-B': 'thinking from B',
+    });
+    expect(useSessionStore.getState().chunkSessionIds).toEqual({
+      'msg-B': 'sess-B',
+    });
+  });
 });

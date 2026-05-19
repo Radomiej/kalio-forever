@@ -177,9 +177,7 @@ describe('LLMService - DB credential overrides env', () => {
       const result = await service.streamChat(
         [{ role: 'user', content: 'hello' }],
         [],
-        (chunk) => chunks.push(chunk),
-        'session-1',
-        'msg-1',
+        { sessionId: 'session-1', messageId: 'msg-1', onChunk: (chunk) => chunks.push(chunk) },
       );
       expect(Array.isArray(result)).toBe(true);
     });
@@ -199,9 +197,7 @@ describe('LLMService - DB credential overrides env', () => {
       const result = await svc2.streamChat(
         [{ role: 'user', content: 'hello' }],
         [],
-        () => {},
-        'session-1',
-        'msg-1',
+        { sessionId: 'session-1', messageId: 'msg-1', onChunk: () => {} },
       );
       expect(Array.isArray(result)).toBe(true);
     });
@@ -223,9 +219,7 @@ describe('LLMService - DB credential overrides env', () => {
         await service.streamChat(
           [{ role: 'user', content: 'hello' }],
           [],
-          () => {},
-          'session-1',
-          'msg-1',
+          { sessionId: 'session-1', messageId: 'msg-1', onChunk: () => {} },
         );
 
         const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
@@ -263,9 +257,7 @@ describe('LLMService - DB credential overrides env', () => {
       await mockBaseUrlService.streamChat(
         [{ role: 'user', content: 'hello' }],
         [],
-        () => {},
-        'session-1',
-        'msg-1',
+        { sessionId: 'session-1', messageId: 'msg-1', onChunk: () => {} },
       );
 
       expect((mockBaseUrlService as unknown as { envProviderKey: string }).envProviderKey).toBe(initialProviderKey);

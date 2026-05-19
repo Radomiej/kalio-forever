@@ -1,12 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
 import { API_BASE } from './helpers/test-config';
 
-const APP_URL = 'http://localhost:5188';
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function openEmbeddingsPanel(page: Page) {
-  await page.goto(APP_URL);
+  await page.goto('/');
   await page.getByTestId('nav-settings').click();
   await expect(page.getByTestId('settings-modal')).toBeVisible();
   await page.getByTestId('settings-tab-embeddings').click();

@@ -66,4 +66,28 @@ describe('RAAppRenderer', () => {
 
     expect(screen.getByTestId('raapp-vfs-renderer')).toHaveTextContent('session-123:design/preview.html');
   });
+
+  it('renders native operation results when the RA-App block carries them', () => {
+    render(
+      <RAAppRenderer
+        block={{
+          type: 'html',
+          mode: 'display',
+          content: '<main>Preview</main>',
+          nativeResults: [
+            {
+              id: 'native-1',
+              system: 'vfs_write',
+              status: 'executed',
+              result: { path: 'drafts/result.txt' },
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Native operations')).toBeInTheDocument();
+    expect(screen.getByText('vfs_write')).toBeInTheDocument();
+    expect(screen.getByText(/drafts\/result\.txt/)).toBeInTheDocument();
+  });
 });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CanvasPanel } from './CanvasPanel';
 import type { ChatMessage, ChatSession, ToolResult } from '@kalio/types';
@@ -435,6 +435,71 @@ describe('CanvasPanel subagent grouping', () => {
 
     await waitFor(() => expect(mockIdentifySession).toHaveBeenCalledWith('sub-session-1'));
     expect(screen.getByText('streaming child draft')).toBeDefined();
+  });
+
+  it('REGRESSION: does not re-identify the same child session on unrelated rerenders', async () => {
+    const view = render(<CanvasPanel />);
+
+    await waitFor(() => expect(mockIdentifySession).toHaveBeenCalledWith('sub-session-1'));
+
+    mockIdentifySession.mockClear();
+    sessionState.messages = [
+      ...sessionState.messages,
+      { id: 'm2', sessionId: 'session-1', role: 'assistant', content: 'parent stream update', createdAt: 3 },
+    ];
+    sessionState.sessionMessages['session-1'] = sessionState.messages;
+
+    await act(async () => {
+      view.rerender(<CanvasPanel />);
+      await Promise.resolve();
+    });
+
+    expect(mockIdentifySession).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: identifies only newly discovered child sessions when previews expand', async () => {
+    const view = render(<CanvasPanel />);
+
+    await waitFor(() => expect(mockIdentifySession).toHaveBeenCalledWith('sub-session-1'));
+
+    mockIdentifySession.mockClear();
+    agentState.toolActivities = [
+      ...agentState.toolActivities,
+      {
+        callId: 'master-call-2',
+        toolName: 'run_subagent',
+        args: {},
+        status: 'success',
+        startedAt: 3,
+        finishedAt: 4,
+        result: {
+          callId: 'master-call-2',
+          status: 'success',
+          data: {
+            result: 'created second child',
+            taskId: 'task-2',
+            childSessionId: 'sub-session-2',
+            parentSessionId: 'session-1',
+            vfsMode: 'isolated',
+            vfsSessionId: 'sub-session-2',
+            copiedFiles: [],
+            durationMs: 20,
+          },
+        },
+      },
+    ];
+    sessionState.sessions = [
+      ...sessionState.sessions,
+      { id: 'sub-session-2', personaId: 'default', title: 'Sub-agent: follow-up', kind: 'subagent', createdAt: 4, updatedAt: 4 },
+    ];
+
+    await act(async () => {
+      view.rerender(<CanvasPanel />);
+      await Promise.resolve();
+    });
+
+    expect(mockIdentifySession).toHaveBeenCalledTimes(1);
+    expect(mockIdentifySession).toHaveBeenCalledWith('sub-session-2');
   });
 
   it('keeps the latest child transcript from session state when REST history is stale', async () => {

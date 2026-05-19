@@ -4,7 +4,7 @@
 
 The original `run_cli_agent` tool was tightly coupled to GitHub Copilot CLI: it used `execFile` directly, hard-coded the Windows `.cmd` wrapper, and had no streaming. This refactor introduces a generic **CLI Agent Module** that:
 
-- Supports multiple CLI coding agents (Copilot, Gemini, Claude Code) via an adapter pattern
+- Supports multiple CLI coding agents (Copilot, Gemini, Claude Code, Codex) via an adapter pattern
 - Streams real-time output to the frontend via a new `cli_agent:progress` Socket.IO event
 - Stores per-adapter config at `~/.kalio/cli-agents/{id}.json`
 - Compresses large outputs before handing them to the LLM context
@@ -21,6 +21,7 @@ apps/kalio-api/src/modules/cli-agent/
     copilot.adapter.ts          ← GitHub Copilot CLI adapter
     gemini.adapter.ts           ← Google Gemini CLI adapter
     claude-code.adapter.ts      ← Anthropic Claude Code adapter
+    codex.adapter.ts            ← OpenAI Codex CLI adapter
   cli-agent-config.service.ts  ← Per-adapter ~/.kalio/cli-agents/{id}.json config
   cli-agent.service.ts         ← Spawn + stream + probe logic
   cli-agent.controller.ts      ← REST endpoints: GET /api/cli-agents, PUT /api/cli-agents/:id/config
@@ -34,7 +35,7 @@ apps/kalio-api/src/modules/cli-agent/
 
 ```typescript
 interface ICLIAgentAdapter {
-  readonly id: string;                          // 'copilot' | 'gemini' | 'claude'
+  readonly id: string;                          // 'copilot' | 'gemini' | 'claude' | 'codex'
   readonly displayName: string;
   readonly installUrl: string;
   executable(platform: NodeJS.Platform): string; // handles Windows .cmd shim
@@ -121,6 +122,7 @@ flowchart LR
     CLIAgentModule --> CopilotAdapter
     CLIAgentModule --> GeminiAdapter
     CLIAgentModule --> ClaudeCodeAdapter
+    CLIAgentModule --> CodexAdapter
     ToolModule --> RunCliAgentTool
     RunCliAgentTool --> CLIAgentService
     RunCliAgentTool --> AllowedPathsService
@@ -184,7 +186,7 @@ interface ToolCallRequest {
 | `apps/kalio-web/src/features/chat/ChatInterface.tsx` | Subscribe to `eventBus.onCLIAgentProgress`, dispatch to `appendCLIAgentChunk` |
 | `apps/kalio-web/src/features/chat/LiveCLIAgentBlock.tsx` | **NEW** — live terminal block for in-flight `run_cli_agent` calls |
 | `apps/kalio-web/src/features/chat/ToolCallBubble.tsx` | Render `LiveCLIAgentBlock` in `LiveToolCallBubble` when running; pass `agentId` to `TerminalOutputBlock` |
-| `apps/kalio-web/src/features/chat/TerminalOutputBlock.tsx` | Accept `agentId?` prop, resolve display name from static map |
+| `apps/kalio-web/src/features/chat/TerminalOutputBlock.tsx` | Accept `agentId?` prop, resolve display name from shared CLI agent labels |
 | `apps/kalio-web/src/features/settings/CLIAgentPanel.tsx` | **NEW** — multi-adapter settings panel with probe status + config editor |
 | `apps/kalio-web/src/features/settings/registry.tsx` | Replace `ToolsPanel` with `CLIAgentPanel` |
 
@@ -194,18 +196,30 @@ interface ToolCallRequest {
 
 | Before | After |
 |--------|-------|
-| `run_cli_agent` only supported Copilot | Supports `agentId: 'copilot' \| 'gemini' \| 'claude'` (default `'copilot'`) |
+| `run_cli_agent` only supported Copilot | Supports `agentId: 'copilot' \| 'gemini' \| 'claude' \| 'codex'` (default `'copilot'`) |
 | Direct `execFile` in `RunCliAgentTool` | Delegates to `CLIAgentService` via adapter pattern |
 | No streaming | `cli_agent:progress` chunks arrive in real time |
 | No config file | `~/.kalio/cli-agents/{id}.json` per adapter |
 | `GET /api/tools/cli-agent/probe` (Copilot only) | `GET /api/cli-agents` (all adapters) |
 | "Copilot CLI" hardcoded in `TerminalOutputBlock` | Dynamic label from `agentId` |
 
+Codex-specific execution notes:
+
+- The Codex adapter runs `codex exec` in non-interactive mode.
+- Default flags are `-a never exec --sandbox workspace-write --color never`.
+- Kalio still enforces the outer `Allowed Paths` guardrail before the CLI process starts.
+- `--skip-git-repo-check` is intentionally not hardcoded; use adapter `extraArgs` only when you explicitly want Codex to run outside a Git repo.
+
+Gemini-specific execution notes:
+
+- The Gemini adapter now uses `--include-directories <workdir>`; newer Gemini CLI builds reject the older `--add-dir` flag.
+- Kalio also passes `--approval-mode yolo` by default for Gemini. The human confirmation still happens at the outer `run_cli_agent` gate in Kalio; `yolo` only prevents Gemini CLI from stalling on its own nested shell/file approvals after that point.
+
 ---
 
 ## Windows Notes
 
-Copilot CLI installs as a `.cmd` shim on Windows. Using `spawn` with `shell: false` and `cmd /c copilot [args]` ensures:
+Copilot CLI and Codex CLI install as `.cmd` shims on Windows when installed via npm. Using `spawn` with `shell: false` and `cmd /c <tool> [args]` ensures:
 - No shell metacharacter injection (args passed as array, not interpolated string)
 - No Node.js `DeprecationWarning` about shell: true
 - Consistent behaviour with `execFile` pattern used elsewhere

@@ -63,6 +63,7 @@ async function emitEvent(event: string, payload: unknown) {
 // Spies declared via vi.hoisted() so they're initialized before vi.mock factories run
 const mockSendMessage = vi.hoisted(() => vi.fn());
 const mockConversationFilesBar = vi.hoisted(() => vi.fn());
+const mockIdentifySession = vi.hoisted(() => vi.fn());
 
 // ── eventBus mock ─────────────────────────────────────────────────────────────
 vi.mock('../../services/eventBus', () => ({
@@ -73,6 +74,7 @@ vi.mock('../../services/eventBus', () => ({
     onComplete: (h: (...args: unknown[]) => void) => capture('chat:complete', h),
     onError: (h: (...args: unknown[]) => void) => capture('chat:error', h),
     onToolConfirmation: (h: (...args: unknown[]) => void) => capture('tool:confirmation_required', h),
+    onToolConfirmationInvalidated: (h: (...args: unknown[]) => void) => capture('tool:confirmation_invalidated', h),
     onToolStart: (h: (...args: unknown[]) => void) => capture('tool:start', h),
     onToolResult: (h: (...args: unknown[]) => void) => capture('tool:result', h),
     onContext: (h: (...args: unknown[]) => void) => capture('chat:context', h),
@@ -81,8 +83,10 @@ vi.mock('../../services/eventBus', () => ({
     onSessionCreated: (h: (...args: unknown[]) => void) => capture('session:created', h),
     onRaAppNativeResult: (h: (...args: unknown[]) => void) => capture('raapp:native_result', h),
     onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
-    onReconnect: vi.fn().mockReturnValue(vi.fn()),
-    identifySession: vi.fn(),
+    onToolArgProgress: (h: (...args: unknown[]) => void) => capture('tool:arg_progress', h),
+    onSessionStatus: (h: (...args: unknown[]) => void) => capture('session:status', h),
+    onReconnect: (h: (...args: unknown[]) => void) => capture('socket:reconnect', h),
+    identifySession: mockIdentifySession,
     sendMessage: mockSendMessage,
     stopTurn: vi.fn(),
     confirmTool: vi.fn(),
@@ -107,11 +111,21 @@ const addActiveAgentLoop = vi.fn();
 const removeActiveAgentLoop = vi.fn();
 const appendCLIAgentChunk = vi.fn();
 const clearCLIAgentOutput = vi.fn();
+const setToolArgProgress = vi.fn();
 
 const agentStoreState = {
   isStreaming: false,
   pendingConfirmations: {} as Record<string, unknown>,
-  toolActivities: [] as { callId: string; toolName: string }[],
+  toolArgProgress: null as { toolName: string; totalChars: number; charsPerSec: number } | null,
+  toolActivities: [] as Array<{
+    callId: string;
+    requestId?: string;
+    toolName: string;
+    args?: Record<string, unknown>;
+    sessionId?: string;
+    status?: 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled' | 'expired';
+    startedAt?: number;
+  }>,
   llmActivities: [],
   systemPrompt: null,
   activeToolNames: [],
@@ -140,6 +154,7 @@ const agentStoreState = {
     sessionId
       ? Object.values(agentStoreState.activeAgentLoops).some((loop) => loop.sessionId === sessionId)
       : false,
+  setToolArgProgress,
   appendCLIAgentChunk,
   clearCLIAgentOutput,
 };
@@ -159,7 +174,22 @@ const startAgentTurn = vi.fn();
 const finalizeAgentTurn = vi.fn();
 const addTurnItem = vi.fn();
 const clearAgentTurns = vi.fn();
+const clearPendingChunks = vi.fn();
 const flushStreamingChunks = vi.fn();
+const getSessionMessages = vi.fn(() => [] as ChatMessage[]);
+const updateSession = vi.fn((sessionId: string, patch: { title?: string; personaId?: string }) => {
+  mockSessions = mockSessions.map((session) =>
+    session.id === sessionId ? { ...session, ...patch } : session,
+  );
+});
+
+function createMockSessions() {
+  return [
+    { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
+    { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
+    { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
+  ];
+}
 
 // Mutable activeTurnId so tests can control what the store returns
 let mockActiveTurnId: string | null = null;
@@ -168,32 +198,32 @@ let mockPendingMessage: string | null = null;
 let mockStreamingChunks: Record<string, string> = {};
 let mockThinkingChunks: Record<string, string> = {};
 let mockChunkSessionIds: Record<string, string> = {};
+let mockMessages: ChatMessage[] = [];
+let mockSessions = createMockSessions();
 const mockSetPendingMessage = vi.fn();
 const mockSetPendingRAAppId = vi.fn();
 
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: Object.assign(
     () => ({
-      messages: [],
+      messages: mockMessages,
       agentTurns: [],
       activeTurnId: mockActiveTurnId,
       activeSessionId: mockActiveSessionId,
-      sessions: [
-        { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
-        { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
-        { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
-      ],
+      sessions: mockSessions,
       addMessage,
       addSession,
       appendChunk: vi.fn(),
       finalizeChunk: vi.fn(),
       setMessages,
-      updateSession: vi.fn(),
+      updateSession,
       setAgentTurns,
       startAgentTurn,
       addTurnItem,
       finalizeAgentTurn,
       clearAgentTurns,
+      clearPendingChunks,
+      getSessionMessages,
       getSessionActiveTurnId: () => mockActiveTurnId,
       getSessionAgentTurns: () => [],
       markAgentTurnError,
@@ -203,24 +233,24 @@ vi.mock('../../store/sessionStore', () => ({
     }),
     {
       getState: () => ({
-        messages: [],
+        messages: mockMessages,
         agentTurns: [],
         activeTurnId: mockActiveTurnId,
         activeSessionId: mockActiveSessionId,
-        sessions: [
-          { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
-          { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
-          { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
-        ],
+        sessions: mockSessions,
         pendingMessage: mockPendingMessage,
         addSession,
         pendingRAAppId: null,
         setPendingMessage: mockSetPendingMessage,
         setPendingRAAppId: mockSetPendingRAAppId,
-        updateSession: vi.fn(),
+        setMessages,
+        setAgentTurns,
+        updateSession,
         streamingChunks: mockStreamingChunks,
         thinkingChunks: mockThinkingChunks,
         chunkSessionIds: mockChunkSessionIds,
+        clearPendingChunks,
+        getSessionMessages,
         finalizeChunk: vi.fn(),
         flushStreamingChunks,
         getSessionActiveTurnId: () => mockActiveTurnId,
@@ -283,12 +313,87 @@ beforeEach(() => {
   mockStreamingChunks = {};
   mockThinkingChunks = {};
   mockChunkSessionIds = {};
+  mockMessages = [];
+  mockSessions = createMockSessions();
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
   vi.clearAllMocks();
 });
 
 describe('ChatInterface event wiring', () => {
+  it('REGRESSION: identifies the active session on mount', async () => {
+    await renderChatInterface();
+
+    expect(mockIdentifySession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('REGRESSION: re-identifies when the active session changes', async () => {
+    const { rerender } = await renderChatInterface();
+    mockIdentifySession.mockClear();
+
+    mockActiveSessionId = 'session-2';
+    await rerenderChatInterface(rerender);
+
+    expect(mockIdentifySession).toHaveBeenCalledTimes(1);
+    expect(mockIdentifySession).toHaveBeenCalledWith('session-2');
+  });
+
+  it('REGRESSION: reconnect re-identifies the active session and reloads its history', async () => {
+    await renderChatInterface();
+    mockIdentifySession.mockClear();
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockClear();
+
+    await emitEvent('socket:reconnect', undefined);
+
+    expect(mockIdentifySession).toHaveBeenCalledTimes(1);
+    expect(mockIdentifySession).toHaveBeenCalledWith('session-1');
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+  });
+
+  it('REGRESSION: reconnect history reload merges server history with local optimistic messages', async () => {
+    const localMessage: ChatMessage = {
+      id: 'local-user-1',
+      sessionId: 'session-1',
+      role: 'user',
+      content: 'still local',
+      createdAt: 10,
+    };
+    mockMessages = [localMessage];
+    await renderChatInterface();
+    setMessages.mockClear();
+    setAgentTurns.mockClear();
+    getSessionMessages.mockReturnValueOnce([localMessage]);
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([]),
+    });
+
+    await emitEvent('socket:reconnect', undefined);
+
+    expect(setMessages).toHaveBeenCalledWith([localMessage]);
+    expect(setAgentTurns).toHaveBeenCalledWith(
+      expect.any(Array),
+    );
+  });
+
+  it('REGRESSION: active session status replay restores the live agent turn after reconnect', async () => {
+    await renderChatInterface();
+
+    await emitEvent('session:status', {
+      sessionId: 'session-1',
+      active: true,
+      turnId: 'turn-restored',
+      queueLength: 0,
+    });
+
+    expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-restored');
+    expect(startAgentTurn).toHaveBeenCalledWith('turn-restored', 'session-1');
+    expect(setStreaming).toHaveBeenCalledWith(true);
+  });
+
   it('REGRESSION: tool:start creates a running activity in agentStore', async () => {
     await renderChatInterface();
 
@@ -358,6 +463,119 @@ describe('ChatInterface event wiring', () => {
         toolName: 'fs_delete',
         status: 'awaiting_confirmation',
       }),
+    );
+  });
+
+  it('REGRESSION: tool:arg_progress updates toolArgProgress in agentStore for the active session', async () => {
+    await renderChatInterface();
+    setToolArgProgress.mockClear();
+
+    await emitEvent('tool:arg_progress', {
+      sessionId: 'session-1',
+      toolName: 'raapp_create',
+      totalChars: 2048,
+      charsPerSec: 512,
+    });
+
+    expect(setToolArgProgress).toHaveBeenCalledWith({
+      toolName: 'raapp_create',
+      totalChars: 2048,
+      charsPerSec: 512,
+    });
+  });
+
+  it('REGRESSION: tool:confirmation_required synthesizes Preparing fallback before any arg progress arrives', async () => {
+    await renderChatInterface();
+    setPendingConfirmation.mockClear();
+    setToolArgProgress.mockClear();
+
+    await emitEvent('tool:confirmation_required', {
+      requestId: 'req-fallback',
+      toolCallId: 'call-fallback',
+      sessionId: 'session-1',
+      toolName: 'raapp_create',
+      args: { type: 'html', content: '<!DOCTYPE html><html></html>' },
+      timeoutMs: 30000,
+    });
+
+    expect(setToolArgProgress).toHaveBeenCalledWith({
+      toolName: 'raapp_create',
+      totalChars: 0,
+      charsPerSec: 0,
+    });
+  });
+
+  it('REGRESSION: tool:confirmation_invalidated with reason confirmed returns the activity to running', async () => {
+    const childAgentRun = {
+      agentRunId: 'subagent-run-confirm',
+      agentType: 'subagent' as const,
+      parentSessionId: 'session-1',
+    };
+
+    await renderChatInterface();
+
+    await emitEvent('tool:start', {
+      callId: 'call-confirmed',
+      toolName: 'run_cli_agent',
+      args: { agentId: 'copilot', workdir: 'C:/repo' },
+      sessionId: 'child-session',
+      agentRun: childAgentRun,
+    });
+
+    await emitEvent('tool:confirmation_required', {
+      requestId: 'req-confirmed',
+      toolCallId: 'call-confirmed',
+      sessionId: 'child-session',
+      toolName: 'run_cli_agent',
+      args: { agentId: 'copilot', workdir: 'C:/repo' },
+      timeoutMs: 0,
+      agentRun: childAgentRun,
+    });
+
+    setPendingConfirmation.mockClear();
+    updateToolActivity.mockClear();
+
+    await emitEvent('tool:confirmation_invalidated', {
+      requestId: 'req-confirmed',
+      toolCallId: 'call-confirmed',
+      sessionId: 'child-session',
+      reason: 'confirmed',
+      agentRun: childAgentRun,
+    });
+
+    expect(setPendingConfirmation).toHaveBeenCalledWith('child-session', null);
+    expect(updateToolActivity).toHaveBeenCalledWith(
+      'call-confirmed',
+      expect.objectContaining({ status: 'running' }),
+    );
+  });
+
+  it('REGRESSION: stale confirmation invalidation resolves callId after pending state was cleared', async () => {
+    await renderChatInterface();
+    agentStoreState.toolActivities = [
+      {
+        callId: 'call-stale',
+        requestId: 'req-stale',
+        toolName: 'image_generate',
+        args: { prompt: 'Generate a coffee poster' },
+        sessionId: 'session-1',
+        status: 'awaiting_confirmation',
+        startedAt: Date.now(),
+      },
+    ];
+    agentStoreState.pendingConfirmations = {};
+    updateToolActivity.mockClear();
+
+    await emitEvent('tool:confirmation_invalidated', {
+      requestId: 'req-stale',
+      sessionId: 'session-1',
+      reason: 'expired',
+      message: 'Tool confirmation expired or was already handled.',
+    });
+
+    expect(updateToolActivity).toHaveBeenCalledWith(
+      'call-stale',
+      expect.objectContaining({ status: 'expired' }),
     );
   });
 
@@ -516,6 +734,43 @@ describe('ChatInterface event wiring', () => {
     });
 
     expect(setStreaming).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: first completed turn still triggers title generation after optimistic preview title', async () => {
+    const firstPrompt = 'Build a dashboard that tracks agent loop progress across subagents';
+    mockSessions = mockSessions.map((session) =>
+      session.id === 'session-1'
+        ? { ...session, title: 'Build a dashboard that tracks agent loop progress…' }
+        : session,
+    );
+    mockMessages = [
+      { id: 'user-1', sessionId: 'session-1', role: 'user', content: firstPrompt, createdAt: 1 },
+      { id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'Need a tool call first', createdAt: 2 },
+      { id: 'assistant-2', sessionId: 'session-1', role: 'assistant', content: 'Done', createdAt: 3 },
+    ];
+
+    const fetchMock = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ title: 'Generated Title' }) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await renderChatInterface();
+    addLlmActivity.mockClear();
+    updateLlmActivity.mockClear();
+    updateSession.mockClear();
+
+    await emitEvent('chat:complete', {
+      sessionId: 'session-1',
+      messageId: 'assistant-2',
+    });
+
+    expect(addLlmActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'title-gen', status: 'running' }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/session-1/generate-title', { method: 'POST' });
+    expect(updateSession).toHaveBeenCalledWith('session-1', { title: 'Generated Title' });
+    expect(updateLlmActivity).toHaveBeenCalledWith(
+      'title-gen',
+      expect.objectContaining({ status: 'done' }),
+    );
   });
 });
 
@@ -752,6 +1007,112 @@ describe('chat:error two-path dispatch', () => {
     expect(markAgentTurnError).not.toHaveBeenCalled();
     expect(removeLastAgentTurn).not.toHaveBeenCalled();
     expect(setStreaming).toHaveBeenCalledWith(false);
+  });
+
+  it('REGRESSION: chat:error clears pending confirmation and settles active tool activities for the errored session', async () => {
+    mockActiveTurnId = 'turn-abc';
+    agentStoreState.toolActivities = [
+      {
+        callId: 'call-awaiting',
+        toolName: 'vfs_write',
+        args: { path: 'orchestrator-edit-cycle.html' },
+        sessionId: 'session-1',
+        status: 'awaiting_confirmation',
+        startedAt: 1000,
+      },
+      {
+        callId: 'call-running',
+        toolName: 'image_generate',
+        args: { filename: 'images/coffee-hero.png' },
+        sessionId: 'session-1',
+        status: 'running',
+        startedAt: 2000,
+      },
+      {
+        callId: 'call-other-session',
+        toolName: 'vfs_write',
+        args: { path: 'other.html' },
+        sessionId: 'session-2',
+        status: 'awaiting_confirmation',
+        startedAt: 3000,
+      },
+    ];
+
+    await renderChatInterface();
+    setPendingConfirmation.mockClear();
+    updateToolActivity.mockClear();
+
+    await emitEvent('chat:error', {
+      sessionId: 'session-1',
+      code: 'LLM_ERROR',
+      message: 'quota exhausted',
+      hadContent: true,
+    });
+
+    expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+    expect(updateToolActivity).toHaveBeenCalledWith(
+      'call-awaiting',
+      expect.objectContaining({
+        status: 'error',
+        result: expect.objectContaining({
+          callId: 'call-awaiting',
+          status: 'error',
+          errorCode: 'LLM_ERROR',
+          errorMessage: 'quota exhausted',
+        }),
+      }),
+    );
+    expect(updateToolActivity).toHaveBeenCalledWith(
+      'call-running',
+      expect.objectContaining({
+        status: 'error',
+        result: expect.objectContaining({
+          callId: 'call-running',
+          status: 'error',
+          errorCode: 'LLM_ERROR',
+          errorMessage: 'quota exhausted',
+        }),
+      }),
+    );
+    expect(updateToolActivity).not.toHaveBeenCalledWith(
+      'call-other-session',
+      expect.anything(),
+    );
+  });
+
+  it('REGRESSION: chat:error with INTERRUPTED settles active tool activities as cancelled', async () => {
+    mockActiveTurnId = 'turn-abc';
+    agentStoreState.toolActivities = [
+      {
+        callId: 'call-awaiting',
+        toolName: 'vfs_write',
+        args: { path: 'orchestrator-edit-cycle.html' },
+        sessionId: 'session-1',
+        status: 'awaiting_confirmation',
+        startedAt: 1000,
+      },
+    ];
+
+    await renderChatInterface();
+    updateToolActivity.mockClear();
+
+    await emitEvent('chat:error', {
+      sessionId: 'session-1',
+      code: 'INTERRUPTED',
+      message: 'Turn interrupted by user',
+      hadContent: false,
+    });
+
+    expect(updateToolActivity).toHaveBeenCalledWith(
+      'call-awaiting',
+      expect.objectContaining({
+        status: 'cancelled',
+        result: expect.objectContaining({
+          callId: 'call-awaiting',
+          status: 'cancelled',
+        }),
+      }),
+    );
   });
 });
 

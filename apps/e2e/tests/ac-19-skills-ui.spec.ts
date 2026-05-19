@@ -1,11 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { API_BASE } from './helpers/test-config';
 
-const APP_URL = 'http://localhost:5188';
-
 test.describe('AC-19: Skills UI', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(APP_URL);
+    await page.goto('/');
     await page.getByTestId('nav-mind').click();
     await page.getByTestId('mind-tab-skills').click();
   });

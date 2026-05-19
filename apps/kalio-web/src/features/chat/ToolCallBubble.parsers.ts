@@ -1,7 +1,9 @@
 import type {
   ChatMessage,
   CLIAgentResult,
+  CLIAgentSessionSnapshot,
   RAAppBlock,
+  RaAppNativeResult,
   RaAppPendingApproval,
   SubagentToolResult,
 } from '@kalio/types';
@@ -17,6 +19,9 @@ export function extractRAAppBlock(data: unknown): RAAppBlock | null {
       content: (d['renderedContent'] as string | undefined) ?? (d['content'] as string),
       vfsPath: typeof d['vfsPath'] === 'string' ? d['vfsPath'] : undefined,
       pendingApprovals: (d['pendingApprovals'] as RaAppPendingApproval[] | undefined) ?? [],
+      nativeResults: Array.isArray(d['nativeResults'])
+        ? d['nativeResults'] as RaAppNativeResult[]
+        : [],
     };
   }
   return null;
@@ -26,18 +31,58 @@ export function extractCLIAgentResult(data: unknown): CLIAgentResult | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
   if (
-    typeof d['output'] === 'string' &&
-    typeof d['exitCode'] === 'number' &&
-    typeof d['durationMs'] === 'number'
+    (typeof d['output'] === 'string' || typeof d['lastOutput'] === 'string') &&
+    (typeof d['exitCode'] === 'number' || typeof d['lastExitCode'] === 'number') &&
+    (typeof d['durationMs'] === 'number' || typeof d['updatedAt'] === 'number')
   ) {
     return {
-      output: d['output'],
-      exitCode: d['exitCode'],
-      durationMs: d['durationMs'],
+      output: typeof d['output'] === 'string' ? d['output'] : (d['lastOutput'] as string),
+      exitCode: typeof d['exitCode'] === 'number' ? d['exitCode'] : (d['lastExitCode'] as number),
+      durationMs: typeof d['durationMs'] === 'number' ? d['durationMs'] : 0,
       agentId: typeof d['agentId'] === 'string' ? d['agentId'] : 'copilot',
+      childSessionId: typeof d['childSessionId'] === 'string' ? d['childSessionId'] : undefined,
     };
   }
   return null;
+}
+
+export function extractCLIAgentSessionSnapshot(data: unknown): CLIAgentSessionSnapshot | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d['childSessionId'] !== 'string' || typeof d['agentId'] !== 'string') {
+    return null;
+  }
+
+  const derivedStatus = typeof d['status'] === 'string'
+    ? d['status']
+    : typeof d['exitCode'] === 'number'
+      ? d['exitCode'] === 0
+        ? 'completed'
+        : 'failed'
+      : 'idle';
+
+  return {
+    childSessionId: d['childSessionId'],
+    parentSessionId: typeof d['parentSessionId'] === 'string' ? d['parentSessionId'] : '',
+    agentId: d['agentId'],
+    workdir: typeof d['workdir'] === 'string' ? d['workdir'] : '',
+    status: derivedStatus as CLIAgentSessionSnapshot['status'],
+    lastPrompt: typeof d['lastPrompt'] === 'string' ? d['lastPrompt'] : '',
+    updatedAt: typeof d['updatedAt'] === 'number' ? d['updatedAt'] : 0,
+    startedAt: typeof d['startedAt'] === 'number' ? d['startedAt'] : undefined,
+    completedAt: typeof d['completedAt'] === 'number' ? d['completedAt'] : undefined,
+    activeCallId: typeof d['activeCallId'] === 'string' ? d['activeCallId'] : undefined,
+    lastOutput: typeof d['lastOutput'] === 'string'
+      ? d['lastOutput']
+      : typeof d['output'] === 'string'
+        ? d['output']
+        : undefined,
+    lastExitCode: typeof d['lastExitCode'] === 'number'
+      ? d['lastExitCode']
+      : typeof d['exitCode'] === 'number'
+        ? d['exitCode']
+        : undefined,
+  };
 }
 
 export function extractImageResult(data: unknown): ImageResultData | null {

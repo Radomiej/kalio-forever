@@ -22,12 +22,14 @@ import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from
 import { WebSearchTool } from './tools/web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
+import { GetCliAgentStatusTool, MessageCliAgentTool, SpawnCliAgentTool, StopCliAgentTool } from './tools/cli-agent-session.tools';
 import { RunCliAgentTool } from './tools/run-cli-agent.tool';
 import { ImageGenerateTool } from './tools/image-generate.tool';
 import { ImageEditTool } from './tools/image-edit.tool';
 import { ImageViewTool } from './tools/image-view.tool';
 import { SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool } from './tools/skill.tools';
 import { PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool } from './tools/persona.tools';
+import { EscalateTool } from './tools/escalate.tool';
 
 /** Minimal registry entry shape — structurally compatible with chat module's ToolRegistryEntry. */
 export interface ToolEntry {
@@ -88,6 +90,10 @@ export class ToolRegistryService {
     private readonly webSearch: WebSearchTool,
     private readonly listTools: ListToolsTool,
     private readonly getToolDetails: GetToolDetailsTool,
+    private readonly spawnCliAgent: SpawnCliAgentTool,
+    private readonly messageCliAgent: MessageCliAgentTool,
+    private readonly getCliAgentStatus: GetCliAgentStatusTool,
+    private readonly stopCliAgent: StopCliAgentTool,
     private readonly runCliAgent: RunCliAgentTool,
     private readonly imageGenerate: ImageGenerateTool,
     private readonly imageEdit: ImageEditTool,
@@ -101,6 +107,7 @@ export class ToolRegistryService {
     private readonly personaCreate: PersonaCreateTool,
     private readonly personaUpdate: PersonaUpdateTool,
     private readonly personaDelete: PersonaDeleteTool,
+    private readonly escalate: EscalateTool,
   ) {
     const all: object[] = [
       vfsWrite, vfsRead, vfsList, vfsGrepSearch, vfsFileSearch, subagent, spawnSubagent, messageSubagent,
@@ -116,10 +123,12 @@ export class ToolRegistryService {
       memoryIngest, memorySearch, memoryIngestConversation,
       webSearch,
       listTools, getToolDetails,
+      spawnCliAgent, messageCliAgent, getCliAgentStatus, stopCliAgent,
       runCliAgent,
       imageGenerate, imageEdit, imageView,
       skillList, skillRead, skillCreate, skillUpdate, skillDelete,
       personaList, personaCreate, personaUpdate, personaDelete,
+      escalate,
     ];
     this.entries = all.map(t => this.toEntry(t));
   }

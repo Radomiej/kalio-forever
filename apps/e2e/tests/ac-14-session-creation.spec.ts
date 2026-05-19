@@ -4,7 +4,7 @@ import { API_BASE } from './helpers/test-config';
 // AC-14: New session can be created and becomes the active session
 test.describe('AC-14: Session creation', () => {
   test('clicking new session creates a session and selects it', async ({ page }) => {
-    await page.goto('http://localhost:5188');
+    await page.goto('/');
 
     // Open Talk section (contains Conversations)
     await page.getByTestId('nav-talk').click();
@@ -18,7 +18,7 @@ test.describe('AC-14: Session creation', () => {
   });
 
   test('chat input is enabled after session is created', async ({ page }) => {
-    await page.goto('http://localhost:5188');
+    await page.goto('/');
 
     // Open Talk section - chat is visible in split view
     await page.getByTestId('nav-talk').click();
@@ -35,7 +35,7 @@ test.describe('AC-14: Session creation', () => {
     const res = await request.post(`${API_BASE}/sessions`, { data: { title: 'AC14 Listed Session' } });
     const session = await res.json();
 
-    await page.goto('http://localhost:5188');
+    await page.goto('/');
 
     // Open Talk section
     await page.getByTestId('nav-talk').click();

@@ -216,9 +216,7 @@ export class CredentialsController {
       await llm.streamChat(
         [{ role: 'user', content: 'ping' }],
         [],
-        () => { /* drain chunks */ },
-        'test-session',
-        'test-msg',
+        { sessionId: 'test-session', messageId: 'test-msg', onChunk: () => { /* drain chunks */ } },
       );
       return { ok: true, latencyMs: Date.now() - start };
     } catch (err) {

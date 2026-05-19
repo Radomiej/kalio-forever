@@ -19,9 +19,15 @@ vi.mock('../../store/sessionStore', () => ({
 
 // Provide callIdToName with a known mapping for regression tests
 const KNOWN_CALL_ID = 'call_1777207759460_1';
+const mockAgentStoreState = {
+  callIdToName: { [KNOWN_CALL_ID]: 'raapp_create' },
+  toolArgProgress: null as { toolName: string; totalChars: number; charsPerSec: number } | null,
+};
+
 vi.mock('../../store/agentStore', () => ({
   useAgentStore: () => ({
-    callIdToName: { [KNOWN_CALL_ID]: 'raapp_create' },
+    callIdToName: mockAgentStoreState.callIdToName,
+    toolArgProgress: mockAgentStoreState.toolArgProgress,
   }),
 }));
 
@@ -72,6 +78,7 @@ describe('AgentTurnBubble', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMessages.length = 0; // Clear mock messages
+    mockAgentStoreState.toolArgProgress = null;
   });
 
   it('renders agent turn bubble with data-testid', () => {
@@ -147,6 +154,15 @@ describe('AgentTurnBubble', () => {
     mockMessages.push(makeMsg({ id: 'msg-1', streaming: true, content: '' }));
     render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], true)} toolActivities={[]} />);
     expect(screen.queryByTestId('streaming-indicator')).not.toBeInTheDocument();
+  });
+
+  it('REGRESSION: shows tool intent before any argument chars are streamed', () => {
+    mockAgentStoreState.toolArgProgress = { toolName: 'raapp_create', totalChars: 0, charsPerSec: 0 };
+
+    render(<AgentTurnBubble turn={makeTurn([], false)} toolActivities={[]} />);
+
+    expect(screen.getByTestId('turn-loading-indicator')).toHaveTextContent('Preparing');
+    expect(screen.getByTestId('turn-loading-indicator')).toHaveTextContent('raapp_create');
   });
 });
 

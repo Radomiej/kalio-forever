@@ -4,6 +4,7 @@ import { ToolDispatchService } from '../tool-dispatch.service';
 import { TurnState } from '../turn-state';
 import { TOOL_REGISTRY } from '../chat.tokens';
 import { MCPService } from '../../mcp/mcp.service';
+import { HitlPolicyService } from '../../hitl/hitl-policy.service';
 import type { StreamContext } from '../interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from '../interfaces/tool-registry-entry.interface';
 
@@ -327,6 +328,136 @@ describe('ToolDispatchService', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('REGRESSION: aborting a subagent HITL wait invalidates confirmation and returns cancelled', async () => {
+      const entry = makeEntry('dangerous_tool', true, { ok: true });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const abortController = new AbortController();
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'sub-session',
+        vfsSessionId: 'sub-session',
+        abortSignal: abortController.signal,
+        agentRun: {
+          agentRunId: 'sub-run-abort',
+          agentType: 'subagent' as const,
+          parentSessionId: 'master-session',
+          vfsMode: 'shared' as const,
+        },
+      };
+
+      const dispatchPromise = scopedService.dispatch('c1', 'dangerous_tool', {}, ctx);
+
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.objectContaining({
+        toolName: 'dangerous_tool',
+        sessionId: 'sub-session',
+        timeoutMs: 0,
+      }));
+
+      abortController.abort();
+
+      const result = await Promise.race([
+        dispatchPromise,
+        new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+      ]);
+
+      expect(result).toEqual(expect.objectContaining({ status: 'cancelled' }));
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_invalidated', expect.objectContaining({
+        reason: 'cancelled',
+        message: expect.stringContaining('aborted'),
+      }));
+      expect(entry.execute).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('dispatch — configurable HITL policy', () => {
+    it('skips manual confirmation when the global policy approves the tool (bypass)', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'bypass' }),
+      };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
+        ],
+      }).compile();
+
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      const result = await scopedService.dispatch('c-bypass', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(result.status).toBe('success');
+      expect(hitlPolicy.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'tool',
+        sessionId: 'sid',
+        name: 'dangerous_tool',
+        args: { path: 'demo.txt' },
+      }));
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes the turn abortSignal into global HITL approval evaluation', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'bypass' }),
+      };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
+        ],
+      }).compile();
+
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      await scopedService.dispatch('c-abort', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(hitlPolicy.resolveApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ abortSignal: ctx.abortSignal }),
+      );
+    });
+
+    it('returns cancelled when the global auto HITL policy rejects the tool', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({
+          status: 'rejected',
+          source: 'auto',
+          reason: 'The args request a destructive write outside the allowed plan.',
+        }),
+      };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
+        ],
+      }).compile();
+
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      const result = await scopedService.dispatch('c-auto-reject', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(result.status).toBe('cancelled');
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).not.toHaveBeenCalled();
     });
   });
 

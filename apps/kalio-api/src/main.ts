@@ -11,7 +11,7 @@ import { resolve } from 'path';
 const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
 // Resolve to project root (three directories up from src/main.ts)
 const projectRoot = resolve(__dirname, '..', '..', '..');
-config({ path: resolve(projectRoot, envFile), override: true });
+config({ path: resolve(projectRoot, envFile) });
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });

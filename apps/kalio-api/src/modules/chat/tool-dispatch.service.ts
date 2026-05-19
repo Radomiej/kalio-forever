@@ -1,21 +1,25 @@
 import { Injectable, Inject, Optional, Logger } from '@nestjs/common';
 
 import { nanoid } from 'nanoid';
-import type { ToolMeta, ToolCallRequest, ToolResult, ToolConfirmationRequest } from '@kalio/types';
+import type { ToolMeta, ToolCallRequest, ToolResult, ToolConfirmationInvalidated, ToolConfirmationRequest } from '@kalio/types';
 import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from './interfaces/tool-registry-entry.interface';
 import { TOOL_REGISTRY } from './chat.tokens';
 import { MCPService } from '../mcp/mcp.service';
+import { HitlPolicyService } from '../hitl/hitl-policy.service';
 
 const HITL_TIMEOUT_MS = 600_000;
 const BUILTIN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
-const OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['image_generate', 'raapp_create']);
+const OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['image_generate']);
 
 type SubagentAgentRunContext = NonNullable<StreamContext['agentRun']> & { autoApproveTools?: string[] };
+type ConfirmationResolutionStatus = 'resolved' | 'rejected' | 'not_found' | 'session_mismatch';
+type PendingMutationStatus = 'removed' | 'not_found' | 'session_mismatch';
 
 interface PendingConfirmation {
   sessionId: string;
   payload: ToolConfirmationRequest;
+  emit: StreamContext['emit'];
   resolve: () => void;
   reject: (err: Error) => void;
 }
@@ -35,6 +39,7 @@ export class ToolDispatchService {
   constructor(
     @Inject(TOOL_REGISTRY) tools: ToolRegistryEntry[],
     @Optional() @Inject(MCPService) private readonly mcpService: MCPService | null,
+    @Optional() @Inject(HitlPolicyService) private readonly hitlPolicy: HitlPolicyService | null,
   ) {
     this.toolMap = new Map(tools.map(t => [t.meta.name, t]));
     this.logger.log(`Tool registry loaded: [${[...this.toolMap.keys()].join(', ')}]`);
@@ -69,8 +74,8 @@ export class ToolDispatchService {
           // Check requiresConfirmation for MCP tools the same way native tools do
           const mcpMeta = this.mcpService.getToolByName(toolName);
           if (mcpMeta?.requiresConfirmation) {
-            const confirmed = await this.awaitConfirmation(callId, toolName, args, ctx);
-            if (!confirmed) {
+            const approved = await this.approveOrRequestConfirmation(callId, toolName, args, ctx);
+            if (!approved) {
               return this.withMeta({ callId, status: 'cancelled' }, toolName, ctx);
             }
           }
@@ -93,8 +98,8 @@ export class ToolDispatchService {
     }
 
     if (entry.meta.requiresConfirmation && !this.canAutoApprove(toolName, ctx)) {
-      const confirmed = await this.awaitConfirmation(callId, toolName, args, ctx);
-      if (!confirmed) {
+      const approved = await this.approveOrRequestConfirmation(callId, toolName, args, ctx);
+      if (!approved) {
         return this.withMeta({ callId, status: 'cancelled' }, toolName, ctx);
       }
     }
@@ -110,6 +115,7 @@ export class ToolDispatchService {
         agentRun: ctx.agentRun,
         // Pass the socket emitter so streaming tools can push progress events
         _emit: ctx.emit as ToolCallRequest['_emit'],
+        abortSignal: ctx.abortSignal,
       };
       const data = await entry.execute(req);
       return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
@@ -128,36 +134,61 @@ export class ToolDispatchService {
     }
   }
 
-  resolveConfirmation(requestId: string, sessionId?: string): void {
+  resolveConfirmation(requestId: string, sessionId?: string): ConfirmationResolutionStatus {
     const pending = this.pending.get(requestId);
-    if (!pending) return;
+    if (!pending) return 'not_found';
     if (sessionId && pending.sessionId !== sessionId) {
       this.logger.warn(
         `Ignoring tool confirmation for request ${requestId}: session mismatch (${sessionId} !== ${pending.sessionId})`,
       );
-      return;
+      return 'session_mismatch';
     }
     this.pending.delete(requestId);
+    this.emitConfirmationInvalidated(pending, 'confirmed');
     pending.resolve();
+    return 'resolved';
   }
 
-  cancelConfirmation(requestId: string, sessionId?: string): void {
+  cancelConfirmation(requestId: string, sessionId?: string): ConfirmationResolutionStatus {
     const pending = this.pending.get(requestId);
-    if (!pending) return;
+    if (!pending) return 'not_found';
     if (sessionId && pending.sessionId !== sessionId) {
       this.logger.warn(
         `Ignoring tool cancellation for request ${requestId}: session mismatch (${sessionId} !== ${pending.sessionId})`,
       );
-      return;
+      return 'session_mismatch';
     }
     this.pending.delete(requestId);
+    this.emitConfirmationInvalidated(pending, 'cancelled');
     pending.reject(new Error('User cancelled tool confirmation'));
+    return 'rejected';
   }
 
   getPendingConfirmations(sessionId: string): ToolConfirmationRequest[] {
     return Array.from(this.pending.values())
       .filter((pending) => pending.sessionId === sessionId)
       .map((pending) => pending.payload);
+  }
+
+  seedPendingConfirmation(payload: ToolConfirmationRequest): void {
+    this.pending.set(payload.requestId, {
+      sessionId: payload.sessionId,
+      payload,
+      emit: () => undefined,
+      resolve: () => undefined,
+      reject: () => undefined,
+    });
+  }
+
+  dropPendingConfirmation(requestId: string, sessionId?: string): PendingMutationStatus {
+    const pending = this.pending.get(requestId);
+    if (!pending) return 'not_found';
+    if (sessionId && pending.sessionId !== sessionId) {
+      return 'session_mismatch';
+    }
+
+    this.pending.delete(requestId);
+    return 'removed';
   }
 
   private awaitConfirmation(
@@ -184,7 +215,15 @@ export class ToolDispatchService {
     return new Promise<boolean>(resolve => {
       const timeout = timeoutMs > 0
         ? setTimeout(() => {
-            this.pending.delete(requestId);
+            const pending = this.pending.get(requestId);
+            if (pending) {
+              this.pending.delete(requestId);
+              this.emitConfirmationInvalidated(
+                pending,
+                'timeout',
+                `Approval timed out for tool ${toolName}.`,
+              );
+            }
             this.logger.warn(
               `HITL confirmation timed out for tool [${toolName}] session=${ctx.sessionId}`,
             );
@@ -192,19 +231,91 @@ export class ToolDispatchService {
           }, timeoutMs)
         : null;
 
+      const cleanupAbortListener = () => {
+        ctx.abortSignal?.removeEventListener('abort', handleAbort);
+      };
+
+      const handleAbort = () => {
+        const pending = this.pending.get(requestId);
+        if (pending) {
+          this.pending.delete(requestId);
+          this.emitConfirmationInvalidated(
+            pending,
+            'cancelled',
+            `Tool confirmation aborted for ${toolName}.`,
+          );
+        }
+        if (timeout) clearTimeout(timeout);
+        cleanupAbortListener();
+        resolve(false);
+      };
+
       this.pending.set(requestId, {
         sessionId: ctx.sessionId,
         payload,
+        emit: ctx.emit,
         resolve: () => {
           if (timeout) clearTimeout(timeout);
+          cleanupAbortListener();
           resolve(true);
         },
         reject: () => {
           if (timeout) clearTimeout(timeout);
+          cleanupAbortListener();
           resolve(false);
         },
       });
+
+      if (ctx.abortSignal?.aborted) {
+        handleAbort();
+        return;
+      }
+      ctx.abortSignal?.addEventListener('abort', handleAbort, { once: true });
     });
+  }
+
+  private async approveOrRequestConfirmation(
+    callId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    ctx: StreamContext,
+  ): Promise<boolean> {
+    if (this.canAutoApprove(toolName, ctx)) {
+      return true;
+    }
+
+    if (this.hitlPolicy) {
+      try {
+        const resolution = await this.hitlPolicy.resolveApproval({
+          kind: 'tool',
+          sessionId: ctx.sessionId,
+          name: toolName,
+          args,
+          abortSignal: ctx.abortSignal,
+          agentRun: ctx.agentRun,
+          toolCallId: callId,
+        });
+
+        if (resolution.status === 'approved') {
+          return true;
+        }
+
+        if (resolution.status === 'rejected') {
+          this.logger.log(
+            `Global HITL policy rejected tool [${toolName}] for session ${ctx.sessionId}${resolution.reason ? `: ${resolution.reason}` : ''}`,
+          );
+          return false;
+        }
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        this.logger.error(
+          `Global HITL policy failed for tool [${toolName}] session=${ctx.sessionId}`,
+          error,
+        );
+      }
+    }
+
+    return this.awaitConfirmation(callId, toolName, args, ctx);
   }
 
   private canAutoApprove(toolName: string, ctx: StreamContext): boolean {
@@ -235,5 +346,20 @@ export class ToolDispatchService {
       toolName,
       agentRun: ctx.agentRun,
     };
+  }
+
+  private emitConfirmationInvalidated(
+    pending: PendingConfirmation,
+    reason: ToolConfirmationInvalidated['reason'],
+    message?: string,
+  ): void {
+    pending.emit('tool:confirmation_invalidated', {
+      requestId: pending.payload.requestId,
+      toolCallId: pending.payload.toolCallId,
+      sessionId: pending.payload.sessionId,
+      reason,
+      ...(message !== undefined ? { message } : {}),
+      ...(pending.payload.agentRun !== undefined ? { agentRun: pending.payload.agentRun } : {}),
+    });
   }
 }

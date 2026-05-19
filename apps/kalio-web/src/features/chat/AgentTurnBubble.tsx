@@ -52,7 +52,7 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
 
 export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props) {
   const { messages, streamingChunks, thinkingChunks } = useSessionStore();
-  const { callIdToName: persistentCallIdToName } = useAgentStore();
+  const { callIdToName: persistentCallIdToName, toolArgProgress } = useAgentStore();
 
   // Build callId → toolName from all available sources
   const toolCallIdToName = new Map<string, string>(Object.entries(persistentCallIdToName));
@@ -91,7 +91,22 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
         <div className={`group relative rounded-2xl text-base-content text-sm px-4 py-3 flex flex-col gap-2 w-full ${turn.agentRun?.agentType === 'subagent' ? 'bg-sky-500/10 border border-sky-500/20' : 'bg-base-300'}`}>
           {/* Loading indicator while turn is active but no items have arrived yet */}
           {!turn.done && turn.items.length === 0 && (
-            <span data-testid="turn-loading-indicator" className="loading loading-dots loading-xs" />
+            toolArgProgress ? (
+              <span data-testid="turn-loading-indicator" className="text-xs text-base-content/60 font-mono tabular-nums">
+                {toolArgProgress.totalChars > 0 ? (
+                  <>
+                    Writing <span className="text-base-content/80">{toolArgProgress.toolName}</span>…{' '}
+                    {toolArgProgress.totalChars.toLocaleString()} chars · {toolArgProgress.charsPerSec.toLocaleString()}/s
+                  </>
+                ) : (
+                  <>
+                    Preparing <span className="text-base-content/80">{toolArgProgress.toolName}</span>…
+                  </>
+                )}
+              </span>
+            ) : (
+              <span data-testid="turn-loading-indicator" className="loading loading-dots loading-xs" />
+            )
           )}
           {turn.items.map((item, idx) => {
             if (item.kind === 'tool') {

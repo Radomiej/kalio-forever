@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, act, fireEvent } from '@testing-library/react';
-import { HistoryToolCallBubble, LiveToolCallBubble, extractRAAppBlock } from './ToolCallBubble';
+import { HistoryToolCallBubble, LiveToolCallBubble } from './ToolCallBubble';
 import type { ToolActivity } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 
@@ -52,65 +52,6 @@ function makeActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
     ...overrides,
   };
 }
-
-// ── HistoryToolCallBubble tests ───────────────────────────────────────────────
-
-describe('REGRESSION: HistoryToolCallBubble — RA-App widget inside chip', () => {
-  it('preserves vfsPath when extracting html RA-App blocks', () => {
-    const block = extractRAAppBlock({
-      status: 'ready',
-      type: 'html',
-      mode: 'display',
-      content: '',
-      vfsPath: 'design/preview.html',
-    });
-
-    expect(block).toMatchObject({
-      type: 'html',
-      mode: 'display',
-      content: '',
-      vfsPath: 'design/preview.html',
-    });
-  });
-
-  it('renders RAAppRenderer when content has RA-App block', () => {
-    render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={false} />);
-    expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();
-  });
-
-  it('does NOT render RAAppRenderer for non-RA-App content', () => {
-    render(<HistoryToolCallBubble toolName="list_raapps" content={NON_RAAPP_RESULT} />);
-    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
-  });
-
-  it('hides widget and shows freeze text when isAnswered=true', () => {
-    render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
-    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
-    expect(screen.getByText('Interactive app — answer submitted')).toBeInTheDocument();
-  });
-
-  it('shows "answered" badge when isAnswered=true', () => {
-    render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
-    expect(screen.getByText('↩ answered')).toBeInTheDocument();
-  });
-
-  it('collapses widget when isAnswered flips from false to true (live collapse)', () => {
-    const { rerender } = render(
-      <HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={false} />,
-    );
-    // Initially expanded — widget visible
-    expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();
-
-    // User answers → isAnswered becomes true
-    act(() => {
-      rerender(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
-    });
-
-    // Widget should be gone, freeze text should appear
-    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
-    expect(screen.getByText('Interactive app — answer submitted')).toBeInTheDocument();
-  });
-});
 
 // ── LiveToolCallBubble tests ──────────────────────────────────────────────────
 // Live chip = status indicator only. Widget NEVER renders here —
@@ -161,6 +102,36 @@ describe('LiveToolCallBubble — status indicator only (no widget)', () => {
     render(<LiveToolCallBubble activity={activity} />);
 
     expect(screen.getByText('run_subagent')).toBeInTheDocument();
+  });
+
+  it('renders durable CLI session snapshots instead of raw JSON blobs', () => {
+    const activity = makeActivity({
+      toolName: 'spawn_cli_agent',
+      status: 'success',
+      finishedAt: Date.now(),
+      result: {
+        callId: 'call-cli-session',
+        status: 'success',
+        data: {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'running',
+          lastPrompt: 'Inspect the repository',
+          updatedAt: Date.now(),
+          activeCallId: 'cli-run-1',
+          lastOutput: 'Scanning files...',
+        },
+      },
+    });
+
+    render(<LiveToolCallBubble activity={activity} />);
+
+    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getAllByText('cli-child-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('Scanning files...')).toBeInTheDocument();
+    expect(screen.queryByText(/"childSessionId": "cli-child-1"/)).not.toBeInTheDocument();
   });
 });
 
@@ -467,5 +438,30 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
 
     expect(screen.getByText('Verbose implementation summary')).toBeInTheDocument();
     expect(screen.getByText('sub-agents/sub-1/design/preview.html')).toBeInTheDocument();
+  });
+
+  it('renders durable CLI session status for message_cli_agent history results without requiring an exit code', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="message_cli_agent"
+        content={JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'running',
+          lastPrompt: 'Continue with tests',
+          updatedAt: Date.now(),
+          activeCallId: 'cli-run-2',
+          lastOutput: 'Running focused tests...',
+        })}
+        args={{ childSessionId: 'cli-child-1', prompt: 'Continue with tests' }}
+      />,
+    );
+
+    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getAllByText('cli-child-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('Running focused tests...')).toBeInTheDocument();
+    expect(screen.queryByText(/"activeCallId": "cli-run-2"/)).not.toBeInTheDocument();
   });
 });

@@ -161,6 +161,35 @@ describe('SessionPanel', () => {
     expect(screen.getByTestId('subagent-session-badge-sub-1')).toHaveTextContent('Sub-agent');
   });
 
+  it('renders cli-agent child sessions with a badge', async () => {
+    const sessionsWithCliChild: ChatSession[] = [
+      ...mockSessions,
+      {
+        id: 'cli-1',
+        personaId: 'default',
+        title: 'Codex CLI: inspect repository',
+        kind: 'cli-agent',
+        parentSessionId: 's1',
+        parentToolCallId: 'call-cli',
+        createdAt: 2_600,
+        updatedAt: Date.now() - 45_000,
+      },
+    ];
+
+    mockState.sessions = sessionsWithCliChild;
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: sessionsWithCliChild });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(sessionsWithCliChild));
+
+    expect(screen.getByText('Codex CLI: inspect repository')).toBeTruthy();
+    expect(screen.getByTestId('cli-agent-session-badge-cli-1')).toHaveTextContent('CLI agent');
+  });
+
   it('keeps the master session above its grouped subagent sessions', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));

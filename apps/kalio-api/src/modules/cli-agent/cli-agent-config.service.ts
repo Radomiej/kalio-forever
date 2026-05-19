@@ -11,6 +11,7 @@ const DEFAULTS: CLIAgentConfig = {
   cliPath: '',
   timeoutMs: 600_000,
   maxOutputChars: 16_000,
+  model: '',
   extraArgs: [],
 };
 
@@ -54,12 +55,19 @@ export class CLIAgentConfigService {
     if (config.maxOutputChars !== undefined && config.maxOutputChars < 1_000) {
       throw new BadRequestException('maxOutputChars must be at least 1000');
     }
+    if (config.model !== undefined && typeof config.model !== 'string') {
+      throw new BadRequestException('model must be a string');
+    }
     if (config.extraArgs !== undefined && !Array.isArray(config.extraArgs)) {
       throw new BadRequestException('extraArgs must be an array');
     }
 
     const existing = await this.getConfig(agentId);
-    const merged: CLIAgentConfig = { ...existing, ...config };
+    const merged: CLIAgentConfig = {
+      ...existing,
+      ...config,
+      model: config.model !== undefined ? config.model.trim() : existing.model,
+    };
 
     await mkdir(configDir(), { recursive: true });
     await writeFile(configPath(agentId), JSON.stringify(merged, null, 2), 'utf8');
