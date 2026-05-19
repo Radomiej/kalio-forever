@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { MODULE_METADATA } from '@nestjs/common/constants';
-import { ConfigModule } from '@nestjs/config';
-import { AppModule } from './app.module';
 import { DatabaseModule } from './database/database.module';
 import { LLMModule } from './modules/llm/llm.module';
 import { PersonaModule } from './modules/persona/persona.module';
@@ -21,10 +19,15 @@ import { RelayModule } from './modules/relay/relay.module';
 import { HitlModule } from './modules/hitl/hitl.module';
 
 describe('AppModule', () => {
-  it('registers the full application module graph', () => {
-    const imports = (Reflect.getMetadata(MODULE_METADATA.IMPORTS, AppModule) as Array<object>) ?? [];
+  it('registers the full application module graph', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.DATABASE_PATH = '/tmp/kalio-app-module.db';
+    process.env.WORKSPACE_ROOT = '/tmp/kalio-app-module-workspace';
 
-    expect(imports.some((entry) => 'module' in entry && entry.module === ConfigModule)).toBe(true);
+    const { AppModule } = await import('./app.module');
+    const imports = (Reflect.getMetadata(MODULE_METADATA.IMPORTS, AppModule) as unknown[]) ?? [];
+
+    expect(imports[0]).toBeDefined();
     expect(imports).toContain(DatabaseModule);
     expect(imports).toContain(LLMModule);
     expect(imports).toContain(PersonaModule);

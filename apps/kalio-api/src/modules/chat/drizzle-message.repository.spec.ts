@@ -44,11 +44,10 @@ describe('DrizzleMessageRepository', () => {
   it('throws a SESSION_NOT_FOUND error when ensureSession cannot find the session', async () => {
     selectSessionResult.mockResolvedValue(undefined);
 
-    const error = await repository.ensureSession('session-1', 'persona-1').catch((err: unknown) => err as NodeJS.ErrnoException);
-
-    expect(error).toBeInstanceOf(Error);
-    expect(error.message).toContain('session-1');
-    expect(error.code).toBe('SESSION_NOT_FOUND');
+    await expect(repository.ensureSession('session-1', 'persona-1')).rejects.toMatchObject({
+      message: expect.stringContaining('session-1'),
+      code: 'SESSION_NOT_FOUND',
+    });
   });
 
   it('maps stored rows to chat messages and persists new messages', async () => {
