@@ -99,6 +99,7 @@ describe('PersonasPanel', () => {
   });
 
   it('validates blank names and creates a persona with an explicit tool allowlist', async () => {
+    const user = userEvent.setup();
     const createdPersona: Persona = {
       id: 'researcher',
       name: 'Researcher',
@@ -119,19 +120,19 @@ describe('PersonasPanel', () => {
     render(<PersonasPanel />);
 
     await screen.findByTestId('new-persona-btn');
-    await userEvent.click(screen.getByTestId('new-persona-btn'));
-    await userEvent.click(screen.getByTestId('persona-save-btn'));
+    await user.click(screen.getByTestId('new-persona-btn'));
+    await user.click(screen.getByTestId('persona-save-btn'));
 
     expect(await screen.findByTestId('persona-edit-error')).toHaveTextContent('Name is required');
     expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/personas' && init?.method === 'POST')).toBe(false);
 
-    await userEvent.type(screen.getByTestId('persona-name-input'), 'Researcher');
-    await userEvent.type(screen.getByTestId('persona-prompt-input'), 'Investigate carefully');
-    await userEvent.type(screen.getByTestId('persona-model-input'), 'gpt-4.1');
+    await user.type(screen.getByTestId('persona-name-input'), 'Researcher');
+    await user.type(screen.getByTestId('persona-prompt-input'), 'Investigate carefully');
+    await user.type(screen.getByTestId('persona-model-input'), 'gpt-4.1');
 
-    await userEvent.click(screen.getByTestId('tool-toggle-all'));
-    await userEvent.click(within(screen.getByTestId('tool-toggle-web_search')).getByRole('checkbox'));
-    await userEvent.click(screen.getByTestId('persona-save-btn'));
+    await user.click(screen.getByTestId('tool-toggle-all'));
+    await user.click(within(screen.getByTestId('tool-toggle-web_search')).getByRole('checkbox'));
+    await user.click(screen.getByTestId('persona-save-btn'));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -151,6 +152,7 @@ describe('PersonasPanel', () => {
   });
 
   it('updates and deletes an existing custom persona', async () => {
+    const user = userEvent.setup();
     const updatedPersona: Persona = {
       ...CUSTOM_PERSONA,
       name: 'Builder v2',
@@ -167,21 +169,21 @@ describe('PersonasPanel', () => {
 
     render(<PersonasPanel />);
 
-    await userEvent.click(await screen.findByTestId('persona-row-builder'));
+    await user.click(await screen.findByTestId('persona-row-builder'));
 
     const nameInput = await screen.findByTestId('persona-name-input');
-    await userEvent.clear(nameInput);
-    await userEvent.type(nameInput, 'Builder v2');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Builder v2');
 
     const promptInput = screen.getByTestId('persona-prompt-input');
-    await userEvent.clear(promptInput);
-    await userEvent.type(promptInput, 'Build safer things');
+    await user.clear(promptInput);
+    await user.type(promptInput, 'Build safer things');
 
     const modelInput = screen.getByTestId('persona-model-input');
-    await userEvent.clear(modelInput);
-    await userEvent.type(modelInput, 'claude-opus');
+    await user.clear(modelInput);
+    await user.type(modelInput, 'claude-opus');
 
-    await userEvent.click(screen.getByTestId('persona-save-btn'));
+    await user.click(screen.getByTestId('persona-save-btn'));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -199,8 +201,8 @@ describe('PersonasPanel', () => {
 
     expect(await screen.findByText('Builder v2')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByTestId('persona-row-builder'));
-    await userEvent.click(await screen.findByTestId('persona-delete-btn'));
+    await user.click(screen.getByTestId('persona-row-builder'));
+    await user.click(await screen.findByTestId('persona-delete-btn'));
 
     await waitFor(() => {
       expect(globalThis.confirm).toHaveBeenCalledWith('Delete persona "Builder v2"? This cannot be undone.');
