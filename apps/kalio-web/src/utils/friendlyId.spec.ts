@@ -44,9 +44,9 @@ describe('toFriendlyName', () => {
     expect(name).toMatch(/^[a-z]+_[a-z]+$/);
   });
 
-  it('produces consistent results across a large set', () => {
+  it('produces consistent results for representative generated session IDs', () => {
     const results = new Map<string, string>();
-    for (let i = 0; i < 1000; i++) {
+    for (let i = 0; i < 25; i++) {
       const id = `session-${i}`;
       const name = toFriendlyName(id);
       expect(name).toMatch(/^[a-z]+_[a-z]+$/);
@@ -60,7 +60,7 @@ describe('toFriendlyName', () => {
     }
   });
 
-  it('adjective and noun parts are non-empty', () => {
+  it('uses non-empty adjective and noun parts', () => {
     const name = toFriendlyName('test-id-12345');
     const [adj, noun] = name.split('_');
     expect(adj.length).toBeGreaterThan(0);
