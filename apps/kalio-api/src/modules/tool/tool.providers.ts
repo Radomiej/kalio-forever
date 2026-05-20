@@ -17,7 +17,6 @@ import { RaAppCreateDraftTool, RaAppExecuteDslTool, RaAppPublishDraftTool } from
 import { RaAppTestTool } from './tools/raapp-test.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 import { WebSearchTool } from './tools/web-search.tool';
-import { SearchHistoricalWebSearchTool } from './tools/search-historical-web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
 import { GetCliAgentStatusTool, MessageCliAgentTool, SpawnCliAgentTool, StopCliAgentTool } from './tools/cli-agent-session.tools';
@@ -45,7 +44,7 @@ export const TOOL_PROVIDER_CLASSES = [
   RaAppCreateDraftTool, RaAppExecuteDslTool, RaAppPublishDraftTool,
   RaAppTestTool,
   MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
-  WebSearchTool, SearchHistoricalWebSearchTool,
+  WebSearchTool,
   ListToolsTool, GetToolDetailsTool,
   SpawnCliAgentTool, MessageCliAgentTool, GetCliAgentStatusTool, StopCliAgentTool,
   RunCliAgentTool,

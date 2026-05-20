@@ -34,7 +34,6 @@ import { RaAppCreateDraftTool, RaAppExecuteDslTool, RaAppPublishDraftTool } from
 import { RaAppTestTool } from './tools/raapp-test.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 import { WebSearchTool } from './tools/web-search.tool';
-import { SearchHistoricalWebSearchTool } from './tools/search-historical-web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
 import { GetCliAgentStatusTool, MessageCliAgentTool, SpawnCliAgentTool, StopCliAgentTool } from './tools/cli-agent-session.tools';
@@ -95,7 +94,6 @@ describe('ToolRegistryService — all tools registered', () => {
       stub(MemorySearchTool),
       stub(MemoryIngestConversationTool),
       stub(WebSearchTool),
-      stub(SearchHistoricalWebSearchTool),
       stub(ListToolsTool),
       stub(GetToolDetailsTool),
       stub(SpawnCliAgentTool),
@@ -141,7 +139,7 @@ describe('ToolRegistryService — all tools registered', () => {
     // Memory
     'memory_ingest', 'memory_search', 'memory_ingest_conversation',
     // Web
-    'web_search', 'search_historical_web_search',
+    'web_search',
     // Meta
     'list_tools', 'get_tool_details',
     // CLI Agent

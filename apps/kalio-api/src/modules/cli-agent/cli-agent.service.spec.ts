@@ -358,7 +358,7 @@ describe('CLIAgentService', () => {
     ) => {
       callback(null, '', '');
       return {} as never;
-    }) as typeof childProcess.execFile);
+    }) as unknown as typeof childProcess.execFile);
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
     vi.spyOn(service as unknown as { getPlatform(): NodeJS.Platform }, 'getPlatform').mockReturnValue('win32');
 

@@ -15,11 +15,12 @@ export function extractRAAppBlock(data: unknown): RAAppBlock | null {
   const type = d['type'];
   const content = typeof d['content'] === 'string' ? d['content'] : undefined;
   const renderedContent = typeof d['renderedContent'] === 'string' ? d['renderedContent'] : undefined;
-  if ((type === 'html' || type === 'gui') && (typeof content === 'string' || typeof renderedContent === 'string')) {
+  const resolvedContent = renderedContent ?? content;
+  if ((type === 'html' || type === 'gui') && typeof resolvedContent === 'string') {
     return {
       type: type as 'html' | 'gui',
       mode: (d['mode'] as 'display' | 'interactive') ?? 'display',
-      content: renderedContent ?? content,
+      content: resolvedContent,
       vfsPath: typeof d['vfsPath'] === 'string' ? d['vfsPath'] : undefined,
       pendingApprovals: (d['pendingApprovals'] as RaAppPendingApproval[] | undefined) ?? [],
       nativeResults: Array.isArray(d['nativeResults'])

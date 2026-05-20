@@ -175,7 +175,7 @@ describe('CLIAgentPtyService', () => {
     ) => {
       callback(null, '', '');
       return {} as never;
-    }) as typeof childProcess.execFile);
+    }) as unknown as typeof childProcess.execFile);
 
     const run = service.run({
       agentId: 'codex',

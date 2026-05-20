@@ -7,72 +7,26 @@ import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
 import { CodexAdapter } from './adapters/codex.adapter';
 import type { ICLIAgentAdapter } from './adapters/cli-agent.adapter';
 import { CLIAgentConfigService } from './cli-agent-config.service';
+import { terminateCliAgentProcess, type KillableProcess } from './cli-agent-process-kill';
 import { compressOutput } from './output-compressor';
+import {
+  EXIT_FALLBACK_GRACE_MS,
+  WINDOWS_POWERSHELL_EXE,
+  extractCodexAgentMessage,
+  normalizeTimeoutMs,
+  quotePowerShellArg,
+} from './cli-agent-utils';
 import type { RunCliAgentRequest } from './cli-agent.types';
 import { CLIAgentPtyService } from './cli-agent-pty.service';
 
 export type { ProgressEmitFn } from './cli-agent.types';
 
-/** Max timeout cap: 20 minutes */
-const MAX_TIMEOUT_MS = 1_200_000;
-/** Slow CLI agents commonly need auth/model startup time before producing useful output. */
-const SLOW_AGENT_MIN_TIMEOUT_MS = 180_000;
-const SLOW_AGENT_IDS = new Set(['gemini', 'codex']);
-const EXIT_FALLBACK_GRACE_MS = 250;
 export const CLI_AGENT_STOPPED_ERROR = 'CLI_AGENT_STOPPED';
-const WINDOWS_POWERSHELL_EXE = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
-
-function normalizeTimeoutMs(agentId: string, timeoutMs: number): number {
-  const cappedTimeout = Math.min(timeoutMs, MAX_TIMEOUT_MS);
-  if (SLOW_AGENT_IDS.has(agentId)) {
-    return Math.max(cappedTimeout, SLOW_AGENT_MIN_TIMEOUT_MS);
-  }
-  return cappedTimeout;
-}
-
-function quotePowerShellArg(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-function parseJsonLine(line: string): unknown | null {
-  try {
-    return JSON.parse(line) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-function extractCodexAgentMessage(output: string): string | null {
-  let lastMessage: string | null = null;
-  for (const line of output.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('{')) {
-      continue;
-    }
-
-    const parsed = parseJsonLine(trimmed);
-    if (!parsed || typeof parsed !== 'object') {
-      continue;
-    }
-
-    const event = parsed as { type?: unknown; item?: unknown };
-    if (event.type !== 'item.completed' || !event.item || typeof event.item !== 'object') {
-      continue;
-    }
-
-    const item = event.item as { type?: unknown; text?: unknown };
-    if (item.type === 'agent_message' && typeof item.text === 'string') {
-      lastMessage = item.text;
-    }
-  }
-
-  return lastMessage?.trim() || null;
-}
 
 interface ActiveRunState {
   sessionId: string;
   agentId: string;
-  proc: { kill(signal?: string | number): unknown; exitCode?: number | null; pid?: number };
+  proc: KillableProcess;
   stopRequested: boolean;
   requestStop?: () => void;
   terminatePromise?: Promise<void>;
@@ -507,60 +461,12 @@ export class CLIAgentService implements OnApplicationBootstrap {
       return activeRun.terminatePromise;
     }
 
-    activeRun.terminatePromise = this.terminateProcess(activeRun.proc, activeRun.agentId);
-    return activeRun.terminatePromise;
-  }
-
-  private async terminateProcess(
-    proc: { kill(signal?: string | number): unknown; exitCode?: number | null; pid?: number },
-    agentId: string,
-  ): Promise<void> {
-    if (proc.exitCode !== undefined && proc.exitCode !== null) {
-      return;
-    }
-
-    if (this.getPlatform() === 'win32' && typeof proc.pid === 'number') {
-      try {
-        await this.killWindowsProcessTree(proc.pid);
-        return;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`[${agentId}] taskkill failed for pid=${proc.pid}: ${message}`);
-      }
-    }
-
-    try {
-      proc.kill('SIGTERM');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`[${agentId}] SIGTERM failed: ${message}`);
-    }
-  }
-
-  private killWindowsProcessTree(pid: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      execFile(
-        'taskkill',
-        ['/F', '/T', '/PID', String(pid)],
-        { windowsHide: true, timeout: 5000 },
-        (err, _stdout, stderr) => {
-          if (!err) {
-            resolve();
-            return;
-          }
-
-          const lowerStderr = (stderr ?? '').toLowerCase();
-          const notFound = lowerStderr.includes('not found')
-            || lowerStderr.includes('no running instance')
-            || lowerStderr.includes('does not exist');
-          if (notFound) {
-            resolve();
-            return;
-          }
-
-          reject(err);
-        },
-      );
+    activeRun.terminatePromise = terminateCliAgentProcess({
+      proc: activeRun.proc,
+      platform: this.getPlatform(),
+      agentId: activeRun.agentId,
+      onWarn: (message) => this.logger.warn(message),
     });
+    return activeRun.terminatePromise;
   }
 }

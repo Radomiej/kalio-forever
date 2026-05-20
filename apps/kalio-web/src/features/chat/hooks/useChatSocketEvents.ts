@@ -8,6 +8,7 @@ import { eventBus } from '../../../services/eventBus';
 import { buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
 import { shouldRefreshVfsForToolResult } from '../ChatInterface.Parts';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
+import { canReleaseComposerAfterToolResult, createToolArgProgressHandlers } from './useChatSocketEvents.helpers';
 
 interface UseChatSocketEventsOptions {
   hasPendingChunksForSession: (sessionId: string | null) => boolean;
@@ -61,33 +62,11 @@ export function useChatSocketEvents({
   useEffect(() => {
     if (!eventBus.connected) eventBus.connect();
 
-    const markToolArgProgressSeen = (sessionId: string, toolName: string) => {
-      const seenForSession = toolArgProgressSeenRef.current[sessionId] ?? new Set<string>();
-      seenForSession.add(toolName);
-      toolArgProgressSeenRef.current[sessionId] = seenForSession;
-    };
-
-    const clearToolArgProgressTracking = (sessionId?: string | null) => {
-      if (!sessionId) {
-        toolArgProgressSeenRef.current = {};
-        setToolArgProgress(null);
-        return;
-      }
-      delete toolArgProgressSeenRef.current[sessionId];
-      if (sessionId === useSessionStore.getState().activeSessionId) {
-        setToolArgProgress(null);
-      }
-    };
-
-    const ensureSyntheticToolIntent = (sessionId: string | null | undefined, toolName: string) => {
-      if (!sessionId || sessionId !== useSessionStore.getState().activeSessionId) {
-        return;
-      }
-      if (toolArgProgressSeenRef.current[sessionId]?.has(toolName)) {
-        return;
-      }
-      setToolArgProgress({ toolName, totalChars: 0, charsPerSec: 0 });
-    };
+    const { markToolArgProgressSeen, clearToolArgProgressTracking, ensureSyntheticToolIntent } = createToolArgProgressHandlers({
+      toolArgProgressSeenRef,
+      setToolArgProgress,
+      getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+    });
 
     const offChunk = eventBus.onChunk((chunk) => {
       const targetSessionId = chunk.sessionId ?? useSessionStore.getState().activeSessionId;
@@ -336,7 +315,17 @@ export function useChatSocketEvents({
         };
         addMessage(toolResultMsg);
       }
-      if (result.status !== 'running' && resultSessionId === activeSessionId) {
+      if (
+        resultSessionId === activeSessionId
+        && canReleaseComposerAfterToolResult({
+          hasActiveTurn: Boolean(useSessionStore.getState().getSessionActiveTurnId(resultSessionId)),
+          hasActiveLoop: useAgentStore.getState().hasActiveLoopForSession(resultSessionId),
+          hasActiveTool: useAgentStore.getState().getToolActivitiesForSession(resultSessionId).some(
+            (activity) => activity.status === 'running' || activity.status === 'awaiting_confirmation',
+          ),
+          hasPendingChunks: hasPendingChunksForSession(resultSessionId),
+        })
+      ) {
         setStreaming(false);
       }
     });

@@ -1,15 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { execFile } from 'node:child_process';
 import type { CLIAgentResult } from '@kalio/types';
+import { terminateCliAgentProcess, type KillableProcess } from './cli-agent-process-kill';
 import { compressOutput } from './output-compressor';
 import type { ProgressEmitFn } from './cli-agent.types';
 import { stripTerminalControlCodes } from './terminal-output';
 
-interface PtyProcess {
+interface PtyProcess extends KillableProcess {
   onData(callback: (data: string) => void): { dispose(): void } | void;
   onExit(callback: (event: { exitCode: number }) => void): { dispose(): void } | void;
-  kill(signal?: string | number): void;
-  pid?: number;
 }
 
 interface PtyModule {
@@ -103,7 +101,12 @@ export class CLIAgentPtyService {
         }
         settled = true;
         cleanup();
-        void this.terminateProcess(proc, request.agentId);
+        void terminateCliAgentProcess({
+          proc,
+          platform: this.getPlatform(),
+          agentId: request.agentId,
+          onWarn: (message) => this.logger.warn(`[PTY] ${message}`),
+        });
         reject(new Error(`CLI agent "${request.agentId}" timed out after ${request.timeoutMs}ms`));
       }, request.timeoutMs);
     });
@@ -123,51 +126,5 @@ export class CLIAgentPtyService {
 
   private getPlatform(): NodeJS.Platform {
     return process.platform;
-  }
-
-  private async terminateProcess(proc: PtyProcess, agentId: string): Promise<void> {
-    if (this.getPlatform() === 'win32' && typeof proc.pid === 'number') {
-      try {
-        await this.killWindowsProcessTree(proc.pid);
-        return;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`[${agentId}] PTY taskkill failed for pid=${proc.pid}: ${message}`);
-      }
-    }
-
-    try {
-      proc.kill('SIGTERM');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`[${agentId}] PTY SIGTERM failed: ${message}`);
-    }
-  }
-
-  private killWindowsProcessTree(pid: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      execFile(
-        'taskkill',
-        ['/F', '/T', '/PID', String(pid)],
-        { windowsHide: true, timeout: 5000 },
-        (err, _stdout, stderr) => {
-          if (!err) {
-            resolve();
-            return;
-          }
-
-          const lowerStderr = (stderr ?? '').toLowerCase();
-          const notFound = lowerStderr.includes('not found')
-            || lowerStderr.includes('no running instance')
-            || lowerStderr.includes('does not exist');
-          if (notFound) {
-            resolve();
-            return;
-          }
-
-          reject(err);
-        },
-      );
-    });
   }
 }

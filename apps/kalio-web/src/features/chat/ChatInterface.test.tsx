@@ -473,9 +473,10 @@ describe('ChatInterface event wiring', () => {
     );
   });
 
-  it('tool:result for the active session unlocks composer streaming state', async () => {
+  it('tool:result for the active session unlocks composer streaming state when no turn remains active', async () => {
     await renderChatInterface();
     setStreaming.mockClear();
+    mockActiveTurnId = null;
 
     await emitEvent('tool:start', { callId: 'call-raapp', toolName: 'run_raapp', args: { name: 'calculator' } });
     await emitEvent('tool:result', {
@@ -488,9 +489,47 @@ describe('ChatInterface event wiring', () => {
     expect(setStreaming).toHaveBeenCalledWith(false);
   });
 
+  it('first tool:result during an active loop does not unlock composer streaming state', async () => {
+    await renderChatInterface();
+    setStreaming.mockClear();
+
+    mockActiveTurnId = 'turn-active';
+    agentStoreState.activeAgentLoops = {
+      'session-1': { sessionId: 'session-1', turnId: 'turn-active', startedAt: Date.now() },
+    };
+    agentStoreState.toolActivities = [
+      {
+        callId: 'call-first',
+        toolName: 'run_raapp',
+        sessionId: 'session-1',
+        args: { name: 'calculator' },
+        status: 'running',
+        startedAt: Date.now(),
+      },
+      {
+        callId: 'call-next',
+        toolName: 'vfs_read',
+        sessionId: 'session-1',
+        args: { path: 'README.md' },
+        status: 'running',
+        startedAt: Date.now(),
+      },
+    ];
+
+    await emitEvent('tool:result', {
+      callId: 'call-first',
+      status: 'success',
+      data: { status: 'ready', type: 'gui' },
+      sessionId: 'session-1',
+    });
+
+    expect(setStreaming).not.toHaveBeenCalledWith(false);
+  });
+
   it('tool:result error/abort for the active session unlocks composer streaming state', async () => {
     await renderChatInterface();
     setStreaming.mockClear();
+    mockActiveTurnId = null;
 
     await emitEvent('tool:start', { callId: 'call-abort', toolName: 'run_raapp', args: { name: 'calculator' }, sessionId: 'session-1' });
     await emitEvent('tool:result', {
