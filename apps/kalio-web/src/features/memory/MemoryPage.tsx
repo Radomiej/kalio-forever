@@ -4,6 +4,8 @@ import { apiClient } from '../../services/apiClient';
 import type { Persona, MemorySearchResult, MemorySearchMode, MemoryIngestResult } from '@kalio/types';
 
 export function MemoryPage() {
+  type FreshnessReason = 'load' | 'search' | 'browse' | 'ingest' | 'delete';
+
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>('');
   const [query, setQuery] = useState('');
@@ -15,21 +17,26 @@ export function MemoryPage() {
   const [ingestText, setIngestText] = useState('');
   const [ingesting, setIngesting] = useState(false);
   const [stats, setStats] = useState<{ count: number; size: number } | null>(null);
+  const [freshness, setFreshness] = useState<{ reason: FreshnessReason; at: number } | null>(null);
   const activePersonaId = selectedPersonaId && personas.some((persona) => persona.id === selectedPersonaId)
     ? selectedPersonaId
     : (personas[0]?.id ?? '');
 
-  const loadStats = useCallback(() => {
+  const touchFreshness = useCallback((reason: FreshnessReason) => {
+    setFreshness({ reason, at: Date.now() });
+  }, []);
+
+  const loadStats = useCallback(async () => {
     if (!activePersonaId) return;
-    apiClient
-      .get<MemorySearchResult[]>(`/api/memory/${activePersonaId}`)
-      .then((r) => {
-        const entries = r.data;
-        const totalSize = entries.reduce((acc, item) => acc + item.content.length, 0);
-        setStats({ count: entries.length, size: totalSize });
-      })
-      .catch(() => setStats(null));
-  }, [activePersonaId]);
+    try {
+      const { data } = await apiClient.get<MemorySearchResult[]>(`/api/memory/${activePersonaId}`);
+      const totalSize = data.reduce((acc, item) => acc + item.content.length, 0);
+      setStats({ count: data.length, size: totalSize });
+      touchFreshness('load');
+    } catch {
+      setStats(null);
+    }
+  }, [activePersonaId, touchFreshness]);
 
   // Load personas on mount
   useEffect(() => {
@@ -42,13 +49,14 @@ export function MemoryPage() {
   // Load stats when persona changes
   useEffect(() => {
     if (!activePersonaId) return;
-    loadStats();
+    void loadStats();
   }, [activePersonaId, loadStats]);
 
   const handlePersonaChange = (nextPersonaId: string) => {
     setSelectedPersonaId(nextPersonaId);
     setResults([]);
     setBrowseMode(false);
+    setFreshness(null);
   };
 
   const handleSearch = async () => {
@@ -70,6 +78,7 @@ export function MemoryPage() {
       setResults([]);
     } finally {
       setLoading(false);
+      touchFreshness('search');
     }
   };
 
@@ -83,7 +92,8 @@ export function MemoryPage() {
       });
       setIngestText('');
       setIngestOpen(false);
-      loadStats();
+      await loadStats();
+      touchFreshness('ingest');
       alert(`Ingested ${data.count} chunks`);
     } catch (err) {
       console.error('[MemoryPage] ingest failed', err);
@@ -105,6 +115,7 @@ export function MemoryPage() {
       setResults([]);
     } finally {
       setLoading(false);
+      touchFreshness('browse');
     }
   };
 
@@ -114,7 +125,8 @@ export function MemoryPage() {
     try {
       await apiClient.delete(`/api/memory/${activePersonaId}/${id}`);
       setResults((prev) => prev.filter((r) => r.id !== id));
-      loadStats();
+      await loadStats();
+      touchFreshness('delete');
     } catch (err) {
       console.error('[MemoryPage] delete failed', err);
     }
@@ -171,6 +183,10 @@ export function MemoryPage() {
           {selectedPersona && (
             <span className="ml-auto text-primary">{selectedPersona.name}</span>
           )}
+          <span className="flex items-center gap-1 ml-auto text-base-content/70" data-testid="memory-freshness">
+            Sync:
+            {freshness ? `${freshness.reason} @ ${new Date(freshness.at).toLocaleTimeString()}` : 'not yet'}
+          </span>
         </div>
       )}
 

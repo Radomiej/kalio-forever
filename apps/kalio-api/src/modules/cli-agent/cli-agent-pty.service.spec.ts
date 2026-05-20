@@ -1,5 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+const mockExecFile = vi.hoisted(() => vi.fn());
+vi.mock('node:child_process', () => ({ execFile: mockExecFile }));
+
+import * as childProcess from 'node:child_process';
 import { CLIAgentPtyService } from './cli-agent-pty.service';
 
 let currentSpawn: ReturnType<typeof vi.fn> | null = null;
@@ -19,6 +24,7 @@ function makePtyProcess() {
       return exitDisposer;
     }),
     kill: vi.fn(),
+    pid: 5511,
     emitData: (data: string) => events.emit('data', data),
     emitExit: (exitCode: number) => events.emit('exit', { exitCode }),
     dataDisposer,
@@ -41,6 +47,7 @@ describe('CLIAgentPtyService', () => {
   let spawn: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    mockExecFile.mockReset();
     spawn = vi.fn();
     currentSpawn = spawn;
     class TestPtyService extends CLIAgentPtyService {
@@ -133,6 +140,7 @@ describe('CLIAgentPtyService', () => {
     vi.useFakeTimers();
     const proc = makePtyProcess();
     spawn.mockReturnValue(proc);
+    vi.spyOn(service as unknown as { getPlatform(): NodeJS.Platform }, 'getPlatform').mockReturnValue('linux');
 
     const run = service.run({
       agentId: 'codex',
@@ -152,5 +160,43 @@ describe('CLIAgentPtyService', () => {
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
     expect(proc.dataDisposer.dispose).toHaveBeenCalled();
     expect(proc.exitDisposer.dispose).toHaveBeenCalled();
+  });
+
+  it('uses Windows taskkill process-tree termination on timeout when running on win32', async () => {
+    vi.useFakeTimers();
+    const proc = makePtyProcess();
+    spawn.mockReturnValue(proc);
+    vi.spyOn(service as unknown as { getPlatform(): NodeJS.Platform }, 'getPlatform').mockReturnValue('win32');
+    vi.mocked(childProcess.execFile).mockImplementation(((
+      _file: string,
+      _args: readonly string[],
+      _options: Record<string, unknown>,
+      callback: (err: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      callback(null, '', '');
+      return {} as never;
+    }) as typeof childProcess.execFile);
+
+    const run = service.run({
+      agentId: 'codex',
+      executable: 'cmd',
+      args: ['/c', 'codex'],
+      workdir: 'C:/repo',
+      callId: 'call-1',
+      sessionId: 'session-1',
+      timeoutMs: 100,
+      maxOutputChars: 16_000,
+    });
+
+    await waitForSpawn();
+    vi.advanceTimersByTime(100);
+    await expect(run).rejects.toThrow('timed out after 100ms');
+
+    expect(childProcess.execFile).toHaveBeenCalledWith(
+      'taskkill',
+      ['/F', '/T', '/PID', '5511'],
+      expect.objectContaining({ windowsHide: true, timeout: 5000 }),
+      expect.any(Function),
+    );
   });
 });

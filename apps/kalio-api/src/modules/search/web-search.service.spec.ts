@@ -1,12 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { WebSearchService } from './web-search.service';
 
+function makeHistoryStore(results: unknown[] = []) {
+  return {
+    insert: vi.fn().mockReturnValue({ id: 'history-new', createdAt: 1_714_000_000_000 }),
+    search: vi.fn().mockReturnValue(results),
+  };
+}
+
 function makeService(
   dbProvider: string | null,
   dbApiKey: string | null,
   envProvider = 'perplexity',
   envApiKey = '',
   webSearchTimeoutMs = 120_000,
+  historyStore = makeHistoryStore(),
 ) {
   const appSettings = {
     get: vi.fn().mockImplementation((key: string) => {
@@ -25,39 +33,47 @@ function makeService(
   const timeoutSettings = {
     getWebSearchTimeoutMs: vi.fn().mockResolvedValue(webSearchTimeoutMs),
   };
-  return new WebSearchService(configService as never, appSettings as never, timeoutSettings as never);
+  return {
+    service: new WebSearchService(
+      configService as never,
+      appSettings as never,
+      timeoutSettings as never,
+      historyStore as never,
+    ),
+    historyStore,
+  };
 }
 
 describe('WebSearchService', () => {
   describe('getConfig()', () => {
     it('returns stored DB provider and apiKey when set', async () => {
-      const svc = makeService('perplexity-openrouter', 'db-api-key');
+      const { service: svc } = makeService('perplexity-openrouter', 'db-api-key');
       const cfg = await svc.getConfig();
       expect(cfg.provider).toBe('perplexity-openrouter');
       expect(cfg.apiKey).toBe('db-api-key');
     });
 
     it('falls back to env provider when DB has none', async () => {
-      const svc = makeService(null, null, 'perplexity', 'env-key');
+      const { service: svc } = makeService(null, null, 'perplexity', 'env-key');
       const cfg = await svc.getConfig();
       expect(cfg.provider).toBe('perplexity');
       expect(cfg.apiKey).toBe('env-key');
     });
 
     it('returns null apiKey when no key configured', async () => {
-      const svc = makeService(null, null, 'perplexity', '');
+      const { service: svc } = makeService(null, null, 'perplexity', '');
       const cfg = await svc.getConfig();
       expect(cfg.apiKey).toBeNull();
     });
 
     it('returns null apiKey when DB key is empty string', async () => {
-      const svc = makeService('perplexity', '', 'perplexity', '');
+      const { service: svc } = makeService('perplexity', '', 'perplexity', '');
       const cfg = await svc.getConfig();
       expect(cfg.apiKey).toBeNull();
     });
 
     it('defaults to perplexity provider when nothing is set', async () => {
-      const svc = makeService(null, null, undefined as unknown as string, '');
+      const { service: svc } = makeService(null, null, undefined as unknown as string, '');
       const cfg = await svc.getConfig();
       expect(cfg.provider).toBe('perplexity');
     });
@@ -65,16 +81,20 @@ describe('WebSearchService', () => {
 
   describe('search()', () => {
     let svc: WebSearchService;
+    let historyStore: ReturnType<typeof makeHistoryStore>;
 
     beforeEach(() => {
-      svc = makeService('perplexity', 'test-api-key');
+      const made = makeService('perplexity', 'test-api-key');
+      svc = made.service;
+      historyStore = made.historyStore;
     });
 
     it('throws when no API key configured', async () => {
-      const noKeySvc = makeService(null, null, 'perplexity', '');
+      const { service: noKeySvc, historyStore: noKeyHistory } = makeService(null, null, 'perplexity', '');
       await expect(noKeySvc.search('test query')).rejects.toThrow(
         'Web search not configured',
       );
+      expect(noKeyHistory.insert).not.toHaveBeenCalled();
     });
 
     it('calls perplexity URL for perplexity provider', async () => {
@@ -89,9 +109,18 @@ describe('WebSearchService', () => {
       vi.stubGlobal('fetch', fetchMock);
 
       const result = await svc.search('what is TypeScript?');
-      expect(result.answer).toBe('answer text');
-      expect(result.citations).toEqual(['https://example.com']);
-      expect(result.provider).toBe('perplexity');
+      expect(result.result.answer).toBe('answer text');
+      expect(result.result.citations).toEqual(['https://example.com']);
+      expect(result.result.provider).toBe('perplexity');
+      expect(result).not.toHaveProperty('historicalSearch');
+      expect(historyStore.insert).toHaveBeenCalledWith({
+        query: 'what is TypeScript?',
+        answer: 'answer text',
+        citations: ['https://example.com'],
+        model: 'sonar',
+        provider: 'perplexity',
+      });
+      expect(historyStore.search).toHaveBeenCalledWith('what is TypeScript?', 5, 'history-new');
       expect(fetchMock).toHaveBeenCalledWith(
         'https://api.perplexity.ai/chat/completions',
         expect.objectContaining({ method: 'POST' }),
@@ -100,7 +129,7 @@ describe('WebSearchService', () => {
     });
 
     it('calls openrouter URL for perplexity-openrouter provider', async () => {
-      const svcOR = makeService('perplexity-openrouter', 'or-key');
+      const { service: svcOR, historyStore: historyOR } = makeService('perplexity-openrouter', 'or-key');
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
         json: () => Promise.resolve({
@@ -112,7 +141,14 @@ describe('WebSearchService', () => {
       vi.stubGlobal('fetch', fetchMock);
 
       const result = await svcOR.search('what is AI?');
-      expect(result.provider).toBe('perplexity-openrouter');
+      expect(result.result.provider).toBe('perplexity-openrouter');
+      expect(historyOR.insert).toHaveBeenCalledWith({
+        query: 'what is AI?',
+        answer: 'openrouter answer',
+        citations: [],
+        model: 'perplexity/sonar',
+        provider: 'perplexity-openrouter',
+      });
       expect(fetchMock).toHaveBeenCalledWith(
         'https://openrouter.ai/api/v1/chat/completions',
         expect.anything(),
@@ -129,6 +165,7 @@ describe('WebSearchService', () => {
       vi.stubGlobal('fetch', fetchMock);
 
       await expect(svc.search('query')).rejects.toThrow('Search API error 401');
+      expect(historyStore.insert).not.toHaveBeenCalled();
       vi.unstubAllGlobals();
     });
 
@@ -140,8 +177,40 @@ describe('WebSearchService', () => {
       vi.stubGlobal('fetch', fetchMock);
 
       const result = await svc.search('query');
-      expect(result.answer).toBe('');
-      expect(result.citations).toEqual([]);
+      expect(result.result.answer).toBe('');
+      expect(result.result.citations).toEqual([]);
+      vi.unstubAllGlobals();
+    });
+
+    it('includes historicalSearch when related history exists', async () => {
+      const historicalSearch = [
+        {
+          id: 'history-old',
+          query: 'TypeScript 5.8 strict mode changes',
+          answer: 'Strict mode answer from earlier.',
+          citations: ['https://example.com/ts58'],
+          model: 'sonar',
+          provider: 'perplexity' as const,
+          createdAt: 1_713_000_000_000,
+          score: 0.72,
+        },
+      ];
+      const made = makeService('perplexity', 'test-api-key', 'perplexity', '', 120_000, makeHistoryStore(historicalSearch));
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          choices: [{ message: { content: 'fresh answer' } }],
+          citations: [],
+          model: 'sonar',
+        }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await made.service.search('TypeScript strict mode');
+
+      expect(result.result.answer).toBe('fresh answer');
+      expect(result.historicalSearch).toEqual(historicalSearch);
+      expect(result.historicalSearchHint).toContain('search_historical_web_search');
       vi.unstubAllGlobals();
     });
 
@@ -156,7 +225,7 @@ describe('WebSearchService', () => {
         }),
       });
       vi.stubGlobal('fetch', fetchMock);
-      const timeoutSvc = makeService('perplexity', 'test-api-key', 'perplexity', '', 180_000);
+      const { service: timeoutSvc } = makeService('perplexity', 'test-api-key', 'perplexity', '', 180_000);
 
       await timeoutSvc.search('long web query');
 

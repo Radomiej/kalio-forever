@@ -171,6 +171,7 @@ export class RunCliAgentTool {
         emitFn: request._emit,
         timeoutMs,
         model,
+        abortSignal: request.abortSignal,
       });
     } catch (err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));

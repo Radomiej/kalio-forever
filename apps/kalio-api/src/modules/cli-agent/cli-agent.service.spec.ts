@@ -31,7 +31,7 @@ function makeFakeProc() {
   vi.spyOn(stdout, 'off');
   vi.spyOn(stderr, 'on');
   vi.spyOn(stderr, 'off');
-  Object.assign(base, { stdout, stderr, stdin: { end: vi.fn() }, exitCode: null, kill: vi.fn() });
+  Object.assign(base, { stdout, stderr, stdin: { end: vi.fn() }, exitCode: null, kill: vi.fn(), pid: 4242 });
   return base as unknown as ChildProcess & { stdout: typeof stdout; stderr: typeof stderr };
 }
 
@@ -54,12 +54,13 @@ const WINDOWS_POWERSHELL_EXE = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\
 
 describe('CLIAgentService', () => {
   let CLIAgentServiceClass: typeof import('./cli-agent.service').CLIAgentService;
+  let stoppedErrorCode: string;
   let service: import('./cli-agent.service').CLIAgentService;
   let configService: CLIAgentConfigService;
   let ptyService: { run: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
-    ({ CLIAgentService: CLIAgentServiceClass } = await import('./cli-agent.service'));
+    ({ CLIAgentService: CLIAgentServiceClass, CLI_AGENT_STOPPED_ERROR: stoppedErrorCode } = await import('./cli-agent.service'));
     configService = { getConfig: vi.fn().mockResolvedValue(makeConfig()) } as unknown as CLIAgentConfigService;
     ptyService = { run: vi.fn() };
     service = new CLIAgentServiceClass(
@@ -119,6 +120,7 @@ describe('CLIAgentService', () => {
     vi.useFakeTimers();
     const fakeProc = makeFakeProc();
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
+    vi.spyOn(service as unknown as { getPlatform(): NodeJS.Platform }, 'getPlatform').mockReturnValue('linux');
 
     const p = service.run({ agentId: 'gemini', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's', timeoutMs: 60_000 });
     await Promise.resolve(); await Promise.resolve();
@@ -321,5 +323,103 @@ describe('CLIAgentService', () => {
     await p;
 
     expect(adapter.buildArgs).toHaveBeenCalledWith('task', '/w', [], 'configured-model');
+  });
+
+  it('cancels run from abortSignal without waiting for timeout and clears active state', async () => {
+    const fakeProc = makeFakeProc();
+    const abortController = new AbortController();
+    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
+
+    const runPromise = service.run({
+      agentId: 'copilot',
+      prompt: 'task',
+      workdir: '/w',
+      callId: 'callId',
+      sessionId: 'sess-abort',
+      abortSignal: abortController.signal,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    abortController.abort(new Error('cancelled'));
+
+    await expect(runPromise).rejects.toThrow(stoppedErrorCode);
+    expect((service as unknown as { activeRuns: Map<string, unknown> }).activeRuns.has('sess-abort')).toBe(false);
+  });
+
+  it('uses Windows taskkill tree-termination on explicit stop', async () => {
+    const fakeProc = makeFakeProc();
+    const execFileMock = vi.mocked(childProcess.execFile);
+    execFileMock.mockImplementation(((
+      _file: string,
+      _args: readonly string[],
+      _options: Record<string, unknown>,
+      callback: (err: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      callback(null, '', '');
+      return {} as never;
+    }) as typeof childProcess.execFile);
+    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
+    vi.spyOn(service as unknown as { getPlatform(): NodeJS.Platform }, 'getPlatform').mockReturnValue('win32');
+
+    const runPromise = service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 'sess-stop' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(service.stop('sess-stop')).toBe(true);
+    await expect(runPromise).rejects.toThrow(stoppedErrorCode);
+    expect(execFileMock).toHaveBeenCalledWith(
+      'taskkill',
+      ['/F', '/T', '/PID', '4242'],
+      expect.objectContaining({ windowsHide: true, timeout: 5000 }),
+      expect.any(Function),
+    );
+  });
+
+  it('settles timeout once and clears activeRuns deterministically', async () => {
+    vi.useFakeTimers();
+    const fakeProc = makeFakeProc();
+    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
+
+    const runPromise = service.run({
+      agentId: 'copilot',
+      prompt: 'task',
+      workdir: '/w',
+      callId: 'c',
+      sessionId: 'sess-timeout',
+      timeoutMs: 100,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    vi.advanceTimersByTime(150);
+
+    await expect(runPromise).rejects.toThrow('timed out after 100ms');
+    fakeProc.emit('close', 0);
+    await Promise.resolve();
+
+    expect((service as unknown as { activeRuns: Map<string, unknown> }).activeRuns.has('sess-timeout')).toBe(false);
+  });
+
+  it('rejects Codex PTY run immediately on stop without waiting for PTY timeout', async () => {
+    const ptyProc = { kill: vi.fn(), pid: 9876 };
+    vi.mocked(ptyService.run).mockImplementation(async (request) => {
+      request.onStart?.(ptyProc as unknown as Parameters<NonNullable<typeof request.onStart>>[0]);
+      return await new Promise(() => undefined);
+    });
+
+    const runPromise = service.run({
+      agentId: 'codex',
+      prompt: 'task',
+      workdir: '/w',
+      callId: 'callId',
+      sessionId: 'sess-codex-stop',
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(service.stop('sess-codex-stop')).toBe(true);
+
+    await expect(runPromise).rejects.toThrow(stoppedErrorCode);
   });
 });

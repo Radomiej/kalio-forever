@@ -20,4 +20,6 @@ export interface RunCliAgentRequest {
   timeoutMs?: number;
   /** Optional model override for adapters that support model selection. */
   model?: string;
+  /** Optional abort signal from the originating tool/chat turn. */
+  abortSignal?: AbortSignal;
 }

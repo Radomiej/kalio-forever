@@ -22,7 +22,8 @@ function getQueryArg(args: ToolCallRequest['args']): string {
   name: 'web_search',
   description:
     'Search the web for up-to-date information using Perplexity AI. ' +
-    'Returns a concise answer with source citations. ' +
+    'Returns { result, historicalSearch? } with a concise answer, source citations, and related persisted WebSearch history when available. ' +
+    'Use search_historical_web_search to search prior web_search answers directly. ' +
     'Requires a Perplexity API key configured in Settings → Web Search.',
   parameters: {
     type: 'object',

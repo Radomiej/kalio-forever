@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
+import { WebSearchHistoryStore, type HistoricalWebSearchResult } from './web-search-history.store';
 
 export type SearchProvider = 'perplexity' | 'perplexity-openrouter';
 
@@ -13,6 +14,15 @@ export interface SearchResult {
   model: string;
   provider: SearchProvider;
 }
+
+export interface WebSearchResponse {
+  result: SearchResult;
+  historicalSearch?: HistoricalWebSearchResult[];
+  historicalSearchHint?: string;
+}
+
+const HISTORICAL_SEARCH_HINT =
+  'Related prior web_search answers were included. Use search_historical_web_search with a focused query to retrieve more persisted WebSearch history.';
 
 interface ChatCompletionResponse {
   choices: Array<{ message: { content: string } }>;
@@ -28,6 +38,7 @@ export class WebSearchService {
     private readonly configService: ConfigService,
     private readonly appSettings: AppSettingsService,
     private readonly timeoutSettings: TimeoutSettingsService,
+    private readonly historyStore: WebSearchHistoryStore,
   ) {}
 
   async getConfig(): Promise<{ provider: SearchProvider; apiKey: string | null }> {
@@ -47,7 +58,7 @@ export class WebSearchService {
     return { provider, apiKey: apiKey || null };
   }
 
-  async search(query: string): Promise<SearchResult> {
+  async search(query: string): Promise<WebSearchResponse> {
     const { provider, apiKey } = await this.getConfig();
 
     if (!apiKey) {
@@ -90,11 +101,18 @@ export class WebSearchService {
 
     const data = (await response.json()) as ChatCompletionResponse;
 
-    return {
+    const result: SearchResult = {
       answer: data.choices?.[0]?.message?.content ?? '',
       citations: data.citations ?? [],
       model: data.model ?? model,
       provider,
     };
+
+    const inserted = this.historyStore.insert({ query, ...result });
+    const historicalSearch = this.historyStore.search(query, 5, inserted.id);
+
+    return historicalSearch.length > 0
+      ? { result, historicalSearch, historicalSearchHint: HISTORICAL_SEARCH_HINT }
+      : { result };
   }
 }

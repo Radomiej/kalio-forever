@@ -336,8 +336,8 @@ export function useChatSocketEvents({
         };
         addMessage(toolResultMsg);
       }
-      if (result.status === 'success' && resultSessionId === activeSessionId) {
-        setStreaming(true);
+      if (result.status !== 'running' && resultSessionId === activeSessionId) {
+        setStreaming(false);
       }
     });
 

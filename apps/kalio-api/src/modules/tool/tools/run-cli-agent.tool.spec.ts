@@ -223,6 +223,19 @@ describe('RunCliAgentTool', () => {
     expect(emitFn).toHaveBeenCalledWith('cli_agent:progress', expect.objectContaining({ chunk: 'x' }));
   });
 
+  it('passes abortSignal from ToolCallRequest into CLIAgentService.run', async () => {
+    const abortController = new AbortController();
+    const req: ToolCallRequest = {
+      ...makeRequest({ prompt: 'task', workdir: '/projects/app' }),
+      abortSignal: abortController.signal,
+    };
+
+    await tool.execute(req);
+
+    const runRequest = (cliAgent.run as ReturnType<typeof vi.fn>).mock.calls[0][0] as RunCliAgentRequest;
+    expect(runRequest.abortSignal).toBe(abortController.signal);
+  });
+
   it.each([
     { label: 'prompt is empty', args: { prompt: '', workdir: '/projects/app' }, error: 'INVALID_PROMPT' },
     { label: 'prompt is whitespace', args: { prompt: '   ', workdir: '/projects/app' }, error: 'INVALID_PROMPT' },

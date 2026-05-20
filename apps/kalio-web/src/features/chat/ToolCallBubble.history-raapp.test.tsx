@@ -35,6 +35,23 @@ describe('REGRESSION: HistoryToolCallBubble RA-App widget inside chip', () => {
     });
   });
 
+  it('supports RA-App blocks that only provide renderedContent', () => {
+    const block = extractRAAppBlock({
+      status: 'ready',
+      type: 'html',
+      mode: 'interactive',
+      renderedContent: '<div>Rendered preview</div>',
+      vfsPath: 'design/preview.html',
+    });
+
+    expect(block).toMatchObject({
+      type: 'html',
+      mode: 'interactive',
+      content: '<div>Rendered preview</div>',
+      vfsPath: 'design/preview.html',
+    });
+  });
+
   it('preserves nativeResults when extracting RA-App blocks', () => {
     const block = extractRAAppBlock({
       status: 'ready',

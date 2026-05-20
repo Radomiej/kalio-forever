@@ -34,10 +34,24 @@ describe('WebSearchTool', () => {
 
   it('passes a trimmed query to the search service', async () => {
     const resultPayload = {
-      answer: 'Latest answer',
-      citations: ['https://example.com'],
-      model: 'sonar',
-      provider: 'perplexity' as const,
+      result: {
+        answer: 'Latest answer',
+        citations: ['https://example.com'],
+        model: 'sonar',
+        provider: 'perplexity' as const,
+      },
+      historicalSearch: [
+        {
+          id: 'history-1',
+          query: 'previous latest status',
+          answer: 'Earlier answer',
+          citations: [],
+          model: 'sonar',
+          provider: 'perplexity' as const,
+          createdAt: 1_713_000_000_000,
+          score: 0.66,
+        },
+      ],
     };
     (webSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue(resultPayload);
 

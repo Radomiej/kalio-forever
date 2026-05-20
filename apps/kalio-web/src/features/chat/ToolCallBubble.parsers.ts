@@ -12,11 +12,14 @@ import type { ImageResultData } from './ImageResultRenderer';
 export function extractRAAppBlock(data: unknown): RAAppBlock | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
-  if ((d['type'] === 'html' || d['type'] === 'gui') && typeof d['content'] === 'string') {
+  const type = d['type'];
+  const content = typeof d['content'] === 'string' ? d['content'] : undefined;
+  const renderedContent = typeof d['renderedContent'] === 'string' ? d['renderedContent'] : undefined;
+  if ((type === 'html' || type === 'gui') && (typeof content === 'string' || typeof renderedContent === 'string')) {
     return {
-      type: d['type'] as 'html' | 'gui',
+      type: type as 'html' | 'gui',
       mode: (d['mode'] as 'display' | 'interactive') ?? 'display',
-      content: (d['renderedContent'] as string | undefined) ?? (d['content'] as string),
+      content: renderedContent ?? content,
       vfsPath: typeof d['vfsPath'] === 'string' ? d['vfsPath'] : undefined,
       pendingApprovals: (d['pendingApprovals'] as RaAppPendingApproval[] | undefined) ?? [],
       nativeResults: Array.isArray(d['nativeResults'])

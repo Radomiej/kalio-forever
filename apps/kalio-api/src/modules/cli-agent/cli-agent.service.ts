@@ -71,8 +71,11 @@ function extractCodexAgentMessage(output: string): string | null {
 
 interface ActiveRunState {
   sessionId: string;
-  proc: { kill(signal?: string | number): unknown; exitCode?: number | null };
+  agentId: string;
+  proc: { kill(signal?: string | number): unknown; exitCode?: number | null; pid?: number };
   stopRequested: boolean;
+  requestStop?: () => void;
+  terminatePromise?: Promise<void>;
 }
 
 @Injectable()
@@ -154,12 +157,19 @@ export class CLIAgentService implements OnApplicationBootstrap {
 
   stop(sessionId: string): boolean {
     const activeRun = this.activeRuns.get(sessionId);
-    if (!activeRun || (activeRun.proc.exitCode !== undefined && activeRun.proc.exitCode !== null)) {
+    if (!activeRun) {
+      return false;
+    }
+
+    if (activeRun.stopRequested) {
+      return true;
+    }
+    if (activeRun.proc.exitCode !== undefined && activeRun.proc.exitCode !== null) {
       return false;
     }
 
     activeRun.stopRequested = true;
-    activeRun.proc.kill('SIGTERM');
+    activeRun.requestStop?.();
     return true;
   }
 
@@ -184,7 +194,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
 
     const effectiveTimeout = normalizeTimeoutMs(agentId, timeoutMs ?? agentConfig.timeoutMs);
 
-    const platform = process.platform;
+    const platform = this.getPlatform();
     const executable = agentConfig.cliPath || adapter.executable(platform);
     const wrapperArgs = agentConfig.cliPath ? [] : adapter.wrapperArgs(platform);
     const model = adapter.supportsModelSelection ? (request.model ?? agentConfig.model) : '';
@@ -223,6 +233,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
 
       const activeRunState: ActiveRunState = {
         sessionId,
+        agentId,
         proc,
         stopRequested: false,
       };
@@ -232,6 +243,11 @@ export class CLIAgentService implements OnApplicationBootstrap {
       const MAX_BUFFER = 4 * 1024 * 1024; // 4 MB hard cap
       let settled = false;
       let exitFallbackTimer: NodeJS.Timeout | null = null;
+      let timer: NodeJS.Timeout | null = null;
+
+      const abortHandler = (): void => {
+        this.stop(sessionId);
+      };
 
       const onData = (chunk: Buffer | string): void => {
         const str = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
@@ -247,7 +263,10 @@ export class CLIAgentService implements OnApplicationBootstrap {
       };
 
       const cleanup = (): void => {
-        clearTimeout(timer);
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
         if (exitFallbackTimer) {
           clearTimeout(exitFallbackTimer);
           exitFallbackTimer = null;
@@ -260,7 +279,32 @@ export class CLIAgentService implements OnApplicationBootstrap {
         proc.removeListener('close', closeHandler);
         proc.removeListener('exit', exitHandler);
         proc.removeListener('error', errorHandler);
+        request.abortSignal?.removeEventListener('abort', abortHandler);
       };
+
+      const terminateAndReject = (reason: 'stopped' | 'timeout'): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        void this.terminateActiveRun(activeRunState);
+
+        if (reason === 'stopped') {
+          reject(new Error(CLI_AGENT_STOPPED_ERROR));
+          return;
+        }
+
+        reject(new Error(`CLI agent "${agentId}" timed out after ${effectiveTimeout}ms`));
+      };
+
+      activeRunState.requestStop = () => {
+        terminateAndReject('stopped');
+      };
+      if (activeRunState.stopRequested) {
+        activeRunState.requestStop();
+        return;
+      }
 
       const finalize = (code: number | null): void => {
         if (settled) {
@@ -312,22 +356,19 @@ export class CLIAgentService implements OnApplicationBootstrap {
         reject(err);
       };
 
-      const timer = setTimeout(() => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        // Guard: only kill if the process is still running (exitCode is null when running)
-        if (proc.exitCode === null) {
-          proc.kill('SIGTERM');
-        }
-        cleanup();
-        reject(new Error(`CLI agent "${agentId}" timed out after ${effectiveTimeout}ms`));
+      timer = setTimeout(() => {
+        terminateAndReject('timeout');
       }, effectiveTimeout);
 
       proc.on('error', errorHandler);
       proc.on('exit', exitHandler);
       proc.on('close', closeHandler);
+
+      if (request.abortSignal?.aborted) {
+        abortHandler();
+        return;
+      }
+      request.abortSignal?.addEventListener('abort', abortHandler, { once: true });
     });
   }
 
@@ -357,9 +398,19 @@ export class CLIAgentService implements OnApplicationBootstrap {
   }): Promise<CLIAgentResult> {
     const { request, executable, allArgs, effectiveTimeout, maxOutputChars } = params;
     let activeRunState: ActiveRunState | null = null;
+    let stopReject: ((reason?: unknown) => void) | null = null;
+    let stopSignalled = false;
+    let abortRequested = request.abortSignal?.aborted ?? false;
+    const stopPromise = new Promise<never>((_, reject) => {
+      stopReject = reject;
+    });
+    const abortHandler = (): void => {
+      abortRequested = true;
+      this.stop(request.sessionId);
+    };
 
     try {
-      const result = await this.pty.run({
+      const runPromise = this.pty.run({
         agentId: request.agentId,
         executable,
         args: allArgs,
@@ -372,12 +423,33 @@ export class CLIAgentService implements OnApplicationBootstrap {
         onStart: (proc) => {
           activeRunState = {
             sessionId: request.sessionId,
+            agentId: request.agentId,
             proc,
             stopRequested: false,
+            requestStop: () => {
+              if (!activeRunState || stopSignalled) {
+                return;
+              }
+              stopSignalled = true;
+              activeRunState.stopRequested = true;
+              void this.terminateActiveRun(activeRunState);
+              stopReject?.(new Error(CLI_AGENT_STOPPED_ERROR));
+            },
           };
           this.activeRuns.set(request.sessionId, activeRunState);
+          if (abortRequested) {
+            activeRunState.requestStop?.();
+          }
         },
       });
+
+      if (request.abortSignal?.aborted) {
+        abortHandler();
+      } else {
+        request.abortSignal?.addEventListener('abort', abortHandler, { once: true });
+      }
+
+      const result = await Promise.race([runPromise, stopPromise]);
       const codexAgentMessage = extractCodexAgentMessage(result.output);
 
       if (this.activeRuns.get(request.sessionId)?.stopRequested) {
@@ -386,6 +458,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
 
       return codexAgentMessage ? { ...result, output: codexAgentMessage } : result;
     } finally {
+      request.abortSignal?.removeEventListener('abort', abortHandler);
       if (activeRunState && this.activeRuns.get(request.sessionId) === activeRunState) {
         this.activeRuns.delete(request.sessionId);
       }
@@ -405,7 +478,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
     if (!adapter) return { available: false, version: null };
 
     const agentConfig = await this.config.getConfig(agentId);
-    const platform = process.platform;
+    const platform = this.getPlatform();
 
     // If cliPath override is set, call it directly with just probe args.
     // Otherwise use the adapter's full executable + wrapperArgs chain.
@@ -422,6 +495,72 @@ export class CLIAgentService implements OnApplicationBootstrap {
         const version = (stdout || stderr).trim() || null;
         resolve({ available: true, version });
       });
+    });
+  }
+
+  private getPlatform(): NodeJS.Platform {
+    return process.platform;
+  }
+
+  private terminateActiveRun(activeRun: ActiveRunState): Promise<void> {
+    if (activeRun.terminatePromise) {
+      return activeRun.terminatePromise;
+    }
+
+    activeRun.terminatePromise = this.terminateProcess(activeRun.proc, activeRun.agentId);
+    return activeRun.terminatePromise;
+  }
+
+  private async terminateProcess(
+    proc: { kill(signal?: string | number): unknown; exitCode?: number | null; pid?: number },
+    agentId: string,
+  ): Promise<void> {
+    if (proc.exitCode !== undefined && proc.exitCode !== null) {
+      return;
+    }
+
+    if (this.getPlatform() === 'win32' && typeof proc.pid === 'number') {
+      try {
+        await this.killWindowsProcessTree(proc.pid);
+        return;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`[${agentId}] taskkill failed for pid=${proc.pid}: ${message}`);
+      }
+    }
+
+    try {
+      proc.kill('SIGTERM');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[${agentId}] SIGTERM failed: ${message}`);
+    }
+  }
+
+  private killWindowsProcessTree(pid: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      execFile(
+        'taskkill',
+        ['/F', '/T', '/PID', String(pid)],
+        { windowsHide: true, timeout: 5000 },
+        (err, _stdout, stderr) => {
+          if (!err) {
+            resolve();
+            return;
+          }
+
+          const lowerStderr = (stderr ?? '').toLowerCase();
+          const notFound = lowerStderr.includes('not found')
+            || lowerStderr.includes('no running instance')
+            || lowerStderr.includes('does not exist');
+          if (notFound) {
+            resolve();
+            return;
+          }
+
+          reject(err);
+        },
+      );
     });
   }
 }

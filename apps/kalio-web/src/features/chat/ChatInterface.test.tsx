@@ -473,6 +473,35 @@ describe('ChatInterface event wiring', () => {
     );
   });
 
+  it('tool:result for the active session unlocks composer streaming state', async () => {
+    await renderChatInterface();
+    setStreaming.mockClear();
+
+    await emitEvent('tool:start', { callId: 'call-raapp', toolName: 'run_raapp', args: { name: 'calculator' } });
+    await emitEvent('tool:result', {
+      callId: 'call-raapp',
+      status: 'success',
+      data: { status: 'ready', type: 'gui', content: '{"nodes":[],"data":{}}' },
+      sessionId: 'session-1',
+    });
+
+    expect(setStreaming).toHaveBeenCalledWith(false);
+  });
+
+  it('tool:result error/abort for the active session unlocks composer streaming state', async () => {
+    await renderChatInterface();
+    setStreaming.mockClear();
+
+    await emitEvent('tool:start', { callId: 'call-abort', toolName: 'run_raapp', args: { name: 'calculator' }, sessionId: 'session-1' });
+    await emitEvent('tool:result', {
+      callId: 'call-abort',
+      status: 'cancelled',
+      sessionId: 'session-1',
+    });
+
+    expect(setStreaming).toHaveBeenCalledWith(false);
+  });
+
   it('tool:confirmation_required creates an awaiting_confirmation activity', async () => {
     await renderChatInterface();
     // Clear the setup call from the activation effect before testing event-driven behaviour

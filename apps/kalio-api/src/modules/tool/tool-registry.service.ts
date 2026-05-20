@@ -20,6 +20,7 @@ import { RaAppCreateDraftTool, RaAppExecuteDslTool, RaAppPublishDraftTool } from
 import { RaAppTestTool } from './tools/raapp-test.tools';
 import { MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool } from './tools/memory.tools';
 import { WebSearchTool } from './tools/web-search.tool';
+import { SearchHistoricalWebSearchTool } from './tools/search-historical-web-search.tool';
 import { ListToolsTool } from './tools/list-tools.tool';
 import { GetToolDetailsTool } from './tools/get-tool-details.tool';
 import { GetCliAgentStatusTool, MessageCliAgentTool, SpawnCliAgentTool, StopCliAgentTool } from './tools/cli-agent-session.tools';
@@ -88,6 +89,7 @@ export class ToolRegistryService {
     private readonly memorySearch: MemorySearchTool,
     private readonly memoryIngestConversation: MemoryIngestConversationTool,
     private readonly webSearch: WebSearchTool,
+    private readonly searchHistoricalWebSearch: SearchHistoricalWebSearchTool,
     private readonly listTools: ListToolsTool,
     private readonly getToolDetails: GetToolDetailsTool,
     private readonly spawnCliAgent: SpawnCliAgentTool,
@@ -121,7 +123,7 @@ export class ToolRegistryService {
       raappCreateDraft, raappExecuteDsl, raappPublishDraft,
       raappTest,
       memoryIngest, memorySearch, memoryIngestConversation,
-      webSearch,
+      webSearch, searchHistoricalWebSearch,
       listTools, getToolDetails,
       spawnCliAgent, messageCliAgent, getCliAgentStatus, stopCliAgent,
       runCliAgent,

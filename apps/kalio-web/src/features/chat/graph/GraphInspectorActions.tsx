@@ -1,4 +1,5 @@
-import { CheckCircle2, ExternalLink, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle2, ExternalLink, PauseCircle, Send, XCircle } from 'lucide-react';
 import type { ToolConfirmationRequest } from '@kalio/types';
 import { eventBus } from '../../../services/eventBus';
 import type { ExecutionGraphNode } from './executionGraphModel';
@@ -8,19 +9,25 @@ interface GraphInspectorActionsProps {
   activeSessionId: string;
   selectedConfirmation: ToolConfirmationRequest | null;
   setActiveSession: (sessionId: string | null) => void;
+  setPendingMessage: (message: string | null) => void;
   setPendingConfirmation: (sessionId: string, confirmation: ToolConfirmationRequest | null) => void;
 }
+
+const CLI_FOLLOW_UP_MESSAGE = 'Continue from the current task. Share a concise status update and your next concrete step.';
 
 export function GraphInspectorActions({
   node,
   activeSessionId,
   selectedConfirmation,
   setActiveSession,
+  setPendingMessage,
   setPendingConfirmation,
 }: GraphInspectorActionsProps) {
+  const [cliActionNotice, setCliActionNotice] = useState<string | null>(null);
   const isChildSessionNode = (node.payload.kind === 'subagent' || node.payload.kind === 'cli-agent')
     && node.sessionId
     && node.sessionId !== activeSessionId;
+  const isCliChildNode = node.payload.kind === 'cli-agent' && isChildSessionNode;
   const shouldRender = isChildSessionNode || selectedConfirmation != null;
 
   if (!shouldRender) {
@@ -41,6 +48,45 @@ export function GraphInspectorActions({
             Open child chat
           </span>
         </button>
+      )}
+      {isCliChildNode && (
+        <>
+          <button
+            type="button"
+            aria-label="Send follow-up"
+            className="w-full rounded-xl bg-cyan-500/85 hover:bg-cyan-500 text-white px-4 py-3 text-sm font-medium transition-colors"
+            onClick={() => {
+              setCliActionNotice(null);
+              setPendingMessage(CLI_FOLLOW_UP_MESSAGE);
+              setActiveSession(node.sessionId ?? null);
+            }}
+          >
+            <span className="flex items-center justify-center gap-2">
+              <Send size={14} />
+              Send follow-up
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="Stop run"
+            className="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-sm font-medium transition-colors hover:bg-base-200"
+            onClick={() => {
+              setCliActionNotice(null);
+              if (!node.sessionId || eventBus.stopTurn(node.sessionId)) {
+                return;
+              }
+              setCliActionNotice('Stop request could not be delivered. Reconnect and retry.');
+            }}
+          >
+            <span className="flex items-center justify-center gap-2">
+              <PauseCircle size={14} />
+              Stop run
+            </span>
+          </button>
+          {cliActionNotice && (
+            <p className="text-sm text-warning">{cliActionNotice}</p>
+          )}
+        </>
       )}
       {selectedConfirmation && (
         <>

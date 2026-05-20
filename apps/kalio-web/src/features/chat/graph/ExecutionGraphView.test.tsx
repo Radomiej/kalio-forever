@@ -14,6 +14,7 @@ type SessionStateShape = {
   sessionMessages: Record<string, ChatMessage[]>;
   sessionAgentTurns: Record<string, AgentTurn[]>;
   setActiveSession: ReturnType<typeof vi.fn>;
+  setPendingMessage: ReturnType<typeof vi.fn>;
 };
 
 type AgentLoopShape = {
@@ -40,6 +41,7 @@ const {
   apiGetMock,
   confirmToolMock,
   cancelToolMock,
+  stopTurnMock,
 } = vi.hoisted(() => ({
   sessionState: {
     activeSessionId: null as string | null,
@@ -49,6 +51,7 @@ const {
     sessionMessages: {} as Record<string, ChatMessage[]>,
     sessionAgentTurns: {} as Record<string, AgentTurn[]>,
     setActiveSession: vi.fn(),
+    setPendingMessage: vi.fn(),
   },
   agentState: {
     toolActivities: [] as ToolActivity[],
@@ -59,6 +62,7 @@ const {
   apiGetMock: vi.fn(),
   confirmToolMock: vi.fn(),
   cancelToolMock: vi.fn(),
+  stopTurnMock: vi.fn(),
 }));
 
 vi.mock('../../../store/sessionStore', () => ({
@@ -79,6 +83,7 @@ vi.mock('../../../services/eventBus', () => ({
   eventBus: {
     confirmTool: confirmToolMock,
     cancelTool: cancelToolMock,
+    stopTurn: stopTurnMock,
   },
 }));
 
@@ -155,6 +160,7 @@ describe('ExecutionGraphView empty-session state', () => {
     ];
     sessionState.sessionMessages = {};
     sessionState.setActiveSession.mockReset();
+    sessionState.setPendingMessage.mockReset();
     apiGetMock.mockResolvedValue({ data: [makePersona(), makePersona({ id: 'persona-child', name: 'UX Designer', model: 'claude-sonnet-4.6' })] });
 
     agentState.toolActivities = [
@@ -183,6 +189,7 @@ describe('ExecutionGraphView empty-session state', () => {
     agentState.setPendingConfirmation.mockReset();
     confirmToolMock.mockReset();
     cancelToolMock.mockReset();
+    stopTurnMock.mockReset();
   });
 
   it('shows session suggestions and live agent activity when no session is selected', async () => {
@@ -417,7 +424,7 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(await screen.findByTestId('graph-raapp-renderer')).toHaveTextContent('html:session-1:calculator/index.html');
   });
 
-  it('REGRESSION: hides unwired CLI steering controls for CLI-agent child nodes', async () => {
+  it('renders CLI child controls for CLI-agent child nodes', async () => {
     const messages = [
       makeMessage({ id: 'u1', role: 'user', content: 'Inspect repo with CLI agent', createdAt: 1 }),
       makeMessage({
@@ -462,8 +469,48 @@ describe('ExecutionGraphView empty-session state', () => {
     fireEvent.click(screen.getByTestId('graph-node-cli-agent:cli-child-1'));
 
     expect(screen.getByRole('button', { name: 'Open child chat' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Send CLI follow-up' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Stop CLI session' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Needs backend route')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Send follow-up' }));
+    expect(sessionState.setPendingMessage).toHaveBeenCalledWith('Continue from the current task. Share a concise status update and your next concrete step.');
+    expect(sessionState.setActiveSession).toHaveBeenCalledWith('cli-child-1');
+
+    stopTurnMock.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Stop run' }));
+    expect(stopTurnMock).toHaveBeenCalledWith('cli-child-1');
+  });
+
+  it('does not render CLI child controls for non-CLI nodes', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'List tools', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-list-1', name: 'list_tools', args: {} }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-list-1',
+        content: JSON.stringify({ tools: ['vfs_read'] }),
+        createdAt: 3,
+      }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Main', createdAt: 1, updatedAt: 3 },
+    ];
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [];
+
+    await renderExecutionGraphView();
+
+    fireEvent.click(screen.getByTestId('graph-node-tool:call-list-1'));
+
+    expect(screen.queryByRole('button', { name: 'Send follow-up' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop run' })).not.toBeInTheDocument();
   });
 });
