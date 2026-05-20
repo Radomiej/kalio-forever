@@ -164,6 +164,11 @@ export function App() {
     setActiveSection('landing');
   };
 
+  const openConversationFromLanding = () => {
+    setTalkView('conversation');
+    setActiveSection('talk');
+  };
+
   return (
     <div data-testid="app-root" className="flex h-screen w-screen overflow-hidden bg-base-100">
 
@@ -236,7 +241,7 @@ export function App() {
       {/* ── Main: full screen sections ── */}
       <main className="flex-1 overflow-hidden min-w-0" data-testid="main-chat">
         {activeSection === 'landing' && (
-          <LandingPage onNavigateToChat={() => setActiveSection('talk')} />
+          <LandingPage onNavigateToChat={openConversationFromLanding} />
         )}
 
         {/* talk section: always mounted so ChatInterface never loses socket listeners

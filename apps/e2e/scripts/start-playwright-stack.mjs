@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '../../..');
 const apiDir = resolve(repoRoot, 'apps/kalio-api');
+const e2eStateDir = process.env.KALIO_PLAYWRIGHT_STATE_DIR ?? resolve(repoRoot, 'data/playwright-stack');
 const envFilePath = resolve(repoRoot, '.env.test');
 
 if (existsSync(envFilePath)) {
@@ -14,22 +15,50 @@ if (existsSync(envFilePath)) {
 
 const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
 const apiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? 'http://localhost:3316';
+const skipBuild = process.env.KALIO_PLAYWRIGHT_SKIP_BUILD === '1';
 const webUrl = new URL(baseUrl);
 const apiUrl = new URL(apiOrigin);
 const nodeBinDir = dirname(process.execPath);
 const programFilesNodeDir = resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'nodejs');
-const corepackNodeCommand = existsSync(resolve(programFilesNodeDir, 'node.exe'))
+const corepackNodeCommand = process.env.KALIO_PLAYWRIGHT_NODE_COMMAND
+  ?? (existsSync(resolve(programFilesNodeDir, 'node.exe'))
   ? resolve(programFilesNodeDir, 'node.exe')
-  : process.execPath;
-const corepackEntrypoint = existsSync(resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js'))
+  : process.execPath);
+const corepackEntrypoint = process.env.KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT
+  ?? (existsSync(resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js'))
   ? resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js')
-  : resolve(nodeBinDir, 'node_modules/corepack/dist/corepack.js');
+  : resolve(nodeBinDir, 'node_modules/corepack/dist/corepack.js'));
+const corepackPnpmCandidate = { command: corepackNodeCommand, argsPrefix: [corepackEntrypoint, 'pnpm'] };
+
+function isCommandOnPath(command) {
+  const pathValue = process.env.PATH;
+  if (!pathValue) {
+    return false;
+  }
+
+  const candidates = pathValue
+    .split(process.platform === 'win32' ? ';' : ':')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => resolve(entry, command));
+
+  return candidates.some((candidatePath) => existsSync(candidatePath));
+}
+
 const pnpmCandidates = process.platform === 'win32'
   ? [
-      { command: 'pnpm.cmd', argsPrefix: [] },
-      { command: corepackNodeCommand, argsPrefix: [corepackEntrypoint, 'pnpm'] },
+      ...(isCommandOnPath('pnpm.cmd') ? [{ command: 'pnpm.cmd', argsPrefix: [] }] : []),
+      ...(isCommandOnPath('corepack.cmd') ? [{ command: 'corepack.cmd', argsPrefix: ['pnpm'] }] : []),
+      ...(existsSync(corepackEntrypoint) ? [corepackPnpmCandidate] : []),
     ]
   : [{ command: 'pnpm', argsPrefix: [] }];
+
+if (pnpmCandidates.length === 0) {
+  throw new Error(
+    `Unable to resolve a pnpm launcher on Windows. Checked pnpm.cmd on PATH and corepack entrypoint at ${corepackEntrypoint}.`,
+  );
+}
+
 let selectedPnpm = pnpmCandidates[0];
 
 const sharedEnv = {
@@ -55,6 +84,7 @@ const frontendEnv = {
   VITE_API_URL: apiUrl.origin,
   VITE_WS_URL: apiUrl.origin,
   VITE_PORT: webUrl.port || '5288',
+  VITE_CACHE_DIR: process.env.VITE_CACHE_DIR ?? resolve(e2eStateDir, 'vite-cache'),
 };
 
 const managedChildren = [];
@@ -217,11 +247,15 @@ process.on('SIGTERM', () => {
 });
 
 async function main() {
-  console.log('[playwright-stack] building backend');
-  await runPnpm('Backend build', ['--filter', 'kalio-api', 'build'], backendEnv);
+  if (skipBuild) {
+    console.log('[playwright-stack] skipping builds because KALIO_PLAYWRIGHT_SKIP_BUILD=1');
+  } else {
+    console.log('[playwright-stack] building backend');
+    await runPnpm('Backend build', ['--filter', 'kalio-api', 'build'], backendEnv);
 
-  console.log('[playwright-stack] building frontend');
-  await runPnpm('Frontend build', ['--filter', 'kalio-web', 'build'], frontendEnv);
+    console.log('[playwright-stack] building frontend');
+    await runPnpm('Frontend build', ['--filter', 'kalio-web', 'build'], frontendEnv);
+  }
 
   console.log(`[playwright-stack] starting backend on ${apiUrl.origin}`);
   spawnManaged('backend', process.execPath, ['dist/main.js'], apiDir, backendEnv);
@@ -231,7 +265,21 @@ async function main() {
   spawnManaged(
     'frontend',
     selectedPnpm.command,
-    [...selectedPnpm.argsPrefix, '--filter', 'kalio-web', 'exec', 'vite', 'preview', '--host', webUrl.hostname, '--port', webUrl.port || '5288', '--strictPort'],
+    [
+      ...selectedPnpm.argsPrefix,
+      '--filter',
+      'kalio-web',
+      'exec',
+      'vite',
+      'preview',
+      '--configLoader',
+      'runner',
+      '--host',
+      webUrl.hostname,
+      '--port',
+      webUrl.port || '5288',
+      '--strictPort',
+    ],
     repoRoot,
     frontendEnv,
   );

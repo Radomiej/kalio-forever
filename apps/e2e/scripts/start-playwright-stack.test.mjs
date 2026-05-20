@@ -29,7 +29,12 @@ async function getFreePort() {
   return port;
 }
 
-async function createSandboxRepo(rootDir) {
+async function createSandboxRepo(rootDir, options = {}) {
+  const {
+    includePnpmCmd = true,
+    includeCorepackCmd = false,
+    includeCorepackShim = false,
+  } = options;
   const launcherDir = resolve(rootDir, 'apps/e2e/scripts');
   const apiDistDir = resolve(rootDir, 'apps/kalio-api/dist');
   const binDir = resolve(rootDir, 'bin');
@@ -75,17 +80,23 @@ server.listen(port, () => {
     `const http = require('node:http');
 
 const args = process.argv.slice(2);
+const normalizedArgs = args[0] === 'pnpm' ? args.slice(1) : args;
 
-if (args.includes('build')) {
-  console.log('[fake-pnpm] build', args.join(' '));
+if (normalizedArgs.includes('build')) {
+  console.log('[fake-pnpm] build', normalizedArgs.join(' '));
   process.exit(0);
 }
 
-if (args[0] === '--filter' && args[1] === 'kalio-web' && args[2] === 'exec' && args[3] === 'vite' && args[4] === 'preview') {
-  const hostIndex = args.indexOf('--host');
-  const portIndex = args.indexOf('--port');
-  const host = hostIndex >= 0 ? args[hostIndex + 1] : '127.0.0.1';
-  const port = Number(portIndex >= 0 ? args[portIndex + 1] : 5288);
+if (normalizedArgs[0] === '--filter' && normalizedArgs[1] === 'kalio-web' && normalizedArgs[2] === 'exec' && normalizedArgs[3] === 'vite' && normalizedArgs[4] === 'preview') {
+  const hostIndex = normalizedArgs.indexOf('--host');
+  const portIndex = normalizedArgs.indexOf('--port');
+  if (!normalizedArgs.includes('--configLoader') || !normalizedArgs.includes('runner')) {
+    console.error('[fake-pnpm] preview must use Vite config loader runner');
+    process.exit(1);
+  }
+
+  const host = hostIndex >= 0 ? normalizedArgs[hostIndex + 1] : '127.0.0.1';
+  const port = Number(portIndex >= 0 ? normalizedArgs[portIndex + 1] : 5288);
   const server = http.createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'text/html' });
     response.end('<!doctype html><title>preview</title><body>preview ok</body>');
@@ -104,7 +115,7 @@ if (args[0] === '--filter' && args[1] === 'kalio-web' && args[2] === 'exec' && a
   return;
 }
 
-console.error('[fake-pnpm] unexpected arguments', args);
+console.error('[fake-pnpm] unexpected arguments', normalizedArgs);
 process.exit(1);
 `,
     'utf8',
@@ -115,11 +126,31 @@ require('./fake-pnpm.cjs');
 `, 'utf8');
   await chmod(resolve(binDir, 'pnpm'), 0o755);
 
-  await writeFile(
-    resolve(binDir, 'pnpm.cmd'),
-    '@echo off\r\nnode "%~dp0\\fake-pnpm.cjs" %*\r\n',
-    'utf8',
-  );
+  if (includePnpmCmd) {
+    await writeFile(
+      resolve(binDir, 'pnpm.cmd'),
+      '@echo off\r\nnode "%~dp0\\fake-pnpm.cjs" %*\r\n',
+      'utf8',
+    );
+  }
+
+  if (includeCorepackCmd) {
+    await writeFile(
+      resolve(binDir, 'corepack.cmd'),
+      '@echo off\r\nnode "%~dp0\\fake-pnpm.cjs" pnpm %*\r\n',
+      'utf8',
+    );
+  }
+
+  if (includeCorepackShim) {
+    const fakeProgramFilesDir = resolve(rootDir, 'program-files/nodejs/node_modules/corepack/dist');
+    await mkdir(fakeProgramFilesDir, { recursive: true });
+    await writeFile(
+      resolve(fakeProgramFilesDir, 'corepack.js'),
+      `require(process.env.KALIO_FAKE_PNPM_PATH);`,
+      'utf8',
+    );
+  }
 
   return {
     launcherPath: resolve(launcherDir, 'start-playwright-stack.mjs'),
@@ -303,6 +334,97 @@ PLAYWRIGHT_API_ORIGIN=http://127.0.0.1:${backendPort}
       const fullOutput = output.join('');
       assert.match(fullOutput, new RegExp(`starting backend on http://127\\.0\\.0\\.1:${backendPort}\\b`));
       assert.match(fullOutput, new RegExp(`starting frontend preview on http://127\\.0\\.0\\.1:${frontendPort}\\b`));
+    } finally {
+      stopCollecting();
+      await terminateProcess(child);
+    }
+  } finally {
+    await removeSandbox(sandboxRoot);
+  }
+});
+
+test('launcher starts on Windows without pnpm.cmd when corepack entrypoint is available', async (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('Windows-only fallback test');
+    return;
+  }
+
+  const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-stack-win-corepack-'));
+  const output = [];
+
+  try {
+    const { launcherPath, binDir } = await createSandboxRepo(sandboxRoot, {
+      includePnpmCmd: false,
+      includeCorepackCmd: true,
+      includeCorepackShim: true,
+    });
+    const frontendPort = await getFreePort();
+    const backendPort = await getFreePort();
+    const fakeProgramFiles = resolve(sandboxRoot, 'program-files');
+    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    const controlledPath = `${binDir}${delimiter}${resolve(systemRoot, 'System32')}`;
+
+    const child = spawn(process.execPath, [launcherPath], {
+      cwd: sandboxRoot,
+      env: {
+        ...process.env,
+        CI: 'true',
+        PATH: controlledPath,
+        PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${frontendPort}`,
+        PLAYWRIGHT_API_ORIGIN: `http://127.0.0.1:${backendPort}`,
+        ProgramFiles: fakeProgramFiles,
+        KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT: resolve(fakeProgramFiles, 'nodejs/node_modules/corepack/dist/corepack.js'),
+        KALIO_PLAYWRIGHT_NODE_COMMAND: process.execPath,
+        KALIO_FAKE_PNPM_PATH: resolve(binDir, 'fake-pnpm.cjs'),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const stopCollecting = collectOutput(child, output);
+
+    try {
+      await waitForReady(child, output, 20_000);
+      const fullOutput = output.join('');
+      assert.match(fullOutput, /backend and frontend are ready/);
+      assert.doesNotMatch(fullOutput, /'pnpm\.cmd' is not recognized/i);
+    } finally {
+      stopCollecting();
+      await terminateProcess(child);
+    }
+  } finally {
+    await removeSandbox(sandboxRoot);
+  }
+});
+
+test('launcher can start from prebuilt artifacts when build step is skipped', async () => {
+  const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-stack-skip-build-'));
+  const output = [];
+
+  try {
+    const { launcherPath, binDir } = await createSandboxRepo(sandboxRoot);
+    const frontendPort = await getFreePort();
+    const backendPort = await getFreePort();
+    const child = spawn(process.execPath, [launcherPath], {
+      cwd: sandboxRoot,
+      env: {
+        ...process.env,
+        CI: 'true',
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+        PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${frontendPort}`,
+        PLAYWRIGHT_API_ORIGIN: `http://127.0.0.1:${backendPort}`,
+        KALIO_PLAYWRIGHT_SKIP_BUILD: '1',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const stopCollecting = collectOutput(child, output);
+
+    try {
+      await waitForReady(child, output, 20_000);
+      const fullOutput = output.join('');
+      assert.match(fullOutput, /skipping builds because KALIO_PLAYWRIGHT_SKIP_BUILD=1/);
+      assert.doesNotMatch(fullOutput, /\[fake-pnpm\] build/);
+      assert.match(fullOutput, /backend and frontend are ready/);
     } finally {
       stopCollecting();
       await terminateProcess(child);

@@ -212,6 +212,24 @@ describe('App view state persistence', () => {
     expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
   });
 
+  it('shows the conversation view when landing starts a chat from a stored graph view', () => {
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
+      activeSection: 'landing',
+      talkTab: 'conversations',
+      talkView: 'graph',
+      toolsTab: 'native',
+      mindTab: 'memory',
+      selectedSkillId: null,
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId('landing-to-chat'));
+
+    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
+    expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
+  });
+
   it('REGRESSION: runtime config type accepts backend responses that include apiKey', () => {
     expect(CONFIG_WITH_API_KEY.apiKey).toBe('');
   });

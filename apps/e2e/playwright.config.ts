@@ -15,7 +15,8 @@ if (PROCESS?.env) {
 
 const CI = PROCESS?.env?.CI;
 const PLAYWRIGHT_BASE_URL = PROCESS?.env?.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
-const packageManagerCommand = PROCESS?.platform === 'win32' ? 'corepack pnpm' : 'pnpm';
+const reuseExistingServer = PROCESS?.env?.KALIO_PLAYWRIGHT_REUSE_SERVER === '1';
+const stackLauncherCommand = 'node ./scripts/start-playwright-stack.mjs';
 
 export default defineConfig({
   testDir: './tests',
@@ -34,9 +35,9 @@ export default defineConfig({
   },
 
   webServer: {
-    command: `${packageManagerCommand} run stack:playwright`,
+    command: stackLauncherCommand,
     url: PLAYWRIGHT_BASE_URL,
-    reuseExistingServer: !CI,
+    reuseExistingServer,
     timeout: 240_000,
   },
 

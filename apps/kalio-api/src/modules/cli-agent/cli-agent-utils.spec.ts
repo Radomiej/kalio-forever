@@ -22,11 +22,11 @@ describe('cli-agent-utils', () => {
 
   describe('quotePowerShellArg', () => {
     it('wraps value in single quotes and escapes embedded quotes', () => {
-      expect(quotePowerShellArg("don't inject | shell")).toBe(\"'don''t inject | shell'\");
+      expect(quotePowerShellArg("don't inject | shell")).toBe("'don''t inject | shell'");
     });
 
     it('is safe on empty string', () => {
-      expect(quotePowerShellArg('')).toBe(\"''\");
+      expect(quotePowerShellArg('')).toBe("''");
     });
   });
 

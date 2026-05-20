@@ -1,22 +1,26 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const configDir = dirname(fileURLToPath(import.meta.url));
 const vitePort = Number.parseInt(process.env['VITE_PORT'] ?? '5188', 10);
 const apiOrigin = process.env['VITE_API_URL'] ?? 'http://localhost:3016';
 const wsOrigin = process.env['VITE_WS_URL'] ?? apiOrigin;
+const cacheDir = process.env['VITE_CACHE_DIR'] ?? 'node_modules/.vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  cacheDir,
   optimizeDeps: {
     exclude: ['vitest'],
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src'),
-      '@kalio/types': resolve(__dirname, '../../packages/@kalio/types/src'),
-      '@kalio/sdk': resolve(__dirname, '../../packages/@kalio/sdk/src'),
+      '@': resolve(configDir, 'src'),
+      '@kalio/types': resolve(configDir, '../../packages/@kalio/types/src'),
+      '@kalio/sdk': resolve(configDir, '../../packages/@kalio/sdk/src'),
     },
   },
   server: {

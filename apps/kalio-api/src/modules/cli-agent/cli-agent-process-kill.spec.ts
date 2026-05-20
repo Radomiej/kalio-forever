@@ -4,6 +4,8 @@ import { terminateCliAgentProcess } from './cli-agent-process-kill';
 vi.mock('node:child_process', () => ({ execFile: vi.fn() }));
 import * as childProcess from 'node:child_process';
 
+type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) => void;
+
 describe('terminateCliAgentProcess', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -23,15 +25,15 @@ describe('terminateCliAgentProcess', () => {
 
   it('uses Windows taskkill when pid is available on win32', async () => {
     const kill = vi.fn();
-    vi.mocked(childProcess.execFile).mockImplementation((
+    vi.mocked(childProcess.execFile).mockImplementation(((
       _file: string,
       _args: readonly string[],
       _options: Record<string, unknown>,
-      callback: (err: Error | null) => void,
+      callback: ExecFileCallback,
     ) => {
-      callback(null);
+      callback?.(null, '', '');
       return {} as never;
-    });
+    }) as unknown as typeof childProcess.execFile);
 
     await terminateCliAgentProcess({
       proc: { pid: 4242, kill },
@@ -51,10 +53,15 @@ describe('terminateCliAgentProcess', () => {
   it('falls back to SIGTERM when taskkill fails with unexpected error', async () => {
     const kill = vi.fn();
     const onWarn = vi.fn();
-    vi.mocked(childProcess.execFile).mockImplementation((_, _, _, callback: (err: Error | null, _stdout: string, _stderr: string) => void) => {
-      callback(new Error('taskkill failed'), '', 'something wrong');
+    vi.mocked(childProcess.execFile).mockImplementation(((
+      _file: string,
+      _args: readonly string[],
+      _options: Record<string, unknown>,
+      callback: ExecFileCallback,
+    ) => {
+      callback?.(new Error('taskkill failed'), '', 'something wrong');
       return {} as never;
-    });
+    }) as unknown as typeof childProcess.execFile);
 
     await terminateCliAgentProcess({
       proc: { pid: 4242, kill },
@@ -66,16 +73,21 @@ describe('terminateCliAgentProcess', () => {
     expect(childProcess.execFile).toHaveBeenCalledTimes(1);
     expect(kill).toHaveBeenCalledWith('SIGTERM');
     expect(onWarn).toHaveBeenCalledWith(
-      expect.stringContaining('[copilot] SIGTERM failed: taskkill failed'),
+      expect.stringContaining('[copilot] taskkill failed for pid=4242: taskkill failed'),
     );
   });
 
   it('does not SIGTERM when Windows taskkill reports process missing', async () => {
     const kill = vi.fn();
-    vi.mocked(childProcess.execFile).mockImplementation((_, _, _, callback: (err: Error | null, _stdout: string, _stderr: string) => void) => {
-      callback(new Error('not found'), '', 'The process with PID 9999 was not found.');
+    vi.mocked(childProcess.execFile).mockImplementation(((
+      _file: string,
+      _args: readonly string[],
+      _options: Record<string, unknown>,
+      callback: ExecFileCallback,
+    ) => {
+      callback?.(new Error('not found'), '', 'The process with PID 9999 was not found.');
       return {} as never;
-    });
+    }) as unknown as typeof childProcess.execFile);
 
     await terminateCliAgentProcess({
       proc: { pid: 9999, kill },
