@@ -261,6 +261,82 @@ describe('BaseOpenAICompatibleProvider', () => {
   });
 
   describe('streamChat - Normal Operation', () => {
+    it('retries transient provider failures before streaming succeeds', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const onChunk = vi.fn();
+      const mockStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          text: vi.fn().mockResolvedValue('busy'),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: mockStream,
+        });
+
+      await provider.streamChat(messages, tools, { sessionId: 'sess-123', messageId: 'msg-456', onChunk });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry authentication failures', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: vi.fn().mockResolvedValue('bad key'),
+      });
+
+      await expect(provider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+      })).rejects.toMatchObject({ code: 'LLM_AUTH' });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects malformed streamed tool arguments instead of executing empty args', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools = [{ name: 'vfs_write', description: 'Write a file', parameters: {} }];
+      const mockStream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"vfs_write","arguments":"{\\"path\\":"}}]}}]}\n\n',
+            ),
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await expect(provider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+      })).rejects.toMatchObject({ code: 'LLM_BAD_TOOL_ARGS' });
+    });
+
     it('REGRESSION: emits tool intent when function name streams before arguments', async () => {
       const messages: LLMMessage[] = [{ role: 'user', content: 'build a calculator' }];
       const tools = [{ name: 'raapp_create', description: 'Create an app', parameters: {} }];

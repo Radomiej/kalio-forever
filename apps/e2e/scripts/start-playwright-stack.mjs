@@ -16,10 +16,18 @@ const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
 const apiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? 'http://localhost:3316';
 const webUrl = new URL(baseUrl);
 const apiUrl = new URL(apiOrigin);
+const nodeBinDir = dirname(process.execPath);
+const programFilesNodeDir = resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'nodejs');
+const corepackNodeCommand = existsSync(resolve(programFilesNodeDir, 'node.exe'))
+  ? resolve(programFilesNodeDir, 'node.exe')
+  : process.execPath;
+const corepackEntrypoint = existsSync(resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js'))
+  ? resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js')
+  : resolve(nodeBinDir, 'node_modules/corepack/dist/corepack.js');
 const pnpmCandidates = process.platform === 'win32'
   ? [
       { command: 'pnpm.cmd', argsPrefix: [] },
-      { command: 'corepack.cmd', argsPrefix: ['pnpm'] },
+      { command: corepackNodeCommand, argsPrefix: [corepackEntrypoint, 'pnpm'] },
     ]
   : [{ command: 'pnpm', argsPrefix: [] }];
 let selectedPnpm = pnpmCandidates[0];
@@ -76,8 +84,8 @@ function quoteShellArg(arg) {
 function spawnProcess(command, args, options) {
   if (process.platform === 'win32' && command.endsWith('.cmd')) {
     const cmd = process.env.ComSpec ?? 'cmd.exe';
-    const commandLine = [command.replace(/\.cmd$/i, ''), ...args].map(quoteShellArg).join(' ');
-    return spawn(cmd, ['/d', '/s', '/c', commandLine], options);
+    const commandLine = ['call', command, ...args].map(quoteShellArg).join(' ');
+    return spawn(cmd, ['/d', '/c', commandLine], options);
   }
 
   return spawn(command, args, options);

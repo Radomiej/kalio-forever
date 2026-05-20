@@ -24,6 +24,7 @@ import { LLMServiceAdapter } from './llm-service.adapter';
 import { ImageHydratorService } from './image-hydrator.service';
 import { SubagentRuntimeService } from './subagent-runtime.service';
 import { ChatTestSupportService } from './chat-test-support.service';
+import { RunJournalService } from './run-journal.service';
 import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
@@ -73,6 +74,7 @@ import {
     SessionManagerService,
     SessionsService,
     ChatTestSupportService,
+    RunJournalService,
     ChatService,
     SessionPipelineService,
     ChatGateway,
@@ -125,7 +127,7 @@ import {
       useExisting: DrizzleMessageRepository,
     },
   ],
-  exports: [ChatService, ChatGateway, ToolDispatchService, SessionManagerService, SessionsService, SubagentRuntimeService, SUBAGENT_RUNTIME],
+  exports: [ChatService, ChatGateway, ToolDispatchService, SessionManagerService, SessionsService, RunJournalService, SubagentRuntimeService, SUBAGENT_RUNTIME],
 })
 export class ChatModule implements OnModuleInit {
   constructor(

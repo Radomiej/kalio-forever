@@ -5,10 +5,32 @@ import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../../
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 import { getReasoningContent } from '../../../common/utils/context-managed-llm-message.util';
 
+export type LLMProviderErrorCode =
+  | 'LLM_ERROR'
+  | 'LLM_RATE_LIMIT'
+  | 'LLM_TIMEOUT'
+  | 'LLM_AUTH'
+  | 'LLM_PROVIDER_DOWN'
+  | 'LLM_QUOTA'
+  | 'LLM_BAD_TOOL_ARGS';
+
+export class LLMProviderError extends Error {
+  constructor(
+    public readonly code: LLMProviderErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'LLMProviderError';
+  }
+}
+
 let _toolCallCounter = 0;
 function uniqueToolCallId(): string {
   return `call_${Date.now()}_${++_toolCallCounter}`;
 }
+
+const MAX_PROVIDER_ATTEMPTS = 3;
+const PROVIDER_TIMEOUT_MS = 120_000;
 
 export class BaseOpenAICompatibleProvider implements ILLMProvider {
   protected readonly logger = new Logger(BaseOpenAICompatibleProvider.name);
@@ -52,16 +74,11 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       ...this.buildThinkingParams(),
     });
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: this.buildHeaders(),
-      body,
-      signal: abortSignal,
-    });
+    const response = await this.fetchStreamingResponse(body, abortSignal);
 
     if (!response.ok || !response.body) {
       const errorText = await response.text().catch(() => '');
-      throw new Error(`[${this.providerName}] LLM request failed: ${response.status} ${response.statusText} - ${errorText}`);
+      throw this.buildHttpError(response.status, response.statusText, errorText);
     }
 
     this.logger.debug(`[${this.providerName}] Streaming response started`, {
@@ -153,9 +170,14 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     for (const [, buf] of Object.entries(toolCallBuffers)) {
       let args: Record<string, unknown> = {};
       try {
-        args = JSON.parse(buf.argsRaw) as Record<string, unknown>;
+        args = buf.argsRaw.trim().length > 0
+          ? JSON.parse(buf.argsRaw) as Record<string, unknown>
+          : {};
       } catch {
-        // leave empty
+        throw new LLMProviderError(
+          'LLM_BAD_TOOL_ARGS',
+          `[${this.providerName}] Tool call ${buf.name || 'unknown'} streamed malformed JSON arguments`,
+        );
       }
       toolCalls.push({ id: uniqueToolCallId(), name: buf.name, args });
     }
@@ -176,6 +198,100 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
   protected buildThinkingParams(): Record<string, unknown> {
     return {};
+  }
+
+  private async fetchStreamingResponse(body: string, abortSignal?: AbortSignal): Promise<Response> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt++) {
+      const timeoutSignal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+      const signal = abortSignal
+        ? AbortSignal.any([abortSignal, timeoutSignal])
+        : timeoutSignal;
+
+      try {
+        const response = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: this.buildHeaders(),
+          body,
+          signal,
+        });
+
+        if (response.ok || !this.shouldRetryStatus(response.status)) {
+          return response;
+        }
+
+        const errorText = await response.text().catch(() => '');
+        const error = this.buildHttpError(response.status, response.statusText, errorText);
+        if (!this.shouldRetryError(error) || attempt === MAX_PROVIDER_ATTEMPTS) {
+          throw error;
+        }
+
+        this.logger.warn(`[${this.providerName}] transient LLM failure ${response.status}; retrying attempt ${attempt + 1}/${MAX_PROVIDER_ATTEMPTS}`);
+        await this.delayBeforeRetry(attempt);
+      } catch (err) {
+        lastError = err;
+        if (abortSignal?.aborted) {
+          throw err;
+        }
+        const normalized = this.normalizeThrownError(err);
+        if (!this.shouldRetryError(normalized) || attempt === MAX_PROVIDER_ATTEMPTS) {
+          throw normalized;
+        }
+        this.logger.warn(`[${this.providerName}] transient LLM transport failure; retrying attempt ${attempt + 1}/${MAX_PROVIDER_ATTEMPTS}`);
+        await this.delayBeforeRetry(attempt);
+      }
+    }
+
+    throw this.normalizeThrownError(lastError);
+  }
+
+  private shouldRetryStatus(status: number): boolean {
+    return status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+  }
+
+  private shouldRetryError(err: LLMProviderError): boolean {
+    return err.code === 'LLM_RATE_LIMIT' || err.code === 'LLM_PROVIDER_DOWN' || err.code === 'LLM_TIMEOUT';
+  }
+
+  private buildHttpError(status: number, statusText: string, errorText: string): LLMProviderError {
+    const body = errorText.toLowerCase();
+    const message = `[${this.providerName}] LLM request failed: ${status} ${statusText} - ${errorText}`;
+
+    if (status === 401 || status === 403) {
+      return new LLMProviderError('LLM_AUTH', message);
+    }
+    if (body.includes('insufficient_quota') || body.includes('quota')) {
+      return new LLMProviderError('LLM_QUOTA', message);
+    }
+    if (status === 429) {
+      return new LLMProviderError('LLM_RATE_LIMIT', message);
+    }
+    if (status === 408 || status === 500 || status === 502 || status === 503 || status === 504) {
+      return new LLMProviderError('LLM_PROVIDER_DOWN', message);
+    }
+    return new LLMProviderError('LLM_ERROR', message);
+  }
+
+  private normalizeThrownError(err: unknown): LLMProviderError {
+    if (err instanceof LLMProviderError) {
+      return err;
+    }
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      return new LLMProviderError('LLM_TIMEOUT', `[${this.providerName}] LLM request timed out`);
+    }
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      return new LLMProviderError('LLM_TIMEOUT', `[${this.providerName}] LLM request timed out`);
+    }
+    return new LLMProviderError(
+      'LLM_PROVIDER_DOWN',
+      `[${this.providerName}] LLM transport failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  private async delayBeforeRetry(attempt: number): Promise<void> {
+    const jitter = Math.floor(Math.random() * 10);
+    await new Promise((resolve) => setTimeout(resolve, 25 * attempt + jitter));
   }
 
   protected supportsReasoningContentHistory(): boolean {

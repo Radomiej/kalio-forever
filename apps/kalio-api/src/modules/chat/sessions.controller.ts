@@ -1,10 +1,14 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
-import type { ChatSession, ChatMessage, CreateSessionDto } from '@kalio/types';
+import type { ChatMessage, ChatRunSnapshot, ChatSession, CreateSessionDto } from '@kalio/types';
 import { SessionsService } from './sessions.service';
+import { RunJournalService } from './run-journal.service';
 
 @Controller('sessions')
 export class SessionsController {
-  constructor(private readonly sessions: SessionsService) {}
+  constructor(
+    private readonly sessions: SessionsService,
+    private readonly runJournal: RunJournalService,
+  ) {}
 
   @Get()
   list(): Promise<ChatSession[]> {
@@ -19,6 +23,11 @@ export class SessionsController {
   @Get(':id/messages')
   getMessages(@Param('id') id: string): Promise<ChatMessage[]> {
     return this.sessions.getMessages(id);
+  }
+
+  @Get(':id/runs/current')
+  getCurrentRun(@Param('id') id: string): Promise<ChatRunSnapshot | null> {
+    return this.runJournal.getCurrentRun(id);
   }
 
   @Delete(':id')

@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import type { SocketEvents } from '@kalio/types';
+import type { ChatRunSnapshot, SocketEvents } from '@kalio/types';
 import { ChatService } from './chat.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import { PerKeyMutex } from './per-key-mutex';
+import { RunJournalService } from './run-journal.service';
 
 type ChatSendPayload = SocketEvents['chat:send'];
 
@@ -25,6 +26,7 @@ export interface SessionRuntimeStatus {
   active: boolean;
   turnId?: string;
   queueLength: number;
+  run?: ChatRunSnapshot;
 }
 
 /**
@@ -50,7 +52,10 @@ export class SessionPipelineService {
   private readonly queues = new Map<string, QueuedItem[]>();
   private readonly mutex = new PerKeyMutex();
 
-  constructor(private readonly chat: ChatService) {}
+  constructor(
+    private readonly chat: ChatService,
+    @Optional() private readonly runJournal?: RunJournalService,
+  ) {}
 
   async submit(payload: ChatSendPayload, emit: EmitFn): Promise<void> {
     const sid = payload.sessionId;
@@ -164,6 +169,15 @@ export class SessionPipelineService {
     };
   }
 
+  async getSessionStatusWithRun(sessionId: string): Promise<SessionRuntimeStatus> {
+    const status = this.getSessionStatus(sessionId);
+    const run = await this.runJournal?.getCurrentRun(sessionId);
+    return {
+      ...status,
+      ...(run ? { run } : {}),
+    };
+  }
+
   /**
    * Cancel the in-flight turn (if any) and drop any queued items for the
    * given session. Used on socket disconnect.
@@ -204,8 +218,12 @@ export class SessionPipelineService {
   private async runOne(payload: ChatSendPayload, emit: EmitFn, turnId: string): Promise<void> {
     const sid = payload.sessionId;
     const startedAt = this.active.get(sid)?.startedAt ?? Date.now();
+    const run = await this.runJournal?.startRun({
+      sessionId: sid,
+      turnId,
+    });
     const donePromise = this.chat
-      .handleTurn(sid, payload.content, payload.personaId, emit, payload.attachments, turnId)
+      .handleTurn(sid, payload.content, payload.personaId, emit, payload.attachments, turnId, run?.id)
       .catch((err) => {
         // ChatService.handleTurn already swallows its own errors, but be
         // defensive so a thrown error never wedges the pipeline state.

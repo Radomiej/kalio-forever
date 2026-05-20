@@ -5,6 +5,8 @@ import { ConversationFilesBar } from '../vfs/ConversationFilesBar';
 import { ContextStats } from './ContextStats';
 import { TokenBadge } from './TokenBadge';
 
+export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
+
 const VFS_REFRESH_TOOL_NAMES = new Set(['vfs_write', 'image_generate', 'image_edit']);
 const WELCOME_PROMPTS = [
   'What can you do?',
@@ -44,26 +46,50 @@ export function buildCopiedChatText(messages: ChatMessage[]): string {
 }
 
 interface ChatStatusBannersProps {
+  connectionState: ChatConnectionState;
   error: string | null;
   onCloseError: () => void;
+  onCloseRecoveryNotice: () => void;
   onCloseRetryError: () => void;
   onRetry: () => void;
+  recoveryNotice: string | null;
   retryError: string | null;
 }
 
 export function ChatStatusBanners({
+  connectionState,
   error,
   onCloseError,
+  onCloseRecoveryNotice,
   onCloseRetryError,
   onRetry,
+  recoveryNotice,
   retryError,
 }: ChatStatusBannersProps) {
+  const showConnectionBanner = connectionState !== 'connected';
+
   return (
     <>
+      {showConnectionBanner && (
+        <div data-testid="chat-connection-status" className="alert alert-info m-2 py-2 text-sm">
+          <span className="loading loading-ring loading-xs" />
+          <span>
+            {connectionState === 'connecting' && 'Connecting to backend...'}
+            {connectionState === 'reconnecting' && 'Reconnecting. Current session will be resynced.'}
+            {connectionState === 'disconnected' && 'Backend connection is offline. New messages will wait for reconnect.'}
+          </span>
+        </div>
+      )}
+      {recoveryNotice && (
+        <div data-testid="chat-recovery-notice" className="alert alert-info m-2 py-2 text-sm flex items-center gap-2">
+          <span className="flex-1">{recoveryNotice}</span>
+          <button className="btn btn-ghost btn-xs" onClick={onCloseRecoveryNotice}>x</button>
+        </div>
+      )}
       {error && (
         <div data-testid="chat-error" className="alert alert-error m-2 py-2 text-sm">
           {error}
-          <button className="btn btn-ghost btn-xs ml-auto" onClick={onCloseError}>✕</button>
+          <button className="btn btn-ghost btn-xs ml-auto" onClick={onCloseError}>x</button>
         </div>
       )}
       {retryError && (
@@ -72,7 +98,7 @@ export function ChatStatusBanners({
           <button className="btn btn-xs btn-warning" onClick={onRetry}>
             Retry
           </button>
-          <button className="btn btn-ghost btn-xs" onClick={onCloseRetryError}>✕</button>
+          <button className="btn btn-ghost btn-xs" onClick={onCloseRetryError}>x</button>
         </div>
       )}
     </>
@@ -169,7 +195,7 @@ export function ChatWelcomeScreen({
         <div className="text-primary font-black text-4xl drop-shadow-[0_0_12px_oklch(0.60_0.176_232.6/0.6)] mb-2">K</div>
         <h2 className="text-base font-semibold text-base-content/80">KALIO</h2>
         <p className="text-base-content/45 text-xs mt-1 leading-relaxed max-w-60">
-          AI assistant — build apps, query data, generate images, run tools
+          AI assistant - build apps, query data, generate images, run tools
         </p>
       </div>
       {activeSessionId && personas.length > 1 && (

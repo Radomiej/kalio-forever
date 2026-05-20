@@ -29,13 +29,21 @@ function makeService() {
   };
 }
 
+function makeRunJournal() {
+  return {
+    getCurrentRun: vi.fn().mockResolvedValue(null),
+  };
+}
+
 describe('SessionsController', () => {
   let controller: SessionsController;
   let svc: ReturnType<typeof makeService>;
+  let runJournal: ReturnType<typeof makeRunJournal>;
 
   beforeEach(() => {
     svc = makeService();
-    controller = new SessionsController(svc as never);
+    runJournal = makeRunJournal();
+    controller = new SessionsController(svc as never, runJournal as never);
   });
 
   describe('list()', () => {
@@ -60,6 +68,28 @@ describe('SessionsController', () => {
       const result = await controller.getMessages('sess-1');
       expect(svc.getMessages).toHaveBeenCalledWith('sess-1');
       expect(result).toEqual([mockMessage]);
+    });
+  });
+
+  describe('getCurrentRun()', () => {
+    it('returns current run for a session', async () => {
+      runJournal.getCurrentRun.mockResolvedValueOnce({
+        id: 'run-1',
+        sessionId: 'sess-1',
+        turnId: 'turn-1',
+        phase: 'llm_streaming',
+        status: 'interrupted_needs_retry',
+        retryCount: 0,
+        safeResume: true,
+        startedAt: 1,
+        updatedAt: 2,
+        lastHeartbeatAt: 2,
+      });
+
+      const result = await controller.getCurrentRun('sess-1');
+
+      expect(runJournal.getCurrentRun).toHaveBeenCalledWith('sess-1');
+      expect(result).toMatchObject({ id: 'run-1', safeResume: true });
     });
   });
 

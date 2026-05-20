@@ -8,7 +8,7 @@
  * because addToolActivity was only called from the confirmation handler.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, screen } from '@testing-library/react';
 import { ChatInterface } from './ChatInterface';
 import { computeAnsweredCallIds } from './chatUtils';
 import type { ChatMessage } from '@kalio/types';
@@ -86,6 +86,7 @@ vi.mock('../../services/eventBus', () => ({
     onToolArgProgress: (h: (...args: unknown[]) => void) => capture('tool:arg_progress', h),
     onSessionStatus: (h: (...args: unknown[]) => void) => capture('session:status', h),
     onReconnect: (h: (...args: unknown[]) => void) => capture('socket:reconnect', h),
+    onConnectionState: (h: (...args: unknown[]) => void) => capture('socket:connection_state', h),
     identifySession: mockIdentifySession,
     sendMessage: mockSendMessage,
     stopTurn: vi.fn(),
@@ -318,6 +319,7 @@ beforeEach(() => {
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
   vi.clearAllMocks();
+  mockSendMessage.mockReturnValue(true);
 });
 
 describe('ChatInterface event wiring', () => {
@@ -392,6 +394,40 @@ describe('ChatInterface event wiring', () => {
     expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-restored');
     expect(startAgentTurn).toHaveBeenCalledWith('turn-restored', 'session-1');
     expect(setStreaming).toHaveBeenCalledWith(true);
+  });
+
+  it('shows safe resume guidance when backend replays an interrupted LLM run', async () => {
+    await renderChatInterface();
+
+    await emitEvent('session:status', {
+      sessionId: 'session-1',
+      active: false,
+      queueLength: 0,
+      run: {
+        id: 'run-1',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        phase: 'llm_streaming',
+        status: 'interrupted_needs_retry',
+        retryCount: 0,
+        safeResume: true,
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    });
+
+    expect(screen.getByTestId('chat-recovery-notice')).toHaveTextContent(
+      'Backend restarted during LLM work',
+    );
+  });
+
+  it('shows reconnect state when the socket drops', async () => {
+    await renderChatInterface();
+
+    await emitEvent('socket:connection_state', { status: 'reconnecting' });
+
+    expect(screen.getByTestId('chat-connection-status')).toHaveTextContent('Reconnecting');
+    expect(screen.getByTestId('chat-recovery-notice')).toHaveTextContent('Connection dropped');
   });
 
   it('REGRESSION: tool:start creates a running activity in agentStore', async () => {
@@ -740,7 +776,7 @@ describe('ChatInterface event wiring', () => {
     const firstPrompt = 'Build a dashboard that tracks agent loop progress across subagents';
     mockSessions = mockSessions.map((session) =>
       session.id === 'session-1'
-        ? { ...session, title: 'Build a dashboard that tracks agent loop progress…' }
+        ? { ...session, title: 'Build a dashboard that tracks agent loop progress...' }
         : session,
     );
     mockMessages = [

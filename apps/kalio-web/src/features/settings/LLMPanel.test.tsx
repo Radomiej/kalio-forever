@@ -139,6 +139,29 @@ describe('LLMPanel', () => {
     expect(screen.getByText('My OpenAI')).toBeInTheDocument();
   });
 
+  it('renders compact provider health from the active runtime config', async () => {
+    mockFetch(defaultMap({ activeId: CRED.id, credentials: [CRED] }));
+    render(<LLMPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toBeInTheDocument());
+
+    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('OpenAI');
+    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('gpt-4o-mini');
+    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('Not tested');
+  });
+
+  it('shows the Windows local provider hint when a local provider is selected', async () => {
+    mockFetch(defaultMap());
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByRole('button', { name: 'BitNet' }));
+
+    expect(screen.getByTestId('provider-health-local-hint')).toHaveTextContent(/windows local provider hint/i);
+  });
+
   it('shows active badge on the active credential', async () => {
     mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
     render(<LLMPanel />);

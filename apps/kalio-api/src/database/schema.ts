@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import type { LLMToolCall, ChatAttachment, MCPPolicy } from '@kalio/types';
+import type { ChatAttachment, ChatRunPhase, ChatRunStatus, LLMToolCall, MCPPolicy } from '@kalio/types';
 // ─── personas ──────────────────────────────────────────────────────────────────
 export const personas = sqliteTable('personas', {
   id:           text('id').primaryKey(),
@@ -37,6 +37,24 @@ export const messages = sqliteTable('messages', {
   toolCallId: text('tool_call_id'),  // for role='tool_result'
   attachments: text('attachments', { mode: 'json' }).$type<ChatAttachment[] | null>(),
   createdAt:  integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const chatRuns = sqliteTable('chat_runs', {
+  id:        text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  turnId:    text('turn_id').notNull(),
+  phase:     text('phase').$type<ChatRunPhase>().notNull(),
+  status:    text('status').$type<ChatRunStatus>().notNull(),
+  provider:  text('provider'),
+  model:     text('model'),
+  retryCount: integer('retry_count').notNull().default(0),
+  safeResume: integer('safe_resume', { mode: 'boolean' }).notNull().default(false),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  lastHeartbeatAt: integer('last_heartbeat_at', { mode: 'timestamp_ms' }).notNull(),
+  completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
 });
 
 // ─── persona_kv ───────────────────────────────────────────────────────────────
@@ -159,6 +177,7 @@ export const auditLog = sqliteTable('audit_log', {
 export type PersonaRow         = typeof personas.$inferSelect;
 export type SessionRow         = typeof sessions.$inferSelect;
 export type MessageRow         = typeof messages.$inferSelect;
+export type ChatRunRow         = typeof chatRuns.$inferSelect;
 export type PersonaKVRow       = typeof personaKV.$inferSelect;
 export type CredentialRow      = typeof credentials.$inferSelect;
 export type MCPServerRow       = typeof mcpServers.$inferSelect;
@@ -172,6 +191,7 @@ export type RaappPendingApprovalRow = typeof raappPendingApprovals.$inferSelect;
 export type InsertPersona      = typeof personas.$inferInsert;
 export type InsertSession      = typeof sessions.$inferInsert;
 export type InsertMessage      = typeof messages.$inferInsert;
+export type InsertChatRun      = typeof chatRuns.$inferInsert;
 export type InsertPersonaKV    = typeof personaKV.$inferInsert;
 export type InsertCredential   = typeof credentials.$inferInsert;
 export type InsertMCPServer    = typeof mcpServers.$inferInsert;

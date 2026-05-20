@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, Server, XCircle } from 'lucide-react';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { useSettingsStore } from './settingsStore';
 import { ModelSettingsSection } from './ModelSettingsSection';
@@ -13,109 +13,22 @@ import {
 } from './llm-provider-settings';
 import type {
   AddForm,
-  ActiveRuntimeConfig,
   LLMConfigWithSource,
   ProviderTestState,
 } from './llm-panel.types';
+import {
+  apiFetch,
+  buildActiveRuntimeConfig,
+  emptyForm,
+  normalizeOptionalText,
+  normalizeProviderName,
+} from './llm-panel.utils';
 import {
   DEFAULT_TOOL_TIMEOUT_SETTINGS,
   normalizeToolTimeout,
   type ToolTimeoutKey,
   type ToolTimeoutSettings,
 } from './tool-timeout-settings';
-
-async function readResponseErrorMessage(res: Response, context: string): Promise<string> {
-  const body = await res.text();
-  if (!body) {
-    return res.statusText ? `HTTP ${res.status}: ${res.statusText}` : `HTTP ${res.status}`;
-  }
-
-  const contentType = res.headers.get('content-type') ?? '';
-  const looksLikeJson = contentType.toLowerCase().includes('application/json');
-
-  if (!looksLikeJson) {
-    return `HTTP ${res.status}: ${body}`;
-  }
-
-  try {
-    const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
-    if (typeof parsed.error === 'string' && parsed.error.trim().length > 0) {
-      return parsed.error;
-    }
-    if (typeof parsed.message === 'string' && parsed.message.trim().length > 0) {
-      return parsed.message;
-    }
-  } catch (err) {
-    console.error(
-      `[LLMPanel] Failed to parse ${context} error body`,
-      err instanceof Error ? err : new Error(String(err)),
-    );
-  }
-
-  return `HTTP ${res.status}: ${body}`;
-}
-
-async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const method = opts?.method?.toUpperCase() ?? 'GET';
-  const res = await fetch(`/api${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    cache: method === 'GET' ? 'no-store' : undefined,
-    ...opts,
-  });
-  if (!res.ok) {
-    throw new Error(await readResponseErrorMessage(res, `apiFetch(${path})`));
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
-}
-
-function emptyForm(): AddForm {
-  return {
-    name: PROVIDER_LABELS['openai'] ?? '',
-    provider: 'openai',
-    apiKey: '',
-    baseUrl: PROVIDER_BASE_URLS['openai'] ?? '',
-    model: PROVIDER_DEFAULT_MODELS['openai'] ?? '',
-    nameEdited: false,
-  };
-}
-
-function normalizeOptionalText(value: string): string | undefined {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function normalizeProviderName(name: string, provider: string): string {
-  return normalizeOptionalText(name) ?? PROVIDER_LABELS[provider] ?? provider;
-}
-
-function buildActiveRuntimeConfig(
-  activeCredential: Credential | null,
-  runtimeConfig: LLMConfigWithSource | null,
-): ActiveRuntimeConfig | null {
-  if (activeCredential) {
-    return {
-      source: 'db',
-      provider: activeCredential.provider,
-      model: activeCredential.model ?? '',
-      baseUrl: activeCredential.baseUrl ?? '',
-      displayName: activeCredential.name,
-      credentialId: activeCredential.id,
-    };
-  }
-
-  if (!runtimeConfig) {
-    return null;
-  }
-
-  return {
-    source: runtimeConfig.source,
-    provider: runtimeConfig.provider,
-    model: runtimeConfig.model,
-    baseUrl: runtimeConfig.baseUrl,
-    displayName: PROVIDER_LABELS[runtimeConfig.provider] ?? runtimeConfig.provider,
-  };
-}
 
 export function LLMPanel() {
   const [credentials, setCredentials] = useState<Credential[]>([]);
@@ -166,6 +79,31 @@ export function LLMPanel() {
   const providerEmptyStateMessage = runtimeConfig?.source === 'env'
     ? 'No credentials configured. Runtime currently uses the env fallback.'
     : 'No credentials configured. Add one below.';
+  const activeProviderLabel = activeRuntimeConfig
+    ? (PROVIDER_LABELS[activeRuntimeConfig.provider] ?? activeRuntimeConfig.provider)
+    : 'Not configured';
+  const activeProviderModel = activeRuntimeConfig?.model || 'No model selected';
+  const activeProviderSource = activeRuntimeConfig
+    ? (activeRuntimeConfig.source === 'env' ? 'env fallback' : 'database')
+    : 'unknown';
+  const showWindowsLocalHint = Boolean(
+    (activeRuntimeConfig && isLocalLlmProviderConfig(activeRuntimeConfig.provider, activeRuntimeConfig.baseUrl || undefined))
+      || (showForm && allowsKeylessAuth),
+  );
+  const testStateLabel = testState === 'testing'
+    ? 'Testing'
+    : testState === 'ok'
+      ? 'Verified'
+      : testState === 'error'
+        ? 'Failed'
+        : 'Not tested';
+  const TestStateIcon = testState === 'testing'
+    ? Loader2
+    : testState === 'ok'
+      ? CheckCircle2
+      : testState === 'error'
+        ? XCircle
+        : Server;
 
   const reportUpdateError = useCallback((message: string, err: unknown) => {
     const error = err instanceof Error ? err : new Error(String(err));
@@ -419,9 +357,33 @@ export function LLMPanel() {
         <div className="alert alert-warning py-2 text-xs gap-2">
           <AlertCircle size={14} />
           {error}
-          <button className="btn btn-ghost btn-xs ml-auto" onClick={() => setError(null)}>✕</button>
+          <button className="btn btn-ghost btn-xs ml-auto" onClick={() => setError(null)}>x</button>
         </div>
       )}
+
+      <section className="border border-base-300 rounded-xl p-4 bg-base-200/10" data-testid="provider-health-card">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold mb-1">Provider Health</h3>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
+              <span className="badge badge-sm badge-outline font-mono">{activeProviderLabel}</span>
+              <span className="font-mono truncate max-w-full">{activeProviderModel}</span>
+              <span className="badge badge-xs badge-neutral">{activeProviderSource}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <TestStateIcon
+              size={14}
+              className={testState === 'testing' ? 'animate-spin text-info' : testState === 'ok' ? 'text-success' : testState === 'error' ? 'text-error' : 'text-base-content/50'}
+            />
+            <span className={testState === 'ok' ? 'text-success' : testState === 'error' ? 'text-error' : 'text-base-content/60'}>
+              {testStateLabel}
+            </span>
+          </div>
+        </div>
+        {testState === 'error' && testError ? <p className="mt-3 text-xs text-error" data-testid="provider-health-last-failure">Last test failure: {testError}</p> : null}
+        {showWindowsLocalHint ? <p className="mt-3 text-xs text-base-content/50" data-testid="provider-health-local-hint">Windows local provider hint: keep the local server running and use the Windows-reachable localhost URL.</p> : null}
+      </section>
 
       <ProviderSettingsSection
         credentials={credentials}

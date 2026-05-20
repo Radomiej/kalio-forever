@@ -68,14 +68,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
 
     replayPendingConfirmations(payload.sessionId);
-    client.emit('session:status', this.pipeline.getSessionStatus(payload.sessionId));
+    client.emit('session:status', await this.pipeline.getSessionStatusWithRun(payload.sessionId));
 
     const descendantSessionIds = await this.collectDescendantSessionIds(payload.sessionId);
-    descendantSessionIds.forEach((sessionId) => {
+    for (const sessionId of descendantSessionIds) {
       this.subscribeSocketToSession(client.id, sessionId);
       replayPendingConfirmations(sessionId);
-      client.emit('session:status', this.pipeline.getSessionStatus(sessionId));
-    });
+      client.emit('session:status', await this.pipeline.getSessionStatusWithRun(sessionId));
+    }
 
     this.logger.log(`Session re-identified: ${payload.sessionId} for socket ${client.id}`);
   }

@@ -465,6 +465,41 @@ export interface UpdateSkillDto {
   prompt?: string;
 }
 
+export type ChatRunPhase =
+  | 'queued'
+  | 'started'
+  | 'llm_streaming'
+  | 'tool_pending'
+  | 'tool_running'
+  | 'completed'
+  | 'interrupted'
+  | 'failed';
+
+export type ChatRunStatus =
+  | 'active'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'interrupted_needs_retry';
+
+export interface ChatRunSnapshot {
+  id: ID;
+  sessionId: ID;
+  turnId: ID;
+  phase: ChatRunPhase;
+  status: ChatRunStatus;
+  provider?: string;
+  model?: string;
+  retryCount: number;
+  safeResume: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  startedAt: Timestamp;
+  updatedAt: Timestamp;
+  lastHeartbeatAt: Timestamp;
+  completedAt?: Timestamp;
+}
+
 // ─── Socket.IO Event Map ──────────────────────────────────────────────────────
 // COMPLETE contract between FE and BE. All Socket.IO events defined here.
 export interface SocketEvents {
@@ -488,7 +523,19 @@ export interface SocketEvents {
   };
   'chat:error': {
     sessionId: ID;
-    code: 'PROVIDER_NOT_CONFIGURED' | 'LLM_ERROR' | 'TOOL_ERROR' | 'INTERRUPTED' | 'QUEUE_FULL' | 'MAX_ITERATIONS_REACHED';
+    code:
+      | 'PROVIDER_NOT_CONFIGURED'
+      | 'LLM_ERROR'
+      | 'LLM_RATE_LIMIT'
+      | 'LLM_TIMEOUT'
+      | 'LLM_AUTH'
+      | 'LLM_PROVIDER_DOWN'
+      | 'LLM_QUOTA'
+      | 'LLM_BAD_TOOL_ARGS'
+      | 'TOOL_ERROR'
+      | 'INTERRUPTED'
+      | 'QUEUE_FULL'
+      | 'MAX_ITERATIONS_REACHED';
     message: string;
     agentRun?: AgentRunContext;
     /** True if at least one `chat:chunk` was emitted before this error.
@@ -532,7 +579,7 @@ export interface SocketEvents {
   // Sessions — server → client
   'session:created': ChatSession;
   'session:updated': Pick<ChatSession, 'id' | 'title' | 'updatedAt'>;
-  'session:status': { sessionId: ID; active: boolean; turnId?: ID; queueLength: number };
+  'session:status': { sessionId: ID; active: boolean; turnId?: ID; queueLength: number; run?: ChatRunSnapshot };
 
   // Session re-registration — client → server (sent after reconnect)
   'session:identify': { sessionId: ID };

@@ -25,6 +25,8 @@ export type ToolArgProgressHandler = (payload: SocketEvents['tool:arg_progress']
 export type SessionStatusHandler = (payload: SocketEvents['session:status']) => void;
 export type ReconnectHandler = () => void;
 export type DisconnectHandler = (reason: string) => void;
+export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
+export type ConnectionStateHandler = (state: { status: ConnectionState; recovered?: boolean; reason?: string }) => void;
 
 export interface KalioSDKOptions {
   wsUrl: string;
@@ -40,6 +42,11 @@ export class KalioSDK {
     this.socket = io(options.wsUrl, {
       transports: ['websocket'],
       autoConnect: false,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 5_000,
+      timeout: 10_000,
     });
   }
 
@@ -55,7 +62,10 @@ export class KalioSDK {
     return this.socket.connected;
   }
 
-  sendMessage(payload: SocketEvents['chat:send']): void {
+  sendMessage(payload: SocketEvents['chat:send']): boolean {
+    if (!this.socket.connected) {
+      return false;
+    }
     this.toolCallCount = 0; // Reset counter for new message
     this.thinkingAccum = '';
     this.inThinking = false;
@@ -64,11 +74,16 @@ export class KalioSDK {
     console.log('personaId:', payload.personaId);
     console.groupEnd();
     this.socket.emit('chat:send', payload);
+    return true;
   }
 
-  stopTurn(sessionId: string): void {
+  stopTurn(sessionId: string): boolean {
+    if (!this.socket.connected) {
+      return false;
+    }
     console.log(`[Thread] ⏹ STOP sessionId=${sessionId}`);
     this.socket.emit('chat:stop', { sessionId });
+    return true;
   }
 
   confirmTool(payload: SocketEvents['tool:confirm']): void {
@@ -281,6 +296,25 @@ export class KalioSDK {
     const wrappedHandler = (reason: string) => handler(reason);
     this.socket.on('disconnect', wrappedHandler);
     return () => this.socket.off('disconnect', wrappedHandler);
+  }
+
+  onConnectionState(handler: ConnectionStateHandler): () => void {
+    const onConnect = () => handler({ status: 'connected', recovered: this.socket.recovered });
+    const onDisconnect = (reason: string) => handler({ status: 'disconnected', reason });
+    const onReconnectAttempt = () => handler({ status: 'reconnecting' });
+    const onConnectError = (err: Error) => handler({ status: 'reconnecting', reason: err.message });
+
+    this.socket.on('connect', onConnect);
+    this.socket.on('disconnect', onDisconnect);
+    this.socket.io.on('reconnect_attempt', onReconnectAttempt);
+    this.socket.on('connect_error', onConnectError);
+
+    return () => {
+      this.socket.off('connect', onConnect);
+      this.socket.off('disconnect', onDisconnect);
+      this.socket.io.off('reconnect_attempt', onReconnectAttempt);
+      this.socket.off('connect_error', onConnectError);
+    };
   }
 
   /** Re-register session ownership with the server after a reconnect. */
