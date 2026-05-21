@@ -13,13 +13,43 @@ $root = $PSScriptRoot
 $api  = Join-Path $root "apps\kalio-api"
 $web  = Join-Path $root "apps\kalio-web"
 $e2eEnvFile = Join-Path $root ".env.test"
-$nestJs = Join-Path $api "node_modules\@nestjs\cli\bin\nest.js"
-$viteJs = Join-Path $web "node_modules\vite\bin\vite.js"
 $BE_PORT = $BackendPort
 $FE_PORT = $FrontendPort
 $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $nodeCmd) { $nodeCmd = Get-Command node -ErrorAction SilentlyContinue }
 if (-not $nodeCmd) { Write-Host "[FAIL] node not found on PATH" -ForegroundColor Red; exit 1 }
+
+function Resolve-WorkspaceCli {
+    param(
+        [string]$PrimaryPath,
+        [string]$PackageFilter,
+        [string]$RelativePath
+    )
+
+    if (Test-Path $PrimaryPath) { return $PrimaryPath }
+
+    $pnpmStore = Join-Path $root "node_modules\.pnpm"
+    if (-not (Test-Path $pnpmStore)) { return $null }
+
+    $match = Get-ChildItem -Path $pnpmStore -Directory -Filter $PackageFilter -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $match) { return $null }
+
+    $candidate = Join-Path $match.FullName $RelativePath
+    if (Test-Path $candidate) { return $candidate }
+    return $null
+}
+
+$nestJs = Resolve-WorkspaceCli `
+    -PrimaryPath (Join-Path $api "node_modules\@nestjs\cli\bin\nest.js") `
+    -PackageFilter "@nestjs+cli*" `
+    -RelativePath "node_modules\@nestjs\cli\bin\nest.js"
+if (-not $nestJs) { Write-Host "[FAIL] Nest CLI not found. Run pnpm install from repo root." -ForegroundColor Red; exit 1 }
+$viteJs = Resolve-WorkspaceCli `
+    -PrimaryPath (Join-Path $web "node_modules\vite\bin\vite.js") `
+    -PackageFilter "vite@*" `
+    -RelativePath "node_modules\vite\bin\vite.js"
+if (-not $viteJs) { Write-Host "[FAIL] Vite CLI not found. Run pnpm install from repo root." -ForegroundColor Red; exit 1 }
 
 # Some Windows shells expose both Path and PATH in the process environment.
 # Start-Process builds a case-insensitive dictionary and fails on that duplicate.
@@ -184,7 +214,7 @@ Write-Host ""
 # --- Start backend (nest start --watch) ---
 if ($useDedicatedPorts) {
     Write-Host "  Building backend for dedicated E2E env..." -ForegroundColor DarkYellow
-    Push-Location $api
+    Push-Location $root
     try {
         & $nodeCmd.Source $nestJs build
     } finally {

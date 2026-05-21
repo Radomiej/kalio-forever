@@ -5,12 +5,13 @@
   "scripts": {
     "stack:playwright": "node ./scripts/start-playwright-stack.mjs",
     "test": "node --test ./scripts/start-playwright-stack.test.mjs",
-    "test:e2e": "playwright test",
+    "test:e2e": "node ./scripts/run-playwright-with-stack.mjs",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "socket.io-client": "^4.8.3"
   }
 }

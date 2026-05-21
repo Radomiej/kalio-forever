@@ -168,7 +168,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     }
 
     for (const [, buf] of Object.entries(toolCallBuffers)) {
-      let args: Record<string, unknown> = {};
+      let args: Record<string, unknown>;
       try {
         args = buf.argsRaw.trim().length > 0
           ? JSON.parse(buf.argsRaw) as Record<string, unknown>

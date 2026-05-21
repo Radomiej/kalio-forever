@@ -15,12 +15,17 @@ const TELEGRAM_COMMANDS = [
   { command: 'help', description: 'Show available commands' },
 ] as const;
 
+interface StartBotOptions {
+  waitForPollingStart?: boolean;
+}
+
 @Injectable()
 export class TelegramRelayService extends RemoteRelayChannel implements OnModuleInit, OnModuleDestroy {
   readonly id = 'telegram';
   private readonly logger = new Logger(TelegramRelayService.name);
 
   private bot: Bot | null = null;
+  private botToken: string | null = null;
   private chatId: string | null = null;
   private botUsername: string | null = null;
   private commandHandlers: RelayCommandHandlers | null = null;
@@ -40,7 +45,10 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
       if (chatId) this.chatId = chatId;
       try {
         await this.startBot(token);
-        this.logger.log(`Telegram bot auto-started as @${this.botUsername}`);
+        this.botToken = token;
+        if (this.botUsername) {
+          this.logger.log(`Telegram bot auto-started as @${this.botUsername}`);
+        }
       } catch (err) {
         this.logger.warn(
           'Failed to auto-start Telegram bot on init',
@@ -55,16 +63,28 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
   }
 
   async connect(botToken: string): Promise<{ botUsername: string }> {
+    const previousConnection = this.bot && this.botToken
+      ? { botToken: this.botToken, chatId: this.chatId }
+      : null;
+
     if (this.bot) {
       await this.stopBot();
     }
-    await this.startBot(botToken);
-    await this.settings.set(KEY_BOT_TOKEN, botToken);
-    return { botUsername: this.botUsername! };
+
+    try {
+      const botUsername = await this.startBot(botToken, { waitForPollingStart: true });
+      this.botToken = botToken;
+      await this.settings.set(KEY_BOT_TOKEN, botToken);
+      return { botUsername };
+    } catch (err) {
+      await this.restorePreviousConnection(previousConnection);
+      throw err;
+    }
   }
 
   async disconnect(): Promise<void> {
     await this.stopBot();
+    this.botToken = null;
     await this.settings.delete(KEY_BOT_TOKEN);
     await this.settings.delete(KEY_CHAT_ID);
   }
@@ -89,11 +109,22 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
     };
   }
 
-  private async startBot(token: string): Promise<void> {
+  private async startBot(token: string, options: StartBotOptions = {}): Promise<string> {
     const bot = new Bot(token);
     await bot.api.deleteWebhook();
     await bot.api.setMyCommands(TELEGRAM_COMMANDS);
     const me = await bot.api.getMe();
+    const waitForPollingStart = options.waitForPollingStart === true;
+    let resolvePollingStart: (() => void) | null = null;
+    let rejectPollingStart: ((error: Error) => void) | null = null;
+
+    const pollingStartPromise = waitForPollingStart
+      ? new Promise<void>((resolve, reject) => {
+          resolvePollingStart = resolve;
+          rejectPollingStart = reject;
+        })
+      : null;
+
     this.bot = bot;
     this.botUsername = me.username;
     this.registerCommands(bot);
@@ -103,7 +134,42 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
         err.error instanceof Error ? err.error : new Error(String(err.error)),
       );
     });
-    void bot.start({ onStart: () => this.logger.log(`Telegram bot @${me.username} polling started`) });
+
+    const finishPollingStart = (error?: Error): void => {
+      if (error) {
+        rejectPollingStart?.(error);
+      } else {
+        resolvePollingStart?.();
+      }
+      resolvePollingStart = null;
+      rejectPollingStart = null;
+    };
+
+    void Promise.resolve(
+      bot.start({
+        onStart: () => {
+          this.logger.log(`Telegram bot @${me.username} polling started`);
+          finishPollingStart();
+        },
+      }),
+    ).catch((err: unknown) => {
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.logger.warn(
+        'Telegram bot polling stopped unexpectedly',
+        error,
+      );
+      if (this.bot === bot) {
+        this.bot = null;
+        this.botUsername = null;
+      }
+      finishPollingStart(error);
+    });
+
+    if (pollingStartPromise) {
+      await pollingStartPromise;
+    }
+
+    return me.username;
   }
 
   private async stopBot(): Promise<void> {
@@ -119,6 +185,23 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
       this.bot = null;
       this.chatId = null;
       this.botUsername = null;
+    }
+  }
+
+  private async restorePreviousConnection(previousConnection: { botToken: string; chatId: string | null } | null): Promise<void> {
+    if (!previousConnection) {
+      return;
+    }
+
+    try {
+      await this.startBot(previousConnection.botToken, { waitForPollingStart: true });
+      this.botToken = previousConnection.botToken;
+      this.chatId = previousConnection.chatId;
+    } catch (restoreErr) {
+      this.logger.warn(
+        'Failed to restore previous Telegram bot after connect error',
+        restoreErr instanceof Error ? restoreErr : new Error(String(restoreErr)),
+      );
     }
   }
 

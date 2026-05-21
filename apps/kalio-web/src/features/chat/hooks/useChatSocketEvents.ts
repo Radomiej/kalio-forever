@@ -219,7 +219,6 @@ export function useChatSocketEvents({
     });
 
     const offToolStart = eventBus.onToolStart((payload) => {
-      console.log('[ToolStart]', payload.toolName, 'callId:', payload.callId, 'args:', payload.args);
       const payloadSessionId = payload.sessionId ?? useSessionStore.getState().activeSessionId;
       ensureSyntheticToolIntent(payloadSessionId, payload.toolName);
       flushThinkingChunks(payloadSessionId);
@@ -261,7 +260,6 @@ export function useChatSocketEvents({
     });
 
     const offAgentStart = eventBus.onAgentStart((payload) => {
-      console.log('[AgentStart]', payload.sessionId, payload.turnId);
       clearToolArgProgressTracking(payload.sessionId);
       addActiveAgentLoop(payload.sessionId, payload.turnId, payload.agentRun);
       startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun);
@@ -270,7 +268,6 @@ export function useChatSocketEvents({
     });
 
     const offAgentDone = eventBus.onAgentDone((payload) => {
-      console.log('[AgentDone]', payload.sessionId, payload.turnId);
       removeActiveAgentLoop(payload.sessionId, payload.agentRun);
       clearToolArgProgressTracking(payload.sessionId);
       finalizeAgentTurn(payload.sessionId);
@@ -290,7 +287,6 @@ export function useChatSocketEvents({
     });
 
     const offToolResult = eventBus.onToolResult((result) => {
-      console.log('[ToolResult]', result.callId, 'status:', result.status, result.status !== 'success' ? `error: ${result.errorCode}` : '');
       const activeSessionId = useSessionStore.getState().activeSessionId;
       const resultSessionId = result.sessionId ?? activeSessionId;
       clearToolArgProgressTracking(resultSessionId);
@@ -365,7 +361,6 @@ export function useChatSocketEvents({
     });
 
     const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
-      console.log('[RaAppNativeResult]', payload.toolCallId, payload.results);
       const sid = useSessionStore.getState().activeSessionId;
       if (!sid) return;
       const { messages, setMessages } = useSessionStore.getState();
@@ -399,7 +394,6 @@ export function useChatSocketEvents({
     });
 
     const offReconnect = eventBus.onReconnect(() => {
-      console.log('[ChatInterface] socket reconnected - resetting streaming state');
       backendHealth.reportSuccess();
       setStreaming(false);
       clearToolActivities();

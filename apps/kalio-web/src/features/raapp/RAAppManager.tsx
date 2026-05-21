@@ -288,9 +288,9 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
           <p className="text-xs text-base-content/30 text-center py-2">Loading catalog…</p>
         )}
 
-        {groups.map((group) => (
+        {groups.map((group, index) => (
           <RAAppGroupCard
-            key={group.slug}
+            key={`group:${group.slug}:${index}`}
             group={group}
             onRun={(slug) => {
               const g = groups.find((x) => x.slug === slug);
@@ -304,12 +304,12 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
           />
         ))}
 
-        {coreApps.map((app) => (
-          <RAAppCoreCard key={app.id} app={app} onRun={handleRun} />
+        {coreApps.map((app, index) => (
+          <RAAppCoreCard key={`core:${app.id}:${index}`} app={app} onRun={handleRun} />
         ))}
 
-        {userStandaloneApps.map((app) => (
-          <RAAppCoreCard key={app.id} app={app} onRun={handleRun} />
+        {userStandaloneApps.map((app, index) => (
+          <RAAppCoreCard key={`user:${app.id}:${index}`} app={app} onRun={handleRun} />
         ))}
 
         {!catalogLoading && groups.length === 0 && coreApps.length === 0 && userStandaloneApps.length === 0 && (
@@ -433,7 +433,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
           <div className="flex flex-col gap-1 p-2 overflow-y-auto shrink-0 max-h-40 border-b border-base-300">
             {sessionApps.map((app, i) => (
               <button
-                key={app.messageId + i}
+                key={`session:${app.messageId}:${i}`}
                 onClick={() => setSelectedIdx(i)}
                 className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm transition-colors ${
                   selectedIdx === i ? 'bg-sky-500/15 text-sky-400' : 'hover:bg-base-200 text-base-content/70'

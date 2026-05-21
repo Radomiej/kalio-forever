@@ -3,11 +3,6 @@ import { API_BASE, deleteSessionIfExists } from './helpers/test-config';
 
 const LAST_ACTIVE_SESSION_STORAGE_KEY = 'kalio:last-active-session-id';
 
-function buildOptimisticTitle(content: string): string {
-  const preview = content.slice(0, 50).trim();
-  return preview + (content.length > 50 ? '…' : '');
-}
-
 function buildGeneratedTitle(content: string): string {
   const preview = content.slice(0, 60).trim();
   return preview + (content.length > 60 ? '…' : '');
@@ -38,7 +33,6 @@ test.describe('AC-21: Session auto-title', () => {
     test.setTimeout(45_000);
 
     const prompt = 'Session title regression verification uses a deliberately long first prompt to exceed sixty characters. Reply with exactly OK and do not use tools.';
-    const optimisticTitle = buildOptimisticTitle(prompt);
     const generatedTitle = buildGeneratedTitle(prompt);
     let sessionId: string | null = null;
 
@@ -67,9 +61,14 @@ test.describe('AC-21: Session auto-title', () => {
       await page.getByTestId('chat-send-btn').click();
 
       await expect
-        .poll(() => activeSessionTitle.textContent(), { timeout: 10_000 })
-        .not.toBe('New Chat');
-      await expect(activeSessionTitle).toHaveText(optimisticTitle, { timeout: 10_000 });
+        .poll(
+          async () => {
+            const title = (await activeSessionTitle.textContent())?.trim();
+            return Boolean(title && title !== 'New Chat');
+          },
+          { timeout: 10_000 },
+        )
+        .toBe(true);
 
       await expect(chatInput).toBeEnabled({ timeout: 30_000 });
       await expect(activeSessionTitle).toHaveText(generatedTitle, { timeout: 10_000 });

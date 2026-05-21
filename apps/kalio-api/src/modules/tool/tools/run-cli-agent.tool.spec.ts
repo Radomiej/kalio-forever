@@ -37,6 +37,8 @@ function makeCLIAgentSessions(): CLIAgentSessionService {
       updatedAt: 1,
     }),
     persistUserMessage: vi.fn().mockResolvedValue(undefined),
+    persistAssistantToolCallMessage: vi.fn().mockResolvedValue(undefined),
+    persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
     saveToolResult: vi.fn().mockResolvedValue(undefined),
   } as unknown as CLIAgentSessionService;
 }
@@ -138,6 +140,7 @@ describe('RunCliAgentTool', () => {
       'call-cli',
       expect.stringContaining('"exitCode":1'),
     );
+    expect(cliAgentSessions.persistAssistantMessage).toHaveBeenCalledWith('cli-child-1', 'rate limit exceeded');
   });
 
   it('creates a durable cli-agent child session, persists the prompt/result there, and returns childSessionId', async () => {
@@ -160,6 +163,15 @@ describe('RunCliAgentTool', () => {
       parentSessionId: 'sess-1',
     }));
     expect(cliAgentSessions.persistUserMessage).toHaveBeenCalledWith('cli-child-1', 'do task');
+    expect(cliAgentSessions.persistAssistantToolCallMessage).toHaveBeenCalledWith(
+      'cli-child-1',
+      'call-cli',
+      expect.objectContaining({
+        agentId: 'codex',
+        prompt: 'do task',
+        workdir: '/projects/app',
+      }),
+    );
     expect(cliAgent.run).toHaveBeenCalledWith(expect.objectContaining<Partial<RunCliAgentRequest>>({
       sessionId: 'cli-child-1',
       callId: 'call-cli',
@@ -170,6 +182,10 @@ describe('RunCliAgentTool', () => {
       'cli-child-1',
       'call-cli',
       expect.stringContaining('"output":""'),
+    );
+    expect(cliAgentSessions.persistAssistantMessage).toHaveBeenCalledWith(
+      'cli-child-1',
+      'CLI agent completed with exit code 0.',
     );
     expect(result).toMatchObject({ childSessionId: 'cli-child-1' });
   });

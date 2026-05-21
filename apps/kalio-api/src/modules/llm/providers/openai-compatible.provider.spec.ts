@@ -64,7 +64,7 @@ describe('OpenAICompatibleProvider', () => {
       );
     });
 
-    it('should log error when tool args JSON parse fails', async () => {
+    it('should throw a structured error when tool args JSON parse fails', async () => {
       // Arrange
       const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
       const tools = [{ name: 'test_tool', description: 'Test', parameters: {} }];
@@ -91,17 +91,13 @@ describe('OpenAICompatibleProvider', () => {
         body: mockStream,
       });
 
-      // Act
-      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
-
-      // Assert
-      // BUG: Current implementation has empty catch block at line 98 that silently ignores parse errors
-      // Expected: Should log the malformed tool args error
-      // This test will fail until the bug is fixed
-      // Tool should still be returned with empty args
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('test_tool');
-      expect(result[0].args).toEqual({});
+      // Act & Assert
+      await expect(
+        provider.streamChat(messages, tools, { sessionId, messageId, onChunk }),
+      ).rejects.toMatchObject({
+        code: 'LLM_BAD_TOOL_ARGS',
+        message: '[openai] Tool call test_tool streamed malformed JSON arguments',
+      });
     });
   });
 
@@ -281,7 +277,7 @@ describe('OpenAICompatibleProvider', () => {
       const sessionId = 'sess-123';
       const messageId = 'msg-456';
 
-      mockFetch.mockResolvedValueOnce({
+      mockFetch.mockResolvedValue({
         ok: false,
         status: 500,
         statusText: 'Internal Server Error',

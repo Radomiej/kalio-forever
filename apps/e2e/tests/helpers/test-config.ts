@@ -21,7 +21,7 @@ export async function isMockLlm(request: APIRequestContext): Promise<boolean> {
 }
 
 export async function selectSession(page: Page, sessionId: string, title: string): Promise<void> {
-	const sessionItem = page.getByTestId('session-item').filter({ hasText: title }).first();
+	const sessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
 	await expect(sessionItem).toBeVisible({ timeout: 5000 });
 	await sessionItem.evaluate((node) => {
 		if (!(node instanceof HTMLElement)) {

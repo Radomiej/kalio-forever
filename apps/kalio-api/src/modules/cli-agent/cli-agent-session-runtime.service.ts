@@ -294,6 +294,12 @@ export class CLIAgentSessionRuntimeService {
         durationMs: result.durationMs,
       }),
     );
+    await this.sessions.persistAssistantMessage(
+      childSessionId,
+      result.output.trim().length > 0
+        ? result.output
+        : `CLI agent completed with exit code ${result.exitCode}.`,
+    );
 
     const toolResult: ToolResult = {
       callId,
@@ -346,6 +352,7 @@ export class CLIAgentSessionRuntimeService {
       callId,
       JSON.stringify(nextSnapshot),
     );
+    await this.sessions.persistAssistantMessage(childSessionId, nextSnapshot.lastOutput ?? '');
 
     emit?.('tool:result', {
       callId,

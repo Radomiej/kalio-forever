@@ -6,10 +6,13 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const sourceScriptPath = resolve(scriptDir, 'start-playwright-stack.mjs');
+const sourceRunnerPath = resolve(scriptDir, 'run-playwright-with-stack.mjs');
+const playwrightConfigPath = resolve(scriptDir, '../playwright.config.ts');
+const launcherReadyTimeoutMs = 15_000;
 
 async function getFreePort() {
   const server = createServer();
@@ -36,14 +39,28 @@ async function createSandboxRepo(rootDir, options = {}) {
     includeCorepackShim = false,
   } = options;
   const launcherDir = resolve(rootDir, 'apps/e2e/scripts');
+  const playwrightCliDir = resolve(rootDir, 'apps/e2e/node_modules/@playwright/test');
   const apiDistDir = resolve(rootDir, 'apps/kalio-api/dist');
   const binDir = resolve(rootDir, 'bin');
 
   await mkdir(launcherDir, { recursive: true });
+  await mkdir(playwrightCliDir, { recursive: true });
   await mkdir(apiDistDir, { recursive: true });
   await mkdir(binDir, { recursive: true });
 
   await copyFile(sourceScriptPath, resolve(launcherDir, 'start-playwright-stack.mjs'));
+  await copyFile(sourceRunnerPath, resolve(launcherDir, 'run-playwright-with-stack.mjs'));
+  await writeFile(
+    resolve(playwrightCliDir, 'cli.js'),
+    `if (process.env.KALIO_PLAYWRIGHT_EXTERNAL_SERVER !== '1') {
+  console.error('[fake-playwright] external server flag missing');
+  process.exit(1);
+}
+
+console.log('[fake-playwright] ran with ' + process.env.PLAYWRIGHT_BASE_URL);
+`,
+    'utf8',
+  );
 
   await writeFile(
     resolve(apiDistDir, 'main.js'),
@@ -154,6 +171,7 @@ require('./fake-pnpm.cjs');
 
   return {
     launcherPath: resolve(launcherDir, 'start-playwright-stack.mjs'),
+    runnerPath: resolve(launcherDir, 'run-playwright-with-stack.mjs'),
     binDir,
   };
 }
@@ -289,7 +307,7 @@ test('launcher starts without a repo .env.test file', async () => {
     const stopCollecting = collectOutput(child, output);
 
     try {
-      await waitForReady(child, output, 20_000);
+      await waitForReady(child, output, launcherReadyTimeoutMs);
       assert.match(output.join(''), /backend and frontend are ready/);
       assert.doesNotMatch(output.join(''), /\.env\.test/);
     } finally {
@@ -330,7 +348,7 @@ PLAYWRIGHT_API_ORIGIN=http://127.0.0.1:${backendPort}
     const stopCollecting = collectOutput(child, output);
 
     try {
-      await waitForReady(child, output, 20_000);
+      await waitForReady(child, output, launcherReadyTimeoutMs);
       const fullOutput = output.join('');
       assert.match(fullOutput, new RegExp(`starting backend on http://127\\.0\\.0\\.1:${backendPort}\\b`));
       assert.match(fullOutput, new RegExp(`starting frontend preview on http://127\\.0\\.0\\.1:${frontendPort}\\b`));
@@ -383,7 +401,7 @@ test('launcher starts on Windows without pnpm.cmd when corepack entrypoint is av
     const stopCollecting = collectOutput(child, output);
 
     try {
-      await waitForReady(child, output, 20_000);
+      await waitForReady(child, output, launcherReadyTimeoutMs);
       const fullOutput = output.join('');
       assert.match(fullOutput, /backend and frontend are ready/);
       assert.doesNotMatch(fullOutput, /'pnpm\.cmd' is not recognized/i);
@@ -420,7 +438,7 @@ test('launcher can start from prebuilt artifacts when build step is skipped', as
     const stopCollecting = collectOutput(child, output);
 
     try {
-      await waitForReady(child, output, 20_000);
+      await waitForReady(child, output, launcherReadyTimeoutMs);
       const fullOutput = output.join('');
       assert.match(fullOutput, /skipping builds because KALIO_PLAYWRIGHT_SKIP_BUILD=1/);
       assert.doesNotMatch(fullOutput, /\[fake-pnpm\] build/);
@@ -431,6 +449,69 @@ test('launcher can start from prebuilt artifacts when build step is skipped', as
     }
   } finally {
     await removeSandbox(sandboxRoot);
+  }
+});
+
+test('playwright wrapper waits on PLAYWRIGHT_BASE_URL from repo .env.test file', async () => {
+  const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-runner-envfile-'));
+  const output = [];
+
+  try {
+    const { runnerPath, binDir } = await createSandboxRepo(sandboxRoot);
+    const frontendPort = await getFreePort();
+    const backendPort = await getFreePort();
+    await writeFile(
+      resolve(sandboxRoot, '.env.test'),
+      `PLAYWRIGHT_BASE_URL=http://127.0.0.1:${frontendPort}
+PLAYWRIGHT_API_ORIGIN=http://127.0.0.1:${backendPort}
+KALIO_PLAYWRIGHT_SKIP_BUILD=1
+`,
+      'utf8',
+    );
+
+    const child = spawn(process.execPath, [runnerPath], {
+      cwd: sandboxRoot,
+      env: {
+        ...process.env,
+        CI: 'true',
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const stopCollecting = collectOutput(child, output);
+
+    try {
+      const [code] = await once(child, 'exit');
+      const fullOutput = output.join('');
+      assert.equal(code, 0, fullOutput);
+      assert.match(fullOutput, new RegExp(`starting frontend preview on http://127\\.0\\.0\\.1:${frontendPort}\\b`));
+      assert.match(fullOutput, new RegExp(`\\[fake-playwright\\] ran with http://127\\.0\\.0\\.1:${frontendPort}`));
+    } finally {
+      stopCollecting();
+    }
+  } finally {
+    await removeSandbox(sandboxRoot);
+  }
+});
+
+test('playwright config rejects mismatched explicit API URLs', async () => {
+  const child = spawn(process.execPath, ['-e', `import(${JSON.stringify(pathToFileURL(playwrightConfigPath).href)})`], {
+    env: {
+      ...process.env,
+      PLAYWRIGHT_API_ORIGIN: 'http://127.0.0.1:3316',
+      TEST_API_URL: 'http://127.0.0.1:9999/api',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const output = [];
+  const stopCollecting = collectOutput(child, output);
+
+  try {
+    const [code] = await once(child, 'exit');
+    assert.notEqual(code, 0);
+    assert.match(output.join(''), /TEST_API_URL must match PLAYWRIGHT_API_ORIGIN/);
+  } finally {
+    stopCollecting();
   }
 });
 

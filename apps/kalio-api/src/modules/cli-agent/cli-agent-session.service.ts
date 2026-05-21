@@ -81,6 +81,14 @@ export class CLIAgentSessionService {
     });
   }
 
+  async persistAssistantMessage(sessionId: string, content: string): Promise<void> {
+    await this.insertMessage({
+      sessionId,
+      role: 'assistant',
+      content,
+    });
+  }
+
   async saveSessionMetadata(sessionId: string, metadata: CLIAgentSessionMetadata): Promise<void> {
     await this.insertMessage({
       sessionId,

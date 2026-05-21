@@ -160,7 +160,7 @@ export function MemoryPage() {
           <button
             className="btn btn-primary btn-sm gap-1"
             onClick={() => setIngestOpen((v) => !v)}
-            disabled={!selectedPersonaId}
+            disabled={!activePersonaId}
             data-testid="memory-ingest-btn"
           >
             <Plus size={14} />
@@ -241,7 +241,7 @@ export function MemoryPage() {
           <button
             className="btn btn-primary gap-1"
             onClick={() => void handleSearch()}
-            disabled={loading || !selectedPersonaId || !query.trim()}
+            disabled={loading || !activePersonaId || !query.trim()}
             data-testid="memory-search-btn"
           >
             {loading ? 'Searching...' : 'Search'}
@@ -249,7 +249,7 @@ export function MemoryPage() {
           <button
             className="btn btn-outline gap-1"
             onClick={() => void handleBrowseAll()}
-            disabled={loading || !selectedPersonaId}
+            disabled={loading || !activePersonaId}
             data-testid="memory-browse-btn"
             title="Show all entries"
           >

@@ -15,8 +15,27 @@ if (PROCESS?.env) {
 
 const CI = PROCESS?.env?.CI;
 const PLAYWRIGHT_BASE_URL = PROCESS?.env?.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
+const PLAYWRIGHT_API_ORIGIN = PROCESS?.env?.PLAYWRIGHT_API_ORIGIN ?? 'http://localhost:3316';
+const TEST_API_URL = PROCESS?.env?.TEST_API_URL ?? `${PLAYWRIGHT_API_ORIGIN}/api`;
+const PLAYWRIGHT_BROWSER_EXECUTABLE_PATH = PROCESS?.env?.KALIO_PLAYWRIGHT_BROWSER_EXECUTABLE_PATH;
+const PLAYWRIGHT_BROWSER_CHANNEL = PROCESS?.env?.KALIO_PLAYWRIGHT_BROWSER_CHANNEL;
 const reuseExistingServer = PROCESS?.env?.KALIO_PLAYWRIGHT_REUSE_SERVER === '1';
+const externalServer = PROCESS?.env?.KALIO_PLAYWRIGHT_EXTERNAL_SERVER === '1';
 const stackLauncherCommand = 'node ./scripts/start-playwright-stack.mjs';
+const browserLaunchOptions = PLAYWRIGHT_BROWSER_EXECUTABLE_PATH
+  ? { executablePath: PLAYWRIGHT_BROWSER_EXECUTABLE_PATH }
+  : undefined;
+
+if (PROCESS?.env?.TEST_API_URL) {
+  const expectedTestApiUrl = `${new URL(PLAYWRIGHT_API_ORIGIN).origin}/api`;
+  const actualTestApiUrl = new URL(TEST_API_URL).href.replace(/\/$/, '');
+
+  if (actualTestApiUrl !== expectedTestApiUrl) {
+    throw new Error(
+      `TEST_API_URL must match PLAYWRIGHT_API_ORIGIN. Expected ${expectedTestApiUrl}, got ${actualTestApiUrl}.`,
+    );
+  }
+}
 
 export default defineConfig({
   testDir: './tests',
@@ -34,23 +53,33 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
 
-  webServer: {
-    command: stackLauncherCommand,
-    url: PLAYWRIGHT_BASE_URL,
-    reuseExistingServer,
-    timeout: 240_000,
-  },
+  webServer: externalServer
+    ? undefined
+    : {
+        command: stackLauncherCommand,
+        url: PLAYWRIGHT_BASE_URL,
+        reuseExistingServer,
+        timeout: 240_000,
+      },
 
   projects: [
     {
       name: 'chromium',
       testIgnore: ['**/integration/**'],
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: PLAYWRIGHT_BROWSER_CHANNEL,
+        launchOptions: browserLaunchOptions,
+      },
     },
     {
       name: 'integration',
       testDir: './tests/integration',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: PLAYWRIGHT_BROWSER_CHANNEL,
+        launchOptions: browserLaunchOptions,
+      },
     },
   ],
 });

@@ -36,6 +36,7 @@ describe('CLIAgentSessionRuntimeService', () => {
       listMessages: vi.fn().mockResolvedValue([]),
       persistUserMessage: vi.fn(),
       persistAssistantToolCallMessage: vi.fn(),
+      persistAssistantMessage: vi.fn(),
       saveToolResult: vi.fn(),
       createChildSession: vi.fn(),
       saveSessionMetadata: vi.fn(),

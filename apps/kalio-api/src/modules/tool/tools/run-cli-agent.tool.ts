@@ -159,6 +159,13 @@ export class RunCliAgentTool {
 
     request._emit?.('session:created', childSession);
     await this.cliAgentSessions.persistUserMessage(childSession.id, prompt);
+    await this.cliAgentSessions.persistAssistantToolCallMessage(childSession.id, request.callId, {
+      agentId,
+      workdir,
+      prompt,
+      timeoutMs,
+      ...(model ? { model } : {}),
+    });
 
     let result: CLIAgentResult;
     try {
@@ -188,6 +195,7 @@ export class RunCliAgentTool {
         request.callId,
         JSON.stringify(failureResult),
       );
+      await this.cliAgentSessions.persistAssistantMessage(childSession.id, failureResult.output);
 
       throw error;
     }
@@ -201,6 +209,12 @@ export class RunCliAgentTool {
       childSession.id,
       request.callId,
       JSON.stringify(persistedResult),
+    );
+    await this.cliAgentSessions.persistAssistantMessage(
+      childSession.id,
+      persistedResult.output.trim().length > 0
+        ? persistedResult.output
+        : `CLI agent completed with exit code ${persistedResult.exitCode}.`,
     );
 
     if (persistedResult.exitCode !== 0) {

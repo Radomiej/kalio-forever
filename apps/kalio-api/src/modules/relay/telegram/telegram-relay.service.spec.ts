@@ -9,7 +9,9 @@ const grammyMock = vi.hoisted(() => {
     setMyCommands: vi.fn(async () => true),
   };
 
-  const start = vi.fn(() => undefined);
+  const start = vi.fn(async (options?: { onStart?: () => void }) => {
+    options?.onStart?.();
+  });
   const stop = vi.fn(async () => undefined);
   const catchHandler = vi.fn(() => undefined);
   const command = vi.fn(() => undefined);
@@ -44,7 +46,7 @@ describe('TelegramRelayService', () => {
 
   const settings = {
     delete: vi.fn(async () => undefined),
-    get: vi.fn(async () => null),
+    get: vi.fn(async (): Promise<string | null> => null),
     set: vi.fn(async () => undefined),
   };
 
@@ -140,6 +142,66 @@ describe('TelegramRelayService', () => {
     expect(service.getStatus()).toStrictEqual({
       connected: false,
       botUsername: undefined,
+      chatIdRegistered: false,
+    });
+  });
+
+  it('does not stay connected when telegram polling rejects after auto-start', async () => {
+    settings.get
+      .mockResolvedValueOnce('test-token')
+      .mockResolvedValueOnce('42');
+    grammyMock.start.mockImplementationOnce(
+      () => Promise.reject(new Error('Conflict: terminated by other getUpdates request')),
+    );
+
+    const service = new TelegramRelayService(settings as never);
+
+    await service.onModuleInit();
+    await Promise.resolve();
+
+    expect(service.getStatus()).toStrictEqual({
+      connected: false,
+      botUsername: undefined,
+      chatIdRegistered: true,
+    });
+  });
+
+  it('rejects connect and does not persist token when telegram polling fails immediately', async () => {
+    grammyMock.start.mockImplementationOnce(
+      () => Promise.reject(new Error('Conflict: terminated by other getUpdates request')),
+    );
+
+    const service = new TelegramRelayService(settings as never);
+
+    await expect(service.connect('bad-token')).rejects.toThrow(
+      'Conflict: terminated by other getUpdates request',
+    );
+    await Promise.resolve();
+
+    expect(settings.set).not.toHaveBeenCalledWith('relay.telegram.bot_token', 'bad-token');
+    expect(service.getStatus()).toStrictEqual({
+      connected: false,
+      botUsername: undefined,
+      chatIdRegistered: false,
+    });
+  });
+
+  it('restores the previous bot when replacing a connected bot fails immediately', async () => {
+    const service = new TelegramRelayService(settings as never);
+
+    await service.connect('good-token');
+    grammyMock.start.mockImplementationOnce(
+      () => Promise.reject(new Error('Conflict: terminated by other getUpdates request')),
+    );
+
+    await expect(service.connect('bad-token')).rejects.toThrow(
+      'Conflict: terminated by other getUpdates request',
+    );
+    await Promise.resolve();
+
+    expect(service.getStatus()).toStrictEqual({
+      connected: true,
+      botUsername: 'kalio_test_bot',
       chatIdRegistered: false,
     });
   });

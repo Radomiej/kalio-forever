@@ -518,6 +518,137 @@ describe('SubagentRuntimeService nested subagents', () => {
     );
   });
 
+  it('REGRESSION: nested subagent can delegate to a CLI agent and propagate the result', async () => {
+    const sessionStreamCounts = new Map<string, number>();
+    const childSessions: string[] = [];
+    const llmSource: ILLMSource = {
+      stream: vi.fn((params: LLMSourceParams) => {
+        const count = sessionStreamCounts.get(params.sessionId) ?? 0;
+        sessionStreamCounts.set(params.sessionId, count + 1);
+        const canSpawnNested = params.tools.some((tool) => tool.name === 'run_subagent');
+        const canRunCli = params.tools.some((tool) => tool.name === 'run_cli_agent');
+
+        if (params.sessionId === childSessions[0] && count === 0 && canSpawnNested) {
+          return streamFrom([
+            { type: 'tool_call', callId: 'nested-call', name: 'run_subagent', args: { objective: 'nested should use CLI' } },
+            { type: 'done' },
+          ]);
+        }
+
+        if (params.sessionId === childSessions[1] && count === 0 && canRunCli) {
+          return streamFrom([
+            {
+              type: 'tool_call',
+              callId: 'nested-cli-call',
+              name: 'run_cli_agent',
+              args: {
+                agentId: 'codex',
+                workdir: 'C:\\Projekty\\kalio-forever',
+                prompt: 'Read package.json and report the project name.',
+              },
+            },
+            { type: 'done' },
+          ]);
+        }
+
+        if (params.sessionId === childSessions[1]) {
+          return streamFrom([{ type: 'text_delta', delta: 'nested saw CLI: kalio-forever' }, { type: 'done' }]);
+        }
+
+        return streamFrom([{ type: 'text_delta', delta: 'outer saw nested CLI result' }, { type: 'done' }]);
+      }),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const sessions = {
+      createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => {
+        childSessions.push(id);
+        return makeSession(id, dto.parentSessionId);
+      }),
+    };
+    let runtime: SubagentRuntimeService;
+    const toolDispatch = {
+      dispatch: vi.fn(async (callId: string, toolName: string, args: Record<string, unknown>, ctx: StreamContext, availableTools: ToolMeta[]): Promise<ToolResult> => {
+        if (toolName === 'run_subagent') {
+          const result = await runtime.runSubagent({
+            parentSessionId: ctx.sessionId,
+            parentToolCallId: callId,
+            objective: typeof args['objective'] === 'string' ? args['objective'] : 'nested',
+            availableTools,
+            timeoutMs: 60000,
+            vfsMode: 'isolated',
+            copyOutputs: false,
+            emit: ctx.emit,
+            parentAgentRun: ctx.agentRun,
+          });
+          return { callId, status: 'success', data: result, sessionId: ctx.sessionId, toolName, agentRun: ctx.agentRun };
+        }
+
+        if (toolName === 'run_cli_agent') {
+          return {
+            callId,
+            status: 'success',
+            data: {
+              output: 'kalio-forever',
+              exitCode: 0,
+              durationMs: 25,
+              agentId: args['agentId'],
+              childSessionId: 'cli-child-from-nested',
+            },
+            sessionId: ctx.sessionId,
+            toolName,
+            agentRun: ctx.agentRun,
+          };
+        }
+
+        return { callId, status: 'error', errorCode: 'TOOL_NOT_AVAILABLE', errorMessage: toolName };
+      }),
+      getToolMetas: vi.fn(),
+    };
+    runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      toolDispatch as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      sessions as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-outer',
+      objective: 'outer should delegate to nested CLI',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+      emit: vi.fn(),
+    });
+
+    expect(result.result).toBe('outer saw nested CLI result');
+    expect(sessions.createWithId).toHaveBeenCalledTimes(2);
+    expect(toolDispatch.dispatch).toHaveBeenCalledWith(
+      'nested-cli-call',
+      'run_cli_agent',
+      expect.objectContaining({
+        agentId: 'codex',
+        workdir: 'C:\\Projekty\\kalio-forever',
+      }),
+      expect.objectContaining({ agentRun: expect.objectContaining({ subagentDepth: 2 }) }),
+      expect.arrayContaining([expect.objectContaining({ name: 'run_cli_agent' })]),
+    );
+    const nestedCliDispatch = (toolDispatch.dispatch as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([callId]) => callId === 'nested-cli-call',
+    );
+    expect(nestedCliDispatch?.[4].map((tool: ToolMeta) => tool.name)).not.toContain('run_subagent');
+  });
+
   it('REGRESSION: dispatches a CLI tool call emitted as raw XML from a child subagent', async () => {
     const rawToolCall = [
       '<tool_call>',
@@ -660,6 +791,8 @@ describe('SubagentRuntimeService nested subagents', () => {
         updatedAt: 1,
       }),
       persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantToolCallMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn().mockResolvedValue(undefined),
     };
     const runCliAgentTool = new RunCliAgentTool(
@@ -707,6 +840,16 @@ describe('SubagentRuntimeService nested subagents', () => {
       'cli-child-1',
       expect.any(String),
       expect.stringContaining('"childSessionId":"cli-child-1"'),
+    );
+    expect(cliAgentSessions.persistAssistantMessage).toHaveBeenCalledWith('cli-child-1', 'kalio-forever');
+    expect(cliAgentSessions.persistAssistantToolCallMessage).toHaveBeenCalledWith(
+      'cli-child-1',
+      expect.any(String),
+      expect.objectContaining({
+        agentId: 'gemini',
+        prompt: 'Read package.json only.',
+        workdir: 'C:\\Projekty\\kalio-forever',
+      }),
     );
     expect(sessionManager.saveToolResult).toHaveBeenCalledWith(
       expect.stringMatching(/^sub-/),

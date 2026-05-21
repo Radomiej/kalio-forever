@@ -28,6 +28,9 @@ importers:
       dotenv:
         specifier: ^16.4.5
         version: 16.4.5
+      socket.io-client:
+        specifier: ^4.8.3
+        version: 4.8.3
 
   apps/kalio-api:
     dependencies:

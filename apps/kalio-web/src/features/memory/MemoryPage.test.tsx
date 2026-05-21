@@ -84,11 +84,7 @@ describe('MemoryPage', () => {
     render(<MemoryPage />);
 
     await screen.findByText('Default persona');
-    fireEvent.change(screen.getByTestId('memory-persona-select'), {
-      target: { value: PERSONA.id },
-    });
-
-    expect(await screen.findByTestId('memory-freshness')).toHaveTextContent('Sync:not yet');
+    await waitFor(() => expect(screen.getByTestId('memory-freshness')).toHaveTextContent('load @'));
 
     fireEvent.click(screen.getByTestId('memory-browse-btn'));
     await waitFor(() => expect(screen.getByTestId('memory-freshness')).toHaveTextContent('browse @'));
@@ -116,5 +112,32 @@ describe('MemoryPage', () => {
     });
 
     expect(apiGet).toHaveBeenCalledWith(`/api/memory/${PERSONA.id}`);
+  });
+
+  it('enables actions for the default active persona before explicit selection', async () => {
+    apiGet.mockImplementation((url: string) => {
+      if (url === '/api/personas') {
+        return Promise.resolve({ data: [PERSONA] });
+      }
+
+      if (url === `/api/memory/${PERSONA.id}`) {
+        return Promise.resolve({ data: [] });
+      }
+
+      throw new Error(`unexpected get call: ${url}`);
+    });
+
+    render(<MemoryPage />);
+
+    await screen.findByText('Default persona');
+
+    expect(screen.getByTestId('memory-ingest-btn')).toBeEnabled();
+    expect(screen.getByTestId('memory-browse-btn')).toBeEnabled();
+
+    fireEvent.change(screen.getByTestId('memory-search-input'), {
+      target: { value: 'fox' },
+    });
+
+    expect(screen.getByTestId('memory-search-btn')).toBeEnabled();
   });
 });

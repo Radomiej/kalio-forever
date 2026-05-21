@@ -453,6 +453,141 @@ describe('buildExecutionGraphModel', () => {
     ]));
   });
 
+  it('renders main -> subagent -> nested subagent -> CLI-agent graph chain', () => {
+    const outerSubagentResult = {
+      result: 'Nested delegated to CLI',
+      taskId: 'task-outer',
+      childSessionId: 'sub-outer',
+      parentSessionId: 'session-1',
+      vfsMode: 'isolated' as const,
+      vfsSessionId: 'sub-outer',
+      copiedFiles: [],
+      durationMs: 100,
+    };
+    const nestedSubagentResult = {
+      result: 'CLI reported kalio-forever',
+      taskId: 'task-nested',
+      childSessionId: 'sub-nested',
+      parentSessionId: 'sub-outer',
+      vfsMode: 'isolated' as const,
+      vfsSessionId: 'sub-nested',
+      copiedFiles: [],
+      durationMs: 80,
+    };
+    const cliAgentResult = {
+      childSessionId: 'cli-child-1',
+      parentSessionId: 'sub-nested',
+      agentId: 'codex',
+      workdir: 'C:/repo',
+      status: 'completed',
+      lastPrompt: 'Read package.json',
+      updatedAt: 9,
+      completedAt: 9,
+      lastOutput: 'kalio-forever',
+      output: 'kalio-forever',
+      exitCode: 0,
+      durationMs: 20,
+    };
+    const mainMessages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Delegate deeply', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        toolCalls: [{ id: 'call-sub-outer', name: 'run_subagent', args: { objective: 'outer' } }],
+        createdAt: 2,
+      }),
+      makeMessage({ id: 'tr1', role: 'tool_result', toolCallId: 'call-sub-outer', content: JSON.stringify(outerSubagentResult), createdAt: 3 }),
+    ];
+    const outerMessages: ChatMessage[] = [
+      makeMessage({ id: 'ou1', sessionId: 'sub-outer', role: 'user', content: 'outer', createdAt: 4 }),
+      makeMessage({
+        id: 'oa1',
+        sessionId: 'sub-outer',
+        role: 'assistant',
+        toolCalls: [{ id: 'call-sub-nested', name: 'run_subagent', args: { objective: 'nested' } }],
+        createdAt: 5,
+      }),
+      makeMessage({ id: 'otr1', sessionId: 'sub-outer', role: 'tool_result', toolCallId: 'call-sub-nested', content: JSON.stringify(nestedSubagentResult), createdAt: 6 }),
+    ];
+    const nestedMessages: ChatMessage[] = [
+      makeMessage({ id: 'nu1', sessionId: 'sub-nested', role: 'user', content: 'nested', createdAt: 7 }),
+      makeMessage({
+        id: 'na1',
+        sessionId: 'sub-nested',
+        role: 'assistant',
+        toolCalls: [{ id: 'call-cli', name: 'run_cli_agent', args: { agentId: 'codex', workdir: 'C:/repo', prompt: 'Read package.json' } }],
+        createdAt: 8,
+      }),
+      makeMessage({ id: 'ntr1', sessionId: 'sub-nested', role: 'tool_result', toolCallId: 'call-cli', content: JSON.stringify(cliAgentResult), createdAt: 9 }),
+    ];
+    const cliMessages: ChatMessage[] = [
+      makeMessage({ id: 'cu1', sessionId: 'cli-child-1', role: 'user', content: 'Read package.json', createdAt: 10 }),
+      makeMessage({
+        id: 'ca1',
+        sessionId: 'cli-child-1',
+        role: 'assistant',
+        toolCalls: [{ id: 'cli-run-1', name: 'run_cli_agent', args: { agentId: 'codex', workdir: 'C:/repo', prompt: 'Read package.json' } }],
+        createdAt: 11,
+      }),
+      makeMessage({
+        id: 'ctr1',
+        sessionId: 'cli-child-1',
+        role: 'tool_result',
+        toolCallId: 'cli-run-1',
+        content: JSON.stringify({ output: 'kalio-forever', exitCode: 0, durationMs: 20, agentId: 'codex', childSessionId: 'cli-child-1' }),
+        createdAt: 12,
+      }),
+      makeMessage({ id: 'ca2', sessionId: 'cli-child-1', role: 'assistant', content: 'kalio-forever', createdAt: 13 }),
+    ];
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages: mainMessages,
+      turns: buildTurnsFromHistory(mainMessages, 'session-1'),
+      toolActivities: [],
+      activeAgentLoops: {},
+      sessions: [
+        makeSession(),
+        makeSession({ id: 'sub-outer', title: 'Outer subagent', kind: 'subagent', parentSessionId: 'session-1' }),
+        makeSession({ id: 'sub-nested', title: 'Nested subagent', kind: 'subagent', parentSessionId: 'sub-outer' }),
+        makeSession({ id: 'cli-child-1', title: 'Codex CLI', kind: 'cli-agent', parentSessionId: 'sub-nested' }),
+      ],
+      sessionMessages: {
+        'session-1': mainMessages,
+        'sub-outer': outerMessages,
+        'sub-nested': nestedMessages,
+        'cli-child-1': cliMessages,
+      },
+      sessionAgentTurns: {
+        'session-1': buildTurnsFromHistory(mainMessages, 'session-1'),
+        'sub-outer': buildTurnsFromHistory(outerMessages, 'sub-outer'),
+        'sub-nested': buildTurnsFromHistory(nestedMessages, 'sub-nested'),
+        'cli-child-1': buildTurnsFromHistory(cliMessages, 'cli-child-1'),
+      },
+    });
+
+    expect(model.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'subagent:sub-outer', kind: 'subagent' }),
+      expect.objectContaining({ id: 'subagent:sub-nested', kind: 'subagent' }),
+      expect.objectContaining({
+        id: 'cli-agent:cli-child-1',
+        kind: 'cli-agent',
+        status: 'success',
+        detail: expect.stringContaining('kalio-forever'),
+        payload: expect.objectContaining({
+          transcript: expect.arrayContaining([
+            expect.objectContaining({ role: 'assistant', content: 'kalio-forever' }),
+          ]),
+        }),
+      }),
+    ]));
+    expect(model.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceId: 'tool:call-sub-outer', targetId: 'subagent:sub-outer' }),
+      expect.objectContaining({ sourceId: 'tool:call-sub-nested', targetId: 'subagent:sub-nested' }),
+      expect.objectContaining({ sourceId: 'tool:call-cli', targetId: 'cli-agent:cli-child-1' }),
+      expect.objectContaining({ sourceId: 'cli-agent:cli-child-1', targetId: expect.stringMatching(/^turn:/) }),
+    ]));
+  });
+
   it('marks awaiting-confirmation tools so the graph can render Accept actions', () => {
     const messages: ChatMessage[] = [
       makeMessage({ id: 'u1', role: 'user', content: 'Delete the draft file', createdAt: 1 }),

@@ -293,6 +293,7 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
               }`}
               onClick={() => void selectSession(s.id)}
               data-testid="session-item"
+              data-session-id={s.id}
             >
               {renamingId === s.id ? (
                 <form

@@ -528,6 +528,133 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(screen.getByText('Stop request could not be delivered. Reconnect and retry.')).toBeInTheDocument();
   });
 
+  it('renders a visible main to subagent to nested subagent to CLI-agent chain with CLI output', async () => {
+    const outerSubagentResult = {
+      result: 'Nested delegated to CLI',
+      taskId: 'task-outer',
+      childSessionId: 'sub-outer',
+      parentSessionId: 'session-1',
+      vfsMode: 'isolated',
+      vfsSessionId: 'sub-outer',
+      copiedFiles: [],
+      durationMs: 100,
+    };
+    const nestedSubagentResult = {
+      result: 'CLI reported kalio-forever',
+      taskId: 'task-nested',
+      childSessionId: 'sub-nested',
+      parentSessionId: 'sub-outer',
+      vfsMode: 'isolated',
+      vfsSessionId: 'sub-nested',
+      copiedFiles: [],
+      durationMs: 80,
+    };
+    const cliAgentResult = {
+      childSessionId: 'cli-child-1',
+      parentSessionId: 'sub-nested',
+      agentId: 'codex',
+      workdir: 'C:/Projekty/kalio-forever',
+      status: 'completed',
+      lastPrompt: 'Read package.json',
+      updatedAt: 9,
+      completedAt: 9,
+      lastOutput: 'kalio-forever',
+      output: 'kalio-forever',
+      exitCode: 0,
+      durationMs: 20,
+    };
+    const mainMessages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Delegate deeply', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        toolCalls: [{ id: 'call-sub-outer', name: 'run_subagent', args: { objective: 'outer' } }],
+        createdAt: 2,
+      }),
+      makeMessage({ id: 'tr1', role: 'tool_result', toolCallId: 'call-sub-outer', content: JSON.stringify(outerSubagentResult), createdAt: 3 }),
+    ];
+    const outerMessages = [
+      makeMessage({ id: 'ou1', sessionId: 'sub-outer', role: 'user', content: 'outer', createdAt: 4 }),
+      makeMessage({
+        id: 'oa1',
+        sessionId: 'sub-outer',
+        role: 'assistant',
+        toolCalls: [{ id: 'call-sub-nested', name: 'run_subagent', args: { objective: 'nested' } }],
+        createdAt: 5,
+      }),
+      makeMessage({ id: 'otr1', sessionId: 'sub-outer', role: 'tool_result', toolCallId: 'call-sub-nested', content: JSON.stringify(nestedSubagentResult), createdAt: 6 }),
+    ];
+    const nestedMessages = [
+      makeMessage({ id: 'nu1', sessionId: 'sub-nested', role: 'user', content: 'nested', createdAt: 7 }),
+      makeMessage({
+        id: 'na1',
+        sessionId: 'sub-nested',
+        role: 'assistant',
+        toolCalls: [{ id: 'call-cli', name: 'run_cli_agent', args: { agentId: 'codex', workdir: 'C:/Projekty/kalio-forever', prompt: 'Read package.json' } }],
+        createdAt: 8,
+      }),
+      makeMessage({ id: 'ntr1', sessionId: 'sub-nested', role: 'tool_result', toolCallId: 'call-cli', content: JSON.stringify(cliAgentResult), createdAt: 9 }),
+    ];
+    const cliMessages = [
+      makeMessage({ id: 'cu1', sessionId: 'cli-child-1', role: 'user', content: 'Read package.json', createdAt: 10 }),
+      makeMessage({
+        id: 'ctr1',
+        sessionId: 'cli-child-1',
+        role: 'tool_result',
+        toolCallId: 'cli-run-1',
+        content: JSON.stringify({ output: 'kalio-forever', exitCode: 0, durationMs: 20, agentId: 'codex' }),
+        createdAt: 11,
+      }),
+      makeMessage({ id: 'ca1', sessionId: 'cli-child-1', role: 'assistant', content: 'kalio-forever', createdAt: 12 }),
+    ];
+
+    const mainTurns = buildTurnsFromHistory(mainMessages, 'session-1');
+    const outerTurns = buildTurnsFromHistory(outerMessages, 'sub-outer');
+    const nestedTurns = buildTurnsFromHistory(nestedMessages, 'sub-nested');
+    const cliTurns = buildTurnsFromHistory(cliMessages, 'cli-child-1');
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = mainMessages;
+    sessionState.sessionMessages = {
+      'session-1': mainMessages,
+      'sub-outer': outerMessages,
+      'sub-nested': nestedMessages,
+      'cli-child-1': cliMessages,
+    };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Main', createdAt: 1, updatedAt: 12 },
+      { id: 'sub-outer', personaId: 'default', title: 'Outer subagent', kind: 'subagent', parentSessionId: 'session-1', createdAt: 2, updatedAt: 12 },
+      { id: 'sub-nested', personaId: 'default', title: 'Nested subagent', kind: 'subagent', parentSessionId: 'sub-outer', createdAt: 3, updatedAt: 12 },
+      { id: 'cli-child-1', personaId: 'default', title: 'Codex CLI', kind: 'cli-agent', parentSessionId: 'sub-nested', createdAt: 4, updatedAt: 12 },
+    ];
+    sessionState.agentTurns = mainTurns;
+    sessionState.sessionAgentTurns = {
+      'session-1': mainTurns,
+      'sub-outer': outerTurns,
+      'sub-nested': nestedTurns,
+      'cli-child-1': cliTurns,
+    };
+    agentState.toolActivities = [];
+
+    await renderExecutionGraphView();
+
+    expect(screen.getByTestId('graph-node-subagent:sub-outer')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-subagent:sub-nested')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-cli-agent:cli-child-1')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('graph-node-cli-agent:cli-child-1'));
+
+    const inspector = screen.getByTestId('execution-graph-inspector');
+    expect(inspector).toHaveTextContent('CLI child details');
+    expect(inspector).toHaveTextContent('C:/Projekty/kalio-forever');
+    expect(inspector).toHaveTextContent('kalio-forever');
+    expect(inspector).toHaveTextContent('Transcript tail');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open child chat' }));
+
+    expect(sessionState.setActiveSession).toHaveBeenCalledWith('cli-child-1');
+  });
+
   it('does not render CLI child controls for non-CLI nodes', async () => {
     const messages = [
       makeMessage({ id: 'u1', role: 'user', content: 'List tools', createdAt: 1 }),
