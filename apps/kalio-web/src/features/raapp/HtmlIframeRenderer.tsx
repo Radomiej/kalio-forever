@@ -22,6 +22,7 @@ export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200 }
   const [height, setHeight] = useState(minHeight);
   const [expanded, setExpanded] = useState(false);
   const bridgedHtml = typeof html === 'string' ? injectRaAppResizeBridge(html) : undefined;
+  const hasTrustedInlineHtml = typeof html === 'string';
 
   const isKnownIframeSource = useCallback((source: MessageEvent['source']) => {
     if (!source) return false;
@@ -47,6 +48,7 @@ export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200 }
 
       // Interactive bridge: iframe sends user answer back to chat
       if (data?.type === 'kalio_send_message' && typeof data.content === 'string') {
+        if (!hasTrustedInlineHtml) return;
         console.log('[RAApp:Bridge] received kalio_send_message', JSON.stringify(data.content).slice(0, 80));
         const { activeSessionId, sessions, addMessage } = useSessionStore.getState();
         if (!activeSessionId) return;
@@ -67,7 +69,7 @@ export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200 }
         });
       }
     },
-    [isKnownIframeSource, minHeight],
+    [hasTrustedInlineHtml, isKnownIframeSource, minHeight],
   );
 
   useEffect(() => {
