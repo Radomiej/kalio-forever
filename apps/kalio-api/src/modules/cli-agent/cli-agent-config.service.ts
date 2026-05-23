@@ -36,10 +36,10 @@ export class CLIAgentConfigService {
       enabled: typeof config.enabled === 'boolean' ? config.enabled : DEFAULTS.enabled,
       cliPath: typeof config.cliPath === 'string' ? config.cliPath : DEFAULTS.cliPath,
       timeoutMs: typeof config.timeoutMs === 'number' && Number.isFinite(config.timeoutMs)
-        ? Math.round(config.timeoutMs)
+        ? Math.max(1_000, Math.min(1_200_000, Math.round(config.timeoutMs)))
         : DEFAULTS.timeoutMs,
       maxOutputChars: typeof config.maxOutputChars === 'number' && Number.isFinite(config.maxOutputChars)
-        ? Math.round(config.maxOutputChars)
+        ? Math.max(1_000, Math.round(config.maxOutputChars))
         : DEFAULTS.maxOutputChars,
       model: typeof config.model === 'string' ? config.model.trim() : DEFAULTS.model,
       extraArgs: Array.isArray(config.extraArgs)
@@ -69,7 +69,7 @@ export class CLIAgentConfigService {
 
     const managed = await this.getManagedConfig(agentId);
     if (managed) {
-      this.cache.set(agentId, managed);
+      // Do NOT cache TOML-managed configs — they refresh when KalioConfigService TTL expires.
       return managed;
     }
 

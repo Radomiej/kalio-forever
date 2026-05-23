@@ -67,15 +67,23 @@ function normalizeParsedConfig(raw: unknown, filePath: string): KalioConfig {
 
 @Injectable()
 export class KalioConfigService {
+  private static readonly CACHE_TTL_MS = 30_000;
+
   private cachedDefaultConfig: KalioEffectiveConfig | null = null;
+  private cachedAt: number | null = null;
 
   async getEffectiveConfig(): Promise<KalioEffectiveConfig> {
-    if (this.cachedDefaultConfig) {
+    if (
+      this.cachedDefaultConfig !== null &&
+      this.cachedAt !== null &&
+      Date.now() - this.cachedAt < KalioConfigService.CACHE_TTL_MS
+    ) {
       return this.cachedDefaultConfig;
     }
 
     const effective = await this.loadEffectiveConfig();
     this.cachedDefaultConfig = effective;
+    this.cachedAt = Date.now();
     return effective;
   }
 
@@ -105,6 +113,7 @@ export class KalioConfigService {
 
   invalidateCache(): void {
     this.cachedDefaultConfig = null;
+    this.cachedAt = null;
   }
 
   async getToolTimeoutSettings(): Promise<Partial<ToolTimeoutSettings>> {

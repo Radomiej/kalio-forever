@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import type { ToolTimeoutSettings } from '@kalio/types';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { KalioConfigService } from '../../config/kalio-config.service';
@@ -80,6 +80,18 @@ export class TimeoutSettingsService {
   }
 
   async setTimeoutSettings(settings: Partial<ToolTimeoutSettings>): Promise<void> {
+    if (this.kalioConfig) {
+      const managed = await this.getConfiguredTimeoutSettings();
+      const managedKeys = (Object.keys(settings) as Array<keyof ToolTimeoutSettings>).filter(
+        (key) => settings[key] !== undefined && managed[key] !== undefined,
+      );
+      if (managedKeys.length > 0) {
+        throw new BadRequestException(
+          `Timeout settings managed by .kalio/config.toml cannot be set via the API: ${managedKeys.join(', ')}`,
+        );
+      }
+    }
+
     const updates: Promise<void>[] = [];
 
     if (settings.webSearchTimeoutMs !== undefined) {

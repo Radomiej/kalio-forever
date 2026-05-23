@@ -214,4 +214,45 @@ describe('KalioConfigService', () => {
     });
     await expect(service.getCliAgentConfig('missing')).resolves.toBeNull();
   });
+
+  it('serves getEffectiveConfig from cache within the TTL and re-reads after it expires', async () => {
+    vi.useFakeTimers();
+    try {
+      const service = new KalioConfigService();
+      let callCount = 0;
+      vi.spyOn(service, 'loadEffectiveConfig').mockImplementation(async () => {
+        callCount += 1;
+        return { config: { runtime: { max_tool_attempts: callCount } }, layers: [] };
+      });
+
+      const first = await service.getEffectiveConfig();
+      const second = await service.getEffectiveConfig();
+      expect(callCount).toBe(1);
+      expect(first).toBe(second); // identical reference — from cache
+
+      vi.advanceTimersByTime(31_000); // past the 30 s TTL
+      const third = await service.getEffectiveConfig();
+      expect(callCount).toBe(2);
+      expect(third.config.runtime?.max_tool_attempts).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invalidateCache() forces a fresh read on the next getEffectiveConfig() call', async () => {
+    const service = new KalioConfigService();
+    let callCount = 0;
+    vi.spyOn(service, 'loadEffectiveConfig').mockImplementation(async () => {
+      callCount += 1;
+      return { config: { runtime: { max_tool_attempts: callCount } }, layers: [] };
+    });
+
+    await service.getEffectiveConfig();
+    await service.getEffectiveConfig();
+    expect(callCount).toBe(1);
+
+    service.invalidateCache();
+    await service.getEffectiveConfig();
+    expect(callCount).toBe(2);
+  });
 });

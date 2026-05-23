@@ -97,7 +97,10 @@ function AdapterCard({ info }: AdapterCardProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => null) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? `${res.status}: ${res.statusText}`);
+      }
       const updated = await res.json() as CLIAgentConfig;
       setConfig(updated);
       setDraft({});

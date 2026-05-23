@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DrizzleService } from '../../database/drizzle.service';
 import { AppSettingsService } from '../../database/app-settings.service';
@@ -33,9 +34,9 @@ describe('TimeoutSettingsService', () => {
     service = new TimeoutSettingsService(appSettings);
   });
 
-  function makeKalioConfigMock(overrides: Parameters<KalioConfigService['getToolTimeoutSettings']>[0] extends never
-    ? Awaited<ReturnType<KalioConfigService['getToolTimeoutSettings']>>
-    : never): Pick<KalioConfigService, 'getToolTimeoutSettings'> {
+  function makeKalioConfigMock(
+    overrides: Awaited<ReturnType<KalioConfigService['getToolTimeoutSettings']>>,
+  ): Pick<KalioConfigService, 'getToolTimeoutSettings'> {
     return {
       getToolTimeoutSettings: vi.fn().mockResolvedValue(overrides),
     };
@@ -140,5 +141,49 @@ describe('TimeoutSettingsService', () => {
     await expect(configManagedService.getWebSearchTimeoutMs()).resolves.toBe(240_000);
     await expect(configManagedService.getProviderTimeoutMs(false)).resolves.toBe(31_000);
     expect(appSettings.get).not.toHaveBeenCalled();
+  });
+
+  it('throws BadRequestException when writing a TOML-managed timeout key', async () => {
+    const appSettings = { get: vi.fn().mockResolvedValue(null), set: vi.fn() };
+    const kalioConfig = makeKalioConfigMock({ webSearchTimeoutMs: 240_000 });
+    const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
+
+    await expect(
+      configManagedService.setTimeoutSettings({ webSearchTimeoutMs: 180_000 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      configManagedService.setTimeoutSettings({ webSearchTimeoutMs: 180_000 }),
+    ).rejects.toThrow(/\.kalio\/config\.toml/);
+    expect(appSettings.set).not.toHaveBeenCalled();
+  });
+
+  it('allows writing non-managed keys when TOML manages other keys', async () => {
+    const appSettings = { get: vi.fn().mockResolvedValue(null), set: vi.fn() };
+    const kalioConfig = makeKalioConfigMock({ webSearchTimeoutMs: 240_000 });
+    const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
+
+    await expect(
+      configManagedService.setTimeoutSettings({ providerLocalTimeoutMs: 5_000 }),
+    ).resolves.toBeUndefined();
+    expect(appSettings.set).toHaveBeenCalledWith('tool_timeout_provider_local_ms', '5000');
+  });
+
+  it('throws when ALL requested keys are TOML-managed', async () => {
+    const appSettings = { get: vi.fn().mockResolvedValue(null), set: vi.fn() };
+    const kalioConfig = makeKalioConfigMock({
+      webSearchTimeoutMs: 240_000,
+      providerLocalTimeoutMs: 8_000,
+      providerRemoteTimeoutMs: 31_000,
+    });
+    const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
+
+    await expect(
+      configManagedService.setTimeoutSettings({
+        webSearchTimeoutMs: 120_000,
+        providerLocalTimeoutMs: 3_000,
+        providerRemoteTimeoutMs: 15_000,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(appSettings.set).not.toHaveBeenCalled();
   });
 });

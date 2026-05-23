@@ -59,4 +59,38 @@ describe('CLIAgentConfigService', () => {
       extraArgs: ['--yolo'],
     });
   });
+
+  it('clamps out-of-bounds timeoutMs and maxOutputChars from TOML to safe values', async () => {
+    const kalioConfig = makeKalioConfigMock({ timeoutMs: 100, maxOutputChars: 50 });
+    const service = new CLIAgentConfigService(kalioConfig as never);
+
+    const config = await service.getConfig('codex');
+    expect(config.timeoutMs).toBe(1_000);
+    expect(config.maxOutputChars).toBe(1_000);
+  });
+
+  it('clamps timeoutMs that exceeds the maximum', async () => {
+    const kalioConfig = makeKalioConfigMock({ timeoutMs: 9_000_000 });
+    const service = new CLIAgentConfigService(kalioConfig as never);
+
+    const config = await service.getConfig('codex');
+    expect(config.timeoutMs).toBe(1_200_000);
+  });
+
+  it('always re-reads TOML-managed configs without caching so TTL expiry is respected', async () => {
+    let callCount = 0;
+    const kalioConfig: Pick<KalioConfigService, 'getCliAgentConfig'> = {
+      getCliAgentConfig: vi.fn().mockImplementation(async () => {
+        callCount += 1;
+        return callCount === 1 ? { cliPath: 'codex-v1.cmd' } : { cliPath: 'codex-v2.cmd' };
+      }),
+    };
+    const service = new CLIAgentConfigService(kalioConfig as never);
+
+    const first = await service.getConfig('codex');
+    const second = await service.getConfig('codex');
+    expect(first.cliPath).toBe('codex-v1.cmd');
+    expect(second.cliPath).toBe('codex-v2.cmd');
+    expect(kalioConfig.getCliAgentConfig).toHaveBeenCalledTimes(2);
+  });
 });
