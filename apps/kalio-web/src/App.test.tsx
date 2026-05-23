@@ -190,7 +190,7 @@ describe('App view state persistence', () => {
     const firstRender = render(<App />);
 
     fireEvent.click(screen.getByTestId('landing-to-chat'));
-    fireEvent.click(screen.getByTestId('talk-view-graph'));
+    fireEvent.click(screen.getByTestId('talk-sidebar-graph-entry'));
 
     expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
 

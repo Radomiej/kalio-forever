@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { envSchema } from './config/env.schema';
+import { KalioConfigModule } from './config/kalio-config.module';
 import { DatabaseModule } from './database/database.module';
 import { LLMModule } from './modules/llm/llm.module';
 import { PersonaModule } from './modules/persona/persona.module';
@@ -26,6 +27,7 @@ import { HitlModule } from './modules/hitl/hitl.module';
       validationSchema: envSchema,
       validationOptions: { abortEarly: true },
     }),
+    KalioConfigModule,
     DatabaseModule,
     LLMModule,
     PersonaModule,

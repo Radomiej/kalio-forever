@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import type { ToolTimeoutSettings } from '@kalio/types';
 import { AppSettingsService } from '../../database/app-settings.service';
+import { KalioConfigService } from '../../config/kalio-config.service';
 
 const DEFAULT_TIMEOUT_SETTINGS: ToolTimeoutSettings = {
   webSearchTimeoutMs: 120_000,
@@ -37,18 +38,38 @@ function parseStoredTimeout(key: keyof ToolTimeoutSettings, rawValue: string | n
 
 @Injectable()
 export class TimeoutSettingsService {
-  constructor(private readonly appSettings: AppSettingsService) {}
+  constructor(
+    private readonly appSettings: AppSettingsService,
+    @Optional() private readonly kalioConfig?: KalioConfigService,
+  ) {}
 
-  private async getTimeoutSetting(key: keyof ToolTimeoutSettings): Promise<number> {
+  private async getStoredTimeoutSetting(key: keyof ToolTimeoutSettings): Promise<number> {
     const rawValue = await this.appSettings.get(TIMEOUT_SETTING_KEYS[key]);
     return parseStoredTimeout(key, rawValue);
   }
 
+  private async getConfiguredTimeoutSettings(): Promise<Partial<ToolTimeoutSettings>> {
+    return this.kalioConfig ? this.kalioConfig.getToolTimeoutSettings() : {};
+  }
+
+  private async getTimeoutSetting(
+    key: keyof ToolTimeoutSettings,
+    configuredSettings?: Partial<ToolTimeoutSettings>,
+  ): Promise<number> {
+    const configuredValue = configuredSettings?.[key];
+    if (configuredValue !== undefined) {
+      return normalizeTimeout(key, configuredValue);
+    }
+
+    return this.getStoredTimeoutSetting(key);
+  }
+
   async getTimeoutSettings(): Promise<ToolTimeoutSettings> {
+    const configuredSettings = await this.getConfiguredTimeoutSettings();
     const [webSearchTimeoutMs, providerLocalTimeoutMs, providerRemoteTimeoutMs] = await Promise.all([
-      this.getTimeoutSetting('webSearchTimeoutMs'),
-      this.getTimeoutSetting('providerLocalTimeoutMs'),
-      this.getTimeoutSetting('providerRemoteTimeoutMs'),
+      this.getTimeoutSetting('webSearchTimeoutMs', configuredSettings),
+      this.getTimeoutSetting('providerLocalTimeoutMs', configuredSettings),
+      this.getTimeoutSetting('providerRemoteTimeoutMs', configuredSettings),
     ]);
 
     return {
@@ -92,10 +113,13 @@ export class TimeoutSettingsService {
   }
 
   async getWebSearchTimeoutMs(): Promise<number> {
-    return this.getTimeoutSetting('webSearchTimeoutMs');
+    return this.getTimeoutSetting('webSearchTimeoutMs', await this.getConfiguredTimeoutSettings());
   }
 
   async getProviderTimeoutMs(isLocal: boolean): Promise<number> {
-    return this.getTimeoutSetting(isLocal ? 'providerLocalTimeoutMs' : 'providerRemoteTimeoutMs');
+    return this.getTimeoutSetting(
+      isLocal ? 'providerLocalTimeoutMs' : 'providerRemoteTimeoutMs',
+      await this.getConfiguredTimeoutSettings(),
+    );
   }
 }

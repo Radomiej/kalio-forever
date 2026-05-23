@@ -85,8 +85,31 @@ describe('HtmlIframeRenderer', () => {
     expect(screen.queryByLabelText('Download HTML')).not.toBeInTheDocument();
   });
 
-  it('forwards kalio_send_message from trusted inline html iframes', () => {
-    render(<HtmlIframeRenderer html="<p>Interactive</p>" />);
+  it('blocks kalio_send_message from display inline html iframes', () => {
+    render(<HtmlIframeRenderer html="<p>Display</p>" mode="display" />);
+
+    const iframe = screen.getByTestId('raapp-iframe') as HTMLIFrameElement;
+    const source = iframe.contentWindow;
+
+    if (!source) {
+      throw new Error('Expected iframe contentWindow to be available in test environment');
+    }
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source,
+          data: { type: 'kalio_send_message', content: 'display reply' },
+        }),
+      );
+    });
+
+    expect(addMessage).not.toHaveBeenCalled();
+    expect(eventBus.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('forwards kalio_send_message from interactive inline html iframes', () => {
+    render(<HtmlIframeRenderer html="<p>Interactive</p>" mode="interactive" />);
 
     const iframe = screen.getByTestId('raapp-iframe') as HTMLIFrameElement;
     const source = iframe.contentWindow;
@@ -155,7 +178,7 @@ describe('HtmlIframeRenderer', () => {
   });
 
   it('rejects kalio_send_message from unknown window sources', () => {
-    render(<HtmlIframeRenderer html="<p>Interactive</p>" />);
+    render(<HtmlIframeRenderer html="<p>Interactive</p>" mode="interactive" />);
 
     const fakeSource = { name: 'attacker' } as unknown as Window;
 
@@ -173,7 +196,7 @@ describe('HtmlIframeRenderer', () => {
   });
 
   it('ignores kalio_send_message payloads with non-string content', () => {
-    render(<HtmlIframeRenderer html="<p>Interactive</p>" />);
+    render(<HtmlIframeRenderer html="<p>Interactive</p>" mode="interactive" />);
 
     const iframe = screen.getByTestId('raapp-iframe') as HTMLIFrameElement;
     const source = iframe.contentWindow;
@@ -197,7 +220,7 @@ describe('HtmlIframeRenderer', () => {
 
   it('ignores kalio_send_message when there is no active session', () => {
     sessionState = { ...defaultSessionState, activeSessionId: '' };
-    render(<HtmlIframeRenderer html="<p>Interactive</p>" />);
+    render(<HtmlIframeRenderer html="<p>Interactive</p>" mode="interactive" />);
 
     const iframe = screen.getByTestId('raapp-iframe') as HTMLIFrameElement;
     const source = iframe.contentWindow;
@@ -221,7 +244,7 @@ describe('HtmlIframeRenderer', () => {
 
   it('ignores kalio_send_message when active session cannot be resolved', () => {
     sessionState = { ...defaultSessionState, activeSessionId: 'missing-session' };
-    render(<HtmlIframeRenderer html="<p>Interactive</p>" />);
+    render(<HtmlIframeRenderer html="<p>Interactive</p>" mode="interactive" />);
 
     const iframe = screen.getByTestId('raapp-iframe') as HTMLIFrameElement;
     const source = iframe.contentWindow;

@@ -72,14 +72,6 @@ function resolveCommand(name) {
 
 function getPnpmLauncher() {
   const nodeDir = resolve(process.execPath, '..');
-  const pnpmOnPath = process.platform === 'win32'
-    ? resolveCommand('pnpm.cmd')
-    : resolveCommand('pnpm');
-
-  if (pnpmOnPath) {
-    return { command: pnpmOnPath, argsPrefix: [], shell: false };
-  }
-
   const programFilesNodeDir = resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'nodejs');
   const corepackFromProgramFiles = resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js');
   const corepackFromNodeDir = resolve(nodeDir, 'node_modules/corepack/dist/corepack.js');
@@ -91,6 +83,14 @@ function getPnpmLauncher() {
 
   if (corepackEntrypoint) {
     return { command: process.execPath, argsPrefix: [corepackEntrypoint, 'pnpm'], shell: false };
+  }
+
+  const pnpmOnPath = process.platform === 'win32'
+    ? resolveCommand('pnpm.cmd')
+    : resolveCommand('pnpm');
+
+  if (pnpmOnPath) {
+    return { command: pnpmOnPath, argsPrefix: [], shell: false };
   }
 
   throw new Error('pnpm launcher not found. Re-run setup with pnpm available.');
@@ -195,6 +195,10 @@ function commonEnv(qaEnv) {
 
 async function startStack() {
   await clearIfRunning();
+
+  if (args.includes('--skip-build') && (backendPortArg === 0 || frontendPortArg === 0)) {
+    throw new Error('--skip-build requires explicit --backend-port and --frontend-port so the existing frontend bundle matches the running API URL.');
+  }
 
   const backendPort = backendPortArg === 0 ? await getFreePort() : backendPortArg;
   const frontendPort = frontendPortArg === 0 ? await getFreePort() : frontendPortArg;
@@ -492,7 +496,7 @@ function killProcessTree(pid) {
 
   if (process.platform === 'win32') {
     return new Promise((resolve, reject) => {
-      const killer = spawn('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' });
+      const killer = spawn('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true });
       killer.once('exit', async (code) => {
         if (code !== 0 && isProcessAlive(pid)) {
           reject(new Error(`taskkill failed for pid ${pid} with exit code ${code}`));

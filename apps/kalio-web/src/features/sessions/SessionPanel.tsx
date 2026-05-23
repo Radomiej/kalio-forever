@@ -106,8 +106,7 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
   const [renameValue, setRenameValue] = useState('');
   const renameRef = useRef<HTMLInputElement>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
-  const [personaFilter, setPersonaFilter] = useState<string>('all');
-  const [newPersonaId, setNewPersonaId] = useState<string>('default');
+  const [newPersonaId] = useState<string>('default');
 
   useEffect(() => {
     if (activeSessionId) {
@@ -171,11 +170,7 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
     }
   };
 
-  const visibleSessions = sortSessionsForSidebar(
-    personaFilter === 'all'
-      ? sessions
-      : sessions.filter((s) => s.personaId === personaFilter),
-  );
+  const visibleSessions = sortSessionsForSidebar(sessions);
 
   const getPersonaName = (personaId: string): string | null => {
     const p = personas.find((p) => p.id === personaId);
@@ -230,43 +225,10 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
         </button>
       </div>
 
-      {/* Persona filter pills — always visible, shows all personas */}
-      {personas.length > 0 && (
-        <div className="flex flex-wrap gap-1 px-3 py-1.5 border-b border-base-300/60 bg-base-200/30 shrink-0">
-          <button
-            className={`btn btn-xs rounded-full h-5 min-h-0 px-2 text-[10px] ${
-              personaFilter === 'all' ? 'btn-primary' : 'btn-ghost border border-base-300/60'
-            }`}
-            onClick={() => { setPersonaFilter('all'); setNewPersonaId('default'); }}
-          >
-            All
-          </button>
-          {personas.map((p) => (
-            <button
-              key={p.id}
-              className={`btn btn-xs rounded-full h-5 min-h-0 px-2 text-[10px] ${
-                personaFilter === p.id ? 'btn-primary' : 'btn-ghost border border-base-300/60'
-              }`}
-              onClick={() => { setPersonaFilter(p.id); setNewPersonaId(p.id); }}
-            >
-              {p.name}
-            </button>
-          ))}
-          {personaFilter !== 'all' && (
-            <button
-              className="btn btn-ghost btn-xs p-0 w-4 h-4 min-h-0 ml-auto text-base-content/30 hover:text-base-content/60"
-              onClick={() => { setPersonaFilter('all'); setNewPersonaId('default'); }}
-            >
-              <X size={10} />
-            </button>
-          )}
-        </div>
-      )}
-
       <div className="flex-1 overflow-y-auto">
         {visibleSessions.length === 0 && !loading && (
           <div className="text-xs text-base-content/40 text-center py-6">
-            {personaFilter !== 'all' ? 'No chats for this persona' : 'No conversations yet'}
+            No conversations yet
           </div>
         )}
         {visibleSessions.map((s) => {
@@ -288,7 +250,7 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
           return (
             <div
               key={s.id}
-              className={`group flex items-start gap-1 px-3 py-2 cursor-pointer border-b border-base-300/40 last:border-0 hover:bg-base-200/50 transition-colors ${isChildSession ? 'pl-6 border-l border-l-sky-500/20' : ''} ${
+              className={`group flex items-start gap-2 px-3 py-2.5 cursor-pointer border-b border-base-300/40 last:border-0 hover:bg-base-200/50 transition-colors ${isChildSession ? 'pl-6 border-l border-l-sky-500/20' : ''} ${
                 activeSessionId === s.id ? 'bg-sky-500/10 border-l-2 border-l-sky-500' : ''
               }`}
               onClick={() => void selectSession(s.id)}
@@ -315,51 +277,57 @@ export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
                   </button>
                 </form>
               ) : (
-                <div className="flex flex-1 min-w-0 flex-col gap-0.5">
-                  <div className="flex items-center gap-1 min-w-0">
-                    <span className="flex-1 text-xs truncate">
-                      {s.title || `Session ${s.id.slice(0, 6)}`}
-                    </span>
-                    {sessionKindBadge && (
-                      <span
-                        className={`text-[9px] rounded px-1 py-0.5 leading-none shrink-0 ${sessionKindBadge.className}`}
-                        data-testid={sessionKindBadge.testId}
-                      >
-                        {sessionKindBadge.label}
+                <div className="flex flex-1 min-w-0 items-start gap-2">
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="flex-1 text-xs font-medium truncate">
+                        {s.title || `Session ${s.id.slice(0, 6)}`}
                       </span>
-                    )}
-                    {pendingConfirmations[s.id] && (
-                      <AlertTriangle
-                        size={10}
-                        className="text-warning shrink-0"
-                        aria-label="Awaiting confirmation"
-                        data-testid={`session-pending-confirmation-${s.id}`}
-                      />
-                    )}
+                      {pendingConfirmations[s.id] && (
+                        <AlertTriangle
+                          size={10}
+                          className="text-warning shrink-0"
+                          aria-label="Awaiting confirmation"
+                          data-testid={`session-pending-confirmation-${s.id}`}
+                        />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {sessionKindBadge && (
+                        <span
+                          className={`text-[9px] rounded px-1 py-0.5 leading-none shrink-0 ${sessionKindBadge.className}`}
+                          data-testid={sessionKindBadge.testId}
+                        >
+                          {sessionKindBadge.label}
+                        </span>
+                      )}
+                      {personaName && (
+                        <span className="text-[10px] text-base-content/40 bg-base-300/50 rounded px-1 py-0.5 leading-none truncate max-w-[7rem]">
+                          {personaName}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-base-content/30 leading-none ml-auto shrink-0">
+                        {formatRelativeTime(s.updatedAt)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex w-16 shrink-0 justify-end gap-1 pt-0.5">
                     <button
-                      className="btn btn-ghost btn-xs p-0 w-5 h-5 shrink-0 opacity-0 group-hover:opacity-100 text-base-content/40 hover:text-sky-400"
+                      className="btn btn-ghost btn-xs p-0 w-7 h-7 shrink-0 opacity-0 group-hover:opacity-100 text-base-content/40 hover:text-sky-400"
                       onClick={(e) => startRename(e, s)}
                       title="Rename"
+                      aria-label={`Rename session ${s.title || s.id}`}
                     >
-                      <Pencil size={10} />
+                      <Pencil size={12} />
                     </button>
                     <button
-                      className="btn btn-ghost btn-xs p-0 w-5 h-5 shrink-0 opacity-0 group-hover:opacity-100 text-base-content/40 hover:text-error"
+                      className="btn btn-ghost btn-xs p-0 w-7 h-7 shrink-0 opacity-0 group-hover:opacity-100 text-base-content/40 hover:text-error"
                       onClick={(e) => void deleteSession(e, s.id)}
                       title="Delete"
+                      aria-label={`Delete session ${s.title || s.id}`}
                     >
-                      <Trash2 size={10} />
+                      <Trash2 size={12} />
                     </button>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {personaName && (
-                      <span className="text-[10px] text-base-content/40 bg-base-300/50 rounded px-1 py-0.5 leading-none truncate max-w-[6rem]">
-                        {personaName}
-                      </span>
-                    )}
-                    <span className="text-[10px] text-base-content/30 leading-none ml-auto shrink-0">
-                      {formatRelativeTime(s.updatedAt)}
-                    </span>
                   </div>
                 </div>
               )}

@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CLIAgentConfig } from '@kalio/types';
+import { KalioConfigService } from '../../config/kalio-config.service';
 
 export type { CLIAgentConfig };
 
@@ -28,20 +29,54 @@ export class CLIAgentConfigService {
   private readonly logger = new Logger(CLIAgentConfigService.name);
   private readonly cache = new Map<string, CLIAgentConfig>();
 
+  constructor(private readonly kalioConfig?: KalioConfigService) {}
+
+  private normalizeConfig(config: Partial<CLIAgentConfig>): CLIAgentConfig {
+    return {
+      enabled: typeof config.enabled === 'boolean' ? config.enabled : DEFAULTS.enabled,
+      cliPath: typeof config.cliPath === 'string' ? config.cliPath : DEFAULTS.cliPath,
+      timeoutMs: typeof config.timeoutMs === 'number' && Number.isFinite(config.timeoutMs)
+        ? Math.round(config.timeoutMs)
+        : DEFAULTS.timeoutMs,
+      maxOutputChars: typeof config.maxOutputChars === 'number' && Number.isFinite(config.maxOutputChars)
+        ? Math.round(config.maxOutputChars)
+        : DEFAULTS.maxOutputChars,
+      model: typeof config.model === 'string' ? config.model.trim() : DEFAULTS.model,
+      extraArgs: Array.isArray(config.extraArgs)
+        ? config.extraArgs.filter((value): value is string => typeof value === 'string')
+        : DEFAULTS.extraArgs,
+    };
+  }
+
+  private async getManagedConfig(agentId: string): Promise<CLIAgentConfig | null> {
+    const config = await this.kalioConfig?.getCliAgentConfig(agentId);
+    return config ? this.normalizeConfig(config) : null;
+  }
+
+  private async getStoredConfig(agentId: string): Promise<CLIAgentConfig | null> {
+    try {
+      const raw = await readFile(configPath(agentId), 'utf8');
+      const parsed = JSON.parse(raw) as Partial<CLIAgentConfig>;
+      return this.normalizeConfig(parsed);
+    } catch {
+      return null;
+    }
+  }
+
   async getConfig(agentId: string): Promise<CLIAgentConfig> {
     const cached = this.cache.get(agentId);
     if (cached) return cached;
 
-    try {
-      const raw = await readFile(configPath(agentId), 'utf8');
-      const parsed = JSON.parse(raw) as Partial<CLIAgentConfig>;
-      const merged: CLIAgentConfig = { ...DEFAULTS, ...parsed };
-      this.cache.set(agentId, merged);
-      return merged;
-    } catch {
-      // File does not exist or is unreadable — return defaults (do NOT create file here)
-      return { ...DEFAULTS };
+    const managed = await this.getManagedConfig(agentId);
+    if (managed) {
+      this.cache.set(agentId, managed);
+      return managed;
     }
+
+    const stored = await this.getStoredConfig(agentId);
+    const resolved = stored ?? { ...DEFAULTS };
+    this.cache.set(agentId, resolved);
+    return resolved;
   }
 
   async saveConfig(agentId: string, config: Partial<CLIAgentConfig>): Promise<CLIAgentConfig> {
@@ -62,12 +97,12 @@ export class CLIAgentConfigService {
       throw new BadRequestException('extraArgs must be an array');
     }
 
-    const existing = await this.getConfig(agentId);
-    const merged: CLIAgentConfig = {
-      ...existing,
-      ...config,
-      model: config.model !== undefined ? config.model.trim() : existing.model,
-    };
+    if (await this.getManagedConfig(agentId)) {
+      throw new BadRequestException(`CLI agent ${agentId} is managed by .kalio/config.toml`);
+    }
+
+    const existing = this.cache.get(agentId) ?? await this.getStoredConfig(agentId) ?? { ...DEFAULTS };
+    const merged = this.normalizeConfig({ ...existing, ...config });
 
     await mkdir(configDir(), { recursive: true });
     await writeFile(configPath(agentId), JSON.stringify(merged, null, 2), 'utf8');

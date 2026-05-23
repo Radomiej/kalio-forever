@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as TOML from '@iarna/toml';
+import type { CLIAgentConfig, ToolTimeoutSettings } from '@kalio/types';
 import { access, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir } from 'node:os';
@@ -104,6 +105,41 @@ export class KalioConfigService {
 
   invalidateCache(): void {
     this.cachedDefaultConfig = null;
+  }
+
+  async getToolTimeoutSettings(): Promise<Partial<ToolTimeoutSettings>> {
+    const { config } = await this.getEffectiveConfig();
+    const toolTimeouts = config.tool_timeouts;
+    if (!toolTimeouts) {
+      return {};
+    }
+
+    const result: Partial<ToolTimeoutSettings> = {};
+
+    if (typeof toolTimeouts.web_search_timeout_ms === 'number' && Number.isFinite(toolTimeouts.web_search_timeout_ms)) {
+      result.webSearchTimeoutMs = Math.round(toolTimeouts.web_search_timeout_ms);
+    }
+
+    if (
+      typeof toolTimeouts.provider_local_timeout_ms === 'number'
+      && Number.isFinite(toolTimeouts.provider_local_timeout_ms)
+    ) {
+      result.providerLocalTimeoutMs = Math.round(toolTimeouts.provider_local_timeout_ms);
+    }
+
+    if (
+      typeof toolTimeouts.provider_remote_timeout_ms === 'number'
+      && Number.isFinite(toolTimeouts.provider_remote_timeout_ms)
+    ) {
+      result.providerRemoteTimeoutMs = Math.round(toolTimeouts.provider_remote_timeout_ms);
+    }
+
+    return result;
+  }
+
+  async getCliAgentConfig(agentId: string): Promise<Partial<CLIAgentConfig> | null> {
+    const { config } = await this.getEffectiveConfig();
+    return config.cli_agents?.[agentId] ?? null;
   }
 
   private async readConfigFile(filePath: string): Promise<KalioConfig | null> {

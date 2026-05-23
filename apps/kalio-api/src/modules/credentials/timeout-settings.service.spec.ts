@@ -4,6 +4,7 @@ import { AppSettingsService } from '../../database/app-settings.service';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import * as schema from '../../database/schema';
+import type { KalioConfigService } from '../../config/kalio-config.service';
 import { TimeoutSettingsService } from './timeout-settings.service';
 
 function makeTestDrizzle(): DrizzleService {
@@ -31,6 +32,14 @@ describe('TimeoutSettingsService', () => {
     const appSettings = new AppSettingsService(drizzleService);
     service = new TimeoutSettingsService(appSettings);
   });
+
+  function makeKalioConfigMock(overrides: Parameters<KalioConfigService['getToolTimeoutSettings']>[0] extends never
+    ? Awaited<ReturnType<KalioConfigService['getToolTimeoutSettings']>>
+    : never): Pick<KalioConfigService, 'getToolTimeoutSettings'> {
+    return {
+      getToolTimeoutSettings: vi.fn().mockResolvedValue(overrides),
+    };
+  }
 
   it('returns default timeout settings when nothing is persisted', async () => {
     await expect(service.getTimeoutSettings()).resolves.toEqual({
@@ -85,6 +94,26 @@ describe('TimeoutSettingsService', () => {
     });
   });
 
+  it('prefers TOML-managed timeout settings over persisted values', async () => {
+    const appSettings = {
+      get: vi.fn(async (key: string) => (key === 'tool_timeout_provider_remote_ms' ? '22000' : '180000')),
+      set: vi.fn(),
+    };
+    const kalioConfig = makeKalioConfigMock({
+      webSearchTimeoutMs: 250_000,
+      providerLocalTimeoutMs: 8_000,
+    });
+    const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
+
+    await expect(configManagedService.getTimeoutSettings()).resolves.toEqual({
+      webSearchTimeoutMs: 250_000,
+      providerLocalTimeoutMs: 8_000,
+      providerRemoteTimeoutMs: 22_000,
+    });
+    expect(appSettings.get).toHaveBeenCalledTimes(1);
+    expect(appSettings.get).toHaveBeenCalledWith('tool_timeout_provider_remote_ms');
+  });
+
   it('reads only the web search timeout key for getWebSearchTimeoutMs', async () => {
     const appSettings = {
       get: vi.fn().mockResolvedValue('180000'),
@@ -95,5 +124,21 @@ describe('TimeoutSettingsService', () => {
     await expect(directGetterService.getWebSearchTimeoutMs()).resolves.toBe(180_000);
     expect(appSettings.get).toHaveBeenCalledTimes(1);
     expect(appSettings.get).toHaveBeenCalledWith('tool_timeout_web_search_ms');
+  });
+
+  it('uses TOML-managed values for direct timeout helpers', async () => {
+    const appSettings = {
+      get: vi.fn().mockResolvedValue('180000'),
+      set: vi.fn(),
+    };
+    const kalioConfig = makeKalioConfigMock({
+      webSearchTimeoutMs: 240_000,
+      providerRemoteTimeoutMs: 31_000,
+    });
+    const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
+
+    await expect(configManagedService.getWebSearchTimeoutMs()).resolves.toBe(240_000);
+    await expect(configManagedService.getProviderTimeoutMs(false)).resolves.toBe(31_000);
+    expect(appSettings.get).not.toHaveBeenCalled();
   });
 });

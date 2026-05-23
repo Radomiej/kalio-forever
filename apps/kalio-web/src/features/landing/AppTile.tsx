@@ -67,16 +67,16 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
         </span>
       )}
 
-      {/* Generate / Remove icon buttons — top-right, visible on hover */}
+      {/* Generate / Remove icon buttons — top-right, visible on hover/focus */}
       <div
-        className="absolute top-1.5 right-1.5 z-20 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-2 right-2 z-20 flex gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
         role="group"
         aria-label="Tile actions"
       >
         {isGenerating ? (
-          <span className="p-1 rounded bg-black/40 text-white">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-black/45 text-white">
             <Loader2 size={14} className="animate-spin" />
           </span>
         ) : (
@@ -84,8 +84,9 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
             {onGenerateIcon && (
               <button
                 type="button"
-                className="p-1 rounded bg-black/40 text-white hover:bg-black/60 cursor-pointer"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-black/45 text-white hover:bg-black/65 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80 cursor-pointer"
                 onClick={(e) => { e.stopPropagation(); onGenerateIcon(); }}
+                aria-label={`Generate icon for ${name}`}
                 title="Generate icon"
                 data-testid={`tile-gen-icon-${id}`}
               >
@@ -95,8 +96,9 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
             {iconUrl && onRemoveIcon && (
               <button
                 type="button"
-                className="p-1 rounded bg-black/40 text-white hover:bg-red-600/80 cursor-pointer"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-black/45 text-white hover:bg-red-600/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80 cursor-pointer"
                 onClick={(e) => { e.stopPropagation(); onRemoveIcon(); }}
+                aria-label={`Remove icon from ${name}`}
                 title="Remove icon"
                 data-testid={`tile-rm-icon-${id}`}
               >

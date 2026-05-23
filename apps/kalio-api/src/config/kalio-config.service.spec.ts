@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -171,5 +171,47 @@ describe('KalioConfigService', () => {
     await expect(service.loadEffectiveConfig({ cwd: tempRoot, homeDir })).rejects.toThrow(
       `Failed to parse Kalio config at ${configPath}`,
     );
+  });
+
+  it('maps and rounds TOML tool timeout settings while ignoring invalid values', async () => {
+    const service = new KalioConfigService();
+    vi.spyOn(service, 'getEffectiveConfig').mockResolvedValue({
+      config: {
+        tool_timeouts: {
+          web_search_timeout_ms: 2000.6,
+          provider_local_timeout_ms: Number.POSITIVE_INFINITY,
+          provider_remote_timeout_ms: 9500.4,
+        },
+      },
+      layers: [],
+    });
+
+    await expect(service.getToolTimeoutSettings()).resolves.toStrictEqual({
+      webSearchTimeoutMs: 2001,
+      providerRemoteTimeoutMs: 9500,
+    });
+  });
+
+  it('returns CLI agent config for known agent and null for missing agent', async () => {
+    const service = new KalioConfigService();
+    vi.spyOn(service, 'getEffectiveConfig').mockResolvedValue({
+      config: {
+        cli_agents: {
+          codex: {
+            enabled: true,
+            cliPath: 'codex',
+            timeoutMs: 60000,
+          },
+        },
+      },
+      layers: [],
+    });
+
+    await expect(service.getCliAgentConfig('codex')).resolves.toStrictEqual({
+      enabled: true,
+      cliPath: 'codex',
+      timeoutMs: 60000,
+    });
+    await expect(service.getCliAgentConfig('missing')).resolves.toBeNull();
   });
 });

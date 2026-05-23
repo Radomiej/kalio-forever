@@ -120,7 +120,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
     const html = injectEngineCDN(content, (block as { engine?: string }).engine);
     return (
       <>
-        <HtmlIframeRenderer html={html} title="RA-App" />
+        <HtmlIframeRenderer html={html} title="RA-App" mode={block.mode} />
         {nativeResultsPanel}
         {hitlOverlay}
       </>
@@ -156,7 +156,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
     if (isHtmlString(content)) {
       return (
         <>
-          <HtmlIframeRenderer html={content} title="RA-App" />
+          <HtmlIframeRenderer html={content} title="RA-App" mode={block.mode} />
           {nativeResultsPanel}
           {hitlOverlay}
         </>
@@ -168,7 +168,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
       if (sniffed) {
         return (
           <>
-            <HtmlIframeRenderer html={sniffed} title="RA-App" />
+            <HtmlIframeRenderer html={sniffed} title="RA-App" mode={block.mode} />
             {nativeResultsPanel}
             {hitlOverlay}
           </>

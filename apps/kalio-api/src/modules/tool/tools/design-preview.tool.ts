@@ -11,13 +11,13 @@ function getFilePathArg(args: ToolCallRequest['args']): string {
   return rawFilePath.trim();
 }
 
-function getModeArg(args: ToolCallRequest['args']): 'display' | 'interactive' {
+function getModeArg(args: ToolCallRequest['args']): 'display' {
   const rawMode = args['mode'];
   if (rawMode === undefined) return 'display';
-  if (rawMode === 'display' || rawMode === 'interactive') {
+  if (rawMode === 'display') {
     return rawMode;
   }
-  throw new Error('INVALID_MODE: mode must be "display" or "interactive"');
+  throw new Error('INVALID_MODE: design_preview currently supports only "display" mode');
 }
 
 @Injectable()
@@ -31,8 +31,8 @@ function getModeArg(args: ToolCallRequest['args']): 'display' | 'interactive' {
       filePath: { type: 'string', description: 'Path to an .html file inside the session VFS' },
       mode: {
         type: 'string',
-        enum: ['display', 'interactive'],
-        description: 'Preview mode for the inline RA-App',
+        enum: ['display'],
+        description: 'Preview mode for the VFS-backed inline RA-App. Interactive mode is not supported for VFS previews.',
       },
     },
   },
@@ -43,7 +43,7 @@ export class DesignPreviewTool {
   async execute(request: ToolCallRequest): Promise<{
     status: 'ready';
     type: 'html';
-    mode: 'display' | 'interactive';
+    mode: 'display';
     content: string;
     vfsPath: string;
   } | {

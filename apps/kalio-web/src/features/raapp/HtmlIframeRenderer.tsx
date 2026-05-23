@@ -3,7 +3,7 @@ import { Download, Expand, X } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
-import type { ChatMessage } from '@kalio/types';
+import type { ChatMessage, RAAppMode } from '@kalio/types';
 import { injectRaAppResizeBridge } from './raapp-preview-bridge';
 
 interface HtmlIframeRendererProps {
@@ -11,18 +11,19 @@ interface HtmlIframeRendererProps {
   src?: string;
   title?: string;
   minHeight?: number;
+  mode?: RAAppMode;
 }
 
 const SANDBOX_ATTR = 'allow-scripts allow-modals';
 const MAX_INLINE_PREVIEW_HEIGHT = 1200;
 
-export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200 }: HtmlIframeRendererProps) {
+export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200, mode = 'display' }: HtmlIframeRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const fullscreenIframeRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(minHeight);
   const [expanded, setExpanded] = useState(false);
   const bridgedHtml = typeof html === 'string' ? injectRaAppResizeBridge(html) : undefined;
-  const hasTrustedInlineHtml = typeof html === 'string';
+  const canSendChatMessages = typeof html === 'string' && mode === 'interactive';
 
   const isKnownIframeSource = useCallback((source: MessageEvent['source']) => {
     if (!source) return false;
@@ -48,7 +49,7 @@ export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200 }
 
       // Interactive bridge: iframe sends user answer back to chat
       if (data?.type === 'kalio_send_message' && typeof data.content === 'string') {
-        if (!hasTrustedInlineHtml) return;
+        if (!canSendChatMessages) return;
         console.log('[RAApp:Bridge] received kalio_send_message', JSON.stringify(data.content).slice(0, 80));
         const { activeSessionId, sessions, addMessage } = useSessionStore.getState();
         if (!activeSessionId) return;
@@ -69,7 +70,7 @@ export function HtmlIframeRenderer({ html, src, title = 'App', minHeight = 200 }
         });
       }
     },
-    [hasTrustedInlineHtml, isKnownIframeSource, minHeight],
+    [canSendChatMessages, isKnownIframeSource, minHeight],
   );
 
   useEffect(() => {

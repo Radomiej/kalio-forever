@@ -228,26 +228,21 @@ describe('SessionPanel', () => {
     ]);
   });
 
-  it('filter button toggles filter row', async () => {
+  it('does not render persona filter chips in the conversation list', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
 
-    // Filter row is always visible when personas are available
-    await waitFor(() => expect(screen.getByText('All')).toBeTruthy());
-    expect(screen.getAllByText('Dev Assistant').length).toBeGreaterThanOrEqual(1);
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/api/personas'));
+    expect(screen.queryByRole('button', { name: 'All' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dev Assistant' })).toBeNull();
   });
 
-  it('persona filter chips filter sessions', async () => {
+  it('keeps all sessions visible regardless of persona', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
 
-    await waitFor(() => expect(screen.getAllByText('Dev Assistant').length).toBeGreaterThanOrEqual(1));
-
-    // Click the filter chip button (not the persona badge span)
-    fireEvent.click(screen.getByRole('button', { name: 'Dev Assistant' }));
-    // Only s1 (personaId=p1) should show; s2 (personaId=default) hidden
     expect(screen.getByText('Chat about React')).toBeTruthy();
-    expect(screen.queryByText('New Chat')).toBeNull();
+    expect(screen.getByText('New Chat')).toBeTruthy();
   });
 
   it('new session button creates session with title "New Chat"', async () => {

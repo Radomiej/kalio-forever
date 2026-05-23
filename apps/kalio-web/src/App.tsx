@@ -276,15 +276,14 @@ export function App() {
                   </button>
                 ))}
               </div>
-              <div className="border-b border-base-300 bg-base-100/80 px-3 py-3 shrink-0">
-                <p className="text-[10px] uppercase tracking-[0.24em] text-base-content/40">View</p>
-                <div className="mt-2 grid grid-cols-2 gap-2" data-testid="talk-sidebar-view-switcher">
+              <div className="border-b border-base-300 bg-base-100/80 px-3 py-2.5 shrink-0">
+                <div className="grid grid-cols-2 gap-1.5" data-testid="talk-sidebar-view-switcher">
                   {TALK_VIEW_OPTIONS.map((view) => (
                     <button
                       key={view.id}
                       type="button"
                       data-testid={`talk-sidebar-${view.id}-entry`}
-                      className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                         talkView === view.id
                           ? 'border-sky-500 bg-sky-500/14 text-sky-300 shadow-[0_0_0_1px_rgba(14,165,233,0.15)]'
                           : 'border-base-300 bg-base-100 text-base-content/65 hover:text-base-content hover:border-base-content/20'
@@ -308,27 +307,14 @@ export function App() {
             <div className="flex-1 min-w-0 flex overflow-hidden">
               <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
                 <div className="border-b border-base-300 bg-base-100/90 backdrop-blur supports-[backdrop-filter]:bg-base-100/75 px-4 py-2 flex items-center justify-between gap-4 shrink-0">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <div>
-                      <p className="text-[10px] uppercase tracking-[0.24em] text-base-content/40">Talk view</p>
-                    </div>
-                    {TALK_VIEW_OPTIONS.map((view) => (
-                      <button
-                        key={view.id}
-                        type="button"
-                        data-testid={`talk-view-${view.id}`}
-                        className={`rounded-full min-w-[8.5rem] px-4 py-2 text-sm font-medium border transition-colors ${
-                          talkView === view.id
-                            ? 'border-sky-500 bg-sky-500/14 text-sky-300 shadow-[0_0_0_1px_rgba(14,165,233,0.15)]'
-                            : 'border-base-300 text-base-content/65 hover:text-base-content hover:border-base-content/20 bg-base-100/55'
-                        }`}
-                        onClick={() => setTalkView(view.id)}
-                      >
-                        {view.label}
-                      </button>
-                    ))}
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-base-content/75 truncate">
+                      {talkView === 'conversation' ? 'Conversation' : 'Execution graph'}
+                    </p>
+                    <p className="text-[10px] text-base-content/40 truncate">
+                      {talkView === 'conversation' ? 'Live chat, files, and canvas' : 'Agent turns, tools, and child runs'}
+                    </p>
                   </div>
-                  <p className="text-xs text-base-content/45">Conversation and graph are two views of the same Talk state, so live sockets and stream state remain intact.</p>
                 </div>
 
                 <div className="flex-1 overflow-hidden min-h-0">
