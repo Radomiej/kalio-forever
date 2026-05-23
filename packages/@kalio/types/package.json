@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --build",
     "test": "vitest run",
-    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+    "clean": "node ../../../scripts/clean-paths.mjs dist tsconfig.tsbuildinfo"
   },
   "devDependencies": {
     "typescript": "~5.9.3",

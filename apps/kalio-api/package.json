@@ -14,9 +14,10 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "clean": "rm -rf dist"
+    "clean": "node ../../scripts/clean-paths.mjs dist"
   },
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
     "@kalio/types": "workspace:*",
     "@lydell/node-pty": "1.2.0-beta.12",
     "@modelcontextprotocol/sdk": "^1.28.0",

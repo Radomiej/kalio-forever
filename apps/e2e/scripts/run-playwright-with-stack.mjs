@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { once } from 'node:events';
+import { existsSync, mkdirSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,11 +11,62 @@ const repoRoot = resolve(e2eDir, '../..');
 const envFilePath = resolve(repoRoot, '.env.test');
 const playwrightCli = resolve(e2eDir, 'node_modules/@playwright/test/cli.js');
 
+const legacyPlaywrightPorts = new Set(['3016', '5188', '3316', '5288']);
+const allowLegacyPlaywrightPorts = process.env.KALIO_PLAYWRIGHT_ALLOW_LEGACY_PORTS === '1';
+
+const explicitEnvBeforeFile = new Set(Object.keys(process.env ?? {}));
+const explicitPlaywrightBase = process.env.PLAYWRIGHT_BASE_URL;
+const explicitPlaywrightApi = process.env.PLAYWRIGHT_API_ORIGIN;
+const explicitDatabasePath = process.env.DATABASE_PATH;
+const explicitWorkspaceRoot = process.env.WORKSPACE_ROOT;
+
 if (existsSync(envFilePath)) {
   process.loadEnvFile?.(envFilePath);
 }
 
+function shouldIgnoreLegacyPlaywrightUrl(urlLike, wasExplicitlySet, key) {
+  if (!urlLike) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(urlLike);
+    if (legacyPlaywrightPorts.has(parsed.port)) {
+      if (allowLegacyPlaywrightPorts) {
+        return false;
+      }
+      if (wasExplicitlySet) {
+        throw new Error(`[playwright-runner] ${key} cannot use legacy port ${parsed.port}. Set KALIO_PLAYWRIGHT_ALLOW_LEGACY_PORTS=1 only for manual debugging.`);
+      }
+      console.log(`[playwright-runner] ignoring ${key} from .env.test because it uses legacy port ${parsed.port}`);
+      return true;
+    }
+  } catch (error) {
+    console.log(`[playwright-runner] ${key} in .env.test is not a valid URL, ignoring and allocating free port`, error instanceof Error ? error.message : error);
+  }
+
+  return false;
+}
+
 const forwardedArgs = process.argv.slice(2);
+
+async function getFreePort() {
+  const server = createServer();
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+
+  if (address === null || typeof address === 'string') {
+    server.close();
+    await once(server, 'close');
+    throw new Error('Could not resolve a free TCP port');
+  }
+
+  const { port } = address;
+  server.close();
+  await once(server, 'close');
+  return port;
+}
 
 function normalizedWindowsEnv(baseEnv) {
   if (process.platform !== 'win32') {
@@ -71,10 +124,43 @@ function run(command, args, options) {
   });
 }
 
+const playwrightBaseWasExplicit = explicitEnvBeforeFile.has('PLAYWRIGHT_BASE_URL') || explicitPlaywrightBase !== undefined;
+const playwrightApiWasExplicit = explicitEnvBeforeFile.has('PLAYWRIGHT_API_ORIGIN') || explicitPlaywrightApi !== undefined;
+const databasePathWasExplicit = explicitEnvBeforeFile.has('DATABASE_PATH') || explicitDatabasePath !== undefined;
+const workspaceRootWasExplicit = explicitEnvBeforeFile.has('WORKSPACE_ROOT') || explicitWorkspaceRoot !== undefined;
+const resolvedPlaywrightBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
+const resolvedPlaywrightApiOrigin = process.env.PLAYWRIGHT_API_ORIGIN;
+if (shouldIgnoreLegacyPlaywrightUrl(resolvedPlaywrightBaseUrl, playwrightBaseWasExplicit, 'PLAYWRIGHT_BASE_URL')) {
+  delete process.env.PLAYWRIGHT_BASE_URL;
+}
+if (shouldIgnoreLegacyPlaywrightUrl(resolvedPlaywrightApiOrigin, playwrightApiWasExplicit, 'PLAYWRIGHT_API_ORIGIN')) {
+  delete process.env.PLAYWRIGHT_API_ORIGIN;
+}
+if (!databasePathWasExplicit) {
+  delete process.env.DATABASE_PATH;
+}
+if (!workspaceRootWasExplicit) {
+  delete process.env.WORKSPACE_ROOT;
+}
+
+const playwrightBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${await getFreePort()}`;
+const playwrightApiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? `http://127.0.0.1:${await getFreePort()}`;
+const runId = `${Date.now()}-${process.pid}`;
+const playwrightStateDir = resolve(repoRoot, 'data/playwright-stack', runId);
+const playwrightDatabasePath = process.env.DATABASE_PATH ?? resolve(playwrightStateDir, 'kalio-e2e.db');
+const playwrightWorkspaceRoot = process.env.WORKSPACE_ROOT ?? resolve(playwrightStateDir, 'workspaces');
+mkdirSync(playwrightStateDir, { recursive: true });
 const stackEnv = normalizedWindowsEnv(process.env);
 const stack = spawn(process.execPath, ['./scripts/start-playwright-stack.mjs'], {
   cwd: e2eDir,
-  env: stackEnv,
+  env: {
+    ...stackEnv,
+    PLAYWRIGHT_BASE_URL: playwrightBaseUrl,
+    PLAYWRIGHT_API_ORIGIN: playwrightApiOrigin,
+    KALIO_PLAYWRIGHT_STATE_DIR: playwrightStateDir,
+    DATABASE_PATH: playwrightDatabasePath,
+    WORKSPACE_ROOT: playwrightWorkspaceRoot,
+  },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
@@ -157,6 +243,11 @@ try {
   const playwrightEnv = normalizedWindowsEnv({
     ...process.env,
     KALIO_PLAYWRIGHT_EXTERNAL_SERVER: '1',
+    PLAYWRIGHT_BASE_URL: playwrightBaseUrl,
+    PLAYWRIGHT_API_ORIGIN: playwrightApiOrigin,
+    TEST_API_URL: `${playwrightApiOrigin}/api`,
+    DATABASE_PATH: playwrightDatabasePath,
+    WORKSPACE_ROOT: playwrightWorkspaceRoot,
   });
   const result = await run(process.execPath, [playwrightCli, 'test', ...forwardedArgs], {
     cwd: e2eDir,

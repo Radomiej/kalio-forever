@@ -4,15 +4,21 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "powershell -ExecutionPolicy Bypass -File start-dev.ps1",
-    "dev:e2e": "powershell -ExecutionPolicy Bypass -File start-dev.ps1 -UseMockLLM -BackendPort 3316 -FrontendPort 5288",
-    "build": "node scripts/run-turbo.mjs run build",
-    "typecheck": "node scripts/run-turbo.mjs run typecheck",
-    "lint": "node scripts/run-turbo.mjs run lint",
+    "dev:e2e": "corepack pnpm --filter @kalio/e2e run test:e2e",
+    "build": "corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run build",
+    "typecheck": "corepack pnpm --filter @kalio/types run build && corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run typecheck",
+    "lint": "corepack pnpm -r --filter kalio-api --filter kalio-web run lint",
     "test": "node scripts/run-test-gate.mjs",
-    "test:e2e": "node scripts/run-turbo.mjs run test:e2e",
-    "clean": "node scripts/run-turbo.mjs run clean",
+    "test:e2e": "corepack pnpm --filter @kalio/e2e run test:e2e",
+    "preflight": "node scripts/repo-preflight.mjs",
+    "repair": "node scripts/repo-preflight.mjs --repair",
+    "clean": "corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run clean",
     "audit": "node scripts/code-audit/run-audit.mjs",
-    "audit:report": "node scripts/code-audit/run-audit.mjs && node scripts/code-audit/aggregate.mjs"
+    "audit:report": "node scripts/code-audit/run-audit.mjs && node scripts/code-audit/aggregate.mjs",
+    "stack:start": "node scripts/stack-manager.mjs start",
+    "stack:status": "node scripts/stack-manager.mjs status",
+    "stack:stop": "node scripts/stack-manager.mjs stop",
+    "llm:probe": "node scripts/probe-llm.mjs"
   },
   "devDependencies": {
     "turbo": "^2.4.0",

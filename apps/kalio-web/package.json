@@ -12,7 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
-    "clean": "rm -rf dist"
+    "clean": "node ../../scripts/clean-paths.mjs dist"
   },
   "dependencies": {
     "@kalio/sdk": "workspace:*",

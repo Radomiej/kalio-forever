@@ -186,11 +186,11 @@ CREDENTIALS_MASTER_KEY=replace-with-a-long-random-secret   # required in product
 ### 3. Run
 
 ```bash
-# Windows (starts both API :3016 and Web :5188)
-.\start-dev.ps1
+# Preferred (all platforms, uses start-dev.ps1 on Windows)
+pnpm dev
 
 # macOS / Linux
-cd apps/kalio-api && pnpm start:dev &
+cd apps/kalio-api && pnpm dev &
 cd apps/kalio-web && pnpm dev
 ```
 
@@ -198,7 +198,7 @@ Open **http://localhost:5188** and start chatting.
 
 ### 4. What success looks like
 
-After `./start-dev.ps1` boots cleanly you should have:
+After `pnpm dev` (or `./start-dev.ps1`) boots cleanly you should have:
 
 - API listening on `http://localhost:3016`
 - Web UI ready on `http://localhost:5188`
@@ -216,7 +216,7 @@ pnpm test:e2e       # end-to-end (Playwright — servers must be running)
 
 ## Daily Use
 
-1. Start the stack with `./start-dev.ps1`.
+1. Start the stack with `pnpm dev` (or `./start-dev.ps1` on Windows).
 2. Open `http://localhost:5188`.
 3. Go to Settings once and either:
   use `mock` for offline development, or

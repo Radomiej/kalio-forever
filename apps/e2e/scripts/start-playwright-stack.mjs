@@ -8,16 +8,52 @@ const repoRoot = resolve(scriptDir, '../../..');
 const apiDir = resolve(repoRoot, 'apps/kalio-api');
 const e2eStateDir = process.env.KALIO_PLAYWRIGHT_STATE_DIR ?? resolve(repoRoot, 'data/playwright-stack');
 const envFilePath = resolve(repoRoot, '.env.test');
+const legacyPlaywrightPorts = new Set(['3016', '5188', '3316', '5288']);
+const allowLegacyPlaywrightPorts = process.env.KALIO_PLAYWRIGHT_ALLOW_LEGACY_PORTS === '1';
+const envKeysBeforeLoad = new Set(Object.keys(process.env ?? {}));
+const explicitPlaywrightBase = process.env.PLAYWRIGHT_BASE_URL;
+const explicitPlaywrightApi = process.env.PLAYWRIGHT_API_ORIGIN;
+const explicitDatabasePath = process.env.DATABASE_PATH;
+const explicitWorkspaceRoot = process.env.WORKSPACE_ROOT;
 
 if (existsSync(envFilePath)) {
   process.loadEnvFile?.(envFilePath);
 }
 
-const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5288';
-const apiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? 'http://localhost:3316';
+const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:0';
+const apiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? 'http://127.0.0.1:0';
 const skipBuild = process.env.KALIO_PLAYWRIGHT_SKIP_BUILD === '1';
+
+const playwrightBaseWasExplicit = envKeysBeforeLoad.has('PLAYWRIGHT_BASE_URL') || explicitPlaywrightBase !== undefined;
+const playwrightApiWasExplicit = envKeysBeforeLoad.has('PLAYWRIGHT_API_ORIGIN') || explicitPlaywrightApi !== undefined;
+
+function isLegacyPlaywrightUrl(urlLike, key) {
+  if (!urlLike) {
+    return false;
+  }
+
+  const parsed = new URL(urlLike);
+  if (legacyPlaywrightPorts.has(parsed.port)) {
+    const source = {
+      base: playwrightBaseWasExplicit ? 'explicit' : '.env.test',
+      api: playwrightApiWasExplicit ? 'explicit' : '.env.test',
+    }[key];
+
+    if (!allowLegacyPlaywrightPorts) {
+      throw new Error(`[playwright-stack] ${key} cannot use legacy port ${parsed.port} from ${source}. Set KALIO_PLAYWRIGHT_ALLOW_LEGACY_PORTS=1 only for manual debugging.`);
+    }
+  }
+}
+
+isLegacyPlaywrightUrl(baseUrl, 'base');
+isLegacyPlaywrightUrl(apiOrigin, 'api');
+
 const webUrl = new URL(baseUrl);
 const apiUrl = new URL(apiOrigin);
+
+if (webUrl.port === '0' || apiUrl.port === '0') {
+  throw new Error('PLAYWRIGHT_BASE_URL and PLAYWRIGHT_API_ORIGIN must include resolved ports. Use run-playwright-with-stack.mjs for random ports.');
+}
 const nodeBinDir = dirname(process.execPath);
 const programFilesNodeDir = resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'nodejs');
 const corepackNodeCommand = process.env.KALIO_PLAYWRIGHT_NODE_COMMAND
@@ -70,12 +106,13 @@ const sharedEnv = {
   LLM_MODEL: process.env.LLM_MODEL ?? 'mock',
   CREDENTIALS_MASTER_KEY: process.env.CREDENTIALS_MASTER_KEY ?? 'playwright-test-master-key-32-chars-minimum',
 };
+const runStateDir = resolve(e2eStateDir);
 
 const backendEnv = {
   ...sharedEnv,
-  PORT: apiUrl.port || '3316',
-  DATABASE_PATH: process.env.DATABASE_PATH ?? './data/kalio-e2e.db',
-  WORKSPACE_ROOT: process.env.WORKSPACE_ROOT ?? './data/workspaces-e2e',
+  PORT: apiUrl.port,
+  DATABASE_PATH: explicitDatabasePath ?? resolve(runStateDir, 'kalio-e2e.db'),
+  WORKSPACE_ROOT: explicitWorkspaceRoot ?? resolve(runStateDir, 'workspaces'),
   CORS_ORIGIN: webUrl.origin,
 };
 
@@ -83,7 +120,7 @@ const frontendEnv = {
   ...process.env,
   VITE_API_URL: apiUrl.origin,
   VITE_WS_URL: apiUrl.origin,
-  VITE_PORT: webUrl.port || '5288',
+  VITE_PORT: webUrl.port,
   VITE_CACHE_DIR: process.env.VITE_CACHE_DIR ?? resolve(e2eStateDir, 'vite-cache'),
 };
 
@@ -277,7 +314,7 @@ async function main() {
       '--host',
       webUrl.hostname,
       '--port',
-      webUrl.port || '5288',
+      webUrl.port,
       '--strictPort',
     ],
     repoRoot,

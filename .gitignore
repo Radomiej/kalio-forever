@@ -1,5 +1,9 @@
 node_modules/
 .pnpm-store/
+.npm-cache/
+.node-gyp/
+.kalio-stack/
+node_modules.bak-*/
 dist/
 .env
 .env.local

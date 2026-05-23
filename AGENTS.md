@@ -205,6 +205,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - In Vitest, shared mock refs used inside `vi.mock()` factories should come from `vi.hoisted()`; Zustand mocks used outside React must expose `.getState()`.
 - On Windows, do not run `vite dev` with redirected/piped stdout/stderr; this can trigger `@tailwindcss/oxide` crashes.
 - For Playwright on Windows, avoid autostarting Vite dev server from Playwright `webServer`; use built frontend + `vite preview` when scripting startup.
+- E2E must allocate random ports and per-run storage; fixed `3016/5188/3316/5288` ports are only for manual development/debugging.
 
 ---
 
