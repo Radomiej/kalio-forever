@@ -125,7 +125,7 @@ export class LLMService {
       provider: envConfig.provider as LLMProviderType,
       apiKey: '',
       baseUrl: this.normalizeEnvDisplayValue(envConfig.baseUrl),
-      model: this.normalizeEnvDisplayValue(envConfig.model),
+      model: envConfig.model,
       source: 'env',
     };
   }

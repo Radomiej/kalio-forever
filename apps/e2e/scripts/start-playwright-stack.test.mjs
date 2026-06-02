@@ -115,6 +115,7 @@ server.listen(port, () => {
     'workspace=' + process.env.WORKSPACE_ROOT,
     'forceLlm=' + process.env.KALIO_FORCE_ENV_LLM,
     'fastMock=' + process.env.KALIO_MOCK_LLM_FAST,
+    'model=' + process.env.LLM_MODEL,
   );
 });
 `,
@@ -627,6 +628,7 @@ test('playwright wrapper forces env mock LLM and fast mock streaming', async () 
         'KALIO_PLAYWRIGHT_SKIP_BUILD=1',
         'LLM_PROVIDER=mock',
         'LLM_BASE_URL=https://paid.example.test/v1',
+        'LLM_MODEL=',
         'KALIO_FORCE_ENV_LLM=0',
         'KALIO_MOCK_LLM_FAST=0',
         '',
@@ -651,6 +653,7 @@ test('playwright wrapper forces env mock LLM and fast mock streaming', async () 
       assert.equal(code, 0, fullOutput);
       assert.match(fullOutput, /forceLlm=1/);
       assert.match(fullOutput, /fastMock=1/);
+      assert.match(fullOutput, /model=mock/);
     } finally {
       stopCollecting();
     }

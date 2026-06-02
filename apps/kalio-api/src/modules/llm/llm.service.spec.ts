@@ -138,7 +138,7 @@ describe('LLMService - DB credential overrides env', () => {
 
       expect(config.source).toBe('env');
       expect(config.provider).toBe('mock');
-      expect(config.model).toBe('');
+      expect(config.model).toBe('mock');
       expect(forcedCreds.getActiveProviderConfig).not.toHaveBeenCalled();
     });
 

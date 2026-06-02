@@ -83,7 +83,7 @@ async function runMockFallbackFlow(page: Page, request: APIRequestContext): Prom
     const llmConfig = await llmConfigResponse.json() as { provider?: string; model?: string; source?: string };
     expect(llmConfig.provider).toBe('mock');
     expect(llmConfig.model).toBe('mock');
-    expect(llmConfig.source).toBe('db');
+    expect(llmConfig.source).toBe('env');
 
     const createSession = await request.post(`${API_BASE}/sessions`, {
       data: { title: sessionTitle, personaId: 'designer' },

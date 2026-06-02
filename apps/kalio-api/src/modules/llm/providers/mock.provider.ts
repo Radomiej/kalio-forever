@@ -404,6 +404,11 @@ export class MockLLMProvider implements ILLMProvider {
       return [toolCall];
     }
 
+    if (isFastMockMode() && lastMessage.includes('Slot: ')) {
+      emitText(options, `[MockLLM] Echo: ${lastMessage.slice(0, 240)}`);
+      return [];
+    }
+
     const response = `[MockLLM] Echo: ${lastMessage}`;
     const words = response.split(' ');
 

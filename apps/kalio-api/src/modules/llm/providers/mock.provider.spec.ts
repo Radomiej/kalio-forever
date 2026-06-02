@@ -612,4 +612,30 @@ describe('MockLLMProvider', () => {
       delta: 'fast finalizer',
     }));
   });
+
+  it('emits architecture slot fallback responses immediately in fast mock mode', async () => {
+    vi.stubEnv('KALIO_MOCK_LLM_FAST', '1');
+    const delay = vi.fn().mockResolvedValue(undefined);
+    const provider = new MockLLMProvider({ delay });
+    const onChunk = vi.fn();
+
+    try {
+      await provider.streamChat(
+        [{
+          role: 'user',
+          content: `Architecture: Demo\nSlot: Finalizer\n${'large context '.repeat(200)}`,
+        }],
+        [],
+        { sessionId: 'session-1', messageId: 'message-1', onChunk },
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(delay).not.toHaveBeenCalled();
+    expect(onChunk).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      delta: expect.stringContaining('[MockLLM] Echo: Architecture: Demo'),
+    }));
+    expect(onChunk).toHaveBeenLastCalledWith(expect.objectContaining({ done: true }));
+  });
 });
