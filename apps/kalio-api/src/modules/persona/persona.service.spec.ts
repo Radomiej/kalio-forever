@@ -3,6 +3,8 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { PersonaService } from './persona.service';
 import { DrizzleService } from '../../database/drizzle.service';
 import { NotFoundException } from '@nestjs/common';
+import type { PersonaGraphConfig } from './persona-graph-config';
+import { LAB_PERSONA_IDS } from './persona-lab-seeds';
 
 // Regression test for: Persona KV Lookup Inefficiency
 // Issue: setKV queries all KV rows for persona then filters client-side
@@ -134,6 +136,54 @@ describe('PersonaService', () => {
     });
   });
 
+  describe('validateGraphConfig', () => {
+    it('validates a graph for an existing persona', async () => {
+      const personaId = 'persona-123';
+      const personaRow = [{
+        id: personaId,
+        name: 'Test Persona',
+        systemPrompt: 'You are helpful',
+        model: 'gpt-4',
+        allowedTools: ['vfs_write'],
+        skillIds: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }];
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(personaRow),
+        }),
+      });
+
+      const graphConfig: PersonaGraphConfig = {
+        version: 1,
+        entryNodeId: 'router-1',
+        maxSteps: 6,
+        nodes: [
+          { id: 'router-1', type: 'router', label: 'Router' },
+          { id: 'final-1', type: 'final', label: 'Done' },
+        ],
+        edges: [{ id: 'edge-1', sourceNodeId: 'router-1', targetNodeId: 'final-1' }],
+      };
+
+      const result = await service.validateGraphConfig(personaId, graphConfig);
+
+      expect(result.ok).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('throws NotFoundException when persona does not exist', async () => {
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await expect(service.validateGraphConfig('missing-persona', {})).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('findAll', () => {
     it('should return all personas mapped correctly', async () => {
       // Arrange
@@ -249,7 +299,7 @@ describe('PersonaService', () => {
     it('includes image generation and inspection tools in the seeded designer persona', () => {
       const config = (
         service as unknown as {
-          loadPersonasConfig(): Record<string, { allowedTools: string[]; systemPrompt: string }>;
+          loadPersonasConfig(): Record<string, { allowedTools: string[]; systemPrompt: string; skillIds?: string[] }>;
         }
       ).loadPersonasConfig();
 
@@ -698,6 +748,245 @@ describe('PersonaService', () => {
       expect(config['builder']?.name).toBe('RaBuilder');
       expect(config['designer']?.name).toBe('UX Designer');
       expect(config['dev']?.name).toBe('Fullstack Dev');
+    });
+
+    it('seeds Agent Architecture Lab default personas for AgentFlow presets', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { allowedTools: string[]; systemPrompt: string; skillIds?: string[] }>;
+        }
+      ).loadPersonasConfig();
+
+      const expectedPersonaIds = [
+        'agent-orchestrator',
+        'agent-planner',
+        'agent-researcher',
+        'agent-implementer',
+        'agent-reviewer',
+        'agent-qa',
+        'agent-synthesizer',
+        'agent-release-guard',
+      ];
+
+      for (const personaId of expectedPersonaIds) {
+        expect(config[personaId]).toBeDefined();
+        expect(config[personaId]?.skillIds).toContain('architecture-agent-superpowers');
+        expect(config[personaId]?.systemPrompt).toContain('KALIO');
+      }
+
+      expect(config['agent-orchestrator']?.allowedTools).toEqual(expect.arrayContaining([
+        'run_sub_agentflow',
+        'spawn_cli_agent',
+        'get_cli_agent_status',
+      ]));
+      expect(config['agent-release-guard']?.systemPrompt).toContain('GO/NO-GO');
+    });
+
+    it('seeds one-to-one Agent Architecture Lab specialist personas', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { allowedTools: string[]; systemPrompt: string; skillIds?: string[] }>;
+        }
+      ).loadPersonasConfig();
+
+      for (const personaId of LAB_PERSONA_IDS) {
+        expect(config[personaId]).toBeDefined();
+        expect(config[personaId]?.skillIds).toContain('architecture-agent-superpowers');
+        expect(config[personaId]?.systemPrompt).toContain('imported from Agent-Architecture-Lab');
+      }
+
+      expect(config['lab-orchestrator']?.allowedTools).toEqual(expect.arrayContaining([
+        'run_sub_agentflow',
+        'spawn_cli_agent',
+        'wait_for',
+      ]));
+      expect(config['lab-backend']?.allowedTools).toEqual(expect.arrayContaining([
+        'fs_write',
+        'spawn_cli_agent',
+        'wait_for',
+      ]));
+      expect(config['lab-res_tech']?.allowedTools).toContain('web_search');
+      expect(config['lab-qa_quality']?.allowedTools).toContain('get_cli_agent_status');
+    });
+
+    it('seeds the dev persona prompt with graph-safe CLI child guidance', () => {
+      const config = (
+        service as unknown as { loadPersonasConfig(): Record<string, { systemPrompt: string }> }
+      ).loadPersonasConfig();
+
+      expect(config['dev']?.systemPrompt).toContain('Use only the tools visible in the current runtime');
+      expect(config['dev']?.systemPrompt).toContain('durable CLI children are the normal implementation backend');
+      expect(config['dev']?.systemPrompt).toContain('Do not attempt run_cli_agent or stop_cli_agent unless visible');
+      expect(config['dev']?.systemPrompt).not.toContain('delegates a coding task to GitHub Copilot CLI (copilot -p)');
+    });
+
+    it('publishes durable CLI session tools and stack guidance for orchestrator-facing personas', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, { allowedTools: string[]; systemPrompt: string; skillIds?: string[] }>;
+        }
+      ).loadPersonasConfig();
+
+      for (const personaId of ['orchestrator', 'dev', 'jony'] as const) {
+        expect(config[personaId]?.allowedTools).toEqual(
+          expect.arrayContaining(['spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'stop_cli_agent']),
+        );
+        expect(config[personaId]?.systemPrompt).toContain('spawn_cli_agent');
+        expect(config[personaId]?.systemPrompt).toContain('message_cli_agent');
+        expect(config[personaId]?.systemPrompt).toContain('get_cli_agent_status');
+        expect(config[personaId]?.systemPrompt).toContain('stop_cli_agent');
+        expect(config[personaId]?.systemPrompt).toContain('Gemini -> Copilot -> Codex');
+        expect(config[personaId]?.skillIds).toContain('architecture-agent-superpowers');
+      }
+    });
+  });
+
+  describe('onApplicationBootstrap — CLI session prompt refresh', () => {
+    it('refreshes the seeded orchestrator prompt when the stored prompt still matches the older run_cli_agent-only guidance', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        orchestrator: {
+          name: 'Orchestrator',
+          systemPrompt: 'new orchestrator prompt with spawn_cli_agent and Gemini -> Copilot -> Codex',
+          model: '',
+          allowedTools: ['run_subagent', 'spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'stop_cli_agent'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'orchestrator',
+            systemPrompt: [
+              'Prefer run_subagent for bounded research, analysis, and specialist reasoning.',
+              'Use run_cli_agent only for concrete implementation tasks with explicit acceptance criteria.',
+              'Do not directly edit files unless delegation is unnecessary and the task is trivial.',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemPrompt: 'new orchestrator prompt with spawn_cli_agent and Gemini -> Copilot -> Codex',
+        }),
+      );
+    });
+
+    it('refreshes mixed legacy orchestrator prompts that still prefer one-shot run_cli_agent guidance', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        orchestrator: {
+          name: 'Orchestrator',
+          systemPrompt: 'new graph-mode orchestrator prompt with spawn_cli_agent plus status polling',
+          model: '',
+          allowedTools: ['run_subagent', 'run_cli_agent', 'spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'orchestrator',
+            systemPrompt: [
+              'Prefer run_subagent for bounded research, analysis, and specialist reasoning.',
+              'Use run_cli_agent for one-shot implementation tasks with explicit acceptance criteria.',
+              'Use spawn_cli_agent for durable CLI child sessions that the parent must monitor.',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemPrompt: 'new graph-mode orchestrator prompt with spawn_cli_agent plus status polling',
+        }),
+      );
+    });
+
+    it('refreshes mixed legacy dev prompts that do not mention graph-mode tool visibility', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        dev: {
+          name: 'Fullstack Dev',
+          systemPrompt: 'new dev prompt: Use only the tools visible in the current runtime. In architecture graph slots, durable CLI children are the normal implementation backend.',
+          model: '',
+          allowedTools: ['run_cli_agent', 'spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'dev',
+            systemPrompt: [
+              'You have two powerful tools for editing code:',
+              'run_cli_agent: delegates a coding task to one of the configured CLI coding agents.',
+              'spawn_cli_agent / message_cli_agent / get_cli_agent_status / stop_cli_agent: manage a durable CLI child session.',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemPrompt: 'new dev prompt: Use only the tools visible in the current runtime. In architecture graph slots, durable CLI children are the normal implementation backend.',
+        }),
+      );
     });
   });
 });

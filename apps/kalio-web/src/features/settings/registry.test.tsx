@@ -6,4 +6,14 @@ describe('settings registry', () => {
     const llmBlock = SETTINGS_BLOCKS.find((block) => block.id === 'llm');
     expect(llmBlock?.label).toBe('LLM Settings');
   });
+
+  it('registers the HITL approvals block', () => {
+    const hitlBlock = SETTINGS_BLOCKS.find((block) => block.id === 'hitl');
+    expect(hitlBlock?.label).toBe('HITL Approvals');
+  });
+
+  it('registers the audit retention policy block', () => {
+    const auditRetentionBlock = SETTINGS_BLOCKS.find((block) => block.id === 'audit-retention');
+    expect(auditRetentionBlock?.label).toBe('Audit Retention');
+  });
 });

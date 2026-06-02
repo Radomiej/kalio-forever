@@ -1,17 +1,40 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { spawn, execFile } from 'node:child_process';
-import type { CLIAgentAdapterInfo, CLIAgentResult, SocketEvents } from '@kalio/types';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { CLIAgentAdapterInfo, CLIAgentResult } from '@kalio/types';
 import { CopilotAdapter } from './adapters/copilot.adapter';
 import { GeminiAdapter } from './adapters/gemini.adapter';
 import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
+import { CodexAdapter } from './adapters/codex.adapter';
 import type { ICLIAgentAdapter } from './adapters/cli-agent.adapter';
 import { CLIAgentConfigService } from './cli-agent-config.service';
+import { terminateCliAgentProcess, type KillableProcess } from './cli-agent-process-kill';
 import { compressOutput } from './output-compressor';
+import {
+  EXIT_FALLBACK_GRACE_MS,
+  WINDOWS_POWERSHELL_EXE,
+  extractCodexAgentMessage,
+  normalizeTimeoutMs,
+  quotePowerShellArg,
+} from './cli-agent-utils';
+import type { CLIAgentRunLimits, RunCliAgentRequest } from './cli-agent.types';
+import { CLIAgentPtyService } from './cli-agent-pty.service';
 
-export type ProgressEmitFn = (event: 'cli_agent:progress', data: SocketEvents['cli_agent:progress']) => void;
+export type { ProgressEmitFn } from './cli-agent.types';
 
-/** Max timeout cap: 20 minutes */
-const MAX_TIMEOUT_MS = 1_200_000;
+export const CLI_AGENT_STOPPED_ERROR = 'CLI_AGENT_STOPPED';
+const WINDOWS_TEMP_PROMPT_THRESHOLD = 7_000;
+
+interface ActiveRunState {
+  sessionId: string;
+  agentId: string;
+  proc: KillableProcess;
+  stopRequested: boolean;
+  requestStop?: () => void;
+  terminatePromise?: Promise<void>;
+}
 
 @Injectable()
 export class CLIAgentService implements OnApplicationBootstrap {
@@ -19,17 +42,21 @@ export class CLIAgentService implements OnApplicationBootstrap {
   private readonly adapters: Map<string, ICLIAgentAdapter>;
   /** Probe results cached at startup and on explicit refresh. */
   private readonly probeCache = new Map<string, CLIAgentAdapterInfo>();
+  private readonly activeRuns = new Map<string, ActiveRunState>();
 
   constructor(
     private readonly config: CLIAgentConfigService,
     copilot: CopilotAdapter,
     gemini: GeminiAdapter,
     claude: ClaudeCodeAdapter,
+    codex: CodexAdapter,
+    private readonly pty: CLIAgentPtyService,
   ) {
     this.adapters = new Map<string, ICLIAgentAdapter>([
       [copilot.id, copilot],
       [gemini.id, gemini],
       [claude.id, claude],
+      [codex.id, codex],
     ]);
   }
 
@@ -58,6 +85,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
       installUrl: adapter.installUrl,
       available: probe.available,
       version: probe.version,
+      supportsModelSelection: adapter.supportsModelSelection,
     };
     this.probeCache.set(agentId, info);
     return info;
@@ -81,26 +109,34 @@ export class CLIAgentService implements OnApplicationBootstrap {
     return [...this.adapters.keys()];
   }
 
+  isRunning(sessionId: string): boolean {
+    return this.activeRuns.has(sessionId);
+  }
+
+  stop(sessionId: string): boolean {
+    const activeRun = this.activeRuns.get(sessionId);
+    if (!activeRun) {
+      return false;
+    }
+
+    if (activeRun.stopRequested) {
+      return true;
+    }
+    if (activeRun.proc.exitCode !== undefined && activeRun.proc.exitCode !== null) {
+      return false;
+    }
+
+    activeRun.stopRequested = true;
+    activeRun.requestStop?.();
+    return true;
+  }
+
   /**
    * Execute a CLI agent headlessly.
-   *
-   * @param agentId   One of: 'copilot' | 'gemini' | 'claude'
-   * @param prompt    Task description sent to the CLI agent.
-   * @param workdir   Working directory — must be validated by caller.
-   * @param callId    Tool call ID used for progress event correlation.
-   * @param sessionId Chat session — included in progress events.
-   * @param emitFn    Optional: called with 'cli_agent:progress' for each stdout/stderr chunk.
-   * @param timeoutMs Optional timeout override; capped at MAX_TIMEOUT_MS.
+   * @param request  See {@link RunCliAgentRequest} for field docs.
    */
-  async run(
-    agentId: string,
-    prompt: string,
-    workdir: string,
-    callId: string,
-    sessionId: string,
-    emitFn?: ProgressEmitFn,
-    timeoutMs?: number,
-  ): Promise<CLIAgentResult> {
+  async run(request: RunCliAgentRequest): Promise<CLIAgentResult> {
+    const { agentId, prompt, workdir, callId, sessionId, emitFn } = request;
     const adapter = this.adapters.get(agentId);
     if (!adapter) {
       throw new Error(`Unknown CLI agent: "${agentId}". Available: ${[...this.adapters.keys()].join(', ')}`);
@@ -114,21 +150,43 @@ export class CLIAgentService implements OnApplicationBootstrap {
       );
     }
 
-    const effectiveTimeout = Math.min(timeoutMs ?? agentConfig.timeoutMs, MAX_TIMEOUT_MS);
+    const limits = this.resolveRunLimits(agentId, request, agentConfig);
 
-    const platform = process.platform;
+    const platform = this.getPlatform();
     const executable = agentConfig.cliPath || adapter.executable(platform);
-    const wrapperArgs = adapter.wrapperArgs(platform);
-    const promptArgs = adapter.buildArgs(prompt, workdir, agentConfig.extraArgs);
+    const wrapperArgs = agentConfig.cliPath ? [] : adapter.wrapperArgs(platform);
+    const model = adapter.supportsModelSelection ? (request.model ?? agentConfig.model) : '';
+    const preparedPrompt = await this.preparePromptForAgent(agentId, platform, prompt);
+    const extraArgs = preparedPrompt.includeDirectory
+      ? [...agentConfig.extraArgs, '--include-directories', preparedPrompt.includeDirectory]
+      : agentConfig.extraArgs;
+    const promptArgs = adapter.buildArgs(preparedPrompt.prompt, workdir, extraArgs, model);
     const allArgs = [...wrapperArgs, ...promptArgs];
 
     this.logger.log(
-      `[${agentId}] spawn: ${executable} (timeout=${effectiveTimeout}ms, cwd=${workdir})`,
+      `[${agentId}] spawn: ${executable} (inactivityTimeout=${limits.inactivityTimeoutMs}ms, hardTimeout=${limits.hardTimeoutMs !== undefined ? `${limits.hardTimeoutMs}ms` : 'disabled'}, cwd=${workdir})`,
     );
+
+    if (agentId === 'codex') {
+      const ptyLaunch = await this.buildCodexPtyLaunch(platform, agentConfig.cliPath, promptArgs, preparedPrompt.prompt);
+      try {
+        return await this.runCodexWithPty({
+          request,
+          executable: ptyLaunch.executable,
+          allArgs: ptyLaunch.args,
+          limits,
+          maxOutputChars: agentConfig.maxOutputChars,
+        });
+      } finally {
+        await ptyLaunch.cleanup?.();
+        await preparedPrompt.cleanup?.();
+      }
+    }
 
     const startedAt = Date.now();
 
-    return new Promise<CLIAgentResult>((resolve, reject) => {
+    try {
+      return await new Promise<CLIAgentResult>((resolve, reject) => {
       const proc = spawn(executable, allArgs, {
         cwd: workdir,
         // pipe stdin so the process doesn't hang waiting for input
@@ -141,8 +199,24 @@ export class CLIAgentService implements OnApplicationBootstrap {
       // Signal EOF on stdin immediately — CLI agents are non-interactive
       proc.stdin?.end();
 
+      const activeRunState: ActiveRunState = {
+        sessionId,
+        agentId,
+        proc,
+        stopRequested: false,
+      };
+      this.activeRuns.set(sessionId, activeRunState);
+
       let rawOutput = '';
       const MAX_BUFFER = 4 * 1024 * 1024; // 4 MB hard cap
+      let settled = false;
+      let exitFallbackTimer: NodeJS.Timeout | null = null;
+      let idleTimer: NodeJS.Timeout | null = null;
+      let hardTimer: NodeJS.Timeout | null = null;
+
+      const abortHandler = (): void => {
+        this.stop(sessionId);
+      };
 
       const onData = (chunk: Buffer | string): void => {
         const str = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
@@ -155,13 +229,73 @@ export class CLIAgentService implements OnApplicationBootstrap {
         if (emitFn) {
           emitFn('cli_agent:progress', { callId, sessionId, agentId, chunk: str });
         }
+        resetIdleTimer();
       };
 
-      proc.stdout.on('data', onData);
-      proc.stderr.on('data', onData);
+      const cleanup = (): void => {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
+        }
+        if (hardTimer) {
+          clearTimeout(hardTimer);
+          hardTimer = null;
+        }
+        if (exitFallbackTimer) {
+          clearTimeout(exitFallbackTimer);
+          exitFallbackTimer = null;
+        }
+        if (this.activeRuns.get(sessionId) === activeRunState) {
+          this.activeRuns.delete(sessionId);
+        }
+        proc.stdout.off('data', onData);
+        proc.stderr.off('data', onData);
+        proc.removeListener('close', closeHandler);
+        proc.removeListener('exit', exitHandler);
+        proc.removeListener('error', errorHandler);
+        request.abortSignal?.removeEventListener('abort', abortHandler);
+      };
 
-      const closeHandler = (code: number | null): void => {
-        clearTimeout(timer);
+      const terminateAndReject = (reason: 'stopped' | 'idle-timeout' | 'hard-timeout'): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        void this.terminateActiveRun(activeRunState);
+
+        if (reason === 'stopped') {
+          reject(new Error(CLI_AGENT_STOPPED_ERROR));
+          return;
+        }
+
+        reject(new Error(
+          reason === 'idle-timeout'
+            ? `CLI agent "${agentId}" idle timed out after ${limits.inactivityTimeoutMs}ms`
+            : `CLI agent "${agentId}" hard timed out after ${limits.hardTimeoutMs}ms`,
+        ));
+      };
+
+      activeRunState.requestStop = () => {
+        terminateAndReject('stopped');
+      };
+      if (activeRunState.stopRequested) {
+        activeRunState.requestStop();
+        return;
+      }
+
+      const finalize = (code: number | null): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+
+        if (activeRunState.stopRequested) {
+          reject(new Error(CLI_AGENT_STOPPED_ERROR));
+          return;
+        }
+
         const durationMs = Date.now() - startedAt;
         const exitCode = code ?? 1;
         const output = compressOutput(rawOutput.trim(), agentConfig.maxOutputChars);
@@ -171,28 +305,208 @@ export class CLIAgentService implements OnApplicationBootstrap {
         resolve({ output, exitCode, durationMs, agentId });
       };
 
-      const timer = setTimeout(() => {
-        // Guard: only kill if the process is still running (exitCode is null when running)
-        if (proc.exitCode === null) {
-          proc.kill('SIGTERM');
-        }
-        proc.stdout.off('data', onData);
-        proc.stderr.off('data', onData);
-        proc.removeListener('close', closeHandler);
-        reject(new Error(`CLI agent "${agentId}" timed out after ${effectiveTimeout}ms`));
-      }, effectiveTimeout);
+      proc.stdout.on('data', onData);
+      proc.stderr.on('data', onData);
 
-      proc.on('error', (err) => {
-        clearTimeout(timer);
-        proc.stdout.off('data', onData);
-        proc.stderr.off('data', onData);
-        proc.removeListener('close', closeHandler);
+      const closeHandler = (code: number | null): void => {
+        finalize(code);
+      };
+
+      const exitHandler = (code: number | null): void => {
+        if (settled || exitFallbackTimer) {
+          return;
+        }
+
+        // Some CLIs exit cleanly but keep stdio open briefly or indefinitely via descendants.
+        // Wait a moment for the normal 'close' event, then finalize from 'exit' to avoid hanging the tool.
+        exitFallbackTimer = setTimeout(() => {
+          finalize(code);
+        }, EXIT_FALLBACK_GRACE_MS);
+      };
+
+      const errorHandler = (err: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
         this.logger.error(`[${agentId}] spawn error: ${err.message}`);
         reject(err);
+      };
+
+      const resetIdleTimer = (): void => {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+        }
+        idleTimer = setTimeout(() => {
+          terminateAndReject('idle-timeout');
+        }, limits.inactivityTimeoutMs);
+      };
+
+      resetIdleTimer();
+      if (limits.hardTimeoutMs !== undefined) {
+        hardTimer = setTimeout(() => {
+          terminateAndReject('hard-timeout');
+        }, limits.hardTimeoutMs);
+      }
+
+      proc.on('error', errorHandler);
+      proc.on('exit', exitHandler);
+      proc.on('close', closeHandler);
+
+      if (request.abortSignal?.aborted) {
+        abortHandler();
+        return;
+      }
+      request.abortSignal?.addEventListener('abort', abortHandler, { once: true });
+      });
+    } finally {
+      await preparedPrompt.cleanup?.();
+    }
+  }
+
+  private async preparePromptForAgent(
+    agentId: string,
+    platform: NodeJS.Platform,
+    prompt: string,
+  ): Promise<{ prompt: string; includeDirectory?: string; cleanup?: () => Promise<void> }> {
+    if (platform !== 'win32' || agentId !== 'gemini' || prompt.length <= WINDOWS_TEMP_PROMPT_THRESHOLD) {
+      return { prompt };
+    }
+
+    const promptDir = await mkdtemp(join(tmpdir(), 'kalio-gemini-prompt-'));
+    const promptPath = join(promptDir, 'prompt.txt');
+    await writeFile(promptPath, prompt, 'utf8');
+
+    return {
+      prompt: `Read and follow the complete implementation instructions from this file: ${promptPath}`,
+      includeDirectory: promptDir,
+      cleanup: () => rm(promptDir, { recursive: true, force: true }),
+    };
+  }
+
+  private async buildCodexPtyLaunch(
+    platform: NodeJS.Platform,
+    cliPath: string,
+    promptArgs: string[],
+    prompt: string,
+  ): Promise<{ executable: string; args: string[]; cleanup?: () => Promise<void> }> {
+    if (platform !== 'win32') {
+      return { executable: cliPath || 'codex', args: promptArgs };
+    }
+
+    const promptDir = await mkdtemp(join(tmpdir(), 'kalio-codex-prompt-'));
+    const promptPath = join(promptDir, 'prompt.txt');
+    await writeFile(promptPath, prompt, 'utf8');
+
+    const codexCommand = cliPath || 'codex';
+    const argsWithoutPrompt = promptArgs.at(-1) === prompt ? promptArgs.slice(0, -1) : promptArgs;
+    const command = [
+      `$prompt = Get-Content -Raw -LiteralPath ${quotePowerShellArg(promptPath)}`,
+      `$prompt | & ${quotePowerShellArg(codexCommand)} ${[...argsWithoutPrompt, '-'].map(quotePowerShellArg).join(' ')}`,
+    ].join('; ');
+    return {
+      executable: WINDOWS_POWERSHELL_EXE,
+      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
+      cleanup: () => rm(promptDir, { recursive: true, force: true }),
+    };
+  }
+
+  private resolveRunLimits(
+    agentId: string,
+    request: RunCliAgentRequest,
+    agentConfig: { timeoutMs: number; hardTimeoutEnabled?: boolean; hardTimeoutMs?: number },
+  ): CLIAgentRunLimits {
+    const inactivityTimeoutMs = normalizeTimeoutMs(
+      agentId,
+      request.inactivityTimeoutMs ?? request.timeoutMs ?? agentConfig.timeoutMs,
+    );
+    const requestedHardTimeout = request.hardTimeoutMs
+      ?? (agentConfig.hardTimeoutEnabled ? agentConfig.hardTimeoutMs : undefined);
+
+    return {
+      inactivityTimeoutMs,
+      ...(requestedHardTimeout !== undefined
+        ? { hardTimeoutMs: normalizeTimeoutMs(agentId, requestedHardTimeout) }
+        : {}),
+    };
+  }
+
+  private async runCodexWithPty(params: {
+    request: RunCliAgentRequest;
+    executable: string;
+    allArgs: string[];
+    limits: CLIAgentRunLimits;
+    maxOutputChars: number;
+  }): Promise<CLIAgentResult> {
+    const { request, executable, allArgs, limits, maxOutputChars } = params;
+    let activeRunState: ActiveRunState | null = null;
+    let stopReject: ((reason?: unknown) => void) | null = null;
+    let stopSignalled = false;
+    let abortRequested = request.abortSignal?.aborted ?? false;
+    const stopPromise = new Promise<never>((_, reject) => {
+      stopReject = reject;
+    });
+    const abortHandler = (): void => {
+      abortRequested = true;
+      this.stop(request.sessionId);
+    };
+
+    try {
+      const runPromise = this.pty.run({
+        agentId: request.agentId,
+        executable,
+        args: allArgs,
+        workdir: request.workdir,
+        callId: request.callId,
+        sessionId: request.sessionId,
+        inactivityTimeoutMs: limits.inactivityTimeoutMs,
+        hardTimeoutMs: limits.hardTimeoutMs,
+        maxOutputChars,
+        emitFn: request.emitFn,
+        onStart: (proc) => {
+          activeRunState = {
+            sessionId: request.sessionId,
+            agentId: request.agentId,
+            proc,
+            stopRequested: false,
+            requestStop: () => {
+              if (!activeRunState || stopSignalled) {
+                return;
+              }
+              stopSignalled = true;
+              activeRunState.stopRequested = true;
+              void this.terminateActiveRun(activeRunState);
+              stopReject?.(new Error(CLI_AGENT_STOPPED_ERROR));
+            },
+          };
+          this.activeRuns.set(request.sessionId, activeRunState);
+          if (abortRequested) {
+            activeRunState.requestStop?.();
+          }
+        },
       });
 
-      proc.on('close', closeHandler);
-    });
+      if (request.abortSignal?.aborted) {
+        abortHandler();
+      } else {
+        request.abortSignal?.addEventListener('abort', abortHandler, { once: true });
+      }
+
+      const result = await Promise.race([runPromise, stopPromise]);
+      const codexAgentMessage = extractCodexAgentMessage(result.output);
+
+      if (this.activeRuns.get(request.sessionId)?.stopRequested) {
+        throw new Error(CLI_AGENT_STOPPED_ERROR);
+      }
+
+      return codexAgentMessage ? { ...result, output: codexAgentMessage } : result;
+    } finally {
+      request.abortSignal?.removeEventListener('abort', abortHandler);
+      if (activeRunState && this.activeRuns.get(request.sessionId) === activeRunState) {
+        this.activeRuns.delete(request.sessionId);
+      }
+    }
   }
 
   /**
@@ -208,7 +522,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
     if (!adapter) return { available: false, version: null };
 
     const agentConfig = await this.config.getConfig(agentId);
-    const platform = process.platform;
+    const platform = this.getPlatform();
 
     // If cliPath override is set, call it directly with just probe args.
     // Otherwise use the adapter's full executable + wrapperArgs chain.
@@ -226,5 +540,23 @@ export class CLIAgentService implements OnApplicationBootstrap {
         resolve({ available: true, version });
       });
     });
+  }
+
+  private getPlatform(): NodeJS.Platform {
+    return process.platform;
+  }
+
+  private terminateActiveRun(activeRun: ActiveRunState): Promise<void> {
+    if (activeRun.terminatePromise) {
+      return activeRun.terminatePromise;
+    }
+
+    activeRun.terminatePromise = terminateCliAgentProcess({
+      proc: activeRun.proc,
+      platform: this.getPlatform(),
+      agentId: activeRun.agentId,
+      onWarn: (message) => this.logger.warn(message),
+    });
+    return activeRun.terminatePromise;
   }
 }

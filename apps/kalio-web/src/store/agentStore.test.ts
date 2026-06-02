@@ -199,6 +199,72 @@ describe('agentStore - LlmActivity', () => {
   });
 });
 
+describe('agentStore - inactive activity cleanup', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      toolActivities: [],
+      sessionToolActivities: {},
+      llmActivities: [],
+      activeAgentLoops: {},
+      isStreaming: false,
+      streamingMessageId: undefined,
+      pendingConfirmations: {},
+      availableTools: [],
+    });
+  });
+
+  it('clears finished tool and llm activity while preserving live work', () => {
+    const store = useAgentStore.getState();
+    store.addToolActivity({
+      callId: 'running-call',
+      sessionId: 'session-1',
+      toolName: 'run_subagent',
+      args: {},
+      status: 'running',
+      startedAt: 1,
+    });
+    store.addToolActivity({
+      callId: 'done-call',
+      sessionId: 'session-1',
+      toolName: 'read_file',
+      args: {},
+      status: 'success',
+      startedAt: 1,
+      finishedAt: 2,
+    });
+    store.addLlmActivity({ id: 'llm-running', label: 'Live', status: 'running', startedAt: 1 });
+    store.addLlmActivity({ id: 'llm-done', label: 'Done', status: 'done', startedAt: 1, finishedAt: 2 });
+
+    store.clearInactiveActivities();
+
+    const state = useAgentStore.getState();
+    expect(state.toolActivities.map((activity) => activity.callId)).toEqual(['running-call']);
+    expect(state.sessionToolActivities['session-1']?.map((activity) => activity.callId)).toEqual(['running-call']);
+    expect(state.llmActivities.map((activity) => activity.id)).toEqual(['llm-running']);
+  });
+
+  it('prunes inactive activity when a new agent loop starts', () => {
+    const store = useAgentStore.getState();
+    store.addToolActivity({
+      callId: 'done-call',
+      sessionId: 'session-1',
+      toolName: 'read_file',
+      args: {},
+      status: 'success',
+      startedAt: 1,
+      finishedAt: 2,
+    });
+    store.addLlmActivity({ id: 'llm-done', label: 'Done', status: 'done', startedAt: 1, finishedAt: 2 });
+
+    store.addActiveAgentLoop('session-2', 'turn-1');
+
+    const state = useAgentStore.getState();
+    expect(state.toolActivities).toEqual([]);
+    expect(state.llmActivities).toEqual([]);
+    expect(state.activeAgentLoops['session-2']).toMatchObject({ sessionId: 'session-2', turnId: 'turn-1' });
+  });
+});
+
 describe('agentStore - Context (systemPrompt + activeToolNames)', () => {
   beforeEach(() => {
     useAgentStore.setState({

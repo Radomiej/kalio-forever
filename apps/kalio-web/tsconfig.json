@@ -16,6 +16,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "./dist",
+    "rootDir": "../..",
     "paths": {
       "@/*": ["./src/*"],
       "@kalio/types": ["../../packages/@kalio/types/src"],

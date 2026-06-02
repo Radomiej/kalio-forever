@@ -3,6 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import type { MCPTool } from '@kalio/types';
 import { MCPService } from './mcp.service';
 import { DrizzleService } from '../../database/drizzle.service';
+import type { KalioConfigService } from '../../config/kalio-config.service';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import * as schema from '../../database/schema';
@@ -33,6 +34,18 @@ function makeTestDrizzle(): DrizzleService {
   return svc;
 }
 
+type KalioConfigMock = Pick<KalioConfigService, 'getEffectiveConfig' | 'invalidateCache'>;
+
+function makeKalioConfigMock(mcpServers: Record<string, unknown>): KalioConfigMock {
+  return {
+    invalidateCache: vi.fn(),
+    getEffectiveConfig: vi.fn(async () => ({
+      config: { mcp_servers: mcpServers },
+      layers: [],
+    })),
+  } as unknown as KalioConfigMock;
+}
+
 describe('MCPService — pure logic (no real MCP connections)', () => {
   let service: MCPService;
   let drizzleSvc: DrizzleService;
@@ -60,6 +73,33 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
     it('returns empty array when no servers in DB', async () => {
       const servers = await service.findAll();
       expect(servers).toHaveLength(0);
+    });
+
+    it('includes enabled TOML-managed servers without persisting them', async () => {
+      const kalioConfig = makeKalioConfigMock({
+        docs: {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-filesystem', '.'],
+          env: { STATIC_TOKEN: 'token' },
+        },
+        disabled: {
+          enabled: false,
+          command: 'npx',
+        },
+      });
+      service = new MCPService(drizzleSvc, kalioConfig as KalioConfigService);
+
+      const servers = await service.findAll();
+
+      expect(servers.map((server) => server.id)).toEqual(['docs']);
+      expect(servers[0]).toMatchObject({
+        id: 'docs',
+        name: 'docs',
+        transport: 'stdio',
+        command: 'npx',
+        status: 'disconnected',
+        managedBy: 'toml',
+      });
     });
   });
 
@@ -103,6 +143,17 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       const all = await service.findAll();
       expect(all).toHaveLength(0);
     });
+
+    it('rejects removing a TOML-managed server', async () => {
+      const kalioConfig = makeKalioConfigMock({
+        docs: {
+          command: 'npx',
+        },
+      });
+      service = new MCPService(drizzleSvc, kalioConfig as KalioConfigService);
+
+      await expect(service.removeServer('docs')).rejects.toThrow('managed by .kalio/config.toml');
+    });
   });
 
   describe('restartServer()', () => {
@@ -110,6 +161,17 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       await expect(service.restartServer('non-existent')).rejects.toThrow(
         'MCP server not found: non-existent',
       );
+    });
+  });
+
+  describe('reloadManagedServers()', () => {
+    it('invalidates the TOML cache and reloads the server list', async () => {
+      const kalioConfig = makeKalioConfigMock({});
+      service = new MCPService(drizzleSvc, kalioConfig as KalioConfigService);
+
+      await expect(service.reloadManagedServers()).resolves.toEqual([]);
+      expect(kalioConfig.invalidateCache).toHaveBeenCalledOnce();
+      expect(kalioConfig.getEffectiveConfig).toHaveBeenCalled();
     });
   });
 

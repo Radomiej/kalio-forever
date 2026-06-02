@@ -1,52 +1,70 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 import { API_BASE } from './helpers/test-config';
 
-// AC-05: Session persistence — messages are stored and retrieved across page reloads
+async function createSession(request: APIRequestContext, title: string) {
+  const response = await request.post(`${API_BASE}/sessions`, { data: { title, personaId: 'default' } });
+  expect(response.ok()).toBe(true);
+  return await response.json() as { id: string; title: string };
+}
+
+async function seedMessages(
+  request: APIRequestContext,
+  sessionId: string,
+): Promise<void> {
+  const response = await request.post(`${API_BASE}/test-support/tool-confirmations/seed-replay`, {
+    data: {
+      sessionId,
+      requestId: `req-${sessionId}`,
+      toolCallId: `tool-${sessionId}`,
+      toolName: 'vfs_write',
+      args: { path: 'note.txt', content: 'hello' },
+      promptMessage: 'Persist this message',
+      assistantMessage: 'I need approval before writing.',
+    },
+  });
+  expect(response.ok()).toBe(true);
+}
+
+// AC-05: Session persistence — sessions and stored messages survive repeat reads
 test.describe('AC-05: Session persistence', () => {
-  test('messages sent in a session are persisted in the database', async ({ request }) => {
-    // Create a session
-    const res = await request.post(`${API_BASE}/sessions`, { data: {} });
-    expect(res.ok()).toBeTruthy();
-    const session = await res.json();
-    expect(session.id).toBeDefined();
+  test('seeded messages are persisted and returned in chronological order', async ({ request }) => {
+    const session = await createSession(request, 'AC05 Messages Test');
+    await seedMessages(request, session.id);
 
-    // Messages endpoint returns array (empty initially)
     const msgRes = await request.get(`${API_BASE}/sessions/${session.id}/messages`);
-    expect(msgRes.ok()).toBeTruthy();
+    expect(msgRes.ok()).toBe(true);
     const messages = await msgRes.json();
-    expect(Array.isArray(messages)).toBeTruthy();
+    expect(messages).toMatchObject([
+      { sessionId: session.id, role: 'user', content: 'Persist this message' },
+      { sessionId: session.id, role: 'assistant', content: 'I need approval before writing.' },
+    ]);
 
-    // cleanup
     await request.delete(`${API_BASE}/sessions/${session.id}`);
   });
 
-  test('reloading the page restores session message history', async ({ request }) => {
-    // Create a session
-    const res = await request.post(`${API_BASE}/sessions`, { data: { title: 'AC05 Reload Test' } });
-    const session = await res.json();
+  test('message history is stable across repeat reads', async ({ request }) => {
+    const session = await createSession(request, 'AC05 Repeat Read Test');
+    await seedMessages(request, session.id);
 
-    // Session persists across multiple GET calls (simulates page reload)
     const getRes1 = await request.get(`${API_BASE}/sessions/${session.id}/messages`);
     const getRes2 = await request.get(`${API_BASE}/sessions/${session.id}/messages`);
-    expect(getRes1.ok()).toBeTruthy();
-    expect(getRes2.ok()).toBeTruthy();
+    expect(getRes1.ok()).toBe(true);
+    expect(getRes2.ok()).toBe(true);
     const msgs1 = await getRes1.json();
     const msgs2 = await getRes2.json();
-    expect(JSON.stringify(msgs1)).toBe(JSON.stringify(msgs2));
+    expect(msgs2).toEqual(msgs1);
 
     await request.delete(`${API_BASE}/sessions/${session.id}`);
   });
 
-  test('multiple sessions are listed in the session panel', async ({ request }) => {
-    // Create two sessions
-    const s1 = await (await request.post(`${API_BASE}/sessions`, { data: { title: 'AC05 Session A' } })).json();
-    const s2 = await (await request.post(`${API_BASE}/sessions`, { data: { title: 'AC05 Session B' } })).json();
+  test('created sessions are returned by the session list endpoint', async ({ request }) => {
+    const s1 = await createSession(request, 'AC05 Session A');
+    const s2 = await createSession(request, 'AC05 Session B');
 
     const listRes = await request.get(`${API_BASE}/sessions`);
-    expect(listRes.ok()).toBeTruthy();
+    expect(listRes.ok()).toBe(true);
     const sessions: Array<{ id: string }> = await listRes.json();
-    expect(sessions.some((s) => s.id === s1.id)).toBeTruthy();
-    expect(sessions.some((s) => s.id === s2.id)).toBeTruthy();
+    expect(sessions.map((s) => s.id)).toEqual(expect.arrayContaining([s1.id, s2.id]));
 
     await request.delete(`${API_BASE}/sessions/${s1.id}`);
     await request.delete(`${API_BASE}/sessions/${s2.id}`);

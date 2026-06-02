@@ -1,0 +1,260 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { KalioConfigService } from './kalio-config.service';
+
+async function writeToml(filePath: string, content: string): Promise<void> {
+  await mkdir(join(filePath, '..'), { recursive: true });
+  await writeFile(filePath, content, 'utf8');
+}
+
+describe('KalioConfigService', () => {
+  const tempDirs = new Set<string>();
+
+  afterEach(async () => {
+    await Promise.all([...tempDirs].map((dirPath) => rm(dirPath, { recursive: true, force: true })));
+    tempDirs.clear();
+  });
+
+  it('returns an empty config when no TOML layers exist', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'kalio-config-empty-'));
+    tempDirs.add(tempRoot);
+
+    const service = new KalioConfigService();
+    const result = await service.loadEffectiveConfig({
+      cwd: join(tempRoot, 'repo'),
+      homeDir: join(tempRoot, 'home'),
+    });
+
+    expect(result.layers).toHaveLength(0);
+    expect(result.config).toStrictEqual({});
+  });
+
+  it('loads user-level config from ~/.kalio/config.toml', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'kalio-config-user-'));
+    tempDirs.add(tempRoot);
+
+    const homeDir = join(tempRoot, 'home');
+    await mkdir(homeDir, { recursive: true });
+    await writeToml(
+      join(homeDir, '.kalio', 'config.toml'),
+      [
+        '[runtime]',
+        'context_window_size = 64000',
+        'max_tool_attempts = 6',
+        '',
+        '[cli_agents.codex]',
+        'model = "gpt-5.4"',
+      ].join('\n'),
+    );
+
+    const service = new KalioConfigService();
+    const result = await service.loadEffectiveConfig({ cwd: tempRoot, homeDir });
+
+    expect(result.layers).toHaveLength(1);
+    expect(result.layers[0]?.scope).toBe('user');
+    expect(result.config.runtime?.context_window_size).toBe(64000);
+    expect(result.config.runtime?.max_tool_attempts).toBe(6);
+    expect(result.config.cli_agents?.codex?.model).toBe('gpt-5.4');
+  });
+
+  it('merges user and project layers with the closest project config winning', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'kalio-config-merge-'));
+    tempDirs.add(tempRoot);
+
+    const homeDir = join(tempRoot, 'home');
+    const repoDir = join(tempRoot, 'repo');
+    const nestedDir = join(repoDir, 'apps', 'kalio-api');
+
+    await mkdir(join(repoDir, '.git'), { recursive: true });
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(nestedDir, { recursive: true });
+
+    await writeToml(
+      join(homeDir, '.kalio', 'config.toml'),
+      [
+        '[runtime]',
+        'context_window_size = 48000',
+        'max_tool_attempts = 4',
+        '',
+        '[mcp_servers.docs]',
+        'command = "npx"',
+        'args = ["-y", "docs-server"]',
+        'enabled = true',
+      ].join('\n'),
+    );
+
+    await writeToml(
+      join(repoDir, '.kalio', 'config.toml'),
+      [
+        '[runtime]',
+        'max_tool_attempts = 8',
+        '',
+        '[features]',
+        'mcp = true',
+        '',
+        '[mcp_servers.docs]',
+        'enabled = false',
+        'disabled_tools = ["delete"]',
+      ].join('\n'),
+    );
+
+    await writeToml(
+      join(repoDir, 'apps', '.kalio', 'config.toml'),
+      [
+        '[runtime]',
+        'context_window_size = 128000',
+      ].join('\n'),
+    );
+
+    const service = new KalioConfigService();
+    const result = await service.loadEffectiveConfig({ cwd: nestedDir, homeDir });
+
+    expect(result.layers).toHaveLength(3);
+    expect(result.layers.map((layer) => layer.scope)).toStrictEqual(['user', 'project', 'project']);
+    expect(result.config.runtime?.context_window_size).toBe(128000);
+    expect(result.config.runtime?.max_tool_attempts).toBe(8);
+    expect(result.config.features?.mcp).toBe(true);
+    expect(result.config.mcp_servers?.docs?.command).toBe('npx');
+    expect(result.config.mcp_servers?.docs?.enabled).toBe(false);
+    expect(result.config.mcp_servers?.docs?.disabled_tools).toStrictEqual(['delete']);
+  });
+
+  it('ignores parent .kalio layers above the detected project root', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'kalio-config-root-'));
+    tempDirs.add(tempRoot);
+
+    const homeDir = join(tempRoot, 'home');
+    const outsideDir = join(tempRoot, 'outside');
+    const repoDir = join(outsideDir, 'repo');
+    const nestedDir = join(repoDir, 'src');
+
+    await mkdir(join(repoDir, '.git'), { recursive: true });
+    await mkdir(nestedDir, { recursive: true });
+    await mkdir(homeDir, { recursive: true });
+
+    await writeToml(
+      join(outsideDir, '.kalio', 'config.toml'),
+      [
+        '[runtime]',
+        'max_tool_attempts = 1',
+      ].join('\n'),
+    );
+
+    await writeToml(
+      join(repoDir, '.kalio', 'config.toml'),
+      [
+        '[runtime]',
+        'max_tool_attempts = 9',
+      ].join('\n'),
+    );
+
+    const service = new KalioConfigService();
+    const result = await service.loadEffectiveConfig({ cwd: nestedDir, homeDir });
+
+    expect(result.layers).toHaveLength(1);
+    expect(result.config.runtime?.max_tool_attempts).toBe(9);
+  });
+
+  it('throws a file-specific error when a config layer contains invalid TOML', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'kalio-config-invalid-'));
+    tempDirs.add(tempRoot);
+
+    const homeDir = join(tempRoot, 'home');
+    await mkdir(homeDir, { recursive: true });
+    const configPath = join(homeDir, '.kalio', 'config.toml');
+    await writeToml(configPath, '[runtime\nmax_tool_attempts = 4');
+
+    const service = new KalioConfigService();
+
+    await expect(service.loadEffectiveConfig({ cwd: tempRoot, homeDir })).rejects.toThrow(
+      `Failed to parse Kalio config at ${configPath}`,
+    );
+  });
+
+  it('maps and rounds TOML tool timeout settings while ignoring invalid values', async () => {
+    const service = new KalioConfigService();
+    vi.spyOn(service, 'getEffectiveConfig').mockResolvedValue({
+      config: {
+        tool_timeouts: {
+          web_search_timeout_ms: 2000.6,
+          provider_local_timeout_ms: Number.POSITIVE_INFINITY,
+          provider_remote_timeout_ms: 9500.4,
+          provider_max_concurrent_streams: 2.4,
+        },
+      },
+      layers: [],
+    });
+
+    await expect(service.getToolTimeoutSettings()).resolves.toStrictEqual({
+      webSearchTimeoutMs: 2001,
+      providerRemoteTimeoutMs: 9500,
+      providerMaxConcurrentStreams: 2,
+    });
+  });
+
+  it('returns CLI agent config for known agent and null for missing agent', async () => {
+    const service = new KalioConfigService();
+    vi.spyOn(service, 'getEffectiveConfig').mockResolvedValue({
+      config: {
+        cli_agents: {
+          codex: {
+            enabled: true,
+            cliPath: 'codex',
+            timeoutMs: 60000,
+          },
+        },
+      },
+      layers: [],
+    });
+
+    await expect(service.getCliAgentConfig('codex')).resolves.toStrictEqual({
+      enabled: true,
+      cliPath: 'codex',
+      timeoutMs: 60000,
+    });
+    await expect(service.getCliAgentConfig('missing')).resolves.toBeNull();
+  });
+
+  it('serves getEffectiveConfig from cache within the TTL and re-reads after it expires', async () => {
+    vi.useFakeTimers();
+    try {
+      const service = new KalioConfigService();
+      let callCount = 0;
+      vi.spyOn(service, 'loadEffectiveConfig').mockImplementation(async () => {
+        callCount += 1;
+        return { config: { runtime: { max_tool_attempts: callCount } }, layers: [] };
+      });
+
+      const first = await service.getEffectiveConfig();
+      const second = await service.getEffectiveConfig();
+      expect(callCount).toBe(1);
+      expect(first).toBe(second); // identical reference — from cache
+
+      vi.advanceTimersByTime(31_000); // past the 30 s TTL
+      const third = await service.getEffectiveConfig();
+      expect(callCount).toBe(2);
+      expect(third.config.runtime?.max_tool_attempts).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invalidateCache() forces a fresh read on the next getEffectiveConfig() call', async () => {
+    const service = new KalioConfigService();
+    let callCount = 0;
+    vi.spyOn(service, 'loadEffectiveConfig').mockImplementation(async () => {
+      callCount += 1;
+      return { config: { runtime: { max_tool_attempts: callCount } }, layers: [] };
+    });
+
+    await service.getEffectiveConfig();
+    await service.getEffectiveConfig();
+    expect(callCount).toBe(1);
+
+    service.invalidateCache();
+    await service.getEffectiveConfig();
+    expect(callCount).toBe(2);
+  });
+});

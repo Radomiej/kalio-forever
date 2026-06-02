@@ -60,9 +60,10 @@ export function ProviderCard({ credential, isActive, isSyncing, onActivate, onRe
       >
         {/* Activate toggle */}
         <button
-          className="text-base-content/40 hover:text-sky-400 transition-colors shrink-0"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-base-content/60 transition-colors hover:bg-base-300 hover:text-sky-400"
           onClick={(e) => { e.stopPropagation(); onActivate(credential.id); }}
           title={isActive ? 'Active provider' : 'Set as active'}
+          aria-label={isActive ? `${credential.name} provider active` : `Activate ${credential.name} provider`}
           disabled={isSyncing}
           data-testid={`provider-activate-${credential.id}`}
         >
@@ -118,7 +119,7 @@ export function ProviderCard({ credential, isActive, isSyncing, onActivate, onRe
                 <span className="font-mono">{credential.baseUrl}</span>
               </div>
             )}
-            <div className="text-xs text-base-content/40 italic">API key stored securely — never exposed</div>
+            <div className="text-xs text-base-content/60 italic">API key stored securely — never exposed</div>
           </div>
 
           {/* Status */}

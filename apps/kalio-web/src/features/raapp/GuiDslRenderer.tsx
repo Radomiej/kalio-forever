@@ -119,6 +119,10 @@ function NodeView({ node, data, onAction }: NodeViewProps) {
       return <hr className={className || 'border-base-300 my-1'} />;
     case 'spacer':
       return <div className={className || 'flex-1'} />;
+    case 'icon': {
+      const iconName = scalarToString(p.name) ?? '';
+      return <span className={className} data-testid="gui-icon">{iconName}</span>;
+    }
     case 'progressbar': {
       const valRaw  = scalarToString(p.value) ?? '0';
       const maxRaw  = scalarToString(p.max)   ?? '100';

@@ -12,6 +12,9 @@ export interface ICLIAgentAdapter {
   /** URL to installation docs — shown in settings when agent is not found. */
   readonly installUrl: string;
 
+  /** Whether this CLI has a first-class model flag. */
+  readonly supportsModelSelection: boolean;
+
   /**
    * Returns the executable to spawn.
    * On Windows, .cmd shims must be wrapped in cmd /c — use this method
@@ -30,8 +33,9 @@ export interface ICLIAgentAdapter {
    * @param prompt  The task description — injected verbatim; never shell-expanded.
    * @param workdir Absolute path the agent should operate in.
    * @param extra   Additional args from user config (appended last).
+   * @param model   Optional model override for adapters that support it.
    */
-  buildArgs(prompt: string, workdir: string, extra?: string[]): string[];
+  buildArgs(prompt: string, workdir: string, extra?: string[], model?: string): string[];
 
   /** Args for the version probe (e.g. ['--version']). */
   probeArgs(): string[];

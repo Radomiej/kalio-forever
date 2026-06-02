@@ -1,18 +1,8 @@
-/**
- * RAAppManager — dual-source RaConsierge browser.
- *
- * Three sections:
- *  1. Catalog  — stored apps fetched from /api/ra-apps (core + versioned user)
- *  2. Work     — raw draft files from the active session VFS
- *  3. Session  — inline apps created by raapp_create in the current chat session
- */
 import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { Code2, Globe, Eye, RefreshCw, Upload, Package, FolderOpen, FlaskConical, Workflow, FileCode, Play, Rocket } from 'lucide-react';
+import { Eye, FolderOpen, Package, RefreshCw, Upload } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
-import { RAAppRenderer } from './RAAppRenderer';
-import { RAAppGroupCard } from './components/RAAppGroupCard';
-import { RAAppCoreCard } from './components/RAAppCoreCard';
 import { bucketCatalogApps } from './catalog.utils';
+import { CatalogView, PreviewPane, SessionView, WorkView, type FoundRAApp, type WorkDraft } from './RAAppManager.Views';
 import {
   getRAApps,
   getRAAppGroups,
@@ -26,20 +16,14 @@ import {
 } from '../../services/apiClient';
 import type { RAAppBlock, RAAppSummary, RAAppGroup, VFSFile } from '@kalio/types';
 
-interface FoundRAApp {
-  messageId: string;
-  block: RAAppBlock;
-  index: number;
+type RAAppSource = 'catalog' | 'work' | 'session';
+
+interface RAAppManagerProps {
+  onOpenVFS: (appId: string) => void;
+  onRunWithAgent: () => void;
 }
 
-interface WorkDraft {
-  id: string;
-  files: VFSFile[];
-  updatedAt: number;
-}
-
-export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId: string) => void; onRunWithAgent: () => void }) {
-  // ── Catalog state ────────────────────────────────────────────────────────
+export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
   const [groups, setGroups] = useState<RAAppGroup[]>([]);
   const [coreApps, setCoreApps] = useState<RAAppSummary[]>([]);
   const [userStandaloneApps, setUserStandaloneApps] = useState<RAAppSummary[]>([]);
@@ -47,9 +31,9 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [activeSource, setActiveSource] = useState<RAAppSource>('work');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Session state ────────────────────────────────────────────────────────
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const messages = useSessionStore((s) => s.messages);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
@@ -57,7 +41,6 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
   const [workLoading, setWorkLoading] = useState(false);
   const [workError, setWorkError] = useState<string | null>(null);
 
-  // ── Derive session inline apps from messages ─────────────────────────────
   const sessionApps = useMemo<FoundRAApp[]>(() => {
     const found: FoundRAApp[] = [];
     let idx = 0;
@@ -75,7 +58,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
           found.push({ messageId: msg.id, block: parsed as RAAppBlock, index: idx++ });
         }
       } catch {
-        // not JSON — skip
+        // Not a RAApp payload.
       }
     }
     return found;
@@ -88,9 +71,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
     for (const file of workFiles) {
       const parts = file.path.split('/');
       if (parts[0] !== 'drafts' || !parts[1]) continue;
-      const existing = drafts.get(parts[1]) ?? [];
-      existing.push(file);
-      drafts.set(parts[1], existing);
+      drafts.set(parts[1], [...(drafts.get(parts[1]) ?? []), file]);
     }
 
     return Array.from(drafts.entries())
@@ -102,7 +83,6 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }, [workFiles]);
 
-  // ── Load catalog ─────────────────────────────────────────────────────────
   const refreshCatalog = useCallback(async () => {
     setCatalogLoading(true);
     setCatalogError(null);
@@ -150,7 +130,6 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
     void refreshWork();
   }, [refreshWork]);
 
-  // ── Upload ───────────────────────────────────────────────────────────────
   const handleUpload = useCallback(
     async (file: File) => {
       if (!file.name.endsWith('.zip')) {
@@ -163,7 +142,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
         await uploadRAApp(file);
         await refreshCatalog();
       } catch {
-        setCatalogError('Upload failed — check that the ZIP contains a valid meta.yml.');
+        setCatalogError('Upload failed - check that the ZIP contains a valid meta.yml.');
       } finally {
         setUploading(false);
       }
@@ -184,7 +163,6 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
     if (file) void handleUpload(file);
   };
 
-  // ── Catalog action handlers ──────────────────────────────────────────────
   const handleRun = useCallback(
     (name: string) => {
       const { setPendingMessage } = useSessionStore.getState();
@@ -194,277 +172,126 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: { onOpenVFS: (appId:
     [onRunWithAgent],
   );
 
-  const handleGroupApprove = useCallback(
-    async (slug: string, bumpType: 'patch' | 'minor' | 'major') => {
-      await approveRAAppDraft(slug, bumpType);
-      await refreshCatalog();
-    },
-    [refreshCatalog],
-  );
-
-  const handleGroupDiscard = useCallback(
-    async (slug: string) => {
-      await discardRAAppDraft(slug);
-      await refreshCatalog();
-    },
-    [refreshCatalog],
-  );
-
-  const handleGroupRollback = useCallback(
-    async (slug: string, version: string) => {
-      await rollbackRAApp(slug, version);
-      await refreshCatalog();
-    },
-    [refreshCatalog],
-  );
-
-  const handleGroupDelete = useCallback(
-    async (slug: string) => {
-      await deleteRAAppGroup(slug);
-      await refreshCatalog();
-    },
-    [refreshCatalog],
-  );
-
-  const handleGroupDownload = useCallback((slug: string, version: string) => {
-    window.open(getRAAppGroupDownloadUrl(slug, version), '_blank');
-  }, []);
-
   const handleWorkAction = useCallback((message: string) => {
     const { setPendingMessage } = useSessionStore.getState();
     setPendingMessage(message);
     onRunWithAgent();
   }, [onRunWithAgent]);
 
+  const catalogCount = groups.length + coreApps.length + userStandaloneApps.length;
+
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-
-      {/* ── Catalog section ─────────────────────────────────────────────── */}
-      <div className="px-3 py-2 border-b border-base-300 shrink-0 flex items-center justify-between">
-        <span className="text-xs font-semibold text-base-content/60 uppercase tracking-wider flex items-center gap-1.5">
-          <Package size={12} />
-          Catalog ({groups.length + coreApps.length + userStandaloneApps.length})
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            className="btn btn-xs btn-ghost"
-            onClick={() => void refreshCatalog()}
-            disabled={catalogLoading}
-            title="Refresh catalog"
-          >
-            <RefreshCw size={12} className={catalogLoading ? 'animate-spin' : ''} />
-          </button>
-          <button
-            className="btn btn-xs btn-ghost"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            title="Upload RA-App ZIP"
-          >
-            <Upload size={12} />
-          </button>
-          <input ref={fileInputRef} type="file" accept=".zip" className="hidden" onChange={handleFileInput} />
-        </div>
-      </div>
-
-      {/* Drop zone */}
-      <div
-        className={`mx-2 mt-2 shrink-0 border-2 border-dashed rounded-lg transition-colors text-center text-xs py-2 cursor-pointer ${
-          dragOver ? 'border-primary bg-primary/10 text-primary' : 'border-base-300 text-base-content/30 hover:border-base-content/20'
-        }`}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        {uploading ? 'Uploading…' : 'Drop a .zip or click to upload'}
-      </div>
-
-      {catalogError && (
-        <p className="text-[10px] text-error px-3 py-1 shrink-0">{catalogError}</p>
-      )}
-
-      <div className="overflow-y-auto shrink-0 max-h-72 p-2 flex flex-col gap-2">
-        {catalogLoading && groups.length === 0 && coreApps.length === 0 && userStandaloneApps.length === 0 && (
-          <p className="text-xs text-base-content/30 text-center py-2">Loading catalog…</p>
-        )}
-
-        {groups.map((group) => (
-          <RAAppGroupCard
-            key={group.slug}
-            group={group}
-            onRun={(slug) => {
-              const g = groups.find((x) => x.slug === slug);
-              if (g) handleRun(g.current.meta.name);
-            }}
-            onDelete={(slug) => void handleGroupDelete(slug)}
-            onApprove={handleGroupApprove}
-            onDiscardDraft={handleGroupDiscard}
-            onRollback={handleGroupRollback}
-            onDownloadVersion={handleGroupDownload}
-          />
-        ))}
-
-        {coreApps.map((app) => (
-          <RAAppCoreCard key={app.id} app={app} onRun={handleRun} />
-        ))}
-
-        {userStandaloneApps.map((app) => (
-          <RAAppCoreCard key={app.id} app={app} onRun={handleRun} />
-        ))}
-
-        {!catalogLoading && groups.length === 0 && coreApps.length === 0 && userStandaloneApps.length === 0 && (
-          <p className="text-xs text-base-content/30 text-center py-2">
-            No apps in catalog — upload a .zip to get started
-          </p>
-        )}
-      </div>
-
-      {/* ── Work section ─────────────────────────────────────────────────── */}
-      <div className="px-3 py-2 border-t border-b border-base-300 shrink-0 flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-base-content/60 uppercase tracking-wider flex items-center gap-1.5">
-          <FolderOpen size={12} />
-          Work ({workDrafts.length})
-        </span>
-        {activeSessionId && (
-          <button
-            className="btn btn-xs btn-ghost gap-1"
-            onClick={() => onOpenVFS(activeSessionId)}
-            data-testid={`raapp-work-open-vfs-${activeSessionId}`}
-            title="Open raw session files"
-          >
-            <FolderOpen size={12} />
-            Open VFS
-          </button>
-        )}
-      </div>
-
-      <div className="overflow-y-auto shrink-0 max-h-44 p-2 flex flex-col gap-2 border-b border-base-300">
-        {workLoading && (
-          <p className="text-xs text-base-content/30 text-center py-2">Loading work files…</p>
-        )}
-
-        {!workLoading && workError && (
-          <p className="text-[10px] text-error px-1">{workError}</p>
-        )}
-
-        {!workLoading && !workError && workDrafts.length === 0 && (
-          <p className="text-xs text-base-content/30 text-center py-2">
-            No raw drafts in the active session
-          </p>
-        )}
-
-        {workDrafts.map((draft) => {
-          const hasGui = draft.files.some((file) => file.path.endsWith('/ui.gui'));
-          const hasSystems = draft.files.some((file) => file.path.endsWith('/systems.yml'));
-          const hasTests = draft.files.some((file) => file.path.endsWith('/tests.yml'));
-
-          return (
-            <div
-              key={draft.id}
-              className="bg-base-200 rounded-lg p-3 flex flex-col gap-2"
-              data-testid={`raapp-work-draft-${draft.id}`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-base-content truncate">{draft.id}</p>
-                  <p className="text-[11px] text-base-content/45">{draft.files.length} files</p>
-                </div>
-                <div className="flex flex-wrap gap-1 justify-end">
-                  {hasGui && <span className="badge badge-xs badge-info gap-1"><FileCode size={9} />ui</span>}
-                  {hasSystems && <span className="badge badge-xs badge-warning gap-1"><Workflow size={9} />systems</span>}
-                  {hasTests && <span className="badge badge-xs badge-success gap-1"><FlaskConical size={9} />tests</span>}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {draft.files.map((file) => (
-                  <span key={file.path} className="badge badge-xs badge-ghost">
-                    {file.path.split('/').slice(2).join('/') || file.path}
-                  </span>
-                ))}
-              </div>
-              <div className="flex items-center gap-1 pt-1 border-t border-base-300">
-                <button
-                  className="btn btn-xs btn-ghost gap-1"
-                  onClick={() => handleWorkAction(`Run raapp_test for draft_id "${draft.id}" now and summarize the results briefly.`)}
-                  data-testid={`raapp-work-test-${draft.id}`}
-                >
-                  <FlaskConical size={10} />
-                  Test
-                </button>
-                <button
-                  className="btn btn-xs btn-primary gap-1"
-                  onClick={() => handleWorkAction(`Run the RA-App draft "${draft.id}" now using raapp_execute_dsl and launch it immediately.`)}
-                  data-testid={`raapp-work-run-${draft.id}`}
-                >
-                  <Play size={10} />
-                  Run
-                </button>
-                <button
-                  className="btn btn-xs btn-success gap-1 ml-auto"
-                  onClick={() => handleWorkAction(`Publish the RA-App draft "${draft.id}" now using raapp_publish_draft with bump_type "minor", then report the released version.`)}
-                  data-testid={`raapp-work-publish-${draft.id}`}
-                >
-                  <Rocket size={10} />
-                  Publish
-                </button>
-              </div>
+    <div className="flex h-full flex-col overflow-hidden bg-base-100" data-testid="raapp-manager">
+      <header className="shrink-0 border-b border-base-300 px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Package size={18} className="text-sky-400" />
+              <h1 className="text-lg font-semibold text-base-content">RAApps</h1>
+              <span className="badge badge-sm badge-ghost">{catalogCount} catalog</span>
+              <span className="badge badge-sm badge-ghost">{workDrafts.length} drafts</span>
+              <span className="badge badge-sm badge-ghost">{sessionApps.length} session</span>
             </div>
-          );
-        })}
-      </div>
-
-      {/* ── Session section ──────────────────────────────────────────────── */}
-      <div className="px-3 py-2 border-t border-b border-base-300 shrink-0">
-        <span className="text-xs font-semibold text-base-content/60 uppercase tracking-wider">
-          Session ({sessionApps.length})
-        </span>
-      </div>
-
-      {sessionApps.length === 0 && (
-        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center p-4">
-          <RefreshCw size={24} className="text-base-content/20" />
-          <p className="text-sm text-base-content/40">No RaConsierge apps in current session</p>
-          <p className="text-xs text-base-content/30">Ask the assistant to create an HTML or GUI app</p>
+            <p className="mt-1 text-xs text-base-content/45">
+              Browse installed apps, manage active drafts, and preview generated session apps.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="btn btn-sm btn-ghost gap-2" onClick={() => void refreshCatalog()} disabled={catalogLoading}>
+              <RefreshCw size={14} className={catalogLoading ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+            <button className="btn btn-sm btn-primary gap-2" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              <Upload size={14} />
+              {uploading ? 'Uploading...' : 'Upload ZIP'}
+            </button>
+            <input ref={fileInputRef} type="file" accept=".zip" className="hidden" onChange={handleFileInput} />
+          </div>
         </div>
-      )}
+      </header>
 
-      {sessionApps.length > 0 && (
-        <>
-          <div className="flex flex-col gap-1 p-2 overflow-y-auto shrink-0 max-h-40 border-b border-base-300">
-            {sessionApps.map((app, i) => (
+      <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)_minmax(340px,0.44fr)]">
+        <aside className="border-b border-base-300 bg-base-200/30 p-3 xl:border-b-0 xl:border-r">
+          <div className="grid grid-cols-3 gap-2 xl:flex xl:flex-col">
+            {[
+              { id: 'catalog' as const, label: 'Catalog', count: catalogCount, icon: <Package size={15} /> },
+              { id: 'work' as const, label: 'Work', count: workDrafts.length, icon: <FolderOpen size={15} /> },
+              { id: 'session' as const, label: 'Session', count: sessionApps.length, icon: <Eye size={15} /> },
+            ].map((item) => (
               <button
-                key={app.messageId + i}
-                onClick={() => setSelectedIdx(i)}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm transition-colors ${
-                  selectedIdx === i ? 'bg-sky-500/15 text-sky-400' : 'hover:bg-base-200 text-base-content/70'
+                key={item.id}
+                type="button"
+                className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                  activeSource === item.id
+                    ? 'border-sky-500 bg-sky-500/12 text-sky-300'
+                    : 'border-base-300 bg-base-100/60 text-base-content/65 hover:border-base-content/20 hover:text-base-content'
                 }`}
+                onClick={() => setActiveSource(item.id)}
               >
-                {app.block.type === 'html' ? (
-                  <Globe size={14} className="shrink-0" />
-                ) : (
-                  <Code2 size={14} className="shrink-0" />
-                )}
-                <span className="flex-1 truncate">
-                  {app.block.type.toUpperCase()} App #{i + 1}
-                </span>
-                <span className="text-xs text-base-content/40 shrink-0 flex items-center gap-1">
-                  <Eye size={10} />
-                  {app.block.mode}
+                <span className="flex items-center gap-2 text-xs font-semibold">
+                  {item.icon}
+                  <span>{item.label}</span>
+                  <span className="ml-auto badge badge-xs badge-ghost">{item.count}</span>
                 </span>
               </button>
             ))}
           </div>
 
-          <div className="flex-1 overflow-auto p-2">
-            {selected ? (
-              <RAAppRenderer block={selected.block} />
-            ) : (
-              <p className="text-xs text-base-content/40 text-center pt-4">Select an app to preview</p>
-            )}
+          <div
+            className={`mt-3 rounded-lg border border-dashed px-3 py-3 text-center text-xs transition-colors ${
+              dragOver ? 'border-primary bg-primary/10 text-primary' : 'border-base-300 text-base-content/40 hover:border-base-content/25'
+            }`}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {uploading ? 'Uploading...' : 'Drop a .zip here'}
           </div>
-        </>
-      )}
+          {catalogError && <p className="mt-2 text-xs text-error">{catalogError}</p>}
+        </aside>
+
+        <section className="min-h-0 overflow-y-auto border-b border-base-300 p-4 xl:border-b-0 xl:border-r">
+          {activeSource === 'catalog' && (
+            <CatalogView
+              catalogCount={catalogCount}
+              catalogLoading={catalogLoading}
+              groups={groups}
+              coreApps={coreApps}
+              userStandaloneApps={userStandaloneApps}
+              onRun={handleRun}
+              onGroupDelete={(slug) => {
+                void deleteRAAppGroup(slug).then(refreshCatalog);
+              }}
+              onGroupApprove={(slug, bumpType) => approveRAAppDraft(slug, bumpType).then(refreshCatalog)}
+              onGroupDiscard={(slug) => discardRAAppDraft(slug).then(refreshCatalog)}
+              onGroupRollback={(slug, version) => rollbackRAApp(slug, version).then(refreshCatalog)}
+              onGroupDownload={(slug, version) => window.open(getRAAppGroupDownloadUrl(slug, version), '_blank')}
+            />
+          )}
+
+          {activeSource === 'work' && (
+            <WorkView
+              activeSessionId={activeSessionId}
+              workDrafts={workDrafts}
+              workLoading={workLoading}
+              workError={workError}
+              onOpenVFS={onOpenVFS}
+              onWorkAction={handleWorkAction}
+            />
+          )}
+
+          {activeSource === 'session' && (
+            <SessionView
+              sessionApps={sessionApps}
+              selectedIdx={selectedIdx}
+              onSelect={(index) => setSelectedIdx(index)}
+            />
+          )}
+        </section>
+
+        <PreviewPane selected={selected} />
+      </div>
     </div>
   );
 }
-

@@ -5,6 +5,8 @@ import { useAgentStore } from '../../store/agentStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
 import type { AgentTurn } from '../../store/sessionStore';
 import type { ToolActivity } from '../../store/agentStore';
+import { findArchitectureRunInMessages } from './architectureChatSummary';
+import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
 import { LiveToolCallBubble, HistoryToolCallBubble } from './ToolCallBubble';
 
 interface Props {
@@ -52,7 +54,7 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
 
 export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props) {
   const { messages, streamingChunks, thinkingChunks } = useSessionStore();
-  const { callIdToName: persistentCallIdToName } = useAgentStore();
+  const { callIdToName: persistentCallIdToName, toolArgProgress, setCanvasFocus } = useAgentStore();
 
   // Build callId → toolName from all available sources
   const toolCallIdToName = new Map<string, string>(Object.entries(persistentCallIdToName));
@@ -81,6 +83,22 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     }
   }
 
+  const architectureRun = findArchitectureRunInMessages(messages);
+  const turnArchitectureRun = architectureRun && turn.items.some((item) => {
+    if (item.kind === 'text') {
+      return messages.some((message) => message.id === item.messageId && (message.architectureRun || /^###\s+(Router|Finalizer)\b/im.test(message.content)));
+    }
+    if (item.kind === 'tool') {
+      return toolCallIdToName.get(item.callId) === 'run_subagent';
+    }
+    return false;
+  })
+    ? architectureRun
+    : null;
+  const architectureFinalAnswer = turnArchitectureRun
+    ? finalAnswerForArchitectureRun(turnArchitectureRun)
+    : null;
+
   return (
     <div data-testid="agent-turn-bubble" className="flex justify-start mb-2 w-full">
       <div className="min-w-0 w-full max-w-[min(100%,68rem)]">
@@ -89,9 +107,43 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
         </p>
 
         <div className={`group relative rounded-2xl text-base-content text-sm px-4 py-3 flex flex-col gap-2 w-full ${turn.agentRun?.agentType === 'subagent' ? 'bg-sky-500/10 border border-sky-500/20' : 'bg-base-300'}`}>
+          {turnArchitectureRun && (
+            <>
+              <ArchitectureRunTimeline
+                run={turnArchitectureRun}
+                onOpenCanvas={() => {
+                  setCanvasFocus({ kind: 'architecture-run', runId: turnArchitectureRun.runId });
+                }}
+                onOpenBranch={(sessionId) => {
+                  setCanvasFocus({ kind: 'architecture-branch', sessionId });
+                }}
+              />
+              {architectureFinalAnswer && (
+                <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 px-3 py-2" data-testid="architecture-final-answer">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300/80">Final answer</p>
+                  <MarkdownViewer content={architectureFinalAnswer} />
+                </div>
+              )}
+            </>
+          )}
           {/* Loading indicator while turn is active but no items have arrived yet */}
           {!turn.done && turn.items.length === 0 && (
-            <span data-testid="turn-loading-indicator" className="loading loading-dots loading-xs" />
+            toolArgProgress ? (
+              <span data-testid="turn-loading-indicator" className="text-xs text-base-content/60 font-mono tabular-nums">
+                {toolArgProgress.totalChars > 0 ? (
+                  <>
+                    Writing <span className="text-base-content/80">{toolArgProgress.toolName}</span>…{' '}
+                    {toolArgProgress.totalChars.toLocaleString()} chars · {toolArgProgress.charsPerSec.toLocaleString()}/s
+                  </>
+                ) : (
+                  <>
+                    Preparing <span className="text-base-content/80">{toolArgProgress.toolName}</span>…
+                  </>
+                )}
+              </span>
+            ) : (
+              <span data-testid="turn-loading-indicator" className="loading loading-dots loading-xs" />
+            )
           )}
           {turn.items.map((item, idx) => {
             if (item.kind === 'tool') {
@@ -134,6 +186,9 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
             const messageId = item.messageId;
             const msg = messages.find((m) => m.id === messageId);
             if (!msg) return null;
+            if (turnArchitectureRun && /^###\s+(Router|Finalizer)\b/im.test(msg.content)) {
+              return null;
+            }
             
             // Use per-message streaming state: cursor blinks only while this message's
             // chunk is still live (disappears as soon as agent calls a tool / thinking / raapp).
@@ -169,4 +224,16 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
       </div>
     </div>
   );
+}
+
+function finalAnswerForArchitectureRun(
+  run: NonNullable<ReturnType<typeof findArchitectureRunInMessages>>,
+): string | null {
+  if (run.finalArtifact?.trim()) {
+    return run.finalArtifact;
+  }
+  const finalizer = [...run.trace]
+    .reverse()
+    .find((step) => step.speaker === 'finalizer' && step.content.trim().length > 0);
+  return finalizer?.content.trim() ?? null;
 }

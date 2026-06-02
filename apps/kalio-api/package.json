@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "nest build",
-    "dev": "node_modules/.bin/nest start --watch",
+    "dev": "nest start --watch",
     "start": "node dist/main",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
@@ -14,10 +14,13 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "clean": "rm -rf dist"
+    "clean": "node ../../scripts/clean-paths.mjs dist"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "@iarna/toml": "^2.2.5",
     "@kalio/types": "workspace:*",
+    "@lydell/node-pty": "1.2.0-beta.12",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@nestjs/common": "^11.1.19",
     "@nestjs/config": "^4.0.4",
@@ -31,6 +34,7 @@
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.2",
     "extract-zip": "^2.0.1",
+    "grammy": "^1.42.0",
     "joi": "^17.13.0",
     "js-yaml": "^4.1.1",
     "nanoid": "^5.0.0",

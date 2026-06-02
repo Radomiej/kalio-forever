@@ -4,28 +4,111 @@
 # Zatrzymanie: Ctrl+C — czyści oba serwery
 
 param(
-    [switch]$UseMockLLM
+    [switch]$UseMockLLM,
+    [int]$BackendPort = 3016,
+    [int]$FrontendPort = 5188
 )
 
 $root = $PSScriptRoot
 $api  = Join-Path $root "apps\kalio-api"
 $web  = Join-Path $root "apps\kalio-web"
-$nestJs = Join-Path $api "node_modules\@nestjs\cli\bin\nest.js"
-$viteJs = Join-Path $web "node_modules\vite\bin\vite.js"
-$BE_PORT = 3016
-$FE_PORT = 5188
+$e2eEnvFile = Join-Path $root ".env.test"
+$localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+if (-not $localAppData) {
+    $localAppData = Join-Path $env:USERPROFILE "AppData\Local"
+}
+$devDataRoot = Join-Path $localAppData "kalio-forever-dev"
+$BE_PORT = $BackendPort
+$FE_PORT = $FrontendPort
 $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $nodeCmd) { $nodeCmd = Get-Command node -ErrorAction SilentlyContinue }
 if (-not $nodeCmd) { Write-Host "[FAIL] node not found on PATH" -ForegroundColor Red; exit 1 }
 
-$previousLlmEnv = @{
+function Resolve-WorkspaceCli {
+    param(
+        [string]$PrimaryPath,
+        [string]$PackageFilter,
+        [string]$RelativePath
+    )
+
+    if (Test-Path $PrimaryPath) { return $PrimaryPath }
+
+    $pnpmStore = Join-Path $root "node_modules\.pnpm"
+    if (-not (Test-Path $pnpmStore)) { return $null }
+
+    $match = Get-ChildItem -Path $pnpmStore -Directory -Filter $PackageFilter -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $match) { return $null }
+
+    $candidate = Join-Path $match.FullName $RelativePath
+    if (Test-Path $candidate) { return $candidate }
+    return $null
+}
+
+$nestJs = Resolve-WorkspaceCli `
+    -PrimaryPath (Join-Path $api "node_modules\@nestjs\cli\bin\nest.js") `
+    -PackageFilter "@nestjs+cli*" `
+    -RelativePath "node_modules\@nestjs\cli\bin\nest.js"
+if (-not $nestJs) { Write-Host "[FAIL] Nest CLI not found. Run pnpm install from repo root." -ForegroundColor Red; exit 1 }
+$viteJs = Resolve-WorkspaceCli `
+    -PrimaryPath (Join-Path $web "node_modules\vite\bin\vite.js") `
+    -PackageFilter "vite@*" `
+    -RelativePath "node_modules\vite\bin\vite.js"
+if (-not $viteJs) { Write-Host "[FAIL] Vite CLI not found. Run pnpm install from repo root." -ForegroundColor Red; exit 1 }
+
+# Some Windows shells expose both Path and PATH in the process environment.
+# Start-Process builds a case-insensitive dictionary and fails on that duplicate.
+$processPath = [Environment]::GetEnvironmentVariable('Path', 'Process')
+if (-not $processPath) { $processPath = [Environment]::GetEnvironmentVariable('PATH', 'Process') }
+if ($processPath) {
+    [Environment]::SetEnvironmentVariable('PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('Path', $processPath, 'Process')
+}
+
+$previousEnv = @{
     LLM_PROVIDER = $env:LLM_PROVIDER
     LLM_API_KEY = $env:LLM_API_KEY
     LLM_BASE_URL = $env:LLM_BASE_URL
     LLM_MODEL = $env:LLM_MODEL
+    KALIO_FORCE_ENV_LLM = $env:KALIO_FORCE_ENV_LLM
+    NODE_ENV = $env:NODE_ENV
+    PORT = $env:PORT
+    DATABASE_PATH = $env:DATABASE_PATH
+    WORKSPACE_ROOT = $env:WORKSPACE_ROOT
+    CORS_ORIGIN = $env:CORS_ORIGIN
+    VITE_API_URL = $env:VITE_API_URL
+    VITE_WS_URL = $env:VITE_WS_URL
+    VITE_PORT = $env:VITE_PORT
 }
 
-function Restore-LlmEnv {
+function Import-EnvFileIfMissing {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) { return }
+
+    foreach ($line in Get-Content $Path) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#') -or -not $trimmed.Contains('=')) {
+            continue
+        }
+
+        $key, $value = $trimmed.Split('=', 2)
+        $key = $key.Trim()
+        if (-not $key -or (Test-Path "Env:$key")) {
+            continue
+        }
+
+        $value = $value.Trim()
+        if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+        Set-Item "Env:$key" $value
+    }
+}
+
+Import-EnvFileIfMissing -Path (Join-Path $root ".env")
+
+function Restore-EnvVars {
     param([hashtable]$Values)
 
     foreach ($entry in $Values.GetEnumerator()) {
@@ -42,7 +125,51 @@ if ($UseMockLLM) {
     $env:LLM_API_KEY = 'mock'
     $env:LLM_BASE_URL = 'mock'
     $env:LLM_MODEL = 'mock'
+    $env:KALIO_FORCE_ENV_LLM = '1'
 }
+
+$apiOrigin = "http://localhost:$BE_PORT"
+$useDedicatedPorts = $BE_PORT -ne 3016 -or $FE_PORT -ne 5188
+
+if ($useDedicatedPorts) {
+    $env:NODE_ENV = 'test'
+    $env:DATABASE_PATH = './data/kalio-e2e.db'
+    $env:WORKSPACE_ROOT = './data/workspaces-e2e'
+    $env:CORS_ORIGIN = "http://localhost:$FE_PORT"
+}
+
+if (-not $env:DATABASE_PATH) {
+    $env:DATABASE_PATH = Join-Path $devDataRoot "kalio-dev.db"
+}
+if (-not $env:WORKSPACE_ROOT) {
+    $env:WORKSPACE_ROOT = Join-Path $devDataRoot "workspaces"
+}
+if (-not $env:MEMORY_DB_PATH) {
+    $env:MEMORY_DB_PATH = Join-Path $devDataRoot "memory"
+}
+if (-not $env:EMBEDDING_CACHE_DIR) {
+    $env:EMBEDDING_CACHE_DIR = Join-Path $devDataRoot "embeddings-cache"
+}
+if (-not $env:CORS_ORIGIN) {
+    $env:CORS_ORIGIN = "http://localhost:$FE_PORT,http://127.0.0.1:$FE_PORT"
+}
+if (-not $env:LLM_PROVIDER) {
+    $env:LLM_PROVIDER = 'mock'
+}
+if (-not $env:LLM_API_KEY) {
+    $env:LLM_API_KEY = 'mock'
+}
+if (-not $env:LLM_BASE_URL) {
+    $env:LLM_BASE_URL = 'mock'
+}
+if (-not $env:LLM_MODEL) {
+    $env:LLM_MODEL = 'mock'
+}
+
+$env:PORT = "$BE_PORT"
+$env:VITE_API_URL = $apiOrigin
+$env:VITE_WS_URL = $apiOrigin
+$env:VITE_PORT = "$FE_PORT"
 
 function Get-PortOwners {
     param([int[]]$Ports)
@@ -147,8 +274,26 @@ if ($UseMockLLM) {
 Write-Host ""
 
 # --- Start backend (nest start --watch) ---
-$beProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList $nestJs, "start", "--watch" `
-    -WorkingDirectory $api -NoNewWindow -PassThru
+if ($useDedicatedPorts) {
+    Write-Host "  Building backend for dedicated E2E env..." -ForegroundColor DarkYellow
+    Push-Location $api
+    try {
+        & $nodeCmd.Source $nestJs build
+    } finally {
+        Pop-Location
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [FAIL] Backend build failed for dedicated E2E env." -ForegroundColor Red
+        Restore-EnvVars -Values $previousEnv
+        exit 1
+    }
+
+    $beProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList "--env-file=$e2eEnvFile", "dist/main.js" `
+        -WorkingDirectory $api -NoNewWindow -PassThru
+} else {
+    $beProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList $nestJs, "start", "--watch" `
+        -WorkingDirectory $api -NoNewWindow -PassThru
+}
 
 Write-Host "  Backend  -> http://localhost:$BE_PORT  (PID $($beProcess.Id))" -ForegroundColor Green
 
@@ -178,6 +323,14 @@ if ($retries -ge $maxRetries) {
     exit 1
 }
 Write-Host "  Backend ready!" -ForegroundColor Green
+
+if ($useDedicatedPorts) {
+    if ($null -eq $previousEnv.NODE_ENV) {
+        Remove-Item 'Env:NODE_ENV' -ErrorAction SilentlyContinue
+    } else {
+        Set-Item 'Env:NODE_ENV' $previousEnv.NODE_ENV
+    }
+}
 
 # --- Start frontend (vite dev) ---
 # IMPORTANT: @tailwindcss/oxide (Rust native module used by Tailwind CSS v4)
@@ -209,6 +362,6 @@ try {
     Write-Host ""
     Write-Host "Stopping stack..." -ForegroundColor Yellow
     Stop-KalioStack -BeProcess $beProcess -FeProcess $feProcess -Ports @($BE_PORT, $FE_PORT)
-    Restore-LlmEnv -Values $previousLlmEnv
+    Restore-EnvVars -Values $previousEnv
     Write-Host "[OK] Stack stopped." -ForegroundColor Green
 }

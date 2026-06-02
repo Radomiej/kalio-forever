@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, extname } from 'node:path';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
@@ -24,7 +24,7 @@ function getContentArg(args: ToolCallRequest['args']): string {
 @Injectable()
 @Tool({
   name: 'fs_write',
-  description: 'Write content to a file on the local filesystem. Path must be inside an allowed directory.',
+  description: 'Write content to a file on the local filesystem. Use this for real project files under allowed directories. Path must be inside an allowed directory.',
   parameters: {
     type: 'object',
     required: ['path', 'content'],
@@ -46,6 +46,14 @@ export class FsWriteTool {
     const allowed = await this.allowedPaths.isAllowed(absPath, { allowMissingPath: true });
     if (!allowed) {
       throw new Error(`ACCESS_DENIED: path is outside allowed roots`);
+    }
+    if (extname(absPath).toLowerCase() === '.json') {
+      try {
+        JSON.parse(content);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new Error(`INVALID_JSON: refusing to write malformed JSON to ${absPath}: ${detail}`, { cause: err });
+      }
     }
     mkdirSync(dirname(absPath), { recursive: true });
     writeFileSync(absPath, content, 'utf8');

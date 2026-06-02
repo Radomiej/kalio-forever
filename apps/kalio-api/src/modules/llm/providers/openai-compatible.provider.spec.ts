@@ -48,7 +48,7 @@ describe('OpenAICompatibleProvider', () => {
       });
 
       // Act
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       // BUG: Current implementation has empty catch block at line 66 that silently ignores parse errors
@@ -64,7 +64,7 @@ describe('OpenAICompatibleProvider', () => {
       );
     });
 
-    it('should log error when tool args JSON parse fails', async () => {
+    it('should throw a structured error when tool args JSON parse fails', async () => {
       // Arrange
       const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
       const tools = [{ name: 'test_tool', description: 'Test', parameters: {} }];
@@ -91,17 +91,13 @@ describe('OpenAICompatibleProvider', () => {
         body: mockStream,
       });
 
-      // Act
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
-
-      // Assert
-      // BUG: Current implementation has empty catch block at line 98 that silently ignores parse errors
-      // Expected: Should log the malformed tool args error
-      // This test will fail until the bug is fixed
-      // Tool should still be returned with empty args
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('test_tool');
-      expect(result[0].args).toEqual({});
+      // Act & Assert
+      await expect(
+        provider.streamChat(messages, tools, { sessionId, messageId, onChunk }),
+      ).rejects.toMatchObject({
+        code: 'LLM_BAD_TOOL_ARGS',
+        message: '[openai] Tool call test_tool streamed malformed JSON arguments',
+      });
     });
   });
 
@@ -129,7 +125,7 @@ describe('OpenAICompatibleProvider', () => {
         body: mockStream,
       });
 
-      await provider.streamChat(messages, tools, vi.fn(), 'sess-123', 'msg-456');
+      await provider.streamChat(messages, tools, { sessionId: 'sess-123', messageId: 'msg-456', onChunk: vi.fn() });
 
       const request = mockFetch.mock.calls[0]?.[1] as { body: string };
       const parsed = JSON.parse(request.body) as { messages: Array<Record<string, unknown>> };
@@ -173,7 +169,7 @@ describe('OpenAICompatibleProvider', () => {
       });
 
       // Act
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       expect(onChunk).toHaveBeenCalledWith({
@@ -230,7 +226,7 @@ describe('OpenAICompatibleProvider', () => {
       });
 
       // Act
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       expect(result).toHaveLength(1);
@@ -267,7 +263,7 @@ describe('OpenAICompatibleProvider', () => {
         body: { getReader: () => reader },
       });
 
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortController.signal);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk, abortSignal: abortController.signal });
 
       expect(result).toEqual([]);
       expect(reader.releaseLock).toHaveBeenCalledOnce();
@@ -281,7 +277,7 @@ describe('OpenAICompatibleProvider', () => {
       const sessionId = 'sess-123';
       const messageId = 'msg-456';
 
-      mockFetch.mockResolvedValueOnce({
+      mockFetch.mockResolvedValue({
         ok: false,
         status: 500,
         statusText: 'Internal Server Error',
@@ -291,7 +287,7 @@ describe('OpenAICompatibleProvider', () => {
 
       // Act & Assert
       await expect(
-        provider.streamChat(messages, tools, onChunk, sessionId, messageId),
+        provider.streamChat(messages, tools, { sessionId, messageId, onChunk }),
       ).rejects.toThrow('[openai] LLM request failed: 500 Internal Server Error - ');
     });
 
@@ -311,7 +307,7 @@ describe('OpenAICompatibleProvider', () => {
 
       // Act & Assert
       await expect(
-        provider.streamChat(messages, tools, onChunk, sessionId, messageId),
+        provider.streamChat(messages, tools, { sessionId, messageId, onChunk }),
       ).rejects.toThrow('[openai] LLM request failed');
     });
   });

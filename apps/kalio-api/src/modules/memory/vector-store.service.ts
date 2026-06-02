@@ -30,6 +30,11 @@ export interface VecEntry {
   createdAt: number;
 }
 
+function normalizeFtsQuery(query: string): string {
+  const terms = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
+  return terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(' ');
+}
+
 // ── VectorStoreService ───────────────────────────────────────────────────────
 
 @Injectable()
@@ -143,6 +148,9 @@ export class VectorStoreService {
   }
 
   searchFTS(query: string, limit = 5): FtsSearchResult[] {
+    const ftsQuery = normalizeFtsQuery(query);
+    if (!ftsQuery) return [];
+
     try {
       const rows = this.db
         .prepare(
@@ -153,7 +161,7 @@ export class VectorStoreService {
            ORDER BY f.rank
            LIMIT ?`
         )
-        .all(query, limit) as Array<{
+        .all(ftsQuery, limit) as Array<{
           id: string;
           bm25_score: number;
           content: string;
@@ -168,7 +176,8 @@ export class VectorStoreService {
         bm25Score: r.bm25_score,
         createdAt: r.created_at,
       }));
-    } catch {
+    } catch (err) {
+      this.logger.warn(`FTS search failed for query "${query.slice(0, 80)}"`, err instanceof Error ? err : new Error(String(err)));
       return [];
     }
   }

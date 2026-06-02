@@ -15,6 +15,10 @@ export class TurnState {
     this.text += delta;
   }
 
+  replaceText(text: string): void {
+    this.text = text;
+  }
+
   appendThinking(delta: string): void {
     this.thinking += delta;
   }

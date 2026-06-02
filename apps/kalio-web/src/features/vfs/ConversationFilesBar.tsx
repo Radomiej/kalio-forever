@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { FolderOpen, File, Download, Archive, RefreshCw, X, Loader, Eye, FileText, FileJson, FileCode, FileImage } from 'lucide-react';
+import { FolderOpen, File, Download, Archive, RefreshCw, X, Loader, Eye, FileText, FileJson, FileCode, FileImage, Upload } from 'lucide-react';
 import { apiClient } from '../../services/apiClient';
 import type { VFSFile, VFSListResult, VFSReadResult } from '@kalio/types';
 
@@ -38,7 +38,10 @@ export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationF
   const [selected, setSelected] = useState<string | null>(null);
   const [preview, setPreview] = useState('');
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -82,6 +85,37 @@ export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationF
     window.open(`${API_BASE}/api/sessions/${sessionId}/vfs/zip`, '_blank');
   };
 
+  const uploadTextFile = useCallback(async (file: globalThis.File, filePath: string) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('filePath', filePath);
+    setUploading(true);
+    setUploadError(null);
+    try {
+      await apiClient.post(`/api/sessions/${sessionId}/vfs/upload-text`, form);
+      await refresh();
+      await openPreview(filePath);
+    } catch (err: unknown) {
+      console.error('[ConversationFilesBar] upload failed', err);
+      setUploadError(formatUploadError(err));
+    } finally {
+      setUploading(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+    }
+  }, [refresh, sessionId]);
+
+  const chooseTextUpload = useCallback((fileList: FileList | null) => {
+    const file = fileList?.[0];
+    if (!file) return;
+    const defaultPath = `project/${file.name}`;
+    const filePath = window.prompt('Upload file to VFS path', defaultPath)?.trim();
+    if (!filePath) {
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+      return;
+    }
+    void uploadTextFile(file, filePath);
+  }, [uploadTextFile]);
+
   return (
     <>
       <button
@@ -90,13 +124,13 @@ export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationF
         data-testid="conversation-files-toggle"
         title="Session files"
       >
-        <FolderOpen size={12} className={files.length > 0 ? 'text-primary shrink-0' : 'text-base-content/30 shrink-0'} />
-        <span className={files.length > 0 ? 'font-medium text-base-content/70' : 'font-medium text-base-content/35'}>Files</span>
+        <FolderOpen size={12} className={files.length > 0 ? 'text-primary shrink-0' : 'text-base-content/60 shrink-0'} />
+        <span className={files.length > 0 ? 'font-medium text-base-content/70' : 'font-medium text-base-content/70'}>Files</span>
         {files.length > 0
           ? <span className="badge badge-xs badge-primary">{files.length}</span>
-          : <span className="text-[10px] text-base-content/30">empty</span>
+          : <span className="text-[10px] text-base-content/70">empty</span>
         }
-        {loading && <Loader size={10} className="animate-spin text-base-content/30 ml-1" />}
+        {loading && <Loader size={10} className="animate-spin text-base-content/60 ml-1" />}
       </button>
 
       <dialog ref={dialogRef} className="modal" data-testid="conversation-files-modal">
@@ -106,6 +140,24 @@ export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationF
             <h3 className="font-semibold text-base flex-1">Session Files</h3>
             <span className="text-xs text-base-content/40 font-mono">{files.length} file{files.length !== 1 ? 's' : ''}</span>
             <div className="flex items-center gap-1">
+              <input
+                ref={uploadInputRef}
+                type="file"
+                className="hidden"
+                accept=".css,.html,.js,.json,.md,.ts,.tsx,.txt,application/json,application/typescript,text/css,text/html,text/javascript,text/markdown,text/plain,text/x-typescript"
+                onChange={(event) => chooseTextUpload(event.target.files)}
+                data-testid="conversation-files-upload-input"
+              />
+              <button
+                className="btn btn-ghost btn-sm gap-1"
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={uploading}
+                data-testid="conversation-files-upload"
+                title="Upload a text file into VFS"
+              >
+                {uploading ? <Loader size={14} className="animate-spin" /> : <Upload size={14} />}
+                <span className="text-xs">Upload</span>
+              </button>
               {files.length > 0 && (
                 <button
                   className="btn btn-ghost btn-sm gap-1"
@@ -133,6 +185,12 @@ export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationF
               </form>
             </div>
           </div>
+
+          {uploadError && (
+            <div className="border-b border-error/20 bg-error/10 px-5 py-2 text-xs leading-5 text-error-content" data-testid="conversation-files-upload-error">
+              {uploadError}
+            </div>
+          )}
 
           <div className="flex flex-1 overflow-hidden">
             <div className="w-64 shrink-0 border-r border-base-300 overflow-y-auto bg-base-200/30">
@@ -215,4 +273,18 @@ export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationF
       </dialog>
     </>
   );
+}
+
+function formatUploadError(err: unknown): string {
+  const response = typeof err === 'object' && err !== null && 'response' in err
+    ? (err as { response?: { status?: number; data?: { message?: unknown } } }).response
+    : undefined;
+  if (response?.status === 413) {
+    return 'Upload is too large for this endpoint. Use a smaller text file or split the project seed before uploading.';
+  }
+  const message = response?.data?.message;
+  if (typeof message === 'string' && message.length > 0) {
+    return message;
+  }
+  return 'Upload failed. Check that the file is text-like and under the VFS upload limit.';
 }

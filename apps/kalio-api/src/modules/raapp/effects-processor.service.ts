@@ -122,6 +122,15 @@ export interface EffectsProcessorResult {
   entities: Entity[];
 }
 
+/** Internal context threaded through processEffect / processCallNative. Not exported. */
+interface EffectRunContext {
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  pendingApprovals: PendingApproval[];
+  sessionCtx: NativeSessionContext;
+  entityStore?: EntityStore;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 /**
@@ -193,13 +202,13 @@ export class EffectsProcessorService {
         for (const entity of entities) {
           const entityInput = { ...inputs, entity_id: entity.id, entity: entity.components };
           for (const effect of system.effects ?? []) {
-            await this.processEffect(effect, entityInput, output, pendingApprovals, sessionCtx, entityStore);
+            await this.processEffect(effect, { input: entityInput, output, pendingApprovals, sessionCtx, entityStore });
           }
         }
       } else {
         // Global execution — no entity context
         for (const effect of system.effects ?? []) {
-          await this.processEffect(effect, inputs, output, pendingApprovals, sessionCtx, entityStore);
+          await this.processEffect(effect, { input: inputs, output, pendingApprovals, sessionCtx, entityStore });
         }
       }
     }
@@ -209,12 +218,9 @@ export class EffectsProcessorService {
 
   private async processEffect(
     effect: RawEffect,
-    input: Record<string, unknown>,
-    output: Record<string, unknown>,
-    pendingApprovals: PendingApproval[],
-    sessionCtx: NativeSessionContext,
-    entityStore?: EntityStore,
+    ctx: EffectRunContext,
   ): Promise<void> {
+    const { input, output, entityStore } = ctx;
     // assign: { target, expression }
     if ('assign' in effect) {
       const { target, expression } = (effect as AssignEffect).assign;
@@ -236,14 +242,14 @@ export class EffectsProcessorService {
       const condResult = this.evalExpression(condition, input, output);
       const branch = condResult ? thenBranch : (elseBranch ?? []);
       for (const e of branch) {
-        await this.processEffect(e, input, output, pendingApprovals, sessionCtx, entityStore);
+        await this.processEffect(e, ctx);
       }
       return;
     }
 
     // call_native: { system, args?, output? }
     if ('call_native' in effect) {
-      await this.processCallNative(effect as CallNativeEffect, input, output, pendingApprovals, sessionCtx);
+      await this.processCallNative(effect as CallNativeEffect, ctx);
       return;
     }
 
@@ -311,11 +317,9 @@ export class EffectsProcessorService {
 
   private async processCallNative(
     effect: CallNativeEffect,
-    input: Record<string, unknown>,
-    output: Record<string, unknown>,
-    pendingApprovals: PendingApproval[],
-    sessionCtx: NativeSessionContext,
+    ctx: EffectRunContext,
   ): Promise<void> {
+    const { input, output, pendingApprovals, sessionCtx } = ctx;
     const { system, args: rawArgs = {}, output: outputPath } = effect.call_native;
 
     // Resolve arg expressions
@@ -334,7 +338,13 @@ export class EffectsProcessorService {
         sessionId: sessionCtx.sessionId,
         type: 'raapp_native_call',
         label: `raapp:call_native ${system} ERROR`,
-        data: { system, args: resolvedArgs, error: err instanceof Error ? err.message : String(err) },
+        data: {
+          domain: 'raapp',
+          eventType: 'raapp_native_call_error',
+          system,
+          args: resolvedArgs,
+          error: err instanceof Error ? err.message : String(err),
+        },
       });
       if (outputPath) {
         this.setPath(output, outputPath.replace(/^output\./, ''), {
@@ -349,6 +359,8 @@ export class EffectsProcessorService {
       type: 'raapp_native_call',
       label: `raapp:call_native ${system}`,
       data: {
+        domain: 'raapp',
+        eventType: executeResult.approval_required ? 'raapp_native_call_pending' : 'raapp_native_call_executed',
         system,
         args: resolvedArgs,
         approval_required: executeResult.approval_required,

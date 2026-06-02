@@ -61,4 +61,63 @@ describe('DoneHandler', () => {
 
     expect(sessionManager.persistAssistantMessage).not.toHaveBeenCalled();
   });
+
+  it('does not convert raw XML tool-call text in normal chat context', async () => {
+    const state = new TurnState();
+    state.appendText([
+      '<tool_call>',
+      '<name>run_cli_agent</name>',
+      '<parameters>',
+      '<agentId>gemini</agentId>',
+      '<prompt>Inspect the project.</prompt>',
+      '</parameters>',
+      '</tool_call>',
+    ].join(''));
+    const ctx = makeCtx(state);
+
+    await handler.handle({ type: 'done' }, ctx);
+
+    expect(ctx.state.text).toContain('<tool_call>');
+    expect(ctx.state.toolCalls).toEqual([]);
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledWith(
+      'sid-04',
+      'mid-04',
+      state,
+    );
+  });
+
+  it('converts run_cli_agent raw XML tool-call text in subagent context', async () => {
+    const state = new TurnState();
+    state.appendText([
+      '<tool_call>',
+      '<name>run_cli_agent</name>',
+      '<parameters>',
+      '<agentId>gemini</agentId>',
+      '<prompt>Inspect the project.</prompt>',
+      '</parameters>',
+      '</tool_call>',
+    ].join(''));
+    const ctx = {
+      ...makeCtx(state),
+      agentRun: { agentRunId: 'sub-1', agentType: 'subagent' as const },
+    };
+
+    await handler.handle({ type: 'done' }, ctx);
+
+    expect(ctx.state.text).toBe('');
+    expect(ctx.state.toolCalls).toEqual([
+      expect.objectContaining({
+        name: 'run_cli_agent',
+        args: {
+          agentId: 'gemini',
+          prompt: 'Inspect the project.',
+        },
+      }),
+    ]);
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledWith(
+      'sid-04',
+      'mid-04',
+      state,
+    );
+  });
 });

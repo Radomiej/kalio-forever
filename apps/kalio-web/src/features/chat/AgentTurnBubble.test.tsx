@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { AgentTurnBubble } from './AgentTurnBubble';
 import type { ChatMessage } from '@kalio/types';
 import type { ToolActivity } from '../../store/agentStore';
@@ -19,9 +19,19 @@ vi.mock('../../store/sessionStore', () => ({
 
 // Provide callIdToName with a known mapping for regression tests
 const KNOWN_CALL_ID = 'call_1777207759460_1';
+const mockAgentStoreState = {
+  callIdToName: { [KNOWN_CALL_ID]: 'raapp_create' },
+  toolArgProgress: null as { toolName: string; totalChars: number; charsPerSec: number } | null,
+  setCanvasOpen: vi.fn(),
+  setCanvasFocus: vi.fn(),
+};
+
 vi.mock('../../store/agentStore', () => ({
   useAgentStore: () => ({
-    callIdToName: { [KNOWN_CALL_ID]: 'raapp_create' },
+    callIdToName: mockAgentStoreState.callIdToName,
+    toolArgProgress: mockAgentStoreState.toolArgProgress,
+    setCanvasOpen: mockAgentStoreState.setCanvasOpen,
+    setCanvasFocus: mockAgentStoreState.setCanvasFocus,
   }),
 }));
 
@@ -34,11 +44,12 @@ vi.mock('./ToolCallBubble', () => ({
   LiveToolCallBubble: ({ activity }: { activity: ToolActivity }) => (
     <div data-testid={`live-tool-${activity.callId}`}>{activity.toolName}</div>
   ),
-  HistoryToolCallBubble: ({ toolName, callId, isAnswered }: { toolName: string; callId: string; isAnswered?: boolean }) => (
+  HistoryToolCallBubble: ({ toolName, callId, isAnswered, defaultOpenOverride }: { toolName: string; callId: string; isAnswered?: boolean; defaultOpenOverride?: boolean }) => (
     <div
       data-testid={`history-tool-${toolName}`}
       data-call-id={callId}
       data-answered={String(isAnswered ?? false)}
+      data-default-open={defaultOpenOverride === undefined ? 'unset' : String(defaultOpenOverride)}
     >
       {toolName}
       {isAnswered && <span>Interactive app — answer submitted</span>}
@@ -72,6 +83,9 @@ describe('AgentTurnBubble', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMessages.length = 0; // Clear mock messages
+    mockAgentStoreState.toolArgProgress = null;
+    mockAgentStoreState.setCanvasOpen.mockClear();
+    mockAgentStoreState.setCanvasFocus.mockClear();
   });
 
   it('renders agent turn bubble with data-testid', () => {
@@ -147,6 +161,328 @@ describe('AgentTurnBubble', () => {
     mockMessages.push(makeMsg({ id: 'msg-1', streaming: true, content: '' }));
     render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], true)} toolActivities={[]} />);
     expect(screen.queryByTestId('streaming-indicator')).not.toBeInTheDocument();
+  });
+
+  it('REGRESSION: shows tool intent before any argument chars are streamed', () => {
+    mockAgentStoreState.toolArgProgress = { toolName: 'raapp_create', totalChars: 0, charsPerSec: 0 };
+
+    render(<AgentTurnBubble turn={makeTurn([], false)} toolActivities={[]} />);
+
+    expect(screen.getByTestId('turn-loading-indicator')).toHaveTextContent('Preparing');
+    expect(screen.getByTestId('turn-loading-indicator')).toHaveTextContent('raapp_create');
+  });
+
+  it('renders an architecture route timeline and opens the run canvas', () => {
+    mockMessages.push(makeMsg({
+      id: 'msg-arch',
+      content: '### Finalizer',
+      architectureRun: {
+        runId: 'run-1',
+        schemaId: 'strategic-decision-council',
+        status: 'completed',
+        finalArtifact: 'Final answer',
+        trace: [
+          {
+            speaker: 'router',
+            content: 'Dispatch to council branches',
+            nodeId: 'router',
+            nextNodeId: 'pragmatist',
+          },
+          {
+            speaker: 'participant',
+            content: 'Pragmatist branch result',
+            nodeId: 'pragmatist',
+            nextNodeId: 'router',
+            stream: {
+              streamGroupId: 'run-1',
+              branchSessionId: 'branch-pragmatist',
+              status: 'completed',
+              chunkCount: 12,
+              text: 'Pragmatist branch result',
+            },
+          },
+          {
+            speaker: 'participant',
+            content: 'Shadow branch result',
+            nodeId: 'shadow',
+            nextNodeId: 'router',
+          },
+          {
+            speaker: 'router',
+            content: 'Merge council outputs',
+            nodeId: 'router',
+            nextNodeId: 'final-artifact',
+            visitIndex: 2,
+          },
+          {
+            speaker: 'finalizer',
+            content: 'Final answer',
+            nodeId: 'final-artifact',
+          },
+        ],
+        routeHops: [],
+      },
+    }));
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-arch' }])} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-run-timeline')).toHaveTextContent('strategic-decision-council');
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Router');
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Sub-agents');
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Finalizer');
+    expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('Pragmatist');
+    expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('Shadow');
+    expect(screen.getAllByTestId('architecture-route-router')).toHaveLength(2);
+    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('Final answer');
+    expect(screen.getByTestId('architecture-final-answer')).toHaveTextContent('Final answer');
+
+    fireEvent.click(screen.getByTestId('open-architecture-run-canvas'));
+
+    expect(mockAgentStoreState.setCanvasFocus).toHaveBeenCalledWith({
+      kind: 'architecture-run',
+      runId: 'run-1',
+    });
+
+    fireEvent.click(screen.getAllByTestId('architecture-route-agent')[0]);
+
+    expect(mockAgentStoreState.setCanvasFocus).toHaveBeenLastCalledWith({
+      kind: 'architecture-branch',
+      sessionId: 'branch-pragmatist',
+    });
+  });
+
+  it('keeps architecture sub-agent tool calls discoverable under the route timeline', () => {
+    mockMessages.push(
+      makeMsg({
+        id: 'msg-arch',
+        content: '### Finalizer',
+        toolCalls: [{ id: 'tc-subagent', name: 'run_subagent', args: { nodeId: 'pragmatist' } }],
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'completed',
+          trace: [
+            {
+              speaker: 'router',
+              content: 'Dispatch to council branches',
+              nodeId: 'router',
+              nextNodeId: 'pragmatist',
+            },
+            {
+              speaker: 'participant',
+              content: 'Pragmatist branch result',
+              nodeId: 'pragmatist',
+              nextNodeId: 'router',
+              stream: {
+                streamGroupId: 'run-1',
+                branchSessionId: 'branch-pragmatist',
+                status: 'completed',
+                chunkCount: 12,
+                text: 'Pragmatist branch result',
+              },
+            },
+          ],
+          routeHops: [],
+        },
+      }),
+      makeMsg({
+        id: 'tool-subagent',
+        role: 'tool_result',
+        toolCallId: 'tc-subagent',
+        content: JSON.stringify({
+          childSessionId: 'branch-pragmatist',
+          parentSessionId: 's1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'branch-pragmatist',
+          copiedFiles: [],
+          result: 'Pragmatist branch result',
+          taskId: 'task-1',
+          durationMs: 100,
+        }),
+      }),
+    );
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-arch' }, { kind: 'tool', callId: 'tc-subagent' }])} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-run-timeline')).toHaveTextContent('Router -> Pragmatist');
+    expect(screen.getByTestId('history-tool-run_subagent')).toHaveAttribute('data-default-open', 'unset');
+  });
+
+  it('hides duplicate router and finalizer markdown when the route timeline is present', () => {
+    mockMessages.push(makeMsg({
+      id: 'router-msg',
+      content: '### Router\n\nVerbose router body',
+      architectureRun: {
+        runId: 'run-1',
+        schemaId: 'strategic-decision-council',
+        status: 'completed',
+        finalArtifact: 'Compact final body',
+        trace: [
+          {
+            speaker: 'router',
+            content: 'Compact router body',
+            nodeId: 'router',
+            nextNodeId: 'final-artifact',
+          },
+          {
+            speaker: 'finalizer',
+            content: 'Compact final body',
+            nodeId: 'final-artifact',
+          },
+        ],
+        routeHops: [],
+      },
+    }));
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'router-msg' }])} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-run-timeline')).toBeInTheDocument();
+    expect(screen.queryByText('Verbose router body')).not.toBeInTheDocument();
+    expect(screen.getByTestId('architecture-final-answer')).toHaveTextContent('Compact final body');
+  });
+
+  it('renders the finalizer trace as final answer when finalArtifact metadata is missing', () => {
+    mockMessages.push(makeMsg({
+      id: 'finalizer-msg',
+      content: '### Finalizer\n\nVerbose duplicated body',
+      architectureRun: {
+        runId: 'run-1',
+        schemaId: 'strategic-decision-council',
+        status: 'completed',
+        trace: [
+          {
+            speaker: 'router',
+            content: 'Router merged branches',
+            nodeId: 'router',
+            nextNodeId: 'final-artifact',
+          },
+          {
+            speaker: 'finalizer',
+            content: 'Trace final answer survives metadata drift',
+            nodeId: 'final-artifact',
+          },
+        ],
+        routeHops: [],
+      },
+    }));
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'finalizer-msg' }])} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-run-timeline')).toBeInTheDocument();
+    expect(screen.queryByText('Verbose duplicated body')).not.toBeInTheDocument();
+    expect(screen.getByTestId('architecture-final-answer')).toHaveTextContent('Trace final answer survives metadata drift');
+  });
+
+  it('renders a partial architecture route without a premature finalizer stage', () => {
+    mockMessages.push(makeMsg({
+      id: 'msg-partial-arch',
+      content: '### Router',
+      architectureRun: {
+        runId: 'run-partial',
+        schemaId: 'strategic-decision-council',
+        status: 'running',
+        trace: [
+          {
+            speaker: 'router',
+            content: 'Dispatch started',
+            nodeId: 'router',
+            nextNodeId: 'pragmatist',
+          },
+          {
+            speaker: 'participant',
+            content: 'Pragmatist is streaming',
+            nodeId: 'pragmatist',
+            nextNodeId: 'router',
+            stream: {
+              streamGroupId: 'run-partial',
+              branchSessionId: 'branch-pragmatist',
+              status: 'streaming',
+              chunkCount: 3,
+              text: 'Pragmatist is streaming',
+            },
+          },
+        ],
+        routeHops: [],
+      },
+    }));
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-partial-arch' }], false)} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-run-timeline')).toHaveTextContent('running / 2 graph steps');
+    expect(screen.getByTestId('architecture-route-agent')).toHaveTextContent('streaming');
+    expect(screen.queryByTestId('architecture-route-finalizer')).not.toBeInTheDocument();
+  });
+
+  it('renders a sequential router chain without collapsing agents into a parallel group', () => {
+    mockMessages.push(makeMsg({
+      id: 'msg-sequential-arch',
+      content: '### Finalizer',
+      architectureRun: {
+        runId: 'run-sequential',
+        schemaId: 'qa-route-hops',
+        status: 'completed',
+        trace: [
+          {
+            speaker: 'router',
+            content: 'Route to first reviewer',
+            nodeId: 'router-entry',
+            nextNodeId: 'agent-one',
+          },
+          {
+            speaker: 'participant',
+            content: 'Agent one reviewed the prompt',
+            nodeId: 'agent-one',
+            nextNodeId: 'router-check',
+            stream: {
+              streamGroupId: 'run-sequential',
+              branchSessionId: 'branch-agent-one',
+              status: 'completed',
+              chunkCount: 8,
+              text: 'Agent one reviewed the prompt',
+            },
+          },
+          {
+            speaker: 'router',
+            content: 'Route to second reviewer',
+            nodeId: 'router-check',
+            nextNodeId: 'agent-two',
+          },
+          {
+            speaker: 'participant',
+            content: 'Agent two validated the result',
+            nodeId: 'agent-two',
+            nextNodeId: 'router-final',
+            stream: {
+              streamGroupId: 'run-sequential',
+              branchSessionId: 'branch-agent-two',
+              status: 'completed',
+              chunkCount: 9,
+              text: 'Agent two validated the result',
+            },
+          },
+          {
+            speaker: 'router',
+            content: 'Route to final answer',
+            nodeId: 'router-final',
+            nextNodeId: 'final-artifact',
+          },
+          {
+            speaker: 'finalizer',
+            content: 'Final routed answer',
+            nodeId: 'final-artifact',
+          },
+        ],
+        routeHops: [],
+      },
+    }));
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-sequential-arch' }])} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Router -> Agent One -> Router -> Agent Two -> Router -> Finalizer');
+    expect(screen.queryByTestId('architecture-route-parallel-agents')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('architecture-route-agent')).toHaveLength(2);
+    expect(screen.getAllByTestId('architecture-route-router')).toHaveLength(3);
+    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('Final routed answer');
   });
 });
 

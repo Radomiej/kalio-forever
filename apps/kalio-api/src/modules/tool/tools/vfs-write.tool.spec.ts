@@ -68,6 +68,14 @@ describe('VFSWriteTool', () => {
       expect(metadata.parameters.required).toContain('filePath');
       expect(metadata.parameters.required).toContain('content');
     });
+
+    it('explains that absolute host paths must use fs_write instead', () => {
+      const metadata = reflector.get(TOOL_METADATA, VFSWriteTool);
+
+      expect(metadata.description).toContain('relative file path');
+      expect(metadata.description).toContain('fs_write');
+      expect(metadata.parameters.properties.filePath.description).toContain('Absolute paths');
+    });
   });
 
   describe('execute', () => {

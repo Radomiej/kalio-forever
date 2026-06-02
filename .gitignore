@@ -1,4 +1,9 @@
 node_modules/
+.pnpm-store/
+.npm-cache/
+.node-gyp/
+.kalio-stack/
+node_modules.bak-*/
 dist/
 .env
 .env.local
@@ -17,7 +22,10 @@ docs/audit/raw/
 docs/audit/*.json
 docs/audit/*.md
 .playwright-mcp/
+.tmp/
 *.tsbuildinfo
 *.log
 kalio-*.png
 .windsurf/
+tmp/runtime-report/
+docs/sessions/

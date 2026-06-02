@@ -25,10 +25,8 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
 
   return (
     <div
-      role="button"
-      tabIndex={0}
       className={`
-        group relative overflow-hidden rounded-lg cursor-pointer select-none
+        group relative overflow-hidden rounded-lg select-none
         flex flex-col justify-end p-3
         transition-all duration-150 ease-out
         hover:scale-[1.04] hover:brightness-110 hover:shadow-lg
@@ -41,10 +39,7 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
         color: color.text,
         animationDelay: `${index * 60}ms`,
       }}
-      onClick={onClick}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
       data-testid={`app-tile-${id}`}
-      aria-label={`Open ${name}`}
       title={description ?? name}
     >
       {/* Generated icon background */}
@@ -67,16 +62,14 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
         </span>
       )}
 
-      {/* Generate / Remove icon buttons — top-right, visible on hover */}
+      {/* Generate / Remove icon buttons — top-right, visible on hover/focus */}
       <div
-        className="absolute top-1.5 right-1.5 z-20 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
+        className="absolute top-2 right-2 z-20 flex gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
         role="group"
         aria-label="Tile actions"
       >
         {isGenerating ? (
-          <span className="p-1 rounded bg-black/40 text-white">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-black/45 text-white">
             <Loader2 size={14} className="animate-spin" />
           </span>
         ) : (
@@ -84,8 +77,9 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
             {onGenerateIcon && (
               <button
                 type="button"
-                className="p-1 rounded bg-black/40 text-white hover:bg-black/60 cursor-pointer"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-black/45 text-white hover:bg-black/65 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80 cursor-pointer"
                 onClick={(e) => { e.stopPropagation(); onGenerateIcon(); }}
+                aria-label={`Generate icon for ${name}`}
                 title="Generate icon"
                 data-testid={`tile-gen-icon-${id}`}
               >
@@ -95,8 +89,9 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
             {iconUrl && onRemoveIcon && (
               <button
                 type="button"
-                className="p-1 rounded bg-black/40 text-white hover:bg-red-600/80 cursor-pointer"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-black/45 text-white hover:bg-red-600/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80 cursor-pointer"
                 onClick={(e) => { e.stopPropagation(); onRemoveIcon(); }}
+                aria-label={`Remove icon from ${name}`}
                 title="Remove icon"
                 data-testid={`tile-rm-icon-${id}`}
               >
@@ -112,15 +107,22 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
         <span className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
       )}
 
-      {/* App name */}
-      <span className="relative z-10 text-sm font-semibold leading-tight truncate w-full text-left">
-        {name}
-      </span>
-      {description && (
-        <span className="relative z-10 text-[10px] opacity-70 leading-tight truncate w-full text-left mt-0.5">
-          {description}
+      <button
+        type="button"
+        className="absolute inset-y-0 left-0 right-12 z-10 flex cursor-pointer flex-col items-start justify-end rounded-md p-3 text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/85"
+        onClick={onClick}
+        data-testid={`app-tile-open-${id}`}
+        aria-label={`Open ${name}`}
+      >
+        <span className="w-full break-words text-left text-sm font-semibold leading-tight">
+          {name}
         </span>
-      )}
+        {description && (
+          <span className="mt-0.5 w-full break-words text-left text-[10px] leading-tight opacity-70">
+            {description}
+          </span>
+        )}
+      </button>
     </div>
   );
 }

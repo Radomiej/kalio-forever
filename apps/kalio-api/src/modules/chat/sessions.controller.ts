@@ -1,14 +1,18 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
-import type { ChatSession, ChatMessage, CreateSessionDto } from '@kalio/types';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import type { ChatMessage, ChatRunSnapshot, ChatSession, CreateSessionDto } from '@kalio/types';
 import { SessionsService } from './sessions.service';
+import { RunJournalService } from './run-journal.service';
 
 @Controller('sessions')
 export class SessionsController {
-  constructor(private readonly sessions: SessionsService) {}
+  constructor(
+    private readonly sessions: SessionsService,
+    private readonly runJournal: RunJournalService,
+  ) {}
 
   @Get()
-  list(): Promise<ChatSession[]> {
-    return this.sessions.list();
+  list(@Query('includeArchived') includeArchived?: string): Promise<ChatSession[]> {
+    return this.sessions.list({ includeArchived: includeArchived === 'true' });
   }
 
   @Post()
@@ -21,9 +25,24 @@ export class SessionsController {
     return this.sessions.getMessages(id);
   }
 
+  @Get(':id/runs/current')
+  getCurrentRun(@Param('id') id: string): Promise<ChatRunSnapshot | null> {
+    return this.runJournal.getCurrentRun(id);
+  }
+
   @Delete(':id')
   async delete(@Param('id') id: string): Promise<void> {
     await this.sessions.delete(id);
+  }
+
+  @Post(':id/archive')
+  async archive(@Param('id') id: string): Promise<void> {
+    await this.sessions.archive(id);
+  }
+
+  @Post(':id/restore')
+  async restore(@Param('id') id: string): Promise<void> {
+    await this.sessions.restore(id);
   }
 
   @Patch(':id')

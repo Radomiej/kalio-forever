@@ -19,4 +19,5 @@ export interface StreamContext {
   readonly state: TurnState;
   readonly emit: EmitFn;
   readonly agentRun?: AgentRunContext;
+  readonly rawXmlToolNames?: readonly string[];
 }

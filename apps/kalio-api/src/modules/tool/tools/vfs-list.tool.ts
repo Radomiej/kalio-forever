@@ -6,7 +6,7 @@ import { VFSService } from '../../vfs/vfs.service';
 @Injectable()
 @Tool({
   name: 'vfs_list',
-  description: 'List all files in the conversation virtual filesystem.',
+  description: 'List all files in the conversation virtual filesystem, skipping generated directories like node_modules, dist, coverage, and reports.',
   parameters: {
     type: 'object',
     properties: {},

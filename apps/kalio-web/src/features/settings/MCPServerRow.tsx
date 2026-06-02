@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { RefreshCw, Trash2, Loader2, AlertCircle, Wrench } from 'lucide-react';
 import type { MCPServer } from '@kalio/types';
 
+type SettingsMCPServer = MCPServer & { managedBy?: 'toml' };
+
 interface Props {
-  server: MCPServer;
+  server: SettingsMCPServer;
   onRestart: (id: string) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
 }
@@ -20,13 +22,16 @@ export function MCPServerRow({ server, onRestart, onRemove }: Props) {
   const [restarting, setRestarting] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const isTomlManaged = server.managedBy === 'toml';
 
   const handleRestart = async () => {
+    if (isTomlManaged) return;
     setRestarting(true);
     try { await onRestart(server.id); } finally { setRestarting(false); }
   };
 
   const handleRemove = async () => {
+    if (isTomlManaged) return;
     setRemoving(true);
     try { await onRemove(server.id); } finally { setRemoving(false); setConfirmRemove(false); }
   };
@@ -41,6 +46,11 @@ export function MCPServerRow({ server, onRestart, onRemove }: Props) {
       <div className="flex items-center gap-2">
         <span className={`badge badge-xs font-mono ${statusClass}`}>{server.status}</span>
         <span className="font-medium text-sm flex-1 truncate">{server.name}</span>
+        {isTomlManaged && (
+          <span className="badge badge-xs border-sky-500/30 bg-sky-500/10 text-sky-300" data-testid={`mcp-managed-${server.id}`}>
+            TOML
+          </span>
+        )}
         <span className="text-xs text-base-content/40 font-mono">{server.transport}</span>
         {(server.toolCount ?? 0) > 0 && (
           <span className="flex items-center gap-1 text-xs text-base-content/50">
@@ -52,8 +62,8 @@ export function MCPServerRow({ server, onRestart, onRemove }: Props) {
         <button
           className="btn btn-ghost btn-xs"
           onClick={() => void handleRestart()}
-          disabled={restarting || removing}
-          title="Restart"
+          disabled={restarting || removing || isTomlManaged}
+          title={isTomlManaged ? 'Reload TOML config to reconnect this server' : 'Restart'}
           data-testid={`mcp-restart-${server.id}`}
         >
           <RefreshCw size={12} className={restarting ? 'animate-spin' : ''} />
@@ -77,7 +87,8 @@ export function MCPServerRow({ server, onRestart, onRemove }: Props) {
           <button
             className="btn btn-ghost btn-xs text-error/70 hover:text-error"
             onClick={() => setConfirmRemove(true)}
-            disabled={removing}
+            disabled={removing || isTomlManaged}
+            title={isTomlManaged ? 'TOML-managed servers are removed from config.toml' : 'Remove'}
             data-testid={`mcp-remove-${server.id}`}
           >
             <Trash2 size={12} />

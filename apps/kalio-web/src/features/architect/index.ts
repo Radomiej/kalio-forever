@@ -1,0 +1,1 @@
+export { ArchitectPage } from './ArchitectPage';

@@ -1,6 +1,5 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import fsSync from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -53,14 +52,6 @@ const DEFAULT_RUNTIME_RA_APPS_PATH = './data/ra-apps';
 
 function getPackagedRAAppsPath(): string {
   return path.resolve(__dirname, '../../assets/ra-apps');
-}
-
-function hasCatalogEntries(dir: string): boolean {
-  try {
-    return fsSync.readdirSync(dir).length > 0;
-  } catch {
-    return false;
-  }
 }
 
 function getRenderableScore(app: LoadedRAApp): number {
@@ -127,6 +118,7 @@ export class RAAppService implements OnModuleInit {
   private readonly logger = new Logger(RAAppService.name);
   private readonly loaded = new Map<string, LoadedRAApp>();
   private readonly coreDir: string;
+  private readonly packagedCoreDir: string | null;
   private readonly userDir: string;
 
   constructor(private readonly config: ConfigService) {
@@ -135,10 +127,10 @@ export class RAAppService implements OnModuleInit {
 
     if (configuredBase) {
       this.coreDir = path.resolve(runtimeBase, 'core');
+      this.packagedCoreDir = null;
     } else {
-      const runtimeCoreDir = path.resolve(runtimeBase, 'core');
-      const packagedCoreDir = path.resolve(getPackagedRAAppsPath(), 'core');
-      this.coreDir = hasCatalogEntries(runtimeCoreDir) ? runtimeCoreDir : packagedCoreDir;
+      this.coreDir = path.resolve(runtimeBase, 'core');
+      this.packagedCoreDir = path.resolve(getPackagedRAAppsPath(), 'core');
     }
 
     this.userDir = path.resolve(runtimeBase, 'user');
@@ -152,6 +144,9 @@ export class RAAppService implements OnModuleInit {
     this.loaded.clear();
     await fs.mkdir(this.coreDir, { recursive: true });
     await fs.mkdir(this.userDir, { recursive: true });
+    if (this.packagedCoreDir && path.resolve(this.packagedCoreDir) !== path.resolve(this.coreDir)) {
+      await this.loadFromDir(this.packagedCoreDir, 'core');
+    }
     await this.loadFromDir(this.coreDir, 'core');
     await this.loadFromDir(this.userDir, 'user');
   }

@@ -40,11 +40,20 @@ describe('tokenizeGui()', () => {
     expect(bools[1].value).toBe('no');
   });
 
-  it('tokenizes true/false as idents (not booleans)', () => {
+  it('tokenizes true/false as booleans (alongside yes/no)', () => {
     const tokens = tokenizeGui('true false');
-    const idents = tokens.filter((t) => t.kind === 'ident');
-    expect(idents.map((t) => t.value)).toContain('true');
-    expect(idents.map((t) => t.value)).toContain('false');
+    const bools = tokens.filter((t) => t.kind === 'boolean');
+    expect(bools).toHaveLength(2);
+    expect(bools[0].value).toBe('yes');
+    expect(bools[1].value).toBe('no');
+  });
+
+  it('tokenizes true/false in prop context as booleans', () => {
+    const tokens = tokenizeGui('visible = true disabled = false');
+    const bools = tokens.filter((t) => t.kind === 'boolean');
+    expect(bools).toHaveLength(2);
+    expect(bools[0].value).toBe('yes');
+    expect(bools[1].value).toBe('no');
   });
 
   it('tokenizes integer numbers', () => {

@@ -250,6 +250,47 @@ describe('SessionVfsController', () => {
     });
   });
 
+  describe('uploadText()', () => {
+    it('uploads a text file to the requested VFS path', async () => {
+      const file = {
+        mimetype: 'text/plain',
+        buffer: Buffer.from('hello world'),
+      } as Express.Multer.File;
+      mockVfs.writeFile.mockReturnValue(undefined);
+      mockVfs.touchSession.mockResolvedValue(undefined);
+
+      const result = await controller.uploadText('sess-1', file, { filePath: 'project/README.md' });
+
+      expect(result).toEqual({ ok: true, path: 'project/README.md', bytesWritten: 11 });
+      expect(mockVfs.writeFile).toHaveBeenCalledWith({
+        sessionId: 'sess-1',
+        filePath: 'project/README.md',
+        content: 'hello world',
+      });
+      expect(mockVfs.touchSession).toHaveBeenCalledWith('sess-1');
+    });
+
+    it('throws BadRequest when text upload filePath is missing', async () => {
+      const file = { mimetype: 'text/plain', buffer: Buffer.from('x') } as Express.Multer.File;
+
+      await expect(controller.uploadText('sess-1', file, {})).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws UnsupportedMediaType for binary text-upload content', async () => {
+      const file = { mimetype: 'image/png', buffer: Buffer.from('img') } as Express.Multer.File;
+
+      await expect(controller.uploadText('sess-1', file, { filePath: 'x.png' })).rejects.toThrow(UnsupportedMediaTypeException);
+    });
+
+    it('throws BadRequest when text upload path traversal is denied', async () => {
+      const file = { mimetype: 'text/plain', buffer: Buffer.from('x') } as Express.Multer.File;
+      const err = Object.assign(new Error('traversal denied'), { code: 'PATH_TRAVERSAL_DENIED' });
+      mockVfs.writeFile.mockImplementation(() => { throw err; });
+
+      await expect(controller.uploadText('sess-1', file, { filePath: '../secret.txt' })).rejects.toThrow(BadRequestException);
+    });
+  });
+
   describe('zip()', () => {
     it('returns StreamableFile with zip content-type', () => {
       const stream = Readable.from(['zip-data']);

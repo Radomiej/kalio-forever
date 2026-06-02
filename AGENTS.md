@@ -178,6 +178,7 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - Import style: Only import from `@kalio/types` across module boundaries. Zero cross-module imports.
 - Error handling pattern: Never use empty catch. Always log errors with context and rethrow or handle explicitly.
 - Testing pattern and framework: Vitest for unit/integration, Playwright for E2E. Mock LLM with `MockLLMProvider` in tests.
+- For critical architecture/runtime work, keep bug-hunter agents running by default: two backend-focused hunters, one frontend-focused hunter, plus one coverage guardian tracking meaningful 80%+ FE/BE coverage. Scope them to disjoint files, require real regression evidence, and do not accept coverage-only or mock-only tests that miss user-visible behavior.
 - **File size hard limit: 500 LOC.** Any file approaching this must be split before adding more code.
   - React components: extract sub-components to co-located files (`ComponentName.SubPart.tsx` or `components/` subfolder)
   - Services/Controllers: extract domain helpers to separate `.utils.ts` or `.helpers.ts` files
@@ -203,6 +204,25 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Do not add net-new behavior to files already over the hard size limit without extracting or shrinking the touched slice in the same change.
 - When frontend and backend intentionally duplicate a runtime rule, update both sides in the same change and keep the sync note aligned.
 - In Vitest, shared mock refs used inside `vi.mock()` factories should come from `vi.hoisted()`; Zustand mocks used outside React must expose `.getState()`.
+- On Windows, do not run `vite dev` with redirected/piped stdout/stderr; this can trigger `@tailwindcss/oxide` crashes.
+- For Playwright on Windows, avoid autostarting Vite dev server from Playwright `webServer`; use built frontend + `vite preview` when scripting startup.
+- E2E must allocate random ports and per-run storage; fixed `3016/5188/3316/5288` ports are only for manual development/debugging.
+- `HitlModule` and `RelayModule` are explicitly imported by `ChatModule` alongside `VFSModule` and `ToolModule` — update cross-module docs whenever this list changes.
+- Removed `override: true` from dotenv `config()` in `main.ts` — CI/Docker env vars set before bootstrap are intentionally kept; `.env` file is additive, not overriding.
+- Architecture finalization must treat missing or unknown CLI child status as unresolved; only completed/success/exited child statuses can count as CLI materialization proof.
+- Goal Master judge slots should use bounded synchronous review tools (`run_subagent`, reads, CLI status) rather than spawning durable background review agents.
+- Full-stack architecture validation must start the task from Kalio FE and verify Conversations/Execution Graph with Playwright; API polling is supporting evidence only.
+- For manual Kalio QA, load the `kalio-manual-qa` skill with `kalio-forever`; two-agent loop requests mean `Dev/Implementer <-> Goal Guard`, not Five Minds.
+- For important architecture/runtime changes, write or update a `docs/sessions/YYYY-MM-DD-*.md` note with what changed, verification evidence, live-readiness status, and remaining blockers before ending the work slice.
+- For `C:\Projekty\TurboProject2` demo runs, create each `demoN` branch from the last verified clean baseline and preserve older demo branches for review.
+- Target nested delegation architecture is `sub_agentflow`: parent sees one tool call, system creates a child `ChatSession` plus full `AgentFlowRun` trace; start from docs/sub-agentflow-target-architecture.md before implementing it.
+- Repo copy of the manual QA skill lives at `docs/agent-skills/kalio-manual-qa.md`; keep it aligned with the installed `kalio-manual-qa` skill.
+- When testing generated demo output, route QA defects back through Kalio/AgentFlow resume context; do not patch the target repo manually.
+- Before any live LLM/CLI/real-project AgentFlow run, pass the local gate first: focused regression tests, affected app typecheck, and affected app build where a build script exists.
+- Before any paid/live AgentFlow run, complete `docs/agentflow-paid-run-readiness-checklist.md`; mock E2E and local gates are mandatory, not optional.
+- During critical AgentFlow work, continuously run two BE bug hunters, one FE bug hunter, and one coverage guardian where agent capacity permits; keep them focused on real bugs, meaningful tests, and 80%+ FE/BE coverage rather than superficial line coverage.
+- Manual QA stacks must prove the effective provider at `/api/llm/config`; stack/env overrides must not be shadowed by `.env`, and localhost QA must allow both `localhost` and `127.0.0.1` origins.
+- For AgentFlow MVP release, separate runtime lifecycle proof from generated-project quality; first verify clean start/trace/wait/resume/final-or-block behavior, and defer LLM/persona output quality to a later hardening pass.
 
 ---
 

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import {
-  MessageSquare, Settings, Wrench, BrainCircuit, Activity,
+  MessageSquare, Settings, Wrench, BrainCircuit, Activity, Network, GitBranch, Gauge,
 } from 'lucide-react';
 import { ChatInterface } from './features/chat/ChatInterface';
 import { CanvasPanel } from './features/chat/CanvasPanel';
+import { ExecutionGraphView } from './features/chat/graph/ExecutionGraphView';
 import { ConversationPanel } from './features/sessions/ConversationPanel';
 import { ConversationManagerPanel } from './features/sessions/ConversationManagerPanel';
 import { PersonaPanel } from './features/persona/PersonaPanel';
@@ -18,41 +19,61 @@ import { MemoryPage } from './features/memory/MemoryPage';
 import { LandingPage } from './features/landing/LandingPage';
 import { BackendStatusBadge } from './components/ui/BackendStatusBadge';
 import { ObservabilityPage } from './features/observability/ObservabilityPage';
+import { ArchitectPage } from './features/architect';
 import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
 import { useSessionStore } from './store/sessionStore';
 import { useAgentStore } from './store/agentStore';
 import { backendHealth } from './services/backendHealth';
 import { useSettingsStore } from './features/settings/settingsStore';
 
-type ActiveSection = 'landing' | 'talk' | 'tools' | 'mind' | 'observe';
+type ActiveSection = 'landing' | 'talk' | 'tools' | 'mind' | 'observe' | 'architect';
 type TalkTab = 'conversations' | 'agents';
+type TalkView = 'conversation' | 'graph';
 type ToolsTab = 'native' | 'mcp' | 'raapps';
 type MindTab = 'memory' | 'files' | 'skills' | 'personas';
 
 type AppViewState = {
   activeSection: ActiveSection;
   talkTab: TalkTab;
+  talkView: TalkView;
   toolsTab: ToolsTab;
   mindTab: MindTab;
   selectedSkillId: string | null;
 };
 
 const APP_VIEW_STATE_STORAGE_KEY = 'kalio:app-view-state';
+const LAST_TALK_ACTIVE_STORAGE_KEY = 'kalio:last-talk-active-at';
+const RECENT_CHAT_FALLBACK_MS = 24 * 60 * 60 * 1000;
 
 const DEFAULT_APP_VIEW_STATE: AppViewState = {
   activeSection: 'landing',
   talkTab: 'conversations',
+  talkView: 'conversation',
   toolsTab: 'native',
   mindTab: 'memory',
   selectedSkillId: null,
 };
 
+const TALK_VIEW_OPTIONS: ReadonlyArray<{ id: TalkView; label: string; icon: React.ReactNode }> = [
+  { id: 'conversation', label: 'Conversation', icon: <MessageSquare size={14} /> },
+  { id: 'graph', label: 'Execution graph', icon: <GitBranch size={14} /> },
+];
+
 function isActiveSection(value: unknown): value is ActiveSection {
-  return value === 'landing' || value === 'talk' || value === 'tools' || value === 'mind' || value === 'observe';
+  return value === 'landing'
+    || value === 'talk'
+    || value === 'tools'
+    || value === 'mind'
+    || value === 'observe'
+    || value === 'architect';
 }
 
 function isTalkTab(value: unknown): value is TalkTab {
   return value === 'conversations' || value === 'agents';
+}
+
+function isTalkView(value: unknown): value is TalkView {
+  return value === 'conversation' || value === 'graph';
 }
 
 function isToolsTab(value: unknown): value is ToolsTab {
@@ -78,6 +99,7 @@ function loadAppViewState(): AppViewState {
     return {
       activeSection: isActiveSection(parsed.activeSection) ? parsed.activeSection : DEFAULT_APP_VIEW_STATE.activeSection,
       talkTab: isTalkTab(parsed.talkTab) ? parsed.talkTab : DEFAULT_APP_VIEW_STATE.talkTab,
+      talkView: isTalkView(parsed.talkView) ? parsed.talkView : DEFAULT_APP_VIEW_STATE.talkView,
       toolsTab: isToolsTab(parsed.toolsTab) ? parsed.toolsTab : DEFAULT_APP_VIEW_STATE.toolsTab,
       mindTab: isMindTab(parsed.mindTab) ? parsed.mindTab : DEFAULT_APP_VIEW_STATE.mindTab,
       selectedSkillId: typeof parsed.selectedSkillId === 'string' ? parsed.selectedSkillId : null,
@@ -87,10 +109,26 @@ function loadAppViewState(): AppViewState {
   }
 }
 
+function loadLastTalkActiveAt(): number | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(LAST_TALK_ACTIVE_STORAGE_KEY);
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function recentTalkBadgeCount(sessions: { updatedAt: number }[], lastTalkActiveAt: number | null, now = Date.now()): number {
+  const threshold = lastTalkActiveAt ?? now - RECENT_CHAT_FALLBACK_MS;
+  return sessions.filter((session) => session.updatedAt > threshold).length;
+}
+
 const NAV: { id: ActiveSection; icon: React.ReactNode; label: string }[] = [
   { id: 'talk',    icon: <MessageSquare size={18} />, label: 'Talk' },
   { id: 'tools',   icon: <Wrench size={18} />,        label: 'Tools' },
   { id: 'mind',    icon: <BrainCircuit size={18} />,  label: 'Mind' },
+  { id: 'architect', icon: <Network size={18} />,     label: 'Architect' },
   { id: 'observe', icon: <Activity size={18} />,      label: 'Observability' },
 ];
 
@@ -98,17 +136,21 @@ export function App() {
   const initialViewState = loadAppViewState();
   const [activeSection, setActiveSection] = useState<ActiveSection>(initialViewState.activeSection);
   const [talkTab, setTalkTab] = useState<TalkTab>(initialViewState.talkTab);
+  const [talkView, setTalkView] = useState<TalkView>(initialViewState.talkView);
   const [toolsTab, setToolsTab] = useState<ToolsTab>(initialViewState.toolsTab);
   const [mindTab, setMindTab] = useState<MindTab>(initialViewState.mindTab);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(initialViewState.selectedSkillId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined);
+  const [lastTalkActiveAt, setLastTalkActiveAt] = useState<number | null>(() => loadLastTalkActiveAt());
 
   const openSettings = (tab?: string) => { setSettingsInitialTab(tab); setSettingsOpen(true); };
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
-  const { sessions } = useSessionStore();
+  const { sessions, setActiveSession } = useSessionStore();
+  const recentTalkCount = recentTalkBadgeCount(sessions, lastTalkActiveAt);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
-  const hasPendingConfirmation = Object.keys(pendingConfirmations).length > 0;
+  const pendingConfirmationCount = Object.keys(pendingConfirmations).length;
+  const hasPendingConfirmation = pendingConfirmationCount > 0;
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
 
   // Initialize on app mount
@@ -137,19 +179,67 @@ export function App() {
     const nextState: AppViewState = {
       activeSection,
       talkTab,
+      talkView,
       toolsTab,
       mindTab,
       selectedSkillId,
     };
     window.sessionStorage.setItem(APP_VIEW_STATE_STORAGE_KEY, JSON.stringify(nextState));
-  }, [activeSection, mindTab, selectedSkillId, talkTab, toolsTab]);
+  }, [activeSection, mindTab, selectedSkillId, talkTab, talkView, toolsTab]);
+
+  useEffect(() => {
+    if (activeSection !== 'talk' || typeof window === 'undefined') {
+      return;
+    }
+
+    const now = Date.now();
+    window.localStorage.setItem(LAST_TALK_ACTIVE_STORAGE_KEY, String(now));
+    setLastTalkActiveAt(now);
+  }, [activeSection]);
 
   const goHome = () => {
     setActiveSection('landing');
   };
 
+  const openConversationFromLanding = () => {
+    setTalkView('conversation');
+    setActiveSection('talk');
+  };
+  const openSessionInConversation = (sessionId: string) => {
+    setActiveSession(sessionId);
+    setTalkTab('conversations');
+    setTalkView('conversation');
+    setActiveSection('talk');
+  };
+  const talkViewSwitcher = (
+    <div className="flex gap-1" data-testid="talk-sidebar-view-switcher" aria-label="Talk view mode">
+      {TALK_VIEW_OPTIONS.map((view) => (
+        <button
+          key={view.id}
+          type="button"
+          data-testid={`talk-sidebar-${view.id}-entry`}
+          className={`btn btn-ghost btn-xs h-7 min-h-0 w-7 p-0 rounded-md ${
+            talkView === view.id
+              ? 'bg-sky-500/15 text-sky-300'
+              : 'text-base-content/45 hover:text-base-content/80'
+          }`}
+          onClick={() => setTalkView(view.id)}
+          aria-label={view.label}
+          title={view.label}
+        >
+          {view.icon}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div data-testid="app-root" className="flex h-screen w-screen overflow-hidden bg-base-100">
+      <div
+        className={`flex min-w-0 flex-1 ${settingsOpen ? 'invisible pointer-events-none' : ''}`}
+        aria-hidden={settingsOpen ? true : undefined}
+        inert={settingsOpen ? true : undefined}
+      >
 
       {/* ── Icon rail ── */}
       <nav className="w-14 shrink-0 flex flex-col items-center py-3 gap-1 border-r border-base-300 bg-base-200 z-10">
@@ -191,9 +281,24 @@ export function App() {
             >
               {item.icon}
             </button>
-            {item.id === 'talk' && sessions.length > 1 && (
-              <span className="absolute -top-1 -right-1 badge badge-xs badge-ghost pointer-events-none">
-                {sessions.length}
+            {item.id === 'talk' && activeSection !== 'talk' && (pendingConfirmationCount > 0 || recentTalkCount > 0) && (
+              <span
+                className={`absolute -top-1 -right-1 badge badge-xs pointer-events-none ${
+                  pendingConfirmationCount > 0
+                    ? 'badge-warning animate-pulse'
+                    : 'badge-info'
+                }`}
+                title={pendingConfirmationCount > 0
+                  ? `${pendingConfirmationCount} approval${pendingConfirmationCount === 1 ? '' : 's'} waiting`
+                  : `${recentTalkCount} completed or updated chat${recentTalkCount === 1 ? '' : 's'} since last Talk activity`}
+                aria-label={pendingConfirmationCount > 0
+                  ? `${pendingConfirmationCount} approval${pendingConfirmationCount === 1 ? '' : 's'} waiting`
+                  : `${recentTalkCount} completed or updated chat${recentTalkCount === 1 ? '' : 's'} since last Talk activity`}
+                data-testid="nav-talk-activity-count"
+              >
+                {(pendingConfirmationCount > 0 ? pendingConfirmationCount : recentTalkCount) > 99
+                  ? '99+'
+                  : pendingConfirmationCount > 0 ? pendingConfirmationCount : recentTalkCount}
               </span>
             )}
           </div>
@@ -220,33 +325,37 @@ export function App() {
       {/* ── Main: full screen sections ── */}
       <main className="flex-1 overflow-hidden min-w-0" data-testid="main-chat">
         {activeSection === 'landing' && (
-          <LandingPage onNavigateToChat={() => setActiveSection('talk')} />
+          <LandingPage onNavigateToChat={openConversationFromLanding} />
         )}
 
         {/* talk section: always mounted so ChatInterface never loses socket listeners
             or in-flight streaming state when the user navigates to the landing page */}
-        <div className={`flex h-full ${activeSection !== 'talk' ? 'hidden' : ''}`}>
+        <div className={`flex h-full flex-col md:flex-row ${activeSection !== 'talk' ? 'hidden' : ''}`}>
             {/* Left sidebar: session list */}
-            <div className="w-72 shrink-0 flex flex-col border-r border-base-300 overflow-hidden">
-              <div className="flex border-b border-base-300 shrink-0">
+            <div className="h-64 w-full shrink-0 flex flex-col border-b border-base-300 overflow-hidden md:h-full md:w-72 md:border-b-0 md:border-r">
+              <div className="flex h-9 items-center gap-1 border-b border-base-300 px-2 shrink-0" data-testid="talk-sidebar-mode-switcher">
                 {[
-                  { id: 'conversations' as const, label: 'Conversations' },
-                  { id: 'agents' as const, label: 'Active' },
+                  { id: 'conversations' as const, label: 'Conversations', icon: <MessageSquare size={14} /> },
+                  { id: 'agents' as const, label: 'Active agent runs', icon: <Gauge size={14} /> },
                 ].map((t) => (
                   <button
                     key={t.id}
-                    className={`flex-1 py-2 text-xs font-medium ${
+                    type="button"
+                    className={`btn btn-ghost btn-xs h-7 min-h-0 w-8 rounded-md p-0 ${
                       talkTab === t.id
-                        ? 'text-sky-400 border-b-2 border-sky-500 bg-sky-500/10'
-                        : 'text-base-content/50 hover:bg-base-200'
+                        ? 'bg-sky-500/15 text-sky-300'
+                        : 'text-base-content/45 hover:text-base-content/80'
                     }`}
                     onClick={() => setTalkTab(t.id)}
+                    aria-label={t.label}
+                    title={t.label}
+                    data-testid={`talk-tab-${t.id}`}
                   >
-                    <span className="relative inline-flex items-center gap-1">
-                      {t.label}
+                    <span className="relative inline-flex items-center">
+                      {t.icon}
                       {t.id === 'agents' && hasPendingConfirmation && (
                         <span
-                          className="inline-block w-1.5 h-1.5 rounded-full bg-warning animate-pulse"
+                          className="absolute -right-1 -top-1 inline-block w-1.5 h-1.5 rounded-full bg-warning animate-pulse"
                           data-testid="active-tab-pending-dot"
                           title="Awaiting confirmation"
                         />
@@ -254,23 +363,31 @@ export function App() {
                     </span>
                   </button>
                 ))}
+                <span className="ml-1 truncate text-[10px] uppercase tracking-wide text-base-content/65">
+                  {talkTab === 'conversations' ? 'Chats' : 'Runs'}
+                </span>
               </div>
               <div className="flex-1 overflow-hidden">
                 {talkTab === 'conversations' && (
-                  <ConversationPanel onSelect={() => {}} />
+                  <ConversationPanel onSelect={() => {}} viewSwitcher={talkViewSwitcher} />
                 )}
                 {talkTab === 'agents' && (
                   <ConversationManagerPanel onNavigate={() => setTalkTab('conversations')} />
                 )}
               </div>
             </div>
-            {/* Chat area */}
-            <div className="flex-1 overflow-hidden min-w-0">
-              <ChatInterface />
-            </div>
-            {/* Canvas — only rendered inside talk section, hidden when navigating away */}
-            <div className="relative flex">
-              <CanvasPanel />
+            <div className="flex-1 min-w-0 flex overflow-hidden">
+              <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+                <div className="flex-1 overflow-hidden min-h-0">
+                  {talkView === 'conversation' ? <ChatInterface /> : <ExecutionGraphView onOpenSessionInConversation={openSessionInConversation} />}
+                </div>
+              </div>
+
+              {talkView === 'conversation' && (
+                <div className="relative hidden lg:flex">
+                  <CanvasPanel />
+                </div>
+              )}
             </div>
           </div>
 
@@ -281,7 +398,7 @@ export function App() {
               {[
                 { id: 'native' as const, label: 'Native' },
                 { id: 'mcp' as const, label: 'MCP' },
-                  { id: 'raapps' as const, label: 'RaConsierge' },
+                  { id: 'raapps' as const, label: 'RAApp' },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -361,7 +478,12 @@ export function App() {
           <ObservabilityPage />
         )}
 
+        {activeSection === 'architect' && (
+          <ArchitectPage />
+        )}
+
       </main>
+      </div>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} initialTab={settingsInitialTab} />}
 

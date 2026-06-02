@@ -49,7 +49,7 @@ describe('BaseOpenAICompatibleProvider', () => {
       });
 
       // Act
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       // FIXED: Implementation now logs a warning when SSE data JSON parse fails
@@ -84,7 +84,7 @@ describe('BaseOpenAICompatibleProvider', () => {
       });
 
       // Act
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       // Should log the error but continue processing valid data
@@ -117,7 +117,7 @@ describe('BaseOpenAICompatibleProvider', () => {
         body: mockStream,
       });
 
-      await keylessProvider.streamChat(messages, tools, vi.fn(), 'sess-123', 'msg-456');
+      await keylessProvider.streamChat(messages, tools, { sessionId: 'sess-123', messageId: 'msg-456', onChunk: vi.fn() });
 
       expect(mockFetch).toHaveBeenCalledWith(
         'https://api.test.com/chat/completions',
@@ -137,7 +137,7 @@ describe('BaseOpenAICompatibleProvider', () => {
         } as LLMMessage & { reasoningContent: string },
       ];
       const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
-      const xiaomiProvider = new XiaomiMiMoProvider('test-key', 'mimo-v2-omni', 'https://api.test.com');
+      const xiaomiProvider = new XiaomiMiMoProvider('test-key', 'mimo-v2.5-pro', 'https://api.test.com');
       (xiaomiProvider as unknown as { logger: typeof mockLogger }).logger = mockLogger;
 
       const mockStream = new ReadableStream({
@@ -152,7 +152,7 @@ describe('BaseOpenAICompatibleProvider', () => {
         body: mockStream,
       });
 
-      await xiaomiProvider.streamChat(messages, tools, vi.fn(), 'sess-123', 'msg-456');
+      await xiaomiProvider.streamChat(messages, tools, { sessionId: 'sess-123', messageId: 'msg-456', onChunk: vi.fn() });
 
       const request = mockFetch.mock.calls[0]?.[1] as { body: string };
       const parsed = JSON.parse(request.body) as { messages: Array<Record<string, unknown>> };
@@ -205,7 +205,7 @@ describe('BaseOpenAICompatibleProvider', () => {
       });
 
       // Act
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       // BUG: Current implementation uses Date.now() for ID, which could collide for calls in same ms
@@ -251,7 +251,7 @@ describe('BaseOpenAICompatibleProvider', () => {
       });
 
       // Act
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       const ids = result.map((tc) => tc.id);
@@ -261,6 +261,118 @@ describe('BaseOpenAICompatibleProvider', () => {
   });
 
   describe('streamChat - Normal Operation', () => {
+    it('retries transient provider failures before streaming succeeds', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const onChunk = vi.fn();
+      const mockStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          text: vi.fn().mockResolvedValue('busy'),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: mockStream,
+        });
+
+      await provider.streamChat(messages, tools, { sessionId: 'sess-123', messageId: 'msg-456', onChunk });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry authentication failures', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: vi.fn().mockResolvedValue('bad key'),
+      });
+
+      await expect(provider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+      })).rejects.toMatchObject({ code: 'LLM_AUTH' });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects malformed streamed tool arguments instead of executing empty args', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools = [{ name: 'vfs_write', description: 'Write a file', parameters: {} }];
+      const mockStream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"vfs_write","arguments":"{\\"path\\":"}}]}}]}\n\n',
+            ),
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await expect(provider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+      })).rejects.toMatchObject({ code: 'LLM_BAD_TOOL_ARGS' });
+    });
+
+    it('REGRESSION: emits tool intent when function name streams before arguments', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'build a calculator' }];
+      const tools = [{ name: 'raapp_create', description: 'Create an app', parameters: {} }];
+      const onChunk = vi.fn();
+      const onToolArgChunk = vi.fn();
+      const sessionId = 'sess-123';
+      const messageId = 'msg-456';
+
+      const mockStream = new ReadableStream({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"raapp_create"}}]}}]}\n\n',
+            ),
+          );
+          controller.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"title\\":\\"Calculator\\"}"}}]}}]}\n\n',
+            ),
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk, onToolArgChunk });
+
+      expect(onToolArgChunk).toHaveBeenCalledWith('raapp_create', 0);
+    });
+
     it('should release the reader lock when abort happens mid-stream', async () => {
       const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
       const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
@@ -285,7 +397,7 @@ describe('BaseOpenAICompatibleProvider', () => {
         body: { getReader: () => reader },
       });
 
-      const result = await provider.streamChat(messages, tools, onChunk, sessionId, messageId, abortController.signal);
+      const result = await provider.streamChat(messages, tools, { sessionId, messageId, onChunk, abortSignal: abortController.signal });
 
       expect(result).toEqual([]);
       expect(reader.releaseLock).toHaveBeenCalledOnce();
@@ -315,7 +427,7 @@ describe('BaseOpenAICompatibleProvider', () => {
       });
 
       // Act
-      await provider.streamChat(messages, tools, onChunk, sessionId, messageId);
+      await provider.streamChat(messages, tools, { sessionId, messageId, onChunk });
 
       // Assert
       expect(onChunk).toHaveBeenCalledWith({

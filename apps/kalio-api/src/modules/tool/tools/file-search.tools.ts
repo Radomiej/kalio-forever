@@ -6,6 +6,7 @@ import { join, relative } from 'node:path';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
+import { shouldSkipTraversalDirectory } from '../../../common/utils/traversal-exclusions.util';
 import { escapeRegex, globToRegex } from './search.utils';
 
 function walkDir(dir: string, maxDepth: number, depth = 0): string[] {
@@ -13,6 +14,9 @@ function walkDir(dir: string, maxDepth: number, depth = 0): string[] {
   const entries = readdirSync(dir, { withFileTypes: true });
   const results: string[] = [];
   for (const e of entries) {
+    if (e.isDirectory() && shouldSkipTraversalDirectory(e.name)) {
+      continue;
+    }
     const full = join(dir, e.name);
     if (e.isDirectory()) {
       results.push(...walkDir(full, maxDepth, depth + 1));
@@ -26,7 +30,7 @@ function walkDir(dir: string, maxDepth: number, depth = 0): string[] {
 @Injectable()
 @Tool({
   name: 'grep_search',
-  description: 'Search for text matches in files under configured allowed directories. Returns matching lines with file paths and line numbers.',
+  description: 'Search for text matches in files under configured allowed directories. Skips generated directories like node_modules, dist, coverage, and reports, then returns matching lines with file paths and line numbers.',
   parameters: {
     type: 'object',
     required: ['query'],
@@ -99,7 +103,7 @@ export class GrepSearchTool {
 @Injectable()
 @Tool({
   name: 'file_search',
-  description: 'Find files matching a glob pattern under configured allowed directories. Returns absolute file paths.',
+  description: 'Find files matching a glob pattern under configured allowed directories. Skips generated directories like node_modules, dist, coverage, and reports, then returns absolute file paths.',
   parameters: {
     type: 'object',
     required: ['pattern'],

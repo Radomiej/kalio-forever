@@ -25,6 +25,19 @@ function convertThinkToDetails(text: string): string {
   return result;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeToolCallXml(text: string): string {
+  return text
+    .replace(/<tool_call\b[\s\S]*?<\/tool_call>/gi, (match) => escapeHtml(match))
+    .replace(/<tool_call\b[\s\S]*$/gi, (match) => escapeHtml(match));
+}
+
 interface MarkdownViewerProps {
   content: string;
   className?: string;
@@ -32,7 +45,7 @@ interface MarkdownViewerProps {
 }
 
 export const MarkdownViewer = memo(function MarkdownViewer({ content, className = '', compact = false }: MarkdownViewerProps) {
-  const sanitizedContent = useMemo(() => convertThinkToDetails(content), [content]);
+  const sanitizedContent = useMemo(() => convertThinkToDetails(escapeToolCallXml(content)), [content]);
 
   const components: Components = useMemo(() => ({
     code({ className: cn, children, ...rest }) {

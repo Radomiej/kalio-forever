@@ -1,23 +1,27 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import type { ToolTimeoutSettings } from '@kalio/types';
 import { AppSettingsService } from '../../database/app-settings.service';
+import { KalioConfigService } from '../../config/kalio-config.service';
 
 const DEFAULT_TIMEOUT_SETTINGS: ToolTimeoutSettings = {
   webSearchTimeoutMs: 120_000,
   providerLocalTimeoutMs: 3_000,
   providerRemoteTimeoutMs: 15_000,
+  providerMaxConcurrentStreams: 2,
 };
 
 const TIMEOUT_BOUNDS: Record<keyof ToolTimeoutSettings, { min: number; max: number }> = {
   webSearchTimeoutMs: { min: 15_000, max: 600_000 },
   providerLocalTimeoutMs: { min: 1_000, max: 30_000 },
   providerRemoteTimeoutMs: { min: 5_000, max: 120_000 },
+  providerMaxConcurrentStreams: { min: 1, max: 20 },
 };
 
 const TIMEOUT_SETTING_KEYS: Record<keyof ToolTimeoutSettings, string> = {
   webSearchTimeoutMs: 'tool_timeout_web_search_ms',
   providerLocalTimeoutMs: 'tool_timeout_provider_local_ms',
   providerRemoteTimeoutMs: 'tool_timeout_provider_remote_ms',
+  providerMaxConcurrentStreams: 'provider_max_concurrent_streams',
 };
 
 function normalizeTimeout(key: keyof ToolTimeoutSettings, rawValue: number | null | undefined): number {
@@ -37,28 +41,62 @@ function parseStoredTimeout(key: keyof ToolTimeoutSettings, rawValue: string | n
 
 @Injectable()
 export class TimeoutSettingsService {
-  constructor(private readonly appSettings: AppSettingsService) {}
+  constructor(
+    private readonly appSettings: AppSettingsService,
+    @Optional() private readonly kalioConfig?: KalioConfigService,
+  ) {}
 
-  private async getTimeoutSetting(key: keyof ToolTimeoutSettings): Promise<number> {
+  private async getStoredTimeoutSetting(key: keyof ToolTimeoutSettings): Promise<number> {
     const rawValue = await this.appSettings.get(TIMEOUT_SETTING_KEYS[key]);
     return parseStoredTimeout(key, rawValue);
   }
 
+  private async getConfiguredTimeoutSettings(): Promise<Partial<ToolTimeoutSettings>> {
+    return this.kalioConfig ? this.kalioConfig.getToolTimeoutSettings() : {};
+  }
+
+  private async getTimeoutSetting(
+    key: keyof ToolTimeoutSettings,
+    configuredSettings?: Partial<ToolTimeoutSettings>,
+  ): Promise<number> {
+    const configuredValue = configuredSettings?.[key];
+    if (configuredValue !== undefined) {
+      return normalizeTimeout(key, configuredValue);
+    }
+
+    return this.getStoredTimeoutSetting(key);
+  }
+
   async getTimeoutSettings(): Promise<ToolTimeoutSettings> {
-    const [webSearchTimeoutMs, providerLocalTimeoutMs, providerRemoteTimeoutMs] = await Promise.all([
-      this.getTimeoutSetting('webSearchTimeoutMs'),
-      this.getTimeoutSetting('providerLocalTimeoutMs'),
-      this.getTimeoutSetting('providerRemoteTimeoutMs'),
+    const configuredSettings = await this.getConfiguredTimeoutSettings();
+    const [webSearchTimeoutMs, providerLocalTimeoutMs, providerRemoteTimeoutMs, providerMaxConcurrentStreams] = await Promise.all([
+      this.getTimeoutSetting('webSearchTimeoutMs', configuredSettings),
+      this.getTimeoutSetting('providerLocalTimeoutMs', configuredSettings),
+      this.getTimeoutSetting('providerRemoteTimeoutMs', configuredSettings),
+      this.getTimeoutSetting('providerMaxConcurrentStreams', configuredSettings),
     ]);
 
     return {
       webSearchTimeoutMs,
       providerLocalTimeoutMs,
       providerRemoteTimeoutMs,
+      providerMaxConcurrentStreams,
     };
   }
 
   async setTimeoutSettings(settings: Partial<ToolTimeoutSettings>): Promise<void> {
+    if (this.kalioConfig) {
+      const managed = await this.getConfiguredTimeoutSettings();
+      const managedKeys = (Object.keys(settings) as Array<keyof ToolTimeoutSettings>).filter(
+        (key) => settings[key] !== undefined && managed[key] !== undefined,
+      );
+      if (managedKeys.length > 0) {
+        throw new BadRequestException(
+          `Timeout settings managed by .kalio/config.toml cannot be set via the API: ${managedKeys.join(', ')}`,
+        );
+      }
+    }
+
     const updates: Promise<void>[] = [];
 
     if (settings.webSearchTimeoutMs !== undefined) {
@@ -88,14 +126,30 @@ export class TimeoutSettingsService {
       );
     }
 
+    if (settings.providerMaxConcurrentStreams !== undefined) {
+      updates.push(
+        this.appSettings.set(
+          TIMEOUT_SETTING_KEYS.providerMaxConcurrentStreams,
+          String(normalizeTimeout('providerMaxConcurrentStreams', settings.providerMaxConcurrentStreams)),
+        ),
+      );
+    }
+
     await Promise.all(updates);
   }
 
   async getWebSearchTimeoutMs(): Promise<number> {
-    return this.getTimeoutSetting('webSearchTimeoutMs');
+    return this.getTimeoutSetting('webSearchTimeoutMs', await this.getConfiguredTimeoutSettings());
   }
 
   async getProviderTimeoutMs(isLocal: boolean): Promise<number> {
-    return this.getTimeoutSetting(isLocal ? 'providerLocalTimeoutMs' : 'providerRemoteTimeoutMs');
+    return this.getTimeoutSetting(
+      isLocal ? 'providerLocalTimeoutMs' : 'providerRemoteTimeoutMs',
+      await this.getConfiguredTimeoutSettings(),
+    );
+  }
+
+  async getProviderMaxConcurrentStreams(): Promise<number> {
+    return this.getTimeoutSetting('providerMaxConcurrentStreams', await this.getConfiguredTimeoutSettings());
   }
 }

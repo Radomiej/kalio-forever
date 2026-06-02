@@ -13,6 +13,22 @@ import {
   OllamaEmbeddingProvider,
 } from './embedding.service';
 
+const { pipelineMock } = vi.hoisted(() => ({
+  pipelineMock: vi.fn(),
+}));
+
+vi.mock('@huggingface/transformers', () => ({
+  env: {
+    cacheDir: '',
+    allowRemoteModels: true,
+  },
+  pipeline: pipelineMock,
+}));
+
+pipelineMock.mockImplementation(async () => async () => ({
+  data: new Float32Array(384).fill(0.01),
+}));
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeTestDeps(): {
@@ -209,21 +225,44 @@ describe('OpenAICompatibleEmbeddingProvider', () => {
 
 describe('EmbeddingService', () => {
   describe('reloadFromCredential — no DB credential, no env', () => {
-    it('uses MockEmbeddingProvider when nothing configured', async () => {
+    it('uses the local default embedding model when nothing configured', async () => {
       const { svc } = makeService();
       await svc.reloadFromCredential();
       const status = svc.getStatus();
-      expect(status.source).toBe('mock');
-      expect(status.configured).toBe(false);
+      expect(status.source).toBe('local');
+      expect(status.configured).toBe(true);
+      expect(status.model).toBe('Xenova/multilingual-e5-small');
+      expect(status.dimensions).toBe(384);
     });
 
-    it('getStatus returns mock shape', async () => {
+    it('getStatus returns the local default model shape', async () => {
       const { svc } = makeService();
       await svc.reloadFromCredential();
       const s = svc.getStatus();
-      expect(s.provider).toBe('mock');
-      expect(s.model).toBe('mock');
-      expect(s.baseUrlMasked).toBe('(mock)');
+      expect(s.provider).toBe('local-transformers');
+        expect(s.source).toBe('local');
+        expect(s.model).toBe('Xenova/multilingual-e5-small');
+        expect(s.backend).toBe('cpu');
+        expect(s.gpuAvailable).toBeUndefined();
+        expect(s.cacheDir).toBe('./data/embeddings-cache');
+        expect(s.profileId).toBe('local-transformers-xenova-multilingual-e5-small-384-cpu');
+      });
+
+    it('can disable embeddings from local config', async () => {
+      const { svc, credentials } = makeService();
+      await credentials.updateLocalConfig({
+        enabled: false,
+        model: 'Xenova/multilingual-e5-small',
+        dimensions: 384,
+        backend: 'cpu',
+      });
+      await svc.reloadFromCredential();
+
+      const status = svc.getStatus();
+      expect(status.provider).toBe('disabled');
+      expect(status.source).toBe('disabled');
+      expect(status.configured).toBe(false);
+      await expect(svc.embedOne('hello')).rejects.toThrow('disabled');
     });
   });
 
@@ -252,8 +291,9 @@ describe('EmbeddingService', () => {
       });
       await svc.reloadFromCredential();
       const status = svc.getStatus();
-      expect(status.source).toBe('mock');      // must NOT pick up LLM vars
-      expect(status.configured).toBe(false);
+      expect(status.source).toBe('local');      // must NOT pick up LLM vars
+      expect(status.configured).toBe(true);
+      expect(status.model).toBe('Xenova/multilingual-e5-small');
     });
 
     it('treats "mock" as missing for env fallback', async () => {
@@ -262,7 +302,8 @@ describe('EmbeddingService', () => {
         EMBEDDING_BASE_URL: 'mock',
       });
       await svc.reloadFromCredential();
-      expect(svc.getStatus().source).toBe('mock');
+      expect(svc.getStatus().source).toBe('local');
+      expect(svc.getStatus().model).toBe('Xenova/multilingual-e5-small');
     });
   });
 
@@ -291,7 +332,7 @@ describe('EmbeddingService', () => {
       expect(status.activeCredentialName).toBe('DBCred');
     });
 
-    it('falls back to env when DB credential is cleared', async () => {
+    it('uses local embeddings when DB credential is cleared even if env embeddings exist', async () => {
       const { svc, credentials } = makeService({
         EMBEDDING_API_KEY: 'sk-env',
         EMBEDDING_BASE_URL: 'https://env.example.com/v1',
@@ -303,7 +344,7 @@ describe('EmbeddingService', () => {
 
       await credentials.clearActive();
       await svc.reloadFromCredential();
-      expect(svc.getStatus().source).toBe('env');
+      expect(svc.getStatus().source).toBe('local');
     });
   });
 
@@ -344,10 +385,18 @@ describe('EmbeddingService', () => {
   });
 
   describe('getDimensions', () => {
-    it('returns mock dimensions when not configured', async () => {
+    it('returns local default dimensions when not configured', async () => {
       const { svc } = makeService();
       await svc.reloadFromCredential();
-      expect(svc.getDimensions()).toBe(1536);
+      expect(svc.getDimensions()).toBe(384);
+    });
+  });
+
+  describe('getProfileId', () => {
+    it('uses model, dimensions, and backend for local profile isolation', async () => {
+      const { svc } = makeService({ EMBEDDING_BACKEND: 'cpu' });
+      await svc.reloadFromCredential();
+      expect(svc.getProfileId()).toBe('local-transformers-xenova-multilingual-e5-small-384-cpu');
     });
   });
 
@@ -360,17 +409,17 @@ describe('EmbeddingService', () => {
       expect(await svc.getModelName()).toBe('text-embedding-3-large');
     });
 
-    it('returns default when not configured', async () => {
+    it('returns local default when not configured', async () => {
       const { svc } = makeService();
       await svc.reloadFromCredential();
-      expect(await svc.getModelName()).toBe('text-embedding-3-small');
+      expect(await svc.getModelName()).toBe('Xenova/multilingual-e5-small');
     });
   });
 
   describe('edge case: getProvider before onModuleInit', () => {
-    it('returns mock provider without crashing', async () => {
+    it('boots the local default provider without crashing', async () => {
       const { svc } = makeService();
-      // Do NOT call reloadFromCredential — test defensive fallback
+      // Do NOT call reloadFromCredential — embedOne should bootstrap the default provider lazily.
       const vec = await svc.embedOne('test before init');
       expect(Array.isArray(vec)).toBe(true);
     });

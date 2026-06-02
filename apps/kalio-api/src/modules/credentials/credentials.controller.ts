@@ -91,14 +91,15 @@ export class CredentialsController {
     if (
       body.webSearchTimeoutMs === undefined &&
       body.providerLocalTimeoutMs === undefined &&
-      body.providerRemoteTimeoutMs === undefined
+      body.providerRemoteTimeoutMs === undefined &&
+      body.providerMaxConcurrentStreams === undefined
     ) {
       throw new BadRequestException('At least one tool timeout setting must be provided');
     }
 
     await this.timeoutSettings.setTimeoutSettings(body);
     this.logger.log(
-      `Tool timeout settings updated via API: web_search=${body.webSearchTimeoutMs ?? '—'} local=${body.providerLocalTimeoutMs ?? '—'} remote=${body.providerRemoteTimeoutMs ?? '—'}`,
+      `Tool timeout settings updated via API: web_search=${body.webSearchTimeoutMs ?? '—'} local=${body.providerLocalTimeoutMs ?? '—'} remote=${body.providerRemoteTimeoutMs ?? '—'} max_streams=${body.providerMaxConcurrentStreams ?? '—'}`,
     );
   }
 
@@ -216,9 +217,7 @@ export class CredentialsController {
       await llm.streamChat(
         [{ role: 'user', content: 'ping' }],
         [],
-        () => { /* drain chunks */ },
-        'test-session',
-        'test-msg',
+        { sessionId: 'test-session', messageId: 'test-msg', onChunk: () => { /* drain chunks */ } },
       );
       return { ok: true, latencyMs: Date.now() - start };
     } catch (err) {

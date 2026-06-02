@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import type { ToolCallRequest } from '@kalio/types';
+import { eq } from 'drizzle-orm';
+import type { MemorySearchResult, ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
+import { DrizzleService } from '../../../database/drizzle.service';
+import { sessions } from '../../../database/schema';
+import { MemoryService } from '../../memory/memory.service';
 import { WebSearchService } from '../../search/web-search.service';
 
 function getQueryArg(args: ToolCallRequest['args']): string {
@@ -17,31 +21,109 @@ function getQueryArg(args: ToolCallRequest['args']): string {
   return trimmedQuery;
 }
 
+function getOfflineSearchArg(args: ToolCallRequest['args']): boolean {
+  const value = args['offline_search'];
+  if (value === undefined) return true;
+  if (typeof value !== 'boolean') {
+    throw new Error('INVALID_OFFLINE_SEARCH: offline_search must be a boolean');
+  }
+  return value;
+}
+
+function formatSearchMemory(query: string, result: Awaited<ReturnType<WebSearchService['search']>>): string {
+  const citations = result.citations.length > 0
+    ? result.citations.map((citation, index) => `${index + 1}. ${citation}`).join('\n')
+    : 'None';
+
+  return [
+    `Web search query: ${query}`,
+    `Provider: ${result.provider}`,
+    `Model: ${result.model}`,
+    '',
+    'Answer:',
+    result.answer,
+    '',
+    'Citations:',
+    citations,
+  ].join('\n');
+}
+
+function formatOfflineAnswer(results: MemorySearchResult[]): string {
+  return results
+    .map((result, index) => {
+      const source = result.metadata['source'] ? ` source=${result.metadata['source']}` : '';
+      return `[${index + 1}]${source}\n${result.content}`;
+    })
+    .join('\n\n');
+}
+
+async function resolvePersonaId(drizzle: DrizzleService, sessionId: string): Promise<string> {
+  const row = drizzle.db
+    .select({ personaId: sessions.personaId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .get();
+  if (!row) throw new Error(`Session ${sessionId} not found - cannot resolve personaId`);
+  return row.personaId;
+}
+
 @Injectable()
 @Tool({
   name: 'web_search',
   description:
-    'Search the web for up-to-date information using Perplexity AI. ' +
-    'Returns a concise answer with source citations. ' +
-    'Requires a Perplexity API key configured in Settings → Web Search.',
+    'Search for current information. By default this checks persona memory first and only calls external web search when no related memory exists. ' +
+    'Set offline_search=false to force an external search. External results are saved silently for future memory retrieval.',
   parameters: {
     type: 'object',
     required: ['query'],
     properties: {
       query: {
         type: 'string',
-        description: 'Search query — be specific for best results',
+        description: 'Search query - be specific for best results',
+      },
+      offline_search: {
+        type: 'boolean',
+        description: 'Defaults to true. Set false to bypass memory and force external search.',
       },
     },
   },
   requiresConfirmation: false,
 })
 export class WebSearchTool {
-  constructor(private readonly webSearch: WebSearchService) {}
+  constructor(
+    private readonly webSearch: WebSearchService,
+    private readonly memory: MemoryService,
+    private readonly drizzle: DrizzleService,
+  ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
     const query = getQueryArg(request.args);
+    const offlineSearch = getOfflineSearchArg(request.args);
+    const personaId = await resolvePersonaId(this.drizzle, request.sessionId);
+
+    if (offlineSearch) {
+      const memoryResults = await this.memory.searchWebResults(query, 5);
+      if (memoryResults.length > 0) {
+        return {
+          answer: formatOfflineAnswer(memoryResults),
+          citations: [],
+          model: 'persona-memory',
+          provider: 'memory',
+          offline: true,
+          results: memoryResults,
+        };
+      }
+    }
+
     const result = await this.webSearch.search(query);
-    return result;
+    const memory = await this.memory.ingestWebSearchResult(formatSearchMemory(query, result), {
+      source: 'web_search',
+      query,
+      persona_id: personaId,
+      provider: result.provider,
+      model: result.model,
+    });
+
+    return { ...result, offline: false, memory };
   }
 }

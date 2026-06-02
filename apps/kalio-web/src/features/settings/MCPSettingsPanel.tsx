@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, ChevronUp, RefreshCw, Container, Loader2, Wrench, AlertCircle } from 'lucide-react';
+import { Plus, ChevronUp, RefreshCw, Container, Loader2, Wrench, AlertCircle, FolderInput } from 'lucide-react';
 import type { MCPServer, CreateMCPServerDto } from '@kalio/types';
 import { MCPServerRow } from './MCPServerRow';
 import { MCPAddServerForm } from './MCPAddServerForm';
+import { MCPExternalImportModal } from './MCPExternalImportModal';
+
+type SettingsMCPServer = MCPServer & { managedBy?: 'toml' };
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -20,15 +23,17 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
 const DOCKER_GATEWAY_NAME = 'Docker MCP Gateway';
 
 export function MCPSettingsPanel() {
-  const [servers, setServers] = useState<MCPServer[]>([]);
+  const [servers, setServers] = useState<SettingsMCPServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [addingGateway, setAddingGateway] = useState(false);
+  const [reloadingConfig, setReloadingConfig] = useState(false);
+  const [showExternalImport, setShowExternalImport] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const list = await apiFetch<MCPServer[]>('/mcp/servers');
+      const list = await apiFetch<SettingsMCPServer[]>('/mcp/servers');
       // Deduplicate by ID to prevent React key collision warnings
       setServers([...new Map(list.map((s) => [s.id, s])).values()]);
     } catch (err) {
@@ -61,6 +66,18 @@ export function MCPSettingsPanel() {
   const handleRemove = async (id: string) => {
     await apiFetch(`/mcp/servers/${id}`, { method: 'DELETE' });
     setServers((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const handleReloadConfig = async () => {
+    setReloadingConfig(true);
+    try {
+      const list = await apiFetch<SettingsMCPServer[]>('/mcp/servers/reload-config', { method: 'POST' });
+      setServers([...new Map(list.map((s) => [s.id, s])).values()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reload MCP config');
+    } finally {
+      setReloadingConfig(false);
+    }
   };
 
   const handleDockerGateway = async () => {
@@ -138,6 +155,22 @@ export function MCPSettingsPanel() {
         </div>
       )}
 
+      <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-base-300 bg-base-200/30">
+        <div className="min-w-0">
+          <p className="text-xs font-medium">TOML config</p>
+          <p className="text-[10px] text-base-content/50 truncate">Reload .kalio/config.toml without restarting Kalio.</p>
+        </div>
+        <button
+          className="btn btn-sm btn-outline gap-1 shrink-0"
+          onClick={() => void handleReloadConfig()}
+          disabled={reloadingConfig}
+          data-testid="mcp-reload-config-btn"
+        >
+          {reloadingConfig ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+          Reload
+        </button>
+      </div>
+
       {/* Server list */}
       {loading ? (
         <div className="flex items-center gap-2 text-xs text-base-content/50 py-2">
@@ -162,14 +195,24 @@ export function MCPSettingsPanel() {
 
       {/* Add server toggle */}
       <div>
-        <button
-          className="btn btn-outline btn-sm gap-2 w-full"
-          onClick={() => setShowForm((v) => !v)}
-          data-testid="mcp-add-toggle"
-        >
-          {showForm ? <ChevronUp size={14} /> : <Plus size={14} />}
-          {showForm ? 'Cancel' : 'Add Server'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            className="btn btn-outline btn-sm gap-2 flex-1"
+            onClick={() => setShowForm((v) => !v)}
+            data-testid="mcp-add-toggle"
+          >
+            {showForm ? <ChevronUp size={14} /> : <Plus size={14} />}
+            {showForm ? 'Cancel' : 'Add Server'}
+          </button>
+          <button
+            className="btn btn-outline btn-sm gap-2"
+            onClick={() => setShowExternalImport(true)}
+            data-testid="mcp-external-import-btn"
+          >
+            <FolderInput size={14} />
+            Import
+          </button>
+        </div>
 
         {showForm && (
           <div className="mt-3">
@@ -185,6 +228,12 @@ export function MCPSettingsPanel() {
         <RefreshCw size={11} />
         <span>Server list refreshes automatically every 5 seconds.</span>
       </div>
+
+      <MCPExternalImportModal
+        isOpen={showExternalImport}
+        onClose={() => setShowExternalImport(false)}
+        onImported={load}
+      />
     </div>
   );
 }

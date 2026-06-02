@@ -383,6 +383,10 @@ systems:
       const call = (audit.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
       expect(call['sessionId']).toBe('sess-123');
       expect(call['type']).toBe('raapp_native_call');
+      expect(call['data']).toMatchObject({
+        domain: 'raapp',
+        eventType: 'raapp_native_call_executed',
+      });
     });
   });
 

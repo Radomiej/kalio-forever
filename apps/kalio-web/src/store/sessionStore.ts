@@ -41,6 +41,7 @@ interface SessionState {
   addMessage: (message: ChatMessage) => void;
   appendChunk: (messageId: string, delta: string, thinking?: boolean, chunkSessionId?: string) => void;
   finalizeChunk: (messageId: string) => void;
+  clearPendingChunks: (sessionId?: string | null) => void;
   flushThinkingChunks: (sessionId?: string | null) => void;
   flushStreamingChunks: (sessionId?: string | null) => void;
   removeSession: (id: string) => void;
@@ -252,6 +253,34 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             }
           : s.sessionMessages,
         messages: targetSessionId === s.activeSessionId ? nextSessionMessages : s.messages,
+      };
+    }),
+
+  clearPendingChunks: (sessionId) =>
+    set((s) => {
+      const targetSessionId = sessionId ?? s.activeSessionId;
+      if (!targetSessionId) return s;
+
+      const pendingIds = Object.entries(s.chunkSessionIds)
+        .filter(([, sid]) => sid === targetSessionId)
+        .map(([messageId]) => messageId);
+
+      if (pendingIds.length === 0) {
+        return s;
+      }
+
+      const pendingIdSet = new Set(pendingIds);
+
+      return {
+        streamingChunks: Object.fromEntries(
+          Object.entries(s.streamingChunks).filter(([messageId]) => !pendingIdSet.has(messageId)),
+        ),
+        thinkingChunks: Object.fromEntries(
+          Object.entries(s.thinkingChunks).filter(([messageId]) => !pendingIdSet.has(messageId)),
+        ),
+        chunkSessionIds: Object.fromEntries(
+          Object.entries(s.chunkSessionIds).filter(([messageId]) => !pendingIdSet.has(messageId)),
+        ),
       };
     }),
 

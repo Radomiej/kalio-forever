@@ -16,7 +16,7 @@ It answers four practical questions:
 - The actual manager already exists. `RAAppManager` has three sections: Catalog, Work, and Session.
 - Landing page and manager already share the same catalog bucketing helper, so grouped current releases are shown once and draft/history IDs are filtered out of the flat user list.
 - Agents are much less likely to get lost now because persona prompts split launch, build, and design workflows explicitly.
-- The main remaining architectural split is persistence: one-shot `raapp_create` still saves standalone flat ZIPs through `RAAppService.saveGeneratedApp()`, while the draft-first publish flow uses grouped versioned storage.
+- The main remaining architectural split is no longer the storage engine. One-shot `raapp_create` now also persists through `RAAppVersioningService.saveAsDraft(...)`; the open question is workflow semantics, because draft-first flows keep an explicit review/publish boundary while `raapp_create` can still create a durable catalog artifact directly from chat.
 
 ## The current model
 
@@ -26,7 +26,7 @@ There are now three distinct RA-App states, and treating them as different thing
 | --- | --- | --- | --- |
 | Raw working copy | Editable draft, per-session iteration | `sessions/<sessionId>/files/drafts/<draftId>/...` | `raapp_create_draft`, `raapp_edit`, `vfs_write`, `design_preview` |
 | Released grouped app | Stable publishable catalog version | `data/ra-apps/user/<slug>/current.zip`, `draft.zip`, `history/*.zip` | `raapp_publish_draft`, versioning endpoints, `run_raapp` |
-| Standalone generated app | One-shot saved result from chat | flat ZIP under `data/ra-apps/user/*.zip` | `raapp_create`, `RAAppService.saveGeneratedApp()` |
+| Generated draft artifact | One-shot saved result from chat | versioned user-app draft managed by `RAAppVersioningService` | `raapp_create` |
 
 That separation is the core of V2.
 
@@ -133,14 +133,11 @@ The new system is not a total rewrite. The DSLs and executor model are intention
 
 ### What is still legacy-ish
 
-The migration is not completely finished.
+The migration is not blocked by the old flat-ZIP write path anymore. `raapp_create` now writes a generated archive through `RAAppVersioningService.saveAsDraft(...)`, so the remaining caveat is workflow, not storage.
 
-`raapp_create` still uses `RAAppService.saveGeneratedApp()`, which writes a standalone flat ZIP directly into the user catalog. That means we currently have two persistence lanes:
-
-- grouped versioned releases for the VFS-first flow
-- standalone flat ZIPs for one-shot generated apps
-
-So the architecture is improved, but not yet fully unified.
+- draft-first flows still keep an explicit review and publish boundary
+- `raapp_create` still creates a durable catalog artifact directly from chat
+- the open policy question is whether delegated child agents should ever be able to create that durable artifact without explicit user approval
 
 ## Manager and agent guidance
 
@@ -175,7 +172,7 @@ Current split:
 
 That is a real improvement over the older situation where creation, editing, preview, and launch could all collapse into one vague RA-App path.
 
-Residual confusion risk still exists in one place: generic one-shot `raapp_create` persists a standalone ZIP instead of feeding the grouped publish lane. That makes it easier for a generic agent to create an app that is valid but not yet aligned with the long-term unified lifecycle.
+Residual confusion risk still exists in one place: generic one-shot `raapp_create` can create a durable versioned draft directly from chat instead of forcing the explicit draft-review-publish lane. That makes it easier for a generic agent to create an app that is valid but not yet aligned with the stricter review workflow.
 
 ## Home page and duplicate control
 

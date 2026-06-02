@@ -153,7 +153,7 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
         {/* Empty state */}
         {!loading && tiles.length === 0 && (
           <div className="col-span-full text-center py-12 text-base-content/40 text-sm">
-            No RaConsierge apps available. Upload a ZIP or load core apps from Settings.
+            No RAApps available. Upload a ZIP or load core apps from Settings.
           </div>
         )}
       </div>

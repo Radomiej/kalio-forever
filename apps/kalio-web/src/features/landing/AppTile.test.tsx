@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { AppTile } from './AppTile';
 
 describe('AppTile', () => {
-  it('renders the tile name, description, and keyboard activation', () => {
+  it('renders the tile name, description, and activates the open control', () => {
     const onClick = vi.fn();
 
     render(
@@ -18,15 +18,15 @@ describe('AppTile', () => {
     );
 
     const tile = screen.getByTestId('app-tile-cats-suite');
+    const openButton = screen.getByTestId('app-tile-open-cats-suite');
     expect(tile).toHaveClass('col-span-2');
     expect(tile).toHaveAttribute('title', 'A cat tools pack');
     expect(tile).toHaveTextContent('Cats Suite');
     expect(tile).toHaveTextContent('A cat tools pack');
 
-    fireEvent.keyDown(tile, { key: 'Enter' });
-    fireEvent.keyDown(tile, { key: ' ' });
+    fireEvent.click(openButton);
 
-    expect(onClick).toHaveBeenCalledTimes(2);
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 
   it('shows generated icon actions without triggering the tile click', () => {

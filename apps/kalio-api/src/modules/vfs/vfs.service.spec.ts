@@ -227,6 +227,23 @@ describe('VFSService', () => {
       expect(paths).toContain('root.txt');
       expect(paths.some((p) => p.includes('nested.txt'))).toBe(true);
     });
+
+    it('skips generated directories during recursive listing', () => {
+      const filesDir = join(testWorkspace, 'sessions', sessionId, 'files');
+      mkdirSync(join(filesDir, 'src'), { recursive: true });
+      mkdirSync(join(filesDir, 'node_modules', 'left-pad'), { recursive: true });
+      mkdirSync(join(filesDir, 'dist'), { recursive: true });
+      writeFileSync(join(filesDir, 'src', 'main.ts'), 'export const ok = true;', 'utf8');
+      writeFileSync(join(filesDir, 'node_modules', 'left-pad', 'index.js'), 'module.exports = {}', 'utf8');
+      writeFileSync(join(filesDir, 'dist', 'bundle.js'), 'console.log("build")', 'utf8');
+
+      const result = service.listFiles(sessionId);
+      const paths = result.files.map((f) => f.path);
+
+      expect(paths).toContain('src/main.ts');
+      expect(paths).not.toContain('node_modules/left-pad/index.js');
+      expect(paths).not.toContain('dist/bundle.js');
+    });
   });
 
   describe('touchSession', () => {

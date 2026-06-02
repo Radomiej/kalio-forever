@@ -94,4 +94,22 @@ describe('GuiDslRenderer', () => {
     render(<GuiDslRenderer payload={payload} />);
     expect(screen.getByTestId('gui-progressbar')).toBeInTheDocument();
   });
+
+  it('renders icon element with data-testid and name text', () => {
+    const payload = makePayload([
+      { kind: 'element', tag: 'icon', props: { name: { kind: 'string', value: 'star' } }, children: [] },
+    ]);
+    render(<GuiDslRenderer payload={payload} />);
+    const icon = screen.getByTestId('gui-icon');
+    expect(icon).toBeInTheDocument();
+    expect(icon.textContent).toBe('star');
+  });
+
+  it('renders icon element with identifier name prop', () => {
+    const payload = makePayload([
+      { kind: 'element', tag: 'icon', props: { name: { kind: 'identifier', value: 'check' } }, children: [] },
+    ]);
+    render(<GuiDslRenderer payload={payload} />);
+    expect(screen.getByTestId('gui-icon').textContent).toBe('check');
+  });
 });

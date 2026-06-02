@@ -8,6 +8,7 @@ interface Props {
   disabled?: boolean;
   loading?: boolean;
   placeholder?: string;
+  'aria-label'?: string;
   'data-testid'?: string;
 }
 
@@ -24,6 +25,7 @@ export function ModelCombobox({
   disabled,
   loading,
   placeholder,
+  'aria-label': ariaLabel,
   'data-testid': testId,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -65,11 +67,11 @@ export function ModelCombobox({
 
   return (
     <div ref={containerRef} className="relative w-full">
-      <div className="flex items-center">
+      <div className="flex items-center gap-1">
         <input
           ref={inputRef}
           type="text"
-          className="input input-bordered input-sm w-full font-mono pr-16"
+          className="input input-bordered input-sm min-w-0 flex-1 font-mono"
           value={displayValue}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -85,14 +87,15 @@ export function ModelCombobox({
           placeholder={loading ? 'Loading models…' : placeholder}
           data-testid={testId}
           role="combobox"
+          aria-label={ariaLabel}
           aria-expanded={open}
           aria-autocomplete="list"
         />
-        <div className="absolute right-1 flex items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5">
           {value && (
             <button
               type="button"
-              className="btn btn-ghost btn-xs px-1 text-base-content/40"
+              className="btn btn-ghost btn-xs min-h-8 w-8 px-0 text-base-content/60"
               onClick={() => {
                 setQuery('');
                 setTypedSinceOpen(false);
@@ -107,7 +110,7 @@ export function ModelCombobox({
           )}
           <button
             type="button"
-            className="btn btn-ghost btn-xs px-1 text-base-content/40"
+            className="btn btn-ghost btn-xs min-h-8 w-8 px-0 text-base-content/60"
             onClick={() => {
               if (disabled || loading) return;
               if (open) {

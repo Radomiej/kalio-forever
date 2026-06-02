@@ -4,15 +4,17 @@ import { SessionsService } from '../sessions.service';
 import type { IMessageRepository } from '../interfaces/message-repository.interface';
 import type { DrizzleService } from '../../../database/drizzle.service';
 import type { SessionManagerService } from '../session-manager.service';
+import type { ChatSessionKind } from '@kalio/types';
 
 interface FakeRow {
   id: string;
   personaId: string;
   title: string;
-  kind?: 'chat' | 'subagent';
+  kind?: ChatSessionKind;
   parentSessionId?: string | null;
   parentTurnId?: string | null;
   parentToolCallId?: string | null;
+  archivedAt?: number | Date | null;
   createdAt: number | Date;
   updatedAt: number | Date;
 }
@@ -22,7 +24,10 @@ function makeDrizzle(rows: FakeRow[]): { drizzle: DrizzleService; rows: FakeRow[
   const select = () => ({
     from: () => ({
       orderBy: () => Promise.resolve(rows),
-      where: () => ({ limit: () => Promise.resolve(rows) }),
+      where: () => ({
+        orderBy: () => Promise.resolve(rows.filter((row) => row.archivedAt == null)),
+        limit: () => Promise.resolve(rows),
+      }),
     }),
   });
   const insert = () => ({
@@ -119,6 +124,28 @@ describe('SessionsService', () => {
         },
       ]);
     });
+
+    it('does not return archived sessions by default', async () => {
+      rows.push(
+        { id: 'visible', personaId: 'p1', title: 'Visible', createdAt: 1, updatedAt: 2, archivedAt: null },
+        { id: 'archived', personaId: 'p1', title: 'Archived', createdAt: 1, updatedAt: 3, archivedAt: 4 },
+      );
+
+      const result = await service.list();
+
+      expect(result.map((session) => session.id)).toEqual(['visible']);
+    });
+
+    it('can include archived sessions for lifecycle views', async () => {
+      rows.push(
+        { id: 'visible', personaId: 'p1', title: 'Visible', createdAt: 1, updatedAt: 2, archivedAt: null },
+        { id: 'archived', personaId: 'p1', title: 'Archived', createdAt: 1, updatedAt: 3, archivedAt: 4 },
+      );
+
+      const result = await service.list({ includeArchived: true });
+
+      expect(result.map((session) => session.id)).toEqual(['visible', 'archived']);
+    });
   });
 
   describe('getMessages', () => {
@@ -142,6 +169,29 @@ describe('SessionsService', () => {
       rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
       await service.delete('s1');
       expect(ops).toContain('delete');
+    });
+  });
+
+  describe('archive', () => {
+    it('throws NotFoundException for missing session', async () => {
+      await expect(service.archive('missing')).rejects.toThrow(NotFoundException);
+    });
+
+    it('marks an existing session archived without deleting it', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
+      await service.archive('s1');
+      expect(ops).toContain('update');
+      expect(rows[0].archivedAt).toBeInstanceOf(Date);
+      expect(rows).toHaveLength(1);
+    });
+  });
+
+  describe('restore', () => {
+    it('clears archive state on an existing session', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0, archivedAt: 1 });
+      await service.restore('s1');
+      expect(ops).toContain('update');
+      expect(rows[0].archivedAt).toBeNull();
     });
   });
 

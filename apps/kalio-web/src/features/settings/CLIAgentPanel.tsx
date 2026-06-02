@@ -9,7 +9,9 @@ interface AdapterCardProps {
 }
 
 const TIMEOUT_MIN_MS = 10_000;
-const TIMEOUT_MAX_MS = 1_200_000;
+const TIMEOUT_MAX_MS = 86_400_000;
+const HARD_TIMEOUT_MIN_MS = 10_000;
+const HARD_TIMEOUT_MAX_MS = 86_400_000;
 const MAX_OUTPUT_MIN = 1_000;
 const MAX_OUTPUT_MAX = 500_000;
 
@@ -19,6 +21,14 @@ function normalizeOptionalText(value: string): string | undefined {
 }
 
 function normalizeCliPath(value: string): string {
+  return normalizeOptionalText(value) ?? '';
+}
+
+function normalizeModel(value: string): string {
+  return normalizeOptionalText(value) ?? '';
+}
+
+function normalizeArchitecturePreference(value: string): string {
   return normalizeOptionalText(value) ?? '';
 }
 
@@ -40,6 +50,13 @@ function normalizeExtraArgs(value: string): string[] {
     .split('\n')
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function modelPlaceholder(agentId: string): string {
+  if (agentId === 'gemini') return 'e.g. gemini-2.5-pro';
+  if (agentId === 'codex') return 'e.g. gpt-5.4-mini';
+  if (agentId === 'claude') return 'e.g. opus';
+  return 'Optional model name';
 }
 
 function AdapterCard({ info }: AdapterCardProps) {
@@ -72,7 +89,23 @@ function AdapterCard({ info }: AdapterCardProps) {
         ...config,
         ...draft,
         cliPath: normalizeCliPath(draft.cliPath ?? config.cliPath),
+        model: normalizeModel(draft.model ?? config.model),
+        architecturePreference: normalizeArchitecturePreference(
+          draft.architecturePreference ?? config.architecturePreference,
+        ),
         timeoutMs: clampNumber(typeof draft.timeoutMs === 'number' ? draft.timeoutMs : config.timeoutMs, TIMEOUT_MIN_MS, TIMEOUT_MAX_MS),
+        hardTimeoutEnabled: typeof draft.hardTimeoutEnabled === 'boolean'
+          ? draft.hardTimeoutEnabled
+          : config.hardTimeoutEnabled ?? false,
+        hardTimeoutMs: clampNumber(
+          typeof draft.hardTimeoutMs === 'number' ? draft.hardTimeoutMs : config.hardTimeoutMs ?? 3_600_000,
+          HARD_TIMEOUT_MIN_MS,
+          HARD_TIMEOUT_MAX_MS,
+        ),
+        autoRecoveryEnabled: typeof draft.autoRecoveryEnabled === 'boolean'
+          ? draft.autoRecoveryEnabled
+          : config.autoRecoveryEnabled ?? false,
+        autoRecoveryPrompt: normalizeOptionalText(draft.autoRecoveryPrompt ?? config.autoRecoveryPrompt ?? 'continue') ?? 'continue',
         maxOutputChars: clampNumber(
           typeof draft.maxOutputChars === 'number' ? draft.maxOutputChars : config.maxOutputChars,
           MAX_OUTPUT_MIN,
@@ -85,7 +118,10 @@ function AdapterCard({ info }: AdapterCardProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => null) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? `${res.status}: ${res.statusText}`);
+      }
       const updated = await res.json() as CLIAgentConfig;
       setConfig(updated);
       setDraft({});
@@ -152,7 +188,7 @@ function AdapterCard({ info }: AdapterCardProps) {
             <input
               type="text"
               className="input input-bordered input-xs font-mono"
-              placeholder="e.g. /usr/local/bin/copilot"
+              placeholder={`e.g. /usr/local/bin/${info.id}`}
               value={merged.cliPath ?? ''}
               onChange={(e) => setDraft((d: ConfigDraft) => ({
                 ...d,
@@ -161,10 +197,44 @@ function AdapterCard({ info }: AdapterCardProps) {
             />
           </div>
 
+          {info.supportsModelSelection && (
+            <div className="form-control gap-1">
+              <label className="label-text text-xs text-base-content/60">Model override (optional)</label>
+              <input
+                type="text"
+                className="input input-bordered input-xs font-mono"
+                placeholder={modelPlaceholder(info.id)}
+                value={merged.model ?? ''}
+                onChange={(e) => setDraft((d: ConfigDraft) => ({
+                  ...d,
+                  model: normalizeModel(e.target.value),
+                }))}
+              />
+            </div>
+          )}
+
           <div className="form-control gap-1">
-            <label className="label-text text-xs text-base-content/60">Timeout (ms)</label>
+            <label className="label-text text-xs text-base-content/60" htmlFor={`architecture-preference-${info.id}`}>
+              Architecture run preference
+            </label>
+            <textarea
+              id={`architecture-preference-${info.id}`}
+              className="textarea textarea-bordered textarea-xs text-xs"
+              rows={2}
+              placeholder="e.g. Prefer cheap materialization; avoid broad rewrites."
+              value={merged.architecturePreference ?? ''}
+              onChange={(e) => setDraft((d: ConfigDraft) => ({
+                ...d,
+                architecturePreference: normalizeArchitecturePreference(e.target.value),
+              }))}
+            />
+          </div>
+
+          <div className="form-control gap-1">
+            <label className="label-text text-xs text-base-content/60">Inactivity timeout (ms)</label>
             <input
               type="number"
+              aria-label="Inactivity timeout"
               className="input input-bordered input-xs font-mono w-36"
               min={TIMEOUT_MIN_MS}
               max={TIMEOUT_MAX_MS}
@@ -177,10 +247,63 @@ function AdapterCard({ info }: AdapterCardProps) {
             />
           </div>
 
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="toggle toggle-sm"
+              checked={merged.hardTimeoutEnabled ?? false}
+              onChange={(e) => setDraft((d: ConfigDraft) => ({ ...d, hardTimeoutEnabled: e.target.checked }))}
+            />
+            <span className="text-sm">Enable hard wall-clock timeout</span>
+          </label>
+
+          <div className="form-control gap-1">
+            <label className="label-text text-xs text-base-content/60">Hard timeout (ms)</label>
+            <input
+              type="number"
+              aria-label="Hard timeout"
+              className="input input-bordered input-xs font-mono w-36"
+              min={HARD_TIMEOUT_MIN_MS}
+              max={HARD_TIMEOUT_MAX_MS}
+              step={60_000}
+              value={merged.hardTimeoutMs ?? 3_600_000}
+              disabled={!merged.hardTimeoutEnabled}
+              onChange={(e) => setDraft((d: ConfigDraft) => ({
+                ...d,
+                hardTimeoutMs: normalizeNumberInput(e.target.value, merged.hardTimeoutMs ?? 3_600_000, HARD_TIMEOUT_MIN_MS, HARD_TIMEOUT_MAX_MS),
+              }))}
+            />
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="toggle toggle-sm"
+              checked={merged.autoRecoveryEnabled ?? false}
+              onChange={(e) => setDraft((d: ConfigDraft) => ({ ...d, autoRecoveryEnabled: e.target.checked }))}
+            />
+            <span className="text-sm">Auto-recover idle durable sessions</span>
+          </label>
+
+          <div className="form-control gap-1">
+            <label className="label-text text-xs text-base-content/60">Auto-recovery prompt</label>
+            <input
+              type="text"
+              className="input input-bordered input-xs"
+              value={merged.autoRecoveryPrompt ?? 'continue'}
+              disabled={!merged.autoRecoveryEnabled}
+              onChange={(e) => setDraft((d: ConfigDraft) => ({
+                ...d,
+                autoRecoveryPrompt: normalizeOptionalText(e.target.value) ?? 'continue',
+              }))}
+            />
+          </div>
+
           <div className="form-control gap-1">
             <label className="label-text text-xs text-base-content/60">Max output chars</label>
             <input
               type="number"
+              aria-label="Max output chars"
               className="input input-bordered input-xs font-mono w-36"
               min={MAX_OUTPUT_MIN}
               max={MAX_OUTPUT_MAX}
@@ -286,6 +409,17 @@ export function CLIAgentPanel() {
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
           Refresh
         </button>
+      </div>
+
+      <div className="rounded-xl border border-sky-500/20 bg-sky-500/8 px-4 py-3 text-sm text-base-content/75">
+        <p>
+          Recommended durable supervision stack for forever loops and repo browsing: <strong>Gemini -&gt; Copilot -&gt; Codex</strong>.
+        </p>
+        <p className="mt-2 text-xs text-base-content/60">
+          Add the repo under Settings -&gt; Allowed Paths, then let the parent agent keep a child session alive with <code className="font-mono">spawn_cli_agent</code>,
+          steer it with <code className="font-mono">message_cli_agent</code>, inspect it with <code className="font-mono">get_cli_agent_status</code>,
+          and interrupt it with <code className="font-mono">stop_cli_agent</code>.
+        </p>
       </div>
 
       {loadError && (

@@ -56,5 +56,38 @@ test.describe('AC-07: MCP server management', () => {
     await page.getByTestId(`mcp-remove-confirm-${server.id}`).click();
     await expect(page.getByTestId(`mcp-server-${server.id}`)).not.toBeVisible({ timeout: 5000 });
   });
+
+  test('open MCP panel picks up server list changes through polling', async ({ page }) => {
+    let serverListCalls = 0;
+    await page.route('**/api/mcp/servers', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
+
+      serverListCalls += 1;
+      const list = serverListCalls < 2
+        ? []
+        : [{
+            id: 'polling-hot-reload',
+            name: 'Polling Hot Reload',
+            transport: 'http',
+            url: 'http://localhost:19999/mcp',
+            status: 'connected',
+            toolCount: 3,
+            createdAt: Date.now(),
+          }];
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(list),
+      });
+    });
+
+    await openMCPPanel(page);
+    await expect(page.getByTestId('mcp-empty')).toBeVisible();
+    await expect(page.getByTestId('mcp-server-polling-hot-reload')).toBeVisible({ timeout: 7000 });
+  });
 });
 

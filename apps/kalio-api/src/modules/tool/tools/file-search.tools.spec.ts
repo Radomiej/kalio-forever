@@ -92,6 +92,53 @@ describe('GrepSearchTool', () => {
       const callArg = (nodefs.readFileSync as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(callArg).toContain('script.ts');
     });
+
+    it('skips generated directories by default while grepping', async () => {
+      (allowedPaths.getRoots as ReturnType<typeof vi.fn>).mockResolvedValue(['/allowed']);
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.readdirSync).mockImplementation((dir) => {
+        const normalizedDir = String(dir).replace(/\\/g, '/');
+        if (normalizedDir === '/allowed') {
+          return [
+            { name: 'src', isDirectory: () => true },
+            { name: 'dist', isDirectory: () => true },
+          ] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        if (normalizedDir.endsWith('/allowed/src')) {
+          return [{ name: 'app.ts', isDirectory: () => false }] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        if (normalizedDir.endsWith('/allowed/dist')) {
+          return [{ name: 'bundle.js', isDirectory: () => false }] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        return [] as unknown as ReturnType<typeof nodefs.readdirSync>;
+      });
+      vi.mocked(nodefs.statSync).mockImplementation((target) => {
+        const normalizedTarget = String(target).replace(/\\/g, '/');
+        if (normalizedTarget === '/allowed/src/app.ts' || normalizedTarget === '/allowed/dist/bundle.js') {
+          return { size: 100 } as ReturnType<typeof nodefs.statSync>;
+        }
+        throw new Error(`Unexpected stat target: ${normalizedTarget}`);
+      });
+      vi.mocked(nodefs.readFileSync).mockImplementation((target) => {
+        const normalizedTarget = String(target).replace(/\\/g, '/');
+        if (normalizedTarget === '/allowed/src/app.ts') {
+          return 'needle in source';
+        }
+        if (normalizedTarget === '/allowed/dist/bundle.js') {
+          return 'needle in build output';
+        }
+        throw new Error(`Unexpected read target: ${normalizedTarget}`);
+      });
+
+      const result = await tool.execute(makeRequest('grep_search', { query: 'needle' }));
+
+      expect(result.matches).toEqual([
+        { file: nodepath.join('/allowed', 'src', 'app.ts'), line: 1, text: 'needle in source' },
+      ]);
+      const traversedDirs = (nodefs.readdirSync as ReturnType<typeof vi.fn>).mock.calls
+        .map(([target]) => String(target).replace(/\\/g, '/'));
+      expect(traversedDirs.some((target) => target.endsWith('/allowed/dist'))).toBe(false);
+    });
   });
 
   describe('edge cases', () => {
@@ -248,6 +295,34 @@ describe('FileSearchTool', () => {
 
       expect(result.files.length).toBeGreaterThan(0);
       expect(result.files.every((f: string) => f.endsWith('.ts'))).toBe(true);
+    });
+
+    it('skips generated directories by default while matching files', async () => {
+      (allowedPaths.getRoots as ReturnType<typeof vi.fn>).mockResolvedValue(['/project']);
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.readdirSync).mockImplementation((dir) => {
+        const normalizedDir = String(dir).replace(/\\/g, '/');
+        if (normalizedDir === '/project') {
+          return [
+            { name: 'src', isDirectory: () => true },
+            { name: 'coverage', isDirectory: () => true },
+          ] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        if (normalizedDir.endsWith('/project/src')) {
+          return [{ name: 'index.ts', isDirectory: () => false }] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        if (normalizedDir.endsWith('/project/coverage')) {
+          return [{ name: 'generated.ts', isDirectory: () => false }] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        return [] as unknown as ReturnType<typeof nodefs.readdirSync>;
+      });
+
+      const result = await tool.execute(makeRequest('file_search', { pattern: '**/*.ts' }));
+
+      expect(result.files).toEqual([nodepath.join('/project', 'src', 'index.ts')]);
+      const traversedDirs = (nodefs.readdirSync as ReturnType<typeof vi.fn>).mock.calls
+        .map(([target]) => String(target).replace(/\\/g, '/'));
+      expect(traversedDirs.some((target) => target.endsWith('/project/coverage'))).toBe(false);
     });
   });
 

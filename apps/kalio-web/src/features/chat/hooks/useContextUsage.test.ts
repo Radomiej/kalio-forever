@@ -6,11 +6,15 @@ import type { LLMHistoryMessage } from '../buildHistory';
 
 type AgentStoreShape = {
   tools: ToolMeta[];
+  getContextForSession: (sessionId: string | null) => { systemPrompt: string | null; activeToolNames: string[] };
 };
 
 type SessionStoreShape = {
   activeSessionId: string | null;
   messages: ChatMessage[];
+  streamingChunks: Record<string, string>;
+  thinkingChunks: Record<string, string>;
+  chunkSessionIds: Record<string, string>;
 };
 
 const {
@@ -24,10 +28,17 @@ const {
 } = vi.hoisted(() => ({
   agentState: {
     tools: [] as ToolMeta[],
+    getContextForSession: vi.fn<AgentStoreShape['getContextForSession']>(() => ({
+      systemPrompt: null as string | null,
+      activeToolNames: [] as string[],
+    })),
   } satisfies AgentStoreShape,
   sessionState: {
     activeSessionId: null as string | null,
     messages: [] as ChatMessage[],
+    streamingChunks: {} as Record<string, string>,
+    thinkingChunks: {} as Record<string, string>,
+    chunkSessionIds: {} as Record<string, string>,
   } satisfies SessionStoreShape,
   countTokensMock: vi.fn<(input: CountTokensInput) => TokenCount>(),
   getCompactStrategyMock: vi.fn(),
@@ -78,8 +89,12 @@ describe('useContextUsage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     agentState.tools = [];
+    agentState.getContextForSession = vi.fn<AgentStoreShape['getContextForSession']>(() => ({ systemPrompt: null, activeToolNames: [] }));
     sessionState.activeSessionId = null;
     sessionState.messages = [];
+    sessionState.streamingChunks = {};
+    sessionState.thinkingChunks = {};
+    sessionState.chunkSessionIds = {};
     countTokensMock.mockReturnValue({
       total: 117,
       breakdown: {
@@ -160,5 +175,45 @@ describe('useContextUsage', () => {
     expect(result.current.compactMessages(messages, 'drop-oldest')).toEqual([messages[0]]);
     expect(getCompactStrategyMock).toHaveBeenCalledWith('drop-oldest');
     expect(compact).toHaveBeenCalledWith(messages, 32000);
+  });
+
+  it('recounts when active streaming chunks change without changing message count', () => {
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = [makeMessage({ id: 'assistant-1', role: 'assistant', content: '', streaming: true })];
+    sessionState.streamingChunks = { 'assistant-1': 'first chunk' };
+    sessionState.chunkSessionIds = { 'assistant-1': 'session-1' };
+    buildHistoryMock.mockImplementation((messages) => [
+      { role: 'assistant', content: messages[0]?.content ?? '' },
+    ]);
+
+    const { rerender } = renderHook(() => useContextUsage());
+
+    expect(buildHistoryMock).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: 'assistant-1', content: 'first chunk' }),
+    ]);
+
+    sessionState.streamingChunks = { 'assistant-1': 'first chunk plus more text' };
+    rerender();
+
+    expect(buildHistoryMock).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: 'assistant-1', content: 'first chunk plus more text' }),
+    ]);
+    expect(countTokensMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses backend chat context prompt when available for the active session', () => {
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = [makeMessage()];
+    agentState.getContextForSession = vi.fn<AgentStoreShape['getContextForSession']>(() => ({
+      systemPrompt: 'BACKEND SYSTEM PROMPT',
+      activeToolNames: ['vfs_read'],
+    }));
+    buildHistoryMock.mockReturnValue([]);
+
+    renderHook(() => useContextUsage());
+
+    expect(countTokensMock).toHaveBeenCalledWith(expect.objectContaining({
+      systemPromptText: 'BACKEND SYSTEM PROMPT',
+    }));
   });
 });

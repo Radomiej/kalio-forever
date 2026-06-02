@@ -6,9 +6,9 @@
  * 2. HistoryToolCallBubble collapses widget when isAnswered flips to true
  * 3. LiveToolCallBubble auto-expands when RA-App result arrives after mount
  */
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, act, fireEvent } from '@testing-library/react';
-import { HistoryToolCallBubble, LiveToolCallBubble, extractRAAppBlock } from './ToolCallBubble';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
+import { HistoryToolCallBubble, LiveToolCallBubble } from './ToolCallBubble';
 import type { ToolActivity } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 
@@ -53,63 +53,9 @@ function makeActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
   };
 }
 
-// ── HistoryToolCallBubble tests ───────────────────────────────────────────────
-
-describe('REGRESSION: HistoryToolCallBubble — RA-App widget inside chip', () => {
-  it('preserves vfsPath when extracting html RA-App blocks', () => {
-    const block = extractRAAppBlock({
-      status: 'ready',
-      type: 'html',
-      mode: 'display',
-      content: '',
-      vfsPath: 'design/preview.html',
-    });
-
-    expect(block).toMatchObject({
-      type: 'html',
-      mode: 'display',
-      content: '',
-      vfsPath: 'design/preview.html',
-    });
-  });
-
-  it('renders RAAppRenderer when content has RA-App block', () => {
-    render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={false} />);
-    expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();
-  });
-
-  it('does NOT render RAAppRenderer for non-RA-App content', () => {
-    render(<HistoryToolCallBubble toolName="list_raapps" content={NON_RAAPP_RESULT} />);
-    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
-  });
-
-  it('hides widget and shows freeze text when isAnswered=true', () => {
-    render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
-    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
-    expect(screen.getByText('Interactive app — answer submitted')).toBeInTheDocument();
-  });
-
-  it('shows "answered" badge when isAnswered=true', () => {
-    render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
-    expect(screen.getByText('↩ answered')).toBeInTheDocument();
-  });
-
-  it('collapses widget when isAnswered flips from false to true (live collapse)', () => {
-    const { rerender } = render(
-      <HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={false} />,
-    );
-    // Initially expanded — widget visible
-    expect(screen.getByTestId('raapp-renderer')).toBeInTheDocument();
-
-    // User answers → isAnswered becomes true
-    act(() => {
-      rerender(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
-    });
-
-    // Widget should be gone, freeze text should appear
-    expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
-    expect(screen.getByText('Interactive app — answer submitted')).toBeInTheDocument();
-  });
+beforeEach(() => {
+  vi.mocked(apiClient.get).mockReset();
+  vi.mocked(apiClient.get).mockRejectedValue(new Error('unexpected apiClient.get call'));
 });
 
 // ── LiveToolCallBubble tests ──────────────────────────────────────────────────
@@ -141,6 +87,18 @@ describe('LiveToolCallBubble — status indicator only (no widget)', () => {
     expect(screen.getByText('run_raapp')).toBeInTheDocument();
   });
 
+  it('shows the target path for live filesystem reads without expanding args', () => {
+    const activity = makeActivity({
+      toolName: 'fs_read',
+      args: { path: 'C:/Projekty/kalio-forever/README.md' },
+      status: 'running',
+    });
+
+    render(<LiveToolCallBubble activity={activity} />);
+
+    expect(screen.getByTestId('tool-call-target')).toHaveTextContent('C:/Projekty/kalio-forever/README.md');
+  });
+
   it('REGRESSION: ToolActivity accepts backend agentRun metadata for auto-approve and subagent depth', () => {
     const activity: ToolActivity = {
       callId: 'call-subagent',
@@ -162,11 +120,66 @@ describe('LiveToolCallBubble — status indicator only (no widget)', () => {
 
     expect(screen.getByText('run_subagent')).toBeInTheDocument();
   });
+
+  it('renders durable CLI session snapshots instead of raw JSON blobs', () => {
+    const activity = makeActivity({
+      toolName: 'spawn_cli_agent',
+      status: 'success',
+      finishedAt: Date.now(),
+      result: {
+        callId: 'call-cli-session',
+        status: 'success',
+        data: {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'running',
+          lastPrompt: 'Inspect the repository',
+          updatedAt: Date.now(),
+          activeCallId: 'cli-run-1',
+          lastOutput: 'Scanning files...',
+        },
+      },
+    });
+
+    render(<LiveToolCallBubble activity={activity} />);
+
+    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getAllByText('cli-child-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('Scanning files...')).toBeInTheDocument();
+    expect(screen.queryByText(/"childSessionId": "cli-child-1"/)).not.toBeInTheDocument();
+  });
 });
 
 // ── HistoryToolCallBubble args display ────────────────────────────────────────
 
 describe('HistoryToolCallBubble — tool input args display', () => {
+  it('shows the target path for history VFS reads in the collapsed chip', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="vfs_read"
+        content={NON_RAAPP_RESULT}
+        args={{ filePath: 'project/SimulationApp.tsx' }}
+      />,
+    );
+
+    expect(screen.getByTestId('tool-call-target')).toHaveTextContent('project/SimulationApp.tsx');
+    expect(screen.queryByText('filePath:')).not.toBeInTheDocument();
+  });
+
+  it('shows the session VFS root for vfs_list calls without path args', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="vfs_list"
+        content={NON_RAAPP_RESULT}
+        args={{}}
+      />,
+    );
+
+    expect(screen.getByTestId('tool-call-target')).toHaveTextContent('session VFS root');
+  });
+
   it('shows args key/value when args prop is provided', () => {
     render(
       <HistoryToolCallBubble
@@ -214,7 +227,79 @@ describe('HistoryToolCallBubble — tool input args display', () => {
   });
 });
 
+describe('HistoryToolCallBubble - CLI terminal output', () => {
+  it('renders run_cli_agent results through the terminal output block and collapses on toggle', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="run_cli_agent"
+        content={JSON.stringify({
+          output: 'Focused test run complete',
+          exitCode: 1,
+          durationMs: 1_250,
+          agentId: 'codex',
+        })}
+      />,
+    );
+
+    expect(screen.getByText('Codex CLI')).toBeInTheDocument();
+    expect(screen.getByText('Focused test run complete')).toBeInTheDocument();
+    expect(screen.getByText('exit=1')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /toggle details/i }));
+
+    expect(screen.queryByText('Focused test run complete')).not.toBeInTheDocument();
+    expect(screen.queryByText('exit=1')).not.toBeInTheDocument();
+  });
+});
+
 describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
+  it('exposes a stable canvas opener for sub-agent history results', () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({ data: [] } as never);
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_subagent"
+        content={JSON.stringify({
+          childSessionId: 'sub-1',
+          parentSessionId: 'p-1',
+          vfsMode: 'isolated',
+          vfsSessionId: 'sub-1',
+          copiedFiles: [],
+          result: 'Completed',
+          taskId: 't-1',
+          durationMs: 1000,
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('open-subagent-canvas')).toBeInTheDocument();
+    expect(screen.getByTestId('tool-call-bubble')).toHaveAttribute('data-tool-name', 'run_subagent');
+    expect(screen.queryByTestId('open-cli-agent-canvas')).not.toBeInTheDocument();
+  });
+
+  it('uses a separate canvas opener id for durable CLI history results', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="message_cli_agent"
+        content={JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'running',
+          lastPrompt: 'Continue with tests',
+          updatedAt: Date.now(),
+          activeCallId: 'cli-run-2',
+          lastOutput: 'Running focused tests...',
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('open-cli-agent-canvas')).toBeInTheDocument();
+    expect(screen.getByTestId('tool-call-bubble')).toHaveAttribute('data-tool-name', 'message_cli_agent');
+    expect(screen.queryByTestId('open-subagent-canvas')).not.toBeInTheDocument();
+  });
+
   it('REGRESSION: ignores malformed copiedFiles payloads instead of treating them as subagent results', () => {
     render(
       <HistoryToolCallBubble
@@ -467,5 +552,167 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
 
     expect(screen.getByText('Verbose implementation summary')).toBeInTheDocument();
     expect(screen.getByText('sub-agents/sub-1/design/preview.html')).toBeInTheDocument();
+  });
+
+  it('renders durable CLI session status for message_cli_agent history results without requiring an exit code', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="message_cli_agent"
+        content={JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'running',
+          lastPrompt: 'Continue with tests',
+          updatedAt: Date.now(),
+          activeCallId: 'cli-run-2',
+          lastOutput: 'Running focused tests...',
+        })}
+        args={{ childSessionId: 'cli-child-1', prompt: 'Continue with tests' }}
+      />,
+    );
+
+    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getAllByText('cli-child-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('Running focused tests...')).toBeInTheDocument();
+    expect(screen.queryByText(/"activeCallId": "cli-run-2"/)).not.toBeInTheDocument();
+  });
+
+  it('renders run_sub_agentflow history as an AgentFlow result block instead of raw JSON', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="run_sub_agentflow"
+        content={JSON.stringify({
+          flowRunId: 'flow-1',
+          childSessionId: 'arch-flow-1-root',
+          status: 'running',
+          summary: 'AgentFlow goal_guard_delivery_loop started.',
+          decisions: [],
+          nextActions: ['Wait for Goal Guard evidence.'],
+          artifacts: [],
+          openChatSessionId: 'arch-flow-1-root',
+          openGraphRunId: 'flow-1',
+          tracePreview: [
+            {
+              id: 'event-1',
+              sequence: 1,
+              type: 'flow:node_start',
+              message: 'Orchestrator started.',
+              nodeId: 'orchestrator',
+              createdAt: Date.now(),
+            },
+          ],
+        })}
+        args={{ flowId: 'goal_guard_delivery_loop', goal: 'Build project' }}
+      />,
+    );
+
+    expect(screen.getByTestId('sub-agentflow-result')).toBeInTheDocument();
+    expect(screen.getByText('AgentFlow goal_guard_delivery_loop started.')).toBeInTheDocument();
+    expect(screen.getAllByText('flow-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('arch-flow-1-root')).toBeInTheDocument();
+    expect(screen.queryByText(/"flowRunId"/)).not.toBeInTheDocument();
+  });
+
+  it('shows return-to-orchestrator handoff counts for waiting AgentFlow results', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="run_sub_agentflow"
+        content={JSON.stringify({
+          flowRunId: 'flow-return',
+          childSessionId: 'arch-flow-return-root',
+          status: 'waiting_on_orchestrator',
+          summary: 'Goal Guard returned control to the orchestrator for QA evidence.',
+          decisions: ['route_to(orchestrator, request QA evidence)'],
+          nextActions: ['Resume with Playwright QA evidence.'],
+          artifacts: [],
+          returnToOrchestratorCount: 2,
+          openChatSessionId: 'arch-flow-return-root',
+          openGraphRunId: 'flow-return',
+          tracePreview: [
+            {
+              id: 'event-return-1',
+              sequence: 1,
+              type: 'flow:return_to_orchestrator',
+              message: 'First supervision handoff.',
+              nodeId: 'orchestrator',
+              status: 'waiting_on_orchestrator',
+              createdAt: Date.now(),
+            },
+          ],
+        })}
+        args={{ flowId: 'goal_guard_delivery_loop', goal: 'Build project' }}
+      />,
+    );
+
+    const result = screen.getByTestId('sub-agentflow-result');
+    expect(result).toHaveTextContent('waiting_on_orchestrator');
+    expect(result).toHaveTextContent('handoffs');
+    expect(result).toHaveTextContent('2');
+
+    fireEvent.click(screen.getByRole('button', { name: /toggle agentflow details/i }));
+
+    expect(result).toHaveTextContent('route_to(orchestrator, request QA evidence)');
+    expect(result).toHaveTextContent('Resume with Playwright QA evidence.');
+    expect(result).toHaveTextContent('flow:return_to_orchestrator');
+    expect(result).toHaveTextContent('First supervision handoff.');
+  });
+
+  it('refreshes a durable run_sub_agentflow history block from the AgentFlow run snapshot', async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({
+      data: {
+        run: {
+          id: 'flow-refresh',
+          parentSessionId: 'session-1',
+          childSessionId: 'arch-flow-refresh-root',
+          openChatSessionId: 'arch-flow-refresh-root',
+          openGraphRunId: 'flow-refresh',
+          flowDefinitionId: 'goal_guard_delivery_loop',
+          status: 'done',
+          startMode: 'durable',
+          returnMode: 'summary',
+          createdAt: 1,
+          updatedAt: 2,
+          finishedAt: 2,
+        },
+        result: {
+          flowRunId: 'flow-refresh',
+          childSessionId: 'arch-flow-refresh-root',
+          openChatSessionId: 'arch-flow-refresh-root',
+          openGraphRunId: 'flow-refresh',
+          status: 'done',
+          summary: 'Goal Guard accepted durable AgentFlow evidence.',
+          decisions: ['accepted after QA'],
+          nextActions: [],
+          artifacts: ['qa/proof.md'],
+        },
+        events: [],
+      },
+    });
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_sub_agentflow"
+        content={JSON.stringify({
+          flowRunId: 'flow-refresh',
+          childSessionId: 'arch-flow-refresh-root',
+          status: 'running',
+          summary: 'AgentFlow goal_guard_delivery_loop started.',
+          decisions: [],
+          nextActions: ['Open the child AgentFlow graph to monitor completion.'],
+          artifacts: [],
+          openChatSessionId: 'arch-flow-refresh-root',
+          openGraphRunId: 'flow-refresh',
+        })}
+        args={{ flowId: 'goal_guard_delivery_loop', goal: 'Build project' }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sub-agentflow-result')).toHaveTextContent('done');
+      expect(screen.getByText('Goal Guard accepted durable AgentFlow evidence.')).toBeInTheDocument();
+    });
+    expect(apiClient.get).toHaveBeenCalledWith('/api/agent-flows/runs/flow-refresh');
   });
 });

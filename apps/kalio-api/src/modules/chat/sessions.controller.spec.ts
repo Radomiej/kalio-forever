@@ -24,25 +24,40 @@ function makeService() {
     create: vi.fn().mockResolvedValue(mockSession),
     getMessages: vi.fn().mockResolvedValue([mockMessage]),
     delete: vi.fn().mockResolvedValue(undefined),
+    archive: vi.fn().mockResolvedValue(undefined),
+    restore: vi.fn().mockResolvedValue(undefined),
     update: vi.fn().mockResolvedValue(undefined),
     generateTitle: vi.fn().mockResolvedValue({ title: 'Generated Title' }),
+  };
+}
+
+function makeRunJournal() {
+  return {
+    getCurrentRun: vi.fn().mockResolvedValue(null),
   };
 }
 
 describe('SessionsController', () => {
   let controller: SessionsController;
   let svc: ReturnType<typeof makeService>;
+  let runJournal: ReturnType<typeof makeRunJournal>;
 
   beforeEach(() => {
     svc = makeService();
-    controller = new SessionsController(svc as never);
+    runJournal = makeRunJournal();
+    controller = new SessionsController(svc as never, runJournal as never);
   });
 
   describe('list()', () => {
     it('returns all sessions', async () => {
       const result = await controller.list();
-      expect(svc.list).toHaveBeenCalled();
+      expect(svc.list).toHaveBeenCalledWith({ includeArchived: false });
       expect(result).toEqual([mockSession]);
+    });
+
+    it('passes includeArchived through to the service', async () => {
+      await controller.list('true');
+      expect(svc.list).toHaveBeenCalledWith({ includeArchived: true });
     });
   });
 
@@ -63,10 +78,46 @@ describe('SessionsController', () => {
     });
   });
 
+  describe('getCurrentRun()', () => {
+    it('returns current run for a session', async () => {
+      runJournal.getCurrentRun.mockResolvedValueOnce({
+        id: 'run-1',
+        sessionId: 'sess-1',
+        turnId: 'turn-1',
+        phase: 'llm_streaming',
+        status: 'interrupted_needs_retry',
+        retryCount: 0,
+        safeResume: true,
+        startedAt: 1,
+        updatedAt: 2,
+        lastHeartbeatAt: 2,
+      });
+
+      const result = await controller.getCurrentRun('sess-1');
+
+      expect(runJournal.getCurrentRun).toHaveBeenCalledWith('sess-1');
+      expect(result).toMatchObject({ id: 'run-1', safeResume: true });
+    });
+  });
+
   describe('delete()', () => {
     it('deletes a session', async () => {
       await controller.delete('sess-1');
       expect(svc.delete).toHaveBeenCalledWith('sess-1');
+    });
+  });
+
+  describe('archive()', () => {
+    it('archives a session without hard deletion', async () => {
+      await controller.archive('sess-1');
+      expect(svc.archive).toHaveBeenCalledWith('sess-1');
+    });
+  });
+
+  describe('restore()', () => {
+    it('restores an archived session', async () => {
+      await controller.restore('sess-1');
+      expect(svc.restore).toHaveBeenCalledWith('sess-1');
     });
   });
 

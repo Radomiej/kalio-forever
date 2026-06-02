@@ -81,4 +81,29 @@ describe('ContextStats', () => {
     fireEvent.click(btn);
     expect(screen.getByText('Hidden text')).toBeInTheDocument();
   });
+
+  it('shows sanitized raw context details when provided', () => {
+    render(
+      <ContextStats
+        tokenCount={makeTokenCount()}
+        onClose={vi.fn()}
+        rawContext={{
+          contextLimit: 32000,
+          systemPromptChars: 1234,
+          activeToolNames: ['fs_read'],
+          history: [
+            { id: 'm1', role: 'user', textChars: 12 },
+            { id: 'm2', role: 'assistant', textChars: 400000, preview: 'large result preview' },
+          ],
+          imageCount: 1,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /raw context/i }));
+
+    expect(screen.getByTestId('context-stats-raw')).toHaveTextContent('"systemPromptChars": 1234');
+    expect(screen.getByTestId('context-stats-raw')).toHaveTextContent('"textChars": 400000');
+    expect(screen.getByTestId('context-stats-raw')).toHaveTextContent('large result preview');
+  });
 });

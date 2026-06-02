@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { envSchema } from './config/env.schema';
+import { KalioConfigModule } from './config/kalio-config.module';
 import { DatabaseModule } from './database/database.module';
 import { LLMModule } from './modules/llm/llm.module';
 import { PersonaModule } from './modules/persona/persona.module';
@@ -16,14 +17,20 @@ import { ChatModule } from './modules/chat/chat.module';
 import { SearchModule } from './modules/search/search.module';
 import { CLIAgentModule } from './modules/cli-agent/cli-agent.module';
 import { ImageModule } from './modules/image/image.module';
+import { RelayModule } from './modules/relay/relay.module';
+import { HitlModule } from './modules/hitl/hitl.module';
+import { ArchitectureModule } from './modules/architecture/architecture.module';
+import { AgentFlowModule } from './modules/agent-flow/agent-flow.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      ignoreEnvFile: true,
       validationSchema: envSchema,
       validationOptions: { abortEarly: true },
     }),
+    KalioConfigModule,
     DatabaseModule,
     LLMModule,
     PersonaModule,
@@ -39,6 +46,10 @@ import { ImageModule } from './modules/image/image.module';
     SearchModule,
     CLIAgentModule,
     ImageModule,
+    ArchitectureModule,
+    AgentFlowModule,
+    HitlModule,
+    RelayModule,
   ],
 })
 export class AppModule {}

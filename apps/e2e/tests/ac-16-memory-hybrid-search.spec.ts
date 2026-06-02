@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 // AC-16: Memory Hybrid Search — user can ingest and search memory per persona
 test.describe('AC-16: Memory Hybrid Search', () => {
   test('user can navigate to Memory page', async ({ page }) => {
-    await page.goto('http://localhost:5188');
+    await page.goto('/');
 
     // Click Mind section
     await page.getByTestId('nav-mind').click();
@@ -15,7 +15,7 @@ test.describe('AC-16: Memory Hybrid Search', () => {
   });
 
   test('user can select persona from dropdown', async ({ page }) => {
-    await page.goto('http://localhost:5188');
+    await page.goto('/');
     await page.getByTestId('nav-mind').click();
     await page.getByRole('button', { name: 'Memory' }).click();
 
@@ -30,7 +30,7 @@ test.describe('AC-16: Memory Hybrid Search', () => {
   });
 
   test('user can search memory with hybrid mode', async ({ page }) => {
-    await page.goto('http://localhost:5188');
+    await page.goto('/');
     await page.getByTestId('nav-mind').click();
     await page.getByRole('button', { name: 'Memory' }).click();
 
@@ -63,7 +63,7 @@ test.describe('AC-16: Memory Hybrid Search', () => {
   });
 
   test('user can switch search modes', async ({ page }) => {
-    await page.goto('http://localhost:5188');
+    await page.goto('/');
     await page.getByTestId('nav-mind').click();
     await page.getByRole('button', { name: 'Memory' }).click();
 
@@ -83,7 +83,7 @@ test.describe('AC-16: Memory Hybrid Search', () => {
   });
 
   test('user can ingest text to memory', async ({ page }) => {
-    await page.goto('http://localhost:5188');
+    await page.goto('/');
     await page.getByTestId('nav-mind').click();
     await page.getByRole('button', { name: 'Memory' }).click();
 
@@ -117,7 +117,7 @@ test.describe('AC-16: Memory Hybrid Search', () => {
   });
 
   test('memory page shows stats for selected persona', async ({ page }) => {
-    await page.goto('http://localhost:5188');
+    await page.goto('/');
     await page.getByTestId('nav-mind').click();
     await page.getByRole('button', { name: 'Memory' }).click();
 
