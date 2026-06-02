@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Persona } from '@kalio/types';
 import { PersonaPanel } from './PersonaPanel';
@@ -68,11 +68,9 @@ describe('PersonaPanel', () => {
     const saveButton = screen.getByTestId('persona-save-btn');
     expect(saveButton).toBeDisabled();
 
-    await user.type(screen.getByTestId('persona-name-input'), 'New Planner');
-    await user.clear(screen.getByTestId('persona-model-input'));
-    await user.type(screen.getByTestId('persona-model-input'), 'gpt-4o-mini');
-    await user.clear(screen.getByTestId('persona-prompt-textarea'));
-    await user.type(screen.getByTestId('persona-prompt-textarea'), 'Plan the next step before acting.');
+    fireEvent.change(screen.getByTestId('persona-name-input'), { target: { value: 'New Planner' } });
+    fireEvent.change(screen.getByTestId('persona-model-input'), { target: { value: 'gpt-4o-mini' } });
+    fireEvent.change(screen.getByTestId('persona-prompt-textarea'), { target: { value: 'Plan the next step before acting.' } });
 
     expect(saveButton).toBeEnabled();
     await user.click(saveButton);

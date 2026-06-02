@@ -699,6 +699,7 @@ describe('getGoalGuardAgentFlowRunResult', () => {
         label: 'Goal Master',
         kind: 'router',
         status: 'pending',
+        visitCount: 1,
         eventIds: ['event-1'],
       },
       {
@@ -706,6 +707,7 @@ describe('getGoalGuardAgentFlowRunResult', () => {
         label: 'Worker 1',
         kind: 'role',
         status: 'completed',
+        visitCount: 1,
         eventIds: ['event-2', 'event-3'],
       },
       {
@@ -713,6 +715,7 @@ describe('getGoalGuardAgentFlowRunResult', () => {
         label: 'Reviewer 1',
         kind: 'role',
         status: 'pending',
+        visitCount: 1,
         eventIds: ['event-4'],
       },
     ]);
