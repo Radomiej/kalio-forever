@@ -1025,7 +1025,16 @@ class ArchitectureGraphRuntime {
 
   private isGoalGuardProofImplementer(slot: ArchitectureRoleSlot): boolean {
     return slot.id === 'implementer'
-      && this.options.run.context?.['requireImplementerWriteProof'] === true;
+      && this.options.run.context?.['requireImplementerWriteProof'] === true
+      && !this.hasDownstreamMaterializerNode();
+  }
+
+  private hasDownstreamMaterializerNode(): boolean {
+    return this.options.schema.edges.some((edge) => {
+      const from = this.options.schema.nodes.find((node) => node.id === edge.fromNodeId);
+      const to = this.options.schema.nodes.find((node) => node.id === edge.toNodeId);
+      return from?.roleSlotId === 'implementer' && to?.roleSlotId === 'materializer';
+    });
   }
 
   private hasMaterializationEvidence(

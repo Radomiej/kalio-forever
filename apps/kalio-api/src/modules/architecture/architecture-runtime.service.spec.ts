@@ -3077,7 +3077,7 @@ describe('ArchitectureRuntimeService', () => {
     })).rejects.toThrow('completed without required tool evidence');
   });
 
-  it('fails Goal Guard proof mode when Implementer completes without write evidence', async () => {
+  it('allows strict Implementer proof mode to continue when a downstream Materializer writes', async () => {
     const { service, executor } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
       const toolNames = slot.id === 'materializer'
@@ -3112,14 +3112,69 @@ describe('ArchitectureRuntimeService', () => {
       };
     });
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
-      prompt: 'Reject read-only Implementer in Goal Guard proof mode.',
+      prompt: 'Let Materializer provide write proof in Goal Guard proof mode.',
       executionMode: 'subagent_execution',
       context: {
         maxArchitectureNodeVisits: 1,
         maxArchitectureSteps: 20,
         requireGoalMasterLoopProof: true,
+        requireImplementerWriteProof: true,
+      },
+    });
+
+    const semantic = semanticEvents(service.getEvents(run.id));
+    expect(semantic.some((event) => event.nodeId === 'materializer' && event.type === 'participant_output')).toBe(true);
+    expect(semantic.at(-1)?.type).toBe('final_artifact');
+  });
+
+  it('still fails strict Implementer proof mode when there is no downstream Materializer', async () => {
+    const { service, executor } = createService();
+    const baseSchema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
+    if (!baseSchema) {
+      throw new Error('goal-master-delivery-loop seed schema missing');
+    }
+    const schema: ArchitectureSchema = {
+      ...baseSchema,
+      name: 'Two Agent Guard',
+      description: 'Strict implementer proof without a materializer.',
+      roleSlots: baseSchema.roleSlots.filter((slot) => (
+        slot.id === 'implementer'
+        || slot.id === 'goal_master'
+        || slot.id === 'finalizer'
+      )),
+      nodes: baseSchema.nodes.filter((node) => (
+        node.id === 'implementer'
+        || node.id === 'goal-master'
+        || node.id === 'final-artifact'
+      )),
+      edges: [
+        { id: 'implementer-goal-master', fromNodeId: 'implementer', toNodeId: 'goal-master' },
+        { id: 'goal-master-final', fromNodeId: 'goal-master', toNodeId: 'final-artifact', label: 'goal complete' },
+      ],
+    };
+
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
+      message: `${slot.label} completed with prose only.`,
+      data: {
+        branchSessionId,
+        personaId,
+        sessionPersonaId: personaId,
+        rootSessionId: run.rootSessionId,
+        slotType: slot.slotType,
+        executionMode: run.executionMode,
+      },
+    }));
+
+    await expect(service.createRun({
+      schemaId: 'goal-master-delivery-loop',
+      schema,
+      prompt: 'Reject read-only Implementer in a two-agent proof flow.',
+      executionMode: 'subagent_execution',
+      context: {
+        maxArchitectureNodeVisits: 1,
+        maxArchitectureSteps: 10,
         requireImplementerWriteProof: true,
       },
     })).rejects.toThrow('implementer did not produce a successful write result');
