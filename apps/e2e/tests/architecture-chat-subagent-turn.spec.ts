@@ -92,10 +92,10 @@ test.describe('Architecture chat turn projection', () => {
       const subagentCalls = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_subagent"]');
       await expect(subagentCalls).toHaveCount(2, { timeout: 90_000 });
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible();
+      await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer', { timeout: 90_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toHaveCount(0);
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(2);
       await expect(page.getByTestId('architecture-route-router')).toHaveCount(3);
-      await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer');
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Execution trace:');
 
       await page.getByTestId('open-architecture-run-canvas').click();
@@ -145,8 +145,8 @@ test.describe('Architecture chat turn projection', () => {
         /run_subagent/,
         /run_subagent/,
       ]);
-      await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router');
-      await expect(page.getByTestId('agent-turn-bubble')).toContainText('Finalizer');
+      await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router', { timeout: 90_000 });
+      await expect(page.getByTestId('agent-turn-bubble')).toContainText('Finalizer', { timeout: 90_000 });
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible();
       await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Pragmatist');
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Execution trace:');

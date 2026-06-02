@@ -27,6 +27,10 @@ export interface MockLLMProviderOptions {
   delay?: (ms: number) => Promise<void>;
 }
 
+function isFastMockMode(): boolean {
+  return process.env.KALIO_MOCK_LLM_FAST === '1';
+}
+
 function contentToText(content: ContextManagedLLMMessage['content']): string {
   if (typeof content === 'string') {
     return content;
@@ -415,5 +419,8 @@ export class MockLLMProvider implements ILLMProvider {
 }
 
 async function defaultDelay(ms: number): Promise<void> {
+  if (isFastMockMode()) {
+    return;
+  }
   await new Promise<void>((resolve) => setTimeout(resolve, ms));
 }

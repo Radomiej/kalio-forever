@@ -577,4 +577,39 @@ describe('MockLLMProvider', () => {
       delta: 'first;second',
     }));
   });
+
+  it('skips default script waits when KALIO_MOCK_LLM_FAST is enabled', async () => {
+    vi.stubEnv('KALIO_MOCK_LLM_FAST', '1');
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: [
+          'Architecture: Demo',
+          'Slot: Finalizer',
+          '[[mock:script]]',
+          'when("Slot: Finalizer") wait(5000) return("fast finalizer")',
+          '[[/mock:script]]',
+        ].join('\n'),
+      },
+    ];
+
+    try {
+      await expect(Promise.race([
+        provider.streamChat(
+          messages,
+          [],
+          { sessionId: 'session-1', messageId: 'message-1', onChunk },
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('mock wait was not skipped')), 100)),
+      ])).resolves.toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(onChunk).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      delta: 'fast finalizer',
+    }));
+  });
 });

@@ -83,7 +83,8 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     }
   }
 
-  const architectureRun = findArchitectureRunInMessages(messages);
+  const persistedArchitectureRun = [...messages].reverse().find((message) => message.architectureRun)?.architectureRun;
+  const architectureRun = persistedArchitectureRun ?? findArchitectureRunInMessages(messages);
   const turnArchitectureRun = architectureRun && turn.items.some((item) => {
     if (item.kind === 'text') {
       return messages.some((message) => message.id === item.messageId && (message.architectureRun || /^###\s+(Router|Finalizer)\b/im.test(message.content)));
@@ -93,7 +94,9 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     }
     return false;
   })
-    ? architectureRun
+    ? persistedArchitectureRun || turn.done
+      ? architectureRun
+      : { ...architectureRun, status: 'running' as const }
     : null;
   const architectureFinalAnswer = turnArchitectureRun
     ? finalAnswerForArchitectureRun(turnArchitectureRun)

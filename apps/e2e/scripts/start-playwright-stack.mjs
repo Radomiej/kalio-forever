@@ -104,6 +104,8 @@ const sharedEnv = {
   LLM_API_KEY: process.env.LLM_API_KEY ?? 'mock',
   LLM_BASE_URL: process.env.LLM_BASE_URL ?? 'mock',
   LLM_MODEL: process.env.LLM_MODEL ?? 'mock',
+  KALIO_FORCE_ENV_LLM: '1',
+  KALIO_MOCK_LLM_FAST: '1',
   CREDENTIALS_MASTER_KEY: process.env.CREDENTIALS_MASTER_KEY ?? 'playwright-test-master-key-32-chars-minimum',
 };
 const runStateDir = resolve(e2eStateDir);

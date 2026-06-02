@@ -308,6 +308,46 @@ describe('AgentTurnBubble', () => {
     expect(screen.getByTestId('history-tool-run_subagent')).toHaveAttribute('data-default-open', 'unset');
   });
 
+  it('does not mark reconstructed in-flight architecture runs as completed', () => {
+    mockMessages.push(
+      makeMsg({
+        id: 'assistant-tools',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{
+          id: 'architecture:run-1:event-pragmatist',
+          name: 'run_subagent',
+          args: {
+            architectureRunId: 'run-1',
+            nodeId: 'pragmatist',
+            roleSlotId: 'pragmatist',
+            childSessionId: 'branch-pragmatist',
+          },
+        }],
+      }),
+      makeMsg({
+        id: 'tool-pragmatist',
+        role: 'tool_result',
+        content: JSON.stringify({
+          result: 'Pragmatist branch answer',
+          taskId: 'event-pragmatist',
+          childSessionId: 'branch-pragmatist',
+          parentSessionId: 's1',
+          vfsMode: 'shared',
+          vfsSessionId: 's1',
+          copiedFiles: [],
+          durationMs: 0,
+        }),
+        toolCallId: 'architecture:run-1:event-pragmatist',
+      }),
+    );
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'tool', callId: 'architecture:run-1:event-pragmatist' }], false)} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-run-timeline')).toHaveTextContent('running / 1 graph steps');
+    expect(screen.getByTestId('architecture-run-timeline')).not.toHaveTextContent('completed / 1 graph steps');
+  });
+
   it('hides duplicate router and finalizer markdown when the route timeline is present', () => {
     mockMessages.push(makeMsg({
       id: 'router-msg',
