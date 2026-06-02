@@ -157,8 +157,8 @@ export class SubagentTool {
       : undefined;
     const rawTimeout = request.args['timeoutMs'] as number | undefined;
     const personaId = typeof request.args['personaId'] === 'string' && request.args['personaId'].trim().length > 0
-      ? request.args['personaId'] as string
-      : 'default';
+      ? request.args['personaId'].trim()
+      : undefined;
     const attachments = Array.isArray(request.args['attachments'])
       ? (request.args['attachments'] as unknown[]).filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
       : undefined;
@@ -171,7 +171,9 @@ export class SubagentTool {
     const sessionId = request.sessionId;
     this.logger.log(`[run_subagent] Starting task ${taskId}: ${objective.slice(0, 80)}`);
 
-    const tools = await this.getPersonaTools(personaId);
+    const tools = personaId != null
+      ? await this.getPersonaTools(personaId)
+      : (request.availableTools ?? await this.getPersonaTools('default'));
     const maxIterations = await this.credentialsService.getMaxToolAttempts();
     const runtime = this.getRuntime();
     return runtime.runSubagent({

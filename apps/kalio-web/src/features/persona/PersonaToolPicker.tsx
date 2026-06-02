@@ -8,7 +8,7 @@ const GROUP_LABELS: Record<string, string> = {
   memory: 'Memory',
   terminal: 'Terminal',
   kv: 'KV Store',
-  raapp: 'RaConsierge',
+  raapp: 'RAApp',
   agent: 'Agent',
   websearch: 'Web Search',
   tools: 'Tools',
@@ -56,11 +56,18 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
   const [groups, setGroups] = useState<ToolGroup[]>([]);
   const [mcpTools, setMcpTools] = useState<ToolMeta[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 6000);
+
     try {
-      const res = await fetch('/api/tools');
+      setLoading(true);
+      setLoadError(null);
+      const res = await fetch('/api/tools', { signal: controller.signal });
+      if (!res.ok) throw new Error(`Tools request failed: ${res.status}`);
       const data: ToolMeta[] = await res.json() as ToolMeta[];
       const nativeTools = data.filter(t => !t.name.startsWith('mcp_'));
       const mcp = data.filter(t => t.name.startsWith('mcp_'));
@@ -84,7 +91,9 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
       setGroups(result);
     } catch (err) {
       console.error('[PersonaToolPicker] load failed', err);
+      setLoadError('Unable to load tools.');
     } finally {
+      window.clearTimeout(timeoutId);
       setLoading(false);
     }
   }, []);
@@ -146,6 +155,16 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
     return (
       <div data-testid="persona-tool-picker" className="text-xs text-base-content/40 py-1">
         Loading tools…
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div data-testid="persona-tool-picker" className="flex items-center justify-between gap-2 rounded border border-error/30 bg-error/10 px-3 py-2">
+        <span className="text-xs text-error">{loadError}</span>
+        <button type="button" className="btn btn-xs btn-ghost text-error" onClick={() => void load()}>
+          Retry
+        </button>
       </div>
     );
   }

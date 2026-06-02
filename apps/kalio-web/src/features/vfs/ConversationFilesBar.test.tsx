@@ -2,13 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { VFSListResult, VFSReadResult } from '@kalio/types';
 
-const { apiGet } = vi.hoisted(() => ({
+const { apiGet, apiPost } = vi.hoisted(() => ({
   apiGet: vi.fn(),
+  apiPost: vi.fn(),
 }));
 
 vi.mock('../../services/apiClient', () => ({
   apiClient: {
     get: apiGet,
+    post: apiPost,
     defaults: {
       baseURL: 'http://api.example.com',
     },
@@ -48,6 +50,7 @@ describe('ConversationFilesBar', () => {
       writable: true,
     });
     vi.spyOn(window, 'open').mockImplementation(() => null);
+    vi.spyOn(window, 'prompt').mockReturnValue('project/seed.md');
   });
 
   it('loads files, opens the modal, previews a file, and downloads file artifacts', async () => {
@@ -123,5 +126,81 @@ describe('ConversationFilesBar', () => {
     await waitFor(() => {
       expect(apiGet).toHaveBeenCalledWith('/api/sessions/session-1/vfs');
     });
+  });
+
+  it('uploads text files through the multipart VFS endpoint and refreshes the file list', async () => {
+    const uploadedFile = {
+      sessionId: 'session-1',
+      path: 'project/seed.md',
+      sizeBytes: 7,
+      mimeType: 'text/markdown',
+      updatedAt: 2,
+    };
+    let listCalls = 0;
+    apiGet.mockImplementation((url: string, config?: { params?: { path?: string } }) => {
+      if (url.includes('/read')) {
+        return Promise.resolve({
+          data: {
+            sessionId: 'session-1',
+            filePath: config?.params?.path ?? '',
+            content: '# Seed uploaded',
+          } satisfies VFSReadResult,
+        });
+      }
+      listCalls += 1;
+      return Promise.resolve({
+        data: {
+          sessionId: 'session-1',
+          files: listCalls >= 3 ? [uploadedFile] : [],
+        } satisfies VFSListResult,
+      });
+    });
+    apiPost.mockResolvedValue({ data: { ok: true, path: 'project/seed.md', bytesWritten: 7 } });
+
+    render(<ConversationFilesBar sessionId="session-1" />);
+
+    fireEvent.click(await screen.findByTestId('conversation-files-toggle'));
+    const input = screen.getByTestId('conversation-files-upload-input') as HTMLInputElement;
+    const file = new File(['# Seed'], 'seed.md', { type: 'text/markdown' });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith('/api/sessions/session-1/vfs/upload-text', expect.any(FormData));
+    });
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenCalledWith('/api/sessions/session-1/vfs');
+    });
+    expect(window.prompt).toHaveBeenCalledWith('Upload file to VFS path', 'project/seed.md');
+    expect(screen.getByTestId('conv-file-project-seed.md')).toHaveTextContent('project/seed.md');
+    expect(screen.getByTestId('conversation-files-preview')).toHaveTextContent('# Seed uploaded');
+  });
+
+  it('skips the upload when the target path prompt is cancelled', async () => {
+    apiGet.mockResolvedValue({ data: makeListResult() });
+    vi.mocked(window.prompt).mockReturnValueOnce(null);
+
+    render(<ConversationFilesBar sessionId="session-1" />);
+
+    fireEvent.click(await screen.findByTestId('conversation-files-toggle'));
+    const input = screen.getByTestId('conversation-files-upload-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['# Seed'], 'seed.md', { type: 'text/markdown' })] } });
+
+    expect(apiPost).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('conversation-files-upload-error')).toBeNull();
+  });
+
+  it('shows an actionable error when text upload is too large', async () => {
+    apiGet.mockResolvedValue({ data: makeListResult() });
+    apiPost.mockRejectedValue({ response: { status: 413, data: { message: 'Payload Too Large' } } });
+
+    render(<ConversationFilesBar sessionId="session-1" />);
+
+    fireEvent.click(await screen.findByTestId('conversation-files-toggle'));
+    const input = screen.getByTestId('conversation-files-upload-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['x'], 'large.md', { type: 'text/markdown' })] } });
+
+    expect(await screen.findByTestId('conversation-files-upload-error')).toHaveTextContent('too large');
+    expect(screen.getByTestId('conversation-files-upload-error')).toHaveTextContent('split the project seed');
   });
 });

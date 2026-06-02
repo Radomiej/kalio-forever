@@ -3,6 +3,7 @@ import { readdirSync, statSync, existsSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
+import { shouldSkipTraversalDirectory } from '../../../common/utils/traversal-exclusions.util';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 
 interface FileEntry {
@@ -10,6 +11,8 @@ interface FileEntry {
   type: 'file' | 'directory';
   sizeBytes?: number;
 }
+
+const MAX_LIST_ENTRIES = 500;
 
 function getPathArg(args: ToolCallRequest['args']): string {
   const rawPath = args['path'];
@@ -30,19 +33,41 @@ function getRecursiveArg(args: ToolCallRequest['args']): boolean {
   return rawRecursive;
 }
 
-function walkDir(dir: string, root: string, maxDepth: number, depth: number): FileEntry[] {
+function toEntryPath(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
+function walkDir(
+  dir: string,
+  root: string,
+  maxDepth: number,
+  depth: number,
+  state: { listed: number; omitted: number },
+): FileEntry[] {
   const entries: FileEntry[] = [];
   if (depth > maxDepth) return entries;
   const items = readdirSync(dir);
-  for (const item of items) {
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index]!;
+    if (maxDepth > 0 && shouldSkipTraversalDirectory(item)) {
+      state.omitted++;
+      continue;
+    }
+    if (state.listed >= MAX_LIST_ENTRIES) {
+      state.omitted += items.length - index;
+      break;
+    }
     const full = join(dir, item);
     const stat = statSync(full);
-    const rel = relative(root, full);
+    const rel = toEntryPath(relative(root, full));
     if (stat.isDirectory()) {
       entries.push({ path: rel, type: 'directory' });
-      entries.push(...walkDir(full, root, maxDepth, depth + 1));
+      state.listed++;
+      const childEntries = walkDir(full, root, maxDepth, depth + 1, state);
+      entries.push(...childEntries);
     } else {
       entries.push({ path: rel, type: 'file', sizeBytes: stat.size });
+      state.listed++;
     }
   }
   return entries;
@@ -51,7 +76,7 @@ function walkDir(dir: string, root: string, maxDepth: number, depth: number): Fi
 @Injectable()
 @Tool({
   name: 'fs_list',
-  description: 'List files and directories at a path inside an allowed directory.',
+  description: 'List files and directories at a path inside an allowed directory. Recursive listings skip heavy generated folders like .git, node_modules, dist, output, reports, and cap results.',
   parameters: {
     type: 'object',
     required: ['path'],
@@ -65,7 +90,7 @@ function walkDir(dir: string, root: string, maxDepth: number, depth: number): Fi
 export class FsListTool {
   constructor(private readonly allowedPaths: AllowedPathsService) {}
 
-  async execute(request: ToolCallRequest): Promise<{ path: string; entries: FileEntry[] }> {
+  async execute(request: ToolCallRequest): Promise<{ path: string; entries: FileEntry[]; omitted: number }> {
     const rawPath = getPathArg(request.args);
     const recursive = getRecursiveArg(request.args);
 
@@ -78,7 +103,8 @@ export class FsListTool {
     const stat = statSync(absPath);
     if (!stat.isDirectory()) throw new Error(`NOT_A_DIRECTORY: ${rawPath}`);
 
-    const entries = walkDir(absPath, absPath, recursive ? 10 : 0, 0);
-    return { path: absPath, entries };
+    const state = { listed: 0, omitted: 0 };
+    const entries = walkDir(absPath, absPath, recursive ? 10 : 0, 0, state);
+    return { path: absPath, entries, omitted: state.omitted };
   }
 }

@@ -6,6 +6,7 @@ import type { AllowedPathsService } from '../../allowed-paths/allowed-paths.serv
 import type { ToolCallRequest } from '@kalio/types';
 import { Reflector } from '@nestjs/core';
 import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
+import * as nodepath from 'node:path';
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
@@ -228,6 +229,50 @@ describe('FsListTool', () => {
       expect(result.path).toBeTruthy();
       expect(typeof result.path).toBe('string');
     });
+
+    it('skips generated directories during recursive listing by default', async () => {
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.statSync).mockImplementation((target) => {
+        const normalizedTarget = String(target).replace(/\\/g, '/');
+        if (
+          normalizedTarget.endsWith(ALLOWED_DIR)
+          || normalizedTarget.endsWith(`${ALLOWED_DIR}/node_modules`)
+          || normalizedTarget.endsWith(`${ALLOWED_DIR}/src`)
+        ) {
+          return { isDirectory: () => true, isFile: () => false, size: 0 } as ReturnType<typeof nodefs.statSync>;
+        }
+        if (
+          normalizedTarget.endsWith(`${ALLOWED_DIR}/node_modules/left-pad.js`)
+          || normalizedTarget.endsWith(`${ALLOWED_DIR}/src/app.ts`)
+        ) {
+          return { isDirectory: () => false, isFile: () => true, size: 12 } as ReturnType<typeof nodefs.statSync>;
+        }
+        throw new Error(`Unexpected stat target: ${normalizedTarget}`);
+      });
+      vi.mocked(nodefs.readdirSync).mockImplementation((target) => {
+        const normalizedTarget = String(target).replace(/\\/g, '/');
+        if (normalizedTarget.endsWith(ALLOWED_DIR)) {
+          return ['node_modules', 'src'] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        if (normalizedTarget.endsWith(`${ALLOWED_DIR}/node_modules`)) {
+          return ['left-pad.js'] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        if (normalizedTarget.endsWith(`${ALLOWED_DIR}/src`)) {
+          return ['app.ts'] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        return [] as unknown as ReturnType<typeof nodefs.readdirSync>;
+      });
+
+      const result = await tool.execute(makeRequest('fs_list', { path: ALLOWED_DIR, recursive: true }));
+
+      expect(result.entries).toEqual([
+        { path: 'src', type: 'directory' },
+        { path: 'src/app.ts', type: 'file', sizeBytes: 12 },
+      ]);
+      const traversedDirs = (nodefs.readdirSync as ReturnType<typeof vi.fn>).mock.calls
+        .map(([target]) => String(target).replace(/\\/g, '/'));
+      expect(traversedDirs.some((target) => target.endsWith(nodepath.join(ALLOWED_DIR, 'node_modules').replace(/\\/g, '/')))).toBe(false);
+    });
   });
 
   describe('edge cases', () => {
@@ -311,6 +356,11 @@ describe('FsWriteTool', () => {
       const metadata = reflector.get(TOOL_METADATA, FsWriteTool);
       expect(metadata.name).toBe('fs_write');
     });
+
+    it('tells agents to use it for real project files', () => {
+      const metadata = reflector.get(TOOL_METADATA, FsWriteTool);
+      expect(metadata.description).toContain('real project files');
+    });
   });
 
   describe('positive scenarios', () => {
@@ -348,6 +398,17 @@ describe('FsWriteTool', () => {
       );
 
       expect(result.bytesWritten).toBe(Buffer.byteLength(content, 'utf8'));
+    });
+
+    it('allows valid JSON writes', async () => {
+      vi.mocked(nodefs.mkdirSync).mockReturnValue(undefined);
+      vi.mocked(nodefs.writeFileSync).mockReturnValue(undefined);
+
+      await tool.execute(
+        makeRequest('fs_write', { path: `${ALLOWED_DIR}/metadata.json`, content: '{"name":"Magic Matter"}' }),
+      );
+
+      expect(nodefs.writeFileSync).toHaveBeenCalled();
     });
   });
 
@@ -410,6 +471,18 @@ describe('FsWriteTool', () => {
         tool.execute(makeRequest('fs_write', { path: `${ALLOWED_DIR}/out.txt`, content })),
       ).rejects.toThrow('INVALID_CONTENT');
 
+      expect(nodefs.writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('rejects malformed JSON writes before touching disk', async () => {
+      vi.mocked(nodefs.mkdirSync).mockReturnValue(undefined);
+      vi.mocked(nodefs.writeFileSync).mockReturnValue(undefined);
+
+      await expect(
+        tool.execute(makeRequest('fs_write', { path: `${ALLOWED_DIR}/metadata.json`, content: '{"name":"Magic Matter"}\n}' })),
+      ).rejects.toThrow('INVALID_JSON');
+
+      expect(nodefs.mkdirSync).not.toHaveBeenCalled();
       expect(nodefs.writeFileSync).not.toHaveBeenCalled();
     });
   });

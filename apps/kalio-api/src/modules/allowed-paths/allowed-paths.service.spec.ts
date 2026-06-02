@@ -40,6 +40,8 @@ const SYMLINK_NEW_FILE_PATH = [ROOT, 'link', 'new.txt'].join(sep);
 const REAL_PATH_OUTSIDE = [OUTSIDE, 'secret.txt'].join(sep);
 const REAL_NEW_PATH_OUTSIDE = [OUTSIDE, 'new.txt'].join(sep);
 const NORMAL_PATH = [ROOT, 'normal.txt'].join(sep);
+const WINDOWS_ROOT = 'C:\\Projekty';
+const WINDOWS_CHILD_WITH_DIFFERENT_CASE = 'c:\\projekty\\ProjectPlanner';
 
 function makeDrizzleWithRoot(root: string): DrizzleService {
   return {
@@ -66,6 +68,17 @@ describe('AllowedPathsService.isAllowed — symlink bypass (BUG-3)', () => {
 
   it('allows a normal path that is genuinely inside the allowed root', async () => {
     const result = await svc.isAllowed(NORMAL_PATH);
+    expect(result).toBe(true);
+  });
+
+  const windowsOnly = process.platform === 'win32' ? it : it.skip;
+
+  windowsOnly('treats Windows child paths as allowed even when the drive letter or directory casing differs', async () => {
+    svc = new AllowedPathsService(makeDrizzleWithRoot(WINDOWS_ROOT));
+    vi.mocked(nodefs.realpathSync as (p: string) => string).mockImplementation((p) => p);
+
+    const result = await svc.isAllowed(WINDOWS_CHILD_WITH_DIFFERENT_CASE);
+
     expect(result).toBe(true);
   });
 

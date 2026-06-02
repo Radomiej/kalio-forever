@@ -6,6 +6,9 @@ import type { Persona, PersonaKV, PersonaSessionConfig, CreatePersonaDto, Update
 import { DrizzleService } from '../../database/drizzle.service';
 import { personas, personaKV } from '../../database/schema';
 import { eq } from 'drizzle-orm';
+import type { PersonaGraphValidationResult } from './persona-graph-config';
+import { validatePersonaGraphConfig } from './persona-graph-config';
+import { buildLabPersonaSeeds } from './persona-lab-seeds';
 
 @Injectable()
 export class PersonaService implements OnApplicationBootstrap {
@@ -65,11 +68,19 @@ export class PersonaService implements OnApplicationBootstrap {
     existingPrompt: string | null | undefined,
     nextPrompt: string,
   ): boolean {
-    if (personaId !== 'designer' || typeof existingPrompt !== 'string') {
+    if (typeof existingPrompt !== 'string') {
       return false;
     }
 
     if (existingPrompt === nextPrompt) {
+      return false;
+    }
+
+    if (this.matchesLegacyCliPrompt(personaId, existingPrompt)) {
+      return true;
+    }
+
+    if (personaId !== 'designer') {
       return false;
     }
 
@@ -90,11 +101,46 @@ export class PersonaService implements OnApplicationBootstrap {
     return matchesRigidLegacyPrompt || matchesPreviousVfsFirstSeed;
   }
 
+  private matchesLegacyCliPrompt(personaId: string, existingPrompt: string): boolean {
+    if (personaId === 'orchestrator') {
+      const matchesRunCliOnlySeed = !existingPrompt.includes('spawn_cli_agent')
+        && existingPrompt.includes('Prefer run_subagent for bounded research, analysis, and specialist reasoning.')
+        && existingPrompt.includes('Use run_cli_agent only for concrete implementation tasks with explicit acceptance criteria.');
+      const matchesMixedOneShotSeed = existingPrompt.includes('spawn_cli_agent')
+        && existingPrompt.includes('Use run_cli_agent for one-shot implementation tasks with explicit acceptance criteria.')
+        && !existingPrompt.includes('in graph mode prefer durable spawn_cli_agent plus status polling');
+      return matchesRunCliOnlySeed || matchesMixedOneShotSeed;
+    }
+
+    if (personaId === 'dev') {
+      const matchesRunCliOnlySeed = !existingPrompt.includes('spawn_cli_agent')
+        && existingPrompt.includes('run_cli_agent: delegates a coding task to one of the configured CLI coding agents')
+        && existingPrompt.includes('## Workflow');
+      const matchesMixedCliSeed = existingPrompt.includes('spawn_cli_agent')
+        && existingPrompt.includes('run_cli_agent: delegates a coding task to one of the configured CLI coding agents')
+        && !existingPrompt.includes('Use only the tools visible in the current runtime.');
+      return matchesRunCliOnlySeed || matchesMixedCliSeed;
+    }
+
+    if (personaId === 'jony') {
+      if (existingPrompt.includes('spawn_cli_agent')) {
+        return false;
+      }
+      return existingPrompt.includes('If delegation is needed, use run_subagent or run_cli_agent with precise acceptance criteria.')
+        && existingPrompt.includes('Never leave the task half-done when tools allow completion.');
+    }
+
+    return false;
+  }
+
   private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model: string; allowedTools: string[]; skillIds?: string[] }> {
     try {
       const configPath = join(__dirname, '../../assets/personas.json');
       const configContent = readFileSync(configPath, 'utf-8');
-      return JSON.parse(configContent);
+      return {
+        ...JSON.parse(configContent),
+        ...buildLabPersonaSeeds(),
+      };
     } catch (error) {
       this.logger.error('Failed to load personas config', error);
       return {};
@@ -131,6 +177,11 @@ export class PersonaService implements OnApplicationBootstrap {
   async remove(id: string): Promise<void> {
     await this.findOne(id);
     await this.drizzle.db.delete(personas).where(eq(personas.id, id));
+  }
+
+  async validateGraphConfig(personaId: string, graphConfig: unknown): Promise<PersonaGraphValidationResult> {
+    await this.findOne(personaId);
+    return validatePersonaGraphConfig(graphConfig);
   }
 
   async getSessionConfig(personaId: string): Promise<PersonaSessionConfig | null> {

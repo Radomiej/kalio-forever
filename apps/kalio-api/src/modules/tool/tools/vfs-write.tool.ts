@@ -22,12 +22,12 @@ function getContentArg(args: ToolCallRequest['args']): string {
 @Injectable()
 @Tool({
   name: 'vfs_write',
-  description: 'Write content to a file in the conversation virtual filesystem.',
+  description: 'Write content to a relative file path in the conversation VFS sandbox. Do not use absolute host filesystem paths; use fs_write for files in an allowed local project directory.',
   parameters: {
     type: 'object',
     required: ['filePath', 'content'],
     properties: {
-      filePath: { type: 'string', description: 'Path relative to the workspace' },
+      filePath: { type: 'string', description: 'Relative VFS path only, for example notes/todo.md. Absolute paths like C:\\project\\file.ts are rejected.' },
       content:  { type: 'string', description: 'File content to write' },
     },
   },

@@ -156,7 +156,7 @@ describe('createLLMProvider', () => {
       const config: ProviderConfig = {
         provider: 'xiaomimimo',
         apiKey: 'test-key',
-        model: 'mimo-v2-omni',
+        model: 'mimo-v2.5-pro',
       };
 
       // Act

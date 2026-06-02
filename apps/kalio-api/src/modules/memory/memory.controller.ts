@@ -19,6 +19,7 @@ import type {
   EmbeddingStatus,
   EmbeddingCredential,
   CreateEmbeddingCredentialDto,
+  UpdateLocalEmbeddingConfigDto,
 } from '@kalio/types';
 import { MemoryService } from './memory.service';
 import { EmbeddingCredentialsService } from './embedding-credentials.service';
@@ -72,6 +73,13 @@ export class MemoryController {
 
   @Get('status/embedding')
   async getEmbeddingStatus(): Promise<EmbeddingStatus> {
+    return this.memoryService.getEmbeddingService().getStatus();
+  }
+
+  @Put('embedding-local')
+  async updateLocalEmbeddingConfig(@Body() dto: UpdateLocalEmbeddingConfigDto): Promise<EmbeddingStatus> {
+    await this.embeddingCredentials.updateLocalConfig(dto);
+    await this.memoryService.getEmbeddingService().reloadFromCredential();
     return this.memoryService.getEmbeddingService().getStatus();
   }
 
@@ -176,6 +184,18 @@ export class MemoryController {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  @Post('reembed-all')
+  async reembedAll(): Promise<{ personas: number; count: number; model: string }> {
+    this.logger.log('Re-embedding memories for all indexed personas');
+    return this.memoryService.reembedAll();
+  }
+
+  @Post(':personaId/reembed')
+  async reembedPersona(@Param('personaId') personaId: string): Promise<{ count: number; model: string }> {
+    this.logger.log(`Re-embedding memories for persona: ${personaId}`);
+    return this.memoryService.reembedPersona(personaId);
   }
 
   // ── Memory CRUD (parameterized — must be LAST to avoid capturing literal routes) ─

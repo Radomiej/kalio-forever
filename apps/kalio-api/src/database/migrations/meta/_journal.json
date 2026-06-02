@@ -57,6 +57,48 @@
       "when": 1777728000000,
       "tag": "0007_subagent_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1777729000000,
+      "tag": "0008_remove_interlocutor_label",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1777814400000,
+      "tag": "0009_chat_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1779897600000,
+      "tag": "0010_session_archive_timestamp",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1779984000000,
+      "tag": "0011_audit_log_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1780070400000,
+      "tag": "0012_audit_log_retention_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1780156800000,
+      "tag": "0013_agent_flow_runs",
+      "breakpoints": true
     }
   ]
 }

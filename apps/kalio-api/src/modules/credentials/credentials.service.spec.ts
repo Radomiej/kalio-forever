@@ -187,14 +187,14 @@ describe('CredentialsService', () => {
         provider: 'xiaomimimo',
         apiKey: 'sk-mimo',
         baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
-        model: 'mimo-v2-omni',
+        model: 'mimo-v2.5-pro',
       });
       await svc.setActiveCredential(c.id);
       const config = await svc.getActiveProviderConfig();
       expect(config).not.toBeNull();
       expect(config?.provider).toBe('xiaomimimo');
       expect(config?.apiKey).toBe('sk-mimo');
-      expect(config?.model).toBe('mimo-v2-omni');
+      expect(config?.model).toBe('mimo-v2.5-pro');
       expect(config?.baseUrl).toBe('https://token-plan-ams.xiaomimimo.com/v1');
     });
 

@@ -1,14 +1,36 @@
-import type { ILLMProvider } from '../llm.types';
-import type { LLMStreamChunk, LLMToolCall } from '@kalio/types';
+import type { ILLMProvider, LLMToolDef, StreamChatOptions } from '../llm.types';
+import type { LLMToolCall } from '@kalio/types';
 import { Logger } from '@nestjs/common';
 import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../../common/utils/llm-provider-http.util';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 import { getReasoningContent } from '../../../common/utils/context-managed-llm-message.util';
 
+export type LLMProviderErrorCode =
+  | 'LLM_ERROR'
+  | 'LLM_RATE_LIMIT'
+  | 'LLM_TIMEOUT'
+  | 'LLM_AUTH'
+  | 'LLM_PROVIDER_DOWN'
+  | 'LLM_QUOTA'
+  | 'LLM_BAD_TOOL_ARGS';
+
+export class LLMProviderError extends Error {
+  constructor(
+    public readonly code: LLMProviderErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'LLMProviderError';
+  }
+}
+
 let _toolCallCounter = 0;
 function uniqueToolCallId(): string {
   return `call_${Date.now()}_${++_toolCallCounter}`;
 }
+
+const MAX_PROVIDER_ATTEMPTS = 3;
+const PROVIDER_TIMEOUT_MS = 120_000;
 
 export class BaseOpenAICompatibleProvider implements ILLMProvider {
   protected readonly logger = new Logger(BaseOpenAICompatibleProvider.name);
@@ -31,12 +53,10 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
   async streamChat(
     messages: ContextManagedLLMMessage[],
-    tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
-    onChunk: (chunk: LLMStreamChunk) => void,
-    sessionId: string,
-    messageId: string,
-    abortSignal?: AbortSignal,
+    tools: LLMToolDef[],
+    options: StreamChatOptions,
   ): Promise<LLMToolCall[]> {
+    const { sessionId, messageId, onChunk, onToolArgChunk, abortSignal } = options;
     if (abortSignal?.aborted) {
       return [];
     }
@@ -45,6 +65,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       model: this.model,
       messages: messages.map((m) => this.buildRequestMessage(m)),
       stream: true,
+      stream_options: { include_usage: true },
       tools: tools.length > 0
         ? tools.map((t) => ({
             type: 'function',
@@ -54,16 +75,11 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       ...this.buildThinkingParams(),
     });
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: this.buildHeaders(),
-      body,
-      signal: abortSignal,
-    });
+    const response = await this.fetchStreamingResponse(body, abortSignal);
 
     if (!response.ok || !response.body) {
       const errorText = await response.text().catch(() => '');
-      throw new Error(`[${this.providerName}] LLM request failed: ${response.status} ${response.statusText} - ${errorText}`);
+      throw this.buildHttpError(response.status, response.statusText, errorText);
     }
 
     this.logger.debug(`[${this.providerName}] Streaming response started`, {
@@ -76,7 +92,6 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let debugChunkCount = 0;
 
     try {
       while (true) {
@@ -107,15 +122,14 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
             continue;
           }
 
+          const usage = this.parseUsage(parsed['usage']);
+          if (usage) {
+            onChunk({ delta: '', done: false, sessionId, messageId, usage });
+          }
+
           const choices = parsed['choices'] as Array<Record<string, unknown>> | undefined;
           const delta = choices?.[0]?.['delta'] as Record<string, unknown> | undefined;
           if (!delta) continue;
-
-          // Debug: log delta keys on first few chunks to diagnose field names
-          debugChunkCount++;
-          if (debugChunkCount <= 3) {
-            this.logger.debug(`[${this.providerName}] delta keys: ${JSON.stringify(Object.keys(delta))}, reasoning_content=${JSON.stringify(delta['reasoning_content'])?.slice(0,40)}, content=${JSON.stringify(delta['content'])?.slice(0,40)}`);
-          }
 
           const content = delta['content'];
           if (typeof content === 'string' && content) {
@@ -136,8 +150,14 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
               if (!toolCallBuffers[idx]) {
                 toolCallBuffers[idx] = { name: '', argsRaw: '' };
               }
-              if (typeof fn?.['name'] === 'string') toolCallBuffers[idx]!.name += fn['name'];
-              if (typeof fn?.['arguments'] === 'string') toolCallBuffers[idx]!.argsRaw += fn['arguments'];
+              if (typeof fn?.['name'] === 'string') {
+                toolCallBuffers[idx]!.name += fn['name'];
+                onToolArgChunk?.(toolCallBuffers[idx]!.name, 0);
+              }
+              if (typeof fn?.['arguments'] === 'string') {
+                toolCallBuffers[idx]!.argsRaw += fn['arguments'];
+                onToolArgChunk?.(toolCallBuffers[idx]!.name, fn['arguments'].length);
+              }
             }
           }
         }
@@ -147,11 +167,16 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     }
 
     for (const [, buf] of Object.entries(toolCallBuffers)) {
-      let args: Record<string, unknown> = {};
+      let args: Record<string, unknown>;
       try {
-        args = JSON.parse(buf.argsRaw) as Record<string, unknown>;
+        args = buf.argsRaw.trim().length > 0
+          ? JSON.parse(buf.argsRaw) as Record<string, unknown>
+          : {};
       } catch {
-        // leave empty
+        throw new LLMProviderError(
+          'LLM_BAD_TOOL_ARGS',
+          `[${this.providerName}] Tool call ${buf.name || 'unknown'} streamed malformed JSON arguments`,
+        );
       }
       toolCalls.push({ id: uniqueToolCallId(), name: buf.name, args });
     }
@@ -172,6 +197,122 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
   protected buildThinkingParams(): Record<string, unknown> {
     return {};
+  }
+
+  private parseUsage(value: unknown): { promptTokens: number; completionTokens: number; totalTokens?: number } | null {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+    const usage = value as Record<string, unknown>;
+    const promptTokens = this.readNumber(usage['prompt_tokens'] ?? usage['promptTokens']);
+    const completionTokens = this.readNumber(usage['completion_tokens'] ?? usage['completionTokens']);
+    const totalTokens = this.readNumber(usage['total_tokens'] ?? usage['totalTokens']);
+    if (promptTokens === undefined && completionTokens === undefined && totalTokens === undefined) {
+      return null;
+    }
+    return {
+      promptTokens: promptTokens ?? 0,
+      completionTokens: completionTokens ?? Math.max((totalTokens ?? 0) - (promptTokens ?? 0), 0),
+      totalTokens,
+    };
+  }
+
+  private readNumber(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  }
+
+  private async fetchStreamingResponse(body: string, abortSignal?: AbortSignal): Promise<Response> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt++) {
+      const timeoutSignal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+      const signal = abortSignal
+        ? AbortSignal.any([abortSignal, timeoutSignal])
+        : timeoutSignal;
+
+      try {
+        const response = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: this.buildHeaders(),
+          body,
+          signal,
+        });
+
+        if (response.ok || !this.shouldRetryStatus(response.status)) {
+          return response;
+        }
+
+        const errorText = await response.text().catch(() => '');
+        const error = this.buildHttpError(response.status, response.statusText, errorText);
+        if (!this.shouldRetryError(error) || attempt === MAX_PROVIDER_ATTEMPTS) {
+          throw error;
+        }
+
+        this.logger.warn(`[${this.providerName}] transient LLM failure ${response.status}; retrying attempt ${attempt + 1}/${MAX_PROVIDER_ATTEMPTS}`);
+        await this.delayBeforeRetry(attempt);
+      } catch (err) {
+        lastError = err;
+        if (abortSignal?.aborted) {
+          throw err;
+        }
+        const normalized = this.normalizeThrownError(err);
+        if (!this.shouldRetryError(normalized) || attempt === MAX_PROVIDER_ATTEMPTS) {
+          throw normalized;
+        }
+        this.logger.warn(`[${this.providerName}] transient LLM transport failure; retrying attempt ${attempt + 1}/${MAX_PROVIDER_ATTEMPTS}`);
+        await this.delayBeforeRetry(attempt);
+      }
+    }
+
+    throw this.normalizeThrownError(lastError);
+  }
+
+  private shouldRetryStatus(status: number): boolean {
+    return status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+  }
+
+  private shouldRetryError(err: LLMProviderError): boolean {
+    return err.code === 'LLM_RATE_LIMIT' || err.code === 'LLM_PROVIDER_DOWN' || err.code === 'LLM_TIMEOUT';
+  }
+
+  private buildHttpError(status: number, statusText: string, errorText: string): LLMProviderError {
+    const body = errorText.toLowerCase();
+    const message = `[${this.providerName}] LLM request failed: ${status} ${statusText} - ${errorText}`;
+
+    if (status === 401 || status === 403) {
+      return new LLMProviderError('LLM_AUTH', message);
+    }
+    if (body.includes('insufficient_quota') || body.includes('quota')) {
+      return new LLMProviderError('LLM_QUOTA', message);
+    }
+    if (status === 429) {
+      return new LLMProviderError('LLM_RATE_LIMIT', message);
+    }
+    if (status === 408 || status === 500 || status === 502 || status === 503 || status === 504) {
+      return new LLMProviderError('LLM_PROVIDER_DOWN', message);
+    }
+    return new LLMProviderError('LLM_ERROR', message);
+  }
+
+  private normalizeThrownError(err: unknown): LLMProviderError {
+    if (err instanceof LLMProviderError) {
+      return err;
+    }
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      return new LLMProviderError('LLM_TIMEOUT', `[${this.providerName}] LLM request timed out`);
+    }
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      return new LLMProviderError('LLM_TIMEOUT', `[${this.providerName}] LLM request timed out`);
+    }
+    return new LLMProviderError(
+      'LLM_PROVIDER_DOWN',
+      `[${this.providerName}] LLM transport failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  private async delayBeforeRetry(attempt: number): Promise<void> {
+    const jitter = Math.floor(Math.random() * 10);
+    await new Promise((resolve) => setTimeout(resolve, 25 * attempt + jitter));
   }
 
   protected supportsReasoningContentHistory(): boolean {

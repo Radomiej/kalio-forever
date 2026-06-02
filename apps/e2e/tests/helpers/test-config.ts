@@ -2,7 +2,17 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 const PROCESS_ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
 
-export const API_BASE = PROCESS_ENV?.TEST_API_URL || 'http://localhost:3016/api';
+function requireEnv(name: 'PLAYWRIGHT_BASE_URL' | 'TEST_API_URL'): string {
+	const value = PROCESS_ENV?.[name];
+	if (!value) {
+		throw new Error(`${name} must be set by the Playwright config or E2E stack runner.`);
+	}
+
+	return value;
+}
+
+export const APP_BASE = requireEnv('PLAYWRIGHT_BASE_URL');
+export const API_BASE = requireEnv('TEST_API_URL');
 
 interface LLMConfigResponse {
 	provider: string;
@@ -20,7 +30,7 @@ export async function isMockLlm(request: APIRequestContext): Promise<boolean> {
 }
 
 export async function selectSession(page: Page, sessionId: string, title: string): Promise<void> {
-	const sessionItem = page.getByTestId('session-item').filter({ hasText: title }).first();
+	const sessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
 	await expect(sessionItem).toBeVisible({ timeout: 5000 });
 	await sessionItem.evaluate((node) => {
 		if (!(node instanceof HTMLElement)) {

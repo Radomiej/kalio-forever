@@ -1,15 +1,29 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Send, Square } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
+import type { ArchitectSchema } from '../architect/architect.types';
 
 interface ChatInputProps {
   onSend: (content: string, personaId: string) => void;
   disabled: boolean;
   isStreaming?: boolean;
   onStop?: () => void;
+  architectures?: Pick<ArchitectSchema, 'id' | 'name'>[];
+  selectedArchitectureId?: string;
+  onArchitectureChange?: (schemaId: string) => void;
+  onArchitectureRun?: (content: string, schemaId: string) => void;
 }
 
-export function ChatInput({ onSend, disabled, isStreaming = false, onStop }: ChatInputProps) {
+export function ChatInput({
+  architectures = [],
+  disabled,
+  isStreaming = false,
+  onArchitectureChange,
+  onArchitectureRun,
+  onSend,
+  onStop,
+  selectedArchitectureId = 'single-chat',
+}: ChatInputProps) {
   const [value, setValue] = useState('');
   const [isSendLocked, setIsSendLocked] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -37,10 +51,15 @@ export function ChatInput({ onSend, disabled, isStreaming = false, onStop }: Cha
     const trimmed = value.trim();
     if (!trimmed || effectiveDisabled) return;
 
+    const activeArchitecture = architectures.find((schema) => schema.id === selectedArchitectureId) ?? null;
     sawParentDisableRef.current = false;
     setIsSendLocked(true);
     try {
-      onSend(trimmed, activeSession?.personaId ?? 'default');
+      if (activeArchitecture && onArchitectureRun) {
+        onArchitectureRun(trimmed, activeArchitecture.id);
+      } else {
+        onSend(trimmed, activeSession?.personaId ?? 'default');
+      }
     } catch (error) {
       setIsSendLocked(false);
       throw error;
@@ -72,8 +91,24 @@ export function ChatInput({ onSend, disabled, isStreaming = false, onStop }: Cha
       <div className="flex items-center gap-2 px-3 pb-3 pt-2">
         {/* Pill container */}
         <div className="flex-1 flex items-center border-2 border-base-300 rounded-2xl bg-base-100 focus-within:border-sky-500/60 transition-colors px-3 py-1.5 gap-2 min-h-[44px]">
+          {onArchitectureChange && (
+            <select
+              aria-label="Architecture runtime"
+              className="select select-bordered select-xs h-8 min-h-8 w-36 shrink-0 bg-base-200 text-[11px] sm:w-48"
+              value={selectedArchitectureId}
+              onChange={(event) => onArchitectureChange(event.target.value)}
+              disabled={effectiveDisabled}
+              data-testid="chat-architecture-select"
+            >
+              <option value="single-chat">Single Chat</option>
+              {architectures.map((schema) => (
+                <option key={schema.id} value={schema.id}>{schema.name}</option>
+              ))}
+            </select>
+          )}
           <textarea
             ref={textareaRef}
+            aria-label="Chat message"
             data-testid="chat-input"
             className="flex-1 resize-none min-h-6 max-h-40 text-sm bg-transparent border-0 outline-none focus:outline-none leading-6 py-0 placeholder:text-base-content/45"
             placeholder={disabled && !activeSessionId ? 'Select a session first…' : 'Ask Kalio…'}

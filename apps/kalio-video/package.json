@@ -1,0 +1,29 @@
+{
+  "name": "kalio-video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "still": "remotion still src/index.ts KalioOverview --scale=0.25 --frame=30",
+    "render": "remotion render src/index.ts KalioOverview ../kalio-demo/public/kalio-overview.mp4",
+    "build": "remotion bundle src/index.ts --out-dir dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "node ../../scripts/clean-paths.mjs dist"
+  },
+  "dependencies": {
+    "lucide-react": "^0.513.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.471"
+  },
+  "devDependencies": {
+    "@remotion/cli": "^4.0.471",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "~5.8.3",
+    "vitest": "^4.0.16"
+  }
+}

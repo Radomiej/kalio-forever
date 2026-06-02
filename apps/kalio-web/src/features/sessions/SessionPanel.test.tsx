@@ -153,15 +153,120 @@ describe('SessionPanel', () => {
     await waitFor(() => expect(screen.getAllByText('2m ago').length).toBeGreaterThan(0));
   });
 
-  it('renders subagent sessions with a badge', async () => {
+  it('hides child subagent sessions from the default conversation list', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
 
-    expect(screen.getByText('Sub-agent: Landing page')).toBeTruthy();
-    expect(screen.getByTestId('subagent-session-badge-sub-1')).toHaveTextContent('Sub-agent');
+    expect(screen.queryByText('Sub-agent: Landing page')).toBeNull();
+    expect(screen.queryByTestId('subagent-session-badge-sub-1')).toBeNull();
+    expect(screen.getByText('2 chats')).toBeTruthy();
   });
 
-  it('keeps the master session above its grouped subagent sessions', async () => {
+  it('expands child conversations from a parent in the default conversation list', async () => {
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
+
+    expect(screen.queryByText('Sub-agent: Landing page')).toBeNull();
+    const toggle = screen.getByTestId('toggle-session-children-s1');
+    expect(toggle).toHaveTextContent('1');
+    expect(toggle).toHaveClass('shrink-0');
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByText('Sub-agent: Landing page')).toBeTruthy();
+    expect(screen.getByTestId('subagent-session-badge-sub-1')).toBeTruthy();
+  });
+
+  it('expands the full agent tree and labels New Chat roots with their architecture run', async () => {
+    const now = Date.now();
+    const architectureSessions: ChatSession[] = [
+      { id: 'host', personaId: 'default', title: 'New Chat', createdAt: now - 5000, updatedAt: now - 5000 },
+      { id: 'flow-root', personaId: 'default', title: 'Architecture: Runtime MVP proof', kind: 'agent-flow', parentSessionId: 'host', createdAt: now - 4000, updatedAt: now - 4000 },
+      { id: 'orchestrator', personaId: 'orchestrator', title: 'Goal Master Delivery Loop: Orchestrator', kind: 'subagent', parentSessionId: 'flow-root', createdAt: now - 3000, updatedAt: now - 3000 },
+      { id: 'implementer', personaId: 'dev', title: 'Goal Master Delivery Loop: Implementer', kind: 'subagent', parentSessionId: 'flow-root', createdAt: now - 2000, updatedAt: now - 2000 },
+      { id: 'cli-proof', personaId: 'dev', title: 'codex CLI: Write proof file', kind: 'cli-agent', parentSessionId: 'implementer', createdAt: now - 1000, updatedAt: now - 1000 },
+    ];
+    mockState.sessions = architectureSessions;
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: architectureSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
+
+    expect(screen.getByText('Architecture: Runtime MVP proof')).toBeTruthy();
+    const toggle = screen.getByTestId('toggle-session-children-host');
+    expect(toggle).toHaveTextContent('4');
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByText('Goal Master Delivery Loop: Orchestrator')).toBeTruthy();
+    expect(screen.getByText('Goal Master Delivery Loop: Implementer')).toBeTruthy();
+    expect(screen.getByText('codex CLI: Write proof file')).toBeTruthy();
+    expect(screen.getByTestId('cli-agent-session-badge-cli-proof')).toBeTruthy();
+  });
+
+  it('keeps large child counts compact in the conversation list', async () => {
+    const now = Date.now();
+    const manyChildren: ChatSession[] = [
+      { id: 'root-many', personaId: 'default', title: 'Large orchestration root', createdAt: now, updatedAt: now },
+      ...Array.from({ length: 120 }, (_, index) => ({
+        id: `child-${index}`,
+        personaId: 'default',
+        title: `Sub-agent: ${index}`,
+        kind: 'subagent' as const,
+        parentSessionId: 'root-many',
+        createdAt: now - index,
+        updatedAt: now - index,
+      })),
+    ];
+    mockState.sessions = manyChildren;
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: manyChildren });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(manyChildren));
+
+    const toggle = screen.getByTestId('toggle-session-children-root-many');
+    expect(toggle).toHaveTextContent('99+');
+    expect(toggle).toHaveClass('shrink-0');
+  });
+
+  it('hides cli-agent child sessions from the default conversation list', async () => {
+    const sessionsWithCliChild: ChatSession[] = [
+      ...mockSessions,
+      {
+        id: 'cli-1',
+        personaId: 'default',
+        title: 'Codex CLI: inspect repository',
+        kind: 'cli-agent',
+        parentSessionId: 's1',
+        parentToolCallId: 'call-cli',
+        createdAt: 2_600,
+        updatedAt: Date.now() - 45_000,
+      },
+    ];
+
+    mockState.sessions = sessionsWithCliChild;
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: sessionsWithCliChild });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(sessionsWithCliChild));
+
+    expect(screen.queryByText('Codex CLI: inspect repository')).toBeNull();
+    expect(screen.queryByTestId('cli-agent-session-badge-cli-1')).toBeNull();
+  });
+
+  it('keeps the master session visible when its child subagent sessions are hidden', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
 
@@ -170,10 +275,10 @@ describe('SessionPanel', () => {
     const subagentIndex = orderedItems.findIndex((text) => text.includes('Sub-agent: Landing page'));
 
     expect(masterIndex).toBeGreaterThanOrEqual(0);
-    expect(subagentIndex).toBe(masterIndex + 1);
+    expect(subagentIndex).toBe(-1);
   });
 
-  it('REGRESSION: keeps sibling subagent sessions in creation order under the master session', async () => {
+  it('keeps an explicitly active child session visible for direct branch inspection', async () => {
     const orderedSessions: ChatSession[] = [
       { id: 'master', personaId: 'orchestrator', title: 'Main orchestration chat', createdAt: 1_000, updatedAt: 5_000 },
       { id: 'child-older', personaId: 'default', title: 'Sub-agent: older child', kind: 'subagent', parentSessionId: 'master', createdAt: 2_000, updatedAt: 6_000 },
@@ -181,6 +286,7 @@ describe('SessionPanel', () => {
     ];
 
     mockState.sessions = orderedSessions;
+    mockState.activeSessionId = 'child-older';
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/sessions') return Promise.resolve({ data: orderedSessions });
       if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
@@ -192,33 +298,146 @@ describe('SessionPanel', () => {
 
     const orderedItems = screen.getAllByTestId('session-item').map((item) => item.textContent ?? '');
 
-    expect(orderedItems.slice(0, 3)).toEqual([
+    expect(orderedItems.slice(0, 2)).toEqual([
       expect.stringContaining('Main orchestration chat'),
       expect.stringContaining('Sub-agent: older child'),
-      expect.stringContaining('Sub-agent: newer child'),
     ]);
+    expect(orderedItems.some((text) => text.includes('Sub-agent: newer child'))).toBe(false);
   });
 
-  it('filter button toggles filter row', async () => {
+  it('does not render persona filter chips in the conversation list', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
 
-    // Filter row is always visible when personas are available
-    await waitFor(() => expect(screen.getByText('All')).toBeTruthy());
-    expect(screen.getAllByText('Dev Assistant').length).toBeGreaterThanOrEqual(1);
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/api/personas'));
+    expect(screen.queryByRole('button', { name: 'Dev Assistant' })).toBeNull();
   });
 
-  it('persona filter chips filter sessions', async () => {
+  it('filters the conversation list to user-started sessions', async () => {
     render(<SessionPanel />);
-    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
 
-    await waitFor(() => expect(screen.getAllByText('Dev Assistant').length).toBeGreaterThanOrEqual(1));
+    fireEvent.click(screen.getByTestId('session-origin-filter-user'));
 
-    // Click the filter chip button (not the persona badge span)
-    fireEvent.click(screen.getByRole('button', { name: 'Dev Assistant' }));
-    // Only s1 (personaId=p1) should show; s2 (personaId=default) hidden
     expect(screen.getByText('Chat about React')).toBeTruthy();
+    expect(screen.getByText('New Chat')).toBeTruthy();
+    expect(screen.queryByText('Sub-agent: Landing page')).toBeNull();
+  });
+
+  it('filters the conversation list to agent-started sessions', async () => {
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
+
+    fireEvent.click(screen.getByTestId('session-origin-filter-agent'));
+
+    expect(screen.getByTestId('session-tree-root')).toHaveTextContent('Chat about React');
     expect(screen.queryByText('New Chat')).toBeNull();
+    expect(screen.getByText('Sub-agent: Landing page')).toBeTruthy();
+    expect(screen.getByTestId('subagent-session-badge-sub-1')).toBeTruthy();
+    expect(screen.queryByTestId('new-session-btn')).toBeNull();
+  });
+
+  it('renders nested agent-started sessions as a tree', async () => {
+    const now = Date.now();
+    const nestedSessions: ChatSession[] = [
+      { id: 'root', personaId: 'default', title: 'Main task', createdAt: now - 3000, updatedAt: now - 3000 },
+      { id: 'sub-outer', personaId: 'default', title: 'Sub-agent: outer', kind: 'subagent', parentSessionId: 'root', createdAt: now - 2000, updatedAt: now - 2000 },
+      { id: 'sub-inner', personaId: 'default', title: 'Sub-agent: inner', kind: 'subagent', parentSessionId: 'sub-outer', createdAt: now - 1000, updatedAt: now - 1000 },
+    ];
+
+    mockState.sessions = nestedSessions;
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: nestedSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(nestedSessions));
+
+    fireEvent.click(screen.getByTestId('session-origin-filter-agent'));
+
+    expect(screen.getByTestId('session-tree-root')).toHaveTextContent('Main task');
+    const items = screen.getAllByTestId('session-item');
+    expect(items.map((item) => item.textContent ?? '')).toEqual([
+      expect.stringContaining('Sub-agent: outer'),
+      expect.stringContaining('Sub-agent: inner'),
+    ]);
+    expect(items[1]).toHaveStyle({ paddingLeft: '40px' });
+  });
+
+  it('hides inactive older agent sessions from the agent filter', async () => {
+    const now = Date.now();
+    const staleSessions: ChatSession[] = [
+      { id: 'root', personaId: 'default', title: 'Main task', createdAt: now - 3 * 86_400_000, updatedAt: now - 3 * 86_400_000 },
+      { id: 'old-sub', personaId: 'default', title: 'Sub-agent: stale', kind: 'subagent', parentSessionId: 'root', createdAt: now - 3 * 86_400_000, updatedAt: now - 3 * 86_400_000 },
+      { id: 'fresh-sub', personaId: 'default', title: 'Sub-agent: fresh', kind: 'subagent', parentSessionId: 'root', createdAt: now - 60_000, updatedAt: now - 60_000 },
+    ];
+
+    mockState.sessions = staleSessions;
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: staleSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(staleSessions));
+
+    fireEvent.click(screen.getByTestId('session-origin-filter-agent'));
+
+    expect(screen.queryByText('Sub-agent: stale')).toBeNull();
+    expect(screen.getByText('Sub-agent: fresh')).toBeTruthy();
+  });
+
+  it('archives agent sessions without hard deletion from the agent filter', async () => {
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
+
+    fireEvent.click(screen.getByTestId('session-origin-filter-agent'));
+    fireEvent.click(screen.getByTestId('archive-session-sub-1'));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions/sub-1/archive'));
+    expect(mockRemoveSession).toHaveBeenCalledWith('sub-1');
+    expect(mockApiDelete).not.toHaveBeenCalledWith('/api/sessions/sub-1');
+  });
+
+  it('loads archived agent sessions and restores them from the archived filter', async () => {
+    const archivedSession: ChatSession = {
+      id: 'archived-sub',
+      personaId: 'default',
+      title: 'Archived Sub-agent',
+      kind: 'subagent',
+      parentSessionId: 's1',
+      createdAt: Date.now() - 60_000,
+      updatedAt: Date.now() - 60_000,
+    };
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
+      if (url === '/api/sessions?includeArchived=true') {
+        return Promise.resolve({ data: [...mockSessions, archivedSession] });
+      }
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
+
+    fireEvent.click(screen.getByTestId('session-origin-filter-archived'));
+    await waitFor(() => expect(screen.getByText('Archived Sub-agent')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('restore-session-archived-sub'));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions/archived-sub/restore'));
+    expect(mockAddSession).toHaveBeenCalledWith(archivedSession);
+  });
+
+  it('keeps all sessions visible regardless of persona', async () => {
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+
+    expect(screen.getByText('Chat about React')).toBeTruthy();
+    expect(screen.getByText('New Chat')).toBeTruthy();
   });
 
   it('new session button creates session with title "New Chat"', async () => {

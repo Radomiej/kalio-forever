@@ -2,12 +2,21 @@ import { useState } from 'react';
 import { X, Minimize2, ChevronDown } from 'lucide-react';
 import { formatTokenCount, type TokenCount } from '../../services/tokenCounter';
 
+export interface RawContextStats {
+  contextLimit: number;
+  systemPromptChars: number;
+  activeToolNames: string[];
+  history: Array<{ id: string; role: string; textChars: number; preview?: string }>;
+  imageCount: number;
+}
+
 interface ContextStatsProps {
   tokenCount: TokenCount;
   onCompactNow?: () => void;
   onClose: () => void;
   systemPrompt?: string | null;
   activeToolNames?: string[];
+  rawContext?: RawContextStats;
 }
 
 // ── Category config ────────────────────────────────────────────────────────────
@@ -15,25 +24,25 @@ interface ContextStatsProps {
 interface CategoryDef {
   key: keyof TokenCount['breakdown'];
   label: string;
-  icon: string;
   color: string; // Tailwind bg class
   barColor: string; // For the stacked bar
 }
 
 const CATEGORIES: CategoryDef[] = [
-  { key: 'tools', label: 'Tools definition', icon: '🔧', color: 'bg-info', barColor: 'bg-info' },
-  { key: 'systemPrompt', label: 'System prompt', icon: '📜', color: 'bg-secondary', barColor: 'bg-secondary' },
-  { key: 'skills', label: 'Skills', icon: '⚡', color: 'bg-warning', barColor: 'bg-warning' },
-  { key: 'history', label: 'History', icon: '💬', color: 'bg-success', barColor: 'bg-success' },
-  { key: 'images', label: 'Images', icon: '🖼️', color: 'bg-accent', barColor: 'bg-accent' },
+  { key: 'tools', label: 'Tools definition', color: 'bg-info', barColor: 'bg-info' },
+  { key: 'systemPrompt', label: 'System prompt', color: 'bg-secondary', barColor: 'bg-secondary' },
+  { key: 'skills', label: 'Skills', color: 'bg-warning', barColor: 'bg-warning' },
+  { key: 'history', label: 'History', color: 'bg-success', barColor: 'bg-success' },
+  { key: 'images', label: 'Images', color: 'bg-accent', barColor: 'bg-accent' },
 ];
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export function ContextStats({ tokenCount, onCompactNow, onClose, systemPrompt, activeToolNames }: ContextStatsProps) {
+export function ContextStats({ tokenCount, onCompactNow, onClose, systemPrompt, activeToolNames, rawContext }: ContextStatsProps) {
   const { total, breakdown, cacheable, contextLimit, usagePercent } = tokenCount;
   const [promptOpen, setPromptOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
 
   const barColor =
     usagePercent >= 95
@@ -108,7 +117,7 @@ export function ContextStats({ tokenCount, onCompactNow, onClose, systemPrompt, 
             <div key={cat.key} className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${cat.color} inline-block`} />
-                <span>{cat.icon} {cat.label}</span>
+                <span>{cat.label}</span>
               </div>
               <span className="font-mono text-base-content/70">
                 {tokens.toLocaleString()} <span className="text-base-content/40">({pct}%)</span>
@@ -121,7 +130,7 @@ export function ContextStats({ tokenCount, onCompactNow, onClose, systemPrompt, 
       {/* Cacheable indicator */}
       <div className="border-t border-base-300 pt-2" data-testid="context-stats-cacheable">
         <div className="flex items-center justify-between">
-          <span>💾 Cacheable</span>
+          <span>Cacheable</span>
           <span className="font-mono text-base-content/70">
             {cacheable.toLocaleString()} tokens
             <span className="text-base-content/40">
@@ -168,6 +177,27 @@ export function ContextStats({ tokenCount, onCompactNow, onClose, systemPrompt, 
                 <span key={name} className="font-mono text-[10px] bg-base-300/60 rounded px-1.5 py-0.5 text-sky-400/80">{name}</span>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {rawContext && (
+        <div className="border-t border-base-300 pt-2 mt-2">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 w-full text-left text-base-content/60 hover:text-base-content/80 transition-colors"
+            onClick={() => setRawOpen((value) => !value)}
+          >
+            <span>Raw context</span>
+            <ChevronDown size={11} className={`ml-auto transition-transform duration-150 ${rawOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {rawOpen && (
+            <pre
+              data-testid="context-stats-raw"
+              className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded bg-base-300/60 px-2 py-1.5 font-mono text-[10px] text-base-content/60"
+            >
+              {JSON.stringify(rawContext, null, 2)}
+            </pre>
           )}
         </div>
       )}

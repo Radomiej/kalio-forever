@@ -3,8 +3,8 @@ import { render, screen } from '@testing-library/react';
 import { RAAppRenderer } from './RAAppRenderer';
 
 vi.mock('./HtmlIframeRenderer', () => ({
-  HtmlIframeRenderer: ({ html }: { html: string }) => (
-    <div data-testid="raapp-html-renderer">{html}</div>
+  HtmlIframeRenderer: ({ html, mode }: { html: string; mode?: string }) => (
+    <div data-testid="raapp-html-renderer" data-mode={mode}>{html}</div>
   ),
 }));
 
@@ -65,5 +65,43 @@ describe('RAAppRenderer', () => {
     );
 
     expect(screen.getByTestId('raapp-vfs-renderer')).toHaveTextContent('session-123:design/preview.html');
+  });
+
+  it('renders native operation results when the RA-App block carries them', () => {
+    render(
+      <RAAppRenderer
+        block={{
+          type: 'html',
+          mode: 'display',
+          content: '<main>Preview</main>',
+          nativeResults: [
+            {
+              id: 'native-1',
+              system: 'vfs_write',
+              status: 'executed',
+              result: { path: 'drafts/result.txt' },
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Native operations')).toBeInTheDocument();
+    expect(screen.getByText('vfs_write')).toBeInTheDocument();
+    expect(screen.getByText(/drafts\/result\.txt/)).toBeInTheDocument();
+  });
+
+  it('passes html block mode to HtmlIframeRenderer', () => {
+    render(
+      <RAAppRenderer
+        block={{
+          type: 'html',
+          mode: 'interactive',
+          content: '<main>Interactive</main>',
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('raapp-html-renderer')).toHaveAttribute('data-mode', 'interactive');
   });
 });

@@ -84,4 +84,48 @@ describe('ChatInput', () => {
     expect(screen.getByTestId('chat-stop-btn')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-send-btn')).not.toBeInTheDocument();
   });
+
+  it('routes composer prompts through the selected architecture when one is selected', () => {
+    const onArchitectureRun = vi.fn();
+    const onSend = vi.fn();
+    render(
+      <ChatInput
+        architectures={[{ id: 'strategic-decision-council', name: 'Strategic Decision Council' }]}
+        disabled={false}
+        isStreaming={false}
+        onArchitectureChange={vi.fn()}
+        onArchitectureRun={onArchitectureRun}
+        onSend={onSend}
+        selectedArchitectureId="strategic-decision-council"
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'decide with graph' } });
+    fireEvent.click(screen.getByTestId('chat-send-btn'));
+
+    expect(onArchitectureRun).toHaveBeenCalledWith('decide with graph', 'strategic-decision-council');
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('keeps direct chat composer behavior when Single Chat is selected', () => {
+    const onArchitectureRun = vi.fn();
+    const onSend = vi.fn();
+    render(
+      <ChatInput
+        architectures={[{ id: 'strategic-decision-council', name: 'Strategic Decision Council' }]}
+        disabled={false}
+        isStreaming={false}
+        onArchitectureChange={vi.fn()}
+        onArchitectureRun={onArchitectureRun}
+        onSend={onSend}
+        selectedArchitectureId="single-chat"
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'answer normally' } });
+    fireEvent.click(screen.getByTestId('chat-send-btn'));
+
+    expect(onSend).toHaveBeenCalledWith('answer normally', 'default');
+    expect(onArchitectureRun).not.toHaveBeenCalled();
+  });
 });

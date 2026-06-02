@@ -76,10 +76,10 @@ describe('LLMController', () => {
 
   describe('getActiveModels()', () => {
     it('returns the model list for the active runtime provider', async () => {
-      mockLLMService.getActiveModels.mockResolvedValue(['mimo-v2-omni', 'mimo-v2-thinking']);
+      mockLLMService.getActiveModels.mockResolvedValue(['mimo-v2.5-pro', 'mimo-v2-thinking']);
 
       await expect(controller.getActiveModels()).resolves.toEqual({
-        models: ['mimo-v2-omni', 'mimo-v2-thinking'],
+        models: ['mimo-v2.5-pro', 'mimo-v2-thinking'],
       });
     });
   });

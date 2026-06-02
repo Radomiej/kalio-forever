@@ -597,6 +597,37 @@ describe('ChatService', () => {
     expect(toolResultLog![0]).toMatchObject({ type: 'tool_result', label: 'my_tool', data: { callId: 'tc1', status: 'success' } });
   });
 
+  it('persists cancelled tool results so the next LLM iteration can see the rejection', async () => {
+    let streamCount = 0;
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(() => {
+        streamCount++;
+        return makeStream(streamCount === 1
+          ? [{ type: 'tool_call', callId: 'tc-cancelled', name: 'fs_write', args: { path: 'metadata.json' } }, { type: 'done' }]
+          : [{ type: 'text_delta', delta: 'acknowledged cancellation' }, { type: 'done' }]);
+      }),
+    };
+    toolDispatch.dispatch.mockResolvedValue({
+      callId: 'tc-cancelled',
+      status: 'cancelled',
+      errorMessage: 'Tool fs_write was not approved.',
+    });
+
+    await buildService(llmSource);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    expect(sessionManager.saveToolResult).toHaveBeenCalledWith(
+      'sid',
+      'tc-cancelled',
+      expect.stringContaining('"status":"cancelled"'),
+    );
+    expect(sessionManager.saveToolResult).toHaveBeenCalledWith(
+      'sid',
+      'tc-cancelled',
+      expect.stringContaining('Tool fs_write was not approved.'),
+    );
+  });
+
   it('logs chunkCount via audit.update after streaming completes', async () => {
     const chunks: InternalLLMChunk[] = [
       { type: 'text_delta', delta: 'a' },

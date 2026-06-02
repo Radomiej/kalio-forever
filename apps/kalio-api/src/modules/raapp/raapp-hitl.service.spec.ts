@@ -4,10 +4,13 @@ import { RAAppHITLService } from './raapp-hitl.service';
 import { NativeSystemRegistry } from './native/native-system-registry.service';
 import { AuditService } from '../chat/audit.service';
 import { DrizzleService } from '../../database/drizzle.service';
+import { HitlPolicyService } from '../hitl/hitl-policy.service';
+import { HitlConfigService } from '../hitl/hitl-config.service';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import * as schema from '../../database/schema';
 import type { PendingApproval } from './effects-processor.service';
+import { eq } from 'drizzle-orm';
 
 function makeTestDrizzle(): DrizzleService {
   const sqlite = new Database(':memory:');
@@ -36,10 +39,27 @@ describe('RAAppHITLService', () => {
   let service: RAAppHITLService;
   let registry: NativeSystemRegistry;
   let drizzleSvc: DrizzleService;
+  let hitlPolicy: { resolveApproval: ReturnType<typeof vi.fn> };
+  let hitlConfig: { getConfig: ReturnType<typeof vi.fn> };
   const auditMock = { log: vi.fn().mockResolvedValue(undefined) };
 
   beforeEach(async () => {
     drizzleSvc = makeTestDrizzle();
+    hitlPolicy = {
+      resolveApproval: vi.fn().mockResolvedValue({ status: 'manual', source: 'manual' }),
+    };
+    hitlConfig = {
+      getConfig: vi.fn().mockResolvedValue({
+        mode: 'manual',
+        autoPersonaId: null,
+        unattendedFallback: 'pause',
+        representativePersonaId: null,
+        notificationChannel: 'none',
+        externalPolicyEnabled: false,
+        externalPolicyPersonaId: null,
+        raAppApprovalTimeoutMs: 600_000,
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -47,6 +67,8 @@ describe('RAAppHITLService', () => {
         NativeSystemRegistry,
         { provide: DrizzleService, useValue: drizzleSvc },
         { provide: AuditService, useValue: auditMock },
+        { provide: HitlPolicyService, useValue: hitlPolicy },
+        { provide: HitlConfigService, useValue: hitlConfig },
       ],
     }).compile();
 
@@ -159,6 +181,42 @@ describe('RAAppHITLService', () => {
       expect(results).toHaveLength(0);
     });
 
+    it('does not execute timed out approvals', async () => {
+      const handler = vi.fn().mockResolvedValue({ done: true });
+      registry.register({
+        id: 'stale_write',
+        description: 'stale write test',
+        approval_required: true,
+        input_schema: {},
+        handler,
+      });
+
+      await service.savePendingApprovals('tc-stale', 'sess-stale', [
+        { id: 'stale-1', system: 'stale_write', args: {}, displayLabel: 'Stale write' },
+      ]);
+      await drizzleSvc.db
+        .update(schema.raappPendingApprovals)
+        .set({ createdAt: new Date(Date.now() - 700_000) })
+        .where(eq(schema.raappPendingApprovals.id, 'stale-1'));
+
+      const results = await service.executeApproved(['stale-1'], 'sess-stale');
+
+      expect(results).toHaveLength(0);
+      expect(handler).not.toHaveBeenCalled();
+      expect(auditMock.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'external_hitl',
+          sessionId: 'sess-stale',
+          label: 'raapp:timeout stale_write',
+          data: expect.objectContaining({
+            domain: 'hitl',
+            eventType: 'raapp_approval_timeout',
+            approvalId: 'stale-1',
+          }),
+        }),
+      );
+    });
+
     it('logs audit entries on success', async () => {
       registry.register({
         id: 'audit_op',
@@ -174,7 +232,30 @@ describe('RAAppHITLService', () => {
 
       await service.executeApproved(['audit-appr-1'], 'sess-audit');
       expect(auditMock.log).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'raapp_native_approved', sessionId: 'sess-audit' }),
+        expect.objectContaining({
+          type: 'raapp_native_approved',
+          sessionId: 'sess-audit',
+          data: expect.objectContaining({
+            domain: 'hitl',
+            eventType: 'raapp_approval_approved',
+            approvalKind: 'raapp_native',
+            approvalId: 'audit-appr-1',
+          }),
+        }),
+      );
+      expect(auditMock.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'external_hitl',
+          sessionId: 'sess-audit',
+          label: 'raapp:executed audit_op',
+          data: expect.objectContaining({
+            domain: 'hitl',
+            kind: 'raapp_hitl_lifecycle',
+            eventType: 'raapp_approval_executed',
+            approvalId: 'audit-appr-1',
+            toolCallId: 'tc-audit',
+          }),
+        }),
       );
     });
   });
@@ -193,6 +274,20 @@ describe('RAAppHITLService', () => {
 
       const { toolCallId } = await service.cancelApprovals(['cancel-1', 'cancel-2'], 'sess-cancel');
       expect(toolCallId).toBe('tc-cancel');
+      expect(auditMock.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'external_hitl',
+          sessionId: 'sess-cancel',
+          label: 'raapp:cancelled vfs_write',
+          data: expect.objectContaining({
+            domain: 'hitl',
+            kind: 'raapp_hitl_lifecycle',
+            eventType: 'raapp_approval_cancelled',
+            approvalId: 'cancel-1',
+            toolCallId: 'tc-cancel',
+          }),
+        }),
+      );
     });
 
     it('returns empty toolCallId when no matching approvals found', async () => {
@@ -219,6 +314,166 @@ describe('RAAppHITLService', () => {
     it('returns empty when session has no pending approvals', async () => {
       const pending = await service.getPendingForSession('sess-empty');
       expect(pending).toHaveLength(0);
+    });
+
+    it('expires stale pending approvals and logs timeout lifecycle events', async () => {
+      await service.savePendingApprovals('tc-timeout', 'sess-timeout', [
+        { id: 'timeout-1', system: 'vfs_write', args: { path: 'stale.txt' }, displayLabel: 'Write stale.txt' },
+        { id: 'fresh-1', system: 'vfs_delete', args: { path: 'fresh.txt' }, displayLabel: 'Delete fresh.txt' },
+      ]);
+
+      await drizzleSvc.db
+        .update(schema.raappPendingApprovals)
+        .set({ createdAt: new Date('2026-05-28T10:00:00.000Z') })
+        .where(eq(schema.raappPendingApprovals.id, 'timeout-1'));
+
+      const expired = await service.expirePendingApprovals(
+        'sess-timeout',
+        new Date('2026-05-28T10:11:00.000Z'),
+        600_000,
+      );
+      const pending = await service.getPendingForSession('sess-timeout');
+
+      expect(expired).toEqual([
+        expect.objectContaining({
+          id: 'timeout-1',
+          status: 'cancelled',
+          result: { reason: 'timeout', timeoutMs: 600_000 },
+        }),
+      ]);
+      expect(pending).toHaveLength(1);
+      expect(pending[0].id).toBe('fresh-1');
+      expect(auditMock.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'external_hitl',
+          sessionId: 'sess-timeout',
+          label: 'raapp:timeout vfs_write',
+          data: expect.objectContaining({
+            kind: 'raapp_hitl_lifecycle',
+            eventType: 'raapp_approval_timeout',
+            approvalId: 'timeout-1',
+            toolCallId: 'tc-timeout',
+            timeoutMs: 600_000,
+          }),
+        }),
+      );
+    });
+
+    it('uses configured RA-App timeout when listing pending approvals', async () => {
+      hitlConfig.getConfig.mockResolvedValue({
+        mode: 'manual',
+        autoPersonaId: null,
+        unattendedFallback: 'pause',
+        representativePersonaId: null,
+        notificationChannel: 'none',
+        externalPolicyEnabled: false,
+        externalPolicyPersonaId: null,
+        raAppApprovalTimeoutMs: 120_000,
+      });
+      await service.savePendingApprovals('tc-config-timeout', 'sess-config-timeout', [
+        { id: 'config-timeout-1', system: 'vfs_write', args: {}, displayLabel: 'Write' },
+      ]);
+      await drizzleSvc.db
+        .update(schema.raappPendingApprovals)
+        .set({ createdAt: new Date(Date.now() - 180_000) })
+        .where(eq(schema.raappPendingApprovals.id, 'config-timeout-1'));
+
+      await expect(service.getPendingForSession('sess-config-timeout')).resolves.toHaveLength(0);
+      expect(auditMock.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'external_hitl',
+          sessionId: 'sess-config-timeout',
+          label: 'raapp:timeout vfs_write',
+          data: expect.objectContaining({
+            eventType: 'raapp_approval_timeout',
+            timeoutMs: 120_000,
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('resolvePendingApprovals()', () => {
+    it('auto-executes the whole batch when the global policy bypasses RA-App approvals', async () => {
+      registry.register({
+        id: 'test_write',
+        description: 'write test',
+        approval_required: true,
+        input_schema: {},
+        handler: async (args) => ({ written: args['path'] }),
+      });
+      hitlPolicy.resolveApproval.mockResolvedValue({ status: 'approved', source: 'bypass' });
+
+      const result = await service.resolvePendingApprovals('tc-bypass', 'sess-bypass', [
+        { id: 'bypass-1', system: 'test_write', args: { path: 'file.txt' }, displayLabel: 'Write file.txt' },
+      ]);
+
+      expect(result.pendingApprovals).toEqual([]);
+      expect(result.nativeResults).toEqual([
+        expect.objectContaining({ id: 'bypass-1', status: 'executed', result: { written: 'file.txt' } }),
+      ]);
+      await expect(service.getPendingForSession('sess-bypass')).resolves.toHaveLength(0);
+    });
+
+    it('falls back to manual when any auto evaluation rejects the RA-App approval batch', async () => {
+      hitlPolicy.resolveApproval
+        .mockResolvedValueOnce({ status: 'approved', source: 'auto', reason: 'First op is safe.' })
+        .mockResolvedValueOnce({ status: 'rejected', source: 'auto', reason: 'Second op is risky.' });
+
+      const approvals: PendingApproval[] = [
+        { id: 'auto-1', system: 'test_write', args: { path: 'safe.txt' }, displayLabel: 'Write safe.txt' },
+        { id: 'auto-2', system: 'test_delete', args: { path: 'danger.txt' }, displayLabel: 'Delete danger.txt' },
+      ];
+
+      const result = await service.resolvePendingApprovals('tc-auto', 'sess-auto', approvals);
+
+      expect(result.nativeResults).toEqual([]);
+      expect(result.pendingApprovals).toEqual([
+        expect.objectContaining({ id: 'auto-1', system: 'test_write' }),
+        expect.objectContaining({ id: 'auto-2', system: 'test_delete' }),
+      ]);
+      await expect(service.getPendingForSession('sess-auto')).resolves.toHaveLength(2);
+      expect(auditMock.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'external_hitl',
+          sessionId: 'sess-auto',
+          label: 'raapp:pending test_write',
+          data: expect.objectContaining({
+            kind: 'raapp_hitl_lifecycle',
+            eventType: 'raapp_approval_pending',
+            approvalId: 'auto-1',
+            toolCallId: 'tc-auto',
+          }),
+        }),
+      );
+    });
+
+    it('returns output patches for auto-executed approvals with output paths', async () => {
+      registry.register({
+        id: 'test_write',
+        description: 'write test',
+        approval_required: true,
+        input_schema: {},
+        handler: async (args) => ({ written: args['path'] }),
+      });
+      hitlPolicy.resolveApproval.mockResolvedValue({ status: 'approved', source: 'bypass' });
+
+      const result = await service.resolvePendingApprovals('tc-bypass', 'sess-bypass', [
+        {
+          id: 'bypass-1',
+          system: 'test_write',
+          args: { path: 'file.txt' },
+          outputPath: 'output.writeResult',
+          displayLabel: 'Write file.txt',
+        },
+      ]);
+
+      expect(result.outputPatches).toEqual([
+        {
+          outputPath: 'output.writeResult',
+          value: { written: 'file.txt' },
+        },
+      ]);
     });
   });
 });

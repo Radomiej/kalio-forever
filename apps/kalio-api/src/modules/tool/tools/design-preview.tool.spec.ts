@@ -77,6 +77,12 @@ describe('DesignPreviewTool', () => {
     );
   });
 
+  it('rejects interactive mode because VFS-backed previews are display-only', async () => {
+    await expect(tool.execute(makeRequest({ filePath: 'design/preview.html', mode: 'interactive' }))).rejects.toThrow(
+      'INVALID_MODE: design_preview currently supports only "display" mode',
+    );
+  });
+
   it('returns a structured tool error when the preview file is missing in VFS', async () => {
     (vfs.readFile as ReturnType<typeof vi.fn>).mockImplementation(() => {
       throw new Error('VFS_FILE_NOT_FOUND: design/missing.html not found in session sess-abc');

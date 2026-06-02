@@ -2,18 +2,27 @@ import type { ToolMeta } from '@kalio/types';
 
 // ─── tool group definitions ───────────────────────────────────────────────────
 
+const AGENT_TOOLS = new Set([
+  'run_subagent',
+  'run_cli_agent',
+  'spawn_cli_agent',
+  'message_cli_agent',
+  'get_cli_agent_status',
+  'stop_cli_agent',
+]);
+
 interface ToolGroup {
   label: string;
   match: (name: string) => boolean;
 }
 
 const TOOL_GROUPS: ToolGroup[] = [
-  { label: 'Agent',              match: (n) => n === 'run_subagent' || n === 'run_cli_agent' },
+  { label: 'Agent',              match: (n) => AGENT_TOOLS.has(n) },
   { label: 'Virtual Filesystem', match: (n) => n.startsWith('vfs_') },
   { label: 'Filesystem',         match: (n) => n.startsWith('fs_') },
   { label: 'Key-Value Store',    match: (n) => n.startsWith('kv_') },
   { label: 'Terminal',           match: (n) => n.startsWith('terminal_') },
-  { label: 'RaConsierge',        match: (n) => n.startsWith('raapp_') || n === 'run_raapp' || n === 'list_raapps' },
+  { label: 'RAApp',              match: (n) => n.startsWith('raapp_') || n === 'run_raapp' || n === 'list_raapps' },
   { label: 'Memory',             match: (n) => n.startsWith('memory_') },
   { label: 'Search',             match: (n) => n === 'grep_search' || n === 'file_search' },
   { label: 'Web',                match: (n) => n === 'web_search' },

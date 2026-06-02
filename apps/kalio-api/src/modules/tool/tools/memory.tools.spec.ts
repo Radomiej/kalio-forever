@@ -141,43 +141,43 @@ describe('MemorySearchTool', () => {
   let memory: Partial<MemoryService>;
 
   beforeEach(() => {
-    memory = { search: vi.fn() };
+    memory = { hybridSearch: vi.fn() };
     tool = new MemorySearchTool(memory as MemoryService, makeDrizzleMock('persona-1'));
   });
 
   describe('positive scenarios', () => {
-    it('returns { results } from memory.search with session-resolved personaId', async () => {
+    it('returns { results } from hybrid memory search with session-resolved personaId', async () => {
       const chunks = [{ id: '1', content: 'relevant fact', score: 0.9, metadata: {}, createdAt: 0 }];
-      (memory.search as ReturnType<typeof vi.fn>).mockResolvedValue(chunks);
+      (memory.hybridSearch as ReturnType<typeof vi.fn>).mockResolvedValue(chunks);
 
       const result = await tool.execute(
         makeRequest('memory_search', { query: 'relevant' }),
       ) as { results: unknown[] };
 
-      expect(memory.search).toHaveBeenCalledWith('relevant', 'persona-1', 5);
+      expect(memory.hybridSearch).toHaveBeenCalledWith('relevant', 'persona-1', 5);
       expect(result.results).toStrictEqual(chunks);
     });
 
-    it('passes custom limit to memory.search', async () => {
-      (memory.search as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    it('passes custom limit to hybrid memory search', async () => {
+      (memory.hybridSearch as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
       await tool.execute(makeRequest('memory_search', { query: 'cats', limit: 10 }));
 
-      expect(memory.search).toHaveBeenCalledWith('cats', 'persona-1', 10);
+      expect(memory.hybridSearch).toHaveBeenCalledWith('cats', 'persona-1', 10);
     });
   });
 
   describe('edge cases', () => {
     it('defaults limit to 5 when not provided', async () => {
-      (memory.search as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (memory.hybridSearch as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
       await tool.execute(makeRequest('memory_search', { query: 'q' }));
 
-      expect(memory.search).toHaveBeenCalledWith('q', 'persona-1', 5);
+      expect(memory.hybridSearch).toHaveBeenCalledWith('q', 'persona-1', 5);
     });
 
     it('returns empty results array when nothing matches', async () => {
-      (memory.search as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (memory.hybridSearch as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
       const result = await tool.execute(
         makeRequest('memory_search', { query: 'zzznomatch' }),
@@ -188,8 +188,8 @@ describe('MemorySearchTool', () => {
   });
 
   describe('negative scenarios', () => {
-    it('propagates error when memory.search throws', async () => {
-      (memory.search as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('SEARCH_FAILED'));
+    it('propagates error when hybrid memory search throws', async () => {
+      (memory.hybridSearch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('SEARCH_FAILED'));
 
       await expect(tool.execute(makeRequest('memory_search', { query: 'x' }))).rejects.toThrow('SEARCH_FAILED');
     });
@@ -207,10 +207,10 @@ describe('MemorySearchTool', () => {
       { label: 'query is numeric', query: 123 },
       { label: 'query is object', query: { text: 'x' } },
     ])('rejects invalid search query when $label (REGRESSION)', async ({ query }) => {
-      (memory.search as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (memory.hybridSearch as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
       await expect(tool.execute(makeRequest('memory_search', { query }))).rejects.toThrow('INVALID_QUERY');
-      expect(memory.search).not.toHaveBeenCalled();
+      expect(memory.hybridSearch).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -219,10 +219,10 @@ describe('MemorySearchTool', () => {
       { label: 'limit is fractional', limit: 1.5 },
       { label: 'limit exceeds max', limit: 999 },
     ])('rejects invalid search limit when $label (REGRESSION)', async ({ limit }) => {
-      (memory.search as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (memory.hybridSearch as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
       await expect(tool.execute(makeRequest('memory_search', { query: 'fact', limit }))).rejects.toThrow('INVALID_LIMIT');
-      expect(memory.search).not.toHaveBeenCalled();
+      expect(memory.hybridSearch).not.toHaveBeenCalled();
     });
   });
 });

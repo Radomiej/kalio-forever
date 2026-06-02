@@ -12,6 +12,7 @@ type AgentStateShape = {
     turnId: string;
     startedAt: number;
   }>;
+  clearInactiveActivities: () => void;
 };
 
 type SessionStateShape = {
@@ -29,6 +30,7 @@ const { stopTurn, agentState, sessionState } = vi.hoisted(() => ({
       turnId: string;
       startedAt: number;
     }>,
+    clearInactiveActivities: vi.fn(),
   } satisfies AgentStateShape,
   sessionState: {
     sessions: [] as ChatSession[],
@@ -87,6 +89,7 @@ describe('ConversationManagerPanel', () => {
     agentState.toolActivities = [];
     agentState.llmActivities = [];
     agentState.activeAgentLoops = {};
+    agentState.clearInactiveActivities = vi.fn();
     sessionState.sessions = [];
   });
 
@@ -142,5 +145,26 @@ describe('ConversationManagerPanel', () => {
     expect(screen.getByText('Generating title')).toBeInTheDocument();
     expect(screen.getByText('Summarizing results')).toBeInTheDocument();
     expect(screen.getByText('Retry failed')).toBeInTheDocument();
+  });
+
+  it('lets the user remove inactive finished activity from the active panel', () => {
+    agentState.toolActivities = [
+      makeToolActivity({ callId: 'call-running', toolName: 'web_search', status: 'running' }),
+      makeToolActivity({
+        callId: 'call-done',
+        toolName: 'memory_search',
+        status: 'success',
+        finishedAt: 5,
+      }),
+    ];
+    agentState.llmActivities = [
+      { id: 'llm-1', label: 'Generating title', status: 'running', startedAt: 1 },
+      { id: 'llm-2', label: 'Summarizing results', status: 'done', startedAt: 1, finishedAt: 2 },
+    ];
+
+    render(<ConversationManagerPanel />);
+
+    fireEvent.click(screen.getByTestId('clear-inactive-agents'));
+    expect(agentState.clearInactiveActivities).toHaveBeenCalledTimes(1);
   });
 });

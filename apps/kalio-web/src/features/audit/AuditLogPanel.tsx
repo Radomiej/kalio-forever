@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BrainCircuit, Wrench, CheckCircle2, XCircle, RefreshCw, ChevronDown, Zap } from 'lucide-react';
+import { BrainCircuit, Wrench, CheckCircle2, XCircle, RefreshCw, ChevronDown, Zap, ShieldAlert } from 'lucide-react';
 import type { AuditLogEntry } from '@kalio/types';
 
 const TYPE_CONFIG: Record<AuditLogEntry['type'], { icon: React.ReactNode; cls: string; short: string }> = {
@@ -7,9 +7,12 @@ const TYPE_CONFIG: Record<AuditLogEntry['type'], { icon: React.ReactNode; cls: s
   llm_response:         { icon: <BrainCircuit size={12} />, cls: 'text-sky-400',    short: '← LLM' },
   tool_call:            { icon: <Wrench size={12} />,        cls: 'text-emerald-400', short: 'Tool →' },
   tool_result:          { icon: <CheckCircle2 size={12} />,  cls: 'text-emerald-400', short: '← Tool' },
+  architecture_event:   { icon: <Zap size={12} />,           cls: 'text-warning',     short: 'Arch' },
   error:                { icon: <XCircle size={12} />,       cls: 'text-error',       short: 'Error' },
   raapp_native_call:    { icon: <Zap size={12} />,           cls: 'text-warning',     short: 'RA call' },
   raapp_native_approved:{ icon: <CheckCircle2 size={12} />,  cls: 'text-warning',     short: 'RA ok' },
+  external_hitl:        { icon: <ShieldAlert size={12} />,   cls: 'text-purple-300',  short: 'HITL' },
+  escalation:           { icon: <Zap size={12} />,           cls: 'text-error',       short: '🔴 Alert' },
 };
 
 function formatTime(ts: number) {
@@ -64,7 +67,7 @@ export function AuditLogPanel() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/audit-log?limit=200');
+      const res = await fetch('/api/audit-log?limit=200&source=all');
       if (res.ok) {
         const data = await res.json() as AuditLogEntry[];
         setEntries(data);

@@ -12,6 +12,8 @@ import { getCompactStrategy } from '../../../services/compactStrategy';
 import { buildHistory } from '../buildHistory';
 import type { LLMHistoryMessage } from '../buildHistory';
 import { getToolCallingPrompt, getCoreOsPrompt } from '../../../services/modelPrompts';
+import { useSettingsStore } from '../../settings/settingsStore';
+import type { RawContextStats } from '../ContextStats';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -36,14 +38,73 @@ export interface ContextUsageResult {
   tokenCount: TokenCount;
   needsCompact: boolean;
   compactMessages: (messages: ChatMessage[], strategyName: string) => ChatMessage[];
+  rawContext: RawContextStats;
+}
+
+function mergeLiveChunks(messages: ChatMessage[], sessionId: string | null, streamingChunks: Record<string, string>, thinkingChunks: Record<string, string>, chunkSessionIds: Record<string, string>): ChatMessage[] {
+  if (!sessionId) return messages;
+  const nextMessages = [...messages];
+  const indexById = new Map(nextMessages.map((message, index) => [message.id, index]));
+  const chunkIds = new Set([...Object.keys(streamingChunks), ...Object.keys(thinkingChunks)]);
+
+  chunkIds.forEach((messageId) => {
+    if (chunkSessionIds[messageId] !== sessionId) return;
+    const existingIndex = indexById.get(messageId);
+    const content = streamingChunks[messageId];
+    const thinking = thinkingChunks[messageId];
+
+    if (existingIndex !== undefined) {
+      const existing = nextMessages[existingIndex];
+      nextMessages[existingIndex] = {
+        ...existing,
+        content: content ?? existing.content,
+        thinking: thinking ?? existing.thinking,
+      };
+      return;
+    }
+
+    nextMessages.push({
+      id: messageId,
+      sessionId,
+      role: 'assistant',
+      content: content ?? '',
+      thinking,
+      streaming: true,
+      createdAt: Date.now(),
+    });
+  });
+
+  return nextMessages;
+}
+
+function buildContextSignature(messages: ChatMessage[], streamingChunks: Record<string, string>, thinkingChunks: Record<string, string>, chunkSessionIds: Record<string, string>): string {
+  return JSON.stringify({
+    messages: messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      thinking: message.thinking,
+      toolCalls: message.toolCalls,
+      attachments: message.attachments?.map((attachment) => ({
+        path: attachment.path,
+        mimeType: attachment.mimeType,
+      })),
+    })),
+    streamingChunks,
+    thinkingChunks,
+    chunkSessionIds,
+  });
 }
 
 export function useContextUsage(): ContextUsageResult {
   const tools = useAgentStore((s) => s.tools);
-  const { activeSessionId, messages } = useSessionStore();
-  const contextLimit = 32000; // Default context window
+  const getContextForSession = useAgentStore((s) => s.getContextForSession);
+  const { activeSessionId, messages, streamingChunks, thinkingChunks, chunkSessionIds } = useSessionStore();
+  const contextLimit = useSettingsStore((s) => s.getEffectiveContextWindow());
+  const activeContext = getContextForSession(activeSessionId);
+  const contextSignature = buildContextSignature(messages, streamingChunks, thinkingChunks, chunkSessionIds);
 
-  const tokenCount = useMemo(() => {
+  const { tokenCount, rawContext } = useMemo(() => {
     // Build the same prompt parts that the backend uses
     const basePromptText = getCoreOsPrompt();
 
@@ -60,10 +121,11 @@ export function useContextUsage(): ContextUsageResult {
     const sessionNote = activeSessionId ? `\nCurrent session ID: ${activeSessionId}` : '';
 
     // Combine base + tool calling prompt + session note into "system prompt" category
-    const fullBasePrompt = `${basePromptText}${toolCallingPrompt}${sessionNote}`;
+    const fullBasePrompt = activeContext.systemPrompt ?? `${basePromptText}${toolCallingPrompt}${sessionNote}`;
 
     // Build history for token estimation
-    const history = buildHistory(messages);
+    const effectiveMessages = mergeLiveChunks(messages, activeSessionId, streamingChunks, thinkingChunks, chunkSessionIds);
+    const history = buildHistory(effectiveMessages);
     const historyTexts: string[] = [];
     let imageCount = 0;
 
@@ -82,9 +144,22 @@ export function useContextUsage(): ContextUsageResult {
       imageDetailMode: 'auto',
     };
 
-    return countTokens(countInput);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length, tools.length, activeSessionId, contextLimit]);
+    return {
+      tokenCount: countTokens(countInput),
+      rawContext: {
+        contextLimit,
+        systemPromptChars: fullBasePrompt.length,
+        activeToolNames: activeContext.activeToolNames,
+        history: effectiveMessages.map((message) => ({
+          id: message.id,
+          role: message.role,
+          textChars: `${message.thinking ?? ''}${message.content}`.length,
+          preview: message.content.length > 160 ? `${message.content.slice(0, 160)}...` : message.content,
+        })),
+        imageCount,
+      },
+    };
+  }, [activeContext.activeToolNames, activeContext.systemPrompt, activeSessionId, contextLimit, contextSignature, messages, streamingChunks, thinkingChunks, chunkSessionIds, tools]);
 
   const needsCompact = tokenCount.total > contextLimit;
 
@@ -96,5 +171,5 @@ export function useContextUsage(): ContextUsageResult {
     [contextLimit],
   );
 
-  return { tokenCount, needsCompact, compactMessages };
+  return { tokenCount, needsCompact, compactMessages, rawContext };
 }

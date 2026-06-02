@@ -14,6 +14,7 @@ import type { RAAppMeta } from '../../raapp/raapp.service';
 import { archiveDirectoryToZip } from '../../raapp/zip-archive.util';
 import { VFSService } from '../../vfs/vfs.service';
 import { EntityStore } from '../../raapp/entity-store';
+import { applyRaAppOutputPatches } from '../../raapp/raapp-output-patches.util';
 
 // ─── raapp_create_draft ───────────────────────────────────────────────────────
 
@@ -224,6 +225,7 @@ export class RaAppExecuteDslTool {
     if (uiGui) {
       const outputData: Record<string, unknown> = { ...inputs };
       let pendingApprovals: import('@kalio/types').RaAppPendingApproval[] = [];
+      let nativeResults: import('@kalio/types').RaAppNativeResult[] = [];
 
       if (systemsYml) {
         try {
@@ -239,13 +241,21 @@ export class RaAppExecuteDslTool {
             outputData['entities'] = effectsResult.entities;
           }
           if (effectsResult.pendingApprovals.length > 0) {
-            await this.hitl.savePendingApprovals(request.callId, sessionId, effectsResult.pendingApprovals);
-            pendingApprovals = effectsResult.pendingApprovals.map((a) => ({
-              id: a.id,
-              system: a.system,
-              displayLabel: a.displayLabel,
-              args: a.args,
-            }));
+            const resolvedApprovals = request.abortSignal
+              ? await this.hitl.resolvePendingApprovals(
+                  request.callId,
+                  sessionId,
+                  effectsResult.pendingApprovals,
+                  request.abortSignal,
+                )
+              : await this.hitl.resolvePendingApprovals(
+                  request.callId,
+                  sessionId,
+                  effectsResult.pendingApprovals,
+                );
+            pendingApprovals = resolvedApprovals.pendingApprovals;
+            nativeResults = resolvedApprovals.nativeResults;
+            applyRaAppOutputPatches(outputData, resolvedApprovals.outputPatches);
           }
         } catch (err) {
           this.logger.error(`[raapp_execute_dsl] Systems execution error`, err);
@@ -267,6 +277,7 @@ export class RaAppExecuteDslTool {
         content: uiGui,
         renderedContent: result.renderedContent,
         ...(pendingApprovals.length > 0 ? { pendingApprovals } : {}),
+        ...(nativeResults.length > 0 ? { nativeResults } : {}),
       };
     }
 

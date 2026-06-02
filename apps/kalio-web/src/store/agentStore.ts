@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import type { AgentRunContext, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
 
-export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled';
+export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled' | 'expired';
 
 export interface ToolActivity {
   callId: string;
+  requestId?: string;
   toolName: string;
   args: Record<string, unknown>;
   sessionId?: string;
@@ -16,6 +17,11 @@ export interface ToolActivity {
 }
 
 export type LlmActivityStatus = 'running' | 'done' | 'error';
+
+export type CanvasFocusTarget =
+  | { kind: 'architecture-branch'; sessionId: string; label?: string }
+  | { kind: 'architecture-run'; runId: string }
+  | null;
 
 export interface LlmActivity {
   id: string;
@@ -50,11 +56,14 @@ interface AgentState {
   callIdToName: Record<string, string>;
   /** Canvas panel open state — true when the canvas is visible */
   canvasOpen: boolean;
+  canvasFocus: CanvasFocusTarget;
   /**
    * All agent loops currently active on the BE, keyed by sessionId.
    * Populated by agent:start / agent:done events across ALL sessions.
    */
   activeAgentLoops: Record<string, { sessionId: string; turnId: string; startedAt: number; agentRun?: AgentRunContext }>;
+  /** Progress of the LLM writing tool call arguments — null when no tool is being written */
+  toolArgProgress: { toolName: string; totalChars: number; charsPerSec: number } | null;
 
   setStreaming: (streaming: boolean, messageId?: string) => void;
   setPendingConfirmation: (sessionId: string, req: ToolConfirmationRequest | null) => void;
@@ -64,6 +73,7 @@ interface AgentState {
   addToolActivity: (activity: ToolActivity) => void;
   updateToolActivity: (callId: string, patch: Partial<ToolActivity>) => void;
   clearToolActivities: (sessionId?: string) => void;
+  clearInactiveActivities: () => void;
   addLlmActivity: (activity: LlmActivity) => void;
   updateLlmActivity: (id: string, patch: Partial<LlmActivity>) => void;
   clearLlmActivities: () => void;
@@ -71,10 +81,12 @@ interface AgentState {
   setContext: (systemPrompt: string, toolNames: string[], sessionId?: string) => void;
   registerCallId: (callId: string, toolName: string) => void;
   setCanvasOpen: (open: boolean) => void;
+  setCanvasFocus: (focus: CanvasFocusTarget) => void;
   toggleCanvas: () => void;
   addActiveAgentLoop: (sessionId: string, turnId: string, agentRun?: AgentRunContext) => void;
   removeActiveAgentLoop: (sessionId: string, agentRun?: AgentRunContext) => void;
   hasActiveLoopForSession: (sessionId: string | null) => boolean;
+  setToolArgProgress: (progress: { toolName: string; totalChars: number; charsPerSec: number } | null) => void;
   /** Accumulated CLI agent output per callId (populated by cli_agent:progress) */
   cliAgentOutput: Record<string, string>;
   appendCLIAgentChunk: (callId: string, chunk: string) => void;
@@ -105,8 +117,10 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   sessionContexts: {},
   callIdToName: {},
   canvasOpen: false,
+  canvasFocus: null,
   activeAgentLoops: {},
   cliAgentOutput: {},
+  toolArgProgress: null,
 
   setStreaming: (streaming, messageId = undefined) =>
     set({ isStreaming: streaming, streamingMessageId: messageId }),
@@ -132,10 +146,17 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
 
   addToolActivity: (activity) =>
     set((s) => {
+      const durableCliTools = new Set([
+        'spawn_cli_agent',
+        'message_cli_agent',
+        'get_cli_agent_status',
+        'stop_cli_agent',
+      ]);
       // If the same callId already exists (e.g. added by onToolConfirmation before tool:start fires),
       // replace it instead of appending — prevents duplicate React keys.
       // Auto-open the Canvas when a CLI agent starts so streaming is immediately visible.
       const shouldOpenCanvas = activity.toolName === 'run_cli_agent'
+        || durableCliTools.has(activity.toolName)
         || activity.toolName === 'run_subagent'
         || activity.agentRun?.agentType === 'subagent';
       const autoOpen = shouldOpenCanvas ? { canvasOpen: true } : {};
@@ -170,7 +191,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   clearToolActivities: (sessionId) =>
     set((s) => {
       if (!sessionId) {
-        return { toolActivities: [], sessionToolActivities: {} };
+        return { toolActivities: [], sessionToolActivities: {}, toolArgProgress: null };
       }
 
       const nextSessionToolActivities = { ...s.sessionToolActivities };
@@ -178,6 +199,25 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
       return {
         toolActivities: s.toolActivities.filter((activity) => activity.sessionId !== sessionId),
         sessionToolActivities: nextSessionToolActivities,
+        toolArgProgress: null,
+      };
+    }),
+
+  clearInactiveActivities: () =>
+    set((s) => {
+      const isActiveTool = (activity: ToolActivity) =>
+        activity.status === 'running' || activity.status === 'awaiting_confirmation';
+      const nextToolActivities = s.toolActivities.filter(isActiveTool);
+      const nextSessionToolActivities = Object.fromEntries(
+        Object.entries(s.sessionToolActivities)
+          .map(([sessionId, activities]) => [sessionId, activities.filter(isActiveTool)] as const)
+          .filter(([, activities]) => activities.length > 0),
+      );
+
+      return {
+        toolActivities: nextToolActivities,
+        sessionToolActivities: nextSessionToolActivities,
+        llmActivities: s.llmActivities.filter((activity) => activity.status === 'running'),
       };
     }),
 
@@ -223,15 +263,30 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
     }),
 
   setCanvasOpen: (open) => set({ canvasOpen: open }),
+  setCanvasFocus: (focus) => set((s) => ({ canvasFocus: focus, canvasOpen: focus ? true : s.canvasOpen })),
   toggleCanvas: () => set((s) => ({ canvasOpen: !s.canvasOpen })),
 
   addActiveAgentLoop: (sessionId, turnId, agentRun) =>
-    set((s) => ({
-      activeAgentLoops: {
-        ...s.activeAgentLoops,
-        [agentRun?.agentRunId ?? sessionId]: { sessionId, turnId, startedAt: Date.now(), agentRun },
-      },
-    })),
+    set((s) => {
+      const isActiveTool = (activity: ToolActivity) =>
+        activity.status === 'running' || activity.status === 'awaiting_confirmation';
+      const nextToolActivities = s.toolActivities.filter(isActiveTool);
+      const nextSessionToolActivities = Object.fromEntries(
+        Object.entries(s.sessionToolActivities)
+          .map(([key, activities]) => [key, activities.filter(isActiveTool)] as const)
+          .filter(([, activities]) => activities.length > 0),
+      );
+
+      return {
+        toolActivities: nextToolActivities,
+        sessionToolActivities: nextSessionToolActivities,
+        llmActivities: s.llmActivities.filter((activity) => activity.status === 'running'),
+        activeAgentLoops: {
+          ...s.activeAgentLoops,
+          [agentRun?.agentRunId ?? sessionId]: { sessionId, turnId, startedAt: Date.now(), agentRun },
+        },
+      };
+    }),
 
   removeActiveAgentLoop: (sessionId, agentRun) =>
     set((s) => {
@@ -239,10 +294,14 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
       delete nextActiveAgentLoops[agentRun?.agentRunId ?? sessionId];
       return { activeAgentLoops: nextActiveAgentLoops };
     }),
+
   hasActiveLoopForSession: (sessionId) => {
     if (!sessionId) return false;
     return Object.values(get().activeAgentLoops).some((loop) => loop.sessionId === sessionId);
   },
+
+  setToolArgProgress: (progress) => set({ toolArgProgress: progress }),
+
   appendCLIAgentChunk: (callId, chunk) =>
     set((s) => {
       if (!callId.trim()) {

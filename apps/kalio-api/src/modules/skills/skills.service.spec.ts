@@ -88,6 +88,37 @@ describe('SkillsService.create()', () => {
 
 // ─── findOne() ────────────────────────────────────────────────────────────────
 
+describe('SkillsService.onApplicationBootstrap()', () => {
+  it('seeds architecture agent superpowers when missing', async () => {
+    const drizzle = makeDrizzle({ findReturnsEmpty: true });
+    const svc = new SkillsService(drizzle);
+
+    await svc.onApplicationBootstrap();
+
+    const insertValues = (drizzle.db.insert as ReturnType<typeof vi.fn>).mock.results[0].value.values;
+    expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'architecture-agent-superpowers',
+      name: 'Architecture Agent Superpowers',
+      source: 'agent',
+      prompt: expect.stringContaining('run_cli_agent and stop_cli_agent to be unavailable'),
+    }));
+  });
+
+  it('refreshes seeded architecture skill content when it already exists', async () => {
+    const drizzle = makeDrizzle();
+    const svc = new SkillsService(drizzle);
+
+    await svc.onApplicationBootstrap();
+
+    const set = (drizzle.db.update as ReturnType<typeof vi.fn>).mock.results[0].value.set;
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Architecture Agent Superpowers',
+      source: 'agent',
+      prompt: expect.stringContaining('Provider errors, max-iteration exhaustion, unavailable tools'),
+    }));
+  });
+});
+
 describe('SkillsService.findOne()', () => {
   it('returns skill when found', async () => {
     const svc = new SkillsService(makeDrizzle());

@@ -12,7 +12,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { io, Socket } from 'socket.io-client';
-import { API_BASE, isMockLlm } from './helpers/test-config';
+import { API_BASE, deleteSessionIfExists, isMockLlm, selectSession } from './helpers/test-config';
 
 const WS_BASE = API_BASE.replace('/api', '');
 
@@ -129,6 +129,42 @@ test.describe('ECS / RA-App live integration', () => {
     }
     const apps = await res.json() as { id: string }[];
     expect(Array.isArray(apps)).toBe(true);
+  });
+
+  test('agent-style raapp_create HTML result renders immediately in chat', async ({ page, request }) => {
+    const sessionTitle = `RA-App generated render ${Date.now()}`;
+    const createSession = await request.post(`${API_BASE}/sessions`, {
+      data: { title: sessionTitle, personaId: 'ra-apps' },
+    });
+    expect(createSession.ok()).toBeTruthy();
+    const session = await createSession.json() as { id: string };
+
+    try {
+      const seedResponse = await request.post(`${API_BASE}/test-support/raapp-hitl/seed`, {
+        data: {
+          sessionId: session.id,
+          toolCallId: `raapp-create-${Date.now()}`,
+          promptMessage: 'Create a tiny HTML RA-App.',
+          assistantMessage: 'I created a tiny HTML RA-App.',
+          block: {
+            type: 'html',
+            mode: 'interactive',
+            content: '<!doctype html><html><body><button id="ready">Generated app works</button></body></html>',
+          },
+          approvals: [],
+        },
+      });
+      expect(seedResponse.ok()).toBeTruthy();
+
+      await page.goto('/');
+      await page.getByTestId('nav-talk').click();
+      await selectSession(page, session.id, sessionTitle);
+
+      await expect(page.getByText('I created a tiny HTML RA-App.')).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByTestId('raapp-iframe')).toBeVisible({ timeout: 10_000 });
+    } finally {
+      await deleteSessionIfExists(request, session.id);
+    }
   });
 
   // ── 4. ECS effects-processor smoke test via direct tool dispatch ──────────

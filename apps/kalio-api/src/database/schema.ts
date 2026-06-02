@@ -1,5 +1,16 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import type { LLMToolCall, ChatAttachment, MCPPolicy } from '@kalio/types';
+import { index, sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import type {
+  AgentFlowRun,
+  AgentFlowPhase,
+  AgentFlowRunStatus,
+  AgentFlowTraceItem,
+  ChatAttachment,
+  ChatRunPhase,
+  ChatRunStatus,
+  LLMToolCall,
+  MCPPolicy,
+  SubAgentFlowResult,
+} from '@kalio/types';
 // ─── personas ──────────────────────────────────────────────────────────────────
 export const personas = sqliteTable('personas', {
   id:           text('id').primaryKey(),
@@ -18,10 +29,11 @@ export const sessions = sqliteTable('sessions', {
   id:          text('id').primaryKey(),
   personaId:   text('persona_id').notNull().references(() => personas.id, { onDelete: 'cascade' }),
   title:       text('title').notNull().default(''),
-  kind:        text('kind', { enum: ['chat', 'subagent'] }).notNull().default('chat'),
+  kind:        text('kind', { enum: ['chat', 'subagent', 'cli-agent', 'agent-flow'] }).notNull().default('chat'),
   parentSessionId: text('parent_session_id'),
   parentTurnId: text('parent_turn_id'),
   parentToolCallId: text('parent_tool_call_id'),
+  archivedAt:  integer('archived_at', { mode: 'timestamp_ms' }),
   createdAt:   integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt:   integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
@@ -38,6 +50,68 @@ export const messages = sqliteTable('messages', {
   attachments: text('attachments', { mode: 'json' }).$type<ChatAttachment[] | null>(),
   createdAt:  integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
+
+export const chatRuns = sqliteTable('chat_runs', {
+  id:        text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  turnId:    text('turn_id').notNull(),
+  phase:     text('phase').$type<ChatRunPhase>().notNull(),
+  status:    text('status').$type<ChatRunStatus>().notNull(),
+  provider:  text('provider'),
+  model:     text('model'),
+  retryCount: integer('retry_count').notNull().default(0),
+  safeResume: integer('safe_resume', { mode: 'boolean' }).notNull().default(false),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  lastHeartbeatAt: integer('last_heartbeat_at', { mode: 'timestamp_ms' }).notNull(),
+  completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
+});
+
+export const agentFlowRuns = sqliteTable('agent_flow_runs', {
+  id: text('id').primaryKey(),
+  parentSessionId: text('parent_session_id').notNull(),
+  parentToolCallId: text('parent_tool_call_id'),
+  childSessionId: text('child_session_id').notNull(),
+  openChatSessionId: text('open_chat_session_id'),
+  openGraphRunId: text('open_graph_run_id'),
+  flowDefinitionId: text('flow_definition_id').notNull(),
+  status: text('status').$type<AgentFlowRunStatus>().notNull(),
+  startMode: text('start_mode', { enum: ['durable', 'blocking'] }).notNull(),
+  returnMode: text('return_mode', { enum: ['summary', 'full_trace', 'artifacts_only'] }).notNull(),
+  waitingForNodeId: text('waiting_for_node_id'),
+  activeNodeIds: text('active_node_ids', { mode: 'json' }).$type<string[]>(),
+  completedNodeIds: text('completed_node_ids', { mode: 'json' }).$type<string[]>(),
+  activePhases: text('active_phases', { mode: 'json' }).$type<AgentFlowPhase[]>(),
+  completedPhases: text('completed_phases', { mode: 'json' }).$type<AgentFlowPhase[]>(),
+  nodeVisitCounts: text('node_visit_counts', { mode: 'json' }).$type<Record<string, number>>(),
+  maxIterations: integer('max_iterations'),
+  returnToOrchestratorCount: integer('return_to_orchestrator_count'),
+  checkpoint: text('checkpoint', { mode: 'json' }).$type<AgentFlowRun['checkpoint']>(),
+  result: text('result', { mode: 'json' }).$type<SubAgentFlowResult>(),
+  summary: text('summary'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  finishedAt: integer('finished_at'),
+}, (table) => ({
+  parentUpdatedAtIdx: index('agent_flow_runs_parent_updated_at_idx').on(table.parentSessionId, table.updatedAt),
+  statusUpdatedAtIdx: index('agent_flow_runs_status_updated_at_idx').on(table.status, table.updatedAt),
+}));
+
+export const agentFlowEvents = sqliteTable('agent_flow_events', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => agentFlowRuns.id, { onDelete: 'cascade' }),
+  sequence: integer('sequence').notNull(),
+  type: text('type').notNull(),
+  status: text('status'),
+  message: text('message').notNull(),
+  event: text('event', { mode: 'json' }).$type<AgentFlowTraceItem>().notNull(),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  runSequenceIdx: index('agent_flow_events_run_sequence_idx').on(table.runId, table.sequence),
+  runCreatedAtIdx: index('agent_flow_events_run_created_at_idx').on(table.runId, table.createdAt),
+}));
 
 // ─── persona_kv ───────────────────────────────────────────────────────────────
 export const personaKV = sqliteTable('persona_kv', {
@@ -146,25 +220,51 @@ export const auditLog = sqliteTable('audit_log', {
   id:         text('id').primaryKey(),
   sessionId:  text('session_id'),
   type:       text('type', {
-    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'error', 'raapp_native_call', 'raapp_native_approved'],
-  }).notNull().$type<'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'error' | 'raapp_native_call' | 'raapp_native_approved'>(),
+    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'architecture_event', 'error', 'raapp_native_call', 'raapp_native_approved', 'external_hitl', 'escalation'],
+  }).notNull().$type<'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'architecture_event' | 'error' | 'raapp_native_call' | 'raapp_native_approved' | 'external_hitl' | 'escalation'>(),
   label:      text('label').notNull(),
   data:       text('data', { mode: 'json' }).$type<Record<string, unknown>>(),
   durationMs: integer('duration_ms'),
   chunkCount: integer('chunk_count'),
   createdAt:  integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-});
+}, (table) => ({
+  createdAtIdx: index('audit_log_created_at_idx').on(table.createdAt),
+  sessionCreatedAtIdx: index('audit_log_session_created_at_idx').on(table.sessionId, table.createdAt),
+  typeCreatedAtIdx: index('audit_log_type_created_at_idx').on(table.type, table.createdAt),
+}));
+
+export const auditLogArchive = sqliteTable('audit_log_archive', {
+  id:         text('id').primaryKey(),
+  sessionId:  text('session_id'),
+  type:       text('type', {
+    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'architecture_event', 'error', 'raapp_native_call', 'raapp_native_approved', 'external_hitl', 'escalation'],
+  }).notNull().$type<'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'architecture_event' | 'error' | 'raapp_native_call' | 'raapp_native_approved' | 'external_hitl' | 'escalation'>(),
+  label:      text('label').notNull(),
+  data:       text('data', { mode: 'json' }).$type<Record<string, unknown>>(),
+  durationMs: integer('duration_ms'),
+  chunkCount: integer('chunk_count'),
+  createdAt:  integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  archivedAt: integer('archived_at', { mode: 'timestamp_ms' }).notNull(),
+}, (table) => ({
+  createdAtIdx: index('audit_log_archive_created_at_idx').on(table.createdAt),
+  sessionCreatedAtIdx: index('audit_log_archive_session_created_at_idx').on(table.sessionId, table.createdAt),
+  typeCreatedAtIdx: index('audit_log_archive_type_created_at_idx').on(table.type, table.createdAt),
+}));
 
 // ─── Type inference helpers ───────────────────────────────────────────────────
 export type PersonaRow         = typeof personas.$inferSelect;
 export type SessionRow         = typeof sessions.$inferSelect;
 export type MessageRow         = typeof messages.$inferSelect;
+export type ChatRunRow         = typeof chatRuns.$inferSelect;
+export type AgentFlowRunRow    = typeof agentFlowRuns.$inferSelect;
+export type AgentFlowEventRow  = typeof agentFlowEvents.$inferSelect;
 export type PersonaKVRow       = typeof personaKV.$inferSelect;
 export type CredentialRow      = typeof credentials.$inferSelect;
 export type MCPServerRow       = typeof mcpServers.$inferSelect;
 export type SkillRow           = typeof skills.$inferSelect;
 export type ToolOverrideRow    = typeof toolOverrides.$inferSelect;
 export type AuditLogRow        = typeof auditLog.$inferSelect;
+export type AuditLogArchiveRow = typeof auditLogArchive.$inferSelect;
 export type AppSettingRow      = typeof appSettings.$inferSelect;
 export type AllowedPathRow     = typeof allowedPaths.$inferSelect;
 export type RaappPendingApprovalRow = typeof raappPendingApprovals.$inferSelect;
@@ -172,6 +272,9 @@ export type RaappPendingApprovalRow = typeof raappPendingApprovals.$inferSelect;
 export type InsertPersona      = typeof personas.$inferInsert;
 export type InsertSession      = typeof sessions.$inferInsert;
 export type InsertMessage      = typeof messages.$inferInsert;
+export type InsertChatRun      = typeof chatRuns.$inferInsert;
+export type InsertAgentFlowRun = typeof agentFlowRuns.$inferInsert;
+export type InsertAgentFlowEvent = typeof agentFlowEvents.$inferInsert;
 export type InsertPersonaKV    = typeof personaKV.$inferInsert;
 export type InsertCredential   = typeof credentials.$inferInsert;
 export type InsertMCPServer    = typeof mcpServers.$inferInsert;

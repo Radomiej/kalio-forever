@@ -84,6 +84,10 @@ export class SessionManagerService {
     await this.repo.saveMessage(msg);
   }
 
+  async persistMessage(message: ChatMessage): Promise<void> {
+    await this.repo.saveMessage(message);
+  }
+
   async saveToolResult(sessionId: string, toolCallId: string, content: string): Promise<void> {
     const msg: ChatMessage = {
       id: nanoid(),

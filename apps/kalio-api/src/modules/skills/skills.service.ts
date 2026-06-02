@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { nanoid } from 'nanoid';
 import type { Skill, CreateSkillDto, UpdateSkillDto } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
@@ -6,8 +8,54 @@ import { skills } from '../../database/schema';
 import { eq, inArray } from 'drizzle-orm';
 
 @Injectable()
-export class SkillsService {
+export class SkillsService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(SkillsService.name);
+
   constructor(private readonly drizzle: DrizzleService) {}
+
+  async onApplicationBootstrap(): Promise<void> {
+    const seededSkills = this.loadSeedSkills();
+    const now = new Date();
+    for (const [id, seed] of Object.entries(seededSkills)) {
+      const existing = await this.drizzle.db
+        .select({ id: skills.id })
+        .from(skills)
+        .where(eq(skills.id, id))
+        .then((rows) => rows[0]);
+      if (existing) {
+        await this.drizzle.db
+          .update(skills)
+          .set({
+            name: seed.name,
+            description: seed.description ?? '',
+            prompt: seed.prompt,
+            source: seed.source ?? 'agent',
+            updatedAt: now,
+          })
+          .where(eq(skills.id, id));
+      } else {
+        await this.drizzle.db.insert(skills).values({
+          id,
+          name: seed.name,
+          description: seed.description ?? '',
+          prompt: seed.prompt,
+          source: seed.source ?? 'agent',
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+  }
+
+  private loadSeedSkills(): Record<string, { name: string; description?: string; prompt: string; source?: 'user' | 'agent' }> {
+    try {
+      const configPath = join(__dirname, '../../assets/skills.json');
+      return JSON.parse(readFileSync(configPath, 'utf-8'));
+    } catch (error) {
+      this.logger.error('Failed to load skills config', error);
+      return {};
+    }
+  }
 
   async findAll(): Promise<Skill[]> {
     const rows = await this.drizzle.db.select().from(skills).orderBy(skills.createdAt);

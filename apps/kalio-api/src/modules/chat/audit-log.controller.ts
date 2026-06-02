@@ -1,12 +1,15 @@
-import { Controller, Get, Delete, Query, BadRequestException } from '@nestjs/common';
-import { desc, and, gte, lte, inArray } from 'drizzle-orm';
+import { Controller, Get, Delete, Query, BadRequestException, Post, Put, Body } from '@nestjs/common';
 import { DrizzleService } from '../../database/drizzle.service';
-import { auditLog } from '../../database/schema';
-import type { AuditType } from '@kalio/types';
+import { auditLog, auditLogArchive } from '../../database/schema';
+import type { AuditRetentionPolicy, AuditType } from '@kalio/types';
+import { AuditService, type AuditLogSource } from './audit.service';
 
 @Controller('audit-log')
 export class AuditLogController {
-  constructor(private readonly drizzle: DrizzleService) {}
+  constructor(
+    private readonly drizzle: DrizzleService,
+    private readonly audit: AuditService,
+  ) {}
 
   /**
    * GET /api/audit-log
@@ -20,43 +23,36 @@ export class AuditLogController {
   async list(
     @Query('limit') limitStr?: string,
     @Query('type') typeStr?: string,
+    @Query('sessionId') sessionId?: string,
     @Query('since') sinceStr?: string,
     @Query('until') untilStr?: string,
+    @Query('source') sourceStr?: string,
   ) {
-    const limit = Math.min(parseInt(limitStr ?? '200', 10) || 200, 500);
+    const parsedLimit = parseInt(limitStr ?? '200', 10);
+    const limit = Math.max(1, Math.min(Number.isFinite(parsedLimit) ? parsedLimit : 200, 2000));
     const types = typeStr ? (typeStr.split(',').filter(Boolean) as AuditType[]) : null;
-    const since = sinceStr ? parseInt(sinceStr, 10) : null;
-    const until = untilStr ? parseInt(untilStr, 10) : null;
+    const since = parseTimestampQuery(sinceStr);
+    const until = parseTimestampQuery(untilStr);
+    const source = parseSource(sourceStr);
+    return this.audit.listEntries({ limit, types, sessionId, since, until, source });
+  }
 
-    const conditions = [];
-    if (types && types.length > 0) {
-      conditions.push(inArray(auditLog.type, types));
-    }
-    if (since) {
-      conditions.push(gte(auditLog.createdAt, new Date(since)));
-    }
-    if (until) {
-      conditions.push(lte(auditLog.createdAt, new Date(until)));
-    }
+  @Get('retention')
+  retention() {
+    return this.audit.retentionStatus();
+  }
 
-    const rows = await this.drizzle.db
-      .select()
-      .from(auditLog)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(auditLog.createdAt))
-      .limit(limit);
+  @Put('retention')
+  updateRetention(@Body() policy: Partial<AuditRetentionPolicy>) {
+    return this.audit.setRetentionPolicy(policy);
+  }
 
-    // Return in chronological order (oldest first)
-    return rows.reverse().map((r) => ({
-      id: r.id,
-      sessionId: r.sessionId,
-      type: r.type,
-      label: r.label,
-      data: r.data ?? null,
-      durationMs: r.durationMs ?? null,
-      chunkCount: r.chunkCount ?? null,
-      createdAt: r.createdAt instanceof Date ? r.createdAt.getTime() : r.createdAt,
-    }));
+  @Post('retention/run')
+  runRetention(@Query('confirm') confirm?: string) {
+    if (confirm !== 'true') {
+      throw new BadRequestException('Pass ?confirm=true to run audit retention now');
+    }
+    return this.audit.runRetentionNow();
   }
 
   /**
@@ -69,6 +65,19 @@ export class AuditLogController {
       throw new BadRequestException('Pass ?confirm=true to clear the audit log');
     }
     await this.drizzle.db.delete(auditLog);
+    await this.drizzle.db.delete(auditLogArchive);
     return { deleted: true };
   }
+}
+
+function parseSource(source: string | undefined): AuditLogSource {
+  if (!source) return 'hot';
+  if (source === 'hot' || source === 'archive' || source === 'all') return source;
+  throw new BadRequestException('Invalid audit log source. Use hot, archive, or all.');
+}
+
+function parseTimestampQuery(value: string | undefined): number | null {
+  if (value == null) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }

@@ -4,8 +4,14 @@ import { ToolDispatchService } from '../tool-dispatch.service';
 import { TurnState } from '../turn-state';
 import { TOOL_REGISTRY } from '../chat.tokens';
 import { MCPService } from '../../mcp/mcp.service';
+import { HitlNotificationService } from '../../hitl/hitl-notification.service';
+import { HitlPolicyService } from '../../hitl/hitl-policy.service';
 import type { StreamContext } from '../interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from '../interfaces/tool-registry-entry.interface';
+import type { DrizzleService } from '../../../database/drizzle.service';
+import type { MemoryService } from '../../memory/memory.service';
+import type { WebSearchService } from '../../search/web-search.service';
+import { WebSearchTool } from '../../tool/tools/web-search.tool';
 
 function makeCtx(): StreamContext & { emit: ReturnType<typeof vi.fn> } {
   const emit = vi.fn();
@@ -23,6 +29,16 @@ function makeEntry(name: string, requiresConfirmation: boolean, result: unknown)
     meta: { name, description: 'test', parameters: {}, requiresConfirmation },
     execute: vi.fn().mockResolvedValue(result),
   };
+}
+
+function makeDrizzleMock(personaId = 'persona-dispatch'): DrizzleService {
+  const query = {
+    select: vi.fn(() => query),
+    from: vi.fn(() => query),
+    where: vi.fn(() => query),
+    get: vi.fn(() => ({ personaId })),
+  };
+  return { db: query } as unknown as DrizzleService;
 }
 
 describe('ToolDispatchService', () => {
@@ -75,6 +91,47 @@ describe('ToolDispatchService', () => {
       expect(result.errorCode).toBe('TOOL_EXECUTION_FAILED');
       expect(result.errorMessage).toContain('exec failed');
     });
+
+    it('dispatches web_search with offline_search override and persists online result silently', async () => {
+      const webSearch = {
+        search: vi.fn().mockResolvedValue({
+          answer: 'Fresh external answer',
+          citations: ['https://example.com/fresh'],
+          model: 'sonar',
+          provider: 'perplexity',
+        }),
+      } satisfies Pick<WebSearchService, 'search'>;
+      const memory = {
+        searchWebResults: vi.fn().mockResolvedValue([]),
+        ingestWebSearchResult: vi.fn().mockResolvedValue({ ids: ['mem-1'], count: 1 }),
+      } satisfies Pick<MemoryService, 'searchWebResults' | 'ingestWebSearchResult'>;
+      const webTool = new WebSearchTool(webSearch as unknown as WebSearchService, memory as unknown as MemoryService, makeDrizzleMock());
+      const webEntry: ToolRegistryEntry = {
+        meta: { name: 'web_search', description: 'search', parameters: {}, requiresConfirmation: false },
+        execute: (req) => webTool.execute(req),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [webEntry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+
+      const result = await scopedService.dispatch('call-web', 'web_search', { query: 'latest status', offline_search: false }, makeCtx());
+
+      expect(result).toEqual({
+        callId: 'call-web',
+        status: 'success',
+        data: expect.objectContaining({ offline: false, memory: { ids: ['mem-1'], count: 1 } }),
+      });
+      expect(memory.searchWebResults).not.toHaveBeenCalled();
+      expect(webSearch.search).toHaveBeenCalledWith('latest status');
+      expect(memory.ingestWebSearchResult).toHaveBeenCalledWith(
+        expect.stringContaining('Fresh external answer'),
+        expect.objectContaining({ source: 'web_search', query: 'latest status', persona_id: 'persona-dispatch' }),
+      );
+    });
   });
 
   describe('dispatch — confirmation required', () => {
@@ -122,6 +179,51 @@ describe('ToolDispatchService', () => {
 
       const result = await service.dispatch('c1', 'dangerous_tool', {}, ctx);
       expect(result.status).toBe('success');
+    });
+
+    it('logs requested and confirmed HITL lifecycle events when confirmed', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const hitlNotifications = {
+        notifyApprovalRequested: vi.fn().mockResolvedValue(undefined),
+        logApprovalLifecycle: vi.fn().mockResolvedValue(undefined),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlNotificationService, useValue: hitlNotifications },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.resolveConfirmation(data['requestId']));
+        }
+      });
+
+      const result = await scopedService.dispatch('c1', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(result.status).toBe('success');
+      expect(hitlNotifications.notifyApprovalRequested).toHaveBeenCalledWith(expect.objectContaining({
+        request: expect.objectContaining({
+          kind: 'tool',
+          sessionId: 'sid',
+          name: 'dangerous_tool',
+          toolCallId: 'c1',
+        }),
+      }));
+      expect(hitlNotifications.logApprovalLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+        eventType: 'hitl_approval_confirmed',
+        source: 'manual',
+        request: expect.objectContaining({
+          kind: 'tool',
+          sessionId: 'sid',
+          name: 'dangerous_tool',
+          toolCallId: 'c1',
+        }),
+      }));
     });
 
     it('ignores confirmation attempts from a different session', async () => {
@@ -212,6 +314,33 @@ describe('ToolDispatchService', () => {
       }));
     });
 
+    it('rejects tool calls outside the provided runtime scope before HITL', async () => {
+      const entry = makeEntry('vfs_write', true, { path: 'index.html' });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      const result = await scopedService.dispatch(
+        'c1',
+        'vfs_write',
+        { filePath: 'index.html', content: '<h1>x</h1>' },
+        ctx,
+        [{ name: 'vfs_read', description: 'Read VFS file', parameters: {}, requiresConfirmation: false }],
+      );
+
+      expect(result).toMatchObject({
+        status: 'error',
+        errorCode: 'TOOL_NOT_AVAILABLE',
+      });
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).not.toHaveBeenCalled();
+    });
+
     it('keeps HITL confirmation for shared-VFS subagent writes', async () => {
       const entry = makeEntry('vfs_write', true, { path: 'index.html' });
       const moduleRef = await Test.createTestingModule({
@@ -249,6 +378,48 @@ describe('ToolDispatchService', () => {
       expect(entry.execute).not.toHaveBeenCalled();
     });
 
+    it('REGRESSION: auto-approves shared VFS writes only when the subagent run explicitly opts in', async () => {
+      const entry = makeEntry('vfs_write', true, { path: 'evidence/proof.json' });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'arch-run-materializer',
+        vfsSessionId: 'arch-run-root',
+        agentRun: {
+          agentRunId: 'sub-run-materializer',
+          agentType: 'subagent' as const,
+          parentSessionId: 'arch-run-root',
+          vfsMode: 'shared' as const,
+          autoApproveTools: ['vfs_write'],
+        },
+      };
+
+      const result = await scopedService.dispatch(
+        'c1',
+        'vfs_write',
+        { filePath: 'evidence/proof.json', content: '{"status":"implemented"}' },
+        ctx,
+      );
+
+      expect(result.status).toBe('success');
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'arch-run-materializer',
+        vfsSessionId: 'arch-run-root',
+        agentRun: expect.objectContaining({
+          agentType: 'subagent',
+          vfsMode: 'shared',
+          autoApproveTools: ['vfs_write'],
+        }),
+      }));
+    });
+
     it('REGRESSION: optionally auto-approves a whitelisted isolated child image_generate tool', async () => {
       const entry = makeEntry('image_generate', true, { path: 'images/coffee-hero.png' });
       const moduleRef = await Test.createTestingModule({
@@ -276,6 +447,100 @@ describe('ToolDispatchService', () => {
       expect(result.status).toBe('success');
       expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
       expect(entry.execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'image_generate' }));
+    });
+
+    it('REGRESSION: optionally auto-approves shared subagent CLI delegation tools', async () => {
+      const entry = makeEntry('run_cli_agent', true, { sessionId: 'cli-session', status: 'completed' });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'architecture-orchestrator',
+        vfsSessionId: 'architecture-root',
+        agentRun: {
+          agentRunId: 'arch-sub-run-cli',
+          agentType: 'subagent' as const,
+          parentSessionId: 'architecture-root',
+          vfsMode: 'shared' as const,
+          autoApproveTools: ['run_cli_agent'],
+        },
+      };
+
+      const result = await scopedService.dispatch('c1', 'run_cli_agent', { agentId: 'copilot' }, ctx);
+
+      expect(result.status).toBe('success');
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'run_cli_agent' }));
+    });
+
+    it('REGRESSION: optionally auto-approves shared subagent host project writes', async () => {
+      const entry = makeEntry('fs_write', true, { path: 'C:\\Projekty\\TurboProject2\\package.json' });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'architecture-materializer',
+        vfsSessionId: 'architecture-root',
+        agentRun: {
+          agentRunId: 'arch-sub-run-fs',
+          agentType: 'subagent' as const,
+          parentSessionId: 'architecture-root',
+          vfsMode: 'shared' as const,
+          autoApproveTools: ['fs_write'],
+        },
+      };
+
+      const result = await scopedService.dispatch('c1', 'fs_write', {
+        path: 'C:\\Projekty\\TurboProject2\\package.json',
+        content: '{"scripts":{"build":"vite build"}}',
+      }, ctx);
+
+      expect(result.status).toBe('success');
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'fs_write' }));
+    });
+
+    it('optionally auto-approves shared subagent terminal spawn for architecture verification', async () => {
+      const entry = makeEntry('terminal_spawn', true, { id: 'term-1' });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'architecture-tester',
+        vfsSessionId: 'architecture-root',
+        agentRun: {
+          agentRunId: 'arch-sub-run-terminal',
+          agentType: 'subagent' as const,
+          parentSessionId: 'architecture-root',
+          vfsMode: 'shared' as const,
+          autoApproveTools: ['terminal_spawn'],
+        },
+      };
+
+      const result = await scopedService.dispatch('c1', 'terminal_spawn', {
+        command: 'npm',
+        args: ['run', 'build'],
+        cwd: 'C:\\Projekty\\TurboProject2',
+      }, ctx);
+
+      expect(result.status).toBe('success');
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'terminal_spawn' }));
     });
 
     it('does not auto-timeout HITL confirmation for subagent turns', async () => {
@@ -324,6 +589,199 @@ describe('ToolDispatchService', () => {
         scopedService.resolveConfirmation(capturedRequestId!);
         const result = await dispatchPromise;
         expect(result.status).toBe('success');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('REGRESSION: aborting a subagent HITL wait invalidates confirmation and returns cancelled', async () => {
+      const entry = makeEntry('dangerous_tool', true, { ok: true });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const abortController = new AbortController();
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'sub-session',
+        vfsSessionId: 'sub-session',
+        abortSignal: abortController.signal,
+        agentRun: {
+          agentRunId: 'sub-run-abort',
+          agentType: 'subagent' as const,
+          parentSessionId: 'master-session',
+          vfsMode: 'shared' as const,
+        },
+      };
+
+      const dispatchPromise = scopedService.dispatch('c1', 'dangerous_tool', {}, ctx);
+
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.objectContaining({
+        toolName: 'dangerous_tool',
+        sessionId: 'sub-session',
+        timeoutMs: 0,
+      }));
+
+      abortController.abort();
+
+      const result = await Promise.race([
+        dispatchPromise,
+        new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+      ]);
+
+      expect(result).toEqual(expect.objectContaining({ status: 'cancelled' }));
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_invalidated', expect.objectContaining({
+        reason: 'cancelled',
+        message: expect.stringContaining('aborted'),
+      }));
+      expect(entry.execute).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('dispatch — configurable HITL policy', () => {
+    it('skips manual confirmation when the global policy approves the tool (bypass)', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'bypass' }),
+      };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
+        ],
+      }).compile();
+
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      const result = await scopedService.dispatch('c-bypass', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(result.status).toBe('success');
+      expect(hitlPolicy.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'tool',
+        sessionId: 'sid',
+        name: 'dangerous_tool',
+        args: { path: 'demo.txt' },
+      }));
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes the turn abortSignal into global HITL approval evaluation', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'bypass' }),
+      };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
+        ],
+      }).compile();
+
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      await scopedService.dispatch('c-abort', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(hitlPolicy.resolveApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ abortSignal: ctx.abortSignal }),
+      );
+    });
+
+    it('returns cancelled when the global auto HITL policy rejects the tool', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({
+          status: 'rejected',
+          source: 'auto',
+          reason: 'The args request a destructive write outside the allowed plan.',
+        }),
+      };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
+        ],
+      }).compile();
+
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      const result = await scopedService.dispatch('c-auto-reject', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(result.status).toBe('cancelled');
+      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(entry.execute).not.toHaveBeenCalled();
+    });
+
+    it('uses representative fallback only after a manual confirmation timeout', async () => {
+      vi.useFakeTimers();
+      try {
+        const entry = makeEntry('dangerous_tool', true, { done: true });
+        const hitlPolicy = {
+          resolveApproval: vi.fn().mockResolvedValue({ status: 'manual', source: 'manual' }),
+          resolveUnattendedApproval: vi.fn().mockResolvedValue({
+            status: 'approved',
+            source: 'representative',
+            reason: 'User did not respond; representative approved the constrained request.',
+          }),
+        };
+        const hitlNotifications = {
+          notifyApprovalRequested: vi.fn().mockResolvedValue(undefined),
+          logApprovalLifecycle: vi.fn().mockResolvedValue(undefined),
+        };
+
+        const moduleRef = await Test.createTestingModule({
+          providers: [
+            ToolDispatchService,
+            { provide: TOOL_REGISTRY, useValue: [entry] },
+            { provide: HitlPolicyService, useValue: hitlPolicy },
+            { provide: HitlNotificationService, useValue: hitlNotifications },
+          ],
+        }).compile();
+
+        const scopedService = moduleRef.get(ToolDispatchService);
+        const ctx = makeCtx();
+        const dispatchPromise = scopedService.dispatch('c-timeout', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+        await Promise.resolve();
+
+        expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.objectContaining({
+          toolName: 'dangerous_tool',
+          timeoutMs: 600_000,
+        }));
+        const requestId = (ctx.emit.mock.calls.find(([event]) => event === 'tool:confirmation_required')?.[1] as { requestId: string }).requestId;
+
+        await vi.advanceTimersByTimeAsync(600_000);
+        const result = await dispatchPromise;
+
+        expect(result.status).toBe('success');
+        expect(hitlPolicy.resolveUnattendedApproval).toHaveBeenCalledWith(expect.objectContaining({
+          kind: 'tool',
+          sessionId: 'sid',
+          name: 'dangerous_tool',
+          toolCallId: 'c-timeout',
+        }));
+        expect(hitlNotifications.logApprovalLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+          eventType: 'hitl_approval_timeout',
+          requestId,
+        }));
+        expect(hitlNotifications.logApprovalLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+          eventType: 'hitl_approval_representative_approved',
+          requestId,
+          source: 'representative',
+          reason: 'User did not respond; representative approved the constrained request.',
+        }));
+        expect(entry.execute).toHaveBeenCalledTimes(1);
       } finally {
         vi.useRealTimers();
       }

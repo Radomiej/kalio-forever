@@ -66,6 +66,28 @@ describe('ModelSettingsSection', () => {
     await waitFor(() => expect(screen.getByTestId('gen-temperature-value')).toHaveTextContent('1.20'));
   });
 
+  it('shows the active provider, model, and base URL when runtime config is available', async () => {
+    const activeRuntimeConfig = {
+      ...ACTIVE_RUNTIME_CONFIG,
+      baseUrl: 'https://api.openai.com/v1',
+    };
+
+    mockFetch({
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+      'GET /api/llm/active/models': { models: ['gpt-4o-mini', 'gpt-4o'] },
+    });
+
+    render(<ModelSettingsSection activeRuntimeConfig={activeRuntimeConfig} onRuntimeConfigChange={vi.fn()} />);
+
+    expect(await screen.findByRole('heading', { name: 'Active Provider' })).toBeInTheDocument();
+    expect(screen.getByText('openai')).toBeInTheDocument();
+    expect(screen.getByText('My OpenAI')).toBeInTheDocument();
+    expect(screen.getByText('saved provider')).toBeInTheDocument();
+    expect(screen.getByText(/Current model:/i)).toHaveTextContent('gpt-4o-mini');
+    expect(screen.getByText(/Base URL:/i).parentElement).toHaveTextContent('https://api.openai.com/v1');
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
+  });
+
   it('populates model dropdown from GET /api/llm/active/models', async () => {
     mockFetch({
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },

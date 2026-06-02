@@ -1,0 +1,153 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import type { ToolActivity } from '../../../store/agentStore';
+import { ExecutionGraphHeader } from './ExecutionGraphHeader';
+
+function makeToolActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
+  return {
+    callId: 'call-1',
+    toolName: 'run_subagent',
+    args: {},
+    status: 'running',
+    startedAt: 1,
+    ...overrides,
+  };
+}
+
+describe('ExecutionGraphHeader', () => {
+  it('uses session titles and fallback labels for live loops and caps visible tool chips at four', () => {
+    const onCardDensityChange = vi.fn();
+    const onFocusModeChange = vi.fn();
+    const onDecreaseZoom = vi.fn();
+    const onIncreaseZoom = vi.fn();
+    const onResetZoom = vi.fn();
+
+    render(
+      <ExecutionGraphHeader
+        cardDensity="compact"
+        collapseTools={false}
+        focusMode="latest-architecture"
+        hydrationStatus={{
+          label: 'VFS 1 missing',
+          tone: 'warning',
+          detail: '1 branch read failed, 1 succeeded, 0 unknown',
+          readFailures: 1,
+          readSuccesses: 1,
+          totalBranches: 2,
+        }}
+        onCardDensityChange={onCardDensityChange}
+        onDecreaseZoom={onDecreaseZoom}
+        onFocusModeChange={onFocusModeChange}
+        onIncreaseZoom={onIncreaseZoom}
+        onResetZoom={onResetZoom}
+        runningLoops={[
+          { sessionId: 'session-1', turnId: 'turn-1', agentRun: { label: 'Orchestrator' } },
+          { sessionId: 'session-2', turnId: 'turn-2' },
+          { sessionId: 'session-3', turnId: 'turn-3' },
+        ]}
+        runningToolActivities={[
+          makeToolActivity({ callId: 'call-1', toolName: 'vfs_read' }),
+          makeToolActivity({ callId: 'call-2', toolName: 'vfs_write' }),
+          makeToolActivity({ callId: 'call-3', toolName: 'run_subagent' }),
+          makeToolActivity({ callId: 'call-4', toolName: 'design_preview' }),
+          makeToolActivity({ callId: 'call-5', toolName: 'spawn_cli_agent' }),
+        ]}
+        sessionTitleById={new Map([
+          ['session-2', 'Branch read'],
+        ])}
+        showFocusToggle
+        zoom={1.15}
+      />,
+    );
+
+    expect(screen.getByText('Execution Graph')).toBeInTheDocument();
+    expect(screen.getByText('Orchestrator')).toBeInTheDocument();
+    expect(screen.getByText('Branch read')).toBeInTheDocument();
+    expect(screen.getByText('Agent run')).toBeInTheDocument();
+    expect(screen.getByText('3 agents live')).toBeInTheDocument();
+    expect(screen.getByText('5 tools active')).toBeInTheDocument();
+    expect(screen.getByText('VFS 1 missing')).toHaveAttribute('title', '1 branch read failed, 1 succeeded, 0 unknown');
+    expect(screen.getByRole('button', { name: 'Compact' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Detailed' })).toBeInTheDocument();
+    expect(screen.getByTestId('graph-card-density-compact')).toHaveClass('min-h-6');
+    expect(screen.getByTestId('graph-card-density-detailed')).toHaveClass('min-h-6');
+    expect(screen.getByTestId('graph-zoom-out')).toHaveClass('min-h-7');
+    expect(screen.getByTestId('graph-zoom-in')).toHaveClass('min-h-7');
+    expect(screen.getByRole('button', { name: 'Latest run' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument();
+    expect(screen.getByText('vfs_read')).toBeInTheDocument();
+    expect(screen.getByText('vfs_write')).toBeInTheDocument();
+    expect(screen.getByText('run_subagent')).toBeInTheDocument();
+    expect(screen.getByText('design_preview')).toBeInTheDocument();
+    expect(screen.queryByText('spawn_cli_agent')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('graph-card-density-detailed'));
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    fireEvent.click(screen.getByTestId('graph-zoom-out'));
+    fireEvent.click(screen.getByTestId('graph-zoom-in'));
+    fireEvent.click(screen.getByTestId('graph-zoom-reset'));
+
+    expect(onCardDensityChange).toHaveBeenCalledWith('detailed');
+    expect(onFocusModeChange).toHaveBeenCalledWith('all');
+    expect(onDecreaseZoom).toHaveBeenCalled();
+    expect(onIncreaseZoom).toHaveBeenCalled();
+    expect(onResetZoom).toHaveBeenCalled();
+  });
+
+  it('uses singular live counters when exactly one loop and one tool are active', () => {
+    render(
+      <ExecutionGraphHeader
+        cardDensity="compact"
+        collapseTools
+        focusMode="latest-architecture"
+        hydrationStatus={null}
+        onCardDensityChange={vi.fn()}
+        onDecreaseZoom={vi.fn()}
+        onFocusModeChange={vi.fn()}
+        onIncreaseZoom={vi.fn()}
+        onResetZoom={vi.fn()}
+        runningLoops={[{ sessionId: 'session-1', turnId: 'turn-1' }]}
+        runningToolActivities={[makeToolActivity({ callId: 'call-1', toolName: 'vfs_read' })]}
+        sessionTitleById={new Map()}
+        showFocusToggle={true}
+        zoom={1}
+      />,
+    );
+
+    expect(screen.getByText('1 agent live')).toBeInTheDocument();
+    expect(screen.getByText('1 tool active')).toBeInTheDocument();
+    expect(screen.getByText('tools grouped')).toBeInTheDocument();
+  });
+
+  it('hides the focus toggle when disabled and applies success hydration styling', () => {
+    render(
+      <ExecutionGraphHeader
+        cardDensity="detailed"
+        collapseTools
+        focusMode="all"
+        hydrationStatus={{
+          label: 'VFS 2/2 ok',
+          tone: 'success',
+          detail: 'All architecture branch reads succeeded',
+          readFailures: 0,
+          readSuccesses: 2,
+          totalBranches: 2,
+        }}
+        onCardDensityChange={vi.fn()}
+        onDecreaseZoom={vi.fn()}
+        onFocusModeChange={vi.fn()}
+        onIncreaseZoom={vi.fn()}
+        onResetZoom={vi.fn()}
+        runningLoops={[]}
+        runningToolActivities={[]}
+        sessionTitleById={new Map()}
+        showFocusToggle={false}
+        zoom={0.95}
+      />,
+    );
+
+    expect(screen.queryByTestId('graph-focus-latest-architecture')).toBeNull();
+    expect(screen.getByText('VFS 2/2 ok')).toHaveClass('border-emerald-500/25');
+    expect(screen.getByText('tools grouped')).toBeInTheDocument();
+  });
+});

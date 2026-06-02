@@ -27,6 +27,18 @@ const ALLOWED_UPLOAD_MIMES: Record<string, string> = {
   'image/gif': 'gif',
 };
 
+const ALLOWED_TEXT_UPLOAD_MIMES = new Set([
+  'application/json',
+  'application/javascript',
+  'application/typescript',
+  'text/css',
+  'text/html',
+  'text/javascript',
+  'text/markdown',
+  'text/plain',
+  'text/x-typescript',
+]);
+
 const UPLOAD_MAX_BYTES = 10 << 20; // 10 MB request body
 const SERVE_PATH_MARKER = '/vfs/serve-path/';
 
@@ -192,6 +204,39 @@ export class SessionVfsController {
     this.vfs.writeBinary(sessionId, path, file.buffer);
     await this.vfs.touchSession(sessionId);
     return { path, mimeType: file.mimetype };
+  }
+
+  /**
+   * Upload a larger text-like file into a caller-selected VFS path. This avoids
+   * the JSON body parser limit used by POST /vfs while keeping all writes inside
+   * the same VFS path traversal guard.
+   */
+  @Post('upload-text')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: UPLOAD_MAX_BYTES } }))
+  async uploadText(
+    @Param('id') sessionId: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() body: { filePath?: string },
+  ): Promise<{ ok: boolean; path: string; bytesWritten: number }> {
+    if (!file) throw new BadRequestException('No file provided in field "file"');
+    if (!body.filePath) throw new BadRequestException('filePath is required');
+    const mimeType = file.mimetype.split(';', 1)[0]?.toLowerCase() ?? '';
+    if (!ALLOWED_TEXT_UPLOAD_MIMES.has(mimeType)) {
+      throw new UnsupportedMediaTypeException(
+        `Unsupported mime type: ${file.mimetype}. Allowed text upload types: ${[...ALLOWED_TEXT_UPLOAD_MIMES].join(', ')}`,
+      );
+    }
+    const content = file.buffer.toString('utf8');
+    try {
+      this.vfs.writeFile({ sessionId, filePath: body.filePath, content });
+      await this.vfs.touchSession(sessionId);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'PATH_TRAVERSAL_DENIED') {
+        throw new BadRequestException((err as Error).message);
+      }
+      throw err;
+    }
+    return { ok: true, path: body.filePath, bytesWritten: Buffer.byteLength(content, 'utf8') };
   }
 
   @Get('zip')

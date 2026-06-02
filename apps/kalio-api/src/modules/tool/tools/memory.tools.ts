@@ -163,7 +163,7 @@ export class MemorySearchTool {
     const limit = getLimitArg(request.args);
     const personaId = await resolvePersonaId(this.drizzle, request.sessionId);
 
-    const results = await this.memory.search(query, personaId, limit);
+    const results = await this.memory.hybridSearch(query, personaId, limit);
     this.logger.debug(`[memory_search] Found ${results.length} results for query="${query.slice(0, 50)}"`);
     return { results };
   }

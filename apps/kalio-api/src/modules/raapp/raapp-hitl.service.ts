@@ -1,11 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { eq, and, inArray } from 'drizzle-orm';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { eq, and, inArray, lt } from 'drizzle-orm';
 import { DrizzleService } from '../../database/drizzle.service';
 import { raappPendingApprovals } from '../../database/schema';
 import { NativeSystemRegistry } from './native/native-system-registry.service';
 import type { NativeSessionContext } from './native/native-system-registry.service';
 import type { PendingApproval } from './effects-processor.service';
 import { AuditService } from '../chat/audit.service';
+import { HitlConfigService } from '../hitl/hitl-config.service';
+import { HitlPolicyService } from '../hitl/hitl-policy.service';
+import type { RaAppNativeResult, RaAppPendingApproval } from '@kalio/types';
+import type { RaAppOutputPatch } from './raapp-output-patches.util';
+
+const DEFAULT_RAAPP_HITL_TIMEOUT_MS = 600_000;
 
 export interface SavedApproval {
   id: string;
@@ -29,6 +35,12 @@ export interface ApproveResult {
   error?: string;
 }
 
+export interface ResolvePendingApprovalsResult {
+  pendingApprovals: RaAppPendingApproval[];
+  nativeResults: RaAppNativeResult[];
+  outputPatches: RaAppOutputPatch[];
+}
+
 /**
  * Manages the lifecycle of RA-App pending approvals:
  * save → approve/cancel → execute → store result.
@@ -41,6 +53,8 @@ export class RAAppHITLService {
     private readonly drizzle: DrizzleService,
     private readonly nativeRegistry: NativeSystemRegistry,
     private readonly audit: AuditService,
+    @Optional() @Inject(HitlPolicyService) private readonly hitlPolicy: HitlPolicyService | null,
+    @Optional() @Inject(HitlConfigService) private readonly hitlConfig: HitlConfigService | null,
   ) {}
 
   async savePendingApprovals(
@@ -67,6 +81,25 @@ export class RAAppHITLService {
     this.logger.log(
       `Saved ${rows.length} pending approvals for toolCallId=${toolCallId} session=${sessionId}`,
     );
+    rows.forEach((row) => {
+      void this.audit.log({
+        sessionId,
+        type: 'external_hitl',
+        label: `raapp:pending ${row.system}`,
+        data: {
+          domain: 'hitl',
+          kind: 'raapp_hitl_lifecycle',
+          eventType: 'raapp_approval_pending',
+          approvalKind: 'raapp_native',
+          approvalId: row.id,
+          toolCallId,
+          system: row.system,
+          displayLabel: row.displayLabel,
+          outputPath: row.outputPath,
+          source: 'manual',
+        },
+      });
+    });
 
     return rows.map((r) => ({ ...r, outputPath: r.outputPath ?? undefined }));
   }
@@ -76,6 +109,7 @@ export class RAAppHITLService {
     sessionId: string,
   ): Promise<ApproveResult[]> {
     if (requestIds.length === 0) return [];
+    await this.expirePendingApprovals(sessionId);
 
     const pending = await this.drizzle.db
       .select()
@@ -113,7 +147,31 @@ export class RAAppHITLService {
           sessionId,
           type: 'raapp_native_approved',
           label: `raapp:approved ${row.system}`,
-          data: { system: row.system, approvalId: row.id, result: result as Record<string, unknown> },
+          data: {
+            domain: 'hitl',
+            eventType: 'raapp_approval_approved',
+            approvalKind: 'raapp_native',
+            approvalId: row.id,
+            requestId: row.id,
+            system: row.system,
+            result: result as Record<string, unknown>,
+          },
+        });
+        void this.audit.log({
+          sessionId,
+          type: 'external_hitl',
+          label: `raapp:executed ${row.system}`,
+          data: {
+            domain: 'hitl',
+            kind: 'raapp_hitl_lifecycle',
+            eventType: 'raapp_approval_executed',
+            approvalKind: 'raapp_native',
+            approvalId: row.id,
+            toolCallId: row.toolCallId,
+            system: row.system,
+            displayLabel: row.displayLabel,
+            source: 'human_or_policy',
+          },
         });
 
         results.push({ id: row.id, system: row.system, toolCallId: row.toolCallId, status: 'executed', result });
@@ -134,20 +192,68 @@ export class RAAppHITLService {
     return results;
   }
 
+  async resolvePendingApprovals(
+    toolCallId: string,
+    sessionId: string,
+    approvals: PendingApproval[],
+    abortSignal?: AbortSignal,
+  ): Promise<ResolvePendingApprovalsResult> {
+    if (approvals.length === 0) {
+      return {
+        pendingApprovals: [],
+        nativeResults: [],
+        outputPatches: [],
+      };
+    }
+
+    const shouldAutoExecute = await this.shouldAutoExecuteBatch(toolCallId, sessionId, approvals, abortSignal);
+    await this.savePendingApprovals(toolCallId, sessionId, approvals);
+
+    if (!shouldAutoExecute) {
+      return {
+        pendingApprovals: approvals.map((approval) => ({
+          id: approval.id,
+          system: approval.system,
+          displayLabel: approval.displayLabel,
+          args: approval.args,
+        })),
+        nativeResults: [],
+        outputPatches: [],
+      };
+    }
+
+    const results = await this.executeApproved(
+      approvals.map((approval) => approval.id),
+      sessionId,
+    );
+    const outputPatches = this.buildOutputPatches(approvals, results);
+
+    return {
+      pendingApprovals: [],
+      nativeResults: results.map((result) => ({
+        id: result.id,
+        system: result.system,
+        status: result.status,
+        result: result.result,
+        error: result.error,
+      })),
+      outputPatches,
+    };
+  }
+
   async cancelApprovals(requestIds: string[], sessionId: string): Promise<{ toolCallId: string }> {
     if (requestIds.length === 0) return { toolCallId: '' };
 
-    // Fetch first row before updating so we can return toolCallId
-    const first = await this.drizzle.db
-      .select({ toolCallId: raappPendingApprovals.toolCallId })
+    const pending = await this.drizzle.db
+      .select()
       .from(raappPendingApprovals)
       .where(
         and(
           inArray(raappPendingApprovals.id, requestIds),
           eq(raappPendingApprovals.sessionId, sessionId),
+          eq(raappPendingApprovals.status, 'pending'),
         ),
-      )
-      .limit(1);
+      );
 
     await this.drizzle.db
       .update(raappPendingApprovals)
@@ -160,11 +266,32 @@ export class RAAppHITLService {
         ),
       );
 
+    pending.forEach((row) => {
+      void this.audit.log({
+        sessionId,
+        type: 'external_hitl',
+        label: `raapp:cancelled ${row.system}`,
+        data: {
+          domain: 'hitl',
+          kind: 'raapp_hitl_lifecycle',
+          eventType: 'raapp_approval_cancelled',
+          approvalKind: 'raapp_native',
+          approvalId: row.id,
+          toolCallId: row.toolCallId,
+          system: row.system,
+          displayLabel: row.displayLabel,
+          source: 'human',
+        },
+      });
+    });
+
     this.logger.log(`Cancelled ${requestIds.length} approvals session=${sessionId}`);
-    return { toolCallId: first[0]?.toolCallId ?? '' };
+    return { toolCallId: pending[0]?.toolCallId ?? '' };
   }
 
   async getPendingForSession(sessionId: string): Promise<SavedApproval[]> {
+    await this.expirePendingApprovals(sessionId);
+
     const rows = await this.drizzle.db
       .select()
       .from(raappPendingApprovals)
@@ -187,5 +314,134 @@ export class RAAppHITLService {
       result: r.result as Record<string, unknown> | undefined,
       createdAt: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt as unknown as number),
     }));
+  }
+
+  async expirePendingApprovals(
+    sessionId: string,
+    now = new Date(),
+    timeoutMs?: number,
+  ): Promise<SavedApproval[]> {
+    const effectiveTimeoutMs = timeoutMs ?? await this.getRaAppApprovalTimeoutMs();
+    if (effectiveTimeoutMs <= 0) return [];
+
+    const cutoff = new Date(now.getTime() - effectiveTimeoutMs);
+    const expired = await this.drizzle.db
+      .select()
+      .from(raappPendingApprovals)
+      .where(
+        and(
+          eq(raappPendingApprovals.sessionId, sessionId),
+          eq(raappPendingApprovals.status, 'pending'),
+          lt(raappPendingApprovals.createdAt, cutoff),
+        ),
+      );
+
+    if (expired.length === 0) return [];
+
+    await this.drizzle.db
+      .update(raappPendingApprovals)
+      .set({ status: 'cancelled', result: { reason: 'timeout', timeoutMs: effectiveTimeoutMs } })
+      .where(
+        and(
+          eq(raappPendingApprovals.sessionId, sessionId),
+          eq(raappPendingApprovals.status, 'pending'),
+          lt(raappPendingApprovals.createdAt, cutoff),
+        ),
+      );
+
+    expired.forEach((row) => {
+      void this.audit.log({
+        sessionId,
+        type: 'external_hitl',
+        label: `raapp:timeout ${row.system}`,
+        data: {
+          domain: 'hitl',
+          kind: 'raapp_hitl_lifecycle',
+          eventType: 'raapp_approval_timeout',
+          approvalKind: 'raapp_native',
+          approvalId: row.id,
+          toolCallId: row.toolCallId,
+          system: row.system,
+          displayLabel: row.displayLabel,
+          timeoutMs: effectiveTimeoutMs,
+          source: 'runtime',
+        },
+      });
+    });
+
+    this.logger.warn(`Expired ${expired.length} RA-App approvals session=${sessionId}`);
+    return expired.map((r) => ({
+      id: r.id,
+      sessionId: r.sessionId,
+      toolCallId: r.toolCallId,
+      system: r.system,
+      args: r.args as Record<string, unknown>,
+      outputPath: r.outputPath ?? undefined,
+      displayLabel: r.displayLabel,
+      status: 'cancelled',
+      result: { reason: 'timeout', timeoutMs: effectiveTimeoutMs },
+      createdAt: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt as unknown as number),
+    }));
+  }
+
+  private async getRaAppApprovalTimeoutMs(): Promise<number> {
+    if (!this.hitlConfig) {
+      return DEFAULT_RAAPP_HITL_TIMEOUT_MS;
+    }
+
+    try {
+      const config = await this.hitlConfig.getConfig();
+      return config.raAppApprovalTimeoutMs;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to load RA-App HITL timeout config; using default: ${message}`);
+      return DEFAULT_RAAPP_HITL_TIMEOUT_MS;
+    }
+  }
+
+  private async shouldAutoExecuteBatch(
+    toolCallId: string,
+    sessionId: string,
+    approvals: PendingApproval[],
+    abortSignal?: AbortSignal,
+  ): Promise<boolean> {
+    if (!this.hitlPolicy) {
+      return false;
+    }
+
+    const resolutions = await Promise.all(
+      approvals.map((approval) => this.hitlPolicy!.resolveApproval({
+        kind: 'raapp_native',
+        sessionId,
+        name: approval.system,
+        args: approval.args,
+        abortSignal,
+        displayLabel: approval.displayLabel,
+        toolCallId,
+      })),
+    );
+
+    return resolutions.length > 0 && resolutions.every((resolution) => resolution.status === 'approved');
+  }
+
+  private buildOutputPatches(
+    approvals: PendingApproval[],
+    results: ApproveResult[],
+  ): RaAppOutputPatch[] {
+    const approvalsById = new Map(approvals.map((approval) => [approval.id, approval]));
+
+    return results.flatMap((result) => {
+      const approval = approvalsById.get(result.id);
+      if (!approval?.outputPath) {
+        return [];
+      }
+
+      return [{
+        outputPath: approval.outputPath,
+        value: result.status === 'executed'
+          ? result.result
+          : { error: result.error ?? 'Execution failed' },
+      }];
+    });
   }
 }

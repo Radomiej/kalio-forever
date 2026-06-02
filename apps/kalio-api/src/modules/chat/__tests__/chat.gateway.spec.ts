@@ -28,6 +28,8 @@ describe('ChatGateway', () => {
       submit: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
       abortAll: vi.fn(),
+      getSessionStatus: vi.fn().mockReturnValue({ sessionId: 'session-1', active: false, queueLength: 0 }),
+      getSessionStatusWithRun: vi.fn().mockResolvedValue({ sessionId: 'session-1', active: false, queueLength: 0 }),
     } as unknown as SessionPipelineService;
 
     sessions = {
@@ -58,7 +60,7 @@ describe('ChatGateway', () => {
   });
 
   it('broadcasts child-session stream events to sockets that identified that child session', async () => {
-    gateway.handleSessionIdentify(observer as never, { sessionId: 'child-session' });
+    await gateway.handleSessionIdentify(observer as never, { sessionId: 'child-session' });
     (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
       emit('chat:chunk', {
         sessionId: 'child-session',
@@ -202,26 +204,26 @@ describe('ChatGateway', () => {
   });
 
   describe('handleSessionIdentify', () => {
-    it('adds session to existing socket set', () => {
-      gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
+    it('adds session to existing socket set', async () => {
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
       const sessions = (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions;
       expect(sessions.get(client.id)?.has('session-2')).toBe(true);
     });
 
-    it('REGRESSION: creates Set and registers session when socket entry is missing', () => {
+    it('REGRESSION: creates Set and registers session when socket entry is missing', async () => {
       // Simulate edge case: socketSessions entry was removed (e.g. race with handleDisconnect)
       const sessions = (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions;
       sessions.delete(client.id);
 
       // Must not silently fail — should create Set and register the session
-      gateway.handleSessionIdentify(client as never, { sessionId: 'session-reconnect' });
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-reconnect' });
 
       const registered = sessions.get(client.id);
       expect(registered).toBeTruthy();
       expect(registered?.has('session-reconnect')).toBe(true);
     });
 
-    it('REGRESSION: replays pending tool confirmations for the re-identified session', () => {
+    it('REGRESSION: replays pending tool confirmations for the re-identified session', async () => {
       const pending: ToolConfirmationRequest = {
         requestId: 'req-1',
         toolCallId: 'call-1',
@@ -232,9 +234,27 @@ describe('ChatGateway', () => {
       };
       (toolDispatch.getPendingConfirmations as ReturnType<typeof vi.fn>).mockReturnValue([pending]);
 
-      gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
 
       expect(client.emit).toHaveBeenCalledWith('tool:confirmation_required', pending);
+    });
+
+    it('REGRESSION: replays active runtime status for the re-identified session', async () => {
+      (pipeline.getSessionStatusWithRun as ReturnType<typeof vi.fn>).mockResolvedValue({
+        sessionId: 'session-2',
+        active: true,
+        turnId: 'turn-live',
+        queueLength: 2,
+      });
+
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
+
+      expect(client.emit).toHaveBeenCalledWith('session:status', {
+        sessionId: 'session-2',
+        active: true,
+        turnId: 'turn-live',
+        queueLength: 2,
+      });
     });
 
     it('REGRESSION: re-identifying the master session replays child confirmations and lets the socket confirm them', async () => {

@@ -1,16 +1,19 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { nanoid } from 'nanoid';
+import fs from 'node:fs';
 import path from 'node:path';
 import type { MemoryIngestResult, MemorySearchResult } from '@kalio/types';
 import { EmbeddingService } from './embedding.service';
 import { VectorStoreService } from './vector-store.service';
 import { AppSettingsService } from '../../database/app-settings.service';
+import { WebResultsMemoryStore } from './web-results-memory.store';
 
 // ── Text splitting constants ────────────────────────────────────────────────
 
 const MAX_CHUNK_SIZE = 1500;
 const CHUNK_OVERLAP = 200;
+const PROFILE_PREFIXES = ['local-transformers-', 'openai-compatible-', 'ollama-', 'disabled-'];
 
 // ── MemoryService ───────────────────────────────────────────────────────────
 
@@ -19,6 +22,7 @@ export class MemoryService implements OnModuleDestroy {
   private readonly logger = new Logger(MemoryService.name);
   private readonly stores = new Map<string, VectorStoreService>();
   private readonly dbBasePath: string;
+  private readonly webResults: WebResultsMemoryStore;
 
   constructor(
     private readonly config: ConfigService,
@@ -26,6 +30,7 @@ export class MemoryService implements OnModuleDestroy {
     private readonly embeddingService: EmbeddingService,
   ) {
     this.dbBasePath = this.config.get<string>('MEMORY_DB_PATH', './data/memory');
+    this.webResults = new WebResultsMemoryStore(this.dbBasePath, this.embeddingService, splitTextIntoChunks);
     this.logger.log(`MemoryService initialized: ${this.dbBasePath}`);
   }
 
@@ -34,14 +39,61 @@ export class MemoryService implements OnModuleDestroy {
   }
 
   private getStore(personaId: string): VectorStoreService {
-    const existing = this.stores.get(personaId);
+    const profileId = this.embeddingService.getProfileId();
+    return this.getStoreForProfile(personaId, profileId);
+  }
+
+  private getStoreForProfile(personaId: string, profileId: string): VectorStoreService {
+    const storeKey = `${personaId}:${profileId}`;
+    const existing = this.stores.get(storeKey);
     if (existing) return existing;
 
-    const dbPath = path.join(this.dbBasePath, `${personaId}.db`);
+    const dbPath = path.join(this.dbBasePath, `${personaId}.${profileId}.db`);
     const dimensions = this.embeddingService.getDimensions();
     const store = new VectorStoreService(dbPath, dimensions);
-    this.stores.set(personaId, store);
+    this.stores.set(storeKey, store);
     return store;
+  }
+
+  private getProfileDbPath(personaId: string, profileId: string): string {
+    return path.join(this.dbBasePath, `${personaId}.${profileId}.db`);
+  }
+
+  private getLegacyDbPath(personaId: string): string {
+    return path.join(this.dbBasePath, `${personaId}.db`);
+  }
+
+  private listPersonaProfileIds(personaId: string): string[] {
+    if (!fs.existsSync(this.dbBasePath)) return [];
+
+    const prefix = `${personaId}.`;
+    return fs.readdirSync(this.dbBasePath)
+      .filter((file) => file.startsWith(prefix) && file.endsWith('.db'))
+      .map((file) => file.slice(prefix.length, -'.db'.length))
+      .filter((profileId) => profileId.length > 0);
+  }
+
+  listIndexedPersonaIds(): string[] {
+    if (!fs.existsSync(this.dbBasePath)) return [];
+
+    const ids = new Set<string>();
+    for (const file of fs.readdirSync(this.dbBasePath)) {
+      if (!file.endsWith('.db')) continue;
+      const withoutExt = file.slice(0, -'.db'.length);
+      if (!PROFILE_PREFIXES.some((prefix) => withoutExt.includes(`.${prefix}`))) {
+        ids.add(withoutExt);
+        continue;
+      }
+      for (const prefix of PROFILE_PREFIXES) {
+        const marker = `.${prefix}`;
+        const index = withoutExt.indexOf(marker);
+        if (index > 0) {
+          ids.add(withoutExt.slice(0, index));
+          break;
+        }
+      }
+    }
+    return Array.from(ids).sort();
   }
 
   async ingest(
@@ -49,6 +101,10 @@ export class MemoryService implements OnModuleDestroy {
     personaId: string,
     metadata: Record<string, string> = {}
   ): Promise<MemoryIngestResult> {
+    if (!this.embeddingService.getStatus().configured) {
+      return { ids: [], count: 0 };
+    }
+
     const store = this.getStore(personaId);
     const chunks = splitTextIntoChunks(text);
     const ids: string[] = [];
@@ -68,10 +124,21 @@ export class MemoryService implements OnModuleDestroy {
     return { ids, count: ids.length };
   }
 
+  async ingestWebSearchResult(
+    text: string,
+    metadata: Record<string, string> = {}
+  ): Promise<MemoryIngestResult> {
+    return this.webResults.ingest(text, metadata);
+  }
+
   async ingestConversation(
     messages: Array<{ role: string; content: string }>,
     personaId: string
   ): Promise<MemoryIngestResult> {
+    if (!this.embeddingService.getStatus().configured) {
+      return { ids: [], count: 0 };
+    }
+
     if (!messages || !Array.isArray(messages)) {
       return { ids: [], count: 0 };
     }
@@ -122,6 +189,10 @@ export class MemoryService implements OnModuleDestroy {
     personaId: string,
     limit = 5
   ): Promise<MemorySearchResult[]> {
+    if (!this.embeddingService.getStatus().configured) {
+      return [];
+    }
+
     const store = this.getStore(personaId);
 
     if (store.count() === 0) {
@@ -163,6 +234,10 @@ export class MemoryService implements OnModuleDestroy {
     personaId: string,
     limit = 5
   ): Promise<MemorySearchResult[]> {
+    if (!this.embeddingService.getStatus().configured) {
+      return [];
+    }
+
     const store = this.getStore(personaId);
 
     if (store.count() === 0) {
@@ -223,6 +298,82 @@ export class MemoryService implements OnModuleDestroy {
     return merged;
   }
 
+  async searchWebResults(
+    query: string,
+    limit = 5
+  ): Promise<MemorySearchResult[]> {
+    return this.webResults.search(query, limit);
+  }
+
+  async reembedPersona(personaId: string): Promise<{ count: number; model: string }> {
+    return this.reembedMemoryId(personaId);
+  }
+
+  private async reembedMemoryId(personaId: string): Promise<{ count: number; model: string }> {
+    if (!this.embeddingService.getStatus().configured) {
+      return { count: 0, model: await this.embeddingService.getModelName() };
+    }
+
+    const currentProfileId = this.embeddingService.getProfileId();
+    const profileIds = Array.from(new Set([...this.listPersonaProfileIds(personaId), currentProfileId]));
+    const entriesById = new Map<string, ReturnType<VectorStoreService['getAll']>[number]>();
+
+    const legacyDbPath = this.getLegacyDbPath(personaId);
+    if (fs.existsSync(legacyDbPath)) {
+      const legacyStore = new VectorStoreService(legacyDbPath, this.embeddingService.getDimensions());
+      try {
+        for (const entry of legacyStore.getAll()) {
+          entriesById.set(entry.id, entry);
+        }
+      } finally {
+        legacyStore.close();
+      }
+    }
+
+    for (const profileId of profileIds) {
+      const dbPath = this.getProfileDbPath(personaId, profileId);
+      if (profileId !== currentProfileId && !fs.existsSync(dbPath)) continue;
+      const sourceStore = this.getStoreForProfile(personaId, profileId);
+      for (const entry of sourceStore.getAll()) {
+        entriesById.set(entry.id, entry);
+      }
+    }
+
+    const entries = Array.from(entriesById.values());
+
+    if (entries.length === 0) {
+      return { count: 0, model: await this.embeddingService.getModelName() };
+    }
+
+    const store = this.getStoreForProfile(personaId, currentProfileId);
+    const model = await this.embeddingService.getModelName();
+    const embeddings = await this.embeddingService.embedBatch(entries.map((entry) => entry.content));
+
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index]!;
+      const embedding = embeddings[index]!;
+      store.insert(entry.id, embedding, entry.content, entry.metadata, model);
+    }
+
+    this.logger.log(`Re-embedded ${entries.length} memories for persona ${personaId} using ${model}`);
+    return { count: entries.length, model };
+  }
+
+  async reembedAll(): Promise<{ personas: number; count: number; model: string }> {
+    const personaIds = this.listIndexedPersonaIds();
+    let count = 0;
+
+    for (const personaId of personaIds) {
+      const result = await this.reembedMemoryId(personaId);
+      count += result.count;
+    }
+
+    const webResult = await this.webResults.reembed();
+    count += webResult.count;
+
+    return { personas: personaIds.length, count, model: webResult.model };
+  }
+
   getAll(personaId: string): MemorySearchResult[] {
     const store = this.getStore(personaId);
     return store.getAll().map((e) => ({
@@ -240,8 +391,20 @@ export class MemoryService implements OnModuleDestroy {
   }
 
   deleteAll(personaId: string): void {
-    const store = this.getStore(personaId);
-    store.deleteAll();
+    for (const profileId of this.listPersonaProfileIds(personaId)) {
+      this.getStoreForProfile(personaId, profileId).deleteAll();
+    }
+    this.getStore(personaId).deleteAll();
+
+    const legacyDbPath = this.getLegacyDbPath(personaId);
+    if (fs.existsSync(legacyDbPath)) {
+      const legacyStore = new VectorStoreService(legacyDbPath, this.embeddingService.getDimensions());
+      try {
+        legacyStore.deleteAll();
+      } finally {
+        legacyStore.close();
+      }
+    }
   }
 
   count(personaId: string): number {
@@ -251,6 +414,7 @@ export class MemoryService implements OnModuleDestroy {
 
   onModuleDestroy(): void {
     this.logger.log('Shutting down MemoryService');
+    this.webResults.close();
     for (const [id, store] of this.stores) {
       try {
         store.close();

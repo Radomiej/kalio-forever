@@ -27,17 +27,33 @@ describe('PerKeyMutex', () => {
 
   it('runs different keys independently (in parallel)', async () => {
     const mutex = new PerKeyMutex();
-    const start = Date.now();
+    let releaseTasks!: () => void;
+    const release = new Promise<void>((resolve) => {
+      releaseTasks = resolve;
+    });
+    let started = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
 
-    await Promise.all([
-      mutex.runExclusive('A', async () => tick(30)),
-      mutex.runExclusive('B', async () => tick(30)),
-      mutex.runExclusive('C', async () => tick(30)),
+    const task = (key: string) =>
+      mutex.runExclusive(key, async () => {
+        started++;
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await release;
+        inFlight--;
+      });
+
+    const tasks = Promise.all([
+      task('A'),
+      task('B'),
+      task('C'),
     ]);
 
-    const elapsed = Date.now() - start;
-    // Three serial 30ms tasks would take >=90ms; parallel <=60ms with slack.
-    expect(elapsed).toBeLessThan(80);
+    await expect.poll(() => started).toBe(3);
+    expect(maxInFlight).toBe(3);
+    releaseTasks();
+    await tasks;
   });
 
   it('releases the key after settle (no memory leak)', async () => {

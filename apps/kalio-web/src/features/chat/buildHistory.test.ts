@@ -75,4 +75,45 @@ describe('buildHistory attachments and multimodal options (REGRESSION)', () => {
       image_url: { detail: 'low' },
     });
   });
+
+  it('strips image attachments into text placeholders when requested', () => {
+    const history = buildHistory([
+      makeMessage({
+        content: 'Look at this image',
+        attachments: [
+          { path: 'uploads/cat.png', mimeType: 'image/png' },
+          { path: 'notes/todo.txt', mimeType: 'text/plain' },
+        ],
+      }),
+      makeMessage({
+        id: 'assistant-1',
+        role: 'assistant',
+        content: 'Looks good.',
+      }),
+    ], { stripImages: true });
+
+    expect(history).toHaveLength(2);
+    expect(history[0]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Look at this image' },
+        { type: 'text', text: '[Image attachment: uploads/cat.png]' },
+      ],
+    });
+    expect(history[1]).toEqual({
+      role: 'assistant',
+      content: 'Looks good.',
+    });
+  });
+
+  it('skips blank user messages that do not contain attachments', () => {
+    const history = buildHistory([
+      makeMessage({ content: '' }),
+      makeMessage({ id: 'assistant-1', role: 'assistant', content: 'Answer' }),
+    ]);
+
+    expect(history).toEqual([
+      { role: 'assistant', content: 'Answer' },
+    ]);
+  });
 });

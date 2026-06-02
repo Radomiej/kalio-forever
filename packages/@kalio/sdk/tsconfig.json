@@ -11,7 +11,7 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "paths": {
-      "@kalio/types": ["../@kalio/types/src"]
+      "@kalio/types": ["../types/dist/index.d.ts"]
     }
   },
   "include": ["src/**/*"],

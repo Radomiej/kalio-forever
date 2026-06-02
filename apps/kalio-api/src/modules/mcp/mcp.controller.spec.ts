@@ -1,85 +1,134 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Test, type TestingModule } from '@nestjs/testing';
+import type { CreateMCPServerDto } from '@kalio/types';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MCPController } from './mcp.controller';
 import { MCPService } from './mcp.service';
-import type { MCPServer, MCPTool, CreateMCPServerDto } from '@kalio/types';
+import { MCPExternalImportService } from './mcp-external-import.service';
 
 describe('MCPController', () => {
-  let controller: MCPController;
-  const mockService = {
-    findAll: vi.fn(),
-    addServer: vi.fn(),
-    removeServer: vi.fn(),
-    restartServer: vi.fn(),
-    getAllTools: vi.fn(),
+  const serverDto: CreateMCPServerDto = {
+    name: 'filesystem',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-filesystem', '.'],
+  };
+  const servers = [{ id: 'server-1', name: 'filesystem' }];
+  const tools = [{ serverId: 'server-1', name: 'read_file', description: 'Read files' }];
+  const externalEntries = [{
+    id: 'cursor:mcp:github',
+    source: 'cursor',
+    configPath: 'C:/Users/test/.cursor/mcp.json',
+    key: 'github',
+    dto: {
+      name: 'github',
+      transport: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-github'],
+    },
+    details: { envKeys: ['GITHUB_TOKEN'], headerKeys: [] },
+    duplicate: false,
+  }];
+  const mcpService = {
+    findAll: vi.fn(async () => servers),
+    addServer: vi.fn(async (_dto: CreateMCPServerDto) => undefined),
+    reloadManagedServers: vi.fn(async () => servers),
+    removeServer: vi.fn(async (_id: string) => undefined),
+    restartServer: vi.fn(async (_id: string) => undefined),
+    getAllTools: vi.fn(async () => tools),
+  };
+  const externalImportService = {
+    discover: vi.fn(async () => externalEntries),
+    apply: vi.fn(async (_entryIds: string[]) => ({
+      imported: [{ id: 'server-2', name: 'github' }],
+      skipped: [],
+      failed: [],
+    })),
   };
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [MCPController],
-      providers: [{ provide: MCPService, useValue: mockService }],
-    }).compile();
-
-    controller = module.get(MCPController);
+  beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  describe('findAll()', () => {
-    it('delegates to mcpService.findAll()', async () => {
-      const servers: MCPServer[] = [
-        { id: 's1', name: 'Server 1', transport: 'http', status: 'connected', toolCount: 2, createdAt: 1000 },
-      ];
-      mockService.findAll.mockResolvedValue(servers);
+  it('delegates listing servers to the service', async () => {
+    const controller = new MCPController(
+      mcpService as unknown as MCPService,
+      externalImportService as unknown as MCPExternalImportService,
+    );
 
-      const result = await controller.findAll();
-      expect(result).toBe(servers);
-      expect(mockService.findAll).toHaveBeenCalled();
-    });
+    await expect(controller.findAll()).resolves.toStrictEqual(servers);
+    expect(mcpService.findAll).toHaveBeenCalledOnce();
   });
 
-  describe('addServer()', () => {
-    it('delegates to mcpService.addServer() with dto', async () => {
-      const dto: CreateMCPServerDto = { name: 'New Server', transport: 'http', url: 'http://localhost:3000' };
-      const server: MCPServer = { id: 'new-s', name: 'New Server', transport: 'http', status: 'connecting', toolCount: 0, createdAt: 2000 };
-      mockService.addServer.mockResolvedValue(server);
+  it('delegates server creation to the service', async () => {
+    const controller = new MCPController(
+      mcpService as unknown as MCPService,
+      externalImportService as unknown as MCPExternalImportService,
+    );
 
-      const result = await controller.addServer(dto);
-      expect(result).toBe(server);
-      expect(mockService.addServer).toHaveBeenCalledWith(dto);
-    });
+    await expect(controller.addServer(serverDto)).resolves.toBeUndefined();
+    expect(mcpService.addServer).toHaveBeenCalledWith(serverDto);
   });
 
-  describe('removeServer()', () => {
-    it('delegates to mcpService.removeServer() with id', async () => {
-      mockService.removeServer.mockResolvedValue(undefined);
-      await controller.removeServer('s-123');
-      expect(mockService.removeServer).toHaveBeenCalledWith('s-123');
-    });
+  it('delegates server removal to the service', async () => {
+    const controller = new MCPController(
+      mcpService as unknown as MCPService,
+      externalImportService as unknown as MCPExternalImportService,
+    );
+
+    await expect(controller.removeServer('server-1')).resolves.toBeUndefined();
+    expect(mcpService.removeServer).toHaveBeenCalledWith('server-1');
   });
 
-  describe('restartServer()', () => {
-    it('delegates to mcpService.restartServer() with id', async () => {
-      mockService.restartServer.mockResolvedValue(undefined);
-      await controller.restartServer('s-456');
-      expect(mockService.restartServer).toHaveBeenCalledWith('s-456');
-    });
+  it('delegates config reload to the service', async () => {
+    const controller = new MCPController(
+      mcpService as unknown as MCPService,
+      externalImportService as unknown as MCPExternalImportService,
+    );
+
+    await expect(controller.reloadConfig()).resolves.toStrictEqual(servers);
+    expect(mcpService.reloadManagedServers).toHaveBeenCalledOnce();
   });
 
-  describe('getTools()', () => {
-    it('delegates to mcpService.getAllTools()', () => {
-      const tools: MCPTool[] = [
-        { name: 'mcp_s1_search', description: 'search', parameters: {}, requiresConfirmation: false, serverId: 's1' },
-      ];
-      mockService.getAllTools.mockReturnValue(tools);
+  it('delegates server restart to the service', async () => {
+    const controller = new MCPController(
+      mcpService as unknown as MCPService,
+      externalImportService as unknown as MCPExternalImportService,
+    );
 
-      const result = controller.getTools();
-      expect(result).toBe(tools);
-      expect(mockService.getAllTools).toHaveBeenCalled();
-    });
+    await expect(controller.restartServer('server-1')).resolves.toBeUndefined();
+    expect(mcpService.restartServer).toHaveBeenCalledWith('server-1');
+  });
 
-    it('returns empty array when no tools', () => {
-      mockService.getAllTools.mockReturnValue([]);
-      expect(controller.getTools()).toHaveLength(0);
+  it('delegates tool listing to the service', async () => {
+    const controller = new MCPController(
+      mcpService as unknown as MCPService,
+      externalImportService as unknown as MCPExternalImportService,
+    );
+
+    await expect(controller.getTools()).resolves.toStrictEqual(tools);
+    expect(mcpService.getAllTools).toHaveBeenCalledOnce();
+  });
+
+  it('delegates external MCP discovery to the service', async () => {
+    const controller = new MCPController(
+      mcpService as unknown as MCPService,
+      externalImportService as unknown as MCPExternalImportService,
+    );
+
+    await expect(controller.discoverExternalConfigs()).resolves.toStrictEqual(externalEntries);
+    expect(externalImportService.discover).toHaveBeenCalledOnce();
+  });
+
+  it('delegates external MCP import apply to the service', async () => {
+    const controller = new MCPController(
+      mcpService as unknown as MCPService,
+      externalImportService as unknown as MCPExternalImportService,
+    );
+
+    await expect(controller.applyExternalConfigs({ entryIds: ['cursor:mcp:github'] })).resolves.toStrictEqual({
+      imported: [{ id: 'server-2', name: 'github' }],
+      skipped: [],
+      failed: [],
     });
+    expect(externalImportService.apply).toHaveBeenCalledWith(['cursor:mcp:github']);
   });
 });

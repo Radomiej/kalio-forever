@@ -3,6 +3,7 @@ import {
   Logger,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import { eq } from 'drizzle-orm';
@@ -13,6 +14,8 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { MCPServer, MCPTool, CreateMCPServerDto } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { mcpServers } from '../../database/schema';
+import { KalioConfigService } from '../../config/kalio-config.service';
+import type { KalioMcpServerConfig } from '../../config/kalio-config.types';
 
 const HEALTH_CHECK_MS = 30_000;
 const BASE_RESTART_MS = 2_000;
@@ -34,6 +37,7 @@ interface ServerHandle {
   restartCount: number;
   lastError?: string;
   permanentError?: boolean;
+  managed?: boolean;
 }
 
 @Injectable()
@@ -44,7 +48,10 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   private healthTimer: ReturnType<typeof setInterval> | null = null;
   private gatewayRef?: { emitToAll(event: string, data: unknown): void };
 
-  constructor(private readonly drizzle: DrizzleService) {}
+  constructor(
+    private readonly drizzle: DrizzleService,
+    @Optional() private readonly kalioConfig?: KalioConfigService,
+  ) {}
 
   setGateway(gw: { emitToAll(event: string, data: unknown): void }): void {
     this.gatewayRef = gw;
@@ -52,17 +59,20 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     const rows = await this.drizzle.db.select().from(mcpServers).where(eq(mcpServers.enabled, true));
-    if (rows.length === 0) return;
-    this.logger.log(`[MCP] Scheduling background connect for ${rows.length} server(s)…`);
-    // Fire-and-forget — do NOT await so NestJS finishes startup and health endpoint
+    const handles = [
+      ...rows.map((r) => this.rowToHandle(r)),
+      ...await this.loadManagedHandles(),
+    ];
+    if (handles.length === 0) return;
+    this.logger.log(`[MCP] Scheduling background connect for ${handles.length} server(s)...`);
+    // Fire-and-forget: do NOT await so NestJS finishes startup and health endpoint
     // responds immediately; MCP servers connect in the background.
-    void Promise.allSettled(rows.map((r) => this.connectHandle(this.rowToHandle(r)))).then(() => {
+    void Promise.allSettled(handles.map((handle) => this.connectHandle(handle))).then(() => {
       const connected = [...this.handles.values()].filter((h) => h.status === 'connected').length;
-      this.logger.log(`[MCP] Background connect done: ${connected}/${rows.length} connected`);
+      this.logger.log(`[MCP] Background connect done: ${connected}/${handles.length} connected`);
     });
     this.healthTimer = setInterval(() => void this.healthCheckAll(), HEALTH_CHECK_MS);
   }
-
   async onModuleDestroy(): Promise<void> {
     if (this.healthTimer) clearInterval(this.healthTimer);
     await Promise.allSettled([...this.handles.keys()].map((id) => this.disconnectHandle(id)));
@@ -71,7 +81,14 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
 
   async findAll(): Promise<MCPServer[]> {
     const rows = await this.drizzle.db.select().from(mcpServers);
-    return rows.map((r) => this.toMCPServer(r));
+    const servers = new Map<string, MCPServer>();
+    for (const row of rows) {
+      servers.set(row.id, this.toMCPServer(row));
+    }
+    for (const handle of await this.loadManagedHandles()) {
+      servers.set(handle.id, this.handleToMCPServer(this.handles.get(handle.id) ?? handle));
+    }
+    return [...servers.values()];
   }
 
   getAllTools(): MCPTool[] {
@@ -121,12 +138,32 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   async removeServer(id: string): Promise<void> {
+    if (this.handles.get(id)?.managed || (await this.loadManagedHandles()).some((handle) => handle.id === id)) {
+      throw new Error(`MCP server ${id} is managed by .kalio/config.toml`);
+    }
     await this.disconnectHandle(id);
     this.handles.delete(id);
-    for (const [name, info] of this.toolNameMap) {
-      if (info.serverId === id) this.toolNameMap.delete(name);
-    }
+    this.removeToolRefs(id);
     await this.drizzle.db.delete(mcpServers).where(eq(mcpServers.id, id));
+  }
+
+  async reloadManagedServers(): Promise<MCPServer[]> {
+    this.kalioConfig?.invalidateCache();
+    const managedIds = [...this.handles.values()]
+      .filter((handle) => handle.managed)
+      .map((handle) => handle.id);
+    for (const id of managedIds) {
+      await this.disconnectHandle(id);
+      this.handles.delete(id);
+      this.removeToolRefs(id);
+    }
+
+    const handles = await this.loadManagedHandles();
+    await Promise.allSettled(handles.map((handle) => this.connectHandle(handle)));
+    if (!this.healthTimer && handles.length > 0) {
+      this.healthTimer = setInterval(() => void this.healthCheckAll(), HEALTH_CHECK_MS);
+    }
+    return this.findAll();
   }
 
   async restartServer(id: string): Promise<void> {
@@ -290,10 +327,75 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async persistStatus(handle: ServerHandle): Promise<void> {
+    if (handle.managed) return;
     await this.drizzle.db
       .update(mcpServers)
       .set({ status: handle.status, toolCount: handle.tools.length, lastError: handle.lastError ?? null })
       .where(eq(mcpServers.id, handle.id));
+  }
+
+  private async loadManagedHandles(): Promise<ServerHandle[]> {
+    if (!this.kalioConfig) return [];
+    const { config } = await this.kalioConfig.getEffectiveConfig();
+    return Object.entries(config.mcp_servers ?? {})
+      .filter(([, server]) => server.enabled !== false)
+      .map(([id, server]) => this.configToHandle(id, server));
+  }
+
+  private configToHandle(id: string, server: KalioMcpServerConfig): ServerHandle {
+    return {
+      id,
+      name: id,
+      transport: server.url ? 'http' : 'stdio',
+      url: server.url,
+      command: server.command,
+      args: server.args,
+      envVars: this.resolveEnv(server),
+      headers: this.resolveHeaders(server),
+      client: null as unknown as Client,
+      rawTransport: null,
+      status: 'disconnected',
+      tools: [],
+      restartCount: 0,
+      managed: true,
+    };
+  }
+
+  private resolveEnv(server: KalioMcpServerConfig): Record<string, string> | undefined {
+    const env: Record<string, string> = { ...(server.env ?? {}) };
+    for (const entry of server.env_vars ?? []) {
+      const name = typeof entry === 'string' ? entry : entry.name;
+      const source = typeof entry === 'string' ? 'local' : entry.source;
+      if (source !== 'local') continue;
+      const value = process.env[name];
+      if (value !== undefined) {
+        env[name] = value;
+      }
+    }
+    return Object.keys(env).length > 0 ? env : undefined;
+  }
+
+  private resolveHeaders(server: KalioMcpServerConfig): Record<string, string> | undefined {
+    const headers: Record<string, string> = { ...(server.http_headers ?? {}) };
+    for (const [header, envName] of Object.entries(server.env_http_headers ?? {})) {
+      const value = process.env[envName];
+      if (value !== undefined) {
+        headers[header] = value;
+      }
+    }
+    if (server.bearer_token_env_var) {
+      const token = process.env[server.bearer_token_env_var];
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+    }
+    return Object.keys(headers).length > 0 ? headers : undefined;
+  }
+
+  private removeToolRefs(serverId: string): void {
+    for (const [name, info] of this.toolNameMap) {
+      if (info.serverId === serverId) this.toolNameMap.delete(name);
+    }
   }
 
   private rowToHandle(row: typeof mcpServers.$inferSelect): ServerHandle {
@@ -327,6 +429,22 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       lastError: handle?.lastError ?? row.lastError ?? undefined,
       createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : (row.createdAt as number),
     };
+  }
+
+  private handleToMCPServer(handle: ServerHandle): MCPServer {
+    const server: MCPServer & { managedBy?: 'toml' } = {
+      id: handle.id,
+      name: handle.name,
+      transport: handle.transport,
+      url: handle.url,
+      command: handle.command,
+      status: handle.status,
+      toolCount: handle.tools.length,
+      lastError: handle.lastError,
+      createdAt: 0,
+      managedBy: handle.managed ? 'toml' : undefined,
+    };
+    return server;
   }
 
 }

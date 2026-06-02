@@ -43,6 +43,8 @@ function makeTestDeps() {
   // Minimal stub for MemoryService — only exposes getEmbeddingService()
   const memoryService = {
     getEmbeddingService: () => embeddingService,
+    reembedPersona: vi.fn(async () => ({ count: 0, model: 'Xenova/multilingual-e5-small' })),
+    reembedAll: vi.fn(async () => ({ personas: 0, count: 0, model: 'Xenova/multilingual-e5-small' })),
   } as unknown as MemoryService;
 
   const controller = new MemoryController(memoryService, embeddingCredentials);
@@ -135,13 +137,15 @@ describe('MemoryController — embedding credential routes', () => {
       const c = await controller.createEmbeddingCredential(BASE_DTO);
       await controller.setActiveEmbeddingCredential(c.id);
       const status = await controller.clearActiveEmbeddingCredential();
-      expect(status.source).toBe('mock');
-      expect(status.configured).toBe(false);
+      expect(status.source).toBe('local');
+      expect(status.configured).toBe(true);
+      expect(status.model).toBe('Xenova/multilingual-e5-small');
     });
 
     it('is idempotent when nothing active', async () => {
       const status = await controller.clearActiveEmbeddingCredential();
-      expect(status.source).toBe('mock');
+      expect(status.source).toBe('local');
+      expect(status.configured).toBe(true);
     });
   });
 
@@ -152,7 +156,8 @@ describe('MemoryController — embedding credential routes', () => {
       const c = await controller.createEmbeddingCredential(BASE_DTO);
       await controller.setActiveEmbeddingCredential(c.id);
       const status = await controller.removeEmbeddingCredential(c.id);
-      expect(status.source).toBe('mock');
+      expect(status.source).toBe('local');
+      expect(status.configured).toBe(true);
       const list = await controller.listEmbeddingCredentials();
       expect(list).toHaveLength(0);
     });
@@ -171,7 +176,7 @@ describe('MemoryController — embedding credential routes', () => {
     it('is a no-op for nonexistent id and returns current status', async () => {
       const status = await controller.removeEmbeddingCredential('nonexistent');
       expect(status).toBeDefined();
-      expect(status.source).toBe('mock');
+      expect(status.source).toBe('local');
     });
   });
 
@@ -180,8 +185,9 @@ describe('MemoryController — embedding credential routes', () => {
   describe('getEmbeddingStatus', () => {
     it('returns mock status when nothing configured', async () => {
       const status = await controller.getEmbeddingStatus();
-      expect(status.source).toBe('mock');
-      expect(status.configured).toBe(false);
+      expect(status.source).toBe('local');
+      expect(status.configured).toBe(true);
+      expect(status.model).toBe('Xenova/multilingual-e5-small');
     });
 
     it('returns db status after activating a credential', async () => {
@@ -259,6 +265,25 @@ describe('MemoryController — embedding credential routes', () => {
     });
   });
 
+  // ── POST /:personaId/reembed ───────────────────────────────────────────────
+
+  describe('reembedPersona', () => {
+    it('rebuilds embeddings for a persona using the current model', async () => {
+      const result = await controller.reembedPersona('persona-123');
+      expect(result.model).toBe('Xenova/multilingual-e5-small');
+      expect(result.count).toBe(0);
+    });
+  });
+
+  describe('reembedAll', () => {
+    it('rebuilds embeddings for all indexed personas using the current model', async () => {
+      const result = await controller.reembedAll();
+      expect(result.model).toBe('Xenova/multilingual-e5-small');
+      expect(result.count).toBe(0);
+      expect(result.personas).toBe(0);
+    });
+  });
+
   // ── Full lifecycle integration ────────────────────────────────────────────────
 
   describe('full lifecycle', () => {
@@ -281,9 +306,10 @@ describe('MemoryController — embedding credential routes', () => {
       expect(status.model).toBe('model-2');
       expect(status.activeCredentialId).toBe(p2.id);
 
-      // Remove second (active) — should fall to mock
+      // Remove second (active) — should fall back to the local default model
       status = await controller.removeEmbeddingCredential(p2.id);
-      expect(status.source).toBe('mock');
+      expect(status.source).toBe('local');
+      expect(status.configured).toBe(true);
 
       // First still in list
       const remaining = await controller.listEmbeddingCredentials();

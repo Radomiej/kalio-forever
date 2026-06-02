@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MCPSettingsPanel } from './MCPSettingsPanel';
 import type { MCPServer } from '@kalio/types';
@@ -47,6 +47,50 @@ const SERVER2: MCPServer = {
   toolCount: 0,
   createdAt: 1704067200000,
 };
+
+const TOML_SERVER: MCPServer & { managedBy: 'toml' } = {
+  ...SERVER2,
+  id: 'toml-docs',
+  name: 'docs',
+  managedBy: 'toml',
+};
+
+const EXTERNAL_DISCOVERY = [
+  {
+    id: 'cursor:mcp:github',
+    source: 'cursor',
+    configPath: 'C:/Users/test/.cursor/mcp.json',
+    key: 'github',
+    dto: {
+      name: 'GitHub (Cursor)',
+      transport: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-github'],
+    },
+    details: {
+      envKeys: ['GITHUB_TOKEN'],
+      headerKeys: [],
+    },
+    duplicate: false,
+  },
+  {
+    id: 'windsurf:mcp:filesystem',
+    source: 'windsurf',
+    configPath: 'C:/Users/test/AppData/Roaming/Windsurf/User/mcp.json',
+    key: 'filesystem',
+    dto: {
+      name: 'Filesystem (Windsurf)',
+      transport: 'stdio',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '.'],
+    },
+    details: {
+      envKeys: [],
+      headerKeys: [],
+    },
+    duplicate: false,
+  },
+];
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -122,8 +166,8 @@ describe('MCPSettingsPanel', () => {
     await waitFor(() => screen.getByTestId('mcp-add-toggle'));
     await user.click(screen.getByTestId('mcp-add-toggle'));
     await screen.findByTestId('mcp-add-form');
-    await user.type(screen.getByTestId('mcp-form-name'), 'New HTTP Server');
-    await user.type(screen.getByTestId('mcp-form-url'), 'https://mcp.test.com/sse');
+    fireEvent.change(screen.getByTestId('mcp-form-name'), { target: { value: 'New HTTP Server' } });
+    fireEvent.change(screen.getByTestId('mcp-form-url'), { target: { value: 'https://mcp.test.com/sse' } });
     await user.click(screen.getByTestId('mcp-form-submit'));
     await waitFor(() => {
       const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
@@ -164,6 +208,73 @@ describe('MCPSettingsPanel', () => {
       expect(body.transport).toBe('stdio');
       expect(body.command).toBe('docker');
       expect(body.args).toEqual(['mcp', 'gateway', 'run']);
+    });
+  });
+
+  it('reload config button calls POST /api/mcp/servers/reload-config and refreshes rows', async () => {
+    mockFetch({
+      'GET /api/mcp/servers': [],
+      'POST /api/mcp/servers/reload-config': [SERVER2],
+    });
+    const user = userEvent.setup();
+    render(<MCPSettingsPanel />);
+    await waitFor(() => screen.getByTestId('mcp-reload-config-btn'));
+
+    await user.click(screen.getByTestId('mcp-reload-config-btn'));
+
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
+      expect(calls.some(([url, opts]) =>
+        url === '/api/mcp/servers/reload-config' && opts?.method === 'POST',
+      )).toBe(true);
+    });
+    await waitFor(() => expect(screen.getByText('Local stdio')).toBeInTheDocument());
+  });
+
+  it('marks TOML-managed servers as readonly', async () => {
+    mockFetch({ 'GET /api/mcp/servers': [TOML_SERVER] });
+    render(<MCPSettingsPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('mcp-managed-toml-docs')).toBeInTheDocument());
+    expect(screen.getByTestId('mcp-restart-toml-docs')).toBeDisabled();
+    expect(screen.getByTestId('mcp-remove-toml-docs')).toBeDisabled();
+  });
+
+  it('opens external import modal, lets user choose checklist items, and applies selected configs', async () => {
+    mockFetch({
+      'GET /api/mcp/servers': [],
+      'POST /api/mcp/servers/import/external/discover': EXTERNAL_DISCOVERY,
+      'POST /api/mcp/servers/import/external/apply': {
+        imported: [
+          { id: 's10', name: 'GitHub (Cursor)' },
+        ],
+        skipped: [],
+        failed: [],
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<MCPSettingsPanel />);
+
+    await waitFor(() => screen.getByTestId('mcp-external-import-btn'));
+    await user.click(screen.getByTestId('mcp-external-import-btn'));
+
+    await waitFor(() => screen.getByTestId('mcp-external-import-modal'));
+    expect(screen.getByText('GitHub (Cursor)')).toBeInTheDocument();
+    expect(screen.getByText('Filesystem (Windsurf)')).toBeInTheDocument();
+    expect(screen.getByTestId('mcp-external-apply-btn')).toBeDisabled();
+
+    await user.click(screen.getByTestId('mcp-external-check-1'));
+    await user.click(screen.getByTestId('mcp-external-apply-btn'));
+
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
+      const applyCall = calls.find(([url, opts]) =>
+        url === '/api/mcp/servers/import/external/apply' && opts?.method === 'POST',
+      );
+      expect(applyCall).toBeDefined();
+      const body = JSON.parse((applyCall?.[1]?.body as string) ?? '{}') as { entryIds?: string[] };
+      expect(body.entryIds).toEqual(['windsurf:mcp:filesystem']);
     });
   });
 });

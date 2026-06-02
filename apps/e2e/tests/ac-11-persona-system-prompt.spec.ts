@@ -102,9 +102,9 @@ test.describe('AC-11: Persona system prompt & tool access', () => {
     await expect(page.locator('[data-testid="persona-item"]', { hasText: 'RaConsierge' }).first()).toBeVisible();
   });
 
-  test('Tools section shows renamed RaConsierge tab', async ({ page }) => {
+  test('Tools section shows RAApp tab', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('nav-tools').click();
-    await expect(page.getByTestId('tools-tab-raapps')).toHaveText('RaConsierge');
+    await expect(page.getByTestId('tools-tab-raapps')).toHaveText('RAApp');
   });
 });

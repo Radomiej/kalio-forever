@@ -1,0 +1,48 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "perplexity-api-key",
+      "description": "Perplexity API Key (https://www.perplexity.ai/settings/api)",
+      "password": true
+    }
+  ],
+  "servers": {
+    "mcp-dev-servers": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:\\Projekty\\mcp-dev-servers\\dist\\index.js",
+        "stdio"
+      ],
+      "env": {
+        "DEV_SERVERS_BACKEND_URL": "http://127.0.0.1:3418",
+        "DEV_SERVERS_API_TOKEN": "change-me-local-token"
+      }
+    },
+    "mcp-playwright-orchestrator": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:\\Projekty\\mcp-playwrigh-master\\dist\\index.js",
+        "--mode",
+        "stdio"
+      ],
+      "env": {
+        "MCP_PLAYWRIGHT_DATA_DIR": "C:\\Projekty\\mcp-playwrigh-master\\.local-data\\mcp-playwright-orchestrator",
+        "PLAYWRIGHT_BROWSERS_PATH": "C:\\Projekty\\mcp-playwrigh-master\\.ms-playwright",
+        "MCP_PLAYWRIGHT_IDLE_SWEEP_MS": "60000",
+        "MCP_PLAYWRIGHT_STDIO_SERVER_URL": "http://127.0.0.1:3333/mcp",
+        "MCP_PLAYWRIGHT_STDIO_RECONNECT_TIMEOUT_MS": "15000"
+      }
+    },
+    "perplexity-ask": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "server-perplexity-ask"],
+      "env": {
+        "PERPLEXITY_API_KEY": "${input:perplexity-api-key}"
+      }
+    }
+  }
+}

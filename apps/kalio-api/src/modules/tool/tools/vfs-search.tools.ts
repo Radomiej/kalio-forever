@@ -9,6 +9,7 @@ import { escapeRegex, globToRegex } from './search.utils';
   name: 'vfs_grep_search',
   description:
     'Search for text matches in files within the conversation virtual filesystem. ' +
+    'Generated directories like node_modules, dist, coverage, and reports are skipped by the VFS listing. ' +
     'Returns matching lines with file paths and line numbers.',
   parameters: {
     type: 'object',
@@ -79,6 +80,7 @@ export class VFSGrepSearchTool {
   name: 'vfs_file_search',
   description:
     'Find files matching a glob pattern in the conversation virtual filesystem. ' +
+    'Generated directories like node_modules, dist, coverage, and reports are skipped by the VFS listing. ' +
     'Returns relative file paths within the session workspace.',
   parameters: {
     type: 'object',

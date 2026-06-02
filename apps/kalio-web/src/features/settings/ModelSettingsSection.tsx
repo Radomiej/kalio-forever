@@ -201,6 +201,7 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
                   onChange={(v) => { setSelectedModel(v); setModelSaved(false); }}
                   loading={modelsLoading}
                   placeholder="e.g. gpt-4o-mini"
+                  aria-label="Active model"
                   data-testid="model-selector"
                 />
                 {modelsError && (
@@ -215,6 +216,7 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
                 onClick={() => void fetchModels()}
                 disabled={modelsLoading}
                 title="Refresh model list"
+                aria-label="Refresh model list"
               >
                 <RefreshCw size={12} className={modelsLoading ? 'animate-spin' : ''} />
               </button>
@@ -264,6 +266,7 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
                 value={genSettings.temperature}
                 onChange={() => undefined}
                 onInput={handleTemperatureInput}
+                aria-label="Temperature"
                 data-testid="gen-temperature"
               />
               <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
@@ -286,6 +289,7 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
                 value={genSettings.maxTokens}
                 onChange={() => undefined}
                 onInput={handleMaxTokensInput}
+                aria-label="Max output tokens"
                 data-testid="gen-max-tokens"
               />
               <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">

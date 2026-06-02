@@ -1,6 +1,6 @@
 # Application Architecture - Current State
 
-This document is the current top-level map of Kalio-Forever.
+This document is the current top-level map of Kalio Workstation (repository: Kalio-Forever).
 It reflects the runtime visible in the codebase today, not older design intent.
 
 Primary source-of-truth areas:
@@ -23,6 +23,7 @@ Primary source-of-truth areas:
 - `design-tools-architecture-current.md` - final design/prototype workflow: VFS-first preview vs RA-App publish lane
 - `raapp-design-current.md` - inline RA-App rendering, catalog, approvals, iframe bridge
 - `cli-agent-module-architecture.md` - CLI coding-agent adapter stack
+- `sub-agentflow-target-architecture.md` - target nested flow delegation model (`sub_agentflow`) for child graph runs
 
 ## Core runtime entities
 

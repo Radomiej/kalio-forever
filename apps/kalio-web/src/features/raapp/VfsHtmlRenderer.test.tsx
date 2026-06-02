@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { VfsHtmlRenderer } from './VfsHtmlRenderer';
 
 vi.mock('./HtmlIframeRenderer', () => ({
@@ -42,14 +42,55 @@ describe('VfsHtmlRenderer', () => {
     expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('credentials');
   });
 
+  it('shows a non-technical loading state before the preview is ready', async () => {
+    let resolveFetch: (value: { ok: boolean }) => void = () => {};
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve as (value: { ok: boolean }) => void;
+        }),
+    );
+
+    render(<VfsHtmlRenderer sessionId="session-1" vfsPath="drafts/loading/index.html" />);
+
+    expect(screen.getByTestId('raapp-preview-loading')).toHaveTextContent('Preparing your app preview');
+
+    await act(async () => {
+      resolveFetch({ ok: true });
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByTestId('raapp-vfs-src')).toHaveTextContent(
+      'http://localhost:3016/api/sessions/session-1/vfs/serve-path/drafts/loading/index.html',
+    );
+  });
+
   it('shows a friendly fallback when the VFS preview target is unavailable', async () => {
     fetchMock.mockResolvedValue({ ok: false });
 
     render(<VfsHtmlRenderer sessionId="session-1" vfsPath="drafts/missing/index.html" />);
 
     expect(await screen.findByTestId('raapp-preview-unavailable')).toHaveTextContent(
-      'Preview unavailable',
+      'not available yet',
     );
     expect(screen.queryByTestId('raapp-vfs-src')).not.toBeInTheDocument();
+  });
+
+  it('lets users retry preview checks without remounting the iframe', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true });
+
+    render(<VfsHtmlRenderer sessionId="session-1" vfsPath="drafts/ready/index.html" />);
+
+    expect(await screen.findByTestId('raapp-preview-unavailable')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry preview' }));
+
+    expect(await screen.findByTestId('raapp-vfs-src')).toHaveTextContent(
+      'http://localhost:3016/api/sessions/session-1/vfs/serve-path/drafts/ready/index.html',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

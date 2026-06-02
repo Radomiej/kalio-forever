@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Wrench, CheckCircle2, XCircle, Loader2, Clock, ChevronDown } from 'lucide-react';
+import { Wrench, CheckCircle2, XCircle, Loader2, Clock, ChevronDown, AlertTriangle } from 'lucide-react';
 import type { ToolActivity } from '../../store/agentStore';
 
 interface ToolActivityRowProps {
@@ -23,6 +23,7 @@ const STATUS_ICON: Record<ToolActivity['status'], React.ReactNode> = {
   success:               <CheckCircle2 size={14} className="text-success" />,
   error:                 <XCircle size={14} className="text-error" />,
   cancelled:             <XCircle size={14} className="text-base-content/40" />,
+  expired:               <AlertTriangle size={14} className="text-warning" />,
 };
 
 const STATUS_LABEL: Record<ToolActivity['status'], string> = {
@@ -31,6 +32,7 @@ const STATUS_LABEL: Record<ToolActivity['status'], string> = {
   success:               'done',
   error:                 'failed',
   cancelled:             'cancelled',
+  expired:               'confirmation expired',
 };
 
 export function ToolActivityRow({ activity }: ToolActivityRowProps) {

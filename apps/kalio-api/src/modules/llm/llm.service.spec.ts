@@ -3,6 +3,8 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { LLMService } from './llm.service';
 import { CredentialsService } from '../credentials/credentials.service';
+import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
+import { ProviderStreamLimiterService } from './provider-stream-limiter.service';
 
 // ─── DB overrides env — bootstrap-only rule ───────────────────────────────────
 // Requirement: .env vars are ONLY the fallback bootstrap when no active DB
@@ -27,6 +29,12 @@ describe('LLMService - DB credential overrides env', () => {
     };
   }
 
+  function buildTimeoutSettingsMock() {
+    return {
+      getProviderMaxConcurrentStreams: vi.fn().mockResolvedValue(2),
+    };
+  }
+
   function buildConfigMock(envVars: Record<string, string> = {}) {
     const defaults: Record<string, string> = {
       LLM_PROVIDER: 'openai',
@@ -47,6 +55,8 @@ describe('LLMService - DB credential overrides env', () => {
         LLMService,
         { provide: ConfigService, useValue: buildConfigMock() },
         { provide: CredentialsService, useValue: credentialsService },
+        { provide: TimeoutSettingsService, useValue: buildTimeoutSettingsMock() },
+        ProviderStreamLimiterService,
       ],
     }).compile();
     service = moduleRef.get<LLMService>(LLMService);
@@ -58,7 +68,7 @@ describe('LLMService - DB credential overrides env', () => {
       credentialsService.getActiveProviderConfig.mockResolvedValue({
         provider: 'xiaomimimo',
         apiKey: 'db-api-key',
-        model: 'mimo-v2-omni',
+        model: 'mimo-v2.5-pro',
         baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
       });
 
@@ -67,7 +77,7 @@ describe('LLMService - DB credential overrides env', () => {
 
       // Assert — DB wins, env is ignored
       expect(config.provider).toBe('xiaomimimo');
-      expect(config.model).toBe('mimo-v2-omni');
+      expect(config.model).toBe('mimo-v2.5-pro');
       expect(config.baseUrl).toBe('https://token-plan-ams.xiaomimimo.com/v1');
       // API key never exposed
       expect(config.apiKey).toBe('');
@@ -94,6 +104,42 @@ describe('LLMService - DB credential overrides env', () => {
 
       expect(config.source).toBe('env');
       expect(config.model).toBe('env-override-model');
+    });
+
+    it('uses env config when KALIO_FORCE_ENV_LLM is set even if DB credential exists', async () => {
+      const forcedCreds = buildCredentialsMock();
+      forcedCreds.getActiveProviderConfig.mockResolvedValue({
+        provider: 'cometapi',
+        apiKey: 'paid-db-key',
+        model: 'paid-db-model',
+        baseUrl: 'https://paid.example/v1',
+      });
+      const forcedModule = await Test.createTestingModule({
+        providers: [
+          LLMService,
+          {
+            provide: ConfigService,
+            useValue: buildConfigMock({
+              LLM_PROVIDER: 'mock',
+              LLM_API_KEY: 'mock',
+              LLM_BASE_URL: 'mock',
+              LLM_MODEL: 'mock',
+              KALIO_FORCE_ENV_LLM: '1',
+            }),
+          },
+          { provide: CredentialsService, useValue: forcedCreds },
+          { provide: TimeoutSettingsService, useValue: buildTimeoutSettingsMock() },
+          ProviderStreamLimiterService,
+        ],
+      }).compile();
+
+      const forcedService = forcedModule.get<LLMService>(LLMService);
+      const config = await forcedService.getConfig();
+
+      expect(config.source).toBe('env');
+      expect(config.provider).toBe('mock');
+      expect(config.model).toBe('');
+      expect(forcedCreds.getActiveProviderConfig).not.toHaveBeenCalled();
     });
 
     it('should not expose API key in getConfig regardless of source', async () => {
@@ -177,9 +223,7 @@ describe('LLMService - DB credential overrides env', () => {
       const result = await service.streamChat(
         [{ role: 'user', content: 'hello' }],
         [],
-        (chunk) => chunks.push(chunk),
-        'session-1',
-        'msg-1',
+        { sessionId: 'session-1', messageId: 'msg-1', onChunk: (chunk) => chunks.push(chunk) },
       );
       expect(Array.isArray(result)).toBe(true);
     });
@@ -193,15 +237,15 @@ describe('LLMService - DB credential overrides env', () => {
           LLMService,
           { provide: ConfigService, useValue: buildConfigMock({ LLM_PROVIDER: 'mock', LLM_API_KEY: 'mock' }) },
           { provide: CredentialsService, useValue: mockCreds2 },
+          { provide: TimeoutSettingsService, useValue: buildTimeoutSettingsMock() },
+          ProviderStreamLimiterService,
         ],
       }).compile();
       const svc2 = m.get<LLMService>(LLMService);
       const result = await svc2.streamChat(
         [{ role: 'user', content: 'hello' }],
         [],
-        () => {},
-        'session-1',
-        'msg-1',
+        { sessionId: 'session-1', messageId: 'msg-1', onChunk: () => {} },
       );
       expect(Array.isArray(result)).toBe(true);
     });
@@ -223,9 +267,7 @@ describe('LLMService - DB credential overrides env', () => {
         await service.streamChat(
           [{ role: 'user', content: 'hello' }],
           [],
-          () => {},
-          'session-1',
-          'msg-1',
+          { sessionId: 'session-1', messageId: 'msg-1', onChunk: () => {} },
         );
 
         const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
@@ -254,6 +296,8 @@ describe('LLMService - DB credential overrides env', () => {
             }),
           },
           { provide: CredentialsService, useValue: mockCreds },
+          { provide: TimeoutSettingsService, useValue: buildTimeoutSettingsMock() },
+          ProviderStreamLimiterService,
         ],
       }).compile();
 
@@ -263,9 +307,7 @@ describe('LLMService - DB credential overrides env', () => {
       await mockBaseUrlService.streamChat(
         [{ role: 'user', content: 'hello' }],
         [],
-        () => {},
-        'session-1',
-        'msg-1',
+        { sessionId: 'session-1', messageId: 'msg-1', onChunk: () => {} },
       );
 
       expect((mockBaseUrlService as unknown as { envProviderKey: string }).envProviderKey).toBe(initialProviderKey);
@@ -315,6 +357,45 @@ describe('LLMService - DB credential overrides env', () => {
       expect(config.model).toBe('mimo-v2-thinking');
       expect(config.source).toBe('env');
     });
+
+    it('stores an env model override when KALIO_FORCE_ENV_LLM is set despite active DB credential', async () => {
+      const forcedCreds = buildCredentialsMock();
+      forcedCreds.getActiveCredentialId.mockResolvedValue('paid-cred');
+      forcedCreds.getActiveProviderConfig.mockResolvedValue({
+        provider: 'cometapi',
+        apiKey: 'paid-db-key',
+        model: 'paid-db-model',
+        baseUrl: 'https://paid.example/v1',
+      });
+      forcedCreds.getEnvModelOverride.mockResolvedValue('mock-next');
+      const forcedModule = await Test.createTestingModule({
+        providers: [
+          LLMService,
+          {
+            provide: ConfigService,
+            useValue: buildConfigMock({
+              LLM_PROVIDER: 'mock',
+              LLM_API_KEY: 'mock',
+              LLM_BASE_URL: 'mock',
+              LLM_MODEL: 'mock',
+              KALIO_FORCE_ENV_LLM: '1',
+            }),
+          },
+          { provide: CredentialsService, useValue: forcedCreds },
+          { provide: TimeoutSettingsService, useValue: buildTimeoutSettingsMock() },
+          ProviderStreamLimiterService,
+        ],
+      }).compile();
+
+      const forcedService = forcedModule.get<LLMService>(LLMService);
+      const config = await forcedService.updateActiveModel('mock-next');
+
+      expect(forcedCreds.getActiveCredentialId).not.toHaveBeenCalled();
+      expect(forcedCreds.updateModel).not.toHaveBeenCalled();
+      expect(forcedCreds.setEnvModelOverride).toHaveBeenCalledWith('mock-next');
+      expect(config.source).toBe('env');
+      expect(config.model).toBe('mock-next');
+    });
   });
 
   describe('createProvider()', () => {
@@ -345,6 +426,8 @@ describe('LLMService - DB credential overrides env', () => {
             useValue: buildConfigMock({ LLM_PROVIDER: 'mock', LLM_API_KEY: 'mock' }),
           },
           { provide: CredentialsService, useValue: mockCreds },
+          { provide: TimeoutSettingsService, useValue: buildTimeoutSettingsMock() },
+          ProviderStreamLimiterService,
         ],
       }).compile();
 
@@ -372,6 +455,8 @@ describe('LLMService - DB credential overrides env', () => {
             }),
           },
           { provide: CredentialsService, useValue: mockCreds },
+          { provide: TimeoutSettingsService, useValue: buildTimeoutSettingsMock() },
+          ProviderStreamLimiterService,
         ],
       }).compile();
 

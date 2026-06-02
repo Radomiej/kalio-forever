@@ -17,10 +17,16 @@ const {
   setCanvasOpen,
   setBackendConfig,
   fetchMock,
+  agentStoreState,
+  setActiveSession,
 } = vi.hoisted(() => ({
   setCanvasOpen: vi.fn(),
   setBackendConfig: vi.fn(),
   fetchMock: vi.fn(),
+  setActiveSession: vi.fn(),
+  agentStoreState: {
+    pendingConfirmations: {} as Record<string, unknown>,
+  },
 }));
 
 vi.mock('./features/chat/ChatInterface', () => ({
@@ -31,8 +37,28 @@ vi.mock('./features/chat/CanvasPanel', () => ({
   CanvasPanel: () => <div data-testid="canvas-panel">Canvas</div>,
 }));
 
+vi.mock('./features/chat/graph/ExecutionGraphView', () => ({
+  ExecutionGraphView: ({ onOpenSessionInConversation }: { onOpenSessionInConversation?: (sessionId: string) => void }) => (
+    <div data-testid="execution-graph-view">
+      Graph
+      <button
+        type="button"
+        data-testid="mock-open-child-chat"
+        onClick={() => onOpenSessionInConversation?.('cli-child-1')}
+      >
+        Open child chat
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock('./features/sessions/ConversationPanel', () => ({
-  ConversationPanel: () => <div data-testid="conversation-panel">Conversations</div>,
+  ConversationPanel: ({ viewSwitcher }: { viewSwitcher?: React.ReactNode }) => (
+    <div data-testid="conversation-panel">
+      Conversations
+      {viewSwitcher}
+    </div>
+  ),
 }));
 
 vi.mock('./features/sessions/ConversationManagerPanel', () => ({
@@ -92,9 +118,20 @@ vi.mock('./features/observability/ObservabilityPage', () => ({
   ObservabilityPage: () => <div data-testid="observability-page">Observability</div>,
 }));
 
+vi.mock('./features/architect', () => ({
+  ArchitectPage: () => <div data-testid="architect-page">Architect editor</div>,
+}));
+
 vi.mock('./store/sessionStore', () => ({
-  useSessionStore: (selector?: (state: { sessions: Array<{ id: string }> }) => unknown) => {
-    const state = { sessions: [{ id: 'session-1' }, { id: 'session-2' }] };
+  useSessionStore: (selector?: (state: { sessions: Array<{ id: string; updatedAt: number }>; setActiveSession: typeof setActiveSession }) => unknown) => {
+    const now = Date.now();
+    const state = {
+      sessions: [
+        { id: 'session-1', updatedAt: now - 60_000 },
+        { id: 'session-2', updatedAt: now - 48 * 60 * 60 * 1000 },
+      ],
+      setActiveSession,
+    };
     return selector ? selector(state) : state;
   },
 }));
@@ -103,7 +140,7 @@ vi.mock('./store/agentStore', () => ({
   useAgentStore: (selector: (state: {
     pendingConfirmations: Record<string, unknown>;
     setCanvasOpen: typeof setCanvasOpen;
-  }) => unknown) => selector({ pendingConfirmations: {}, setCanvasOpen }),
+  }) => unknown) => selector({ pendingConfirmations: agentStoreState.pendingConfirmations, setCanvasOpen }),
 }));
 
 vi.mock('./services/backendHealth', () => ({
@@ -120,6 +157,9 @@ describe('App view state persistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    localStorage.clear();
+    agentStoreState.pendingConfirmations = {};
+    setActiveSession.mockReset();
     fetchMock.mockResolvedValue({
       json: async () => ({
         provider: 'mock',
@@ -163,6 +203,142 @@ describe('App view state persistence', () => {
     expect(screen.getByTestId('raapp-manager')).toBeInTheDocument();
     expect(screen.queryByTestId('landing-page')).not.toBeInTheDocument();
     expect(screen.queryByTestId('tool-panel')).not.toBeInTheDocument();
+  });
+
+  it('hydrates the stored talk graph view on first mount', () => {
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
+      activeSection: 'talk',
+      talkTab: 'conversations',
+      talkView: 'graph',
+      toolsTab: 'native',
+      mindTab: 'memory',
+      selectedSkillId: null,
+    }));
+
+    render(<App />);
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('canvas-panel')).not.toBeInTheDocument();
+  });
+
+  it('persists the selected talk graph view after remount', () => {
+    const firstRender = render(<App />);
+
+    fireEvent.click(screen.getByTestId('landing-to-chat'));
+    fireEvent.click(screen.getByTestId('talk-sidebar-graph-entry'));
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+
+    firstRender.unmount();
+
+    render(<App />);
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+  });
+
+  it('shows a dedicated graph entry in the Talk sidebar and switches views without creating a session first', () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId('landing-to-chat'));
+    fireEvent.click(screen.getByTestId('talk-sidebar-graph-entry'));
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+  });
+
+  it('shows the conversation view when landing starts a chat from a stored graph view', () => {
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
+      activeSection: 'landing',
+      talkTab: 'conversations',
+      talkView: 'graph',
+      toolsTab: 'native',
+      mindTab: 'memory',
+      selectedSkillId: null,
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId('landing-to-chat'));
+
+    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
+    expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
+  });
+
+  it('opens graph child sessions in the conversation view', () => {
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
+      activeSection: 'talk',
+      talkTab: 'conversations',
+      talkView: 'graph',
+      toolsTab: 'native',
+      mindTab: 'memory',
+      selectedSkillId: null,
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId('mock-open-child-chat'));
+
+    expect(setActiveSession).toHaveBeenCalledWith('cli-child-1');
+    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
+    expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
+  });
+
+  it('shows recent completed talk activity badge instead of total conversation count', () => {
+    localStorage.setItem('kalio:last-talk-active-at', String(Date.now() - 10 * 60_000));
+
+    render(<App />);
+
+    const badge = screen.getByTestId('nav-talk-activity-count');
+    expect(badge).toHaveTextContent('1');
+    expect(badge).toHaveAttribute('title', '1 completed or updated chat since last Talk activity');
+    expect(badge).not.toHaveTextContent('2');
+  });
+
+  it('prioritizes pending approval badge over completed talk activity', () => {
+    localStorage.setItem('kalio:last-talk-active-at', String(Date.now() - 10 * 60_000));
+    agentStoreState.pendingConfirmations = {
+      requestA: {},
+      requestB: {},
+    };
+
+    render(<App />);
+
+    const badge = screen.getByTestId('nav-talk-activity-count');
+    expect(badge).toHaveTextContent('2');
+    expect(badge).toHaveAttribute('title', '2 approvals waiting');
+    expect(badge).toHaveClass('badge-warning');
+    expect(badge).toHaveClass('animate-pulse');
+  });
+
+  it('clears recent talk badge when user opens Talk', () => {
+    localStorage.setItem('kalio:last-talk-active-at', String(Date.now() - 10 * 60_000));
+
+    render(<App />);
+    expect(screen.getByTestId('nav-talk-activity-count')).toHaveTextContent('1');
+
+    fireEvent.click(screen.getByTestId('nav-talk'));
+
+    expect(screen.queryByTestId('nav-talk-activity-count')).not.toBeInTheDocument();
+  });
+
+  it('opens the Architect section from the app rail', () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId('nav-architect'));
+
+    expect(screen.getByTestId('architect-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('landing-page')).not.toBeInTheDocument();
+  });
+
+  it('opens the Observability section from the app rail', () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId('nav-observe'));
+
+    expect(screen.getByTestId('observability-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('landing-page')).not.toBeInTheDocument();
   });
 
   it('REGRESSION: runtime config type accepts backend responses that include apiKey', () => {

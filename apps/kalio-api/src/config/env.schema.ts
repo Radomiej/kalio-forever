@@ -6,8 +6,11 @@ export const envSchema = Joi.object({
   DATABASE_PATH:       Joi.string().required(),
   WORKSPACE_ROOT:      Joi.string().required(),
   MEMORY_DB_PATH:      Joi.string().default('./data/memory'),
-  EMBEDDING_MODEL:     Joi.string().default('text-embedding-3-small'),
-  EMBEDDING_DIMENSIONS: Joi.number().default(1536),
+  EMBEDDING_ENABLED:   Joi.boolean().default(true),
+  EMBEDDING_MODEL:     Joi.string().default('Xenova/multilingual-e5-small'),
+  EMBEDDING_DIMENSIONS: Joi.number().default(384),
+  EMBEDDING_CACHE_DIR: Joi.string().default('./data/embeddings-cache'),
+  EMBEDDING_BACKEND:   Joi.string().valid('auto', 'webgpu', 'cpu').default('cpu'),
   // Dedicated embedding provider (optional — falls back to LLM config if not set)
   EMBEDDING_BASE_URL:  Joi.string().optional(),
   EMBEDDING_API_KEY:   Joi.string().optional(),

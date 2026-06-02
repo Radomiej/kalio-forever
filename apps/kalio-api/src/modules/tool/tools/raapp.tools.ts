@@ -14,6 +14,7 @@ import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
 import { RAAppVersioningService } from '../../raapp/raapp-versioning.service';
 import { archiveDirectoryToZip } from '../../raapp/zip-archive.util';
 import { EntityStore } from '../../raapp/entity-store';
+import { applyRaAppOutputPatches } from '../../raapp/raapp-output-patches.util';
 
 function createGeneratedAppId(sessionId: string): string {
   const sessionPart = sessionId.trim().slice(0, 8) || 'session';
@@ -87,7 +88,17 @@ async function buildGeneratedArchive(input: SaveGeneratedAppInput): Promise<{ ap
       },
       content: {
         type: 'string',
-        description: 'The HTML string or GUI DSL YAML content',
+        description:
+          'The HTML string (for type="html") or GUI DSL source (for type="gui"). ' +
+          'GUI DSL is a custom text format — NOT YAML or JSON. Syntax: elements use ' +
+          '`tag { prop = value child_tag { … } }`. ' +
+          'Strings are double-quoted: `text = "Hello"`. ' +
+          'Booleans are yes/no or true/false: `visible = yes`. ' +
+          'Numbers are bare: `value = 42`. ' +
+          'Layout tags: window vbox hbox panel container. ' +
+          'Content tags: label span title text button icon divider spacer progressbar. ' +
+          'Style via Tailwind/DaisyUI: `class = "btn btn-primary"`. ' +
+          'Example: `window { class = "p-4" vbox { label { text = "Hi" } button { text = "Click" onclick = "hello" } } }`',
       },
       mode: {
         type: 'string',
@@ -227,6 +238,7 @@ export class RunRaAppTool {
       }
       // Execute system effects (including call_native) to compute derived outputs
       let pendingApprovals: import('@kalio/types').RaAppPendingApproval[] = [];
+      let nativeResults: import('@kalio/types').RaAppNativeResult[] = [];
       if (appToRun.systemsContent) {
         const entityStore = new EntityStore();
         const effectsResult = await this.effectsProcessor.processSystemsYaml(
@@ -243,13 +255,21 @@ export class RunRaAppTool {
         }
 
         if (effectsResult.pendingApprovals.length > 0) {
-          await this.hitl.savePendingApprovals(request.callId, sessionId, effectsResult.pendingApprovals);
-          pendingApprovals = effectsResult.pendingApprovals.map((a) => ({
-            id: a.id,
-            system: a.system,
-            displayLabel: a.displayLabel,
-            args: a.args,
-          }));
+          const resolvedApprovals = request.abortSignal
+            ? await this.hitl.resolvePendingApprovals(
+                request.callId,
+                sessionId,
+                effectsResult.pendingApprovals,
+                request.abortSignal,
+              )
+            : await this.hitl.resolvePendingApprovals(
+                request.callId,
+                sessionId,
+                effectsResult.pendingApprovals,
+              );
+          pendingApprovals = resolvedApprovals.pendingApprovals;
+          nativeResults = resolvedApprovals.nativeResults;
+          applyRaAppOutputPatches(outputData, resolvedApprovals.outputPatches);
         }
       }
       const data = { output: outputData };
@@ -265,6 +285,7 @@ export class RunRaAppTool {
         content: appToRun.guiContent,
         renderedContent: result.renderedContent,
         ...(pendingApprovals.length > 0 ? { pendingApprovals } : {}),
+        ...(nativeResults.length > 0 ? { nativeResults } : {}),
       };
     }
 

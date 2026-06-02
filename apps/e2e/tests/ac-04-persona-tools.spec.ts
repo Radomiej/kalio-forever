@@ -1,14 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { API_BASE } from './helpers/test-config';
 
-const APP_URL = 'http://localhost:5188';
-
 function uniquePersonaName(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 async function goToPersonas(page: import('@playwright/test').Page) {
-  await page.goto(APP_URL);
+  await page.goto('/');
   await page.getByTestId('nav-mind').click();
   await page.getByTestId('mind-tab-personas').click();
 }

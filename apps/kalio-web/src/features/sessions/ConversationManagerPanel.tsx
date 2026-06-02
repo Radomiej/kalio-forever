@@ -10,6 +10,7 @@ export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => vo
   const toolActivities = useAgentStore((s) => s.toolActivities);
   const llmActivities = useAgentStore((s) => s.llmActivities);
   const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
+  const clearInactiveActivities = useAgentStore((s) => s.clearInactiveActivities);
   const sessions = useSessionStore((s) => s.sessions);
 
   const runningLoops = Object.values(activeAgentLoops);
@@ -19,6 +20,8 @@ export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => vo
   const done = toolActivities.filter(
     (a) => a.status !== 'running' && a.status !== 'awaiting_confirmation',
   );
+  const inactiveLlmCount = llmActivities.filter((a) => a.status !== 'running').length;
+  const inactiveCount = done.length + inactiveLlmCount;
 
   const isEmpty = runningLoops.length === 0 && !isStreaming && toolActivities.length === 0 && llmActivities.length === 0;
 
@@ -81,6 +84,17 @@ export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => vo
           </>
         )}
         <span className="ml-auto text-xs text-base-content/30">{toolActivities.length} call{toolActivities.length !== 1 ? 's' : ''}{llmActivities.length > 0 ? ` · ${llmActivities.length} llm` : ''}</span>
+        {inactiveCount > 0 && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs h-6 min-h-0 px-2 text-base-content/45 hover:text-base-content"
+            onClick={clearInactiveActivities}
+            data-testid="clear-inactive-agents"
+            title="Remove finished activity from this panel"
+          >
+            Clear inactive
+          </button>
+        )}
       </div>
 
       {/* Active tool calls */}

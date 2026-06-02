@@ -1,6 +1,6 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import type { ToolMeta } from '@kalio/types';
+import type { LLMContent, ToolMeta } from '@kalio/types';
 import type { ILLMSource } from './interfaces/llm-source.interface';
 import type { EmitFn, StreamContext } from './interfaces/stream-context.interface';
 import { TurnState } from './turn-state';
@@ -10,9 +10,47 @@ import { SessionManagerService } from './session-manager.service';
 import { AuditService } from './audit.service';
 import { LLM_SOURCE } from './chat.tokens';
 import { TurnErrorAlreadyEmitted } from './turn-error';
+import { RunJournalService } from './run-journal.service';
 import { PersonaService } from '../persona/persona.service';
 import { SkillsService } from '../skills/skills.service';
 import { CredentialsService } from '../credentials/credentials.service';
+import { toAuditToolCallData, toAuditToolResultData } from './audit-tool-data';
+
+type ChatErrorCode = import('@kalio/types').SocketEvents['chat:error']['code'];
+type LLMUsage = { promptTokens: number; completionTokens: number; totalTokens?: number };
+
+function estimateTextTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+function estimateContentTokens(content: LLMContent): number {
+  if (typeof content === 'string') {
+    return estimateTextTokens(content);
+  }
+  return content.reduce((total, part) => {
+    if (part.type === 'text') {
+      return total + estimateTextTokens(part.text);
+    }
+    return total + 1024;
+  }, 0);
+}
+
+function getChatErrorCode(err: unknown): ChatErrorCode {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = (err as { code?: unknown }).code;
+    if (
+      code === 'LLM_RATE_LIMIT' ||
+      code === 'LLM_TIMEOUT' ||
+      code === 'LLM_AUTH' ||
+      code === 'LLM_PROVIDER_DOWN' ||
+      code === 'LLM_QUOTA' ||
+      code === 'LLM_BAD_TOOL_ARGS'
+    ) {
+      return code;
+    }
+  }
+  return 'LLM_ERROR';
+}
 
 /**
  * Orchestrates a single conversation turn:
@@ -39,6 +77,7 @@ export class ChatService {
     private readonly skillsService: SkillsService,
     private readonly credentialsService: CredentialsService,
     private readonly audit: AuditService,
+    @Optional() private readonly runJournal?: RunJournalService,
   ) {}
 
   async handleTurn(
@@ -47,13 +86,15 @@ export class ChatService {
     personaId: string,
     emit: EmitFn,
     attachments?: import('@kalio/types').ChatAttachment[],
+    suppliedTurnId?: string,
+    runId?: string,
   ): Promise<void> {
     const controller = new AbortController();
     this.abortControllers.set(sessionId, controller);
 
     const firstMessageId = nanoid();
     let lastMessageId = firstMessageId;
-    const turnId = nanoid();
+    const turnId = suppliedTurnId ?? nanoid();
     // Tracks whether at least one chat:chunk was emitted so the FE can
     // choose between appending an error to an existing bubble (hadContent=true)
     // vs rolling back an empty bubble and offering retry (hadContent=false).
@@ -62,6 +103,13 @@ export class ChatService {
       if (event === 'chat:chunk') hadContent = true;
       emit(event, data);
     };
+    const checkpointRun = async (
+      phase: import('@kalio/types').ChatRunPhase,
+      extra?: Parameters<RunJournalService['checkpoint']>[1],
+    ): Promise<void> => {
+      if (!runId || !this.runJournal) return;
+      await this.runJournal.checkpoint(runId, { phase, ...extra });
+    };
 
     try {
       // Signal start of agent turn so the FE can open an AgentTurn bubble
@@ -69,6 +117,7 @@ export class ChatService {
       // activeTurnId to attach text/tool items to and the live stream is
       // invisible (only history reload would reconstruct it).
       trackingEmit('agent:start', { sessionId, turnId });
+      await checkpointRun('started');
 
       // Ensure session row exists before any FK-constrained inserts
       await this.sessionManager.ensureSession(sessionId, personaId);
@@ -139,6 +188,7 @@ export class ChatService {
         }
 
         iterationMessageId = iteration === 1 ? firstMessageId : nanoid();
+        await checkpointRun('llm_streaming');
 
         const state = new TurnState();
         const ctx: StreamContext = {
@@ -167,6 +217,7 @@ export class ChatService {
           type: 'llm_request',
           label: iterationMessageId,
           data: {
+            estimatedInputTokens: history.reduce((total, item) => total + estimateContentTokens(item.content), 0),
             personaId,
             iteration,
             messageCount: history.length,
@@ -197,10 +248,19 @@ export class ChatService {
         };
 
         let chunkCount = 0;
+        let usage: LLMUsage | undefined;
         let lastAuditUpdate = performance.now();
 
         for await (const chunk of this.llmSource.stream(params)) {
           if (controller.signal.aborted) break;
+          if (chunk.type === 'usage') {
+            usage = {
+              promptTokens: chunk.promptTokens,
+              completionTokens: chunk.completionTokens,
+              totalTokens: chunk.totalTokens,
+            };
+            continue;
+          }
           chunkCount++;
           await this.streamProcessor.process(chunk, ctx);
           // Throttle live audit updates to every 500ms so we don't hammer the DB
@@ -219,12 +279,14 @@ export class ChatService {
           emptyNoToolRetries = 0;
           for (const tc of state.toolCalls) {
             if (controller.signal.aborted) break;
+            await checkpointRun('tool_pending');
             trackingEmit('tool:start', { callId: tc.id, toolName: tc.name, args: tc.args });
+            await checkpointRun('tool_running');
             await this.audit.log({
               sessionId,
               type: 'tool_call',
               label: tc.name,
-              data: { callId: tc.id, args: tc.args },
+              data: toAuditToolCallData(tc.id, tc.name, tc.args),
             });
             const toolStart = performance.now();
             const result = await this.toolDispatch.dispatch(tc.id, tc.name, tc.args, ctx, toolMetas);
@@ -233,16 +295,28 @@ export class ChatService {
               sessionId,
               type: 'tool_result',
               label: tc.name,
-              data: { callId: tc.id, status: result.status },
+              data: toAuditToolResultData(tc.id, tc.name, result, tc.args),
               durationMs: Math.round(performance.now() - toolStart),
             });
-            if (result.status !== 'cancelled') {
-              const content =
-                result.status === 'success'
-                  ? JSON.stringify(result.data ?? '')
-                  : (result.errorMessage ?? '');
-              await this.sessionManager.saveToolResult(sessionId, tc.id, content);
+            if (tc.name === 'escalate' && result.status === 'success') {
+              void this.audit.log({
+                sessionId,
+                type: 'escalation',
+                label: 'Agent Escalation',
+                data: { message: (result.data as Record<string, unknown>)?.['message'] as string },
+              });
             }
+            const content =
+              result.status === 'success'
+                ? JSON.stringify(result.data ?? '')
+                : JSON.stringify({
+                    status: result.status,
+                    errorCode: result.errorCode,
+                    errorMessage: result.errorMessage ?? (
+                      result.status === 'cancelled' ? `Tool ${tc.name} was cancelled or not approved.` : ''
+                    ),
+                  });
+            await this.sessionManager.saveToolResult(sessionId, tc.id, content);
           }
         }
 
@@ -255,6 +329,8 @@ export class ChatService {
             textLength: state.text.length,
             thinkingLength: state.thinking.length,
             toolCallCount: state.toolCalls.length,
+            usage,
+            estimatedOutputTokens: estimateTextTokens(state.text) + estimateTextTokens(state.thinking),
           },
         });
 
@@ -289,6 +365,7 @@ export class ChatService {
       // structured error before agent:done so the FE can distinguish it
       // from a successful completion.
       if (controller.signal.aborted) {
+        if (runId) await this.runJournal?.interrupt(runId, 'Turn interrupted by user');
         trackingEmit('chat:error', {
           sessionId,
           code: 'INTERRUPTED',
@@ -296,6 +373,7 @@ export class ChatService {
           hadContent,
         });
       } else if (iteration > maxToolAttempts) {
+        if (runId) await this.runJournal?.fail(runId, 'MAX_ITERATIONS_REACHED', `Agent loop exceeded ${maxToolAttempts} iterations`);
         trackingEmit('chat:error', {
           sessionId,
           code: 'MAX_ITERATIONS_REACHED',
@@ -303,6 +381,7 @@ export class ChatService {
           hadContent,
         });
       } else if (emptyNoToolRetriesExhausted) {
+        if (runId) await this.runJournal?.fail(runId, 'LLM_ERROR', `Agent produced empty output ${maxEmptyNoToolRetries} times in a row`);
         trackingEmit('chat:error', {
           sessionId,
           code: 'LLM_ERROR',
@@ -310,18 +389,21 @@ export class ChatService {
           hadContent,
         });
       } else {
+        if (runId) await this.runJournal?.complete(runId);
         trackingEmit('chat:complete', { sessionId, messageId: lastMessageId });
       }
       trackingEmit('agent:done', { sessionId, turnId });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      const errorCode = getChatErrorCode(err);
       this.logger.error(
         `Turn failed session=${sessionId}: ${message}`,
         err instanceof Error ? err.stack : undefined,
       );
       if (!(err instanceof TurnErrorAlreadyEmitted)) {
-        emit('chat:error', { sessionId, code: 'LLM_ERROR', message, hadContent });
+        emit('chat:error', { sessionId, code: errorCode, message, hadContent });
       }
+      if (runId) await this.runJournal?.fail(runId, errorCode, message);
       // Always close the agent turn so the FE doesn't keep an open bubble forever
       emit('agent:done', { sessionId, turnId });
       void this.audit.log({

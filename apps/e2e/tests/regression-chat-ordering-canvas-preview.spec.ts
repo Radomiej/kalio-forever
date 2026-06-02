@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 type SeedStatement = {
   run: (...params: unknown[]) => unknown;
@@ -27,11 +28,14 @@ interface SeededOrderingFixture {
 const requireBackend = createRequire(resolve(__dirname, '../../kalio-api/package.json'));
 const BetterSqlite3 = requireBackend('better-sqlite3') as new (path: string) => SeedDb;
 const PROCESS_ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-const DB_PATH = PROCESS_ENV?.DATABASE_PATH?.trim()
-  ? resolve(PROCESS_ENV.DATABASE_PATH)
-  : resolve(__dirname, '../../kalio-api/data/kalio.db');
+const API_DIR = resolve(__dirname, '../../kalio-api');
+const configuredDatabasePath = PROCESS_ENV?.DATABASE_PATH?.trim();
+const DB_PATH = configuredDatabasePath
+  ? resolve(API_DIR, configuredDatabasePath)
+  : resolve(API_DIR, 'data/kalio.db');
 
 function openDb(): SeedDb {
+  mkdirSync(dirname(DB_PATH), { recursive: true });
   const db = new BetterSqlite3(DB_PATH);
   db.pragma('foreign_keys = ON');
   return db;
@@ -283,11 +287,19 @@ test.describe('REGRESSION: chat ordering and canvas previews', () => {
       nodes.map((node) => (node.textContent ?? '').replace(/\s+/g, ' ').trim()),
     );
     const masterIndex = sidebarOrder.findIndex((text) => text.includes(fixture.masterTitle));
-    const olderChildIndex = sidebarOrder.findIndex((text) => text.includes(fixture.olderChildTitle));
-    const newerChildIndex = sidebarOrder.findIndex((text) => text.includes(fixture.newerChildTitle));
 
     expect(masterIndex).toBeGreaterThanOrEqual(0);
-    expect(olderChildIndex).toBe(masterIndex + 1);
+    await page.getByTestId(`toggle-session-children-${fixture.masterSessionId}`).click();
+
+    const expandedSidebarOrder = await page.getByTestId('session-item').evaluateAll((nodes) =>
+      nodes.map((node) => (node.textContent ?? '').replace(/\s+/g, ' ').trim()),
+    );
+    const expandedMasterIndex = expandedSidebarOrder.findIndex((text) => text.includes(fixture.masterTitle));
+    const olderChildIndex = expandedSidebarOrder.findIndex((text) => text.includes(fixture.olderChildTitle));
+    const newerChildIndex = expandedSidebarOrder.findIndex((text) => text.includes(fixture.newerChildTitle));
+
+    expect(expandedMasterIndex).toBeGreaterThanOrEqual(0);
+    expect(olderChildIndex).toBe(expandedMasterIndex + 1);
     expect(newerChildIndex).toBe(olderChildIndex + 1);
 
     await masterSession.click();

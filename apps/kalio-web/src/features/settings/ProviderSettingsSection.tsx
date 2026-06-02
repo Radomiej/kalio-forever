@@ -34,12 +34,13 @@ function EnvProviderCard({
         onClick={() => setCollapsed((value) => !value)}
       >
         <button
-          className="text-base-content/40 hover:text-sky-400 transition-colors shrink-0"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-base-content/60 transition-colors hover:bg-base-300 hover:text-sky-400"
           onClick={(event) => {
             event.stopPropagation();
             onActivate();
           }}
           title={isActive ? 'Active provider' : 'Set as active'}
+          aria-label={isActive ? 'Environment fallback provider active' : 'Activate environment fallback provider'}
           disabled={isSyncing}
           data-testid="provider-activate-env"
         >
@@ -77,7 +78,7 @@ function EnvProviderCard({
                 <span className="font-mono">{model}</span>
               </div>
             ) : null}
-            <div className="text-xs text-base-content/40 italic">
+            <div className="text-xs text-base-content/60 italic">
               Runtime falls back to the backend environment when no saved credential is active.
             </div>
           </div>

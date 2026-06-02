@@ -13,7 +13,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc --build",
-    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+    "clean": "node ../../../scripts/clean-paths.mjs dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
     "@kalio/types": "workspace:*"

@@ -1,7 +1,7 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import { eq, desc } from 'drizzle-orm';
-import type { ChatSession, ChatMessage, CreateSessionDto } from '@kalio/types';
+import { eq, desc, isNull } from 'drizzle-orm';
+import type { ChatSession, ChatMessage, ChatSessionKind, CreateSessionDto } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { sessions } from '../../database/schema';
 import { SessionManagerService } from './session-manager.service';
@@ -23,11 +23,13 @@ export class SessionsService {
     @Inject(MESSAGE_REPOSITORY) private readonly repo: IMessageRepository,
   ) {}
 
-  async list(): Promise<ChatSession[]> {
-    const rows = await this.drizzle.db
+  async list(options: { includeArchived?: boolean } = {}): Promise<ChatSession[]> {
+    const query = this.drizzle.db
       .select()
-      .from(sessions)
-      .orderBy(desc(sessions.updatedAt));
+      .from(sessions);
+    const rows = await (options.includeArchived
+      ? query.orderBy(desc(sessions.updatedAt))
+      : query.where(isNull(sessions.archivedAt)).orderBy(desc(sessions.updatedAt)));
     return rows.map(this.toChatSession);
   }
 
@@ -75,6 +77,23 @@ export class SessionsService {
     await this.drizzle.db.delete(sessions).where(eq(sessions.id, id));
   }
 
+  async archive(id: string): Promise<void> {
+    await this.assertExists(id);
+    const now = new Date();
+    await this.drizzle.db
+      .update(sessions)
+      .set({ archivedAt: now, updatedAt: now })
+      .where(eq(sessions.id, id));
+  }
+
+  async restore(id: string): Promise<void> {
+    await this.assertExists(id);
+    await this.drizzle.db
+      .update(sessions)
+      .set({ archivedAt: null, updatedAt: new Date() })
+      .where(eq(sessions.id, id));
+  }
+
   async rename(id: string, title: string): Promise<void> {
     await this.update(id, { title });
   }
@@ -105,7 +124,7 @@ export class SessionsService {
     id: string;
     personaId: string;
     title: string;
-    kind?: 'chat' | 'subagent';
+    kind?: ChatSessionKind;
     parentSessionId?: string | null;
     parentTurnId?: string | null;
     parentToolCallId?: string | null;
@@ -125,7 +144,7 @@ export class SessionsService {
     id: string;
     personaId: string;
     title: string;
-    kind?: 'chat' | 'subagent';
+    kind?: ChatSessionKind;
     parentSessionId?: string | null;
     parentTurnId?: string | null;
     parentToolCallId?: string | null;

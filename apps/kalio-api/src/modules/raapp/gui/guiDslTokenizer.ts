@@ -106,8 +106,9 @@ export function tokenizeGui(src: string): GuiToken[] {
         i++;
       }
       const lower = s.toLowerCase();
-      if (lower === 'yes' || lower === 'no') {
-        tokens.push({ kind: 'boolean', value: lower, pos: start });
+      if (lower === 'yes' || lower === 'no' || lower === 'true' || lower === 'false') {
+        const boolVal = (lower === 'yes' || lower === 'true') ? 'yes' : 'no';
+        tokens.push({ kind: 'boolean', value: boolVal, pos: start });
       } else {
         tokens.push({ kind: 'ident', value: s, pos: start });
       }

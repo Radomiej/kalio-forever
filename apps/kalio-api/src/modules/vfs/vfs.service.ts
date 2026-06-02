@@ -15,6 +15,7 @@ import type { Readable } from 'node:stream';
 import archiver from 'archiver';
 import { eq } from 'drizzle-orm';
 import type { VFSWriteRequest, VFSReadResult, VFSListResult, VFSFile } from '@kalio/types';
+import { shouldSkipTraversalDirectory } from '../../common/utils/traversal-exclusions.util';
 import { DrizzleService } from '../../database/drizzle.service';
 import { sessions } from '../../database/schema';
 import { injectRaAppResizeBridge } from './raapp-preview-bridge';
@@ -211,6 +212,9 @@ export class VFSService {
     const result: VFSFile[] = [];
     const entries = readdirSync(currentDir);
     for (const entry of entries) {
+      if (shouldSkipTraversalDirectory(entry)) {
+        continue;
+      }
       const fullPath = join(currentDir, entry);
       const stat = statSync(fullPath);
       if (stat.isDirectory()) {

@@ -74,6 +74,42 @@ describe('RAAppService', () => {
       }
     });
 
+    it('does not let a partial runtime core directory hide shipped core apps', async () => {
+      const originalCwd = process.cwd();
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-partial-core-'));
+      const runtimeCoreDir = path.join(tempRoot, 'data', 'ra-apps', 'core');
+      const runtimeVisualDir = path.join(runtimeCoreDir, 'visual-calculator');
+
+      try {
+        await fs.mkdir(runtimeVisualDir, { recursive: true });
+        await fs.writeFile(
+          path.join(runtimeVisualDir, 'meta.yml'),
+          [
+            'id: visual-calculator',
+            'name: Runtime Visual Calculator',
+            'version: "9.9.9"',
+            'description: Runtime override fixture',
+            'execution:',
+            '  render_as: display',
+          ].join('\n'),
+          'utf8',
+        );
+        await fs.writeFile(path.join(runtimeVisualDir, 'ui.gui'), 'vbox { label { text = "runtime" } }', 'utf8');
+        process.chdir(tempRoot);
+
+        const isolatedService = await createService();
+        await isolatedService.init();
+
+        const ids = isolatedService.getAll().map((app) => app.id);
+        expect(ids).toContain('qa-interactive');
+        expect(ids).toContain('visual-calculator');
+        expect(isolatedService.getById('visual-calculator')?.meta.version).toBe('9.9.9');
+      } finally {
+        process.chdir(originalCwd);
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
     it('keeps the more renderable duplicate when the same app id appears twice in runtime core', async () => {
       const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-dup-'));
       const coreDir = path.join(tempRoot, 'core');

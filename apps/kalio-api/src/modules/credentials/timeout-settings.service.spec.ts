@@ -1,9 +1,11 @@
+import { BadRequestException } from '@nestjs/common';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DrizzleService } from '../../database/drizzle.service';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import * as schema from '../../database/schema';
+import type { KalioConfigService } from '../../config/kalio-config.service';
 import { TimeoutSettingsService } from './timeout-settings.service';
 
 function makeTestDrizzle(): DrizzleService {
@@ -32,11 +34,20 @@ describe('TimeoutSettingsService', () => {
     service = new TimeoutSettingsService(appSettings);
   });
 
+  function makeKalioConfigMock(
+    overrides: Awaited<ReturnType<KalioConfigService['getToolTimeoutSettings']>>,
+  ): Pick<KalioConfigService, 'getToolTimeoutSettings'> {
+    return {
+      getToolTimeoutSettings: vi.fn().mockResolvedValue(overrides),
+    };
+  }
+
   it('returns default timeout settings when nothing is persisted', async () => {
     await expect(service.getTimeoutSettings()).resolves.toEqual({
       webSearchTimeoutMs: 120_000,
       providerLocalTimeoutMs: 3_000,
       providerRemoteTimeoutMs: 15_000,
+      providerMaxConcurrentStreams: 2,
     });
   });
 
@@ -45,16 +56,19 @@ describe('TimeoutSettingsService', () => {
       webSearchTimeoutMs: 180_000,
       providerLocalTimeoutMs: 7_000,
       providerRemoteTimeoutMs: 45_000,
+      providerMaxConcurrentStreams: 3,
     });
 
     await expect(service.getTimeoutSettings()).resolves.toEqual({
       webSearchTimeoutMs: 180_000,
       providerLocalTimeoutMs: 7_000,
       providerRemoteTimeoutMs: 45_000,
+      providerMaxConcurrentStreams: 3,
     });
     await expect(service.getWebSearchTimeoutMs()).resolves.toBe(180_000);
     await expect(service.getProviderTimeoutMs(true)).resolves.toBe(7_000);
     await expect(service.getProviderTimeoutMs(false)).resolves.toBe(45_000);
+    await expect(service.getProviderMaxConcurrentStreams()).resolves.toBe(3);
   });
 
   it('clamps timeout settings to safe bounds', async () => {
@@ -62,12 +76,14 @@ describe('TimeoutSettingsService', () => {
       webSearchTimeoutMs: 1,
       providerLocalTimeoutMs: 999_999,
       providerRemoteTimeoutMs: 2_000,
+      providerMaxConcurrentStreams: 999,
     });
 
     await expect(service.getTimeoutSettings()).resolves.toEqual({
       webSearchTimeoutMs: 15_000,
       providerLocalTimeoutMs: 30_000,
       providerRemoteTimeoutMs: 5_000,
+      providerMaxConcurrentStreams: 20,
     });
   });
 
@@ -82,7 +98,30 @@ describe('TimeoutSettingsService', () => {
       webSearchTimeoutMs: 120_000,
       providerLocalTimeoutMs: 3_000,
       providerRemoteTimeoutMs: 15_000,
+      providerMaxConcurrentStreams: 2,
     });
+  });
+
+  it('prefers TOML-managed timeout settings over persisted values', async () => {
+    const appSettings = {
+      get: vi.fn(async (key: string) => (key === 'tool_timeout_provider_remote_ms' ? '22000' : '180000')),
+      set: vi.fn(),
+    };
+    const kalioConfig = makeKalioConfigMock({
+      webSearchTimeoutMs: 250_000,
+      providerLocalTimeoutMs: 8_000,
+      providerMaxConcurrentStreams: 4,
+    });
+    const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
+
+    await expect(configManagedService.getTimeoutSettings()).resolves.toEqual({
+      webSearchTimeoutMs: 250_000,
+      providerLocalTimeoutMs: 8_000,
+      providerRemoteTimeoutMs: 22_000,
+      providerMaxConcurrentStreams: 4,
+    });
+    expect(appSettings.get).toHaveBeenCalledTimes(1);
+    expect(appSettings.get).toHaveBeenCalledWith('tool_timeout_provider_remote_ms');
   });
 
   it('reads only the web search timeout key for getWebSearchTimeoutMs', async () => {
@@ -95,5 +134,69 @@ describe('TimeoutSettingsService', () => {
     await expect(directGetterService.getWebSearchTimeoutMs()).resolves.toBe(180_000);
     expect(appSettings.get).toHaveBeenCalledTimes(1);
     expect(appSettings.get).toHaveBeenCalledWith('tool_timeout_web_search_ms');
+  });
+
+  it('uses TOML-managed values for direct timeout helpers', async () => {
+    const appSettings = {
+      get: vi.fn().mockResolvedValue('180000'),
+      set: vi.fn(),
+    };
+    const kalioConfig = makeKalioConfigMock({
+      webSearchTimeoutMs: 240_000,
+      providerRemoteTimeoutMs: 31_000,
+      providerMaxConcurrentStreams: 5,
+    });
+    const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
+
+    await expect(configManagedService.getWebSearchTimeoutMs()).resolves.toBe(240_000);
+    await expect(configManagedService.getProviderTimeoutMs(false)).resolves.toBe(31_000);
+    await expect(configManagedService.getProviderMaxConcurrentStreams()).resolves.toBe(5);
+    expect(appSettings.get).not.toHaveBeenCalled();
+  });
+
+  it('throws BadRequestException when writing a TOML-managed timeout key', async () => {
+    const appSettings = { get: vi.fn().mockResolvedValue(null), set: vi.fn() };
+    const kalioConfig = makeKalioConfigMock({ webSearchTimeoutMs: 240_000 });
+    const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
+
+    await expect(
+      configManagedService.setTimeoutSettings({ webSearchTimeoutMs: 180_000 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      configManagedService.setTimeoutSettings({ webSearchTimeoutMs: 180_000 }),
+    ).rejects.toThrow(/\.kalio\/config\.toml/);
+    expect(appSettings.set).not.toHaveBeenCalled();
+  });
+
+  it('allows writing non-managed keys when TOML manages other keys', async () => {
+    const appSettings = { get: vi.fn().mockResolvedValue(null), set: vi.fn() };
+    const kalioConfig = makeKalioConfigMock({ webSearchTimeoutMs: 240_000 });
+    const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
+
+    await expect(
+      configManagedService.setTimeoutSettings({ providerLocalTimeoutMs: 5_000 }),
+    ).resolves.toBeUndefined();
+    expect(appSettings.set).toHaveBeenCalledWith('tool_timeout_provider_local_ms', '5000');
+  });
+
+  it('throws when ALL requested keys are TOML-managed', async () => {
+    const appSettings = { get: vi.fn().mockResolvedValue(null), set: vi.fn() };
+    const kalioConfig = makeKalioConfigMock({
+      webSearchTimeoutMs: 240_000,
+      providerLocalTimeoutMs: 8_000,
+      providerRemoteTimeoutMs: 31_000,
+      providerMaxConcurrentStreams: 4,
+    });
+    const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
+
+    await expect(
+      configManagedService.setTimeoutSettings({
+        webSearchTimeoutMs: 120_000,
+        providerLocalTimeoutMs: 3_000,
+        providerRemoteTimeoutMs: 15_000,
+        providerMaxConcurrentStreams: 2,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(appSettings.set).not.toHaveBeenCalled();
   });
 });

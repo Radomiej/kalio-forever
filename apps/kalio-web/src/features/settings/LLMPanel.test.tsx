@@ -139,6 +139,63 @@ describe('LLMPanel', () => {
     expect(screen.getByText('My OpenAI')).toBeInTheDocument();
   });
 
+  it('exposes accessible names for runtime controls and provider activation', async () => {
+    mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
+    render(<LLMPanel />);
+
+    await waitFor(() => expect(screen.getByLabelText('Active model')).toBeInTheDocument());
+
+    expect(screen.getByLabelText('Refresh model list')).toBeInTheDocument();
+    expect(screen.getByLabelText('Temperature')).toBeInTheDocument();
+    expect(screen.getByLabelText('Max output tokens')).toBeInTheDocument();
+    expect(screen.getByLabelText('Context window')).toBeInTheDocument();
+    expect(screen.getByLabelText('Max tool attempts')).toBeInTheDocument();
+    expect(screen.getByLabelText('Web search timeout')).toBeInTheDocument();
+    expect(screen.getByLabelText('Local provider probe timeout')).toBeInTheDocument();
+    expect(screen.getByLabelText('Remote provider probe timeout')).toBeInTheDocument();
+    expect(screen.getByLabelText('My OpenAI provider active')).toBeInTheDocument();
+  });
+
+  it('renders compact provider health from the active runtime config', async () => {
+    mockFetch(defaultMap({ activeId: CRED.id, credentials: [CRED] }));
+    render(<LLMPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toBeInTheDocument());
+
+    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('OpenAI');
+    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('gpt-4o-mini');
+    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('Not tested');
+  });
+
+  it('shows the Windows local provider hint when a local provider is selected', async () => {
+    mockFetch(defaultMap());
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    await waitFor(() => screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByTestId('add-provider-btn'));
+    await user.click(screen.getByRole('button', { name: 'BitNet' }));
+
+    expect(screen.getByTestId('provider-health-local-hint')).toHaveTextContent(/windows local provider hint/i);
+  });
+
+  it('shows the Windows local provider hint when a local provider is already active', async () => {
+    const localCredential: Credential = {
+      id: 'c-bitnet',
+      name: 'Local BitNet',
+      provider: 'bitnet',
+      baseUrl: 'http://localhost:8080/v1',
+      model: 'bitnet-b1.58-2b-4t',
+      createdAt: 1704067200000,
+    };
+
+    mockFetch(defaultMap({ credentials: [localCredential], activeId: localCredential.id }));
+    render(<LLMPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toBeInTheDocument());
+    expect(screen.getByTestId('provider-health-local-hint')).toHaveTextContent(/windows local provider hint/i);
+  });
+
   it('shows active badge on the active credential', async () => {
     mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
     render(<LLMPanel />);
@@ -149,12 +206,12 @@ describe('LLMPanel', () => {
     mockFetch({
       ...defaultMap({
         llmProvider: 'xiaomimimo',
-        llmModel: 'mimo-v2-omni',
+        llmModel: 'mimo-v2.5-pro',
         llmBaseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
         llmSource: 'env',
       }),
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
-      'GET /api/llm/active/models': { models: ['mimo-v2-omni', 'mimo-v2-thinking'] },
+      'GET /api/llm/active/models': { models: ['mimo-v2.5-pro', 'mimo-v2-thinking'] },
     });
 
     render(<LLMPanel />);
@@ -166,19 +223,19 @@ describe('LLMPanel', () => {
     expect(screen.getByText('Active Provider')).toBeInTheDocument();
     expect(screen.getByTestId('provider-row-env')).toHaveTextContent(/xiaomi mimo/i);
     expect(screen.queryByText(/activate a provider above to select its model/i)).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('mimo-v2-omni'));
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('mimo-v2.5-pro'));
   });
 
   it('saves the active model through the runtime endpoint when the env provider is active', async () => {
     mockFetch({
       ...defaultMap({
         llmProvider: 'xiaomimimo',
-        llmModel: 'mimo-v2-omni',
+        llmModel: 'mimo-v2.5-pro',
         llmBaseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
         llmSource: 'env',
       }),
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
-      'GET /api/llm/active/models': { models: ['mimo-v2-omni', 'mimo-v2-thinking'] },
+      'GET /api/llm/active/models': { models: ['mimo-v2.5-pro', 'mimo-v2-thinking'] },
       'PUT /api/llm/active/model': {
         provider: 'xiaomimimo',
         model: 'mimo-v2-thinking',
@@ -313,8 +370,7 @@ describe('LLMPanel', () => {
     await user.click(screen.getByRole('button', { name: 'BitNet' }));
 
     const nameInput = screen.getByRole('textbox', { name: /name/i });
-    await user.clear(nameInput);
-    await user.type(nameInput, 'Local BitNet');
+    fireEvent.change(nameInput, { target: { value: 'Local BitNet' } });
     await user.click(screen.getByTestId('add-provider-submit'));
 
     await waitFor(() => expect(screen.getByTestId('provider-row-c-bitnet')).toBeInTheDocument());
@@ -411,9 +467,8 @@ describe('LLMPanel', () => {
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
     const nameInput = screen.getByRole('textbox', { name: /name/i });
-    await user.clear(nameInput);
-    await user.type(nameInput, 'New Key');
-    await user.type(screen.getByTestId('add-provider-apikey'), 'sk-test');
+    fireEvent.change(nameInput, { target: { value: 'New Key' } });
+    fireEvent.change(screen.getByTestId('add-provider-apikey'), { target: { value: 'sk-test' } });
     await user.click(screen.getByTestId('add-provider-submit'));
     await waitFor(() => expect(screen.getByTestId(`provider-row-${created.id}`)).toBeInTheDocument());
     // form should be hidden after submit

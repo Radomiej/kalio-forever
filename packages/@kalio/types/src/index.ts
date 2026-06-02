@@ -32,6 +32,8 @@ export interface LLMStreamChunk {
   agentRun?: AgentRunContext;
   /** True when delta carries reasoning/thinking content (not final answer) */
   thinking?: boolean;
+  /** Provider-reported usage when available from a terminal stream chunk. */
+  usage?: { promptTokens: number; completionTokens: number; totalTokens?: number };
 }
 
 export interface LLMToolCall {
@@ -118,6 +120,35 @@ export interface ChatAttachment {
   mimeType: string;   // e.g. 'image/png'
 }
 
+export interface ArchitectureChatTraceStep {
+  speaker: 'participant' | 'router' | 'finalizer';
+  content: string;
+  eventId?: ID;
+  nodeId?: string;
+  nextNodeId?: string;
+  visitIndex?: number;
+  incompleteReason?: string;
+  routerOutput?: ArchitectureRouterOutput;
+  stream?: ArchitectureBranchStreamSummary;
+}
+
+export interface ArchitectureBranchStreamSummary {
+  streamGroupId: ID;
+  branchSessionId: ID;
+  status: 'started' | 'streaming' | 'completed' | 'failed';
+  chunkCount: number;
+  text: string;
+}
+
+export interface ArchitectureChatRunSummary {
+  runId: ID;
+  schemaId: ID;
+  status: ArchitectureRunStatus;
+  finalArtifact?: string;
+  trace: ArchitectureChatTraceStep[];
+  routeHops: ArchitectureRouteHop[];
+}
+
 export interface ChatMessage {
   id: ID;
   sessionId: ID;
@@ -127,15 +158,18 @@ export interface ChatMessage {
   toolCalls?: LLMToolCall[];  // populated for assistant messages with tool use
   toolCallId?: string;        // populated for role='tool_result'
   attachments?: ChatAttachment[];  // image / file attachments on user messages
+  architectureRun?: ArchitectureChatRunSummary; // FE projection for architecture graph runs
   streaming?: boolean;        // FE only — true while chunk stream is open
   createdAt: Timestamp;
 }
+
+export type ChatSessionKind = 'chat' | 'subagent' | 'cli-agent' | 'agent-flow';
 
 export interface ChatSession {
   id: ID;
   personaId: ID;
   title: string;              // auto-generated from first message
-  kind?: 'chat' | 'subagent';
+  kind?: ChatSessionKind;
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
@@ -146,7 +180,7 @@ export interface ChatSession {
 export interface CreateSessionDto {
   personaId: ID;
   title?: string;
-  kind?: 'chat' | 'subagent';
+  kind?: ChatSessionKind;
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
@@ -162,6 +196,12 @@ export interface ToolMeta {
 
 export type AgentType = 'master' | 'subagent';
 export type VFSMode = 'isolated' | 'shared';
+export type ChildExecutionKind = 'sub_agent' | 'cli_agent' | 'sub_agentflow';
+export type ArchitectureChildAgentKind = ChildExecutionKind | 'subagent' | 'cli-agent';
+export type AgentFlowRunStatus = 'queued' | 'running' | 'waiting_on_orchestrator' | 'done' | 'failed' | 'cancelled' | 'blocked';
+export type AgentFlowReturnMode = 'summary' | 'full_trace' | 'artifacts_only';
+export type AgentFlowStartMode = 'durable' | 'blocking';
+export type AgentFlowPhase = 'strategy' | 'research' | 'debate' | 'build' | 'qa' | 'hitl' | 'custom';
 
 export interface AgentRunContext {
   agentRunId: ID;
@@ -193,6 +233,157 @@ export interface SubagentToolResult {
   durationMs: number;
 }
 
+export interface RunSubAgentFlowArgs {
+  flowId: ID;
+  goal: string;
+  context?: string | Record<string, unknown>;
+  parentSessionId: ID;
+  parentToolCallId?: ID;
+  startMode?: AgentFlowStartMode;
+  vfsMode?: VFSMode;
+  copyBack?: boolean;
+  returnMode?: AgentFlowReturnMode;
+  maxSteps?: number;
+  continuation?: AgentFlowContinuationCursor;
+}
+
+export interface AgentFlowNode {
+  id: ID;
+  agentId: ID;
+  label: string;
+  phase: AgentFlowPhase;
+  role: string;
+  tools: string[];
+  x?: number;
+  y?: number;
+}
+
+export interface AgentFlowEdge {
+  id: ID;
+  fromNodeId: ID;
+  toNodeId: ID;
+  condition?: string;
+  returnToOrchestrator?: boolean;
+}
+
+export interface AgentFlowDefinition {
+  id: ID;
+  name: string;
+  version: string;
+  entryNodeId: ID;
+  orchestratorNodeId?: ID;
+  maxIterations?: number;
+  nodes: AgentFlowNode[];
+  edges: AgentFlowEdge[];
+}
+
+export interface AgentFlowTraceItem {
+  id: ID;
+  sequence: number;
+  type: string;
+  message: string;
+  nodeId?: string;
+  roleSlotId?: string;
+  route?: ArchitectureRouteDecision;
+  data?: Record<string, unknown>;
+  status?: AgentFlowRunStatus;
+  createdAt: Timestamp;
+}
+
+export interface SubAgentFlowResult {
+  flowRunId: ID;
+  childSessionId: ID;
+  status: AgentFlowRunStatus;
+  summary: string;
+  decisions: string[];
+  nextActions: string[];
+  artifacts: string[];
+  returnToOrchestratorCount?: number;
+  tracePreview?: AgentFlowTraceItem[];
+  openChatSessionId?: ID;
+  openGraphRunId?: ID;
+}
+
+export interface AgentFlowRouteCheckpoint {
+  fromNodeId: ID;
+  selectedNodeIds: ID[];
+  nextNodeId?: ID;
+  source?: ArchitectureRouteSource;
+  response?: string;
+}
+
+export interface AgentFlowContinuationCursor {
+  reason: 'max_steps' | 'return_to_orchestrator' | 'runtime_pause';
+  waitingNodeId?: ID;
+  pendingNodeIds: ID[];
+  visitCounts: Record<ID, number>;
+  lastCompletedNodeId?: ID;
+  lastRoute?: AgentFlowRouteCheckpoint;
+  message?: string;
+}
+
+export interface AgentFlowCheckpoint {
+  goal: string;
+  context?: string | Record<string, unknown>;
+  vfsMode?: VFSMode;
+  copyBack?: boolean;
+  maxSteps?: number;
+  continuation?: AgentFlowContinuationCursor;
+  lastResumeInput?: string;
+  resumeContext?: Record<string, unknown>;
+}
+
+export interface AgentFlowRun {
+  id: ID;
+  parentSessionId: ID;
+  parentToolCallId?: ID;
+  childSessionId: ID;
+  openChatSessionId?: ID;
+  openGraphRunId?: ID;
+  flowDefinitionId: ID;
+  status: AgentFlowRunStatus;
+  startMode: AgentFlowStartMode;
+  returnMode: AgentFlowReturnMode;
+  activeNodeIds?: ID[];
+  completedNodeIds?: ID[];
+  activePhases?: AgentFlowPhase[];
+  completedPhases?: AgentFlowPhase[];
+  nodeVisitCounts?: Record<ID, number>;
+  maxIterations?: number;
+  waitingForNodeId?: ID;
+  returnToOrchestratorCount?: number;
+  checkpoint?: AgentFlowCheckpoint;
+  summary?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  finishedAt?: Timestamp;
+}
+
+export interface CreateAgentFlowRunDto {
+  flowId: ID;
+  goal: string;
+  context?: string | Record<string, unknown>;
+  parentSessionId: ID;
+  parentToolCallId?: ID;
+  startMode?: AgentFlowStartMode;
+  vfsMode?: VFSMode;
+  copyBack?: boolean;
+  returnMode?: AgentFlowReturnMode;
+  maxSteps?: number;
+}
+
+export interface ResumeAgentFlowRunDto {
+  input?: string;
+  context?: Record<string, unknown>;
+  maxSteps?: number;
+}
+
+export interface AgentFlowRunSnapshot {
+  run: AgentFlowRun;
+  result?: SubAgentFlowResult;
+  events: AgentFlowTraceItem[];
+}
+
 export interface ToolCallRequest {
   sessionId: ID;
   vfsSessionId?: ID;
@@ -208,6 +399,12 @@ export interface ToolCallRequest {
    * progress events before the final tool:result arrives.
    */
   readonly _emit?: <K extends keyof SocketEvents>(event: K, data: SocketEvents[K]) => void;
+  /**
+   * Backend-only: abort signal for the originating turn.
+   * Tools and approval helpers can use this to stop follow-up work when the
+   * user interrupts the parent turn.
+   */
+  readonly abortSignal?: AbortSignal;
 }
 
 export interface ToolResult {
@@ -228,6 +425,15 @@ export interface ToolConfirmationRequest {
   toolName: string;
   args: Record<string, unknown>;
   timeoutMs: number;          // confirmation timeout in ms; 0 disables timeout
+  agentRun?: AgentRunContext;
+}
+
+export interface ToolConfirmationInvalidated {
+  requestId: string;
+  toolCallId?: string;
+  sessionId: ID;
+  reason: 'timeout' | 'cancelled' | 'confirmed' | 'not_found' | 'replay_stale';
+  message?: string;
   agentRun?: AgentRunContext;
 }
 
@@ -280,6 +486,7 @@ export interface ToolTimeoutSettings {
   webSearchTimeoutMs: number;
   providerLocalTimeoutMs: number;
   providerRemoteTimeoutMs: number;
+  providerMaxConcurrentStreams: number;
 }
 
 // ─── Allowed Paths ──────────────────────────────────────────────────────────────
@@ -362,6 +569,7 @@ export interface RAAppBlock {
   vfsPath?: string;           // optional: load content from VFS path
   actions?: RAAppAction[];    // only for mode='interactive'
   pendingApprovals?: RaAppPendingApproval[];  // populated when call_native needs HITL
+  nativeResults?: RaAppNativeResult[];
 }
 
 export interface RAAppResult {
@@ -374,6 +582,7 @@ export interface RAAppResult {
   };
   requiresHITL?: boolean;     // true when mode='interactive' and has actions
   pendingApprovals?: RaAppPendingApproval[];  // populated by EffectsProcessorService
+  nativeResults?: RaAppNativeResult[];
 }
 
 // ─── GUI DSL (rendered wire format) ─────────────────────────────────────────
@@ -448,6 +657,41 @@ export interface UpdateSkillDto {
   prompt?: string;
 }
 
+export type ChatRunPhase =
+  | 'queued'
+  | 'started'
+  | 'llm_streaming'
+  | 'tool_pending'
+  | 'tool_running'
+  | 'completed'
+  | 'interrupted'
+  | 'failed';
+
+export type ChatRunStatus =
+  | 'active'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'interrupted_needs_retry';
+
+export interface ChatRunSnapshot {
+  id: ID;
+  sessionId: ID;
+  turnId: ID;
+  phase: ChatRunPhase;
+  status: ChatRunStatus;
+  provider?: string;
+  model?: string;
+  retryCount: number;
+  safeResume: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  startedAt: Timestamp;
+  updatedAt: Timestamp;
+  lastHeartbeatAt: Timestamp;
+  completedAt?: Timestamp;
+}
+
 // ─── Socket.IO Event Map ──────────────────────────────────────────────────────
 // COMPLETE contract between FE and BE. All Socket.IO events defined here.
 export interface SocketEvents {
@@ -471,7 +715,19 @@ export interface SocketEvents {
   };
   'chat:error': {
     sessionId: ID;
-    code: 'PROVIDER_NOT_CONFIGURED' | 'LLM_ERROR' | 'TOOL_ERROR' | 'INTERRUPTED' | 'QUEUE_FULL' | 'MAX_ITERATIONS_REACHED';
+    code:
+      | 'PROVIDER_NOT_CONFIGURED'
+      | 'LLM_ERROR'
+      | 'LLM_RATE_LIMIT'
+      | 'LLM_TIMEOUT'
+      | 'LLM_AUTH'
+      | 'LLM_PROVIDER_DOWN'
+      | 'LLM_QUOTA'
+      | 'LLM_BAD_TOOL_ARGS'
+      | 'TOOL_ERROR'
+      | 'INTERRUPTED'
+      | 'QUEUE_FULL'
+      | 'MAX_ITERATIONS_REACHED';
     message: string;
     agentRun?: AgentRunContext;
     /** True if at least one `chat:chunk` was emitted before this error.
@@ -483,6 +739,7 @@ export interface SocketEvents {
 
   // Tool HITL — server → client
   'tool:confirmation_required': ToolConfirmationRequest;
+  'tool:confirmation_invalidated': ToolConfirmationInvalidated;
 
   // Tool HITL — client → server
   'tool:confirm': { requestId: string; sessionId: ID };
@@ -514,12 +771,17 @@ export interface SocketEvents {
   // Sessions — server → client
   'session:created': ChatSession;
   'session:updated': Pick<ChatSession, 'id' | 'title' | 'updatedAt'>;
+  'session:status': { sessionId: ID; active: boolean; turnId?: ID; queueLength: number; run?: ChatRunSnapshot };
 
   // Session re-registration — client → server (sent after reconnect)
   'session:identify': { sessionId: ID };
 
   // CLI Agent streaming — server → client
   'cli_agent:progress': { callId: ID; sessionId: ID; agentId: string; chunk: string };
+
+  // Tool argument generation progress — server → client
+  // Emitted ~once per second while the LLM streams tool call arguments (before tool:start).
+  'tool:arg_progress': { toolName: string; totalChars: number; charsPerSec: number; sessionId: ID };
 
 }
 
@@ -530,6 +792,25 @@ export interface CLIAgentResult {
   exitCode: number;     // 0 = success, non-zero = failure
   durationMs: number;   // wall-clock time of the CLI run
   agentId: string;      // which adapter was used: 'copilot' | 'gemini' | 'claude' | …
+  childSessionId?: ID;
+}
+
+export type CLIAgentSessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
+
+export interface CLIAgentSessionSnapshot {
+  childSessionId: ID;
+  parentSessionId: ID;
+  agentId: string;
+  workdir: string;
+  status: CLIAgentSessionStatus;
+  lastPrompt: string;
+  updatedAt: Timestamp;
+  startedAt?: Timestamp;
+  completedAt?: Timestamp;
+  activeCallId?: ID;
+  lastOutput?: string;
+  lastExitCode?: number;
+  recoveryAttempts?: number;
 }
 
 /** Probe/availability info for a single CLI agent adapter. */
@@ -539,6 +820,7 @@ export interface CLIAgentAdapterInfo {
   installUrl: string;
   available: boolean;
   version: string | null;
+  supportsModelSelection?: boolean;
 }
 
 /** Per-adapter configuration stored at ~/.kalio/cli-agents/{id}.json */
@@ -547,10 +829,22 @@ export interface CLIAgentConfig {
   enabled: boolean;
   /** Override the executable path/name. Empty string = use adapter default. */
   cliPath: string;
-  /** Max execution time in ms. Default: 600 000 (10 min). */
+  /** Max inactivity time in ms. Default: 900 000 (15 min). */
   timeoutMs: number;
+  /** Optional hard wall-clock limit. Disabled by default for long-running CLI agents. */
+  hardTimeoutEnabled?: boolean;
+  /** Hard wall-clock limit in ms when hardTimeoutEnabled is true. */
+  hardTimeoutMs?: number;
+  /** Whether durable CLI sessions may auto-start a follow-up turn after idle timeout. */
+  autoRecoveryEnabled?: boolean;
+  /** Prompt used for auto-recovery follow-up turns. Defaults to "continue". */
+  autoRecoveryPrompt?: string;
   /** Max output chars kept for LLM history. Default: 16 000. */
   maxOutputChars: number;
+  /** Optional model override passed to adapters that support model selection. */
+  model: string;
+  /** Optional architecture-run preference shown in CLI-agent tool descriptions. */
+  architecturePreference: string;
   /** Extra CLI args appended after the adapter's default args. */
   extraArgs: string[];
 }
@@ -575,6 +869,7 @@ export interface MemorySearchResult {
 // Independent credential table for embedding providers (separate from LLM
 // credentials — embedding has `dimensions` and different provider set).
 export type EmbeddingProviderType = 'openai' | 'cometapi' | 'openrouter' | 'ollama' | 'custom';
+export type LocalEmbeddingBackend = 'auto' | 'webgpu' | 'cpu';
 
 /** apiKey is NEVER included in EmbeddingCredential — never exposed after creation. */
 export interface EmbeddingCredential {
@@ -596,14 +891,27 @@ export interface CreateEmbeddingCredentialDto {
   dimensions: number;
 }
 
+export interface UpdateLocalEmbeddingConfigDto {
+  enabled: boolean;
+  model: string;
+  dimensions: number;
+  backend: LocalEmbeddingBackend;
+}
+
 export interface EmbeddingStatus {
-  provider: 'openai-compatible' | 'ollama' | 'mock';
+  provider: 'openai-compatible' | 'ollama' | 'local-transformers' | 'disabled' | 'mock';
   /** Where the active embedding config comes from */
-  source: 'db' | 'env' | 'mock';
+  source: 'db' | 'env' | 'local' | 'disabled' | 'mock';
   model: string;
   dimensions: number;
   baseUrlMasked: string;
   configured: boolean;
+  backend?: LocalEmbeddingBackend;
+  activeBackend?: 'webgpu' | 'cpu';
+  gpuAvailable?: boolean;
+  cacheDir?: string;
+  profileId?: string;
+  modelParameters?: string;
   /** Set when source === 'db' */
   activeCredentialId?: string;
   activeCredentialName?: string;
@@ -662,9 +970,25 @@ export type AuditType =
   | 'llm_response'
   | 'tool_call'
   | 'tool_result'
+  | 'architecture_event'
   | 'error'
   | 'raapp_native_call'
-  | 'raapp_native_approved';
+  | 'raapp_native_approved'
+  | 'external_hitl'
+  | 'escalation';
+
+export type AuditDomain =
+  | 'llm'
+  | 'tool'
+  | 'subagent'
+  | 'architecture'
+  | 'hitl'
+  | 'hook'
+  | 'vfs'
+  | 'file'
+  | 'raapp'
+  | 'error'
+  | 'generic';
 
 export interface AuditLogEntry {
   id: ID;
@@ -675,6 +999,34 @@ export interface AuditLogEntry {
   durationMs: number | null;
   chunkCount: number | null;
   createdAt: Timestamp;
+}
+
+export interface AuditRetentionPolicy {
+  retentionDays: number;
+  archiveRetentionDays: number;
+  pruneEveryWrites: number;
+  pruneIntervalHours: number;
+  maxHotRows: number;
+  maxArchivedRows: number;
+}
+
+export interface AuditRetentionStatus {
+  hotRows: number;
+  archivedRows: number;
+  maxHotRows: number;
+  maxArchivedRows: number;
+  retentionDays: number;
+  archiveRetentionDays: number;
+  pruneEveryWrites: number;
+  pruneIntervalHours: number;
+  lastRetentionRunAt: Timestamp | null;
+  nextRetentionRunAt: Timestamp | null;
+  oldestHotEntryAt: Timestamp | null;
+  newestHotEntryAt: Timestamp | null;
+  oldestArchiveEntryAt: Timestamp | null;
+  newestArchiveEntryAt: Timestamp | null;
+  coldStorageEnabled: boolean;
+  coldStorageMode: 'sqlite_table';
 }
 
 // ─── Image Generation ─────────────────────────────────────────────────────────
@@ -741,3 +1093,289 @@ export interface ImageEditResult {
   message: string;
   iteratedFrom?: string;
 }
+
+export type SecurityPolicyDecision = 'allow' | 'deny' | 'ask_user';
+export type SecurityPolicyRisk = 'low' | 'medium' | 'high' | 'critical';
+
+export interface SecurityPolicyRequest {
+  source: 'mcp-cli-agents' | 'kalio' | 'mcp' | 'raapp' | 'manual' | string;
+  subject?: {
+    userId?: string;
+    agentId?: string;
+    sessionId?: string;
+    turnId?: string;
+  };
+  action: {
+    kind: 'shell' | 'tool' | 'filesystem' | 'network' | 'credential' | 'agent_prompt' | string;
+    name: string;
+    commandOrTool?: string;
+    args?: Record<string, unknown>;
+    workdir?: string;
+    paths?: string[];
+  };
+  risk: SecurityPolicyRisk;
+  context?: {
+    reason?: string;
+    outputExcerpt?: string;
+    repo?: string;
+    permissionMode?: string;
+  };
+}
+
+export interface SecurityPolicyResponse {
+  decision: SecurityPolicyDecision;
+  reason: string;
+  risk?: SecurityPolicyRisk;
+  ttlSeconds?: number;
+  auditId?: string;
+}
+
+// Architecture Orchestration
+export type ArchitectureNodeKind = 'parallel' | 'role' | 'router' | 'artifact';
+export type ArchitectureNodeBehaviorMode =
+  | 'fan_out_all'
+  | 'choose_one'
+  | 'rank_then_merge'
+  | 'merge_inputs'
+  | 'finalize';
+export type ArchitectureNodeFanOutMode = 'parallel' | 'sequential';
+export type ArchitectureNodeScoringPolicy = 'confidence' | 'risk' | 'cost' | 'custom';
+export type ArchitectureRunStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type ArchitectureExecutionMode = 'session_branches' | 'subagent_execution';
+export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime_fallback';
+export type ArchitectureExecutionEventType =
+  | 'run_created'
+  | 'node_started'
+  | 'agent_started'
+  | 'participant_output'
+  | 'router_decision'
+  | 'router_output'
+  | 'tool_call'
+  | 'human_gate'
+  | 'artifact_created'
+  | 'memory_persisted'
+  | 'final_artifact'
+  | 'node_completed';
+
+export interface ArchitectureRoleSlot {
+  id: string;
+  label: string;
+  description: string;
+  slotType: 'participant' | 'router' | 'judge' | 'finalizer' | 'critic' | 'tool_executor';
+  defaultPersonaId: ID;
+  allowedPersonaTags: string[];
+  required: boolean;
+  canOverrideAtRunStart: boolean;
+}
+
+export interface ArchitectureSchemaNode {
+  id: string;
+  label: string;
+  kind: ArchitectureNodeKind;
+  roleSlotId?: string;
+  behavior?: {
+    mode: ArchitectureNodeBehaviorMode;
+    fanOut?: ArchitectureNodeFanOutMode;
+    convergeToNodeId?: string;
+    maxBranches?: number;
+    scoringPolicy?: ArchitectureNodeScoringPolicy;
+    description?: string;
+  };
+  x?: number;
+  y?: number;
+}
+
+export interface ArchitectureSchemaEdge {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  label?: string;
+  returnToOrchestrator?: boolean;
+}
+
+export type ArchitectureContextCompression = 'none' | 'summary' | 'evidence_only';
+
+export interface ArchitectureContextPolicyOverride {
+  includeUserTask?: boolean;
+  includeProjectMemory?: boolean;
+  includeBrowserSession?: boolean;
+  includePriorDecisions?: boolean;
+  includeOtherAgentOutputs?: boolean;
+  includeToolResults?: boolean;
+  contextCompression?: ArchitectureContextCompression;
+}
+
+export interface ArchitectureContextPolicy {
+  includeUserTask: boolean;
+  includeProjectMemory: boolean;
+  includeBrowserSession: boolean;
+  includePriorDecisions: boolean;
+  includeOtherAgentOutputs?: boolean;
+  includeToolResults?: boolean;
+  contextCompression?: ArchitectureContextCompression;
+  perSlotOverrides?: Record<string, ArchitectureContextPolicyOverride>;
+}
+
+export interface ArchitectureSchema {
+  id: ID;
+  name: string;
+  description: string;
+  version: string;
+  roleSlots: ArchitectureRoleSlot[];
+  nodes: ArchitectureSchemaNode[];
+  edges: ArchitectureSchemaEdge[];
+  routerPolicy: {
+    mode: 'rank_then_merge' | 'evidence_first' | 'risk_weighted';
+    mustAddressCriticFindings: boolean;
+    canReturnNeedsMoreResearch: boolean;
+  };
+  contextPolicy: ArchitectureContextPolicy;
+  memoryPolicy: {
+    persistFinalArtifact: boolean;
+    persistRouterDecision: boolean;
+  };
+  outputArtifactSchema: string;
+}
+
+export interface CreateArchitectureRunDto {
+  schemaId: ID;
+  prompt: string;
+  context?: Record<string, unknown>;
+  slotOverrides?: Record<string, ID>;
+  executionMode?: ArchitectureExecutionMode;
+  schema?: ArchitectureSchema;
+}
+
+export interface CreateArchitectureSchemaVariantDto {
+  name?: string;
+  description?: string;
+  roleSlotPersonaOverrides?: Record<string, ID>;
+  nodeKindOverrides?: Record<string, ArchitectureNodeKind>;
+  contextPolicy?: ArchitectureContextPolicy;
+  nodes?: ArchitectureSchemaNode[];
+  edges?: ArchitectureSchemaEdge[];
+}
+
+export interface ArchitectureRun {
+  id: ID;
+  schemaId: ID;
+  prompt: string;
+  executionMode: ArchitectureExecutionMode;
+  context?: Record<string, unknown>;
+  slotOverrides?: Record<string, ID>;
+  rootSessionId?: ID;
+  branchSessionIds?: Record<string, ID>;
+  status: ArchitectureRunStatus;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  completedAt?: Timestamp;
+}
+
+export interface ArchitectureRouteDecision {
+  source: ArchitectureRouteSource;
+  fromNodeId: string;
+  selectedNodeIds: string[];
+  rejectedNodeIds?: string[];
+  nextNodeId?: string;
+  convergeToNodeId?: string;
+  mode?: ArchitectureNodeBehaviorMode;
+  response?: string;
+}
+
+export type ArchitectureRouterNextAction =
+  | 'finalize'
+  | 'ask_human'
+  | 'run_more_research'
+  | 'rerun_with_different_personas';
+
+export interface ArchitectureRouterInsight {
+  fromSlot: string;
+  insight: string;
+  whyAccepted?: string;
+  whyRejected?: string;
+}
+
+export interface ArchitectureRouterRisk {
+  risk: string;
+  mitigation: string;
+  sourceSlot: string;
+}
+
+export interface ArchitectureRouterOutput {
+  selectedStrategy: string;
+  mergedDecision: string;
+  acceptedInputs: ArchitectureRouterInsight[];
+  rejectedInputs: ArchitectureRouterInsight[];
+  unresolvedConflicts: string[];
+  risks: ArchitectureRouterRisk[];
+  confidence: number;
+  nextAction: ArchitectureRouterNextAction;
+}
+
+export interface ArchitectureRouteHop {
+  eventId: ID;
+  source: ArchitectureRouteSource;
+  fromNodeId: string;
+  toNodeId: string;
+}
+
+export interface ArchitectureExecutionEvent {
+  id: ID;
+  runId: ID;
+  sequence: number;
+  type: ArchitectureExecutionEventType;
+  message: string;
+  nodeId?: string;
+  roleSlotId?: string;
+  route?: ArchitectureRouteDecision;
+  routerOutput?: ArchitectureRouterOutput;
+  data?: Record<string, unknown>;
+  createdAt: Timestamp;
+}
+
+export interface ArchitectureGraphProjection {
+  runId: ID;
+  status?: ArchitectureRunStatus;
+  nodes: Array<{
+    id: string;
+    label: string;
+    kind: ArchitectureNodeKind;
+    behavior?: ArchitectureSchemaNode['behavior'];
+    status: 'pending' | 'running' | 'completed';
+    visitCount?: number;
+    eventIds: ID[];
+    toolEvidence?: Record<string, unknown>;
+    incompleteReason?: string;
+  }>;
+  edges: ArchitectureSchemaEdge[];
+  routeHops?: ArchitectureRouteHop[];
+  childAgents?: ArchitectureChildAgentProjection[];
+}
+
+export interface ArchitectureChildAgentProjection {
+  id: ID;
+  parentNodeId?: string;
+  parentRoleSlotId?: string;
+  parentEventId?: ID;
+  kind: ArchitectureChildAgentKind;
+  backend?: string;
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'stopped' | 'unknown';
+  toolName: string;
+  workdir?: string;
+  targetPaths?: string[];
+  updatedAt?: Timestamp;
+}
+
+export interface ArchitectureChatProjection {
+  runId: ID;
+  messages: Array<{
+    id: ID;
+    eventId: ID;
+    speaker: 'system' | 'participant' | 'router' | 'finalizer';
+      content: string;
+      roleSlotId?: string;
+      route?: ArchitectureRouteDecision;
+      incompleteReason?: string;
+      createdAt: Timestamp;
+    }>;
+  }

@@ -144,6 +144,29 @@ Current controller endpoints:
 | `POST` | `/mcp/servers/:id/restart` | Force a reconnect cycle for one server |
 | `GET` | `/mcp/tools` | Return only currently connected, discovered MCP tools |
 
+## Agent QA tool profile
+
+Architecture and AgentFlow validation should use a small, explicit MCP profile
+instead of relying on whatever tools happen to be connected:
+
+| Server | Purpose | Required for |
+| --- | --- | --- |
+| `mcp-dev-servers` | Kalio service lifecycle, logs, stack health, managed service restart | Full-stack architecture QA and live run recovery |
+| `mcp-playwright-orchestrator` | Browser flow execution, screenshots, visual/WCAG/focus/runtime audits | FE-started workflow proof and generated-site QA |
+
+Kalio can receive this profile in two supported ways:
+
+1. Import `.vscode/mcp.json` through Settings -> MCP Servers -> Import Existing
+   MCP Configs. `MCPExternalImportService` discovers the workspace `.vscode`
+   config through the `copilot` source entry.
+2. Manage the same servers from TOML using
+   `docs/examples/kalio-agent-qa-mcp.config.toml` as the copy source.
+
+Agent personas used for testing should either use `mcpPolicy = "allow_all"` in a
+dedicated QA persona or an allow-list that includes only the prefixed tools from
+these two servers plus the native architecture/runtime tools needed for the run.
+General product personas should not receive this profile by default.
+
 ## Status events
 
 The live service pushes status snapshots through the gateway reference using:
