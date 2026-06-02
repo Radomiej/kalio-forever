@@ -67,7 +67,7 @@ Do not start or resume paid/live runs if any item below is true:
 - Typecheck or build is red for the affected app.
 - Mock E2E does not cover the exact target flow.
 - CLI backends are only prompt-recommended, not enforced by runtime/tool visibility.
-- Implementer/Materializer can complete without required write/materialization evidence.
+- Implementer can complete without required write evidence, or Goal Master can accept without verified Implementer/CLI proof.
 - Conversations or Execution Graph cannot show the run status reliably.
 - The latest live run is still `running` and cannot be reconciled from durable state.
 - The active live credential fails provider validation, including `401 Invalid API Key`.

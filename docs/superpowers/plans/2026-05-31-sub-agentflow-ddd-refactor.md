@@ -863,13 +863,13 @@ Added stronger runtime scenario coverage:
 - MockLLM reject-then-accept loop: proves return-to-implementer routing before final acceptance.
 - MockLLM immediate accept: proves direct finalization path.
 - MockLLM reject-forever: proves bounded failure with stop-event payload (`maxSteps`, `maxNodeVisits`, `pendingNodeIds`, `visitCounts`) and no final artifact.
-- Production Goal Master schema with deterministic subagent tool events: keeps `materializer` and `verifier` as `tool_executor` slots and asserts `vfs_write`, `vfs_read`, and Goal Master tool evidence before finalization.
+- Production Goal Master schema with deterministic subagent tool events: keeps `implementer` and `verifier` as `tool_executor` slots and asserts `vfs_write`, `vfs_read`, and Goal Master tool evidence before finalization.
 
 Latest E2E coverage:
 
 - `apps/e2e/tests/agentflow-goal-guard.spec.ts` starts the dedicated Goal Guard AgentFlow from the Architect UI on the random-port mock stack.
 - The completed path asserts the graph shows `Implementer` and `Goal Master`, rejects `Five Minds`, renders the executed route, attaches graph/chat screenshots, and verifies final chat evidence.
-- The failure-first path starts a prose-only Goal Guard run through the API and proves it does not reach `done` without materialization evidence.
+- The failure-first path starts a prose-only Goal Guard run through the API and proves it does not reach `done` without Implementer write evidence.
 
 ## 2026-05-31 Checkpoint Envelope Update
 
@@ -958,7 +958,7 @@ Verified the current AgentFlow contract through the full mock stack:
 - `npm.cmd --prefix apps/e2e run test:e2e -- agentflow-goal-guard.spec.ts`
 - Result: `3 passed`.
 - Stack evidence: backend build, frontend build, random API/web ports, mock LLM config, Architect UI start, graph/chat screenshot attachments, and API resume path.
-- Failure-first evidence: prose-only materialization did not produce a `done` AgentFlow result.
+- Failure-first evidence: prose-only Implementer output did not produce a `done` AgentFlow result.
 - Resume evidence: bounded `maxSteps: 2` run reached `waiting_on_orchestrator` with `checkpoint.continuation`, then `POST /api/agent-flows/runs/:id/resume` completed the same AgentFlow run and retained the `flow:resume_input` event.
 
 Resolved blocker before real project execution:
