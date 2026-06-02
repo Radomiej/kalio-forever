@@ -1,12 +1,10 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ArchitectRunProjection } from './ArchitectRunProjection';
 import type { ArchitectRunResult, ArchitectSchema } from './architect.types';
 
 describe('ArchitectRunProjection', () => {
   it('shows the Goal Guard waiting state and submits structured QA evidence back into the flow', async () => {
-    const user = userEvent.setup();
     const onResumeWithQualityGate = vi.fn();
     render(
       <ArchitectRunProjection
@@ -22,13 +20,11 @@ describe('ArchitectRunProjection', () => {
     expect(screen.getByRole('button', { name: /Resume with QA evidence/i })).toBeInTheDocument();
     expect(screen.queryByText(/Five Minds/i)).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Resume with QA evidence/i }));
-    await user.clear(screen.getByLabelText('Summary'));
-    await user.type(screen.getByLabelText('Summary'), 'QA still finds a blocking issue.');
-    await user.clear(screen.getByLabelText('High'));
-    await user.type(screen.getByLabelText('High'), '2');
-    await user.type(screen.getByLabelText('Artifact path'), 'C:\\qa\\flow.png');
-    await user.click(screen.getByTestId('agentflow-resume-with-qa'));
+    fireEvent.click(screen.getByRole('button', { name: /Resume with QA evidence/i }));
+    fireEvent.change(screen.getByLabelText('Summary'), { target: { value: 'QA still finds a blocking issue.' } });
+    fireEvent.change(screen.getByLabelText('High'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Artifact path'), { target: { value: 'C:\\qa\\flow.png' } });
+    fireEvent.click(screen.getByTestId('agentflow-resume-with-qa'));
 
     expect(onResumeWithQualityGate).toHaveBeenCalledWith({
       source: 'playwright',

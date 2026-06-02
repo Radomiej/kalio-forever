@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ImageConfigResponse } from '@kalio/types';
 import { ImageSettingsPanel } from './ImageSettingsPanel';
@@ -108,14 +108,12 @@ describe('ImageSettingsPanel', () => {
     const maxDimensionInput = screen.getByDisplayValue('2048');
     const maxKbInput = screen.getByDisplayValue('1024');
 
-    await user.clear(maxDimensionInput);
-    await user.type(maxDimensionInput, '3072');
-    await user.clear(maxKbInput);
-    await user.type(maxKbInput, '1536');
-    await user.click(screen.getByRole('radio', { name: 'high' }));
+    fireEvent.change(maxDimensionInput, { target: { value: '3072' } });
+    fireEvent.change(maxKbInput, { target: { value: '1536' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'high' }));
 
-    await user.type(apiKeyInput, '  sk-test  ');
-    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+    fireEvent.change(apiKeyInput, { target: { value: '  sk-test  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Saved!/i })).toBeInTheDocument());
     expect(screen.getByText(/Config saved/i)).toBeInTheDocument();

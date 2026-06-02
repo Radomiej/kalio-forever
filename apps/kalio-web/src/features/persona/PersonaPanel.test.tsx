@@ -101,13 +101,10 @@ describe('PersonaPanel', () => {
 
     const row = screen.getByTestId('persona-item');
     const scoped = within(row);
-    await user.clear(scoped.getByDisplayValue('Existing Persona'));
-    await user.type(scoped.getByPlaceholderText('Name'), 'Updated Persona');
-    await user.clear(scoped.getByDisplayValue('gpt-4o-mini'));
-    await user.type(scoped.getByPlaceholderText('Model'), 'gpt-4.1-mini');
+    fireEvent.change(scoped.getByDisplayValue('Existing Persona'), { target: { value: 'Updated Persona' } });
+    fireEvent.change(scoped.getByDisplayValue('gpt-4o-mini'), { target: { value: 'gpt-4.1-mini' } });
     const promptField = scoped.getByDisplayValue('Stay focused on the current plan.');
-    await user.clear(promptField);
-    await user.type(promptField, 'Trimmed prompt.');
+    fireEvent.change(promptField, { target: { value: 'Trimmed prompt.' } });
 
     await user.click(scoped.getByRole('button', { name: /save/i }));
 

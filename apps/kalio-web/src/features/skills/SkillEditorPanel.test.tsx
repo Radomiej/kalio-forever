@@ -1,5 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Skill } from '@kalio/types';
 import { SkillEditorPanel } from './SkillEditorPanel';
@@ -30,7 +29,6 @@ describe('SkillEditorPanel', () => {
   });
 
   it('loads a skill and saves edited fields', async () => {
-    const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === '/api/skills/skill-a' && !init?.method) return response(skill);
@@ -44,13 +42,10 @@ describe('SkillEditorPanel', () => {
     const nameInput = await screen.findByTestId('skill-name-input');
     expect(nameInput).toHaveValue('Manual QA');
 
-    await user.clear(nameInput);
-    await user.type(nameInput, 'Manual QA Pro');
-    await user.clear(screen.getByDisplayValue('Check UI behavior'));
-    await user.type(screen.getByPlaceholderText('What does this skill do?'), 'Check the full user flow');
-    await user.clear(screen.getByDisplayValue('Verify the rendered UI.'));
-    await user.type(screen.getByPlaceholderText(/Enter the prompt snippet this skill injects/), 'Verify FE and BE evidence.');
-    await user.click(screen.getByTestId('skill-save-btn'));
+    fireEvent.change(nameInput, { target: { value: 'Manual QA Pro' } });
+    fireEvent.change(screen.getByDisplayValue('Check UI behavior'), { target: { value: 'Check the full user flow' } });
+    fireEvent.change(screen.getByDisplayValue('Verify the rendered UI.'), { target: { value: 'Verify FE and BE evidence.' } });
+    fireEvent.click(screen.getByTestId('skill-save-btn'));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/skills/skill-a', expect.objectContaining({
