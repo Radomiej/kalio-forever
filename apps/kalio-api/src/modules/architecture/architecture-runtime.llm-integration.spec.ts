@@ -14,7 +14,7 @@ import { ArchitectureRuntimeService } from './architecture-runtime.service';
 
 describe('Architecture graph runtime LLM integration', () => {
   it('runs a graph role through MockLLM-backed chat and preserves normal chat compatibility', async () => {
-    const harness = createMockChatHarness();
+    const harness = createMockChatHarness(vi.fn().mockResolvedValue(undefined));
     const roleExecutor = new ArchitectureRoleExecutorService(createSubagentRuntime(harness.chat));
     const sessions = createSessionStore();
     const runtime = new ArchitectureRuntimeService(
