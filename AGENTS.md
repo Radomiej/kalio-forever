@@ -209,7 +209,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - E2E must allocate random ports and per-run storage; fixed `3016/5188/3316/5288` ports are only for manual development/debugging.
 - `HitlModule` and `RelayModule` are explicitly imported by `ChatModule` alongside `VFSModule` and `ToolModule` — update cross-module docs whenever this list changes.
 - Removed `override: true` from dotenv `config()` in `main.ts` — CI/Docker env vars set before bootstrap are intentionally kept; `.env` file is additive, not overriding.
-- Architecture finalization must treat missing or unknown CLI child status as unresolved; only completed/success/exited child statuses can count as CLI materialization proof.
+- Architecture finalization must treat missing or unknown CLI child status as unresolved; only completed/success/exited child statuses can count as CLI implementation proof.
 - Goal Master judge slots should use bounded synchronous review tools (`run_subagent`, reads, CLI status) rather than spawning durable background review agents.
 - Full-stack architecture validation must start the task from Kalio FE and verify Conversations/Execution Graph with Playwright; API polling is supporting evidence only.
 - For manual Kalio QA, load the `kalio-manual-qa` skill with `kalio-forever`; two-agent loop requests mean `Dev/Implementer <-> Goal Guard`, not Five Minds.
@@ -223,6 +223,8 @@ When the user corrects your approach, append a one-line rule here before ending 
 - During critical AgentFlow work, continuously run two BE bug hunters, one FE bug hunter, and one coverage guardian where agent capacity permits; keep them focused on real bugs, meaningful tests, and 80%+ FE/BE coverage rather than superficial line coverage.
 - Manual QA stacks must prove the effective provider at `/api/llm/config`; stack/env overrides must not be shadowed by `.env`, and localhost QA must allow both `localhost` and `127.0.0.1` origins.
 - For AgentFlow MVP release, separate runtime lifecycle proof from generated-project quality; first verify clean start/trace/wait/resume/final-or-block behavior, and defer LLM/persona output quality to a later hardening pass.
+- Treat `C:\Projekty\Agent-Architecture-Lab` as the high-level role/agent reference; adapt Kalio runtime and UI around that model instead of inventing new top-level roles.
+- For subagent acceleration, use GPT-5.4 mini for simple isolated checks and GPT-5.3 Codex or GPT-5.4 for normal implementation/review work; do not use GPT-5.5.
 
 ---
 

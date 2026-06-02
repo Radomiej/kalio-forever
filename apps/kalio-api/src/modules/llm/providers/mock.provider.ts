@@ -198,8 +198,8 @@ function createRunSubAgentFlowToolCall(): LLMToolCall {
         MOCK_GOAL_GUARD_VFS_SUCCESS_TRIGGER,
         '[[mock:script]]',
         'when("Slot: Orchestrator") return("route_to(implementer, run one implementation pass before guard review)")',
-        'when("Slot: Implementer") return("Implementation complete; proof must be materialized and checked.")',
-        'when("Slot: Tester") return("Regression check passed after reading materialized evidence.")',
+        'when("Slot: Implementer") return("Implementation complete with write evidence; proof must be checked.")',
+        'when("Slot: Tester") return("Regression check passed after reading implementation evidence.")',
         'when("Slot: Finalizer") return("Goal Guard accepted deterministic VFS evidence for the requested task.")',
         '[[/mock:script]]',
       ].join('\n'),
@@ -297,18 +297,12 @@ export class MockLLMProvider implements ILLMProvider {
     const lastMessage = getLastUserMessageText(messages);
     if (lastMessage.includes(MOCK_GOAL_GUARD_VFS_SUCCESS_TRIGGER)) {
       if (
-        (
-          lastMessage.includes('Slot: Materializer')
-          || (
-            lastMessage.includes('Slot: Implementer')
-            && lastMessage.includes('Implementation proof mode')
-          )
-        )
+        lastMessage.includes('Slot: Implementer')
+        && lastMessage.includes('Implementation proof mode')
         && hasTool(tools, 'vfs_write')
       ) {
         if (hasPriorToolResult(messages, 'vfs_write', 'e2e/goal-guard-proof.json')) {
-          const role = lastMessage.includes('Slot: Implementer') ? 'Implementer' : 'Materializer';
-          emitText(options, `${role} wrote e2e/goal-guard-proof.json with vfs_write evidence.`);
+          emitText(options, 'Implementer wrote e2e/goal-guard-proof.json with vfs_write evidence.');
           return [];
         }
         const toolCall = createGoalGuardVfsWriteToolCall();

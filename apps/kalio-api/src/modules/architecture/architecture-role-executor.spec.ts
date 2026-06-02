@@ -165,15 +165,15 @@ describe('ArchitectureRoleExecutorService', () => {
   it('summarizes streamed host write and terminal build results as strong tool evidence', async () => {
     const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     if (!schema) throw new Error('Expected Goal Master schema');
-    const materializer = schema.roleSlots.find((slot) => slot.id === 'materializer');
-    if (!materializer) throw new Error('Expected materializer slot');
+    const implementer = schema.roleSlots.find((slot) => slot.id === 'implementer');
+    if (!implementer) throw new Error('Expected implementer slot');
     const subagentRuntime: SubagentRuntimePort = {
       runSubagent: vi.fn(async (request) => {
         request.emit?.('tool:start', {
           callId: 'call-write',
           toolName: 'fs_write',
           args: { path: 'C:\\Projekty\\TurboProject2\\src\\runtime-proof.ts' },
-          sessionId: 'branch-materializer',
+          sessionId: 'branch-implementer',
           agentRun: undefined as never,
         });
         request.emit?.('tool:result', {
@@ -186,7 +186,7 @@ describe('ArchitectureRoleExecutorService', () => {
           callId: 'call-build',
           toolName: 'terminal_spawn',
           args: { command: 'npm.cmd', args: ['run', 'build'], cwd: 'C:\\Projekty\\TurboProject2' },
-          sessionId: 'branch-materializer',
+          sessionId: 'branch-implementer',
           agentRun: undefined as never,
         });
         request.emit?.('tool:result', {
@@ -199,7 +199,7 @@ describe('ArchitectureRoleExecutorService', () => {
           callId: 'call-build-output',
           toolName: 'terminal_output',
           args: { id: 'term-build' },
-          sessionId: 'branch-materializer',
+          sessionId: 'branch-implementer',
           agentRun: undefined as never,
         });
         request.emit?.('tool:result', {
@@ -209,9 +209,9 @@ describe('ArchitectureRoleExecutorService', () => {
           data: { id: 'term-build', exitCode: 0 },
         } as never);
         return {
-          result: 'Materializer wrote proof and build exited 0.',
-          taskId: 'task-materializer',
-          childSessionId: 'branch-materializer',
+          result: 'Implementer wrote proof and build exited 0.',
+          taskId: 'task-implementer',
+          childSessionId: 'branch-implementer',
           parentSessionId: 'root-1',
           vfsMode: 'shared' as const,
           vfsSessionId: 'root-1',
@@ -234,11 +234,11 @@ describe('ArchitectureRoleExecutorService', () => {
       run: {
         ...createRun('subagent_execution'),
         context: { projectPath: 'C:\\Projekty\\TurboProject2' },
-        branchSessionIds: { materializer: 'branch-materializer' },
+        branchSessionIds: { implementer: 'branch-implementer' },
       },
-      slot: materializer,
-      branchSessionId: 'branch-materializer',
-      personaId: materializer.defaultPersonaId,
+      slot: implementer,
+      branchSessionId: 'branch-implementer',
+      personaId: implementer.defaultPersonaId,
     });
 
     expect(result.data.toolEvidence).toMatchObject({
@@ -416,15 +416,15 @@ describe('ArchitectureRoleExecutorService', () => {
   it('grants VFS write tools only to architecture tool executor slots by default', async () => {
     const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     if (!schema) throw new Error('Expected Goal Master schema');
-    const materializer = schema.roleSlots.find((slot) => slot.id === 'materializer');
-    if (!materializer) throw new Error('Expected materializer slot');
+    const implementer = schema.roleSlots.find((slot) => slot.id === 'implementer');
+    if (!implementer) throw new Error('Expected implementer slot');
     const subagentRuntime: SubagentRuntimePort = {
       runSubagent: vi.fn(async (request) => {
         request.emit?.('tool:start', {
           callId: 'call-write',
           toolName: 'vfs_write',
           args: { filePath: 'project/proof.md' },
-          sessionId: 'branch-materializer',
+          sessionId: 'branch-implementer',
           agentRun: undefined as never,
         });
         request.emit?.('tool:result', {
@@ -434,9 +434,9 @@ describe('ArchitectureRoleExecutorService', () => {
           data: { filePath: 'project/proof.md' },
         } as never);
         return {
-        result: 'Materialized artifacts',
-        taskId: 'task-materializer',
-        childSessionId: 'branch-materializer',
+        result: 'Implemented artifacts',
+        taskId: 'task-implementer',
+        childSessionId: 'branch-implementer',
         parentSessionId: 'root-1',
         vfsMode: 'shared' as const,
         vfsSessionId: 'root-1',
@@ -463,11 +463,11 @@ describe('ArchitectureRoleExecutorService', () => {
       schema,
       run: {
         ...createRun('subagent_execution'),
-        branchSessionIds: { materializer: 'branch-materializer' },
+        branchSessionIds: { implementer: 'branch-implementer' },
       },
-      slot: materializer,
-      branchSessionId: 'branch-materializer',
-      personaId: materializer.defaultPersonaId,
+      slot: implementer,
+      branchSessionId: 'branch-implementer',
+      personaId: implementer.defaultPersonaId,
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
@@ -478,13 +478,13 @@ describe('ArchitectureRoleExecutorService', () => {
     ]);
     expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent']);
     expect(call?.maxIterations).toBe(2);
-    expect(call?.objective).toContain('Slot: Materializer (tool_executor)');
+    expect(call?.objective).toContain('Slot: Implementer (tool_executor)');
     expect(call?.objective).toContain('Act as an execution slot, not a planner.');
     expect(call?.objective).toContain('create or update the required artifacts first with vfs_write, fs_write, or a durable CLI child agent');
-    expect(call?.objective).toContain('A materializer cannot pass by only inspecting an existing artifact or running build/test commands');
+    expect(call?.objective).toContain('An implementer cannot pass by only inspecting an existing artifact or running build/test commands');
     expect(call?.objective).toContain('build-only work belongs to verifier slots');
     expect(call?.objective).toContain('Do not spend early tool calls on environment probes');
-    expect(call?.objective).toContain('After a materializer has visible write evidence');
+    expect(call?.objective).toContain('After an implementer has visible write evidence');
     expect(call?.objective).toContain('use VFS or host-project reads as evidence unless terminal tools are available');
     expect(call?.objective).toContain('Do not claim runtime proof unless a visible tool result proves it.');
     expect(result.data.toolEvidence).toMatchObject({
@@ -499,15 +499,15 @@ describe('ArchitectureRoleExecutorService', () => {
     });
   });
 
-  it('gates materializer read tools when upstream evidence already includes project reads', async () => {
+  it('gates implementer read tools when upstream evidence already includes project reads', async () => {
     const schema = getGoalMasterSchema();
-    const materializer = schema.roleSlots.find((slot) => slot.id === 'materializer');
-    if (!materializer) throw new Error('Expected materializer slot');
+    const implementer = schema.roleSlots.find((slot) => slot.id === 'implementer');
+    if (!implementer) throw new Error('Expected implementer slot');
     const subagentRuntime: SubagentRuntimePort = {
       runSubagent: vi.fn(async () => ({
-        result: 'Materializer wrote accessibility polish.',
-        taskId: 'task-materializer',
-        childSessionId: 'branch-materializer',
+        result: 'Implementer wrote accessibility polish.',
+        taskId: 'task-implementer',
+        childSessionId: 'branch-implementer',
         parentSessionId: 'root-1',
         vfsMode: 'shared' as const,
         vfsSessionId: 'root-1',
@@ -559,9 +559,9 @@ describe('ArchitectureRoleExecutorService', () => {
           executionCwd: 'C:\\Projekty\\TurboProject2',
         },
       },
-      slot: materializer,
-      branchSessionId: 'branch-materializer',
-      personaId: materializer.defaultPersonaId,
+      slot: implementer,
+      branchSessionId: 'branch-implementer',
+      personaId: implementer.defaultPersonaId,
       incomingEvents,
     });
 
@@ -622,13 +622,13 @@ describe('ArchitectureRoleExecutorService', () => {
   it('grants host project write tools only to tool executor slots without auto-approving them by default', async () => {
     const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     if (!schema) throw new Error('Expected Goal Master schema');
-    const materializer = schema.roleSlots.find((slot) => slot.id === 'materializer');
-    if (!materializer) throw new Error('Expected materializer slot');
+    const implementer = schema.roleSlots.find((slot) => slot.id === 'implementer');
+    if (!implementer) throw new Error('Expected implementer slot');
     const subagentRuntime: SubagentRuntimePort = {
       runSubagent: vi.fn(async () => ({
-        result: 'Materialized host project artifact',
+        result: 'Implemented host project artifact',
         taskId: 'task-host-write',
-        childSessionId: 'branch-materializer',
+        childSessionId: 'branch-implementer',
         parentSessionId: 'root-1',
         vfsMode: 'shared' as const,
         vfsSessionId: 'root-1',
@@ -653,11 +653,11 @@ describe('ArchitectureRoleExecutorService', () => {
       run: {
         ...createRun('subagent_execution'),
         context: { executionCwd: 'C:\\Projekty\\bitecs-gpu---shared-memory-explorer' },
-        branchSessionIds: { materializer: 'branch-materializer' },
+        branchSessionIds: { implementer: 'branch-implementer' },
       },
-      slot: materializer,
-      branchSessionId: 'branch-materializer',
-      personaId: materializer.defaultPersonaId,
+      slot: implementer,
+      branchSessionId: 'branch-implementer',
+      personaId: implementer.defaultPersonaId,
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
@@ -670,19 +670,19 @@ describe('ArchitectureRoleExecutorService', () => {
       'fs_write',
     ]);
     expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent']);
-    expect(call?.objective).toContain('Use fs_write only from tool-executor slots when an approved materialization is required.');
+    expect(call?.objective).toContain('Use fs_write only from tool-executor slots when an approved implementation write is required.');
   });
 
   it('auto-approves host project writes for tool executor slots only when run context opts in', async () => {
     const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     if (!schema) throw new Error('Expected Goal Master schema');
-    const materializer = schema.roleSlots.find((slot) => slot.id === 'materializer');
-    if (!materializer) throw new Error('Expected materializer slot');
+    const implementer = schema.roleSlots.find((slot) => slot.id === 'implementer');
+    if (!implementer) throw new Error('Expected implementer slot');
     const subagentRuntime: SubagentRuntimePort = {
       runSubagent: vi.fn(async () => ({
-        result: 'Materialized host project artifact',
+        result: 'Implemented host project artifact',
         taskId: 'task-host-write',
-        childSessionId: 'branch-materializer',
+        childSessionId: 'branch-implementer',
         parentSessionId: 'root-1',
         vfsMode: 'shared' as const,
         vfsSessionId: 'root-1',
@@ -706,11 +706,11 @@ describe('ArchitectureRoleExecutorService', () => {
           projectPath: 'C:\\Projekty\\TurboProject2',
           autoApproveArchitectureProjectWrites: true,
         },
-        branchSessionIds: { materializer: 'branch-materializer' },
+        branchSessionIds: { implementer: 'branch-implementer' },
       },
-      slot: materializer,
-      branchSessionId: 'branch-materializer',
-      personaId: materializer.defaultPersonaId,
+      slot: implementer,
+      branchSessionId: 'branch-implementer',
+      personaId: implementer.defaultPersonaId,
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
@@ -1001,7 +1001,7 @@ describe('ArchitectureRoleExecutorService', () => {
       slot: implementer,
       branchSessionId: 'branch-implementer',
       personaId: implementer.defaultPersonaId,
-      outgoingNodeIds: ['materializer'],
+      outgoingNodeIds: ['implementer'],
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
@@ -1009,8 +1009,9 @@ describe('ArchitectureRoleExecutorService', () => {
       'vfs_list',
       'vfs_read',
       'vfs_write',
+      'spawn_cli_agent',
     ]);
-    expect(call?.autoApproveTools).toEqual(['vfs_write']);
+    expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent']);
     expect(call?.objective).toContain('Implementation proof mode: the Implementer must create or update at least one artifact with vfs_write');
   });
 
@@ -1050,7 +1051,7 @@ describe('ArchitectureRoleExecutorService', () => {
       slot: implementer,
       branchSessionId: 'branch-implementer',
       personaId: implementer.defaultPersonaId,
-      outgoingNodeIds: ['materializer'],
+      outgoingNodeIds: ['implementer'],
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
@@ -1059,7 +1060,7 @@ describe('ArchitectureRoleExecutorService', () => {
       'vfs_read',
       'vfs_write',
     ]);
-    expect(call?.autoApproveTools).toEqual(['vfs_write']);
+    expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent']);
     expect(call?.objective).toContain('Implementation proof mode: the Implementer must create or update at least one artifact with vfs_write');
   });
 
@@ -1106,7 +1107,7 @@ describe('ArchitectureRoleExecutorService', () => {
       slot: implementer,
       branchSessionId: 'branch-implementer',
       personaId: implementer.defaultPersonaId,
-      outgoingNodeIds: ['materializer'],
+      outgoingNodeIds: ['implementer'],
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
@@ -1118,22 +1119,22 @@ describe('ArchitectureRoleExecutorService', () => {
       'fs_read',
       'fs_write',
     ]);
-    expect(call?.autoApproveTools).toEqual(['vfs_write', 'fs_write']);
+    expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent', 'fs_write']);
     expect(call?.objective).toContain('use fs_write for host project files');
   });
 
-  it('lets materializer slots own durable CLI child materialization and exposes child session evidence downstream', async () => {
+  it('lets implementer slots own durable CLI child implementation and exposes child session evidence downstream', async () => {
     const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     if (!schema) throw new Error('Expected Goal Master schema');
-    const materializer = schema.roleSlots.find((slot) => slot.id === 'materializer');
-    if (!materializer) throw new Error('Expected materializer slot');
+    const implementer = schema.roleSlots.find((slot) => slot.id === 'implementer');
+    if (!implementer) throw new Error('Expected implementer slot');
     const subagentRuntime: SubagentRuntimePort = {
       runSubagent: vi.fn(async (request) => {
         request.emit?.('tool:start', {
           callId: 'call-cli',
           toolName: 'spawn_cli_agent',
           args: { workdir: 'C:\\Projekty\\TurboProject2' },
-          sessionId: 'branch-materializer',
+          sessionId: 'branch-implementer',
           agentRun: undefined as never,
         });
         request.emit?.('tool:result', {
@@ -1148,9 +1149,9 @@ describe('ArchitectureRoleExecutorService', () => {
           },
         } as never);
         return {
-          result: 'Spawned Copilot materializer child cli-child-1 and reported its status.',
-          taskId: 'task-materializer',
-          childSessionId: 'branch-materializer',
+          result: 'Spawned Copilot implementer child cli-child-1 and reported its status.',
+          taskId: 'task-implementer',
+          childSessionId: 'branch-implementer',
           parentSessionId: 'root-1',
           vfsMode: 'shared' as const,
           vfsSessionId: 'root-1',
@@ -1177,11 +1178,11 @@ describe('ArchitectureRoleExecutorService', () => {
       run: {
         ...createRun('subagent_execution'),
         context: { projectPath: 'C:\\Projekty\\TurboProject2' },
-        branchSessionIds: { materializer: 'branch-materializer' },
+        branchSessionIds: { implementer: 'branch-implementer' },
       },
-      slot: materializer,
-      branchSessionId: 'branch-materializer',
-      personaId: materializer.defaultPersonaId,
+      slot: implementer,
+      branchSessionId: 'branch-implementer',
+      personaId: implementer.defaultPersonaId,
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
@@ -1200,7 +1201,7 @@ describe('ArchitectureRoleExecutorService', () => {
       'message_cli_agent',
     ]);
     expect(call?.objective).toContain('durable CLI child agent');
-    expect(call?.objective).toContain('Do not spawn a second materialization path');
+    expect(call?.objective).toContain('Do not spawn a second implementation path');
     expect(result.data.toolEvidence).toMatchObject({
       toolCallCount: 1,
       toolResultCount: 1,
@@ -1288,15 +1289,15 @@ describe('ArchitectureRoleExecutorService', () => {
   it('does not summarize failed get_cli_agent_status lookups without a runtime snapshot as CLI child evidence', async () => {
     const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     if (!schema) throw new Error('Expected Goal Master schema');
-    const materializer = schema.roleSlots.find((slot) => slot.id === 'materializer');
-    if (!materializer) throw new Error('Expected materializer slot');
+    const implementer = schema.roleSlots.find((slot) => slot.id === 'implementer');
+    if (!implementer) throw new Error('Expected implementer slot');
     const subagentRuntime: SubagentRuntimePort = {
       runSubagent: vi.fn(async (request) => {
         request.emit?.('tool:start', {
           callId: 'call-cli-status-missing',
           toolName: 'get_cli_agent_status',
           args: { childSessionId: 'implementer' },
-          sessionId: 'branch-materializer',
+          sessionId: 'branch-implementer',
           agentRun: undefined as never,
         });
         request.emit?.('tool:result', {
@@ -1307,8 +1308,8 @@ describe('ArchitectureRoleExecutorService', () => {
         } as never);
         return {
           result: 'Status lookup failed because implementer is not a CLI child session id.',
-          taskId: 'task-materializer',
-          childSessionId: 'branch-materializer',
+          taskId: 'task-implementer',
+          childSessionId: 'branch-implementer',
           parentSessionId: 'root-1',
           vfsMode: 'shared' as const,
           vfsSessionId: 'root-1',
@@ -1328,11 +1329,11 @@ describe('ArchitectureRoleExecutorService', () => {
       schema,
       run: {
         ...createRun('subagent_execution'),
-        branchSessionIds: { materializer: 'branch-materializer' },
+        branchSessionIds: { implementer: 'branch-implementer' },
       },
-      slot: materializer,
-      branchSessionId: 'branch-materializer',
-      personaId: materializer.defaultPersonaId,
+      slot: implementer,
+      branchSessionId: 'branch-implementer',
+      personaId: implementer.defaultPersonaId,
     });
 
     expect(result.data.toolEvidence).toMatchObject({
@@ -1535,7 +1536,7 @@ describe('ArchitectureRoleExecutorService', () => {
         context: {
           projectPath: 'C:\\Projekty\\TurboProject2',
           cliAgentToolPreferences: {
-            copilot: 'Prefer cheap materialization and avoid large exploratory rewrites.',
+            copilot: 'Prefer cheap implementation and avoid large exploratory rewrites.',
             codex: 'Use conservative verification only.',
           },
         },
@@ -1551,7 +1552,7 @@ describe('ArchitectureRoleExecutorService', () => {
     const spawn = call?.availableTools.find((tool) => tool.name === 'spawn_cli_agent');
     const status = call?.availableTools.find((tool) => tool.name === 'get_cli_agent_status');
     const fsList = call?.availableTools.find((tool) => tool.name === 'fs_list');
-    expect(spawn?.description).toContain('Architecture CLI preferences: copilot: Prefer cheap materialization');
+    expect(spawn?.description).toContain('Architecture CLI preferences: copilot: Prefer cheap implementation');
     expect(status?.description).toContain('codex: Use conservative verification only.');
     expect(fsList?.description).toBe('List host files');
     expect(call?.objective).not.toContain('cliAgentToolPreferences');
@@ -1589,7 +1590,7 @@ describe('ArchitectureRoleExecutorService', () => {
           cliAgentToolPreferences: {
             copilot: {
               model: 'gpt-4.1',
-              preference: 'Prefer cheap materialization.',
+              preference: 'Prefer cheap implementation.',
             },
             gemini: {
               model: 'gemini-2.5-pro',
@@ -1606,7 +1607,7 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const toolDescription = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].availableTools[0]?.description ?? '';
-    expect(toolDescription).toContain('copilot (model gpt-4.1): Prefer cheap materialization.');
+    expect(toolDescription).toContain('copilot (model gpt-4.1): Prefer cheap implementation.');
     expect(toolDescription).toContain('gemini (model gemini-2.5-pro): Use for brainstorming.');
   });
 

@@ -247,7 +247,7 @@ describe('Architecture graph runtime LLM integration', () => {
 
     const run = await runtime.createRun({
       schemaId: 'goal-master-delivery-loop',
-      prompt: 'Accept once implementation, materialization, verification, and test evidence are visible.',
+      prompt: 'Accept once implementation, implementation, verification, and test evidence are visible.',
       executionMode: 'subagent_execution',
       schema: dryGoalMasterLoopSchema(),
       context: {
@@ -304,7 +304,7 @@ describe('Architecture graph runtime LLM integration', () => {
     expect(stopEvent?.data).toMatchObject({
       maxSteps: 8,
       maxNodeVisits: 10,
-      pendingNodeIds: expect.arrayContaining(['verifier']),
+      pendingNodeIds: expect.arrayContaining(['goal-master']),
       visitCounts: expect.objectContaining({
         implementer: expect.any(Number),
         'goal-master': expect.any(Number),
@@ -334,12 +334,12 @@ describe('Architecture graph runtime LLM integration', () => {
       },
     });
     const events = runtime.getEvents(run.id);
-    const materializerOutput = events.find((event) => event.nodeId === 'materializer' && event.type === 'participant_output');
+    const implementerOutput = events.find((event) => event.nodeId === 'implementer' && event.type === 'participant_output');
     const verifierOutput = events.find((event) => event.nodeId === 'verifier' && event.type === 'participant_output');
     const goalDecision = events.find((event) => event.nodeId === 'goal-master' && event.type === 'router_decision');
 
     expect(run.status).toBe('completed');
-    expect(materializerOutput?.data?.['toolEvidence']).toMatchObject({
+    expect(implementerOutput?.data?.['toolEvidence']).toMatchObject({
       toolResultCount: 1,
       successfulToolNames: ['vfs_write'],
       targetPaths: ['evidence/proof.json'],
@@ -357,7 +357,6 @@ describe('Architecture graph runtime LLM integration', () => {
     expect(subagentRuntime.calls.map((call) => call.slot)).toEqual([
       'orchestrator',
       'implementer',
-      'materializer',
       'verifier',
       'tester',
       'goal_master',
@@ -486,9 +485,6 @@ class StatefulDeliveryLoopLLMSource implements ILLMSource {
     if (prompt.includes('Slot: Implementer')) {
       return 'Implementer prepared React/Vite/Tailwind changes for the salon site.';
     }
-    if (prompt.includes('Slot: Materializer')) {
-      return 'Materializer produced concrete project files for the salon website.';
-    }
     if (prompt.includes('Slot: Verifier')) {
       return this.testerVisits === 0
         ? 'Verifier read files but build evidence is still missing.'
@@ -507,7 +503,7 @@ class StatefulDeliveryLoopLLMSource implements ILLMSource {
         : 'Goal Master accepts verified build evidence. route_to(final-artifact, accepted)';
     }
     if (prompt.includes('Slot: Finalizer')) {
-      return 'Verified completion report: implementation, materialization, tests, and Goal Master acceptance are complete.';
+      return 'Verified completion report: implementation, tests, and Goal Master acceptance are complete.';
     }
     return 'Unhandled dry loop slot.';
   }
@@ -531,9 +527,6 @@ class GoalMasterScenarioLLMSource implements ILLMSource {
     }
     if (prompt.includes('Slot: Implementer')) {
       return 'Implementer delivered a concrete implementation plan and source changes.';
-    }
-    if (prompt.includes('Slot: Materializer')) {
-      return 'Materializer produced concrete artifacts with write evidence.';
     }
     if (prompt.includes('Slot: Verifier')) {
       return 'Verifier confirmed read evidence and build output.';
@@ -577,11 +570,8 @@ class EvidenceProducingSubagentRuntime implements SubagentRuntimePort {
       return 'Orchestrator routes to implementation. route_to(implementer, start deterministic evidence path)';
     }
     if (slot === 'implementer') {
-      return 'Implementer specifies evidence/proof.json and hands it to the materializer.';
-    }
-    if (slot === 'materializer') {
       emitToolResult(request, 'vfs_write', { filePath: 'evidence/proof.json', bytesWritten: 42 });
-      return 'Materializer wrote evidence/proof.json with vfs_write evidence.';
+      return 'Implementer wrote evidence/proof.json with vfs_write evidence.';
     }
     if (slot === 'verifier') {
       emitToolResult(request, 'vfs_read', { filePath: 'evidence/proof.json', content: '{"ok":true}' });
@@ -651,7 +641,7 @@ function dryGoalMasterLoopSchema(): ArchitectureSchema {
     id: 'dry-goal-master-delivery-loop',
     name: 'Dry Goal Master Delivery Loop',
     roleSlots: baseSchema.roleSlots.map((slot) => (
-      slot.id === 'materializer' || slot.id === 'verifier'
+      slot.id === 'implementer' || slot.id === 'verifier'
         ? { ...slot, slotType: 'participant' as const }
         : slot
     )),

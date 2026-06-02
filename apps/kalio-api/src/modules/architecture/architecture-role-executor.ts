@@ -269,7 +269,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     const canUseCliAgents = this.canUseCliAgents(input.run.context);
     if (input.slot.slotType === 'tool_executor') {
       const tools = ['vfs_write'];
-      if (this.isMaterializerSlot(input.slot) && canUseCliAgents) {
+      if (this.isImplementationWriterSlot(input.slot) && canUseCliAgents) {
         tools.push('spawn_cli_agent', 'message_cli_agent');
       }
       if (this.canAutoApproveProjectWrites(input.run.context)) {
@@ -303,20 +303,20 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     const hasLocalProjectContext = this.hasLocalProjectContext(input.run.context);
     const canUseCliAgents = this.canUseCliAgents(input.run.context);
     if (input.slot.slotType === 'tool_executor') {
-      const gateMaterializerReads = this.isMaterializerSlot(input.slot)
+      const gateImplementationReads = this.isImplementationWriterSlot(input.slot)
         && this.hasIncomingReadEvidence(input.incomingEvents);
       return this.withCliToolPreferences(allTools.filter((tool) => (
         (ARCHITECTURE_TOOL_EXECUTOR_TOOL_NAMES.has(tool.name) && (
-          !gateMaterializerReads || !ARCHITECTURE_BRANCH_TOOL_NAMES.has(tool.name)
+          !gateImplementationReads || !ARCHITECTURE_BRANCH_TOOL_NAMES.has(tool.name)
         ))
         || (canUseCliAgents && (tool.name === 'get_cli_agent_status' || tool.name === 'wait_for'))
-        || (canUseCliAgents && this.isMaterializerSlot(input.slot) && ARCHITECTURE_CLI_AGENT_TOOL_NAMES.has(tool.name))
+        || (canUseCliAgents && this.isImplementationWriterSlot(input.slot) && ARCHITECTURE_CLI_AGENT_TOOL_NAMES.has(tool.name))
         || (hasLocalProjectContext && (
-          (!gateMaterializerReads && ARCHITECTURE_PROJECT_READ_TOOL_NAMES.has(tool.name))
+          (!gateImplementationReads && ARCHITECTURE_PROJECT_READ_TOOL_NAMES.has(tool.name))
           || ARCHITECTURE_PROJECT_WRITE_TOOL_NAMES.has(tool.name)
         ))
         || (
-          !gateMaterializerReads
+          !gateImplementationReads
           && this.hasExecutionCwd(input.run.context)
           && ARCHITECTURE_TERMINAL_TOOL_NAMES.has(tool.name)
         )
@@ -473,7 +473,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       lines.push(
         '',
         `Local host project path: ${localProjectPath}`,
-        'If your answer depends on host project files, call fs_list or fs_read first. Use fs_write only from tool-executor slots when an approved materialization is required.',
+        'If your answer depends on host project files, call fs_list or fs_read first. Use fs_write only from tool-executor slots when an approved implementation write is required.',
       );
     }
     const context = this.contextForObjective(input.run.context, policy);
@@ -615,7 +615,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
 
   private cliBackendPolicyInstruction(input: ArchitectureRoleExecutionInput): string | null {
     if (!this.canUseCliAgents(input.run.context)) {
-      return 'CLI agents are unavailable for this run. Do not call CLI-agent tools or claim CLI materialization; use Kalio sub-agents and visible VFS/tool evidence instead.';
+      return 'CLI agents are unavailable for this run. Do not call CLI-agent tools or claim CLI implementation proof; use Kalio sub-agents and visible VFS/tool evidence instead.';
     }
     const policy = this.cliBackendPolicyForSlot(input.run.context, input.slot);
     if (!policy) {
@@ -642,7 +642,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     if (this.isOrchestrationSlot(slot)) {
       return {
         allowed: ['gemini', 'copilot', 'codex'],
-        purpose: 'Use Gemini for reconnaissance or brainstorming, Copilot for implementation/materialization delegation, and Codex for conservative analysis or final verification delegation',
+        purpose: 'Use Gemini for reconnaissance or brainstorming, Copilot for implementation delegation, and Codex for conservative analysis or final verification delegation',
       };
     }
     if (slot.id === 'implementer') {
@@ -650,13 +650,6 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         preferred: 'copilot',
         allowed: ['copilot', 'codex'],
         purpose: 'Use Copilot for implementation work; use Codex only for conservative fallback or code-analysis support',
-      };
-    }
-    if (slot.id === 'materializer') {
-      return {
-        preferred: 'codex',
-        allowed: ['gemini', 'codex', 'copilot'],
-        purpose: 'Use Codex for implementation delivery by default, Gemini for broad file generation fallback, and Copilot only as an explicit last fallback when credit limits allow it',
       };
     }
     if (slot.id === 'verifier' || slot.id === 'tester') {
@@ -764,10 +757,10 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     if (slot.slotType === 'tool_executor') {
       return [
         'Act as an execution slot, not a planner.',
-        'Use the available tools to materialize or verify the incoming implementation evidence.',
-        'If this slot is a materializer, create or update the required artifacts first with vfs_write, fs_write, or a durable CLI child agent. A materializer cannot pass by only inspecting an existing artifact or running build/test commands; build-only work belongs to verifier slots. Do not spend early tool calls on environment probes such as node -v, npm -v, or git branch unless the incoming evidence says those probes are required before writing.',
-        'If this materializer delegates writes to a CLI child, use spawn_cli_agent with expectedChangedFiles and verificationCommands when possible, then poll get_cli_agent_status and report the childSessionId, status, changed paths, and weak points. Do not spawn a second materialization path when an existing CLI child already owns the same work; poll or message that child instead.',
-        'After a materializer has visible write evidence, it may run install/build commands when terminal tools are available, then report exact paths written and command results.',
+        'Use the available tools to implement or verify the incoming architecture step.',
+        'If this slot is an implementer, create or update the required artifacts first with vfs_write, fs_write, or a durable CLI child agent. An implementer cannot pass by only inspecting an existing artifact or running build/test commands; build-only work belongs to verifier slots. Do not spend early tool calls on environment probes such as node -v, npm -v, or git branch unless the incoming evidence says those probes are required before writing.',
+        'If this implementer delegates writes to a CLI child, use spawn_cli_agent with expectedChangedFiles and verificationCommands when possible, then poll get_cli_agent_status and report the childSessionId, status, changed paths, and weak points. Do not spawn a second implementation path when an existing CLI child already owns the same work; poll or message that child instead.',
+        'After an implementer has visible write evidence, it may run install/build commands when terminal tools are available, then report exact paths written and command results.',
         'If this slot is a verifier, use VFS or host-project reads as evidence unless terminal tools are available with an explicit execution cwd in context; when incoming evidence references a CLI child session, inspect it with get_cli_agent_status before judging the delegated work.',
         'When terminal tools are available, run the narrowest relevant command and report exact command, exit status, and tool output summary.',
         'If a required write or command needs human approval, request it through the tool flow and stop after reporting the pending approval.',
@@ -833,8 +826,8 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     return slot.slotType === 'router' && /\borchestrator\b/i.test(`${slot.id} ${slot.label}`);
   }
 
-  private isMaterializerSlot(slot: ArchitectureRoleSlot): boolean {
-    return /\bmateriali[sz]er\b/i.test(`${slot.id} ${slot.label}`);
+  private isImplementationWriterSlot(slot: ArchitectureRoleSlot): boolean {
+    return slot.id === 'implementer';
   }
 
   private baseData(

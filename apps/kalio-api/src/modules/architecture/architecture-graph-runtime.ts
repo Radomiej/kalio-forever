@@ -884,16 +884,16 @@ class ArchitectureGraphRuntime {
   }
 
   private blockingIncompleteMaterializationReason(): string | undefined {
-    const materializerSlotIds = new Set(
+    const implementationProofSlotIds = new Set(
       this.options.schema.roleSlots
-        .filter((slot) => this.isMaterializerSlot(slot))
+        .filter((slot) => this.isImplementationProofSlot(slot))
         .map((slot) => slot.id),
     );
     for (const event of [...this.events].reverse()) {
       if (
         event.type !== 'participant_output'
         || event.roleSlotId === undefined
-        || !materializerSlotIds.has(event.roleSlotId)
+        || !implementationProofSlotIds.has(event.roleSlotId)
       ) {
         continue;
       }
@@ -955,7 +955,7 @@ class ArchitectureGraphRuntime {
   }): string | undefined {
     const unresolved = evidence.childCliSessions.find((session) => !isCompletedCliChildStatus(session.status));
     return unresolved
-      ? `CLI child materialization is incomplete: child status is ${unresolved.status ?? 'unknown'}.`
+      ? `CLI child implementation is incomplete: child status is ${unresolved.status ?? 'unknown'}.`
       : undefined;
   }
 
@@ -972,6 +972,12 @@ class ArchitectureGraphRuntime {
     if (this.isGoalGuardProofImplementer(slot)) {
       const evidence = this.toolEvidence(data);
       if (!this.hasOwnMaterializationEvidence(evidence)) {
+        if (this.hasIndependentHostVerificationEvidence()) {
+          return { ok: true };
+        }
+        if (this.hasIncompleteCliDelegationEvidence(evidence)) {
+          return { ok: true };
+        }
         return { ok: false, reason: 'implementer did not produce a successful write result' };
       }
       return { ok: true };
@@ -981,18 +987,18 @@ class ArchitectureGraphRuntime {
     }
     const evidence = this.toolEvidence(data);
     if (evidence.toolResultCount < 1) {
-      if (this.isMaterializerSlot(slot) && this.hasIndependentHostVerificationEvidence()) {
+      if (this.isImplementationProofSlot(slot) && this.hasIndependentHostVerificationEvidence()) {
         return { ok: true };
       }
       return { ok: false, reason: 'no tool result was observed' };
     }
     if (
-      this.isMaterializerSlot(slot)
+      this.isImplementationProofSlot(slot)
       && !this.hasMaterializationEvidence(evidence, incomingEvents)
       && !this.hasIncompleteCliDelegationEvidence(evidence)
       && !this.hasIndependentHostVerificationEvidence()
     ) {
-      return { ok: false, reason: 'materializer did not produce a successful write result' };
+      return { ok: false, reason: `${slot.id} did not produce a successful write result` };
     }
     if (this.isVerifierSlot(slot) && !evidence.successfulToolNames.some((name) => (
       name === 'vfs_read'
@@ -1013,7 +1019,7 @@ class ArchitectureGraphRuntime {
     data: Record<string, unknown>,
     incomingEvents: ArchitectureExecutionEvent[],
   ): string | undefined {
-    if (slot.slotType !== 'tool_executor' || !this.isMaterializerSlot(slot)) {
+    if (slot.slotType !== 'tool_executor' || !this.isImplementationProofSlot(slot)) {
       return undefined;
     }
     const evidence = this.toolEvidence(data);
@@ -1025,16 +1031,11 @@ class ArchitectureGraphRuntime {
 
   private isGoalGuardProofImplementer(slot: ArchitectureRoleSlot): boolean {
     return slot.id === 'implementer'
-      && this.options.run.context?.['requireImplementerWriteProof'] === true
-      && !this.hasDownstreamMaterializerNode();
-  }
-
-  private hasDownstreamMaterializerNode(): boolean {
-    return this.options.schema.edges.some((edge) => {
-      const from = this.options.schema.nodes.find((node) => node.id === edge.fromNodeId);
-      const to = this.options.schema.nodes.find((node) => node.id === edge.toNodeId);
-      return from?.roleSlotId === 'implementer' && to?.roleSlotId === 'materializer';
-    });
+      && slot.slotType === 'tool_executor'
+      && (
+        this.options.run.context?.['requireGoalMasterLoopProof'] === true
+        || this.options.run.context?.['requireImplementerWriteProof'] === true
+      );
   }
 
   private hasMaterializationEvidence(
@@ -1104,7 +1105,7 @@ class ArchitectureGraphRuntime {
     if (!this.hasIncompleteCliDelegationEvidence(evidence) || this.hasCliMaterializationEvidence(evidence)) {
       return undefined;
     }
-    return this.unresolvedCliChildReason(evidence) ?? 'CLI child materialization is incomplete.';
+    return this.unresolvedCliChildReason(evidence) ?? 'CLI child implementation is incomplete.';
   }
 
   private toolEvidence(data: Record<string, unknown>): {
@@ -1134,8 +1135,8 @@ class ArchitectureGraphRuntime {
     return { toolResultCount, successfulToolNames, targetPaths, childCliSessions };
   }
 
-  private isMaterializerSlot(slot: ArchitectureRoleSlot): boolean {
-    return /\bmateriali[sz]er\b/i.test(`${slot.id} ${slot.label}`);
+  private isImplementationProofSlot(slot: ArchitectureRoleSlot): boolean {
+    return slot.id === 'implementer';
   }
 
   private isVerifierSlot(slot: ArchitectureRoleSlot): boolean {

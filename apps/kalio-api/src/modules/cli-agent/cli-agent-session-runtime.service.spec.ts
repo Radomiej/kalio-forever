@@ -49,6 +49,7 @@ describe('CLIAgentSessionRuntimeService', () => {
 
     sessions = {
       getChildSession: vi.fn().mockResolvedValue(makeChildSession()),
+      getAccessibleChildSession: vi.fn().mockResolvedValue(makeChildSession()),
       loadSessionMetadata: vi.fn().mockResolvedValue({ agentId: 'codex', workdir: 'C:/repo' }),
       listMessages: vi.fn().mockResolvedValue([]),
       persistUserMessage: vi.fn(),
@@ -93,6 +94,43 @@ describe('CLIAgentSessionRuntimeService', () => {
     expect(allowedPaths.isAllowed).toHaveBeenCalledWith('C:/repo');
     expect(cliAgent.run).not.toHaveBeenCalled();
     expect(sessions.listMessages).not.toHaveBeenCalled();
+  });
+
+  it('reads CLI child status through architecture sibling sessions in the same session tree', async () => {
+    vi.mocked(sessions.getAccessibleChildSession).mockResolvedValue({
+      ...makeChildSession(),
+      parentSessionId: 'arch-run-materializer',
+    });
+    vi.mocked(sessions.loadLatestToolResult).mockResolvedValue({
+      id: 'tool-result-1',
+      sessionId: 'cli-child-1',
+      role: 'tool_result',
+      toolCallId: 'cli-run-1',
+      content: JSON.stringify({
+        childSessionId: 'cli-child-1',
+        parentSessionId: 'arch-run-materializer',
+        agentId: 'codex',
+        workdir: 'C:/repo',
+        status: 'completed',
+        lastPrompt: 'Change files',
+        updatedAt: 20,
+        lastOutput: 'build passed',
+        lastExitCode: 0,
+      }),
+      createdAt: 20,
+    });
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    const status = await service.getStatus('arch-run-verifier', 'cli-child-1');
+
+    expect(sessions.getAccessibleChildSession).toHaveBeenCalledWith('arch-run-verifier', 'cli-child-1');
+    expect(status).toMatchObject({
+      childSessionId: 'cli-child-1',
+      parentSessionId: 'arch-run-verifier',
+      status: 'completed',
+      lastOutput: 'build passed',
+      lastExitCode: 0,
+    });
   });
 
   it('auto-recovers a durable CLI session after idle timeout when enabled', async () => {

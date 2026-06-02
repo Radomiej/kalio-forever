@@ -332,28 +332,29 @@ describe('MockLLMProvider', () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();
     const onToolArgChunk = vi.fn();
-    const materializerMessages: ContextManagedLLMMessage[] = [
+    const implementerMessages: ContextManagedLLMMessage[] = [
       {
         role: 'user',
         content: [
           'Architecture: Goal Master Delivery Loop v0.1.0',
-          'Slot: Materializer (tool_executor)',
+          'Slot: Implementer (tool_executor)',
+          'Implementation proof mode: the Implementer must create or update at least one artifact with vfs_write before completing.',
           'Task: build proof [[mock:goal-guard-vfs-success]]',
           '[[mock:script]]',
-          'when("Slot: Materializer") return("script should not bypass tool evidence")',
+          'when("Slot: Implementer") return("script should not bypass tool evidence")',
           '[[/mock:script]]',
         ].join('\n'),
       },
     ];
 
-    const materializerCalls = await provider.streamChat(
-      materializerMessages,
+    const implementerCalls = await provider.streamChat(
+      implementerMessages,
       [{ name: 'vfs_write', description: 'Write to VFS', parameters: {} }],
       { sessionId: 'session-1', messageId: 'message-1', onChunk, onToolArgChunk },
     );
 
     expect(onChunk).not.toHaveBeenCalled();
-    expect(materializerCalls).toEqual([
+    expect(implementerCalls).toEqual([
       expect.objectContaining({
         name: 'vfs_write',
         args: expect.objectContaining({
@@ -425,7 +426,8 @@ describe('MockLLMProvider', () => {
         role: 'user',
         content: [
           'Architecture: Goal Master Delivery Loop v0.1.0',
-          'Slot: Materializer (tool_executor)',
+          'Slot: Implementer (tool_executor)',
+          'Implementation proof mode: the Implementer must create or update at least one artifact with vfs_write before completing.',
           'Task: build proof [[mock:goal-guard-vfs-success]]',
         ].join('\n'),
       },
@@ -439,13 +441,13 @@ describe('MockLLMProvider', () => {
       },
     ];
 
-    const materializerCalls = await provider.streamChat(
+    const implementerCalls = await provider.streamChat(
       messages,
       [{ name: 'vfs_write', description: 'Write to VFS', parameters: {} }],
       { sessionId: 'session-1', messageId: 'message-1', onChunk },
     );
 
-    expect(materializerCalls).toEqual([]);
+    expect(implementerCalls).toEqual([]);
     expect(onChunk).toHaveBeenCalledWith(expect.objectContaining({
       delta: expect.stringContaining('vfs_write evidence'),
       done: false,

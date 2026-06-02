@@ -706,8 +706,8 @@ describe('ArchitectureRuntimeService', () => {
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'goal_master'
         ? 'Goal Master incorrectly accepts delegated CLI proof. route_to(final-artifact, accepted)'
-        : slot.id === 'materializer'
-          ? 'Materializer delegated host writes to a CLI child that is still running.'
+        : slot.id === 'implementer'
+          ? 'Implementer delegated host writes to a CLI child that is still running.'
           : `${slot.label} branch prepared for: ${run.prompt}`,
       data: {
         branchSessionId,
@@ -717,7 +717,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
-        ...(slot.id === 'materializer'
+        ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-async-finalizer-block', 'running') }
           : slot.slotType === 'tool_executor'
             ? { toolEvidence: toolEvidenceForSlot(slot.id) }
@@ -742,7 +742,7 @@ describe('ArchitectureRuntimeService', () => {
       type: 'router_decision',
       message: 'Architecture run failed.',
       data: {
-        error: expect.stringContaining('Architecture finalization blocked: CLI child materialization is incomplete'),
+        error: expect.stringContaining('Architecture finalization blocked: CLI child implementation is incomplete'),
       },
     });
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
@@ -1413,9 +1413,9 @@ describe('ArchitectureRuntimeService', () => {
         runId: run.id,
         sequence: 2,
         type: 'participant_output',
-        message: 'Materializer wrote proof.',
-        nodeId: 'materializer',
-        roleSlotId: 'materializer',
+        message: 'Implementer wrote proof.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
         data: {
           toolEvidence: {
             toolResultCount: 1,
@@ -1439,7 +1439,6 @@ describe('ArchitectureRuntimeService', () => {
           visitCounts: {
             orchestrator: 1,
             implementer: 1,
-            materializer: 1,
             verifier: 1,
             tester: 1,
             'goal-master': 1,
@@ -1463,7 +1462,6 @@ describe('ArchitectureRuntimeService', () => {
         visitCounts: {
           orchestrator: 1,
           implementer: 1,
-          materializer: 1,
           verifier: 1,
           tester: 1,
           'goal-master': 1,
@@ -1757,7 +1755,7 @@ describe('ArchitectureRuntimeService', () => {
         : slot.id === 'goal_master'
           ? 'Goal Master accepts visible tool proof. route_to(final-artifact, accepted)'
           : slot.slotType === 'tool_executor'
-            ? `${slot.label} completed with ${slot.id === 'materializer' ? 'vfs_write' : 'vfs_read'} tool evidence.`
+            ? `${slot.label} completed with ${slot.id === 'implementer' ? 'vfs_write' : 'vfs_read'} tool evidence.`
             : `${slot.label} branch prepared for: ${run.prompt}`,
       data: {
         branchSessionId,
@@ -1821,7 +1819,7 @@ describe('ArchitectureRuntimeService', () => {
           : slot.id === 'goal_master'
             ? 'Goal Master accepts. route_to(final-artifact, accepted)'
             : slot.slotType === 'tool_executor'
-              ? `${slot.label} completed with ${slot.id === 'materializer' ? 'vfs_write' : 'vfs_read'} tool evidence.`
+              ? `${slot.label} completed with ${slot.id === 'implementer' ? 'vfs_write' : 'vfs_read'} tool evidence.`
               : `${slot.label} branch prepared for: ${run.prompt}`,
         data: {
           branchSessionId,
@@ -1874,15 +1872,15 @@ describe('ArchitectureRuntimeService', () => {
     ]));
   });
 
-  it('accepts CLI-agent materialization evidence from prior architecture nodes', async () => {
+  it('accepts CLI-agent implementation evidence from prior architecture nodes', async () => {
     const { service, executor } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'orchestrator'
         ? 'Delegated implementation to Copilot CLI and inspected changed files. route_to(implementer, cli implementation complete)'
         : slot.id === 'goal_master'
-          ? 'Goal Master accepts CLI materialization and verifier evidence. route_to(final-artifact, accepted)'
-          : slot.id === 'materializer'
-            ? 'Materializer confirmed files already exist from CLI child and avoided redundant host writes.'
+          ? 'Goal Master accepts CLI implementation and verifier evidence. route_to(final-artifact, accepted)'
+          : slot.id === 'implementer'
+            ? 'Implementer confirmed files already exist from CLI child and avoided redundant host writes.'
             : slot.slotType === 'tool_executor'
               ? `${slot.label} completed with vfs_read tool evidence.`
               : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -1905,7 +1903,7 @@ describe('ArchitectureRuntimeService', () => {
           },
         } : {}),
         ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
-        ...(slot.id === 'materializer' ? {
+        ...(slot.id === 'implementer' ? {
           toolEvidence: {
             toolCallCount: 1,
             toolResultCount: 1,
@@ -1914,13 +1912,13 @@ describe('ArchitectureRuntimeService', () => {
             targetPaths: ['C:\\Projekty\\TurboProject2\\src\\App.tsx'],
           },
         } : {}),
-        ...(slot.slotType === 'tool_executor' && slot.id !== 'materializer' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
+        ...(slot.slotType === 'tool_executor' && slot.id !== 'implementer' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
       },
     }));
 
     const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
-      prompt: 'Accept CLI child materialization as architecture-level write proof.',
+      prompt: 'Accept CLI child implementation as architecture-level write proof.',
       executionMode: 'subagent_execution',
       context: {
         maxArchitectureNodeVisits: 1,
@@ -1930,15 +1928,15 @@ describe('ArchitectureRuntimeService', () => {
     const semantic = semanticEvents(service.getEvents(run.id));
 
     expect(run.status).toBe('completed');
-    expect(semantic.find((event) => event.nodeId === 'materializer')?.message).toContain('CLI child');
+    expect(semantic.find((event) => event.nodeId === 'implementer')?.message).toContain('CLI child');
     expect(semantic.at(-1)?.type).toBe('final_artifact');
   });
 
-  it('continues a still-running durable CLI child as incomplete materialization evidence', async () => {
+  it('continues a still-running durable CLI child as incomplete implementation evidence', async () => {
     const { service, executor } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
-      message: slot.id === 'materializer'
-        ? 'Materializer hit a recoverable branch error: Sub-agent timed out after 120000ms.'
+      message: slot.id === 'implementer'
+        ? 'Implementer hit a recoverable branch error: Sub-agent timed out after 120000ms.'
         : slot.id === 'goal_master'
           ? 'Goal Master sees running CLI child and routes back. route_to(implementer, cli child still running)'
         : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -1950,7 +1948,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.id === 'goal_master' ? { routeToNodeId: 'implementer', response: 'cli child still running' } : {}),
-        ...(slot.id === 'materializer' ? {
+        ...(slot.id === 'implementer' ? {
           toolEvidence: {
             toolCallCount: 1,
             toolResultCount: 1,
@@ -1980,17 +1978,17 @@ describe('ArchitectureRuntimeService', () => {
     const semantic = semanticEvents(service.getEvents(run.id));
 
     expect(run.status).toBe('failed');
-    expect(semantic.find((event) => event.nodeId === 'materializer')?.message).toContain('recoverable branch error');
+    expect(semantic.find((event) => event.nodeId === 'implementer')?.message).toContain('recoverable branch error');
     expect(semantic.find((event) => event.nodeId === 'goal-master')?.route?.nextNodeId).toBe('implementer');
   });
 
-  it('does not treat a running CLI child materializer as completed proof when Goal Master tries to finalize', async () => {
+  it('does not treat a running CLI child implementer as completed proof when Goal Master tries to finalize', async () => {
     const { service, executor } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'goal_master'
         ? 'Goal Master accepts delegated CLI proof. route_to(final-artifact, accepted)'
-        : slot.id === 'materializer'
-          ? 'Materializer completed spawn_cli_agent delegation; child is still running.'
+        : slot.id === 'implementer'
+          ? 'Implementer completed spawn_cli_agent delegation; child is still running.'
           : slot.slotType === 'tool_executor'
             ? `${slot.label} completed with vfs_read tool evidence.`
             : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -2002,7 +2000,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
-        ...(slot.id === 'materializer'
+        ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-running-proof', 'running') }
           : slot.slotType === 'tool_executor'
             ? { toolEvidence: toolEvidenceForSlot(slot.id) }
@@ -2012,7 +2010,7 @@ describe('ArchitectureRuntimeService', () => {
 
     const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
-      prompt: 'Do not finish while the CLI materializer is still running.',
+      prompt: 'Do not finish while the CLI implementer is still running.',
       executionMode: 'subagent_execution',
       context: {
         requireGoalMasterLoopProof: true,
@@ -2030,7 +2028,7 @@ describe('ArchitectureRuntimeService', () => {
       rejectedNodeIds: ['final-artifact'],
     });
     expect(goalDecision?.data).toMatchObject({
-      runtimeGuard: expect.stringContaining('CLI child materialization is incomplete'),
+      runtimeGuard: expect.stringContaining('CLI child implementation is incomplete'),
     });
     expect(semantic.at(-1)?.type).not.toBe('final_artifact');
   });
@@ -2040,8 +2038,8 @@ describe('ArchitectureRuntimeService', () => {
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'goal_master'
         ? 'Goal Master independently verified files and dist build output. route_to(final-artifact, accepted)'
-        : slot.id === 'materializer'
-          ? 'Materializer delegated host writes to a CLI child that is still reported as running.'
+        : slot.id === 'implementer'
+          ? 'Implementer delegated host writes to a CLI child that is still reported as running.'
           : slot.id === 'verifier'
             ? 'Verifier confirmed npm build output through terminal and dist reads.'
             : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -2068,7 +2066,7 @@ describe('ArchitectureRuntimeService', () => {
             },
           }
           : {}),
-        ...(slot.id === 'materializer'
+        ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-stale-after-build', 'running') }
           : slot.id === 'verifier'
             ? {
@@ -2111,26 +2109,26 @@ describe('ArchitectureRuntimeService', () => {
     expect(semantic.at(-1)?.type).toBe('final_artifact');
   });
 
-  it('does not crash a resumed materializer pass when prior verifier evidence already proves host build output', async () => {
+  it('does not crash a resumed implementer pass when prior verifier evidence already proves host build output', async () => {
     const { service, executor } = createService();
     let goalMasterVisits = 0;
-    let materializerVisits = 0;
+    let implementerVisits = 0;
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
       if (slot.id === 'goal_master') {
         goalMasterVisits += 1;
       }
-      if (slot.id === 'materializer') {
-        materializerVisits += 1;
+      if (slot.id === 'implementer') {
+        implementerVisits += 1;
       }
       return {
         message: slot.id === 'goal_master'
           ? goalMasterVisits === 1
             ? 'Goal Master requests one more implementation pass. route_to(implementer, continue)'
             : 'Goal Master accepts independently verified host build evidence. route_to(final-artifact, accepted)'
-          : slot.id === 'materializer'
-            ? materializerVisits === 1
-              ? 'Materializer delegated host writes to a CLI child that is still reported as running.'
-              : 'Materializer resumed after checkpoint and inspected the already built host project.'
+          : slot.id === 'implementer'
+            ? implementerVisits === 1
+              ? 'Implementer delegated host writes to a CLI child that is still reported as running.'
+              : 'Implementer resumed after checkpoint and inspected the already built host project.'
             : slot.id === 'verifier'
               ? 'Verifier confirmed source files and dist output through reads and terminal build evidence.'
               : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -2144,9 +2142,9 @@ describe('ArchitectureRuntimeService', () => {
           ...(slot.id === 'goal_master'
             ? { routeToNodeId: goalMasterVisits === 1 ? 'implementer' : 'final-artifact' }
             : {}),
-          ...(slot.id === 'materializer'
+          ...(slot.id === 'implementer'
             ? {
-              toolEvidence: materializerVisits === 1
+              toolEvidence: implementerVisits === 1
                 ? cliChildToolEvidence('cli-child-stale-after-checkpoint', 'running')
                 : {
                   toolCallCount: 1,
@@ -2179,7 +2177,7 @@ describe('ArchitectureRuntimeService', () => {
 
     const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
-      prompt: 'Resume without requiring duplicate materializer writes after build proof.',
+      prompt: 'Resume without requiring duplicate implementer writes after build proof.',
       executionMode: 'subagent_execution',
       context: {
         requireGoalMasterLoopProof: true,
@@ -2190,31 +2188,31 @@ describe('ArchitectureRuntimeService', () => {
     const semantic = semanticEvents(service.getEvents(run.id));
 
     expect(run.status).toBe('completed');
-    expect(materializerVisits).toBe(2);
+    expect(implementerVisits).toBe(2);
     expect(semantic.filter((event) => event.nodeId === 'goal-master' && event.type === 'router_decision')).toHaveLength(2);
     expect(semantic.at(-1)?.type).toBe('final_artifact');
   });
 
-  it('does not crash a no-op resumed materializer pass after independent host build proof exists', async () => {
+  it('does not crash a no-op resumed implementer pass after independent host build proof exists', async () => {
     const { service, executor } = createService();
     let goalMasterVisits = 0;
-    let materializerVisits = 0;
+    let implementerVisits = 0;
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
       if (slot.id === 'goal_master') {
         goalMasterVisits += 1;
       }
-      if (slot.id === 'materializer') {
-        materializerVisits += 1;
+      if (slot.id === 'implementer') {
+        implementerVisits += 1;
       }
       return {
         message: slot.id === 'goal_master'
           ? goalMasterVisits === 1
             ? 'Goal Master requests one more implementation pass. route_to(implementer, continue)'
             : 'Goal Master accepts independently verified host build evidence. route_to(final-artifact, accepted)'
-          : slot.id === 'materializer'
-            ? materializerVisits === 1
-              ? 'Materializer delegated host writes to a CLI child that is still reported as running.'
-              : 'Materializer resumed and reported no further writes were needed.'
+          : slot.id === 'implementer'
+            ? implementerVisits === 1
+              ? 'Implementer delegated host writes to a CLI child that is still reported as running.'
+              : 'Implementer resumed and reported no further writes were needed.'
             : slot.id === 'verifier'
               ? 'Verifier confirmed source files and dist output through reads and terminal build evidence.'
               : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -2228,7 +2226,7 @@ describe('ArchitectureRuntimeService', () => {
           ...(slot.id === 'goal_master'
             ? { routeToNodeId: goalMasterVisits === 1 ? 'implementer' : 'final-artifact' }
             : {}),
-          ...(slot.id === 'materializer' && materializerVisits === 1
+          ...(slot.id === 'implementer' && implementerVisits === 1
             ? { toolEvidence: cliChildToolEvidence('cli-child-stale-after-noop', 'running') }
             : slot.id === 'verifier'
               ? {
@@ -2244,7 +2242,7 @@ describe('ArchitectureRuntimeService', () => {
                   ],
                 },
               }
-              : slot.slotType === 'tool_executor' && slot.id !== 'materializer'
+              : slot.slotType === 'tool_executor' && slot.id !== 'implementer'
                 ? { toolEvidence: toolEvidenceForSlot(slot.id) }
                 : {}),
         },
@@ -2253,7 +2251,7 @@ describe('ArchitectureRuntimeService', () => {
 
     const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
-      prompt: 'Resume no-op materializer after build proof.',
+      prompt: 'Resume no-op implementer after build proof.',
       executionMode: 'subagent_execution',
       context: {
         requireGoalMasterLoopProof: true,
@@ -2264,7 +2262,7 @@ describe('ArchitectureRuntimeService', () => {
     const semantic = semanticEvents(service.getEvents(run.id));
 
     expect(run.status).toBe('completed');
-    expect(materializerVisits).toBe(2);
+    expect(implementerVisits).toBe(2);
     expect(semantic.at(-1)?.type).toBe('final_artifact');
   });
 
@@ -2273,8 +2271,8 @@ describe('ArchitectureRuntimeService', () => {
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'goal_master'
         ? 'Goal Master accepts delegated CLI proof. route_to(final-artifact, accepted)'
-        : slot.id === 'materializer'
-          ? 'Materializer delegated host writes to a CLI child with unknown status.'
+        : slot.id === 'implementer'
+          ? 'Implementer delegated host writes to a CLI child with unknown status.'
           : `${slot.label} branch prepared for: ${run.prompt}`,
       data: {
         branchSessionId,
@@ -2284,7 +2282,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
-        ...(slot.id === 'materializer'
+        ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-unknown-proof', 'unknown') }
           : slot.slotType === 'tool_executor'
             ? { toolEvidence: toolEvidenceForSlot(slot.id) }
@@ -2322,8 +2320,8 @@ describe('ArchitectureRuntimeService', () => {
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'goal_master'
         ? 'Goal Master accepts visible write proof. route_to(final-artifact, accepted)'
-        : slot.id === 'materializer'
-          ? 'Materializer wrote files directly but delegated CLI child status is unknown.'
+        : slot.id === 'implementer'
+          ? 'Implementer wrote files directly but delegated CLI child status is unknown.'
           : `${slot.label} branch prepared for: ${run.prompt}`,
       data: {
         branchSessionId,
@@ -2333,7 +2331,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
-        ...(slot.id === 'materializer'
+        ...(slot.id === 'implementer'
           ? {
               toolEvidence: {
                 ...cliChildToolEvidence('cli-child-unknown-with-write', 'unknown'),
@@ -2377,8 +2375,8 @@ describe('ArchitectureRuntimeService', () => {
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'goal_master'
         ? 'Goal Master incorrectly accepts delegated CLI proof. route_to(final-artifact, accepted)'
-        : slot.id === 'materializer'
-          ? 'Materializer delegated host writes to a CLI child that is still running.'
+        : slot.id === 'implementer'
+          ? 'Implementer delegated host writes to a CLI child that is still running.'
           : `${slot.label} branch prepared for: ${run.prompt}`,
       data: {
         branchSessionId,
@@ -2388,7 +2386,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
-        ...(slot.id === 'materializer'
+        ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-finalizer-block', 'running') }
           : slot.slotType === 'tool_executor'
             ? { toolEvidence: toolEvidenceForSlot(slot.id) }
@@ -2404,27 +2402,27 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureNodeVisits: 1,
         maxArchitectureSteps: 20,
       },
-    })).rejects.toThrow('Architecture finalization blocked: CLI child materialization is incomplete');
+    })).rejects.toThrow('Architecture finalization blocked: CLI child implementation is incomplete');
   });
 
   it('passes all prior childCliSessions into Goal Master and finalizer inputs', async () => {
     const { service, executor } = createService();
     let goalMasterVisits = 0;
-    let materializerVisits = 0;
+    let implementerVisits = 0;
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
       if (slot.id === 'goal_master') {
         goalMasterVisits += 1;
       }
-      if (slot.id === 'materializer') {
-        materializerVisits += 1;
+      if (slot.id === 'implementer') {
+        implementerVisits += 1;
       }
       return {
         message: slot.id === 'goal_master'
           ? goalMasterVisits === 1
             ? 'Goal Master needs another pass. route_to(implementer, continue)'
             : 'Goal Master accepts all CLI evidence. route_to(final-artifact, accepted)'
-          : slot.id === 'materializer'
-            ? `Materializer completed spawn_cli_agent child cli-child-${materializerVisits}.`
+          : slot.id === 'implementer'
+            ? `Implementer completed spawn_cli_agent child cli-child-${implementerVisits}.`
             : `${slot.label} branch prepared for: ${run.prompt}`,
         data: {
           branchSessionId,
@@ -2436,8 +2434,8 @@ describe('ArchitectureRuntimeService', () => {
           ...(slot.id === 'goal_master'
             ? { routeToNodeId: goalMasterVisits === 1 ? 'implementer' : 'final-artifact' }
             : {}),
-          ...(slot.id === 'materializer'
-            ? { toolEvidence: cliChildToolEvidence(`cli-child-${materializerVisits}`, 'completed') }
+          ...(slot.id === 'implementer'
+            ? { toolEvidence: cliChildToolEvidence(`cli-child-${implementerVisits}`, 'completed') }
             : slot.slotType === 'tool_executor'
               ? { toolEvidence: toolEvidenceForSlot(slot.id) }
               : {}),
@@ -2470,14 +2468,14 @@ describe('ArchitectureRuntimeService', () => {
   });
 
   it.each(['stopped', 'failed'] as const)(
-    'does not count a %s CLI child as completed materialization',
+    'does not count a %s CLI child as completed implementation',
     async (status) => {
       const { service, executor } = createService();
       vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
         message: slot.id === 'goal_master'
           ? 'Goal Master accepts delegated CLI proof. route_to(final-artifact, accepted)'
-          : slot.id === 'materializer'
-            ? `Materializer completed spawn_cli_agent delegation; child ${status}.`
+          : slot.id === 'implementer'
+            ? `Implementer completed spawn_cli_agent delegation; child ${status}.`
             : slot.slotType === 'tool_executor'
               ? `${slot.label} completed with vfs_read tool evidence.`
               : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -2489,7 +2487,7 @@ describe('ArchitectureRuntimeService', () => {
           slotType: slot.slotType,
           executionMode: run.executionMode,
           ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
-          ...(slot.id === 'materializer'
+          ...(slot.id === 'implementer'
             ? { toolEvidence: cliChildToolEvidence(`cli-child-${status}`, status) }
             : slot.slotType === 'tool_executor'
               ? { toolEvidence: toolEvidenceForSlot(slot.id) }
@@ -2499,7 +2497,7 @@ describe('ArchitectureRuntimeService', () => {
 
       const run = await service.createRun({
         schemaId: 'goal-master-delivery-loop',
-        prompt: `Do not finish from a ${status} CLI materializer.`,
+        prompt: `Do not finish from a ${status} CLI implementer.`,
         executionMode: 'subagent_execution',
         context: {
           requireGoalMasterLoopProof: true,
@@ -2525,8 +2523,8 @@ describe('ArchitectureRuntimeService', () => {
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'goal_master'
         ? 'Goal Master accepts visible write proof. route_to(final-artifact, accepted)'
-        : slot.id === 'materializer'
-          ? 'Materializer wrote files directly but still has a running delegated CLI child.'
+        : slot.id === 'implementer'
+          ? 'Implementer wrote files directly but still has a running delegated CLI child.'
           : slot.slotType === 'tool_executor'
             ? `${slot.label} completed with vfs_read tool evidence.`
             : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -2538,7 +2536,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
-        ...(slot.id === 'materializer'
+        ...(slot.id === 'implementer'
           ? {
               toolEvidence: {
                 ...cliChildToolEvidence('cli-child-running-with-write', 'running'),
@@ -2583,7 +2581,7 @@ describe('ArchitectureRuntimeService', () => {
     const schemaWithoutToolExecutors: ArchitectureSchema = {
       ...baseSchema,
       roleSlots: baseSchema.roleSlots.map((slot) => (
-        slot.id === 'materializer' || slot.id === 'verifier'
+        slot.id === 'implementer' || slot.id === 'verifier'
           ? { ...slot, slotType: 'participant' }
           : slot
       )),
@@ -2910,7 +2908,7 @@ describe('ArchitectureRuntimeService', () => {
     const { service, executor } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'goal_master'
-        ? 'Goal Master accepts structured materialization evidence. route_to(final-artifact, accepted)'
+        ? 'Goal Master accepts structured implementation evidence. route_to(final-artifact, accepted)'
         : slot.slotType === 'tool_executor'
           ? `${slot.label} completed the assigned evidence step.`
           : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -2952,7 +2950,7 @@ describe('ArchitectureRuntimeService', () => {
     const schemaWithOneSpoofableToolSlot: ArchitectureSchema = {
       ...baseSchema,
       roleSlots: baseSchema.roleSlots.map((slot) => (
-        slot.id === 'materializer' || slot.id === 'tester'
+        slot.id === 'implementer' || slot.id === 'tester'
           ? { ...slot, slotType: 'participant' }
           : slot
       )),
@@ -3001,7 +2999,7 @@ describe('ArchitectureRuntimeService', () => {
   it('allows Goal Master finalization when host project file proof is visible', async () => {
     const { service, executor } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
-      const toolNames = slot.id === 'materializer'
+      const toolNames = slot.id === 'implementer'
         ? ['fs_write']
         : slot.id === 'verifier'
           ? ['fs_read']
@@ -3068,7 +3066,7 @@ describe('ArchitectureRuntimeService', () => {
 
     await expect(service.createRun({
       schemaId: 'goal-master-delivery-loop',
-      prompt: 'Reject prose-only materializer.',
+      prompt: 'Reject prose-only implementer.',
       executionMode: 'subagent_execution',
       context: {
         maxArchitectureNodeVisits: 1,
@@ -3077,10 +3075,10 @@ describe('ArchitectureRuntimeService', () => {
     })).rejects.toThrow('completed without required tool evidence');
   });
 
-  it('allows strict Implementer proof mode to continue when a downstream Materializer writes', async () => {
+  it('allows strict Implementer proof mode to continue when a downstream Implementer writes', async () => {
     const { service, executor } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
-      const toolNames = slot.id === 'materializer'
+      const toolNames = slot.id === 'implementer'
         ? ['vfs_write']
         : slot.id === 'verifier'
           ? ['vfs_read']
@@ -3114,7 +3112,7 @@ describe('ArchitectureRuntimeService', () => {
 
     const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
-      prompt: 'Let Materializer provide write proof in Goal Guard proof mode.',
+      prompt: 'Let Implementer provide write proof in Goal Guard proof mode.',
       executionMode: 'subagent_execution',
       context: {
         maxArchitectureNodeVisits: 1,
@@ -3125,11 +3123,11 @@ describe('ArchitectureRuntimeService', () => {
     });
 
     const semantic = semanticEvents(service.getEvents(run.id));
-    expect(semantic.some((event) => event.nodeId === 'materializer' && event.type === 'participant_output')).toBe(true);
+    expect(semantic.some((event) => event.nodeId === 'implementer' && event.type === 'participant_output')).toBe(true);
     expect(semantic.at(-1)?.type).toBe('final_artifact');
   });
 
-  it('still fails strict Implementer proof mode when there is no downstream Materializer', async () => {
+  it('still fails strict Implementer proof mode when there is no downstream Implementer', async () => {
     const { service, executor } = createService();
     const baseSchema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     if (!baseSchema) {
@@ -3138,7 +3136,7 @@ describe('ArchitectureRuntimeService', () => {
     const schema: ArchitectureSchema = {
       ...baseSchema,
       name: 'Two Agent Guard',
-      description: 'Strict implementer proof without a materializer.',
+      description: 'Strict implementer proof without a implementer.',
       roleSlots: baseSchema.roleSlots.filter((slot) => (
         slot.id === 'implementer'
         || slot.id === 'goal_master'
@@ -3180,10 +3178,10 @@ describe('ArchitectureRuntimeService', () => {
     })).rejects.toThrow('implementer did not produce a successful write result');
   });
 
-  it('fails Goal Guard proof mode when Materializer only reads files and never writes', async () => {
+  it('fails Goal Guard proof mode when Implementer only reads files and never writes', async () => {
     const { service, executor } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
-      const toolNames = slot.id === 'materializer'
+      const toolNames = slot.id === 'implementer'
         ? ['fs_read']
         : slot.id === 'verifier'
           ? ['fs_read']
@@ -3217,14 +3215,14 @@ describe('ArchitectureRuntimeService', () => {
 
     await expect(service.createRun({
       schemaId: 'goal-master-delivery-loop',
-      prompt: 'Reject read-only Materializer in Goal Guard proof mode.',
+      prompt: 'Reject read-only Implementer in Goal Guard proof mode.',
       executionMode: 'subagent_execution',
       context: {
         maxArchitectureNodeVisits: 1,
         maxArchitectureSteps: 20,
         requireGoalMasterLoopProof: true,
       },
-    })).rejects.toThrow('materializer did not produce a successful write result');
+    })).rejects.toThrow('implementer did not produce a successful write result');
   });
 
   it('uses an inline draft schema for run graph projections without changing the registry schema', async () => {
@@ -3830,14 +3828,14 @@ describe('ArchitectureRuntimeService', () => {
     const persistedMessages: ChatMessage[] = [
       {
         id: `architecture:${runId}:user`,
-        sessionId: `arch-${runId}-materializer`,
+        sessionId: `arch-${runId}-implementer`,
         role: 'user',
-        content: 'Architecture: Goal Master Delivery Loop v0.1.0\nSlot: Materializer\nTask: create project.',
+        content: 'Architecture: Goal Master Delivery Loop v0.1.0\nSlot: Implementer\nTask: create project.',
         createdAt,
       },
       {
         id: `architecture:${runId}:tool-calls`,
-        sessionId: `arch-${runId}-materializer`,
+        sessionId: `arch-${runId}-implementer`,
         role: 'assistant',
         content: '',
         toolCalls: [{
@@ -3845,8 +3843,8 @@ describe('ArchitectureRuntimeService', () => {
           name: 'spawn_cli_agent',
           args: {
             architectureRunId: runId,
-            nodeId: 'materializer',
-            roleSlotId: 'materializer',
+            nodeId: 'implementer',
+            roleSlotId: 'implementer',
             agentId: 'copilot',
             workdir: 'C:\\Projekty\\TurboProject2',
             expectedChangedFiles: ['src/App.tsx'],
@@ -3856,7 +3854,7 @@ describe('ArchitectureRuntimeService', () => {
       },
       {
         id: `architecture:${runId}:tool-result`,
-        sessionId: `arch-${runId}-materializer`,
+        sessionId: `arch-${runId}-implementer`,
         role: 'tool_result',
         toolCallId,
         content: JSON.stringify({
@@ -3868,7 +3866,7 @@ describe('ArchitectureRuntimeService', () => {
         createdAt: createdAt + 2,
       },
     ];
-    sessions.list.mockResolvedValue([{ id: `arch-${runId}-materializer` }]);
+    sessions.list.mockResolvedValue([{ id: `arch-${runId}-implementer` }]);
     sessions.getMessages.mockResolvedValue(persistedMessages);
     audit.listEntries.mockResolvedValue([
       auditRow({
@@ -3916,7 +3914,7 @@ describe('ArchitectureRuntimeService', () => {
       auditRow({
         id: 'audit-3',
         createdAt: createdAt + 2,
-        label: 'architecture_event:participant_output:materializer',
+        label: 'architecture_event:participant_output:implementer',
         data: {
           domain: 'architecture',
           kind: 'architecture_event',
@@ -3927,9 +3925,9 @@ describe('ArchitectureRuntimeService', () => {
           eventId: `${runId}:event:3`,
           eventType: 'participant_output',
           sequence: 3,
-          nodeId: 'materializer',
-          roleSlotId: 'materializer',
-          messagePreview: 'Materializer delegated host writes to a running Copilot CLI child.',
+          nodeId: 'implementer',
+          roleSlotId: 'implementer',
+          messagePreview: 'Implementer delegated host writes to a running Copilot CLI child.',
           incompleteReason: 'CLI child cli-child-running is still running',
         },
       }),
@@ -3945,7 +3943,7 @@ describe('ArchitectureRuntimeService', () => {
           schemaId: 'goal-master-delivery-loop',
           executionMode: 'subagent_execution',
           rootSessionId: `arch-${runId}-root`,
-          branchSessionIds: { implementer: `arch-${runId}-implementer`, materializer: `arch-${runId}-materializer` },
+          branchSessionIds: { implementer: `arch-${runId}-implementer` },
           eventCount: 3,
         },
       }),
@@ -3956,17 +3954,16 @@ describe('ArchitectureRuntimeService', () => {
     expect(graph).toMatchObject({
       runId,
       nodes: expect.arrayContaining([
-        expect.objectContaining({ id: 'implementer', status: 'completed' }),
         expect.objectContaining({
-          id: 'materializer',
+          id: 'implementer',
           status: 'completed',
           incompleteReason: 'CLI child cli-child-running is still running',
         }),
       ]),
       childAgents: [expect.objectContaining({
         id: 'cli-child-running',
-        parentNodeId: 'materializer',
-        parentRoleSlotId: 'materializer',
+        parentNodeId: 'implementer',
+        parentRoleSlotId: 'implementer',
         kind: 'cli-agent',
         backend: 'copilot',
         status: 'running',
@@ -3980,8 +3977,8 @@ describe('ArchitectureRuntimeService', () => {
   it('does not let persisted child-agent projections erase live parent metadata', async () => {
     const { service, executor, sessions } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
-      message: slot.id === 'materializer'
-        ? 'Materializer delegated to an existing CLI child and inspected status.'
+      message: slot.id === 'implementer'
+        ? 'Implementer delegated to an existing CLI child and inspected status.'
         : `${slot.label} branch prepared for: ${run.prompt}`,
       data: {
         branchSessionId,
@@ -3990,7 +3987,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'materializer'
+        ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-overlay', 'completed') }
           : slot.slotType === 'tool_executor'
             ? { toolEvidence: toolEvidenceForSlot(slot.id) }
@@ -4007,18 +4004,18 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureSteps: 20,
       },
     });
-    sessions.list.mockResolvedValue([{ id: `arch-${run.id}-materializer` }]);
+    sessions.list.mockResolvedValue([{ id: `arch-${run.id}-implementer` }]);
     sessions.getMessages.mockResolvedValue([
       {
         id: `architecture:${run.id}:user`,
-        sessionId: `arch-${run.id}-materializer`,
+        sessionId: `arch-${run.id}-implementer`,
         role: 'user',
-        content: 'Architecture: Goal Master Delivery Loop v0.1.0\nSlot: Materializer\nTask: Keep live child-agent graph metadata.',
+        content: 'Architecture: Goal Master Delivery Loop v0.1.0\nSlot: Implementer\nTask: Keep live child-agent graph metadata.',
         createdAt: run.createdAt,
       },
       {
         id: `architecture:${run.id}:tool-calls`,
-        sessionId: `arch-${run.id}-materializer`,
+        sessionId: `arch-${run.id}-implementer`,
         role: 'assistant',
         content: '',
         toolCalls: [{
@@ -4033,7 +4030,7 @@ describe('ArchitectureRuntimeService', () => {
       },
       {
         id: `architecture:${run.id}:tool-result`,
-        sessionId: `arch-${run.id}-materializer`,
+        sessionId: `arch-${run.id}-implementer`,
         role: 'tool_result',
         toolCallId: `architecture:${run.id}:status`,
         content: JSON.stringify({
@@ -4049,8 +4046,8 @@ describe('ArchitectureRuntimeService', () => {
     expect(graph?.childAgents).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'cli-child-overlay',
-        parentNodeId: 'materializer',
-        parentRoleSlotId: 'materializer',
+        parentNodeId: 'implementer',
+        parentRoleSlotId: 'implementer',
         backend: 'copilot',
         status: 'completed',
         workdir: 'C:\\Projekty\\TurboProject2',
@@ -4064,8 +4061,8 @@ describe('ArchitectureRuntimeService', () => {
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'goal_master'
         ? 'Goal Master accepts the evidence. route_to(final-artifact, accepted)'
-        : slot.id === 'materializer'
-          ? 'Materializer completed with fs_write tool evidence.'
+        : slot.id === 'implementer'
+          ? 'Implementer completed with fs_write tool evidence.'
           : slot.id === 'verifier' || slot.id === 'tester'
             ? `${slot.label} completed with fs_read tool evidence.`
             : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -4076,7 +4073,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'materializer'
+        ...(slot.id === 'implementer'
           ? { toolEvidence: toolEvidenceForSlot(slot.id) }
           : (slot.id === 'verifier' || slot.id === 'tester')
             ? { toolEvidence: toolEvidenceForSlot(slot.id) }
@@ -4094,16 +4091,16 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureSteps: 20,
       },
     });
-    sessions.list.mockResolvedValue([{ id: `arch-${run.id}-materializer` }]);
+    sessions.list.mockResolvedValue([{ id: `arch-${run.id}-implementer` }]);
     sessions.getMessages.mockResolvedValue([{
       id: `architecture:${run.id}:branch-result`,
-      sessionId: `arch-${run.id}-materializer`,
+      sessionId: `arch-${run.id}-implementer`,
       role: 'tool_result',
-      toolCallId: `architecture:${run.id}:materializer`,
+      toolCallId: `architecture:${run.id}:implementer`,
       content: JSON.stringify({
-        childSessionId: `arch-${run.id}-materializer`,
+        childSessionId: `arch-${run.id}-implementer`,
         parentSessionId: `arch-${run.id}-root`,
-        taskId: 'task-materializer',
+        taskId: 'task-implementer',
         vfsMode: 'shared',
       }),
       createdAt: run.createdAt + 1,
@@ -4111,14 +4108,14 @@ describe('ArchitectureRuntimeService', () => {
 
     const graph = await service.getGraphDurable(run.id);
 
-    expect(graph?.childAgents?.map((child) => child.id)).not.toContain(`arch-${run.id}-materializer`);
+    expect(graph?.childAgents?.map((child) => child.id)).not.toContain(`arch-${run.id}-implementer`);
   });
 
   it('does not let persisted running status overwrite a live completed CLI child status', async () => {
     const { service, executor, sessions } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
-      message: slot.id === 'materializer'
-        ? 'Materializer delegated to a CLI child that completed successfully.'
+      message: slot.id === 'implementer'
+        ? 'Implementer delegated to a CLI child that completed successfully.'
         : `${slot.label} branch prepared for: ${run.prompt}`,
       data: {
         branchSessionId,
@@ -4127,7 +4124,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'materializer'
+        ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-reconciled', 'completed') }
           : slot.slotType === 'tool_executor'
             ? { toolEvidence: toolEvidenceForSlot(slot.id) }
@@ -4144,11 +4141,11 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureSteps: 20,
       },
     });
-    sessions.list.mockResolvedValue([{ id: `arch-${run.id}-materializer` }]);
+    sessions.list.mockResolvedValue([{ id: `arch-${run.id}-implementer` }]);
     sessions.getMessages.mockResolvedValue([
       {
         id: `architecture:${run.id}:tool-calls`,
-        sessionId: `arch-${run.id}-materializer`,
+        sessionId: `arch-${run.id}-implementer`,
         role: 'assistant',
         content: '',
         toolCalls: [{
@@ -4163,7 +4160,7 @@ describe('ArchitectureRuntimeService', () => {
       },
       {
         id: `architecture:${run.id}:tool-result`,
-        sessionId: `arch-${run.id}-materializer`,
+        sessionId: `arch-${run.id}-implementer`,
         role: 'tool_result',
         toolCallId: `architecture:${run.id}:status`,
         content: JSON.stringify({
@@ -4336,7 +4333,7 @@ function semanticEvents(events: ArchitectureExecutionEvent[]): ArchitectureExecu
 }
 
 function toolEvidenceForSlot(slotId: string): Record<string, unknown> {
-  const successfulToolNames = slotId === 'materializer'
+  const successfulToolNames = slotId === 'implementer'
     ? ['vfs_write']
     : ['vfs_read'];
   return {

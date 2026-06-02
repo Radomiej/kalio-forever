@@ -90,7 +90,6 @@ describe('ArchitectureRegistryService', () => {
     expect(goalMaster?.roleSlots.map((slot) => slot.id)).toEqual([
       'orchestrator',
       'implementer',
-      'materializer',
       'verifier',
       'tester',
       'goal_master',
@@ -98,8 +97,7 @@ describe('ArchitectureRegistryService', () => {
     ]);
     expect(goalMaster?.edges.map((edge) => `${edge.fromNodeId}->${edge.toNodeId}`)).toEqual([
       'orchestrator->implementer',
-      'implementer->materializer',
-      'materializer->verifier',
+      'implementer->verifier',
       'verifier->tester',
       'tester->goal-master',
       'goal-master->final-artifact',
@@ -158,7 +156,8 @@ describe('ArchitectureRegistryService', () => {
     expect(slotsById.get('orchestrator')?.description).toMatch(/sub-?agents?.*CLI|CLI.*sub-?agents?/i);
     expect(slotsById.get('orchestrator')?.defaultPersonaId).toBe('agent-orchestrator');
     expect(slotsById.get('implementer')?.defaultPersonaId).toBe('agent-implementer');
-    expect(slotsById.get('materializer')?.description).toMatch(/CLI child/i);
+    expect(slotsById.get('implementer')?.description).toMatch(/CLI child/i);
+    expect(slotsById.get('implementer')?.slotType).toBe('tool_executor');
     expect(slotsById.get('verifier')?.description).toMatch(/CLI child/i);
     expect(slotsById.get('verifier')?.defaultPersonaId).toBe('agent-qa');
     expect(slotsById.get('goal_master')?.description).toMatch(/routes back/i);

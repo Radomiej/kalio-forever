@@ -303,8 +303,8 @@ describe('Architecture controllers', () => {
           name: 'spawn_cli_agent',
           args: {
             architectureRunId: runId,
-            nodeId: 'materializer',
-            roleSlotId: 'materializer',
+            nodeId: 'implementer',
+            roleSlotId: 'implementer',
             agentId: 'copilot',
             workdir: 'C:\\Projekty\\TurboProject2',
             expectedChangedFiles: ['src/App.tsx'],
@@ -337,8 +337,8 @@ describe('Architecture controllers', () => {
 
     expect(graph?.childAgents).toEqual([{
       id: 'cli-child-1',
-      parentNodeId: 'materializer',
-      parentRoleSlotId: 'materializer',
+      parentNodeId: 'implementer',
+      parentRoleSlotId: 'implementer',
       parentEventId: `${runId}:event:4`,
       kind: 'cli-agent',
       backend: 'copilot',

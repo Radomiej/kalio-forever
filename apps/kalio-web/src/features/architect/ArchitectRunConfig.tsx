@@ -170,7 +170,7 @@ export function ArchitectRunConfig({
               ? 'border-warning/40 bg-warning/10 text-warning'
               : 'border-base-300 bg-base-200/60 text-base-content/45'
           }`}
-          title="Allow architecture materializer nodes to write to the configured host project path."
+          title="Allow architecture implementer nodes to write to the configured host project path."
         >
           <input
             type="checkbox"
