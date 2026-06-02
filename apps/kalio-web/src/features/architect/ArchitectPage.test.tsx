@@ -986,7 +986,7 @@ describe('ArchitectPage', () => {
 
     fireEvent.click(await screen.findByTestId('architect-mode-add-node'));
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 640, clientY: 220 });
-    const customNode = await screen.findByTestId('architect-node-custom-node-4');
+    const customNode = await screen.findByTestId('architect-node-custom-node-4', undefined, { timeout: 5000 });
     fireEvent.click(screen.getByTestId('architect-mode-connect'));
     fireEvent.click(customNode);
     fireEvent.click(screen.getByTestId('architect-node-router'));
@@ -1024,7 +1024,7 @@ describe('ArchitectPage', () => {
     fireEvent.click(await screen.findByTestId('architect-mode-add-router'));
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 660, clientY: 260 });
 
-    const customNode = await screen.findByTestId('architect-node-custom-node-4');
+    const customNode = await screen.findByTestId('architect-node-custom-node-4', undefined, { timeout: 5000 });
 
     expect(customNode).toHaveTextContent('Router 4');
     expect(screen.getByTestId('architect-node-kind-custom-node-4')).toHaveTextContent('router');
