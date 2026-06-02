@@ -66,7 +66,7 @@ test.describe('AC-07: MCP server management', () => {
       }
 
       serverListCalls += 1;
-      const list = serverListCalls < 2
+      const list = serverListCalls < 3
         ? []
         : [{
             id: 'polling-hot-reload',

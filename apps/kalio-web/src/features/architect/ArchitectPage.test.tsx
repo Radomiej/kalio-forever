@@ -1024,7 +1024,9 @@ describe('ArchitectPage', () => {
     fireEvent.click(await screen.findByTestId('architect-mode-add-router'));
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 660, clientY: 260 });
 
-    expect(screen.getByTestId('architect-node-custom-node-4')).toHaveTextContent('Router 4');
+    const customNode = await screen.findByTestId('architect-node-custom-node-4');
+
+    expect(customNode).toHaveTextContent('Router 4');
     expect(screen.getByTestId('architect-node-kind-custom-node-4')).toHaveTextContent('router');
     expect(screen.getByTestId('architect-node-behavior-custom-node-4')).toHaveTextContent('choose one');
 

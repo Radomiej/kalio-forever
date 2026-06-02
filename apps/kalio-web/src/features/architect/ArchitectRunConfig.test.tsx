@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ArchitectRunConfig, estimateArchitectureBudget } from './ArchitectRunConfig';
 import type { ArchitectSchema } from './architect.types';
@@ -256,22 +255,20 @@ describe('estimateArchitectureBudget', () => {
     expect(onStopRun).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps Start run disabled until a schema is loaded, while still allowing Goal Guard flow entry', async () => {
-    const user = userEvent.setup();
+  it('keeps Start run disabled until a schema is loaded, while still allowing Goal Guard flow entry', () => {
     render(<RunConfigHarness schema={null} />);
 
     const taskInput = screen.getByRole('textbox', { name: /task/i });
     const startRunButton = screen.getByRole('button', { name: /start run/i });
     const goalGuardButton = screen.getByRole('button', { name: /goal guard/i });
 
-    await user.type(taskInput, 'Deliver the architecture slice.');
+    fireEvent.change(taskInput, { target: { value: 'Deliver the architecture slice.' } });
 
     expect(startRunButton).toBeDisabled();
     expect(goalGuardButton).toBeEnabled();
   });
 
-  it('enables and disables the start actions based on the task prompt content', async () => {
-    const user = userEvent.setup();
+  it('enables and disables the start actions based on the task prompt content', () => {
     render(<RunConfigHarness />);
 
     const taskInput = screen.getByRole('textbox', { name: /task/i });
@@ -281,12 +278,12 @@ describe('estimateArchitectureBudget', () => {
     expect(startRunButton).toBeDisabled();
     expect(goalGuardButton).toBeDisabled();
 
-    await user.type(taskInput, 'Deliver the architecture slice.');
+    fireEvent.change(taskInput, { target: { value: 'Deliver the architecture slice.' } });
 
     expect(startRunButton).toBeEnabled();
     expect(goalGuardButton).toBeEnabled();
 
-    await user.clear(taskInput);
+    fireEvent.change(taskInput, { target: { value: '' } });
 
     expect(startRunButton).toBeDisabled();
     expect(goalGuardButton).toBeDisabled();

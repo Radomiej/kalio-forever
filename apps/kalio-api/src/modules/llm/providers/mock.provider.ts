@@ -31,6 +31,13 @@ function isFastMockMode(): boolean {
   return process.env.KALIO_MOCK_LLM_FAST === '1';
 }
 
+async function mockScriptDelay(ms: number): Promise<void> {
+  if (isFastMockMode()) {
+    return;
+  }
+  await defaultDelay(ms);
+}
+
 function contentToText(content: ContextManagedLLMMessage['content']): string {
   if (typeof content === 'string') {
     return content;
@@ -338,7 +345,7 @@ export class MockLLMProvider implements ILLMProvider {
       for (const action of actions) {
         if (abortSignal?.aborted) return [];
         if (action.kind === 'wait') {
-          await (this.options.delay ?? defaultDelay)(action.ms);
+          await (this.options.delay ?? mockScriptDelay)(action.ms);
           continue;
         }
         onChunk({ delta: action.text, done: false, sessionId, messageId });
@@ -419,8 +426,5 @@ export class MockLLMProvider implements ILLMProvider {
 }
 
 async function defaultDelay(ms: number): Promise<void> {
-  if (isFastMockMode()) {
-    return;
-  }
   await new Promise<void>((resolve) => setTimeout(resolve, ms));
 }

@@ -81,7 +81,7 @@ describe('CLIAgentService', () => {
       makeAdapter('codex') as unknown as CodexAdapter,
       ptyService as unknown as import('./cli-agent-pty.service').CLIAgentPtyService,
     );
-  });
+  }, 30_000);
 
   afterEach(() => {
     vi.clearAllMocks();

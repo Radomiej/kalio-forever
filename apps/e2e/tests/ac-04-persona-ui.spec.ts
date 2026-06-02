@@ -110,7 +110,7 @@ test.describe('AC-04: Personas UI', () => {
     await expect(item).toBeVisible({ timeout: 5000 });
     // Click the expand button (the main row toggle)
     await item.locator('button').first().click();
-    await expect(page.locator('text=Expand system prompt content here.')).toBeVisible();
+    await expect(item.getByText('Expand system prompt content here.').first()).toBeVisible();
 
     await request.delete(`${API_BASE}/personas/${persona.id}`);
   });

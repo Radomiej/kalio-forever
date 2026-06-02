@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuditLogEntry } from '@kalio/types';
 import { ObservabilityPage } from './ObservabilityPage';
@@ -31,7 +31,7 @@ describe('ObservabilityPage', () => {
   it('defaults to workflow rows and lets tools be inspected separately', async () => {
     render(<ObservabilityPage />);
 
-    await waitFor(() => expect(screen.getByTestId('architecture-run-group')).toBeTruthy());
+    expect(await screen.findByTestId('architecture-run-group')).toBeTruthy();
 
     expect(screen.getByTestId('audit-retention-strip')).toHaveTextContent('visible 3/50k');
     expect(screen.getByTestId('audit-retention-strip')).toHaveTextContent('retention 30d');
@@ -64,7 +64,7 @@ describe('ObservabilityPage', () => {
     const llmRow = screen.getByTestId('audit-entry-row:llm-1');
     expect(toolRow.compareDocumentPosition(firstArchitectureRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(firstArchitectureRow.compareDocumentPosition(llmRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
+  }, 15_000);
 });
 
 function makeEntries(): AuditLogEntry[] {

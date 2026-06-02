@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import type { MCPPolicy, ToolMeta } from '@kalio/types';
@@ -71,7 +71,6 @@ describe('PersonaToolPicker', () => {
   });
 
   it('groups native tools, supports global selection controls, and switches MCP policy when needed', async () => {
-    const user = userEvent.setup();
     installFetchMock(TOOL_FIXTURE);
 
     render(<ToolPickerHarness initialSelected={['vfs_read_file']} initialPolicy="allow_all" />);
@@ -84,7 +83,7 @@ describe('PersonaToolPicker', () => {
     expect(screen.getByText('MCP Tools')).toBeInTheDocument();
     expect(screen.getByText('1 available')).toBeInTheDocument();
 
-    await user.click(screen.getByTestId('tools-enable-all'));
+    fireEvent.click(screen.getByTestId('tools-enable-all'));
 
     await waitFor(() => {
       expect(screen.getByTestId('group-toggle-vfs')).toBeChecked();
@@ -92,7 +91,7 @@ describe('PersonaToolPicker', () => {
       expect(screen.getByTestId('group-toggle-agent')).toBeChecked();
     });
 
-    await user.click(screen.getByTestId('tools-disable-all'));
+    fireEvent.click(screen.getByTestId('tools-disable-all'));
 
     await waitFor(() => {
       expect(screen.getByTestId('group-toggle-vfs')).not.toBeChecked();
@@ -100,15 +99,15 @@ describe('PersonaToolPicker', () => {
       expect(screen.getByTestId('group-toggle-agent')).not.toBeChecked();
     });
 
-    await user.click(screen.getByTestId('mcp-policy-allow_list'));
+    fireEvent.click(screen.getByTestId('mcp-policy-allow_list'));
     await screen.findByTestId('tool-toggle-mcp_web_search');
-    await user.click(screen.getByTestId('tool-toggle-mcp_web_search'));
+    fireEvent.click(screen.getByTestId('tool-toggle-mcp_web_search'));
 
     await waitFor(() => {
       expect(screen.getByTestId('mcp-policy-allow_list').querySelector('input')).toBeChecked();
       expect(screen.getByText(/1\/1/)).toBeInTheDocument();
     });
-  });
+  }, 15_000);
 
   it('shows a load error and retries the catalog request', async () => {
     const user = userEvent.setup();

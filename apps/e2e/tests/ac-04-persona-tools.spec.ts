@@ -102,7 +102,7 @@ test.describe('AC-04: Persona Tool Picker', () => {
 
     await goToPersonas(page);
 
-  const item = page.getByTestId('persona-item').filter({ hasText: personaName });
+    const item = page.getByTestId('persona-item').filter({ hasText: personaName });
     await expect(item).toBeVisible({ timeout: 5000 });
     // Badge shows "3"
     await expect(item.locator('.badge', { hasText: '3' })).toBeVisible();
@@ -125,13 +125,13 @@ test.describe('AC-04: Persona Tool Picker', () => {
 
     await goToPersonas(page);
 
-  const item = page.getByTestId('persona-item').filter({ hasText: personaName });
+    const item = page.getByTestId('persona-item').filter({ hasText: personaName });
     await expect(item).toBeVisible({ timeout: 5000 });
     // Expand
     await item.locator('button').first().click();
     // VFS group badge should appear (2 vfs tools)
-    await expect(page.locator('.badge', { hasText: /VFS/ })).toBeVisible();
-    await expect(page.locator('.badge', { hasText: /Terminal/ })).toBeVisible();
+    await expect(item.locator('.badge', { hasText: /VFS/ }).first()).toBeVisible();
+    await expect(item.locator('.badge', { hasText: /Terminal/ }).first()).toBeVisible();
 
     await request.delete(`${API_BASE}/personas/${persona.id}`);
   });

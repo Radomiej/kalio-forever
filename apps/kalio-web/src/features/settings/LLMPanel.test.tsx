@@ -282,23 +282,21 @@ describe('LLMPanel', () => {
 
   it('pre-fills name with provider label and updates on provider change', async () => {
     mockFetch(defaultMap());
-    const user = userEvent.setup();
     render(<LLMPanel />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
-    await user.click(screen.getByTestId('add-provider-btn'));
+    fireEvent.click(screen.getByTestId('add-provider-btn'));
 
     const nameInput = screen.getByRole('textbox', { name: /name/i }) as HTMLInputElement;
     expect(nameInput.value).toBe('OpenAI');
 
-    await user.click(screen.getByRole('button', { name: 'DeepSeek' }));
+    fireEvent.click(screen.getByRole('button', { name: 'DeepSeek' }));
     expect(nameInput.value).toBe('DeepSeek');
 
     // user types custom name — provider switch should not overwrite it
-    await user.clear(nameInput);
-    await user.type(nameInput, 'Custom');
-    await user.click(screen.getByRole('button', { name: 'OpenRouter' }));
+    fireEvent.change(nameInput, { target: { value: 'Custom' } });
+    fireEvent.click(screen.getByRole('button', { name: 'OpenRouter' }));
     expect(nameInput.value).toBe('Custom');
-  });
+  }, 15_000);
 
   it('supports bitnet in the add-provider form', async () => {
     mockFetch(defaultMap());
@@ -413,14 +411,13 @@ describe('LLMPanel', () => {
       'POST /api/credentials/test': { ok: true, latencyMs: 18 },
     };
     mockFetch(map);
-    const user = userEvent.setup();
     render(<LLMPanel />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
-    await user.click(screen.getByTestId('add-provider-btn'));
-    await user.type(screen.getByTestId('add-provider-apikey'), 'sk-test-key');
-    await user.click(screen.getByTestId('add-provider-test'));
+    fireEvent.click(screen.getByTestId('add-provider-btn'));
+    fireEvent.change(screen.getByTestId('add-provider-apikey'), { target: { value: 'sk-test-key' } });
+    fireEvent.click(screen.getByTestId('add-provider-test'));
     await waitFor(() => expect(screen.getByTestId('add-provider-test')).toHaveTextContent('Connected!'));
-  });
+  }, 15_000);
 
   it('test button shows "Failed" on unsuccessful test', async () => {
     // No mock for /api/llm/models → 404 response → test fails

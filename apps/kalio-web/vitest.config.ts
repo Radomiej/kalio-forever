@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
@@ -15,6 +15,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
+    exclude: [...configDefaults.exclude, 'dist/**', 'coverage/**', 'storybook-static/**', 'test-results/**'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],
