@@ -565,9 +565,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 1,
         type: 'participant_output',
-        message: 'Materializer spawned a CLI child that has not completed yet.',
-        nodeId: 'materializer',
-        roleSlotId: 'materializer',
+        message: 'Implementer spawned a CLI child that has not completed yet.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
         data: {
           toolEvidence: {
             successfulToolNames: ['spawn_cli_agent'],
@@ -969,9 +969,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 1,
         type: 'participant_output',
-        message: 'Materializer spawned a CLI child and moved on after partial evidence.',
-        nodeId: 'materializer',
-        roleSlotId: 'materializer',
+        message: 'Implementer spawned a CLI child and moved on after partial evidence.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
         data: {
           toolEvidence: {
             successfulToolNames: ['spawn_cli_agent', 'wait_for', 'get_cli_agent_status'],
@@ -1073,9 +1073,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 1,
         type: 'participant_output',
-        message: 'Materializer spawned a CLI child and moved on after partial evidence.',
-        nodeId: 'materializer',
-        roleSlotId: 'materializer',
+        message: 'Implementer spawned a CLI child and moved on after partial evidence.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
         data: {
           toolEvidence: {
             successfulToolNames: ['spawn_cli_agent', 'wait_for'],
@@ -1191,9 +1191,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 1,
         type: 'participant_output',
-        message: 'Materializer timed out after spawning a CLI child.',
-        nodeId: 'materializer',
-        roleSlotId: 'materializer',
+        message: 'Implementer timed out after spawning a CLI child.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
         data: {
           toolEvidence: {
             successfulToolNames: ['spawn_cli_agent', 'wait_for'],
@@ -1293,9 +1293,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 1,
         type: 'participant_output',
-        message: 'Materializer timed out after spawning a CLI child.',
-        nodeId: 'materializer',
-        roleSlotId: 'materializer',
+        message: 'Implementer timed out after spawning a CLI child.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
         data: {
           toolEvidence: {
             successfulToolNames: ['spawn_cli_agent', 'wait_for'],
@@ -1395,9 +1395,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 1,
         type: 'participant_output',
-        message: 'Materializer timed out after spawning a CLI child.',
-        nodeId: 'materializer',
-        roleSlotId: 'materializer',
+        message: 'Implementer timed out after spawning a CLI child.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
         data: {
           toolEvidence: {
             successfulToolNames: ['spawn_cli_agent', 'wait_for'],
@@ -1478,9 +1478,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 1,
         type: 'participant_output',
-        message: 'Materializer timed out after spawning a CLI child.',
-        nodeId: 'materializer',
-        roleSlotId: 'materializer',
+        message: 'Implementer timed out after spawning a CLI child.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
         data: {
           toolEvidence: {
             successfulToolNames: ['spawn_cli_agent', 'wait_for'],
@@ -1561,9 +1561,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 1,
         type: 'participant_output',
-        message: 'Materializer spawned CLI children that all finished cleanly.',
-        nodeId: 'materializer',
-        roleSlotId: 'materializer',
+        message: 'Implementer spawned CLI children that all finished cleanly.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
         data: {
           toolEvidence: {
             successfulToolNames: ['spawn_cli_agent'],

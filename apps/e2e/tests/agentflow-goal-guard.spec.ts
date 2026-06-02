@@ -456,7 +456,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     }
   });
 
-  test('starts the two-agent delivery loop, materializes VFS evidence, and renders graph state', async ({ page, request }, testInfo) => {
+  test('starts the two-agent delivery loop, writes Implementer VFS evidence, and renders graph state', async ({ page, request }, testInfo) => {
     test.setTimeout(180_000);
     test.skip(!(await isMockLlm(request)), 'Goal Guard AgentFlow E2E requires the mock LLM stack.');
 
@@ -467,8 +467,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       '[[mock:goal-guard-vfs-success]]',
       '[[mock:script]]',
       'when("Slot: Orchestrator") return("route_to(implementer, plan one implementation pass and one guard pass)")',
-      'when("Slot: Implementer") return("Implementation complete; proof must be materialized and checked.")',
-      'when("Slot: Tester") return("Regression check passed after reading materialized evidence.")',
+      'when("Slot: Tester") return("Regression check passed after reading Implementer write evidence.")',
       'when("Slot: Finalizer") return("Goal Guard accepted deterministic VFS evidence for the requested task.")',
       '[[/mock:script]]',
     ].join('\n');
@@ -476,6 +475,8 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.goto('/');
     await page.getByTestId('nav-architect').click();
     await expect(page.getByTestId('architect-page')).toBeVisible();
+    await page.getByTestId('architect-goal-master-loop-proof').check();
+    await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
     await page.getByTestId('architect-start-goal-guard-flow').click();
 
@@ -636,21 +637,20 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(page.getByTestId('execution-graph-view')).not.toContainText(/Five Minds/i);
   });
 
-  test('does not accept Goal Guard AgentFlow when materialization evidence is missing', async ({ request }) => {
+  test('does not accept Goal Guard AgentFlow when Implementer write evidence is missing', async ({ request }) => {
     test.setTimeout(90_000);
     test.skip(!(await isMockLlm(request)), 'Goal Guard AgentFlow E2E requires the mock LLM stack.');
 
-    const parentSessionId = await createParentSession(request, 'E2E missing materialization parent');
+    const parentSessionId = await createParentSession(request, 'E2E missing Implementer write parent');
     const response = await request.post(`${API_BASE}/agent-flows/runs`, {
       data: {
         flowId: 'goal_guard_delivery_loop',
         goal: [
-          'Try to accept a delivery without materialized files.',
+          'Try to accept a delivery without Implementer-written files.',
           'Goal Master must not accept prose-only completion.',
           '[[mock:script]]',
           'when("Slot: Orchestrator") return("route_to(implementer, plan one implementation pass)")',
           'when("Slot: Implementer") return("Implementation complete in prose only.")',
-          'when("Slot: Materializer") return("Materializer says files are ready but emits no tool evidence.")',
           'when("Slot: Goal Master") return("Goal Master accepts prose-only work. route_to(final-artifact, accepted)")',
           '[[/mock:script]]',
         ].join('\n'),
@@ -662,6 +662,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
           maxArchitectureSteps: 12,
           maxArchitectureNodeVisits: 1,
           requireGoalMasterLoopProof: true,
+          requireImplementerWriteProof: true,
         },
       },
     });
@@ -676,7 +677,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
 
     expect(snapshot.run.status).not.toBe('done');
     expect(snapshot.result?.status).not.toBe('done');
-    expect(JSON.stringify(snapshot)).toContain('Architecture tool executor materializer completed without required tool evidence: no tool result was observed');
+    expect(JSON.stringify(snapshot)).toContain('Architecture tool executor implementer completed without required tool evidence: implementer did not produce a successful write result');
   });
 
   test('rejects unknown AgentFlow schemas without creating a durable run', async ({ request }) => {
@@ -725,8 +726,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
           '[[mock:goal-guard-vfs-success]]',
           '[[mock:script]]',
           'when("Slot: Orchestrator") return("route_to(implementer, plan one implementation pass and one guard pass)")',
-          'when("Slot: Implementer") return("Implementation complete; proof must be materialized and checked.")',
-          'when("Slot: Tester") return("Regression check passed after reading materialized evidence.")',
+          'when("Slot: Tester") return("Regression check passed after reading Implementer write evidence.")',
           'when("Slot: Finalizer") return("Goal Guard accepted resumable deterministic VFS evidence.")',
           '[[/mock:script]]',
         ].join('\n'),
@@ -738,6 +738,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
           maxArchitectureSteps: 2,
           maxArchitectureNodeVisits: 2,
           requireGoalMasterLoopProof: true,
+          requireImplementerWriteProof: true,
         },
       },
     });
@@ -753,11 +754,12 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
 
     const resumeResponse = await request.post(`${API_BASE}/agent-flows/runs/${started.run.id}/resume`, {
       data: {
-        input: 'Continue the Goal Guard loop and finish only with materialized evidence.',
+        input: 'Continue the Goal Guard loop and finish only with Implementer write evidence.',
         maxSteps: 20,
         context: {
           maxArchitectureSteps: 20,
           maxArchitectureNodeVisits: 4,
+          requireImplementerWriteProof: true,
         },
       },
     });
@@ -788,8 +790,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       '[[mock:goal-guard-vfs-success]]',
       '[[mock:script]]',
       'when("Slot: Orchestrator") return("route_to(implementer, plan one implementation pass and one guard pass)")',
-      'when("Slot: Implementer") return("Implementation complete; proof must be materialized and checked.")',
-      'when("Slot: Tester") return("Regression check passed after reading materialized evidence.")',
+      'when("Slot: Tester") return("Regression check passed after reading Implementer write evidence.")',
       'when("Slot: Finalizer") return("Goal Guard accepted FE-resumed deterministic VFS evidence.")',
       '[[/mock:script]]',
     ].join('\n');
@@ -799,6 +800,8 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(page.getByTestId('architect-page')).toBeVisible();
     await page.getByTestId('architect-max-steps').fill('2');
     await page.getByTestId('architect-max-node-visits').fill('4');
+    await page.getByTestId('architect-goal-master-loop-proof').check();
+    await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
     await page.getByTestId('architect-start-goal-guard-flow').click();
 
@@ -848,8 +851,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       '[[mock:goal-guard-vfs-success]]',
       '[[mock:script]]',
       'when("Slot: Orchestrator") return("route_to(implementer, plan one implementation pass and one guard pass)")',
-      'when("Slot: Implementer") return("Implementation complete; proof must be materialized and checked.")',
-      'when("Slot: Tester") return("Regression check passed after reading materialized evidence.")',
+      'when("Slot: Tester") return("Regression check passed after reading Implementer write evidence.")',
       'when("Slot: Finalizer") return("Goal Guard accepted QA-gated deterministic VFS evidence.")',
       '[[/mock:script]]',
     ].join('\n');
@@ -859,6 +861,8 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(page.getByTestId('architect-page')).toBeVisible();
     await page.getByTestId('architect-max-steps').fill('2');
     await page.getByTestId('architect-max-node-visits').fill('4');
+    await page.getByTestId('architect-goal-master-loop-proof').check();
+    await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
     await page.getByTestId('architect-start-goal-guard-flow').click();
 

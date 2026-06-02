@@ -24,6 +24,16 @@ Reference check against `C:\Projekty\Agent-Architecture-Lab` showed no high-leve
   - Passed.
 - `rg -n "materializer|materialization|materialize|Materializer" apps/kalio-api/src/modules/architecture apps/kalio-api/src/modules/llm/providers apps/kalio-web/src/features/architect AGENTS.md`
   - No matches.
+- `npm.cmd --prefix apps/kalio-api run test -- src/modules/agent-flow/architecture-agent-flow.adapter.spec.ts src/modules/architecture/architecture-runtime.service.spec.ts src/modules/architecture/architecture-runtime.llm-integration.spec.ts src/modules/llm/providers/mock.provider.spec.ts`
+  - Passed: 132 tests.
+- `npm.cmd --prefix apps/e2e run test:e2e -- agentflow-goal-guard.spec.ts --project=chromium`
+  - Passed: 11 Playwright tests.
+  - Built `kalio-api` and `kalio-web`, then verified FE-started Goal Guard flows, Talk/Execution Graph visibility, bounded resume, QA resume, and failure-first Implementer write proof behavior.
+  - Screenshots were attached by the Playwright test for the Goal Guard graph/chat evidence run.
+- `pnpm turbo run test`
+  - Passed: 8/8 workspace tasks.
+  - `kalio-api`: 163 files / 1948 tests passed.
+  - `@kalio/e2e`: 12 launcher tests passed.
 
 ## Remaining
 
