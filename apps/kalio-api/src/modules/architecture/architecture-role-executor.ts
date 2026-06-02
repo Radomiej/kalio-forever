@@ -266,7 +266,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
   }
 
   private autoApproveToolsForSlot(input: ArchitectureRoleExecutionInput): string[] | undefined {
-    const canUseCliAgents = this.canUseCliAgents(input.run.context);
+    const canUseCliAgents = this.canUseCliAgentsForSlot(input.run.context, input.slot);
     if (input.slot.slotType === 'tool_executor') {
       const tools = ['vfs_write'];
       if (this.isImplementationWriterSlot(input.slot) && canUseCliAgents) {
@@ -301,7 +301,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       return [];
     }
     const hasLocalProjectContext = this.hasLocalProjectContext(input.run.context);
-    const canUseCliAgents = this.canUseCliAgents(input.run.context);
+    const canUseCliAgents = this.canUseCliAgentsForSlot(input.run.context, input.slot);
     if (input.slot.slotType === 'tool_executor') {
       const gateImplementationReads = this.isImplementationWriterSlot(input.slot)
         && this.hasIncomingReadEvidence(input.incomingEvents);
@@ -442,7 +442,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       this.instructionForSlot(
         input.slot,
         outgoingNodeIds,
-        this.canUseCliAgents(input.run.context),
+        this.canUseCliAgentsForSlot(input.run.context, input.slot),
         this.canUseOrchestratorSubagents(input.run.context),
       ),
       this.goalGuardProofImplementerInstruction(input),
@@ -570,6 +570,16 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     return !Array.isArray(available) || available.some((value) => typeof value === 'string' && value.trim().length > 0);
   }
 
+  private canUseCliAgentsForSlot(
+    context: Record<string, unknown> | undefined,
+    slot: ArchitectureRoleSlot,
+  ): boolean {
+    if (!this.canUseCliAgents(context)) {
+      return false;
+    }
+    return !this.isOrchestrationSlot(slot) || this.canUseOrchestratorSubagents(context);
+  }
+
   private canUseOrchestratorSubagents(context: Record<string, unknown> | undefined): boolean {
     return context?.['allowArchitectureOrchestratorSubagents'] === true;
   }
@@ -614,7 +624,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
   }
 
   private cliBackendPolicyInstruction(input: ArchitectureRoleExecutionInput): string | null {
-    if (!this.canUseCliAgents(input.run.context)) {
+    if (!this.canUseCliAgentsForSlot(input.run.context, input.slot)) {
       return 'CLI agents are unavailable for this run. Do not call CLI-agent tools or claim CLI implementation proof; use Kalio sub-agents and visible VFS/tool evidence instead.';
     }
     const policy = this.cliBackendPolicyForSlot(input.run.context, input.slot);
@@ -647,9 +657,9 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     }
     if (slot.id === 'implementer') {
       return {
-        preferred: 'copilot',
-        allowed: ['copilot', 'codex'],
-        purpose: 'Use Copilot for implementation work; use Codex only for conservative fallback or code-analysis support',
+        preferred: 'codex',
+        allowed: ['codex', 'copilot'],
+        purpose: 'Use Codex for implementation work; use Copilot only as an explicit fallback when Codex is unavailable or the run config selects Copilot',
       };
     }
     if (slot.id === 'verifier' || slot.id === 'tester') {
@@ -874,12 +884,18 @@ function parseRouteToCall(message: string): { targetNodeId: string; response?: s
   const body = message.slice(bodyStart, bodyEnd);
   const commaIndex = body.indexOf(',');
   const rawTarget = commaIndex >= 0 ? body.slice(0, commaIndex) : body;
-  const targetNodeId = rawTarget.trim();
+  const targetNodeId = normalizedRouteTarget(rawTarget);
   if (!/^[A-Za-z0-9_.:-]+$/.test(targetNodeId)) {
     return null;
   }
   const response = commaIndex >= 0 ? body.slice(commaIndex + 1).trim() : undefined;
   return { targetNodeId, response };
+}
+
+function normalizedRouteTarget(rawTarget: string): string {
+  const trimmed = rawTarget.trim();
+  const namedTarget = trimmed.match(/^(?:targetNodeId|nodeId)\s*=\s*['"]?([^'"]+)['"]?$/i);
+  return (namedTarget?.[1] ?? trimmed).trim();
 }
 
 function architectureSlotMessage(

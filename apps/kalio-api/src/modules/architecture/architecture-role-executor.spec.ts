@@ -906,6 +906,67 @@ describe('ArchitectureRoleExecutorService', () => {
     });
   });
 
+  it('keeps orchestrator routing-only by default even when CLI agents are globally available', async () => {
+    const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
+    if (!schema) throw new Error('Expected Goal Master schema');
+    const orchestrator = schema.roleSlots.find((slot) => slot.id === 'orchestrator');
+    if (!orchestrator) throw new Error('Expected orchestrator slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'route_to(implementer, next step ready)',
+        taskId: 'task-orchestrator',
+        childSessionId: 'branch-orchestrator',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const toolDispatch = {
+      getToolMetas: vi.fn((): ToolMeta[] => [
+        { name: 'vfs_list', description: 'List VFS files', parameters: {}, requiresConfirmation: false },
+        { name: 'vfs_read', description: 'Read VFS files', parameters: {}, requiresConfirmation: false },
+        { name: 'fs_list', description: 'List host files', parameters: {}, requiresConfirmation: false },
+        { name: 'fs_read', description: 'Read host files', parameters: {}, requiresConfirmation: false },
+        { name: 'run_subagent', description: 'Run subagent', parameters: {}, requiresConfirmation: false },
+        { name: 'spawn_cli_agent', description: 'Spawn CLI agent', parameters: {}, requiresConfirmation: true },
+        { name: 'message_cli_agent', description: 'Message CLI agent', parameters: {}, requiresConfirmation: true },
+        { name: 'get_cli_agent_status', description: 'Get CLI status', parameters: {}, requiresConfirmation: false },
+        { name: 'wait_for', description: 'Wait for async tool', parameters: {}, requiresConfirmation: false },
+      ]),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+
+    await service.execute({
+      schema,
+      run: {
+        ...createRun('subagent_execution'),
+        branchSessionIds: { orchestrator: 'branch-orchestrator' },
+        context: {
+          projectPath: 'C:\\Projekty\\TurboProject2',
+          availableCliAgents: ['copilot', 'codex'],
+        },
+      },
+      slot: orchestrator,
+      branchSessionId: 'branch-orchestrator',
+      personaId: orchestrator.defaultPersonaId,
+      outgoingNodeIds: ['implementer'],
+    });
+
+    const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
+    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
+      'vfs_list',
+      'vfs_read',
+      'fs_list',
+      'fs_read',
+    ]);
+    expect(call?.autoApproveTools).toEqual(['vfs_write']);
+    expect(call?.objective).toContain('CLI agents are unavailable for this run.');
+    expect(call?.objective).toContain('route to the next architecture node instead');
+    expect(call?.objective).not.toContain('Allowed CLI backends:');
+  });
+
   it('hides CLI-agent tools when architecture context marks CLI agents unavailable', async () => {
     const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     if (!schema) throw new Error('Expected Goal Master schema');
@@ -1200,6 +1261,8 @@ describe('ArchitectureRoleExecutorService', () => {
       'spawn_cli_agent',
       'message_cli_agent',
     ]);
+    expect(call?.objective).toContain('Preferred CLI backend: codex.');
+    expect(call?.objective).toContain('Allowed CLI backends: codex, copilot.');
     expect(call?.objective).toContain('durable CLI child agent');
     expect(call?.objective).toContain('Do not spawn a second implementation path');
     expect(result.data.toolEvidence).toMatchObject({
@@ -1377,7 +1440,10 @@ describe('ArchitectureRoleExecutorService', () => {
       run: {
         ...createRun('subagent_execution'),
         branchSessionIds: { orchestrator: 'branch-orchestrator' },
-        context: { allowArchitectureCliStop: true },
+        context: {
+          allowArchitectureCliStop: true,
+          allowArchitectureOrchestratorSubagents: true,
+        },
       },
       slot: orchestrator,
       branchSessionId: 'branch-orchestrator',
@@ -1535,6 +1601,7 @@ describe('ArchitectureRoleExecutorService', () => {
         ...createRun('subagent_execution'),
         context: {
           projectPath: 'C:\\Projekty\\TurboProject2',
+          allowArchitectureOrchestratorSubagents: true,
           cliAgentToolPreferences: {
             copilot: 'Prefer cheap implementation and avoid large exploratory rewrites.',
             codex: 'Use conservative verification only.',
@@ -1587,6 +1654,7 @@ describe('ArchitectureRoleExecutorService', () => {
       run: {
         ...createRun('subagent_execution'),
         context: {
+          allowArchitectureOrchestratorSubagents: true,
           cliAgentToolPreferences: {
             copilot: {
               model: 'gpt-4.1',
@@ -1895,6 +1963,39 @@ describe('ArchitectureRoleExecutorService', () => {
     expect(result.data.route_to).toEqual({
       targetNodeId: 'router',
       response: 'Use option (A) and preserve validation notes (required).',
+    });
+  });
+
+  it('parses named route_to target arguments from router outputs', async () => {
+    const schema = getSchema();
+    const slot = schema.roleSlots[0];
+    if (!slot) throw new Error('Expected slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: "NO-GO. nextAction: route_to(targetNodeId='router', response={\"reason\":\"evidence missing\"})",
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    const result = await service.execute({
+      schema,
+      run: createRun('subagent_execution'),
+      slot,
+      branchSessionId: 'branch-1',
+      personaId: slot.defaultPersonaId,
+      outgoingNodeIds: ['router'],
+    });
+
+    expect(result.data.route_to).toEqual({
+      targetNodeId: 'router',
+      response: 'response={"reason":"evidence missing"}',
     });
   });
 
