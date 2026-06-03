@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { OnModuleDestroy } from '@nestjs/common';
 import type { EmbeddingStatus } from '@kalio/types';
 import { EmbeddingCredentialsService, type LocalEmbeddingConfig } from './embedding-credentials.service';
+import type { EmbeddingProviderConfig, IEmbeddingProvider } from './embedding-provider.types';
 import {
   DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
   DEFAULT_LOCAL_EMBEDDING_BACKEND,
@@ -15,23 +16,6 @@ import {
 const DEFAULT_REMOTE_EMBEDDING_MODEL = 'text-embedding-3-small';
 const DEFAULT_REMOTE_EMBEDDING_DIMENSIONS = 1536;
 const DEFAULT_LOCAL_EMBEDDING_CACHE_DIR = './data/embeddings-cache';
-
-// ── Interfaces ──────────────────────────────────────────────────────────────
-
-export interface IEmbeddingProvider {
-  embed(texts: string[]): Promise<number[][]>;
-  getDimensions(): number;
-  getActiveBackend?(): 'webgpu' | 'cpu' | null;
-  isGpuAvailable?(): boolean | undefined;
-  dispose?(): Promise<void> | void;
-}
-
-export interface EmbeddingProviderConfig {
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  dimensions: number;
-}
 
 // ── OpenAI-compatible provider ─────────────────────────────────────────────
 

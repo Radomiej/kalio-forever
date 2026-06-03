@@ -1,7 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import {
-  ArrowRight, BrainCircuit, MessageSquareText, Wrench,
-} from 'lucide-react';
 import type { ArchitectureGraphProjection, ChatMessage, Persona } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
@@ -10,26 +7,18 @@ import { buildTurnsFromHistory } from '../chatUtils';
 import {
   buildExecutionGraphModel,
 } from './executionGraphModel';
-import { ExecutionGraphBoard, type GraphCardDensity } from './ExecutionGraphBoard';
+import { ExecutionGraphBoard } from './ExecutionGraphBoard';
+import type { GraphCardDensity } from './ExecutionGraphBoard.types';
 import { ExecutionGraphHeader } from './ExecutionGraphHeader';
 import { ExecutionGraphInspector } from './ExecutionGraphInspector';
+import { ExecutionGraphLiveSidebar, isLiveTool } from './ExecutionGraphLiveSidebar';
+import { ExecutionGraphNoNodesState, ExecutionGraphNoSessionState } from './ExecutionGraphEmptyStates';
 import { focusExecutionGraphMessages, type ExecutionGraphFocusMode } from './executionGraphFocus';
 import { extractArchitectureBranchSessionIds, extractExecutionGraphHydrationStatus } from './executionGraphHydration';
 import { architectureRunIdFromRootSession, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
 
 const DEFAULT_GRAPH_ZOOM = 0.82;
 const DEFAULT_INSPECTOR_WIDTH = 320;
-
-function isLiveTool(activity: { status: string }): boolean {
-  return activity.status === 'running' || activity.status === 'awaiting_confirmation';
-}
-
-function formatSidebarLoopLabel(
-  loop: { sessionId: string; agentRun?: { label?: string } },
-  sessionTitleById: Map<string, string>,
-): string {
-  return loop.agentRun?.label ?? sessionTitleById.get(loop.sessionId) ?? 'Agent run';
-}
 
 interface ExecutionGraphViewProps {
   onOpenSessionInConversation?: (sessionId: string) => void;
@@ -266,66 +255,13 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
   );
 
   const liveActivitySidebar = (
-    <aside className="rounded-xl border border-base-300 bg-base-100/95 p-3 space-y-3 shadow-[0_12px_28px_rgba(2,12,27,0.18)]">
-      <section className="space-y-2">
-        <div className="flex items-center gap-2">
-          <BrainCircuit size={14} className="text-sky-400" />
-          <h4 className="text-sm font-semibold tracking-tight">Live agents</h4>
-        </div>
-        {runningLoops.length > 0 ? (
-          <div className="space-y-2">
-            {runningLoops.map((loop) => (
-              <div key={`${loop.sessionId}-${loop.turnId}`} className="rounded-lg border border-sky-500/15 bg-sky-500/8 px-3 py-2">
-                <p className="text-xs font-semibold text-sky-300">{formatSidebarLoopLabel(loop, sessionTitleById)}</p>
-                <p className="mt-1 text-xs text-base-content/60">{sessionTitleById.get(loop.sessionId) ?? loop.sessionId}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-base-content/55">No active agent runs right now.</p>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Wrench size={14} className="text-amber-400" />
-          <h4 className="text-sm font-semibold tracking-tight">Running tools</h4>
-        </div>
-        {runningToolActivities.length > 0 ? (
-          <div className="space-y-2">
-            {runningToolActivities.map((activity) => (
-              <div key={activity.callId} className="rounded-lg border border-amber-500/15 bg-amber-500/8 px-3 py-2">
-                <p className="text-xs font-semibold text-amber-200">{activity.toolName}</p>
-                <p className="mt-1 text-xs text-base-content/60">session {sessionTitleById.get(activity.sessionId ?? '') ?? 'active chat'}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-base-content/55">No live tool calls yet.</p>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <div className="flex items-center gap-2">
-          <MessageSquareText size={14} className="text-base-content/70" />
-          <h4 className="text-sm font-semibold tracking-tight">Recent sessions</h4>
-        </div>
-        <div className="space-y-2">
-          {sessions.slice(0, 4).map((session) => (
-            <button
-              key={session.id}
-              type="button"
-              aria-label={`Open recent session ${session.title}`}
-              className="w-full rounded-lg border border-base-300 bg-base-200/60 px-3 py-2 text-left transition-colors hover:bg-base-200"
-              onClick={() => setActiveSession(session.id)}
-            >
-              <p className="text-xs font-medium text-base-content/90">{session.title}</p>
-              <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-base-content/45">{session.kind === 'subagent' ? 'subagent session' : session.kind === 'cli-agent' ? 'cli agent session' : 'chat session'}</p>
-            </button>
-          ))}
-        </div>
-      </section>
-    </aside>
+    <ExecutionGraphLiveSidebar
+      runningLoops={runningLoops}
+      runningToolActivities={runningToolActivities}
+      sessions={sessions}
+      sessionTitleById={sessionTitleById}
+      onSelectSession={setActiveSession}
+    />
   );
 
   if (!activeSessionId) {
@@ -333,50 +269,12 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
       <div data-testid="execution-graph-view" className="flex h-full overflow-hidden bg-base-100">
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {header}
-
-          <div className={graphSurfaceClassName}>
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-              <section className="rounded-[28px] border border-sky-500/15 bg-[#101b2d]/92 p-6 text-sky-50 shadow-[0_25px_45px_rgba(2,12,27,0.35)]">
-                <div className="max-w-3xl">
-                  <p className="text-[11px] uppercase tracking-[0.3em] text-sky-200/65">Execution overview</p>
-                  <h3 className="mt-3 text-3xl font-black tracking-tight">Pick a session or inspect live activity</h3>
-                  <p className="mt-3 text-sm text-sky-100/70">
-                    Graph mode now stays useful before a session is focused: you can jump into recent sessions, inspect running agents,
-                    and see which tools are currently executing.
-                  </p>
-                </div>
-
-                <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {selectableSessions.map((session) => (
-                    <button
-                      key={session.id}
-                      type="button"
-                      aria-label={`Open session ${session.title} from graph overview`}
-                      className="rounded-[22px] border border-sky-400/20 bg-sky-500/8 px-4 py-4 text-left transition-all hover:border-sky-300/40 hover:bg-sky-500/14"
-                      onClick={() => setActiveSession(session.id)}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-lg font-semibold text-sky-50">{session.title}</p>
-                          <p className="mt-1 text-xs uppercase tracking-[0.24em] text-sky-200/60">session</p>
-                        </div>
-                        <ArrowRight size={16} className="mt-1 text-sky-200/70 shrink-0" />
-                      </div>
-                      <p className="mt-4 text-xs text-sky-100/60">updated {new Date(session.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                    </button>
-                  ))}
-                </div>
-
-                {selectableSessions.length === 0 && (
-                  <div className="mt-8 rounded-[22px] border border-dashed border-sky-400/20 px-5 py-6 text-sm text-sky-100/60">
-                    No root chat sessions yet. Create or select one in Conversations to start building the graph.
-                  </div>
-                )}
-              </section>
-
-              {liveActivitySidebar}
-            </div>
-          </div>
+          <ExecutionGraphNoSessionState
+            graphSurfaceClassName={graphSurfaceClassName}
+            liveActivitySidebar={liveActivitySidebar}
+            selectableSessions={selectableSessions}
+            onSelectSession={setActiveSession}
+          />
         </div>
       </div>
     );
@@ -414,28 +312,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
       <div data-testid="execution-graph-view" className="flex h-full overflow-hidden bg-base-100">
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {header}
-
-          <div className={graphSurfaceClassName}>
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-              <section className="rounded-[28px] border border-sky-500/15 bg-[#101b2d]/92 p-6 text-sky-50 shadow-[0_25px_45px_rgba(2,12,27,0.35)]">
-                <p className="text-[11px] uppercase tracking-[0.3em] text-sky-200/65">Selected session</p>
-                <h3 className="mt-3 text-3xl font-black tracking-tight">No execution nodes yet for this session.</h3>
-                <p className="mt-3 text-sm text-sky-100/70">
-                  {activeSession
-                    ? `Session "${activeSession.title}" is active in Graph view, but nothing has executed yet.`
-                    : 'This session is active in Graph view, but nothing has executed yet.'}
-                </p>
-                <p className="mt-3 text-sm text-sky-100/70">
-                  You do not need to start in Graph. Send the first message in Conversation or stay here and switch back later. The graph will populate from the same Talk session state.
-                </p>
-                <div className="mt-6 rounded-[22px] border border-dashed border-sky-400/20 px-5 py-5 text-sm text-sky-100/65">
-                  The first prompt, tool call, subagent branch, or final answer will appear here as soon as the session starts producing execution data.
-                </div>
-              </section>
-
-              {liveActivitySidebar}
-            </div>
-          </div>
+          <ExecutionGraphNoNodesState
+            activeSession={activeSession}
+            graphSurfaceClassName={graphSurfaceClassName}
+            liveActivitySidebar={liveActivitySidebar}
+          />
         </div>
       </div>
     );

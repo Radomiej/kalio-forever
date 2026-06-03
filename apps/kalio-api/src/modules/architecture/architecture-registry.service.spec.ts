@@ -4,7 +4,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ArchitectureSchema } from '@kalio/types';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LAB_PRESET_IDS } from './architecture-seed-schemas.lab-presets';
 import { ArchitectureRegistryService } from './architecture-registry.service';
 
@@ -416,6 +416,27 @@ describe('ArchitectureRegistryService', () => {
     );
     await expect(readFile(join(registryPath, 'schemas', 'strategic-decision-council-variant-2.json'), 'utf8')).resolves.toContain(
       'strategic-decision-council-variant-2',
+    );
+  });
+
+  it('continues a variant write queue after a previous queued promise rejects', async () => {
+    const registryPath = await makeTempRegistryPath(tempDirs);
+    const service = new ArchitectureRegistryService(makeConfig(registryPath));
+    const internals = service as unknown as {
+      variantWriteQueues: Map<string, Promise<void>>;
+      logger: { warn: (message: string, error: unknown) => void };
+    };
+    const warnSpy = vi.spyOn(internals.logger, 'warn').mockImplementation(() => undefined);
+    internals.variantWriteQueues.set('strategic-decision-council', Promise.reject(new Error('previous write failed')));
+
+    const variant = await service.createVariant('strategic-decision-council', {
+      name: 'Recovered queue council',
+    });
+
+    expect(variant?.id).toBe('strategic-decision-council-variant-1');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Previous architecture variant write failed'),
+      expect.any(Error),
     );
   });
 

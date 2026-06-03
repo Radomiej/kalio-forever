@@ -115,6 +115,15 @@ export function getChildImageIdentity(image: ImageResultData): string {
   return `inline:${hashString(image.image_url)}`;
 }
 
+function safeParseJson(value: string): unknown | null {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (err) {
+    void err;
+    return null;
+  }
+}
+
 function isSubagentCopiedFile(data: unknown): data is SubagentToolResult['copiedFiles'][number] {
   if (!data || typeof data !== 'object') return false;
   const file = data as Record<string, unknown>;
@@ -161,28 +170,26 @@ export function extractChildToolPreviews(messages: ChatMessage[]): { raapp: RAAp
 
   for (const message of messages) {
     if (!message || message.role !== 'tool_result') continue;
-    try {
-      const parsed = JSON.parse(message.content);
-      const nextRaapp = extractRAAppBlock(parsed);
-      if (nextRaapp) {
-        raapp = nextRaapp;
-      }
+    const parsed = safeParseJson(message.content);
+    if (parsed === null) continue;
 
-      const image = extractImageResult(parsed);
-      if (!image) {
-        continue;
-      }
-
-      const imageKey = getChildImageIdentity(image);
-      if (seenImages.has(imageKey)) {
-        continue;
-      }
-
-      seenImages.add(imageKey);
-      images.push(image);
-    } catch {
-      // ignore invalid JSON payloads in history lookup
+    const nextRaapp = extractRAAppBlock(parsed);
+    if (nextRaapp) {
+      raapp = nextRaapp;
     }
+
+    const image = extractImageResult(parsed);
+    if (!image) {
+      continue;
+    }
+
+    const imageKey = getChildImageIdentity(image);
+    if (seenImages.has(imageKey)) {
+      continue;
+    }
+
+    seenImages.add(imageKey);
+    images.push(image);
   }
 
   return { raapp, images };

@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Server, XCircle } from 'lucide-react';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { useSettingsStore } from './settingsStore';
-import { ModelSettingsSection } from './ModelSettingsSection';
+import { LLMPanelErrorAlert, LLMPanelHeader } from './LLMPanel.Chrome';
 import { ProviderSettingsSection } from './ProviderSettingsSection';
-import { ToolTimeoutsSection } from './ToolTimeoutsSection';
+import { LLMProviderHealthCard } from './LLMPanel.ProviderHealth';
+import { LLMRuntimeSettingsSection } from './LLMPanel.RuntimeSettings';
+import { buildLLMPanelDerivedState } from './LLMPanel.derived';
 import {
   isLocalLlmProviderConfig,
   PROVIDER_BASE_URLS,
@@ -29,7 +30,6 @@ import {
   type ToolTimeoutKey,
   type ToolTimeoutSettings,
 } from './tool-timeout-settings';
-
 export function LLMPanel() {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -70,41 +70,13 @@ export function LLMPanel() {
     () => buildActiveRuntimeConfig(activeCredential, runtimeConfig),
     [activeCredential, runtimeConfig],
   );
-  const envRuntimeSnapshot = runtimeConfig?.source === 'env' ? runtimeConfig : lastEnvRuntimeConfig;
-  const envFallbackProviderId = envRuntimeSnapshot?.provider ?? 'env';
-  const envFallbackProviderLabel = envRuntimeSnapshot
-    ? (PROVIDER_LABELS[envRuntimeSnapshot.provider] ?? envRuntimeSnapshot.provider)
-    : undefined;
-  const envFallbackModel = envRuntimeSnapshot?.model;
-  const providerEmptyStateMessage = runtimeConfig?.source === 'env'
-    ? 'No credentials configured. Runtime currently uses the env fallback.'
-    : 'No credentials configured. Add one below.';
-  const activeProviderLabel = activeRuntimeConfig
-    ? (PROVIDER_LABELS[activeRuntimeConfig.provider] ?? activeRuntimeConfig.provider)
-    : 'Not configured';
-  const activeProviderModel = activeRuntimeConfig?.model || 'No model selected';
-  const activeProviderSource = activeRuntimeConfig
-    ? (activeRuntimeConfig.source === 'env' ? 'env fallback' : 'database')
-    : 'unknown';
-  const showWindowsLocalHint = Boolean(
-    (activeRuntimeConfig && isLocalLlmProviderConfig(activeRuntimeConfig.provider, activeRuntimeConfig.baseUrl || undefined))
-      || (showForm && allowsKeylessAuth),
-  );
-  const testStateLabel = testState === 'testing'
-    ? 'Testing'
-    : testState === 'ok'
-      ? 'Verified'
-      : testState === 'error'
-        ? 'Failed'
-        : 'Not tested';
-  const TestStateIcon = testState === 'testing'
-    ? Loader2
-    : testState === 'ok'
-      ? CheckCircle2
-      : testState === 'error'
-        ? XCircle
-        : Server;
-
+  const derived = buildLLMPanelDerivedState({
+    activeRuntimeConfig,
+    runtimeConfig,
+    lastEnvRuntimeConfig,
+    showForm,
+    allowsKeylessAuth,
+  });
   const reportUpdateError = useCallback((message: string, err: unknown) => {
     const error = err instanceof Error ? err : new Error(String(err));
     console.error(`[LLMPanel] ${message}`, error);
@@ -345,45 +317,17 @@ export function LLMPanel() {
 
   return (
     <div className="flex flex-col gap-5" data-testid="llm-panel">
-      <div>
-        <h2 className="text-base font-semibold mb-1">LLM Settings</h2>
-        <p className="text-xs text-base-content/60">
-          Configure model behavior, runtime limits, and provider credentials.
-          Active provider selection is stored in the database, and API keys remain write-only.
-        </p>
-      </div>
+      <LLMPanelHeader />
+      {error && <LLMPanelErrorAlert error={error} onClear={() => setError(null)} />}
 
-      {error && (
-        <div className="alert alert-warning py-2 text-xs gap-2">
-          <AlertCircle size={14} />
-          {error}
-          <button className="btn btn-ghost btn-xs ml-auto" onClick={() => setError(null)}>x</button>
-        </div>
-      )}
-
-      <section className="border border-base-300 rounded-xl p-4 bg-base-200/10" data-testid="provider-health-card">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold mb-1">Provider Health</h3>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
-              <span className="badge badge-sm badge-outline font-mono">{activeProviderLabel}</span>
-              <span className="font-mono truncate max-w-full">{activeProviderModel}</span>
-              <span className="badge badge-xs badge-neutral">{activeProviderSource}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 text-xs">
-            <TestStateIcon
-              size={14}
-              className={testState === 'testing' ? 'animate-spin text-info' : testState === 'ok' ? 'text-success' : testState === 'error' ? 'text-error' : 'text-base-content/50'}
-            />
-            <span className={testState === 'ok' ? 'text-success' : testState === 'error' ? 'text-error' : 'text-base-content/60'}>
-              {testStateLabel}
-            </span>
-          </div>
-        </div>
-        {testState === 'error' && testError ? <p className="mt-3 text-xs text-error" data-testid="provider-health-last-failure">Last test failure: {testError}</p> : null}
-        {showWindowsLocalHint ? <p className="mt-3 text-xs text-base-content/50" data-testid="provider-health-local-hint">Windows local provider hint: keep the local server running and use the Windows-reachable localhost URL.</p> : null}
-      </section>
+      <LLMProviderHealthCard
+        activeProviderLabel={derived.activeProviderLabel}
+        activeProviderModel={derived.activeProviderModel}
+        activeProviderSource={derived.activeProviderSource}
+        testState={testState}
+        testError={testError}
+        showWindowsLocalHint={derived.showWindowsLocalHint}
+      />
 
       <ProviderSettingsSection
         credentials={credentials}
@@ -392,16 +336,16 @@ export function LLMPanel() {
         loading={loading}
         showEnvFallback={runtimeConfig !== null}
         envFallbackActive={!activeId && runtimeConfig?.source === 'env'}
-        envFallbackProviderId={envFallbackProviderId}
-        envFallbackProviderLabel={envFallbackProviderLabel}
-        envFallbackModel={envFallbackModel}
+        envFallbackProviderId={derived.envFallbackProviderId}
+        envFallbackProviderLabel={derived.envFallbackProviderLabel}
+        envFallbackModel={derived.envFallbackModel}
         showForm={showForm}
         form={form}
         allowsKeylessAuth={allowsKeylessAuth}
         normalizedApiKey={normalizedApiKey}
         testState={testState}
         testError={testError}
-        emptyStateMessage={providerEmptyStateMessage}
+        emptyStateMessage={derived.providerEmptyStateMessage}
         onActivate={(credentialId) => void handleActivate(credentialId)}
         onRemove={(credentialId) => void handleRemove(credentialId)}
         onUseEnvFallback={() => void handleUseEnvFallback()}
@@ -416,81 +360,17 @@ export function LLMPanel() {
         onTest={() => void handleTest()}
       />
 
-      <section className="flex flex-col gap-5 border border-base-300 rounded-xl p-4 bg-base-200/10">
-        <div>
-          <h3 className="text-sm font-semibold mb-1">Runtime Settings</h3>
-          <p className="text-xs text-base-content/60">
-            Configure the active provider, runtime model, generation parameters, and turn-level limits.
-          </p>
-        </div>
-
-        <ModelSettingsSection
-          activeRuntimeConfig={activeRuntimeConfig}
-          onRuntimeConfigChange={handleRuntimeConfigChange}
-        />
-
-        <div className="border-t border-base-300 pt-4">
-          <h3 className="text-sm font-semibold mb-1">Context Window</h3>
-          <p className="text-xs text-base-content/60 mb-3">
-            Oldest messages are trimmed automatically when history exceeds this limit.
-            Stored in the backend.
-          </p>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-base-content/60">Max tokens</span>
-            <span className="badge badge-neutral font-mono text-xs" data-testid="context-window-value">
-              {(contextWindow / 1000).toFixed(0)}k
-            </span>
-          </div>
-          <input
-            type="range"
-            className="range range-sm range-primary w-full"
-            min={4000}
-            max={200000}
-            step={4000}
-            value={contextWindow}
-            onChange={(e) => void handleContextWindowChange(parseInt(e.target.value, 10))}
-            aria-label="Context window"
-            data-testid="context-window-slider"
-          />
-          <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
-            <span>4k</span><span>32k</span><span>128k</span><span>200k</span>
-          </div>
-        </div>
-
-        <div className="border-t border-base-300 pt-4">
-          <h3 className="text-sm font-semibold mb-1">Agent Loop Limit</h3>
-          <p className="text-xs text-base-content/60 mb-3">
-            Max tool-attempt loop iterations per turn before automatic stop.
-            Increase for complex test scenarios (for example 25).
-          </p>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-base-content/60">Max tool attempts</span>
-            <span className="badge badge-neutral font-mono text-xs" data-testid="max-tool-attempts-value">
-              {maxToolAttempts}
-            </span>
-          </div>
-          <input
-            type="range"
-            className="range range-sm range-primary w-full"
-            min={1}
-            max={100}
-            step={1}
-            value={maxToolAttempts}
-            onChange={(e) => void handleMaxToolAttemptsChange(parseInt(e.target.value, 10))}
-            aria-label="Max tool attempts"
-            data-testid="max-tool-attempts-slider"
-          />
-          <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
-            <span>1</span><span>8</span><span>25</span><span>100</span>
-          </div>
-        </div>
-
-        <ToolTimeoutsSection
-          values={toolTimeouts}
-          onInputChange={handleToolTimeoutInputChange}
-          onCommit={(key, value) => void commitToolTimeoutChange(key, value)}
-        />
-      </section>
+      <LLMRuntimeSettingsSection
+        activeRuntimeConfig={activeRuntimeConfig}
+        contextWindow={contextWindow}
+        maxToolAttempts={maxToolAttempts}
+        toolTimeouts={toolTimeouts}
+        onRuntimeConfigChange={handleRuntimeConfigChange}
+        onContextWindowChange={handleContextWindowChange}
+        onMaxToolAttemptsChange={handleMaxToolAttemptsChange}
+        onToolTimeoutInputChange={handleToolTimeoutInputChange}
+        onToolTimeoutCommit={(key, value) => void commitToolTimeoutChange(key, value)}
+      />
     </div>
   );
 }

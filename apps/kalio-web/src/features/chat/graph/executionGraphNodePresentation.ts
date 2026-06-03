@@ -1,5 +1,5 @@
 import { BOARD_PADDING_X, BOARD_PADDING_Y, COLUMN_GAP, NODE_HEIGHT, NODE_WIDTH, ROW_GAP, basename } from './executionGraphModel.helpers';
-import type { ExecutionGraphNode } from './executionGraphModel';
+import type { ExecutionGraphNode } from './executionGraphModel.types';
 
 export interface GraphNodeMetadataItem {
   label: string;

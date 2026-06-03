@@ -3,7 +3,7 @@ import { env, pipeline } from '@huggingface/transformers';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { IEmbeddingProvider } from './embedding.service';
+import type { IEmbeddingProvider } from './embedding-provider.types';
 
 export const DEFAULT_LOCAL_EMBEDDING_MODEL = 'Xenova/multilingual-e5-small';
 export const DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384;

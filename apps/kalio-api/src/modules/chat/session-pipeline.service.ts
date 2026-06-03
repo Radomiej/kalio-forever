@@ -115,8 +115,10 @@ export class SessionPipelineService {
     if (decision.kind === 'interrupt') {
       try {
         await decision.prior;
-      } catch {
-        // handleTurn doesn't throw, but be defensive
+      } catch (err) {
+        this.logger.warn(
+          `Prior interrupted turn rejected for session ${payload.sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
       if (payload.content.trim().length === 0) return;
       // Re-claim the slot atomically before dispatching the interrupting

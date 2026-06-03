@@ -119,7 +119,10 @@ function AdapterCard({ info }: AdapterCardProps) {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const errorBody = await res.json().catch(() => null) as { message?: string } | null;
+        const errorBody = await res.json().catch((err: unknown) => {
+          console.debug('[CLIAgentPanel] save error response was not JSON', err);
+          return null;
+        }) as { message?: string } | null;
         throw new Error(errorBody?.message ?? `${res.status}: ${res.statusText}`);
       }
       const updated = await res.json() as CLIAgentConfig;

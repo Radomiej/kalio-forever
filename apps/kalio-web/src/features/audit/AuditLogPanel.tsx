@@ -72,8 +72,8 @@ export function AuditLogPanel() {
         const data = await res.json() as AuditLogEntry[];
         setEntries(data);
       }
-    } catch {
-      // silently ignore network errors
+    } catch (err) {
+      console.warn('[AuditLogPanel] Failed to load audit events', err);
     } finally {
       setLoading(false);
     }

@@ -185,7 +185,9 @@ export class CredentialsController {
           try {
             const parsed = JSON.parse(text) as { error?: { message?: string } };
             if (parsed?.error?.message) errorMessage = parsed.error.message;
-          } catch { /* not JSON */ }
+          } catch (err) {
+            this.logger.debug(`Provider error body was not JSON: ${err instanceof Error ? err.message : String(err)}`);
+          }
           return { ok: false, latencyMs: Date.now() - start, error: errorMessage };
         }
 

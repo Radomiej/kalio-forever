@@ -171,15 +171,15 @@ async function readJsonResponse(response: JsonResponseLike, errorPrefix: string)
   return parseJsonBody(rawBody, getResponseContentType(response), errorPrefix);
 }
 
-async function readImageApiError(response: JsonResponseLike): Promise<ImageApiError> {
+async function readImageApiError(response: JsonResponseLike, logger?: Logger): Promise<ImageApiError> {
   const rawBody = await response.text().catch(() => '');
   const contentType = getResponseContentType(response);
 
   if (rawBody.trim().length > 0 && (contentType.length === 0 || contentType.includes('json'))) {
     try {
       return JSON.parse(rawBody) as ImageApiError;
-    } catch {
-      // Fall back to a readable body summary below.
+    } catch (err) {
+      logger?.debug(`Image API error body was not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -521,7 +521,7 @@ export class ImageGenerationService {
     });
 
     if (!response.ok) {
-      const errorData = await readImageApiError(response);
+      const errorData = await readImageApiError(response, this.logger);
       const msg = errorData?.error?.message ?? `HTTP ${response.status}`;
       throw new Error(`Image generation failed: ${msg}`);
     }

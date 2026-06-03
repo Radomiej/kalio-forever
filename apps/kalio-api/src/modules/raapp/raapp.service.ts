@@ -210,7 +210,9 @@ export class RAAppService implements OnModuleInit {
             );
             count++;
             continue;
-          } catch { /* no unpacked RA-App in this subdir — try versioned zip */ }
+          } catch (err) {
+            this.logger.debug(`No unpacked RA-App meta.yml in ${appDir}; trying current.zip: ${err instanceof Error ? err.message : String(err)}`);
+          }
 
           // versioned user apps live in {slug}/current.zip after migration
           const currentZip = path.join(appDir, 'current.zip');
@@ -220,7 +222,9 @@ export class RAAppService implements OnModuleInit {
               this.logger.warn(`Failed to load versioned RA-App ${entry.name}/current.zip: ${String(err)}`),
             );
             count++;
-          } catch { /* no current.zip in this subdir — skip */ }
+          } catch (err) {
+            this.logger.debug(`No versioned RA-App current.zip in ${appDir}; skipping: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
       this.logger.log(`Loaded ${source} RA-Apps (${count})`);
@@ -248,18 +252,24 @@ export class RAAppService implements OnModuleInit {
       try {
         htmlContent = await fs.readFile(path.join(appDir, candidate), 'utf-8');
         break;
-      } catch { /* not found, try next */ }
+      } catch (err) {
+        this.logger.debug(`Optional RA-App HTML candidate ${candidate} not found in ${appDir}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     let guiContent: string | null = null;
     try {
       guiContent = await fs.readFile(path.join(appDir, 'ui.gui'), 'utf-8');
-    } catch { /* not found */ }
+    } catch (err) {
+      this.logger.debug(`Optional RA-App ui.gui not found in ${appDir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     let systemsContent: string | null = null;
     try {
       systemsContent = await fs.readFile(path.join(appDir, 'systems.yml'), 'utf-8');
-    } catch { /* not found */ }
+    } catch (err) {
+      this.logger.debug(`Optional RA-App systems.yml not found in ${appDir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     const renderAs = (meta.execution?.render_as as string | undefined) ?? (meta as { ui?: { render_as?: string } }).ui?.render_as;
     const appMode: 'display' | 'interactive' = renderAs === 'interactive' ? 'interactive' : 'display';
@@ -338,7 +348,9 @@ export class RAAppService implements OnModuleInit {
       for (const name of candidates) {
         try {
           result[name] = await fs.readFile(path.join(tmpDir, name), 'utf-8');
-        } catch { /* file absent — skip */ }
+        } catch (err) {
+          this.logger.debug(`Optional RA-App file ${name} absent in extracted archive: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
       return result;
     } finally {

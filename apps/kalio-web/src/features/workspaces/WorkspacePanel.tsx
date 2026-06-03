@@ -37,7 +37,8 @@ export function WorkspacePanel() {
             ),
           );
         })
-        .catch(() => {
+        .catch((err: unknown) => {
+          console.warn(`[WorkspacePanel] Failed to load VFS for session ${s.id}`, err);
           setEntries((prev) =>
             prev.map((e) =>
               e.sessionId === s.id ? { ...e, loading: false, error: 'Failed to load files' } : e,

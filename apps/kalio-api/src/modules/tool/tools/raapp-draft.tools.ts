@@ -447,7 +447,9 @@ export class RaAppPublishDraftTool {
         message: err instanceof Error ? err.message : String(err),
       };
     } finally {
-      await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => { /* best effort */ });
+      await fs.rm(tmpRoot, { recursive: true, force: true }).catch((err) => {
+        this.logger.warn(`[raapp_publish_draft] Failed to clean temp dir ${tmpRoot}`, err);
+      });
     }
   }
 }

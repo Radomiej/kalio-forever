@@ -1,6 +1,6 @@
 import { Wrench, Zap } from 'lucide-react';
 import type { ToolActivity } from '../../../store/agentStore';
-import type { GraphCardDensity } from './ExecutionGraphBoard';
+import type { GraphCardDensity } from './ExecutionGraphBoard.types';
 import type { ExecutionGraphFocusMode } from './executionGraphFocus';
 import type { ExecutionGraphHydrationStatus } from './executionGraphHydration';
 

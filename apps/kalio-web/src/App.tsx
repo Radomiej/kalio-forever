@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  MessageSquare, Settings, Wrench, BrainCircuit, Activity, Network, GitBranch, Gauge,
+  MessageSquare, GitBranch, Gauge,
 } from 'lucide-react';
 import { ChatInterface } from './features/chat/ChatInterface';
 import { CanvasPanel } from './features/chat/CanvasPanel';
@@ -20,116 +20,24 @@ import { LandingPage } from './features/landing/LandingPage';
 import { BackendStatusBadge } from './components/ui/BackendStatusBadge';
 import { ObservabilityPage } from './features/observability/ObservabilityPage';
 import { ArchitectPage } from './features/architect';
+import { AppNavRail } from './AppNavRail';
+import type { ActiveSection, AppViewState, MindTab, TalkTab, TalkView, ToolsTab } from './App.types';
+import {
+  APP_VIEW_STATE_STORAGE_KEY,
+  LAST_TALK_ACTIVE_STORAGE_KEY,
+  loadAppViewState,
+  loadLastTalkActiveAt,
+  recentTalkBadgeCount,
+} from './App.viewState';
 import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
 import { useSessionStore } from './store/sessionStore';
 import { useAgentStore } from './store/agentStore';
 import { backendHealth } from './services/backendHealth';
 import { useSettingsStore } from './features/settings/settingsStore';
 
-type ActiveSection = 'landing' | 'talk' | 'tools' | 'mind' | 'observe' | 'architect';
-type TalkTab = 'conversations' | 'agents';
-type TalkView = 'conversation' | 'graph';
-type ToolsTab = 'native' | 'mcp' | 'raapps';
-type MindTab = 'memory' | 'files' | 'skills' | 'personas';
-
-type AppViewState = {
-  activeSection: ActiveSection;
-  talkTab: TalkTab;
-  talkView: TalkView;
-  toolsTab: ToolsTab;
-  mindTab: MindTab;
-  selectedSkillId: string | null;
-};
-
-const APP_VIEW_STATE_STORAGE_KEY = 'kalio:app-view-state';
-const LAST_TALK_ACTIVE_STORAGE_KEY = 'kalio:last-talk-active-at';
-const RECENT_CHAT_FALLBACK_MS = 24 * 60 * 60 * 1000;
-
-const DEFAULT_APP_VIEW_STATE: AppViewState = {
-  activeSection: 'landing',
-  talkTab: 'conversations',
-  talkView: 'conversation',
-  toolsTab: 'native',
-  mindTab: 'memory',
-  selectedSkillId: null,
-};
-
 const TALK_VIEW_OPTIONS: ReadonlyArray<{ id: TalkView; label: string; icon: React.ReactNode }> = [
   { id: 'conversation', label: 'Conversation', icon: <MessageSquare size={14} /> },
   { id: 'graph', label: 'Execution graph', icon: <GitBranch size={14} /> },
-];
-
-function isActiveSection(value: unknown): value is ActiveSection {
-  return value === 'landing'
-    || value === 'talk'
-    || value === 'tools'
-    || value === 'mind'
-    || value === 'observe'
-    || value === 'architect';
-}
-
-function isTalkTab(value: unknown): value is TalkTab {
-  return value === 'conversations' || value === 'agents';
-}
-
-function isTalkView(value: unknown): value is TalkView {
-  return value === 'conversation' || value === 'graph';
-}
-
-function isToolsTab(value: unknown): value is ToolsTab {
-  return value === 'native' || value === 'mcp' || value === 'raapps';
-}
-
-function isMindTab(value: unknown): value is MindTab {
-  return value === 'memory' || value === 'files' || value === 'skills' || value === 'personas';
-}
-
-function loadAppViewState(): AppViewState {
-  if (typeof window === 'undefined') {
-    return DEFAULT_APP_VIEW_STATE;
-  }
-
-  try {
-    const raw = window.sessionStorage.getItem(APP_VIEW_STATE_STORAGE_KEY);
-    if (!raw) {
-      return DEFAULT_APP_VIEW_STATE;
-    }
-
-    const parsed = JSON.parse(raw) as Partial<AppViewState>;
-    return {
-      activeSection: isActiveSection(parsed.activeSection) ? parsed.activeSection : DEFAULT_APP_VIEW_STATE.activeSection,
-      talkTab: isTalkTab(parsed.talkTab) ? parsed.talkTab : DEFAULT_APP_VIEW_STATE.talkTab,
-      talkView: isTalkView(parsed.talkView) ? parsed.talkView : DEFAULT_APP_VIEW_STATE.talkView,
-      toolsTab: isToolsTab(parsed.toolsTab) ? parsed.toolsTab : DEFAULT_APP_VIEW_STATE.toolsTab,
-      mindTab: isMindTab(parsed.mindTab) ? parsed.mindTab : DEFAULT_APP_VIEW_STATE.mindTab,
-      selectedSkillId: typeof parsed.selectedSkillId === 'string' ? parsed.selectedSkillId : null,
-    };
-  } catch {
-    return DEFAULT_APP_VIEW_STATE;
-  }
-}
-
-function loadLastTalkActiveAt(): number | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const raw = window.localStorage.getItem(LAST_TALK_ACTIVE_STORAGE_KEY);
-  const parsed = raw ? Number(raw) : Number.NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function recentTalkBadgeCount(sessions: { updatedAt: number }[], lastTalkActiveAt: number | null, now = Date.now()): number {
-  const threshold = lastTalkActiveAt ?? now - RECENT_CHAT_FALLBACK_MS;
-  return sessions.filter((session) => session.updatedAt > threshold).length;
-}
-
-const NAV: { id: ActiveSection; icon: React.ReactNode; label: string }[] = [
-  { id: 'talk',    icon: <MessageSquare size={18} />, label: 'Talk' },
-  { id: 'tools',   icon: <Wrench size={18} />,        label: 'Tools' },
-  { id: 'mind',    icon: <BrainCircuit size={18} />,  label: 'Mind' },
-  { id: 'architect', icon: <Network size={18} />,     label: 'Architect' },
-  { id: 'observe', icon: <Activity size={18} />,      label: 'Observability' },
 ];
 
 export function App() {
@@ -161,7 +69,9 @@ export function App() {
       .then((cfg: LLMConfigWithSource) => {
         setBackendConfig(cfg);
       })
-      .catch(() => {/* non-fatal */});
+      .catch((err: unknown) => {
+        console.warn('[App] Failed to load backend LLM config', err);
+      });
   }, [setBackendConfig]);
 
   // Close canvas when navigating away from talk
@@ -242,87 +152,14 @@ export function App() {
       >
 
       {/* ── Icon rail ── */}
-      <nav className="w-14 shrink-0 flex flex-col items-center py-3 gap-1 border-r border-base-300 bg-base-200 z-10">
-        {/* Logo — click to return to landing page */}
-        <button
-          className={`mb-1 btn btn-ghost btn-sm w-10 h-10 p-0 flex items-center justify-center ${
-            activeSection === 'landing'
-              ? 'bg-sky-500/15 text-sky-400 border-l-2 border-sky-500'
-              : ''
-          }`}
-          onClick={goHome}
-          data-testid="nav-home"
-          aria-label="Home"
-          title="Home"
-        >
-          <span className={`font-black text-lg select-none ${
-            activeSection === 'landing'
-              ? 'text-sky-400 drop-shadow-[0_0_10px_oklch(0.60_0.176_232.6/0.9)]'
-              : 'text-primary drop-shadow-[0_0_8px_oklch(0.60_0.176_232.6/0.7)]'
-          }`}>K</span>
-        </button>
-
-        <div className="w-8 border-b border-base-300 my-1" />
-
-        {/* Nav tabs */}
-        {NAV.map((item) => (
-          <div key={item.id} className="relative">
-            <button
-              className={`btn btn-ghost btn-sm w-10 h-10 p-0 flex flex-col items-center justify-center tooltip tooltip-right ${
-                activeSection === item.id && activeSection !== 'landing'
-                  ? 'bg-sky-500/15 text-sky-400 border-l-2 border-sky-500'
-                  : 'text-base-content/60 hover:text-base-content/90'
-              }`}
-              data-tip={item.label}
-              onClick={() => setActiveSection(item.id)}
-              data-testid={`nav-${item.id}`}
-              aria-label={item.label}
-              title={item.label}
-            >
-              {item.icon}
-            </button>
-            {item.id === 'talk' && activeSection !== 'talk' && (pendingConfirmationCount > 0 || recentTalkCount > 0) && (
-              <span
-                className={`absolute -top-1 -right-1 badge badge-xs pointer-events-none ${
-                  pendingConfirmationCount > 0
-                    ? 'badge-warning animate-pulse'
-                    : 'badge-info'
-                }`}
-                title={pendingConfirmationCount > 0
-                  ? `${pendingConfirmationCount} approval${pendingConfirmationCount === 1 ? '' : 's'} waiting`
-                  : `${recentTalkCount} completed or updated chat${recentTalkCount === 1 ? '' : 's'} since last Talk activity`}
-                aria-label={pendingConfirmationCount > 0
-                  ? `${pendingConfirmationCount} approval${pendingConfirmationCount === 1 ? '' : 's'} waiting`
-                  : `${recentTalkCount} completed or updated chat${recentTalkCount === 1 ? '' : 's'} since last Talk activity`}
-                data-testid="nav-talk-activity-count"
-              >
-                {(pendingConfirmationCount > 0 ? pendingConfirmationCount : recentTalkCount) > 99
-                  ? '99+'
-                  : pendingConfirmationCount > 0 ? pendingConfirmationCount : recentTalkCount}
-              </span>
-            )}
-          </div>
-        ))}
-
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Settings button */}
-        <div className="mb-2 relative">
-          <button
-            className="btn btn-ghost btn-sm w-10 h-10 p-0 flex items-center justify-center tooltip tooltip-right text-base-content/60 hover:text-primary"
-            data-tip="Settings"
-            onClick={() => openSettings()}
-            data-testid="nav-settings"
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Settings size={18} />
-          </button>
-        </div>
-      </nav>
-
-      {/* ── Main: full screen sections ── */}
+      <AppNavRail
+        activeSection={activeSection}
+        pendingConfirmationCount={pendingConfirmationCount}
+        recentTalkCount={recentTalkCount}
+        onGoHome={goHome}
+        onOpenSettings={() => openSettings()}
+        onSelectSection={setActiveSection}
+      />
       <main className="flex-1 overflow-hidden min-w-0" data-testid="main-chat">
         {activeSection === 'landing' && (
           <LandingPage onNavigateToChat={openConversationFromLanding} />

@@ -104,7 +104,7 @@ export function collectKnipRows(report, pkg) {
 }
 
 async function main() {
-  const fileStats = await readJson('file-stats.json', { rows: [], silentCatchHits: [], anyHits: [] });
+  const fileStats = await readJson('file-stats.json', { rows: [], silentCatchHits: [], anyHits: [], regressionReviewLeads: [] });
   const governance = await readJson('docs-governance.json', { docs: {}, findings: [] });
   
   // Merge all madge outputs
@@ -163,6 +163,16 @@ async function main() {
     Fix: 'Replace with generics or @kalio/types',
   }));
 
+  // --- Regression review leads ----------------------------------------------
+  const regressionRows = (fileStats.regressionReviewLeads ?? []).slice(0, 60).map((h) => ({
+    Severity: h.severity === 'HIGH' ? '🟡 HIGH' : h.severity === 'MEDIUM' ? '🟢 MEDIUM' : '⚪ LOW',
+    File: h.file,
+    Line: h.line,
+    Check: h.check,
+    Match: h.match,
+    Fix: 'Review against AGENTS.md and UI/API centralization rules; suppress only with clear rationale',
+  }));
+
   // --- Circular deps ---------------------------------------------------------
   const circularRows = madgeOutputs.slice(0, 20).map((cycle, i) => ({
     '#': i + 1,
@@ -207,9 +217,10 @@ async function main() {
     high: godRows.filter((r) => r.Severity.includes('HIGH')).length
         + silentRows.filter((r) => r.Severity.includes('HIGH')).length
         + circularRows.filter((r) => r.Severity.includes('HIGH')).length
-        + governanceRows.filter((r) => r.Severity.includes('HIGH')).length,
-    medium: anyRows.filter((r) => r.Severity.includes('MEDIUM')).length + dupRows.length + deadRows.filter((r) => r.Severity.includes('MEDIUM')).length + governanceRows.filter((r) => r.Severity.includes('MEDIUM')).length,
-    low: anyRows.filter((r) => r.Severity.includes('LOW')).length + deadRows.filter((r) => r.Severity.includes('LOW')).length,
+        + governanceRows.filter((r) => r.Severity.includes('HIGH')).length
+        + regressionRows.filter((r) => r.Severity.includes('HIGH')).length,
+    medium: anyRows.filter((r) => r.Severity.includes('MEDIUM')).length + dupRows.length + deadRows.filter((r) => r.Severity.includes('MEDIUM')).length + governanceRows.filter((r) => r.Severity.includes('MEDIUM')).length + regressionRows.filter((r) => r.Severity.includes('MEDIUM')).length,
+    low: anyRows.filter((r) => r.Severity.includes('LOW')).length + deadRows.filter((r) => r.Severity.includes('LOW')).length + regressionRows.filter((r) => r.Severity.includes('LOW')).length,
   };
 
   const date = new Date().toISOString().slice(0, 10);
@@ -268,7 +279,7 @@ async function main() {
   }
 
   // --- Write JSON ------------------------------------------------------------
-  const jsonOut = { date, counts, godRows, silentRows, anyRows, circularRows, dupRows, deadRows, governanceRows, prio };
+  const jsonOut = { date, counts, godRows, silentRows, anyRows, regressionRows, circularRows, dupRows, deadRows, governanceRows, prio };
   await writeFile(path.join(OUT_DIR, `${date}-report.json`), JSON.stringify(jsonOut, null, 2));
 
   // --- Write Markdown --------------------------------------------------------
@@ -309,6 +320,10 @@ ${silentRows.length ? mdTable(['Severity', 'File', 'Line', 'Match', 'Fix'], sile
 ## \`any\` types (top 30 files)
 
 ${anyRows.length ? mdTable(['Severity', 'File', 'Count', 'Fix'], anyRows) : '_No any types._'}
+
+## Regression review leads
+
+${regressionRows.length ? mdTable(['Severity', 'File', 'Line', 'Check', 'Match', 'Fix'], regressionRows) : '_No regression review leads detected._'}
 
 ## Circular dependencies (madge)
 
