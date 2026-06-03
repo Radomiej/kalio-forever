@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Search, BrainCircuit, Trash2, Plus, ChevronDown, ChevronUp, Database, Sparkles, TextSearch } from 'lucide-react';
+import { Search, BrainCircuit, Plus, Database, Sparkles, TextSearch } from 'lucide-react';
 import { apiClient } from '../../services/apiClient';
 import type { Persona, MemorySearchResult, MemorySearchMode, MemoryIngestResult } from '@kalio/types';
+import { ModeButton, ResultCard } from './MemoryPage.Parts';
 
 export function MemoryPage() {
   type FreshnessReason = 'load' | 'search' | 'browse' | 'ingest' | 'delete';
@@ -316,100 +317,6 @@ export function MemoryPage() {
                 index={index}
                 onDelete={() => handleDelete(result.id)}
               />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ModeButton({
-  mode,
-  current,
-  onClick,
-  label,
-  icon,
-}: {
-  mode: MemorySearchMode;
-  current: MemorySearchMode;
-  onClick: () => void;
-  label: string;
-  icon: React.ReactNode;
-}) {
-  const active = mode === current;
-  return (
-    <button
-      className={`btn btn-sm gap-1 ${active ? 'btn-primary' : 'btn-ghost'}`}
-      onClick={onClick}
-      data-testid={`memory-mode-${mode}`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function ResultCard({
-  result,
-  index,
-  onDelete,
-}: {
-  result: MemorySearchResult;
-  index: number;
-  onDelete: () => void;
-}) {
-  const [expanded, setExpanded] = useState(index < 3);
-
-  return (
-    <div
-      className="border border-base-300 rounded-lg bg-base-200/30 overflow-hidden"
-      data-testid="memory-result"
-    >
-      <div className="p-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="badge badge-sm badge-primary">
-              {(result.score * 100).toFixed(0)}%
-            </span>
-            <span className="text-xs text-base-content/40 font-mono">
-              {new Date(result.createdAt).toLocaleDateString()}
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              className="btn btn-ghost btn-xs p-1 h-6 w-6"
-              onClick={() => setExpanded((v) => !v)}
-              title={expanded ? 'Collapse' : 'Expand'}
-            >
-              {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
-            <button
-              className="btn btn-ghost btn-xs p-1 h-6 w-6 text-error hover:bg-error/10"
-              onClick={onDelete}
-              title="Delete"
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-        </div>
-
-        {expanded ? (
-          <p className="mt-2 text-sm whitespace-pre-wrap">{result.content}</p>
-        ) : (
-          <p className="mt-2 text-sm line-clamp-2">{result.content}</p>
-        )}
-
-        {result.metadata && Object.keys(result.metadata).length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {Object.entries(result.metadata).map(([key, value]) => (
-              <span
-                key={key}
-                className="badge badge-xs badge-ghost"
-                title={`${key}: ${value}`}
-              >
-                {key}: {value.slice(0, 20)}{value.length > 20 ? '...' : ''}
-              </span>
             ))}
           </div>
         )}
