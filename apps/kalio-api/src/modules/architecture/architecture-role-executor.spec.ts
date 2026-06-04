@@ -2063,6 +2063,136 @@ describe('ArchitectureRoleExecutorService', () => {
     });
   });
 
+  it('routes from structured routerOutput nextAction when route_to prose is missing', async () => {
+    const schema = getSchema();
+    const slot = schema.roleSlots[0];
+    if (!slot) throw new Error('Expected slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: [
+          'The failed build requires another implementation pass.',
+          '```json',
+          JSON.stringify({
+            selectedStrategy: 'implementer',
+            mergedDecision: 'Send the QA failure back to implementation.',
+            acceptedInputs: [],
+            rejectedInputs: [],
+            unresolvedConflicts: [],
+            risks: [],
+            confidence: 0.82,
+            nextAction: 'route_to',
+            targetNodeId: 'implementer',
+            response: 'Fix the failed build without adding dependencies.',
+          }),
+          '```',
+        ].join('\n'),
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    const result = await service.execute({
+      schema,
+      run: createRun('subagent_execution'),
+      slot,
+      branchSessionId: 'branch-1',
+      personaId: slot.defaultPersonaId,
+      outgoingNodeIds: ['implementer'],
+    });
+
+    expect(result.data.route_to).toEqual({
+      targetNodeId: 'implementer',
+      response: 'Fix the failed build without adding dependencies.',
+    });
+  });
+
+  it('keeps prose route_to precedence over structured routerOutput routes', async () => {
+    const schema = getSchema();
+    const slot = schema.roleSlots[0];
+    if (!slot) throw new Error('Expected slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: [
+          'route_to(router, preserve explicit route)',
+          '```json',
+          JSON.stringify({
+            nextAction: 'route_to',
+            targetNodeId: 'implementer',
+            response: 'Do not use this structured fallback.',
+          }),
+          '```',
+        ].join('\n'),
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    const result = await service.execute({
+      schema,
+      run: createRun('subagent_execution'),
+      slot,
+      branchSessionId: 'branch-1',
+      personaId: slot.defaultPersonaId,
+      outgoingNodeIds: ['router', 'implementer'],
+    });
+
+    expect(result.data.route_to).toEqual({
+      targetNodeId: 'router',
+      response: 'preserve explicit route',
+    });
+  });
+
+  it('ignores structured route JSON when target is not an outgoing node', async () => {
+    const schema = getSchema();
+    const slot = schema.roleSlots[0];
+    if (!slot) throw new Error('Expected slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: [
+          'The answer includes routing-shaped JSON for an unavailable node.',
+          '```json',
+          JSON.stringify({
+            nextAction: 'route_to',
+            targetNodeId: 'implementer',
+            response: 'This target is not available from here.',
+          }),
+          '```',
+        ].join('\n'),
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    const result = await service.execute({
+      schema,
+      run: createRun('subagent_execution'),
+      slot,
+      branchSessionId: 'branch-1',
+      personaId: slot.defaultPersonaId,
+      outgoingNodeIds: ['router'],
+    });
+
+    expect(result.data.route_to).toBeUndefined();
+  });
+
   it('applies per-slot context policy before building subagent objectives', async () => {
     const schema = {
       ...getSchema(),

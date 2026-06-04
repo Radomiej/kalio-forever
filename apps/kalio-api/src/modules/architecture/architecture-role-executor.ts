@@ -883,6 +883,14 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
 }
 
 function parseRouteToCall(message: string): { targetNodeId: string; response?: string } | null {
+  const proseRoute = parseRouteToCallFromProse(message);
+  if (proseRoute) {
+    return proseRoute;
+  }
+  return parseRouteToCallFromStructuredOutput(message);
+}
+
+function parseRouteToCallFromProse(message: string): { targetNodeId: string; response?: string } | null {
   const marker = 'route_to(';
   const start = message.toLowerCase().indexOf(marker);
   if (start < 0) {
@@ -917,6 +925,142 @@ function parseRouteToCall(message: string): { targetNodeId: string; response?: s
   }
   const response = commaIndex >= 0 ? body.slice(commaIndex + 1).trim() : undefined;
   return { targetNodeId, response };
+}
+
+function parseRouteToCallFromStructuredOutput(message: string): { targetNodeId: string; response?: string } | null {
+  const candidates = [
+    ...extractFencedJsonBlocks(message),
+    ...extractTaggedJsonBlocks(message, 'routerOutput'),
+    ...extractTaggedJsonBlocks(message, 'router_output'),
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseStructuredRouteOutputCandidate(candidate);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function parseStructuredRouteOutputCandidate(raw: string): { targetNodeId: string; response?: string } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  const output = routeOutputCandidate(parsed);
+  if (!output) {
+    return null;
+  }
+  const nextAction = output['nextAction'];
+  if (typeof nextAction !== 'string' || nextAction.toLowerCase() !== 'route_to') {
+    return null;
+  }
+  const targetNodeIdValue = typeof output['targetNodeId'] === 'string'
+    ? output['targetNodeId']
+    : typeof output['nodeId'] === 'string'
+      ? output['nodeId']
+      : undefined;
+  if (typeof targetNodeIdValue !== 'string') {
+    return null;
+  }
+  const targetNodeId = targetNodeIdValue.trim();
+  if (!/^[A-Za-z0-9_.:-]+$/.test(targetNodeId)) {
+    return null;
+  }
+  const explicitResponse = typeof output['response'] === 'string' && output['response'].trim().length > 0
+    ? output['response'].trim()
+    : undefined;
+  const mergedDecision = typeof output['mergedDecision'] === 'string' && output['mergedDecision'].trim().length > 0
+    ? output['mergedDecision'].trim()
+    : undefined;
+
+  return {
+    targetNodeId,
+    response: explicitResponse ?? mergedDecision,
+  };
+}
+
+function routeOutputCandidate(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (isStructuredRouteOutput(value)) {
+    return value;
+  }
+  if (isRecord(value['routerOutput'])) {
+    return isStructuredRouteOutput(value['routerOutput']) ? value['routerOutput'] : null;
+  }
+  return null;
+}
+
+function isStructuredRouteOutput(value: unknown): value is Record<string, unknown> {
+  return isRecord(value)
+    && (typeof value['nextAction'] === 'string')
+    && (
+      typeof value['targetNodeId'] === 'string'
+      || typeof value['nodeId'] === 'string'
+    )
+    && (
+      typeof value['mergedDecision'] === 'undefined'
+      || typeof value['mergedDecision'] === 'string'
+    )
+    && (
+      typeof value['response'] === 'undefined'
+      || typeof value['response'] === 'string'
+    );
+}
+
+function extractFencedJsonBlocks(text: string): string[] {
+  return [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1]?.trim() ?? '');
+}
+
+function extractTaggedJsonBlocks(text: string, tag: string): string[] {
+  const tagIndex = text.toLowerCase().indexOf(tag.toLowerCase());
+  if (tagIndex < 0) {
+    return [];
+  }
+  const braceIndex = text.indexOf('{', tagIndex);
+  if (braceIndex < 0) {
+    return [];
+  }
+  const block = balancedJsonObject(text, braceIndex);
+  return block ? [block] : [];
+}
+
+function balancedJsonObject(text: string, startIndex: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = startIndex; index < text.length; index += 1) {
+    const char = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(startIndex, index + 1);
+      }
+    }
+  }
+  return null;
 }
 
 function normalizedRouteTarget(rawTarget: string): string {
