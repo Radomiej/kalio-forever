@@ -236,5 +236,15 @@ The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT
 - AgentFlow run `0SsbHDnwO_7ZuwzYZjNHn` is terminal `done`; event audit has `count=181`, `hasFinal=1`, `hasResume=2`, and `hasUnresolved=0`.
 - Research audit note exists, is ASCII-only, contains `seeded/no live search`, contains `2026-06-04`, contains no `2025`, and contains `0` live URLs.
 - Search config remains `provider=perplexity`, `configured=false`, so live `web_search` URL persistence is not currently provable.
-- `AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL=mimo-v2.5-pro` readiness smoke passed on the live API.
-- The original objective is therefore still not complete: it requires live web-search persistence and a fresh full high-level AgentFlow proof using `mimo-v2.5-pro` in graph execution, while the current hard blocker is missing Web Search configuration.
+- 2026-06-05 recheck with `AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL=mimo-v2.5-pro` failed on the live API with XiaomiMiMo MiFE `451 Unavailable For Legal Reasons` / cross-border isolation policy.
+- The original objective is therefore still not complete: it requires live web-search persistence and a fresh full high-level AgentFlow proof using `mimo-v2.5-pro` in graph execution. Current hard blockers are missing Web Search configuration and Xiaomi `mimo-v2.5-pro` cross-border access.
+
+## 2026-06-05 Blocked Recheck
+
+- Kalio repo is clean on `feature/mvp-demo`; TurboProject2 is clean on `codex/paid-xiaomi-agentflow-orchestrator-proof-4`.
+- `/api/search/config`: `provider=perplexity`, `configured=false`.
+- `/api/search/test`: `ok=false`, `Web search not configured. Add a Perplexity API key in Settings -> Web Search.`
+- `AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL=mimo-v2.5-pro npm.cmd run agentflow:paid-readiness` failed with `3` blockers:
+  - required high-level model smoke failed for `mimo-v2.5-pro` with MiFE `451` cross-border isolation policy;
+  - Web Search is not configured;
+  - Web Search smoke failed.
