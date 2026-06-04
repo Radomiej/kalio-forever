@@ -52,7 +52,7 @@ export function renderArchitectureRunProjection({
     detail: run.trace
       .map((step) => `${step.speaker}${step.nextNodeId ? ` -> ${step.nextNodeId}` : ''}`)
       .join(', '),
-    status: run.status === 'failed' ? 'error' : 'success',
+    status: run.status === 'failed' || run.status === 'cancelled' ? 'error' : 'success',
     column: branchMaxColumn + 1,
     row: startRow,
     turnId: turn.id,

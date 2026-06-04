@@ -114,7 +114,7 @@ describe('reconstructDurableArchitectureGraph', () => {
     });
   });
 
-  it('normalizes success and exited CLI child snapshots to completed status during durable reconstruction', async () => {
+  it('normalizes success, terminal-success and exited CLI child snapshots to completed status during durable reconstruction', async () => {
     const runId = 'durable-child-terminal-aliases-run';
     const registry = new ArchitectureRegistryService();
     const sessions = createPersistedSessions({
@@ -192,7 +192,7 @@ describe('reconstructDurableArchitectureGraph', () => {
           content: JSON.stringify({
             childSessionId: 'cli-child-2',
             agentId: 'copilot',
-            status: 'exited',
+            status: 'terminal-success',
             workdir: 'C:\\Projekty\\TurboProject2',
           }),
           createdAt: 104,

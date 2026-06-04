@@ -113,6 +113,8 @@ describe('RunSubAgentFlowTool', () => {
     expect(agentFlowRuntime.run).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       flowRunId: 'flow-1',
+      parentSessionId: 'real-parent',
+      parentToolCallId: 'call-1',
       childSessionId: 'child-1',
       openChatSessionId: 'child-1',
       openGraphRunId: 'flow-1',

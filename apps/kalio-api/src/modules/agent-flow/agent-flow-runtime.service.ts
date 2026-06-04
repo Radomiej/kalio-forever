@@ -37,7 +37,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
   ) {}
 
   async run(args: RunSubAgentFlowArgs): Promise<SubAgentFlowResult> {
-    const result = await this.adapter.run(args);
+    const result = this.withResultIdentity(await this.adapter.run(args), args);
     const now = Date.now();
     const snapshot = this.copyBackIfNeeded({
       run: {
@@ -63,9 +63,10 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
 
     const snapshot = await this.adapter.start(args);
     const checkpointed = this.copyBackIfNeeded(withCheckpoint(snapshot, args));
-    this.repository.saveSnapshot(checkpointed);
+    const normalized = this.withSnapshotResultIdentity(checkpointed);
+    this.repository.saveSnapshot(normalized);
     this.scheduleDurableReconciliation(checkpointed.run.id);
-    return checkpointed;
+    return normalized;
   }
 
   async resume(runId: string, dto: ResumeAgentFlowRunDto): Promise<AgentFlowRunSnapshot> {
@@ -150,6 +151,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
     if (!snapshot) {
       throw new Error(`AGENT_FLOW_RUN_NOT_FOUND: ${runId}`);
     }
+    await this.adapter.stop?.(runId, argsFromRun(snapshot.run));
     const now = Date.now();
     const stopEvent: AgentFlowTraceItem = {
       id: `agent-flow:${runId}:event:${snapshot.events.length + 1}:stopped`,
@@ -270,6 +272,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
       id: `agent-flow:${run.id}:event:${snapshot.events.length + 1}:copy_back`,
       sequence: (lastEvent?.sequence ?? snapshot.events.length) + 1,
       type: 'flow:copy_back',
+      lifecycle: 'copy_back',
       message: `Copied ${copiedFiles.length} AgentFlow artifact(s) back to the parent session.`,
       data: {
         copiedFiles,
@@ -284,6 +287,8 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
       result: {
         ...(snapshot.result ?? {
           flowRunId: run.id,
+          parentSessionId: run.parentSessionId,
+          parentToolCallId: run.parentToolCallId,
           childSessionId: run.childSessionId,
           status: run.status,
           summary: run.summary ?? `AgentFlow ${run.flowDefinitionId} finished with status ${run.status}.`,
@@ -296,6 +301,29 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
         artifacts: Array.from(new Set([...(snapshot.result?.artifacts ?? []), ...artifacts])),
       },
       events: [...snapshot.events, event],
+    };
+  }
+
+  private withResultIdentity(result: SubAgentFlowResult, args: RunSubAgentFlowArgs): SubAgentFlowResult {
+    return {
+      ...result,
+      parentSessionId: args.parentSessionId,
+      parentToolCallId: args.parentToolCallId,
+    };
+  }
+
+  private withSnapshotResultIdentity(snapshot: AgentFlowRunSnapshot): AgentFlowRunSnapshot {
+    if (!snapshot.result) return snapshot;
+    return {
+      ...snapshot,
+      result: {
+        ...snapshot.result,
+        parentSessionId: snapshot.run.parentSessionId,
+        parentToolCallId: snapshot.run.parentToolCallId,
+        childSessionId: snapshot.run.childSessionId,
+        openChatSessionId: snapshot.run.openChatSessionId ?? snapshot.result.openChatSessionId,
+        openGraphRunId: snapshot.run.openGraphRunId ?? snapshot.result.openGraphRunId,
+      },
     };
   }
 }

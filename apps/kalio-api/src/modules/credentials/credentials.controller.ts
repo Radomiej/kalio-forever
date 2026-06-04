@@ -1,9 +1,11 @@
 import { Controller, Get, Post, Put, Patch, Delete, Param, Body, HttpCode, HttpStatus, Logger, BadRequestException } from '@nestjs/common';
 import type { Credential, CreateCredentialDto, ToolTimeoutSettings } from '@kalio/types';
 import { CredentialsService } from './credentials.service';
-import { createLLMProvider } from '../llm/providers/provider-factory';
+import { LLMService } from '../llm/llm.service';
+import type { LLMToolDef } from '../llm/llm.types';
 import { TimeoutSettingsService } from './timeout-settings.service';
 import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
+import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../common/utils/llm-provider-http.util';
 
 @Controller('credentials')
 export class CredentialsController {
@@ -12,7 +14,83 @@ export class CredentialsController {
   constructor(
     private readonly credentialsService: CredentialsService,
     private readonly timeoutSettings: TimeoutSettingsService,
+    private readonly llm: LLMService,
   ) {}
+
+  private runtimeSmokeMessages(): Array<{ role: 'system' | 'user'; content: string }> {
+    return [
+      {
+        role: 'system',
+        content: [
+          'You are the Kalio ArchitectureRuntime orchestrator smoke-test role.',
+          'Define acceptance criteria, route graph work, delegate to child agents, and require evidence before claiming completion.',
+          'Use the available tool schemas when needed, but keep this smoke response bounded.',
+          'Return a compact JSON object with status, plannedPhases, nextStep, evidenceNeeded, and providerModelObserved.',
+        ].join(' '),
+      },
+      {
+        role: 'user',
+        content: [
+          'Paid Xiaomi orchestrator proof after agent-orchestrator persona hardening.',
+          'Target repo: C:\\Projekty\\TurboProject2, current branch codex/paid-xiaomi-orchestrator-proof-2.',
+          'Create a new real route/page for a Xiaomi-style premium smartphone landing page.',
+          'Use the normal Goal Master Delivery Loop and keep the run auditable.',
+          '',
+          'Required phases:',
+          '1. Planning/prototyping: run a design debate or critique and web-search/research current premium smartphone/product landing page patterns. Persist research/design notes into the target repo, for example docs/xiaomi-orchestrator-proof-research.md.',
+          '2. Implementation: implement the page using existing project patterns. Do not overwrite unrelated salon content. Record exact files changed.',
+          '3. Refactor/QA: run available build/tests, inspect the result, fix issues, and commit the target repo changes.',
+          '',
+          'Evidence contract: final artifact must include parent session id, child/root session id, architecture/AgentFlow run id, branch, commit hash, changed files, research note path, whether web search/research was used, build/test command result, and final status.',
+          'Use mimo-v2.5-pro for orchestration/review and mimo-v2.5 for lower-level work if runtime model routing is available; otherwise record the effective provider/model actually used.',
+          'Do not claim done without real commit and verification evidence.',
+        ].join(' '),
+      },
+    ];
+  }
+
+  private runtimeSmokeTools(): LLMToolDef[] {
+    return [
+      {
+        name: 'spawn_cli_agent',
+        description: 'Start a delegated CLI implementation or review agent for an architecture workflow node.',
+        parameters: {
+          type: 'object',
+          properties: {
+            agentId: { type: 'string' },
+            role: { type: 'string' },
+            workdir: { type: 'string' },
+            prompt: { type: 'string' },
+          },
+          required: ['agentId', 'role', 'workdir', 'prompt'],
+        },
+      },
+      {
+        name: 'web_search',
+        description: 'Research current external references before a design or implementation decision.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            maxResults: { type: 'number' },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'vfs_write',
+        description: 'Persist auditable research, design notes, implementation notes, or final artifacts.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+            content: { type: 'string' },
+          },
+          required: ['path', 'content'],
+        },
+      },
+    ];
+  }
 
   @Get()
   findAll(): Promise<Credential[]> {
@@ -154,29 +232,20 @@ export class CredentialsController {
         return { ok: false, latencyMs: Date.now() - start, error: 'API key not available' };
       }
 
-      const PROVIDER_BASE_URLS: Record<string, string> = {
-        openai:     'https://api.openai.com/v1',
-        xiaomimimo: 'https://token-plan-ams.xiaomimimo.com/v1',
-        deepseek:   'https://api.deepseek.com/v1',
-        cometapi:   'https://api.cometapi.com/v1',
-        openrouter: 'https://openrouter.ai/api/v1',
-        ollama:     'http://localhost:11434/v1',
-        bitnet:     'http://localhost:8080/v1',
+      const providerConfig = {
+        provider: cred.provider,
+        apiKey: apiKey || '',
+        model: cred.model ?? '',
+        ...(cred.baseUrl ? { baseUrl: cred.baseUrl } : {}),
       };
-
-      const resolvedBase = (cred.baseUrl ?? PROVIDER_BASE_URLS[cred.provider] ?? '').replace(/\/$/, '');
+      const resolvedBase = resolveLlmProviderBaseUrl(providerConfig.provider, providerConfig.baseUrl);
       const endpoint = `${resolvedBase}/models`;
       const timeoutMs = await this.timeoutSettings.getProviderTimeoutMs(isLocal);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
-        const authHeaders: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
-        if (cred.provider === 'xiaomimimo') {
-          authHeaders['HTTP-Referer'] = 'https://github.com/RooVetGit/Roo-Cline';
-          authHeaders['X-Title'] = 'Roo Code';
-          authHeaders['User-Agent'] = 'RooCode/3.17.0';
-        }
+        const authHeaders = buildProviderCompatHeaders(providerConfig.provider, apiKey || undefined);
 
         const upstream = await fetch(endpoint, { headers: authHeaders, signal: controller.signal });
         if (!upstream.ok) {
@@ -210,13 +279,13 @@ export class CredentialsController {
   ): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
     const start = Date.now();
     try {
-      const llm = createLLMProvider({
-        provider: body.provider,
-        apiKey: body.apiKey,
-        model: body.model,
-        baseUrl: body.baseUrl,
-      });
-      await llm.streamChat(
+      await this.llm.streamChatWithConfig(
+        {
+          provider: body.provider,
+          apiKey: body.apiKey,
+          model: body.model,
+          ...(body.baseUrl ? { baseUrl: body.baseUrl } : {}),
+        },
         [{ role: 'user', content: 'ping' }],
         [],
         { sessionId: 'test-session', messageId: 'test-msg', onChunk: () => { /* drain chunks */ } },
@@ -224,6 +293,92 @@ export class CredentialsController {
       return { ok: true, latencyMs: Date.now() - start };
     } catch (err) {
       return { ok: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  @Post(':id/test-completion')
+  async testCompletionById(
+    @Param('id') id: string,
+  ): Promise<{
+    ok: boolean;
+    latencyMs: number;
+    mode: 'runtime_smoke';
+    provider: string;
+    model: string;
+    source: 'db';
+    error?: string;
+  }> {
+    const start = Date.now();
+    try {
+      const all = await this.credentialsService.findAll();
+      const cred = all.find((c) => c.id === id);
+      if (!cred) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          mode: 'runtime_smoke',
+          provider: '',
+          model: '',
+          source: 'db',
+          error: 'Credential not found',
+        };
+      }
+
+      const isLocal = isLocalLlmProvider(cred.provider, cred.baseUrl ?? undefined);
+      const apiKey = await this.credentialsService.getApiKey(id);
+      if (!apiKey && !isLocal) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          mode: 'runtime_smoke',
+          provider: cred.provider,
+          model: cred.model ?? '',
+          source: 'db',
+          error: 'API key not available',
+        };
+      }
+      if (!cred.model) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          mode: 'runtime_smoke',
+          provider: cred.provider,
+          model: cred.model ?? '',
+          source: 'db',
+          error: 'Credential model is not set',
+        };
+      }
+
+      const providerConfig = {
+        provider: cred.provider,
+        apiKey: apiKey ?? '',
+        model: cred.model,
+        ...(cred.baseUrl ? { baseUrl: cred.baseUrl } : {}),
+      };
+      await this.llm.streamChatWithConfig(
+        providerConfig,
+        this.runtimeSmokeMessages(),
+        this.runtimeSmokeTools(),
+        { sessionId: 'credential-completion-test-session', messageId: 'credential-completion-test-msg', onChunk: () => { /* drain chunks */ } },
+      );
+      return {
+        ok: true,
+        latencyMs: Date.now() - start,
+        mode: 'runtime_smoke',
+        provider: cred.provider,
+        model: cred.model,
+        source: 'db',
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        latencyMs: Date.now() - start,
+        mode: 'runtime_smoke',
+        provider: 'unknown',
+        model: 'unknown',
+        source: 'db',
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 }

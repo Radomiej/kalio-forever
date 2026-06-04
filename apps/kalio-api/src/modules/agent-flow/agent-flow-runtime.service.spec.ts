@@ -13,6 +13,7 @@ function adapter() {
     run: vi.fn(),
     start: vi.fn(),
     getSnapshot: vi.fn(),
+    stop: vi.fn(),
   };
 }
 
@@ -2432,6 +2433,57 @@ describe('AgentFlowRuntimeService', () => {
       status: 'blocked',
     });
     expect(repository.getSnapshot('run-stale-global-list')?.run.status).toBe('blocked');
+  });
+
+  it('cascades stop to the runtime adapter before storing a cancelled snapshot', async () => {
+    const architectureAdapter = adapter();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    repository.saveSnapshot({
+      run: {
+        id: 'run-stop-cascade',
+        parentSessionId: 'parent-stop-cascade',
+        parentToolCallId: 'tool-stop-cascade',
+        childSessionId: 'arch-run-stop-cascade-root',
+        openGraphRunId: 'run-stop-cascade',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'running',
+        startMode: 'durable',
+        returnMode: 'summary',
+        checkpoint: {
+          goal: 'Stop the underlying architecture worker',
+          context: { workdir: 'C:\\Projekty\\TurboProject2' },
+          vfsMode: 'isolated',
+          copyBack: false,
+          maxSteps: 8,
+        },
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+    });
+
+    const stopped = await service.stop('run-stop-cascade');
+
+    expect(architectureAdapter.stop).toHaveBeenCalledWith('run-stop-cascade', expect.objectContaining({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Stop the underlying architecture worker',
+      parentSessionId: 'parent-stop-cascade',
+      parentToolCallId: 'tool-stop-cascade',
+      context: { workdir: 'C:\\Projekty\\TurboProject2' },
+      vfsMode: 'isolated',
+      copyBack: false,
+      maxSteps: 8,
+    }));
+    expect(stopped.run.status).toBe('cancelled');
+    expect(stopped.events.at(-1)).toMatchObject({
+      type: 'flow:stopped',
+      status: 'cancelled',
+    });
+    expect(repository.getSnapshot('run-stop-cascade')?.run.status).toBe('cancelled');
   });
 
   it('RED: preserves checkpoint fields when refreshed durable snapshots omit them', async () => {

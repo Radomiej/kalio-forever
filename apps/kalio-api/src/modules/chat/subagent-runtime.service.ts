@@ -16,6 +16,7 @@ import { PersonaService } from '../persona/persona.service';
 import { SkillsService } from '../skills/skills.service';
 import { AuditService } from './audit.service';
 import { toAuditToolCallData, toAuditToolResultData } from './audit-tool-data';
+import { buildSubagentLLMAuditData } from './subagent-llm-audit.helpers';
 
 const DEFAULT_MAX_ITERATIONS = 8;
 const MAX_SUBAGENT_NESTING_DEPTH = 1;
@@ -298,6 +299,8 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     let latestText = '';
     let lastMessageId = `subagent-${params.agentRun.agentRunId}`;
     const personaConfig = await this.personaService.getSessionConfig(params.personaId);
+    const runtimeConfig = await this.llmSource.getConfig?.();
+    const llmAuditData = buildSubagentLLMAuditData(runtimeConfig, personaConfig?.model);
     const activeSkills = personaConfig?.skillIds && personaConfig.skillIds.length > 0
       ? await this.skillsService?.findByIds(personaConfig.skillIds) ?? []
       : [];
@@ -342,6 +345,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           estimatedInputTokens: history.reduce((total, item) => total + estimateContentTokens(item.content), 0),
           messageCount: history.length,
           toolCount: params.tools.length,
+          ...llmAuditData,
           ...(params.auditContext ?? {}),
         },
       });
@@ -359,6 +363,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           textLength: 0,
           thinkingLength: 0,
           toolCallCount: 0,
+          ...llmAuditData,
           ...(params.auditContext ?? {}),
         },
         chunkCount: 0,
@@ -371,6 +376,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         tools: params.tools,
         sessionId: params.childSessionId,
         messageId,
+        model: personaConfig?.model?.trim() || undefined,
         abortSignal: params.abortSignal,
       })) {
         if (params.abortSignal.aborted) {
@@ -404,6 +410,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           toolCallCount: state.toolCalls.length,
           usage,
           estimatedOutputTokens: estimateTextTokens(state.text) + estimateTextTokens(state.thinking),
+          ...llmAuditData,
           ...(params.auditContext ?? {}),
         },
       });

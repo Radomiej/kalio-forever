@@ -70,12 +70,14 @@ describe('ArchitectureAgentFlowAdapter', () => {
     }));
     expect(result).toMatchObject({
       flowRunId: 'run-1',
+      parentSessionId: 'parent-1',
       childSessionId: 'arch-run-1-root',
       status: 'done',
       summary: 'Goal Guard accepted the implementation.',
       tracePreview: [
         expect.objectContaining({
           type: 'flow:final_artifact',
+          lifecycle: 'done',
           nodeId: 'final-artifact',
           roleSlotId: 'finalizer',
           route: expect.objectContaining({
@@ -89,6 +91,161 @@ describe('ArchitectureAgentFlowAdapter', () => {
           }),
         }),
       ],
+    });
+  });
+
+  it('projects canonical AgentFlow lifecycle labels while preserving legacy trace event types', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-lifecycle',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Audit lifecycle',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-lifecycle-root',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 4,
+      completedAt: 4,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-created',
+        runId: run.id,
+        sequence: 1,
+        type: 'run_created',
+        message: 'AgentFlow run created.',
+        createdAt: 1,
+      },
+      {
+        id: 'event-started',
+        runId: run.id,
+        sequence: 2,
+        type: 'node_started',
+        message: 'Implementer started.',
+        nodeId: 'implementer',
+        createdAt: 2,
+      },
+      {
+        id: 'event-completed',
+        runId: run.id,
+        sequence: 3,
+        type: 'node_completed',
+        message: 'Implementer completed.',
+        nodeId: 'implementer',
+        createdAt: 3,
+      },
+      {
+        id: 'event-final',
+        runId: run.id,
+        sequence: 4,
+        type: 'final_artifact',
+        message: 'Lifecycle accepted.',
+        nodeId: 'final-artifact',
+        createdAt: 4,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn().mockResolvedValue(run),
+      getEvents: vi.fn().mockReturnValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const result = await adapter.run({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Audit lifecycle',
+      parentSessionId: 'parent-lifecycle',
+      parentToolCallId: 'call-lifecycle',
+      returnMode: 'full_trace',
+    });
+
+    expect(result).toMatchObject({
+      parentSessionId: 'parent-lifecycle',
+      parentToolCallId: 'call-lifecycle',
+      openGraphRunId: 'run-lifecycle',
+    });
+    expect(result.tracePreview?.map((event) => event.type)).toEqual([
+      'flow:run_created',
+      'flow:node_start',
+      'flow:node_result',
+      'flow:final_artifact',
+    ]);
+    expect(result.tracePreview?.map((event) => event.lifecycle)).toEqual([
+      'started',
+      'node_started',
+      'node_completed',
+      'done',
+    ]);
+  });
+
+  it('projects stopped architecture runs as cancelled AgentFlow snapshots', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-stopped',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Stop cleanly',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-stopped-root',
+      status: 'cancelled',
+      createdAt: 1,
+      updatedAt: 3,
+      completedAt: 3,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-created',
+        runId: run.id,
+        sequence: 1,
+        type: 'run_created',
+        message: 'AgentFlow run created.',
+        createdAt: 1,
+      },
+      {
+        id: 'event-stopped',
+        runId: run.id,
+        sequence: 2,
+        type: 'run_stopped',
+        message: 'Architecture run stopped by user.',
+        data: {
+          reasonCode: 'user_stop',
+          stoppedByUser: true,
+          previousStatus: 'running',
+          source: 'user',
+        },
+        createdAt: 3,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn().mockResolvedValue(run),
+      getEvents: vi.fn().mockReturnValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const result = await adapter.run({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Stop cleanly',
+      parentSessionId: 'parent-stopped',
+      parentToolCallId: 'call-stopped',
+      returnMode: 'full_trace',
+    });
+
+    expect(result).toMatchObject({
+      flowRunId: 'run-stopped',
+      parentSessionId: 'parent-stopped',
+      parentToolCallId: 'call-stopped',
+      childSessionId: 'arch-run-stopped-root',
+      status: 'cancelled',
+      summary: 'Architecture run stopped by user.',
+      openChatSessionId: 'arch-run-stopped-root',
+      openGraphRunId: 'run-stopped',
+    });
+    expect(result.tracePreview?.at(-1)).toMatchObject({
+      type: 'flow:stopped',
+      lifecycle: 'cancelled',
+      message: 'Architecture run stopped by user.',
+      data: expect.objectContaining({
+        reasonCode: 'user_stop',
+        sourceEventType: 'run_stopped',
+      }),
     });
   });
 
@@ -629,10 +786,13 @@ describe('ArchitectureAgentFlowAdapter', () => {
 
     expect(snapshot?.run.status).not.toBe('done');
     expect(snapshot?.result?.status).not.toBe('done');
+    expect(snapshot?.result?.summary).toBe('Blocked because linked CLI child agents are unresolved.');
     expect(snapshot?.events.at(-1)).toMatchObject({
       type: 'flow:unresolved_cli_children',
+      lifecycle: 'blocked',
       status: 'blocked',
       data: {
+        reasonCode: 'unresolved_cli_children',
         childSessionIds: [
           'cli-child-running',
           'cli-child-failed',
@@ -642,6 +802,94 @@ describe('ArchitectureAgentFlowAdapter', () => {
       },
     });
     expect(snapshot?.result?.nextActions).toContain('Wait for linked CLI child agents to complete before accepting the AgentFlow result.');
+  });
+
+  it('allows finalization when a later verifier terminal evidence proves child work even if an earlier child is still running', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-final-with-verifier-terminal-evidence',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Implement with terminal verifier evidence',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-final-with-verifier-terminal-evidence-root',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 18,
+      completedAt: 18,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-cli',
+        runId: run.id,
+        sequence: 1,
+        type: 'participant_output',
+        message: 'Implementer delegated a running CLI child.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
+        data: {
+          toolEvidence: {
+            successfulToolNames: ['spawn_cli_agent'],
+            childCliSessions: [
+              {
+                childSessionId: 'cli-child-running-verifier-terminal',
+                agentId: 'copilot',
+                status: 'running',
+                workdir: 'C:\\Projekty\\TurboProject2',
+              },
+            ],
+          },
+        },
+        createdAt: 8,
+      },
+      {
+        id: 'event-verifier-terminal',
+        runId: run.id,
+        sequence: 2,
+        type: 'participant_output',
+        message: 'Verifier validated terminal build output and got commit. Build passed, git status branch is clean.',
+        nodeId: 'verifier',
+        roleSlotId: 'verifier',
+        data: {
+          toolEvidence: {
+            toolCallCount: 1,
+            toolResultCount: 1,
+            toolNames: ['terminal_output'],
+            successfulToolNames: ['terminal_output'],
+            targetPaths: ['C:\\Projekty\\TurboProject2\\dist'],
+          },
+        },
+        createdAt: 12,
+      },
+      {
+        id: 'event-final',
+        runId: run.id,
+        sequence: 3,
+        type: 'final_artifact',
+        message: 'Delivery accepted after verifier terminal evidence.',
+        nodeId: 'final-artifact',
+        roleSlotId: 'finalizer',
+        createdAt: 18,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRun: vi.fn().mockReturnValue(run),
+      findRunDurable: vi.fn().mockResolvedValue(run),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-final-with-verifier-terminal-evidence', {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Implement with terminal verifier evidence',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('done');
+    expect(snapshot?.result?.status).toBe('done');
+    expect(snapshot?.events.some((event) => event.type === 'flow:unresolved_cli_children')).toBe(false);
+    expect(snapshot?.result?.nextActions).not.toContain('Wait for linked CLI child agents to complete before accepting the AgentFlow result.');
   });
 
   it('does not finalize when the final artifact contract declares unresolved blockers', async () => {
@@ -693,6 +941,8 @@ describe('ArchitectureAgentFlowAdapter', () => {
     expect(snapshot?.result?.status).toBe('blocked');
     expect(snapshot?.events.at(-1)).toMatchObject({
       type: 'flow:final_artifact_blocker',
+      lifecycle: 'blocked',
+      data: { reasonCode: 'final_artifact_blocker' },
       status: 'blocked',
     });
     expect(snapshot?.result?.nextActions).toEqual([
@@ -859,6 +1109,8 @@ describe('ArchitectureAgentFlowAdapter', () => {
     expect(snapshot?.run.summary).toBe('Blocked because the latest architecture attempt completed without a final artifact.');
     expect(snapshot?.events.at(-1)).toMatchObject({
       type: 'flow:missing_final_artifact',
+      lifecycle: 'blocked',
+      data: { reasonCode: 'missing_final_artifact' },
       status: 'blocked',
     });
     expect(snapshot?.events.some((event) => event.type === 'flow:final_artifact_blocker')).toBe(false);
@@ -1586,6 +1838,12 @@ describe('ArchitectureAgentFlowAdapter', () => {
                 status: 'exited',
                 workdir: 'C:\\Projekty\\TurboProject2',
               },
+              {
+                childSessionId: 'cli-child-terminal-success',
+                agentId: 'copilot',
+                status: 'terminal-success',
+                workdir: 'C:\\Projekty\\TurboProject2',
+              },
             ],
           },
         },
@@ -1843,6 +2101,88 @@ describe('ArchitectureAgentFlowAdapter', () => {
     expect(snapshot?.run.status).toBe('running');
     expect(snapshot?.run.waitingForNodeId).toBeUndefined();
     expect(snapshot?.run.checkpoint?.continuation).toBeUndefined();
+  });
+
+  it('blocks finalization-missing when Goal Master accepts host evidence but runtime fallback rejects final artifact', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-finalization-missing',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Continue after external QA',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-finalization-missing-root',
+      status: 'running',
+      createdAt: 1,
+      updatedAt: 12,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-goal-master',
+        runId: run.id,
+        sequence: 1,
+        type: 'router_decision',
+        message: 'Status: GO. Delivery accepted with build passes, git status clean, and final-artifact requested.',
+        nodeId: 'goal-master',
+        roleSlotId: 'goal_master',
+        route: {
+          source: 'runtime_fallback',
+          fromNodeId: 'goal-master',
+          selectedNodeIds: ['implementer'],
+          rejectedNodeIds: ['final-artifact'],
+          nextNodeId: 'implementer',
+          response: 'CLI child implementation is incomplete: child status is failed.',
+        },
+        createdAt: 10,
+      },
+      {
+        id: 'event-completed',
+        runId: run.id,
+        sequence: 2,
+        type: 'node_completed',
+        message: 'Goal Master completed.',
+        nodeId: 'goal-master',
+        roleSlotId: 'goal_master',
+        createdAt: 11,
+      },
+      {
+        id: 'event-return',
+        runId: run.id,
+        sequence: 3,
+        type: 'router_decision',
+        message: 'Goal Master returned control to the orchestrator.',
+        nodeId: 'goal-master',
+        roleSlotId: 'goal_master',
+        data: {
+          returnToOrchestrator: true,
+          pendingNodeIds: ['implementer'],
+          visitCounts: { implementer: 3, 'goal-master': 3 },
+        },
+        createdAt: 12,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRun: vi.fn().mockReturnValue(run),
+      findRunDurable: vi.fn(),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-finalization-missing', {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Continue after external QA',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('blocked');
+    expect(snapshot?.run.summary).toBe('Blocked because Goal Master accepted finalization evidence, but the runtime could not produce the final artifact.');
+    expect(snapshot?.result?.status).toBe('blocked');
+    expect(snapshot?.events.at(-1)).toMatchObject({
+      type: 'flow:finalization_missing',
+      status: 'blocked',
+      data: { reasonCode: 'finalization_missing' },
+    });
   });
 
   it('maps failed architecture max-step stops to waiting AgentFlow continuation', async () => {

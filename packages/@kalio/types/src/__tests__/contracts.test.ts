@@ -30,6 +30,7 @@ import type {
   CreateArchitectureSchemaVariantDto,
   CreateArchitectureRunDto,
   ArchitectureRun,
+  ArchitectureRunStatus,
   ArchitectureRouterOutput,
   ArchitectureRouteDecision,
   ArchitectureRouteHop,
@@ -185,6 +186,9 @@ describe('@kalio/types contract shape', () => {
     expectTypeOf<AgentFlowRunStatus>().toEqualTypeOf<
       'queued' | 'running' | 'waiting_on_orchestrator' | 'done' | 'failed' | 'cancelled' | 'blocked'
     >();
+    expectTypeOf<ArchitectureRunStatus>().toEqualTypeOf<
+      'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+    >();
     expectTypeOf<AgentFlowReturnMode>().toEqualTypeOf<'summary' | 'full_trace' | 'artifacts_only'>();
     expectTypeOf<AgentFlowStartMode>().toEqualTypeOf<'durable' | 'blocking'>();
     expectTypeOf<AgentFlowPhase>().toEqualTypeOf<'strategy' | 'research' | 'debate' | 'build' | 'qa' | 'hitl' | 'custom'>();
@@ -204,6 +208,7 @@ describe('@kalio/types contract shape', () => {
       id: 'trace-1',
       sequence: 1,
       type: 'flow:node_result',
+      lifecycle: 'node_completed',
       message: 'Goal Guard accepted the result.',
       nodeId: 'goal-guard',
       roleSlotId: 'goal_master',
@@ -224,6 +229,8 @@ describe('@kalio/types contract shape', () => {
     };
     const result: SubAgentFlowResult = {
       flowRunId: 'flow-run-1',
+      parentSessionId: args.parentSessionId,
+      parentToolCallId: args.parentToolCallId,
       childSessionId: 'flow-child-1',
       status: 'done',
       summary: 'Goal Guard accepted the result.',
@@ -297,6 +304,9 @@ describe('@kalio/types contract shape', () => {
     expect(run.flowDefinitionId).toBe('goal_guard_delivery_loop');
     expect(definition.edges.some((edge) => edge.returnToOrchestrator)).toBe(true);
     expect(result.tracePreview?.[0]?.type).toBe('flow:node_result');
+    expect(result.tracePreview?.[0]?.lifecycle).toBe('node_completed');
+    expect(result.parentSessionId).toBe('parent-1');
+    expect(result.parentToolCallId).toBe('call-1');
     expect(result.tracePreview?.[0]?.route?.nextNodeId).toBe('final-artifact');
     expect(result.tracePreview?.[0]?.data?.['toolEvidence']).toEqual({
       successfulToolNames: ['vfs_write'],
@@ -505,7 +515,7 @@ describe('@kalio/types contract shape', () => {
       }>;
     }>();
     expectTypeOf<ArchitectureRun['executionMode']>().toEqualTypeOf<'session_branches' | 'subagent_execution'>();
-    expectTypeOf<ArchitectureRun['status']>().toEqualTypeOf<'queued' | 'running' | 'completed' | 'failed'>();
+    expectTypeOf<ArchitectureRun['status']>().toEqualTypeOf<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>();
     expectTypeOf<ArchitectureRun['slotOverrides']>().toEqualTypeOf<Record<string, ID> | undefined>();
     expectTypeOf<ArchitectureRun['rootSessionId']>().toEqualTypeOf<ID | undefined>();
     expectTypeOf<ArchitectureRun['branchSessionIds']>().toEqualTypeOf<Record<string, ID> | undefined>();
@@ -524,7 +534,8 @@ describe('@kalio/types contract shape', () => {
         | 'artifact_created'
         | 'memory_persisted'
         | 'final_artifact'
-        | 'node_completed';
+        | 'node_completed'
+        | 'run_stopped';
       message: string;
     }>();
     expectTypeOf<ArchitectureRouteDecision>().toEqualTypeOf<{

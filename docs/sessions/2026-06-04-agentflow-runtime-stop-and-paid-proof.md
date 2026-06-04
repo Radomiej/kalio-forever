@@ -1,0 +1,141 @@
+# AgentFlow Runtime Stop And Paid Proof QA
+
+Date: 2026-06-04
+
+## Goal
+
+Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi provider and fix critical runtime auditability issues found during manual QA.
+
+## What Changed
+
+- Added a `stop` capability to the AgentFlow runtime port.
+- Implemented `ArchitectureAgentFlowAdapter.stop()` as an MVP bridge to `ArchitectureRuntimeService.stopRun()`.
+- Updated `AgentFlowRuntimeService.stop()` so an AgentFlow stop cascades to the underlying Architecture runtime before storing the local `cancelled` snapshot.
+- Added a regression test proving `AgentFlowRuntimeService.stop()` calls the runtime adapter with reconstructed run args.
+- Added parent-chat start projection for async Architecture runs so parent conversation history receives the run immediately, before graph execution completes.
+- Added normal `chat:stop` cascade to active AgentFlow runs tied to the stopped parent/root/child session.
+- Added a `ModuleRef.get(AGENT_FLOW_RUNTIME, { strict: false })` fallback for `chat:stop` so the gateway can resolve the sibling AgentFlow runtime in the real Nest module graph.
+- Added AgentFlow `blocked/finalization_missing` projection when Goal Master accepts host build/git evidence but the runtime fallback cannot produce the final artifact.
+- Added first-class Architecture stop semantics: `ArchitectureRunStatus` now includes `cancelled`, `ArchitectureRuntimeService.stopRun()` appends `run_stopped`, and AgentFlow trace projection maps it to `flow:stopped` / lifecycle `cancelled`.
+- Updated execution graph mapping so direct Architecture runs with status `cancelled` render as terminal error/interruption nodes instead of success.
+- Updated `docs/technical-debt.md` with findings from the paid proof run and remaining runtime/product debt.
+
+## QA Evidence
+
+- Paid readiness had previously passed on provider `xiaomimimo` / model `mimo-v2.5`.
+- Graph Editor false-start run `M850F2q1JT1LIkJ_0KEeB` completed and appeared in the conversation projection, but it was a developer-path run, not the normal product path.
+- Conversation-started Goal Master Delivery Loop run `Ob_SIuSzaMExFOM_95nIu` produced a child Architecture/AgentFlow trace and returned to `waiting_on_orchestrator`.
+- Target repo `C:\Projekty\TurboProject2` branch `codex/paid-xiaomi-agentflow-proof` received commit `4d42fad` and `npm.cmd run build` passed.
+- Product QA rejected the generated proof page as final evidence because it is mock content, has inconsistent statuses, and regressed existing salon page sections.
+- Resume-driven QA sent the blockers back into run `Ob_SIuSzaMExFOM_95nIu`.
+- The child workflow produced final commit `737eaf3 fix: restore salon site, replace mock proof with real runtime evidence, fix encoding`.
+- Post-commit `npm.cmd run build` passed and `C:\Projekty\TurboProject2` was clean.
+- Despite accepted host evidence, AgentFlow still returned to `waiting_on_orchestrator` while `/api/architecture-runs/Ob_SIuSzaMExFOM_95nIu` reported `running`.
+- After backend restart, clean normal Talk run `zXYvRz-GOBlv9FMANp-mT` was started from a new ordinary chat session `vNeJeOKVVxdwB-3jIHf5S` with workflow selector `Goal Master Delivery Loop`.
+- The clean run reached terminal `failed` quickly because XiaomiMiMo returned `451 Unavailable For Legal Reasons` for cross-border isolation policy.
+- Parent conversation persistence was verified via `/api/sessions/vNeJeOKVVxdwB-3jIHf5S/messages`: it contains `architecture:zXYvRz-GOBlv9FMANp-mT:user` and an assistant failure projection with the provider error.
+- AgentFlow snapshot for `zXYvRz-GOBlv9FMANp-mT` includes `flowRunId`, `parentSessionId`, `childSessionId`, `openGraphRunId`, terminal `failed` status, and trace events for run creation, orchestrator start, provider error, and failure.
+- A second clean normal Talk run `2xdteJG6sw4cVNR0fmDqt` was started from ordinary parent chat session `FA26urjLVVRTnkdVRv02q` with child/root session `arch-2xdteJG6sw4cVNR0fmDqt-root` on target branch `codex/paid-xiaomi-orchestrator-proof-2`.
+- Run `2xdteJG6sw4cVNR0fmDqt` also reached terminal `failed` on the first orchestrator node because XiaomiMiMo returned `451 Unavailable For Legal Reasons`.
+- Parent conversation persistence was verified via `/api/sessions/FA26urjLVVRTnkdVRv02q/messages`: it contains `architecture:2xdteJG6sw4cVNR0fmDqt:user` and an assistant failure projection with the provider error.
+- `C:\Projekty\TurboProject2` remained clean on branch `codex/paid-xiaomi-orchestrator-proof-2`; no generated files or commits were produced by the failed provider-gated run.
+- The readiness endpoint initially still produced a false-positive with a short noop-shaped completion smoke after backend restart, so the smoke request was hardened to mimic an ArchitectureRuntime orchestrator request with realistic delegation/research/write tool schemas.
+- After hardening and backend restart, live `agentflow:paid-readiness` failed before workflow start on the same XiaomiMiMo `451`, which is the correct fail-closed behavior.
+- `agent-orchestrator` persona was hardened to require planning/prototyping, implementation, and refactor/QA phases; persisted research/design notes; branch/commit/build evidence; and parent/child/run ids in final artifacts.
+- Live API check after restart verified `agent-orchestrator` contains the three-phase prompt and final artifact requirements, with tools including `run_sub_agentflow`, `spawn_cli_agent`, `web_search`, `vfs_write`, `fs_write`, and `design_preview`.
+- A fresh normal Talk run `GDwxvzV-5f-oUY2Mk1iu-` was started from parent chat session `aIjeVybswO09XtQLp3yfF` after persona hardening.
+- Run `GDwxvzV-5f-oUY2Mk1iu-` created slot sessions including `arch-GDwxvzV-5f-oUY2Mk1iu--orchestrator` with persona `agent-orchestrator`, but the root session `arch-GDwxvzV-5f-oUY2Mk1iu--root` still showed persona `default`.
+- Run `GDwxvzV-5f-oUY2Mk1iu-` failed on the first orchestrator request with XiaomiMiMo `451 Unavailable For Legal Reasons`; no target-repo files changed.
+- The parent conversation stored `architecture:GDwxvzV-5f-oUY2Mk1iu-:user` and terminal assistant projection `architecture:GDwxvzV-5f-oUY2Mk1iu-:text:GDwxvzV-5f-oUY2Mk1iu-:event:5`.
+- Because full prompt-shaped synthetic completion smoke still passed while the real Architecture run failed, `agentflow:paid-readiness` was extended to inspect recent parent-chat Architecture provider-failure projections.
+- Live `agentflow:paid-readiness` now fails closed on recent provider failures from `aIjeVybswO09XtQLp3yfF` / `GDwxvzV-5f-oUY2Mk1iu-` and `FA26urjLVVRTnkdVRv02q` / `2xdteJG6sw4cVNR0fmDqt`.
+- Focused stop regression evidence now proves stopped Architecture runs no longer masquerade as `failed`: controller stop returns `cancelled`, the final raw event is `run_stopped`, and AgentFlow projection returns status `cancelled` with `flow:stopped` trace.
+- Frontend graph regression evidence now proves cancelled Architecture root projections render as terminal error/interruption nodes rather than success.
+- Subagent LLM audit events now record effective runtime provider/model/source plus requested persona model, so manual QA can see whether `agent-orchestrator` actually used the active model or a persona-preferred model.
+- Persona model routing now passes a request-scoped override into `LLMService.streamChat()` and creates the provider request with the persona model without mutating the active DB credential model.
+- Seeded high-level roles (`orchestrator`, `agent-orchestrator`, `agent-planner`, `agent-reviewer`, `agent-synthesizer`, `agent-release-guard`) now default to `mimo-v2.5-pro`; execution/research/design/QA roles default to `mimo-v2.5`.
+
+## Last Proof Findings
+
+- `agentflow:paid-readiness` only reproduced correctly with an explicit `KALIO_API_BASE_URL`; relying on the implicit local API target was too fragile for proof QA.
+- Parent conversation projections can still show a reason string that does not exactly match the terminal runtime reason, so the trace remains the source of truth.
+- VFS/tool evidence still drifted from host worktree evidence on the CLI child path, and child reconciliation was not fully settled at the time of the proof.
+- The trace was noisy enough that manual review had to filter past unrelated events to find the actual proof signal.
+- Persona worker resolution was still not fully closed in the proof path, so the orchestration split remained partially proven.
+
+## Verification
+
+- `npm.cmd run test -- apps/kalio-api/src/modules/agent-flow/agent-flow-runtime.service.spec.ts apps/kalio-api/src/modules/agent-flow/architecture-agent-flow.adapter.spec.ts apps/kalio-api/src/modules/agent-flow/agent-flow-runs.controller.spec.ts`
+  - Passed. The test gate ran broader workspace coverage: backend `164` files / `1958` tests and web `110` files / `932` tests.
+- `npm.cmd run test -- apps/kalio-api/src/modules/architecture/architecture-runtime.service.spec.ts apps/kalio-api/src/modules/chat/__tests__/chat.gateway.spec.ts apps/kalio-api/src/modules/agent-flow/architecture-agent-flow.adapter.spec.ts apps/kalio-api/src/modules/agent-flow/agent-flow-runtime.service.spec.ts`
+  - Passed. The test gate ran broader workspace coverage: backend `164` files / `1962` tests and web `110` files / `932` tests.
+- `npm.cmd run typecheck`
+  - Passed for `@kalio/types`, `@kalio/sdk`, `kalio-api`, and `kalio-web`.
+- `npm.cmd run test -- apps/kalio-api/src/modules/chat/__tests__/chat.gateway.spec.ts`
+  - Passed. The test gate ran broader workspace coverage: backend `164` files / `1962` tests and web `110` files / `932` tests.
+- `node scripts\agentflow-paid-readiness.test.mjs`
+  - Passed `7` tests, including the regression where model listing passes but real completion smoke fails.
+- `npm.cmd run test -- apps/kalio-api/src/modules/credentials/credentials.controller.spec.ts`
+  - Passed after hardening the runtime-shaped completion smoke. The test gate ran broader workspace coverage: backend `164` files / `1966` tests and web `110` files / `933` tests.
+- `npm.cmd run test -- apps/kalio-api/src/modules/architecture/architecture.controller.spec.ts apps/kalio-api/src/modules/agent-flow/architecture-agent-flow.adapter.spec.ts apps/kalio-api/src/modules/agent-flow/agent-flow-runtime.service.spec.ts packages/@kalio/types/src/__tests__/contracts.test.ts`
+  - Passed. The test gate ran broader workspace coverage: backend `164` files / `1965` tests and web `110` files / `932` tests.
+- `npm.cmd run test -- apps/kalio-web/src/features/chat/graph/executionGraphArchitectureRoot.test.ts`
+  - Passed. The test gate ran broader workspace coverage: backend `164` files / `1965` tests and web `110` files / `933` tests.
+- `$env:KALIO_API_BASE_URL='http://localhost:3016/api'; npm.cmd run agentflow:paid-readiness`
+  - Failed as expected on one blocker: active credential completion smoke returned XiaomiMiMo `451 Unavailable For Legal Reasons` cross-border isolation policy.
+- `npm.cmd run typecheck`
+  - Passed again after hardening `CredentialsController.testCompletionById()`.
+- `node scripts\agentflow-paid-readiness.test.mjs`
+  - Passed `8` tests after adding the recent provider-failure projection regression.
+- `npm.cmd run test -- apps/kalio-api/src/modules/credentials/credentials.controller.spec.ts apps/kalio-api/src/modules/persona/persona.service.spec.ts`
+  - Passed after persona and readiness-gate hardening. The test gate ran broader workspace coverage: backend `164` files / `1966` tests and web `110` files / `933` tests.
+- `npm.cmd run typecheck`
+  - Passed after persona and readiness-gate hardening.
+- `npm.cmd run test -- apps/kalio-api/src/modules/chat/__tests__/subagent-runtime.service.spec.ts`
+  - Passed after adding provider/model/source/personaModel audit fields to subagent LLM request and response events. The test gate ran broader workspace coverage: backend `164` files / `1966` tests and web `110` files / `933` tests.
+- `npm.cmd run typecheck`
+  - Passed after adding subagent LLM model audit fields.
+- `npm.cmd run test -- apps/kalio-api/src/modules/chat/__tests__/llm-service.adapter.spec.ts apps/kalio-api/src/modules/llm/llm.service.spec.ts apps/kalio-api/src/modules/chat/__tests__/subagent-runtime.service.spec.ts`
+  - Broad gate failed on unrelated `wait-for.tool.spec.ts` polling expectation (`expected 2 calls, got 1`). The changed specs passed in the same run.
+- `corepack pnpm --filter kalio-api exec vitest run src/modules/chat/__tests__/llm-service.adapter.spec.ts src/modules/llm/llm.service.spec.ts src/modules/chat/__tests__/subagent-runtime.service.spec.ts`
+  - Passed after adding request-scoped model override: `3` files / `46` tests.
+- `corepack pnpm --filter kalio-api exec vitest run src/modules/tool/tools/wait-for.tool.spec.ts`
+  - Passed on rerun: `1` file / `7` tests, confirming the broad-gate failure was not caused by the model-routing change.
+- `corepack pnpm --filter kalio-api exec vitest run src/modules/chat/__tests__/llm-service.adapter.spec.ts src/modules/llm/llm.service.spec.ts src/modules/chat/__tests__/subagent-runtime.service.spec.ts src/modules/persona/persona.service.spec.ts`
+  - Passed after seeded persona model backfill: `4` files / `84` tests.
+- `npm.cmd run typecheck`
+  - Passed after request-scoped persona model routing and seeded model backfill.
+- `$env:KALIO_API_BASE_URL='http://localhost:3016/api'; npm.cmd run agentflow:paid-readiness`
+  - Failed as expected after the recent provider-failure projection check: fresh Talk-started Architecture runs `GDwxvzV-5f-oUY2Mk1iu-` and `2xdteJG6sw4cVNR0fmDqt` contain XiaomiMiMo `451` provider failures.
+- `C:\Projekty\TurboProject2`: `git status --short`
+  - Empty on branch `codex/paid-xiaomi-orchestrator-proof-2` after failed run `2xdteJG6sw4cVNR0fmDqt`.
+  - Empty again after failed run `GDwxvzV-5f-oUY2Mk1iu-`.
+- `git -C C:\Projekty\kalio-forever diff --check`
+  - Passed with CRLF normalization warnings only.
+- `C:\Projekty\TurboProject2`: `npm.cmd run build`
+  - Passed after final commit `737eaf3`.
+- Playwright trace artifact:
+  - `C:\Projekty\mcp-playwrigh-master\.local-data\mcp-playwright-orchestrator\artifacts\224fe816-c44e-4cda-bb83-b0e27d7475b6\paid-xiaomi-ordinary-workflow-1780566788073-4c3db90e-c352-4a93-b31e-f5f54c0f7525.zip`
+- Playwright trace artifact for clean Talk proof:
+  - `C:\Projekty\mcp-playwrigh-master\.local-data\mcp-playwright-orchestrator\artifacts\5e95f793-1a56-49b0-a06e-4d19c0efcc4f\normal-chat-agentflow-proof-1780569571248-222aa6cf-e7b1-496c-b4d8-ac6013502a8d.zip`
+- Playwright trace artifact for second normal Talk proof:
+  - `C:\Projekty\mcp-playwrigh-master\.local-data\mcp-playwright-orchestrator\artifacts\5e95f793-1a56-49b0-a06e-4d19c0efcc4f\paid-xiaomi-orchestrator-proof-2026-06-04-1780571856165-436c8c28-67a5-4423-8a8b-ea255062d750.zip`
+- Playwright trace artifact for persona-hardened normal Talk proof:
+  - `C:\Projekty\mcp-playwrigh-master\.local-data\mcp-playwright-orchestrator\artifacts\5e95f793-1a56-49b0-a06e-4d19c0efcc4f\paid-xiaomi-orchestrator-persona-proof-2026-06-04-1780572954649-2e15f19a-60b5-4f39-9a76-493a29e6a3e0.zip`
+- Playwright evidence bundle for clean Talk proof:
+  - Snapshot: `C:\Projekty\mcp-playwrigh-master\.local-data\mcp-playwright-orchestrator\snapshots\5e95f793-1a56-49b0-a06e-4d19c0efcc4f--6dc8536f-0e98-4940-bf00-cc602f03ae1c--normal-chat-agentflow-provider-failure-proof\2026-06-04T10-39-41-396Z-aadfc9b3-3cb4-4b9b-af92-8ff6a480dbb7.png`
+  - Finding: canvas/inspector content can sit outside the 1440px viewport; tracked in `docs/technical-debt.md`.
+
+## Live Readiness
+
+Not ready to accept the paid proof as complete.
+
+The target repo proof has been materially delivered and verified on the older proof branch, and the runtime lifecycle now handles stale/finalization-missing and provider-failure cases more honestly. Paid readiness now detects the XiaomiMiMo cross-border completion failure before workflow start. A clean paid implementation proof on `codex/paid-xiaomi-orchestrator-proof-2` is still blocked by XiaomiMiMo cross-border access on the live ArchitectureRuntime completion path.
+
+## Remaining Blockers
+
+- Live manual stop still needs browser/API evidence on a long-running run after the provider gate is resolved or a controlled mock long-running run is used.
+- AgentFlow verifier did not reconcile the host repo commit/build evidence with its isolated VFS/tool evidence.
+- UI inspector still needs stronger "Open child graph" behavior; current evidence indicates it mostly switches session and may not focus `graphRunId`.
+- Paid Xiaomi readiness now has a real chat-completion smoke request and correctly fails on the provider 451. The remaining blocker is provider-side access, not hidden readiness false-positive behavior.
+- A clean normal-chat paid proof is still needed after provider access is fixed to verify resume and final terminal `done` end-to-end.

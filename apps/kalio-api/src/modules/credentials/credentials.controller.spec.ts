@@ -4,7 +4,9 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { CredentialsController } from './credentials.controller';
 import { CredentialsService } from './credentials.service';
 import { TimeoutSettingsService } from './timeout-settings.service';
+import { LLMService } from '../llm/llm.service';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
+import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../common/utils/llm-provider-http.util';
 
 function makeCredential(overrides: Partial<Credential> = {}): Credential {
   return {
@@ -43,6 +45,9 @@ describe('CredentialsController', () => {
     setTimeoutSettings: vi.fn(),
     getProviderTimeoutMs: vi.fn(),
   };
+  const mockLLMService = {
+    streamChatWithConfig: vi.fn().mockResolvedValue([]),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -50,6 +55,7 @@ describe('CredentialsController', () => {
       providers: [
         { provide: CredentialsService, useValue: mockService },
         { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
+        { provide: LLMService, useValue: mockLLMService },
       ],
     }).compile();
 
@@ -110,6 +116,58 @@ describe('CredentialsController', () => {
     });
   });
 
+  describe('testCompletionById()', () => {
+    it('runs a server-side completion smoke test through the shared LLM service without exposing the API key', async () => {
+      mockService.findAll.mockResolvedValue([makeCredential({ provider: 'xiaomimimo', model: 'mimo-v2.5-pro', baseUrl: undefined })]);
+      mockService.getApiKey.mockResolvedValue('xiao-completion-key');
+
+      const result = await controller.testCompletionById('cred-1');
+
+      expect(result).toEqual(expect.objectContaining({
+        ok: true,
+        latencyMs: expect.any(Number),
+        mode: 'runtime_smoke',
+      }));
+      expect(mockService.getApiKey).toHaveBeenCalledWith('cred-1');
+      expect(mockLLMService.streamChatWithConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'xiaomimimo',
+          apiKey: 'xiao-completion-key',
+          model: 'mimo-v2.5-pro',
+        }),
+        expect.any(Array),
+        expect.any(Array),
+        expect.objectContaining({
+          sessionId: 'credential-completion-test-session',
+          messageId: 'credential-completion-test-msg',
+        }),
+      );
+    });
+
+    it('uses a runtime-shaped completion smoke instead of a trivial ping', async () => {
+      mockService.findAll.mockResolvedValue([makeCredential({ provider: 'mock', model: 'mock' })]);
+      mockService.getApiKey.mockResolvedValue('mock');
+
+      const result = await controller.testCompletionById('cred-1');
+
+      expect(result.mode).toBe('runtime_smoke');
+      expect(result.ok).toBe(true);
+    });
+
+    it('fails the completion smoke test when a non-local credential has no server-side API key', async () => {
+      mockService.findAll.mockResolvedValue([makeCredential({ provider: 'openai' })]);
+      mockService.getApiKey.mockResolvedValue('');
+
+      const result = await controller.testCompletionById('cred-1');
+
+      expect(result).toEqual(expect.objectContaining({
+        ok: false,
+        mode: 'runtime_smoke',
+        error: 'API key not available',
+      }));
+    });
+  });
+
   describe('setActive()', () => {
     it('calls service.setActiveCredential and returns void', async () => {
       mockService.setActiveCredential.mockResolvedValue(undefined);
@@ -131,6 +189,7 @@ describe('CredentialsController', () => {
         providers: [
           { provide: CredentialsService, useValue: mockService },
           { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
+          { provide: LLMService, useValue: mockLLMService },
         ],
       }).compile();
 
@@ -159,6 +218,7 @@ describe('CredentialsController', () => {
         providers: [
           { provide: CredentialsService, useValue: mockService },
           { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
+          { provide: LLMService, useValue: mockLLMService },
         ],
       }).compile();
 
@@ -192,6 +252,7 @@ describe('CredentialsController', () => {
         providers: [
           { provide: CredentialsService, useValue: mockService },
           { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
+          { provide: LLMService, useValue: mockLLMService },
         ],
       }).compile();
 
@@ -442,6 +503,38 @@ describe('CredentialsController', () => {
       }
     });
 
+    it('uses the shared Xiaomi Roo Code identity for /models probe', async () => {
+      mockService.findAll.mockResolvedValue([makeCredential({ provider: 'xiaomimimo', baseUrl: undefined })]);
+      mockService.getApiKey.mockResolvedValue('xiao-test-key');
+      const originalFetch = globalThis.fetch;
+      const compatibleHeaders = buildProviderCompatHeaders('xiaomimimo', 'xiao-test-key');
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ id: 'mimo-v2.5-pro' }] }),
+      });
+      try {
+        const result = await controller.testById('cred-1');
+
+        expect(result).toEqual(expect.objectContaining({
+          ok: true,
+          latencyMs: expect.any(Number),
+          modelCount: 1,
+        }));
+        expect(globalThis.fetch).toHaveBeenCalledOnce();
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          `${resolveLlmProviderBaseUrl('xiaomimimo')}/models`,
+          expect.objectContaining({
+            headers: expect.objectContaining({
+              ...compatibleHeaders,
+            }),
+          }),
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it('uses remote timeout for remote providers', async () => {
       const cred = makeCredential({
         provider: 'openai',
@@ -464,16 +557,27 @@ describe('CredentialsController', () => {
 
   describe('testConnection()', () => {
     it('returns ok=false on LLM stream failure', async () => {
-      // Mock createLLMProvider — it creates a provider that throws
-      // We test the catch path of testConnection
+      mockLLMService.streamChatWithConfig.mockRejectedValueOnce(new Error('stream failure'));
       const result = await controller.testConnection({
         provider: 'mock',
         apiKey: 'bad-key',
         model: 'mock',
       });
-      // Mock provider may succeed or fail — just check structure
-      expect(typeof result.ok).toBe('boolean');
-      expect(typeof result.latencyMs).toBe('number');
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('stream failure');
+      expect(mockLLMService.streamChatWithConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'mock',
+          apiKey: 'bad-key',
+          model: 'mock',
+        }),
+        [{ role: 'user', content: 'ping' }],
+        [],
+        expect.objectContaining({
+          sessionId: 'test-session',
+          messageId: 'test-msg',
+        }),
+      );
     });
   });
 });

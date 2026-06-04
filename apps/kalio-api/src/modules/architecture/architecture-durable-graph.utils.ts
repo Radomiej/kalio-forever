@@ -56,7 +56,7 @@ export function normalizeCliStatus(
   if (status === 'idle' || status === 'running' || status === 'completed' || status === 'failed' || status === 'stopped') {
     return status;
   }
-  if (status === 'success' || status === 'exited') {
+  if (status === 'terminal-success' || status === 'success' || status === 'exited') {
     return 'completed';
   }
   if (status === 'error') {

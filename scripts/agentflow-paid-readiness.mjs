@@ -10,6 +10,9 @@ const stackStatePath = resolve(repoRoot, '.kalio-stack/qa-stack-state.json');
 export async function collectPaidReadinessChecks(options = {}) {
   const apiBase = (options.apiBase ?? process.env.KALIO_API_BASE_URL ?? resolveManagedApiBase()).replace(/\/$/, '');
   const maxRunningAgeMs = Number(options.maxRunningAgeMs ?? process.env.AGENTFLOW_MAX_RUNNING_AGE_MS ?? 15 * 60 * 1000);
+  const maxRecentProviderFailureMs = Number(
+    options.maxRecentProviderFailureMs ?? process.env.AGENTFLOW_RECENT_PROVIDER_FAILURE_AGE_MS ?? 60 * 60 * 1000,
+  );
   const fetchJson = options.fetchJson ?? fetch;
   const now = options.now ?? Date.now();
   const checks = [];
@@ -18,6 +21,7 @@ export async function collectPaidReadinessChecks(options = {}) {
   const credentials = await checkJson(fetchJson, checks, `${apiBase}/credentials`, 'Credentials endpoint is reachable');
   const active = await checkJson(fetchJson, checks, `${apiBase}/credentials/active`, 'Active credential endpoint is reachable');
   const runs = await checkJson(fetchJson, checks, `${apiBase}/agent-flows/runs`, 'AgentFlow runs endpoint is reachable');
+  const sessions = await checkJson(fetchJson, checks, `${apiBase}/sessions`, 'Sessions endpoint is reachable');
   const codexConfig = await checkJson(fetchJson, checks, `${apiBase}/cli-agents/codex/config`, 'Codex CLI config endpoint is reachable');
 
   if (llmConfig) {
@@ -73,6 +77,42 @@ export async function collectPaidReadinessChecks(options = {}) {
           `Active credential provider test failed: ${credentialCheck.error ?? 'unknown error'}`,
         );
       }
+      const completionCheck = await checkJson(
+        fetchJson,
+        checks,
+        `${apiBase}/credentials/${active.credentialId}/test-completion`,
+        'Active credential completion smoke endpoint is reachable',
+        { method: 'POST' },
+      );
+      if (completionCheck) {
+        passOrFail(
+          checks,
+          completionCheck.ok === true,
+          `Active credential completion smoke passed (` +
+            `${completionCheck.provider ?? 'unknown'} / ${completionCheck.model ?? 'unknown'} / ${completionCheck.source ?? 'unknown'})`,
+          `Active credential completion smoke failed: ${completionCheck.error ?? 'unknown error'}`,
+        );
+        if (completionCheck.ok === true && llmConfig) {
+          passOrFail(
+            checks,
+            completionCheck.provider === llmConfig.provider,
+            `Active completion smoke used effective provider (${completionCheck.provider ?? 'unknown'})`,
+            `Active completion smoke used ${completionCheck.provider ?? 'unknown'} but effective provider is ${llmConfig.provider ?? 'unknown'}`,
+          );
+          passOrFail(
+            checks,
+            completionCheck.model === llmConfig.model,
+            `Active completion smoke model matches effective model (${completionCheck.model ?? 'unknown'})`,
+            `Active completion smoke model ${completionCheck.model ?? 'unknown'} does not match effective model ${llmConfig.model ?? 'unknown'}`,
+          );
+          passOrFail(
+            checks,
+            completionCheck.source === llmConfig.source,
+            `Active completion smoke source matches effective source (${completionCheck.source ?? 'unknown'})`,
+            `Active completion smoke source ${completionCheck.source ?? 'unknown'} does not match effective source ${llmConfig.source ?? 'unknown'}`,
+          );
+        }
+      }
     }
   }
 
@@ -85,6 +125,16 @@ export async function collectPaidReadinessChecks(options = {}) {
       staleRunning.length === 0,
       'No stale running AgentFlow runs found',
       `Found stale running AgentFlow runs: ${staleRunning.map((run) => run.id).join(', ')}`,
+    );
+  }
+
+  if (Array.isArray(sessions)) {
+    const recentProviderFailures = await findRecentProviderFailures(fetchJson, apiBase, sessions, now, maxRecentProviderFailureMs);
+    passOrFail(
+      checks,
+      recentProviderFailures.length === 0,
+      'No recent provider-failed Architecture conversation projections found',
+      `Recent Architecture provider failures found: ${recentProviderFailures.join(', ')}`,
     );
   }
 
@@ -152,6 +202,35 @@ function passOrFail(checks, condition, passMessage, failMessage) {
 function isStale(updatedAt, now, maxRunningAgeMs) {
   if (typeof updatedAt !== 'number') return true;
   return now - updatedAt > maxRunningAgeMs;
+}
+
+async function findRecentProviderFailures(fetchJson, apiBase, sessions, now, maxAgeMs) {
+  const recentSessions = sessions
+    .filter((session) => typeof session?.id === 'string' && typeof session?.updatedAt === 'number')
+    .filter((session) => now - session.updatedAt <= maxAgeMs)
+    .slice(0, 20);
+  const failures = [];
+
+  for (const session of recentSessions) {
+    try {
+      const response = await fetchJson(`${apiBase}/sessions/${session.id}/messages`);
+      if (!response.ok) continue;
+      const messages = await response.json();
+      if (!Array.isArray(messages)) continue;
+      const providerFailure = messages.find((message) => {
+        const content = typeof message?.content === 'string' ? message.content : '';
+        return content.includes('Architecture run failed')
+          && (content.includes('451 Unavailable For Legal Reasons') || content.includes('cross-border isolation policy'));
+      });
+      if (providerFailure) {
+        failures.push(`${session.id}:${providerFailure.id ?? 'message'}`);
+      }
+    } catch {
+      // Missing message history should not hide the explicit endpoint checks above.
+    }
+  }
+
+  return failures;
 }
 
 function resolveManagedApiBase() {

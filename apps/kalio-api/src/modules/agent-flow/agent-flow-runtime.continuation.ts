@@ -95,6 +95,7 @@ function appendWaitingEventIfNeeded(snapshot: AgentFlowRunSnapshot): AgentFlowRu
     id: `agent-flow:${snapshot.run.id}:event:${snapshot.events.length + 1}:waiting`,
     sequence: (lastEvent?.sequence ?? snapshot.events.length) + 1,
     type: eventType,
+    lifecycle: continuation.reason === 'return_to_orchestrator' ? 'return_to_orchestrator' : 'waiting_on_orchestrator',
     message: continuation.message ?? 'AgentFlow paused and is waiting for orchestrator input.',
     nodeId: continuation.waitingNodeId,
     status: 'waiting_on_orchestrator',
@@ -119,7 +120,9 @@ function createRuntimeMissingEvent(snapshot: AgentFlowRunSnapshot, now: number):
     id: `agent-flow:${snapshot.run.id}:event:${snapshot.events.length + 1}`,
     sequence: snapshot.events.length + 1,
     type: 'flow:runtime_missing',
+    lifecycle: 'runtime_missing',
     message: 'Underlying architecture runtime snapshot is no longer available; the durable AgentFlow run was blocked instead of staying running.',
+    data: { reasonCode: 'runtime_missing' },
     status: 'blocked',
     createdAt: now,
   };
@@ -150,7 +153,9 @@ export function blockExceededReturnToOrchestratorCap(snapshot: AgentFlowRunSnaps
     id: `agent-flow:${snapshot.run.id}:event:${snapshot.events.length + 1}:loop_cap`,
     sequence: (snapshot.events.at(-1)?.sequence ?? snapshot.events.length) + 1,
     type: 'flow:return_to_orchestrator_cap_exceeded',
+    lifecycle: 'blocked',
     message: `AgentFlow exceeded the return-to-orchestrator cap (${maxCount}).`,
+    data: { reasonCode: 'return_to_orchestrator_cap_exceeded', maxCount },
     status: 'blocked',
     createdAt: now,
   };

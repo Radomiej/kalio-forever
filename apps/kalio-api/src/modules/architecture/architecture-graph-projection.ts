@@ -170,7 +170,7 @@ function normalizeChildAgentStatus(value: unknown): NonNullable<ArchitectureGrap
   if (value === 'idle' || value === 'running' || value === 'completed' || value === 'failed' || value === 'stopped') {
     return value;
   }
-  if (value === 'success' || value === 'exited') {
+  if (value === 'terminal-success' || value === 'success' || value === 'exited') {
     return 'completed';
   }
   if (value === 'error') {

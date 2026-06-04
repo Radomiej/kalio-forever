@@ -64,6 +64,22 @@ describe('LLMServiceAdapter', () => {
     expect(out[0]).toEqual({ type: 'thinking_delta', delta: 'reasoning' });
   });
 
+  it('passes the per-request model override to LLMService', async () => {
+    const llm = makeLLM({ chunks: [], toolCalls: [] });
+    const adapter = new LLMServiceAdapter(llm);
+
+    await collect(adapter.stream({
+      ...baseParams,
+      model: 'mimo-v2.5',
+    }));
+
+    expect(llm.streamChat).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(Array),
+      expect.objectContaining({ modelOverride: 'mimo-v2.5' }),
+    );
+  });
+
   it('emits tool_call chunks before done', async () => {
     const adapter = new LLMServiceAdapter(makeLLM({
       chunks: [],

@@ -100,14 +100,19 @@ describe('Architecture controllers', () => {
     const stopped = await controller.stop(run.id);
     const events = await controller.events(run.id);
 
-    expect(stopped.status).toBe('failed');
+    expect(stopped.status).toBe('cancelled');
     expect(stopped.completedAt).toBeDefined();
     expect(events.at(-1)).toMatchObject({
-      type: 'router_decision',
+      type: 'run_stopped',
       message: 'Architecture run stopped by user.',
-      data: { stoppedByUser: true },
+      data: {
+        reasonCode: 'user_stop',
+        stoppedByUser: true,
+        previousStatus: 'running',
+        source: 'user',
+      },
     });
-    await expect(controller.findOne(run.id)).resolves.toMatchObject({ status: 'failed' });
+    await expect(controller.findOne(run.id)).resolves.toMatchObject({ status: 'cancelled' });
   });
 
   it('enriches architecture run context with configured CLI-agent preferences', async () => {

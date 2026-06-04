@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { isCompletedCliChildStatus, mergeChildAgentStatus } from './architecture-cli-child-status';
+import type { ArchitectureChildAgentProjection } from '@kalio/types';
 
 describe('architecture CLI child status helpers', () => {
-  it.each(['completed', 'success', 'exited'] as const)(
+  it.each(['completed', 'terminal-success', 'success', 'exited'] as const)(
     'treats %s as completed CLI child status',
     (status) => {
       expect(isCompletedCliChildStatus(status)).toBe(true);
@@ -22,10 +23,17 @@ describe('architecture CLI child status helpers', () => {
     expect(mergeChildAgentStatus('stopped', 'running')).toBe('stopped');
   });
 
-  it.each(['completed', 'failed', 'stopped'] as const)(
+  it.each(['completed', 'terminal-success', 'exited', 'failed', 'stopped'] as const)(
     'preserves %s when a stale overlay reports unknown',
     (status) => {
-      expect(mergeChildAgentStatus(status, 'unknown')).toBe(status);
+      expect(mergeChildAgentStatus(status as unknown as ArchitectureChildAgentProjection['status'], 'unknown')).toBe(status);
+    },
+  );
+
+  it.each(['terminal-success', 'exited', 'completed', 'success'] as const)(
+    'preserves terminal completion statuses over stale running overlays',
+    (status) => {
+      expect(mergeChildAgentStatus(status as unknown as ArchitectureChildAgentProjection['status'], 'running')).toBe(status);
     },
   );
 });

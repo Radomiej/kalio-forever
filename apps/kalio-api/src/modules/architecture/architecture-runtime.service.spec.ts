@@ -418,6 +418,53 @@ describe('ArchitectureRuntimeService', () => {
     expect(service.getChat(run.id)?.messages.at(-1)?.speaker).toBe('finalizer');
   });
 
+  it('persists an async run start projection to parent chat before graph execution completes', async () => {
+    const { service, executor, sessionManager } = createService();
+    const resolvers: Array<(value: Awaited<ReturnType<ArchitectureRoleExecutor['execute']>>) => void> = [];
+    vi.mocked(executor.execute).mockImplementation(({ branchSessionId, personaId, run, slot }) => new Promise((resolve) => {
+      resolvers.push(resolve);
+      if (resolvers.length > 1) {
+        resolve({
+          message: `${slot.label} branch prepared for: ${run.prompt}`,
+          data: {
+            branchSessionId,
+            personaId,
+            sessionPersonaId: personaId,
+            rootSessionId: run.rootSessionId,
+            slotType: slot.slotType,
+            executionMode: run.executionMode,
+          },
+        });
+      }
+    }));
+
+    const run = await service.createRunAsync({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Show this architecture run in parent chat immediately.',
+      context: { parentSessionId: 'parent-chat-start' },
+    });
+
+    expect(sessionManager.persistMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: `architecture:${run.id}:user`,
+      sessionId: 'parent-chat-start',
+      role: 'user',
+      content: '[Architecture: Strategic Decision Council]\nShow this architecture run in parent chat immediately.',
+    }));
+    expect(service.findRun(run.id)?.status).toBe('running');
+
+    resolvers[0]?.({
+      message: `Pragmatist branch prepared for: ${run.prompt}`,
+      data: {
+        branchSessionId: run.branchSessionIds?.['pragmatist'] ?? 'missing',
+        personaId: 'dev',
+        sessionPersonaId: 'dev',
+        rootSessionId: run.rootSessionId,
+        slotType: 'participant',
+        executionMode: run.executionMode,
+      },
+    });
+  });
+
   it('refreshes async run updatedAt when live graph events arrive', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     const { service, executor } = createService();

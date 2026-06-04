@@ -2,6 +2,7 @@ import type { ArchitectureChildAgentProjection } from '@kalio/types';
 
 export function isCompletedCliChildStatus(status: string | undefined): boolean {
   return status === 'completed'
+    || status === 'terminal-success'
     || status === 'success'
     || status === 'exited';
 }
@@ -20,5 +21,5 @@ export function mergeChildAgentStatus(
 }
 
 function isTerminalChildAgentStatus(status: ArchitectureChildAgentProjection['status'] | undefined): boolean {
-  return status === 'completed' || status === 'failed' || status === 'stopped';
+  return isCompletedCliChildStatus(status) || status === 'failed' || status === 'stopped';
 }

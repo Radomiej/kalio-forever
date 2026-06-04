@@ -9,6 +9,10 @@ import { BaseOpenAICompatibleProvider } from './base-openai-compatible.provider'
 
 export type { ProviderConfig } from '../llm.types';
 
+export function createRuntimeLLMProvider(config: ProviderConfig): ILLMProvider {
+  return createLLMProvider(config);
+}
+
 export function createLLMProvider(config: ProviderConfig): ILLMProvider {
   const { provider, apiKey, model, baseUrl } = config;
 

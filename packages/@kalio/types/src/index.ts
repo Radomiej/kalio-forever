@@ -281,6 +281,7 @@ export interface AgentFlowTraceItem {
   id: ID;
   sequence: number;
   type: string;
+  lifecycle?: AgentFlowLifecycleEvent;
   message: string;
   nodeId?: string;
   roleSlotId?: string;
@@ -290,8 +291,28 @@ export interface AgentFlowTraceItem {
   createdAt: Timestamp;
 }
 
+export type AgentFlowLifecycleEvent =
+  | 'started'
+  | 'node_started'
+  | 'node_completed'
+  | 'edge_taken'
+  | 'guard_result'
+  | 'tool_called'
+  | 'return_to_orchestrator'
+  | 'waiting_on_orchestrator'
+  | 'resume_input'
+  | 'done'
+  | 'blocked'
+  | 'failed'
+  | 'cancelled'
+  | 'runtime_missing'
+  | 'runtime_stalled'
+  | 'copy_back';
+
 export interface SubAgentFlowResult {
   flowRunId: ID;
+  parentSessionId?: ID;
+  parentToolCallId?: ID;
   childSessionId: ID;
   status: AgentFlowRunStatus;
   summary: string;
@@ -1140,7 +1161,7 @@ export type ArchitectureNodeBehaviorMode =
   | 'finalize';
 export type ArchitectureNodeFanOutMode = 'parallel' | 'sequential';
 export type ArchitectureNodeScoringPolicy = 'confidence' | 'risk' | 'cost' | 'custom';
-export type ArchitectureRunStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type ArchitectureRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ArchitectureExecutionMode = 'session_branches' | 'subagent_execution';
 export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime_fallback';
 export type ArchitectureExecutionEventType =
@@ -1155,7 +1176,8 @@ export type ArchitectureExecutionEventType =
   | 'artifact_created'
   | 'memory_persisted'
   | 'final_artifact'
-  | 'node_completed';
+  | 'node_completed'
+  | 'run_stopped';
 
 export interface ArchitectureRoleSlot {
   id: string;

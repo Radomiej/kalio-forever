@@ -182,4 +182,35 @@ describe('buildArchitectureParentChatMessages', () => {
     expect(incompleteText).toContain('Incomplete: Subagent exhausted its tool loop without producing a final answer.');
     expect(incompleteText).toContain('Sub-agent stopped after 6 tool iteration(s) without producing a final answer.');
   });
+
+  it('projects run_stopped as a terminal cancelled message in parent chat', () => {
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'e-stopped',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'run_stopped',
+        message: 'Architecture run stopped by user.',
+        createdAt: 12,
+        data: {
+          reasonCode: 'user_stop',
+          stoppedByUser: true,
+          previousStatus: 'running',
+          source: 'user',
+        },
+      },
+    ];
+    const stoppedRun = {
+      ...makeRun(),
+      status: 'cancelled' as const,
+    };
+
+    const messages = buildArchitectureParentChatMessages(makeSchema(), stoppedRun, 'parent-1', events, 200);
+    const stoppedText = messages.find((message) => message.id.includes('e-stopped'))?.content;
+
+    expect(stoppedText).toContain('### Run stopped');
+    expect(stoppedText).toContain('Status: cancelled');
+    expect(stoppedText).toContain('Reason: Architecture run stopped by user.');
+    expect(stoppedText).toContain('Reason code: user_stop');
+  });
 });

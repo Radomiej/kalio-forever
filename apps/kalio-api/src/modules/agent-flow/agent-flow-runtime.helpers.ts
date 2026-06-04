@@ -118,6 +118,7 @@ export function createResumeEvent(runId: string, sequence: number, dto: ResumeAg
     id: `agent-flow:${runId}:event:${sequence}`,
     sequence,
     type: 'flow:resume_input',
+    lifecycle: 'resume_input',
     message,
     status: 'running',
     createdAt: Date.now(),
@@ -149,7 +150,9 @@ export function createResumeFailedEvent(runId: string, sequence: number, error: 
     id: `agent-flow:${runId}:event:${sequence}:resume_failed`,
     sequence,
     type: 'flow:resume_failed',
+    lifecycle: 'blocked',
     message: error instanceof Error ? error.message : 'AgentFlow resume failed.',
+    data: { reasonCode: 'resume_failed' },
     status: 'blocked',
     createdAt: Date.now(),
   };
@@ -204,6 +207,8 @@ function preserveResultIdentity(
 ): SubAgentFlowResult {
   return {
     ...result,
+    parentSessionId: baseRun.parentSessionId,
+    parentToolCallId: baseRun.parentToolCallId,
     childSessionId: baseRun.childSessionId,
     ...(baseRun.openChatSessionId ? { openChatSessionId: baseRun.openChatSessionId } : {}),
     ...(baseRun.openGraphRunId ? { openGraphRunId: baseRun.openGraphRunId } : {}),

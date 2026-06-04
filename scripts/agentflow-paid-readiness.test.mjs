@@ -26,6 +26,9 @@ function invalidJsonResponse() {
 function fetchFrom(routes) {
   return async (url) => {
     const route = routes[url];
+    if (!route && (url.endsWith('/sessions') || url.includes('/sessions/'))) {
+      return response([]);
+    }
     if (!route) {
       throw new Error(`Unexpected URL: ${url}`);
     }
@@ -73,12 +76,55 @@ test('paid readiness passes only when live provider, active credential, fresh ru
       'http://kalio.test/api/credentials': response([{ id: 'cred-live' }]),
       'http://kalio.test/api/credentials/active': response({ credentialId: 'cred-live' }),
       'http://kalio.test/api/credentials/cred-live/test': response({ ok: true, modelCount: 2 }),
+      'http://kalio.test/api/credentials/cred-live/test-completion': response({
+        ok: true,
+        provider: 'openai',
+        model: 'gpt-5.4',
+        source: 'db',
+        latencyMs: 42,
+      }),
       'http://kalio.test/api/agent-flows/runs': response([{ run: { id: 'run-fresh', status: 'running', updatedAt: 9_500 } }]),
       'http://kalio.test/api/cli-agents/codex/config': response({ enabled: true, model: 'gpt-5.4-mini' }),
     }),
   });
 
   assert.equal(exitCode, 0);
+});
+
+test('paid readiness blocks when the completion smoke diverges from the effective Xiaomi provider config', async () => {
+  const checks = await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    fetchJson: fetchFrom({
+      'http://kalio.test/api/llm/config': response({ provider: 'xiaomimimo', source: 'db', model: 'mimo-v2.5' }),
+      'http://kalio.test/api/credentials': response([{ id: 'cred-live' }]),
+      'http://kalio.test/api/credentials/active': response({ credentialId: 'cred-live' }),
+      'http://kalio.test/api/credentials/cred-live/test': response({ ok: true, modelCount: 2 }),
+      'http://kalio.test/api/credentials/cred-live/test-completion': response({
+        ok: true,
+        provider: 'openai',
+        model: 'gpt-4o',
+        source: 'env',
+        latencyMs: 42,
+      }),
+      'http://kalio.test/api/agent-flows/runs': response([]),
+      'http://kalio.test/api/cli-agents/codex/config': response({ enabled: true, model: 'gpt-5.4-mini' }),
+    }),
+  });
+
+  assert.ok(checks.some((check) => (
+    check.ok === false
+    && check.message === 'Active completion smoke used openai but effective provider is xiaomimimo'
+  )));
+  assert.ok(checks.some((check) => (
+    check.ok === false
+    && check.message === 'Active completion smoke model gpt-4o does not match effective model mimo-v2.5'
+  )));
+  assert.ok(checks.some((check) => (
+    check.ok === false
+    && check.message === 'Active completion smoke source env does not match effective source db'
+  )));
 });
 
 test('paid readiness honors explicit API base when the managed stack uses random ports', async () => {
@@ -109,9 +155,39 @@ test('paid readiness honors explicit API base when the managed stack uses random
     'http://127.0.0.1:51052/api/credentials',
     'http://127.0.0.1:51052/api/credentials/active',
     'http://127.0.0.1:51052/api/agent-flows/runs',
+    'http://127.0.0.1:51052/api/sessions',
     'http://127.0.0.1:51052/api/cli-agents/codex/config',
     'http://127.0.0.1:51052/api/credentials/cred-live/test',
+    'http://127.0.0.1:51052/api/credentials/cred-live/test-completion',
   ]);
+});
+
+test('paid readiness fails when recent conversation projection contains Architecture provider failure', async () => {
+  const checks = await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    maxRecentProviderFailureMs: 5_000,
+    fetchJson: fetchFrom({
+      'http://kalio.test/api/llm/config': response({ provider: 'xiaomimimo', source: 'db', model: 'mimo-v2.5-pro' }),
+      'http://kalio.test/api/credentials': response([{ id: 'cred-live' }]),
+      'http://kalio.test/api/credentials/active': response({ credentialId: 'cred-live' }),
+      'http://kalio.test/api/credentials/cred-live/test': response({ ok: true, modelCount: 9 }),
+      'http://kalio.test/api/credentials/cred-live/test-completion': response({ ok: true, latencyMs: 42 }),
+      'http://kalio.test/api/agent-flows/runs': response([]),
+      'http://kalio.test/api/sessions': response([{ id: 'parent-1', updatedAt: 9_500 }]),
+      'http://kalio.test/api/sessions/parent-1/messages': response([{
+        id: 'architecture:run-1:text',
+        content: 'Architecture run failed. Reason: [XiaomiMiMo] LLM request failed: 451 Unavailable For Legal Reasons - cross-border isolation policy',
+      }]),
+      'http://kalio.test/api/cli-agents/codex/config': response({ enabled: true, model: 'gpt-5.4-mini' }),
+    }),
+  });
+
+  assert.ok(checks.some((check) => (
+    check.ok === false
+    && check.message === 'Recent Architecture provider failures found: parent-1:architecture:run-1:text'
+  )));
 });
 
 test('paid readiness fails when the active credential exists but provider validation fails', async () => {
@@ -124,12 +200,38 @@ test('paid readiness fails when the active credential exists but provider valida
       'http://kalio.test/api/credentials': response([{ id: 'cred-live' }]),
       'http://kalio.test/api/credentials/active': response({ credentialId: 'cred-live' }),
       'http://kalio.test/api/credentials/cred-live/test': response({ ok: false, error: 'Invalid API Key' }),
+      'http://kalio.test/api/credentials/cred-live/test-completion': response({ ok: false, error: 'Invalid API Key' }),
       'http://kalio.test/api/agent-flows/runs': response([]),
       'http://kalio.test/api/cli-agents/codex/config': response({ enabled: true, model: 'gpt-5.4-mini' }),
     }),
   });
 
   assert.ok(checks.some((check) => check.ok === false && check.message === 'Active credential provider test failed: Invalid API Key'));
+});
+
+test('paid readiness fails when provider model listing passes but real completion smoke fails', async () => {
+  const checks = await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    fetchJson: fetchFrom({
+      'http://kalio.test/api/llm/config': response({ provider: 'xiaomimimo', source: 'db', model: 'mimo-v2.5-pro' }),
+      'http://kalio.test/api/credentials': response([{ id: 'cred-live' }]),
+      'http://kalio.test/api/credentials/active': response({ credentialId: 'cred-live' }),
+      'http://kalio.test/api/credentials/cred-live/test': response({ ok: true, modelCount: 9 }),
+      'http://kalio.test/api/credentials/cred-live/test-completion': response({
+        ok: false,
+        error: '[XiaomiMiMo] LLM request failed: 451 Client Error (451) - cross-border isolation policy',
+      }),
+      'http://kalio.test/api/agent-flows/runs': response([]),
+      'http://kalio.test/api/cli-agents/codex/config': response({ enabled: true, model: 'gpt-5.4-mini' }),
+    }),
+  });
+
+  assert.ok(checks.some((check) => (
+    check.ok === false
+    && check.message === 'Active credential completion smoke failed: [XiaomiMiMo] LLM request failed: 451 Client Error (451) - cross-border isolation policy'
+  )));
 });
 
 test('paid readiness reports malformed JSON responses as blockers instead of throwing', async () => {

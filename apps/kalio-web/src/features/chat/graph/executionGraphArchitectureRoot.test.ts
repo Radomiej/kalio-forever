@@ -238,4 +238,35 @@ describe('buildArchitectureRootGraphModel', () => {
       expect(model.nodes[0].payload.summary.status).toBe('failed');
     }
   });
+
+  it('renders cancelled architecture runs as terminal errors instead of success', () => {
+    const graph: ArchitectureGraphProjection = {
+      runId: 'run-cancelled',
+      status: 'cancelled',
+      nodes: [
+        {
+          id: 'materializer',
+          label: 'Materializer',
+          kind: 'role',
+          status: 'pending',
+          eventIds: [],
+        },
+      ],
+      edges: [],
+      routeHops: [],
+    };
+
+    const model = buildArchitectureRootGraphModel({
+      graph,
+      rootSessionId: 'arch-run-cancelled-root',
+      sessions: [],
+      sessionMessages: {},
+    });
+
+    expect(model.nodes[0]?.status).toBe('error');
+    expect(model.nodes[0]?.payload.kind).toBe('architecture-run');
+    if (model.nodes[0]?.payload.kind === 'architecture-run') {
+      expect(model.nodes[0].payload.summary.status).toBe('cancelled');
+    }
+  });
 });
