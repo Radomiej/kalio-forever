@@ -324,4 +324,6 @@ Acceptance:
 Update 2026-06-04:
 - Runtime regression coverage now proves `flow:missing_final_artifact` blocked snapshots can be resumed with external QA evidence.
 - ArchitectureRuntime regression coverage now proves a passed external QA resume can re-enter the last completed Goal Master even when the latest cursor points at a later Orchestrator attempt and pending Implementer.
-- Remaining debt: rerun a live Kalio instance with the patched backend to prove the next paid/ordinary Xiaomi run reaches terminal `done` or a correctly reasoned terminal `blocked`.
+- Live run `rH7lbjvi5Sl4EaXWvgT3j` was resumed with external host evidence and reached terminal `done`: `flow:resume_input` -> Goal Master -> `flow:final_artifact` -> finalizer completed.
+- Audit log confirms the effective request used `provider=xiaomimimo`, `requestModel=mimo-v2.5`, and `personaModel=mimo-v2.5-pro`, so the ordinary-model fallback is traceable.
+- Remaining debt: event sequence numbering is duplicated around resumed mixed segments, and the proof still does not establish concrete `web_search` URL persistence in the design-debate document.

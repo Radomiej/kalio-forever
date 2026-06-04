@@ -77,7 +77,12 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
 - No AgentFlow event showed an actual `web_search` tool call for the design-debate; the document persisted general source names, not concrete source URLs.
 - Fixed the runtime recovery gap found by run `rH7lbjvi5Sl4EaXWvgT3j`: `flow:missing_final_artifact` and `flow:finalization_missing` blocked snapshots are now resumable, matching `flow:final_artifact_blocker`.
 - Fixed resume routing for the host-evidence recovery case: when external QA is passed and the latest cursor points at a later non-judge node, ArchitectureRuntime re-enters the last completed judge node instead of replaying the pending Implementer.
-- This is intentionally a runtime lifecycle fix, not proof that the already-running backend instance has been restarted with the new code.
+- Live resume proof on run `rH7lbjvi5Sl4EaXWvgT3j` confirmed the patched recovery path without manual target-repo edits.
+- Resume request carried external host evidence (`host-build-and-playwright`, `status=passed`, `highFindings=0`) and effective provider/model stayed `xiaomimimo` / `mimo-v2.5`.
+- The trace now shows the desired lifecycle for this run: previous `flow:missing_final_artifact`, then `flow:resume_input`, `Goal Master started`, `Goal Master completed`, `Verified Completion Artifact started`, `flow:final_artifact`, and final status `done`.
+- The final artifact accepted branch `codex/paid-xiaomi-agentflow-orchestrator-proof-4`, commit `0f3e3fb feat: add orchestrated launch studio page`, changed files, build result, visual QA result, and text QA result.
+- Audit log for `arch-rH7lbjvi5Sl4EaXWvgT3j-goal_master` records provider/model fields: `provider=xiaomimimo`, `model=mimo-v2.5`, `modelSource=request`, `personaModel=mimo-v2.5-pro`, `requestModel=mimo-v2.5`.
+- Event sequence numbering is still not clean after resumed mixed segments: tail evidence includes repeated sequence values around `243` and `247`, so chronology is readable but not yet audit-grade.
 
 ## Verification
 
@@ -127,6 +132,12 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
   - Passed after missing-final-artifact resume recovery: `1` file / `42` tests.
 - `corepack pnpm --filter kalio-api run typecheck`
   - Passed after the AgentFlow/ArchitectureRuntime resume recovery changes.
+- `POST http://127.0.0.1:3016/api/agent-flows/runs/rH7lbjvi5Sl4EaXWvgT3j/resume`
+  - Passed as a live paid Xiaomi ordinary-model proof after the recovery fix. Result: `status=done`, `events=263`, last event `flow:node_result` / `Verified Completion Artifact completed.`
+- `GET http://127.0.0.1:3016/api/agent-flows/runs/rH7lbjvi5Sl4EaXWvgT3j/events`
+  - Confirmed lifecycle tail includes `flow:resume_input`, `goal-master`, `flow:final_artifact`, and terminal finalizer completion.
+- `GET http://127.0.0.1:3016/api/audit-log?limit=80&sessionId=arch-rH7lbjvi5Sl4EaXWvgT3j-goal_master`
+  - Confirmed effective provider/model audit fields on live LLM requests and responses.
 - `$env:KALIO_API_BASE_URL='http://localhost:3016/api'; npm.cmd run agentflow:paid-readiness`
   - Failed as expected after the recent provider-failure projection check: fresh Talk-started Architecture runs `GDwxvzV-5f-oUY2Mk1iu-` and `2xdteJG6sw4cVNR0fmDqt` contain XiaomiMiMo `451` provider failures.
 - `C:\Projekty\TurboProject2`: `git status --short`
@@ -155,9 +166,9 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
 
 ## Live Readiness
 
-Not ready to accept the paid proof as complete.
+Partially ready.
 
-The target repo proof has been materially delivered and verified on the older proof branch, and the runtime lifecycle now handles stale/finalization-missing and provider-failure cases more honestly. Paid readiness now detects the XiaomiMiMo cross-border completion failure before workflow start. A clean paid implementation proof on `codex/paid-xiaomi-orchestrator-proof-2` is still blocked by XiaomiMiMo cross-border access on the live ArchitectureRuntime completion path.
+The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT3j` now ends `done` after external host evidence is resumed through Goal Master and final artifact. Paid readiness still correctly detects prior XiaomiMiMo `mimo-v2.5-pro` cross-border failures. The full original objective remains incomplete because high-level `mimo-v2.5-pro` is still provider-blocked and design-debate research persistence did not prove concrete `web_search` URL capture.
 
 ## Remaining Blockers
 
@@ -165,5 +176,6 @@ The target repo proof has been materially delivered and verified on the older pr
 - AgentFlow verifier did not reconcile the host repo commit/build evidence with its isolated VFS/tool evidence.
 - UI inspector still needs stronger "Open child graph" behavior; current evidence indicates it mostly switches session and may not focus `graphRunId`.
 - Paid Xiaomi readiness now has a real chat-completion smoke request and correctly fails on the provider 451. The remaining blocker is provider-side access, not hidden readiness false-positive behavior.
-- A clean normal-chat paid proof is still needed after provider access is fixed to verify resume and final terminal `done` end-to-end.
+- A clean normal-chat paid proof using `mimo-v2.5-pro` is still needed after provider access is fixed; ordinary `mimo-v2.5` now has terminal `done` proof on run `rH7lbjvi5Sl4EaXWvgT3j`.
 - Resume path remains non-terminal in `Gq-bpKL4-B5ueq4lwhxed` when child CLI enters `spawn_cli_agent` / `wait_for` path without host worktree diff, and trace sequence de-duplication still needs correction.
+- Event sequence de-duplication remains a real auditability issue after resumed runs even when final status is now correct.
