@@ -49,3 +49,19 @@ export function buildProviderCompatHeaders(provider: string, apiKey?: string): R
 
   return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
 }
+
+export function readEnvBooleanFlag(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') {
+    return true;
+  }
+  if (normalized === 'false') {
+    return false;
+  }
+
+  return defaultValue;
+}

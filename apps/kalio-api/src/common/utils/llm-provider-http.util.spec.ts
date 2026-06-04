@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildProviderCompatHeaders,
+  readEnvBooleanFlag,
   resolveLlmProviderBaseUrl,
   XIAOMI_BASE_URL,
   XIAOMI_COMPAT_HEADERS,
@@ -42,5 +43,13 @@ describe('llm-provider-http.util', () => {
       'X-AI-Code-Tool': 'Roo Code',
       'X-Client-Source': 'roo-code',
     });
+  });
+
+  it('parses explicit boolean env flags without changing the default fallback', () => {
+    expect(readEnvBooleanFlag(undefined, true)).toBe(true);
+    expect(readEnvBooleanFlag(undefined, false)).toBe(false);
+    expect(readEnvBooleanFlag('true', false)).toBe(true);
+    expect(readEnvBooleanFlag('false', true)).toBe(false);
+    expect(readEnvBooleanFlag('  false  ', true)).toBe(false);
   });
 });
