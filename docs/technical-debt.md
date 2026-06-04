@@ -97,6 +97,7 @@ Update 2026-06-04:
 - Subagent LLM calls now pass a request-scoped persona model override through `LLMSource` / `LLMService.streamChat()` without mutating the active credential model.
 - Seeded personas now default high-level orchestration/planning/review/release/synthesis roles to `mimo-v2.5-pro`, while execution/research/design/QA roles default to `mimo-v2.5`.
 - Existing seeded personas with an empty stored model are backfilled on bootstrap; custom non-empty user models are not overwritten.
+- Static routing audit confirmed the backend text LLM path still goes through the shared `LLMService` / provider factory. Per-request model override only swaps the model on the already-selected provider config; it does not bypass Xiaomi config or remap the provider. The observed `mimo-v2.5-pro` `451 Unavailable For Legal Reasons` is therefore tracked as provider-side cross-border policy/access, not a hidden runtime routing bug.
 - Remaining debt: this currently covers chat/subagent LLM calls. Any future direct ArchitectureRuntime LLM path outside `SubagentRuntimeService` must carry the same override/audit contract.
 
 ### Auditability Criteria For Manual AgentFlow Proofs
@@ -184,6 +185,7 @@ Acceptance:
 Update 2026-06-04:
 - AgentFlow projection now emits `blocked/finalization_missing` when Goal Master accepted host build/git evidence but the Architecture runtime fallback still routes away from `final-artifact`.
 - This prevents a known false `waiting_on_orchestrator` projection after accepted external QA evidence.
+- AgentFlow projection now also treats an explicit `externalQualityGate.status=passed` resume context as independent host verification for unresolved CLI child evidence. This prevents a later accepted `flow:final_artifact` from being overwritten by `flow:unresolved_cli_children` when the host QA evidence was supplied outside the child CLI runtime.
 
 ### Last Real Proof Findings
 

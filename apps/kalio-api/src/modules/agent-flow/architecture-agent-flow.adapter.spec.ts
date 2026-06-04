@@ -1712,6 +1712,102 @@ describe('ArchitectureAgentFlowAdapter', () => {
     expect(snapshot?.events.some((event) => event.type === 'flow:unresolved_cli_children')).toBe(false);
   });
 
+  it('allows finalization when resume context carries a passed external quality gate', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-final-with-external-quality-gate',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Implement with external quality gate verification',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-final-with-external-quality-gate-root',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 20,
+      completedAt: 20,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-cli-running',
+        runId: run.id,
+        sequence: 1,
+        type: 'participant_output',
+        message: 'Implementer timed out after spawning a CLI child.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
+        data: {
+          toolEvidence: {
+            successfulToolNames: ['spawn_cli_agent', 'wait_for'],
+            targetPaths: ['C:\\Projekty\\TurboProject2'],
+            childCliSessions: [{
+              childSessionId: 'cli-child-external-gate',
+              agentId: 'codex',
+              status: 'running',
+              workdir: 'C:\\Projekty\\TurboProject2',
+            }],
+          },
+        },
+        createdAt: 8,
+      },
+      {
+        id: 'event-goal-master-output',
+        runId: run.id,
+        sequence: 2,
+        type: 'router_output',
+        message: 'Goal Master accepted external QA. route_to(final-artifact, accepted)',
+        nodeId: 'goal-master',
+        roleSlotId: 'goal_master',
+        route: {
+          source: 'router',
+          fromNodeId: 'goal-master',
+          selectedNodeIds: ['final-artifact'],
+          rejectedNodeIds: ['implementer'],
+          nextNodeId: 'final-artifact',
+        },
+        createdAt: 18,
+      },
+      {
+        id: 'event-final',
+        runId: run.id,
+        sequence: 3,
+        type: 'final_artifact',
+        message: 'Verified delivery accepted.',
+        nodeId: 'final-artifact',
+        roleSlotId: 'finalizer',
+        data: {
+          finalArtifactStatus: 'accepted',
+        },
+        createdAt: 20,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRunDurable: vi.fn().mockResolvedValue(run),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-final-with-external-quality-gate', {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Implement with external quality gate verification',
+      parentSessionId: 'parent-1',
+      context: {
+        externalQualityGate: {
+          status: 'passed',
+          checkedBy: 'host-codex',
+          evidence: [
+            'target file exists',
+            'no fake date remains',
+          ],
+        },
+      },
+    });
+
+    expect(snapshot?.run.status).toBe('done');
+    expect(snapshot?.result?.status).toBe('done');
+    expect(snapshot?.events.some((event) => event.type === 'flow:unresolved_cli_children')).toBe(false);
+  });
+
   it('allows finalization when later final artifact text carries host verification evidence', async () => {
     const run: ArchitectureRun = {
       id: 'run-final-with-final-artifact-host-proof',

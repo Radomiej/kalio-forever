@@ -188,3 +188,28 @@ The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT
 - Resume path remains non-terminal in `Gq-bpKL4-B5ueq4lwhxed` when child CLI enters `spawn_cli_agent` / `wait_for` path without host worktree diff, and trace sequence de-duplication still needs correction.
 - Event sequence de-duplication is now covered at the AgentFlow merge layer, but it still needs live recheck on a fresh resumed run after backend reload.
 - A fresh flow is still needed to prove the new research-source contract creates either concrete `web_search` URLs or a clear `seeded/no live search` label in the persisted design-debate document.
+
+## Update: Research-Source Contract Proof And CLI Guard Fix
+
+- Fresh ordinary-model run `0SsbHDnwO_7ZuwzYZjNHn` created `C:\Projekty\TurboProject2\docs\orchestrated-launch-studio-research-source-audit.md` on branch `codex/paid-xiaomi-agentflow-orchestrator-proof-4`.
+- Effective LLM audit for the run showed `provider=xiaomimimo`, `model=mimo-v2.5`, `modelSource=request`; this confirms the ordinary model path uses the Xiaomi provider rather than a bypass.
+- The implementer runtime did not expose `web_search`, so the persisted audit note honestly records `seeded/no live search`, `web_search Used: No`, and `Source URLs: None`.
+- Host verification confirmed the audit note is ASCII-only, has `Audit Date: 2026-06-04`, contains no `2025`, and contains the required `seeded/no live search` marker.
+- Resume with `externalQualityGate.status=passed` produced an accepted `flow:final_artifact`, but the live process still projected the snapshot as `blocked` because unresolved CLI child evidence was evaluated after the host QA gate.
+- Patched `ArchitectureAgentFlowAdapter` so an explicit passed external quality gate is treated as independent host verification for unresolved CLI child evidence. This preserves the original guard for weak/no-evidence finalization while avoiding a false `blocked` after host-verified acceptance.
+- Static routing audit by two subagents found no evidence that `mimo-v2.5-pro` requests bypass the shared text provider. Model override changes only the model field on the selected provider config; the `451` remains a Xiaomi/provider-side cross-border policy/access blocker.
+
+## Verification Update
+
+- `corepack pnpm --filter kalio-api exec vitest run src/modules/agent-flow/architecture-agent-flow.adapter.spec.ts`
+  - Passed: `1` file / `36` tests.
+- `corepack pnpm --filter kalio-api exec vitest run src/modules/agent-flow/agent-flow-runtime.service.spec.ts`
+  - Passed: `1` file / `43` tests.
+- `corepack pnpm --filter kalio-api run typecheck`
+  - Passed.
+
+## Remaining Blockers After This Slice
+
+- The running Kalio API process still needs rebuild/restart before the external-quality-gate projection fix affects live snapshots.
+- `mimo-v2.5-pro` remains blocked by Xiaomi `451`; ordinary `mimo-v2.5` is the verified paid test model for now.
+- The research-source contract is only proven for the honest fallback (`seeded/no live search`), not for actual persisted live `web_search` URLs.

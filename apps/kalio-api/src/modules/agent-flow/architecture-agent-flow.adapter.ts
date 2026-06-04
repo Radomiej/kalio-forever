@@ -206,8 +206,12 @@ function extractDecisions(events: ArchitectureExecutionEvent[]): string[] {
     .slice(-5);
 }
 
-function extractNextActions(status: SubAgentFlowResult['status'], events: ArchitectureExecutionEvent[]): string[] {
-  if (status === 'blocked' && hasUnresolvedCliChildren(events)) {
+function extractNextActions(
+  status: SubAgentFlowResult['status'],
+  events: ArchitectureExecutionEvent[],
+  args?: RunSubAgentFlowArgs,
+): string[] {
+  if (status === 'blocked' && hasUnresolvedCliChildren(events, args)) {
     return ['Wait for linked CLI child agents to complete before accepting the AgentFlow result.'];
   }
   if (status === 'blocked' && hasBlockingFinalArtifact(events)) {
@@ -264,7 +268,14 @@ function hasBlockingFinalArtifact(events: ArchitectureExecutionEvent[]): boolean
   return finalArtifactLegacyTextDeclaresBlockingStatus(finalArtifact?.message);
 }
 
-function unresolvedCliChildSessions(events: ArchitectureExecutionEvent[]): string[] {
+function hasPassedExternalQualityGate(args: RunSubAgentFlowArgs | undefined): boolean {
+  const context = isRecord(args?.context) ? args.context : undefined;
+  const gate = isRecord(context?.['externalQualityGate']) ? context['externalQualityGate'] : undefined;
+  return gate?.['status'] === 'passed';
+}
+
+function unresolvedCliChildSessions(events: ArchitectureExecutionEvent[], args?: RunSubAgentFlowArgs): string[] {
+  const hasExternalGate = hasPassedExternalQualityGate(args);
   const unresolved: string[] = [];
   for (const [index, event] of events.entries()) {
     const toolEvidence = isRecord(event.data?.toolEvidence) ? event.data.toolEvidence : undefined;
@@ -278,7 +289,7 @@ function unresolvedCliChildSessions(events: ArchitectureExecutionEvent[]): strin
         : 'unknown-cli-child';
       const status = typeof child['status'] === 'string' ? child['status'] : undefined;
       if (!isCompletedCliChildStatus(status)) {
-        if (hasLaterIndependentHostVerification(events.slice(index + 1))) {
+        if (hasExternalGate || hasLaterIndependentHostVerification(events.slice(index + 1))) {
           continue;
         }
         unresolved.push(childSessionId);
@@ -410,18 +421,19 @@ function hasFinalizationMissingBlocker(
   return events.some((event) => event.createdAt <= lastRuntimeFallback.createdAt && hasTextFinalizationAcceptance(event));
 }
 
-function hasUnresolvedCliChildren(events: ArchitectureExecutionEvent[]): boolean {
-  return unresolvedCliChildSessions(events).length > 0;
+function hasUnresolvedCliChildren(events: ArchitectureExecutionEvent[], args?: RunSubAgentFlowArgs): boolean {
+  return unresolvedCliChildSessions(events, args).length > 0;
 }
 
 function effectiveResultStatus(
   run: ArchitectureRun,
   events: ArchitectureExecutionEvent[],
   continuation: AgentFlowContinuationCursor | undefined,
+  args?: RunSubAgentFlowArgs,
 ): SubAgentFlowResult['status'] {
   if (run.status === 'cancelled') return 'cancelled';
   if (hasFinalizationMissingBlocker(events, continuation)) return 'blocked';
-  if ((hasFinalArtifact(events) || run.status === 'completed' || run.status === 'failed') && hasUnresolvedCliChildren(events)) return 'blocked';
+  if ((hasFinalArtifact(events) || run.status === 'completed' || run.status === 'failed') && hasUnresolvedCliChildren(events, args)) return 'blocked';
   if (hasBlockingFinalArtifact(events)) return 'blocked';
   if (completedWithoutFinalArtifact(run, events)) return 'blocked';
   if (!continuation && hasFinalArtifact(events)) return 'done';
@@ -433,10 +445,11 @@ function effectiveRunStatus(
   run: ArchitectureRun,
   events: ArchitectureExecutionEvent[],
   continuation: AgentFlowContinuationCursor | undefined,
+  args?: RunSubAgentFlowArgs,
 ): AgentFlowRun['status'] {
   if (run.status === 'cancelled') return 'cancelled';
   if (hasFinalizationMissingBlocker(events, continuation)) return 'blocked';
-  if ((hasFinalArtifact(events) || run.status === 'completed' || run.status === 'failed') && hasUnresolvedCliChildren(events)) return 'blocked';
+  if ((hasFinalArtifact(events) || run.status === 'completed' || run.status === 'failed') && hasUnresolvedCliChildren(events, args)) return 'blocked';
   if (hasBlockingFinalArtifact(events)) return 'blocked';
   if (completedWithoutFinalArtifact(run, events)) return 'blocked';
   if (!continuation && hasFinalArtifact(events)) return 'done';
@@ -492,7 +505,7 @@ function summarizeBlockedFlowResult(
   if (hasFinalizationMissingBlocker(events, continuation)) {
     return 'Blocked because Goal Master accepted finalization evidence, but the runtime could not produce the final artifact.';
   }
-  const unresolvedChildren = unresolvedCliChildSessions(events);
+  const unresolvedChildren = unresolvedCliChildSessions(events, args);
   if (unresolvedChildren.length > 0) {
     return 'Blocked because linked CLI child agents are unresolved.';
   }
@@ -563,7 +576,7 @@ function maxStepContinuation(events: ArchitectureExecutionEvent[]): AgentFlowCon
 function toResult(args: RunSubAgentFlowArgs, run: ArchitectureRun, events: ArchitectureExecutionEvent[]): SubAgentFlowResult {
   const statusEvents = latestAttemptEvents(events);
   const continuation = maxStepContinuation(statusEvents);
-  const status = effectiveResultStatus(run, statusEvents, continuation);
+  const status = effectiveResultStatus(run, statusEvents, continuation, args);
   const returnToOrchestratorCount = continuation?.reason === 'return_to_orchestrator' ? 1 : undefined;
   const returnMode = normalizeReturnMode(args.returnMode);
   const summary = status === 'blocked'
@@ -577,7 +590,7 @@ function toResult(args: RunSubAgentFlowArgs, run: ArchitectureRun, events: Archi
     status,
     summary,
     decisions: returnMode === 'artifacts_only' ? [] : extractDecisions(events),
-    nextActions: extractNextActions(status, statusEvents),
+    nextActions: extractNextActions(status, statusEvents, args),
     artifacts: [],
     returnToOrchestratorCount,
     tracePreview: traceProjection(returnMode, events),
@@ -589,8 +602,8 @@ function toResult(args: RunSubAgentFlowArgs, run: ArchitectureRun, events: Archi
 function toSnapshot(args: RunSubAgentFlowArgs, run: ArchitectureRun, events: ArchitectureExecutionEvent[]): AgentFlowRunSnapshot {
   const statusEvents = latestAttemptEvents(events);
   const continuation = maxStepContinuation(statusEvents);
-  const status = effectiveRunStatus(run, statusEvents, continuation);
-  const unresolvedChildren = status === 'blocked' ? unresolvedCliChildSessions(statusEvents) : [];
+  const status = effectiveRunStatus(run, statusEvents, continuation, args);
+  const unresolvedChildren = status === 'blocked' ? unresolvedCliChildSessions(statusEvents, args) : [];
   const finalArtifactBlocked = status === 'blocked' && hasBlockingFinalArtifact(statusEvents);
   const missingFinalArtifact = status === 'blocked' && completedWithoutFinalArtifact(run, statusEvents);
   const finalizationMissing = status === 'blocked' && hasFinalizationMissingBlocker(statusEvents, continuation);
