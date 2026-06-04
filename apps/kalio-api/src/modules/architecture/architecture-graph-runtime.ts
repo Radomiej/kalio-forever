@@ -218,12 +218,30 @@ class ArchitectureGraphRuntime {
       return null;
     }
     const lastCompletedNodeId = this.options.resumeFrom?.lastCompletedNodeId;
-    if (!lastCompletedNodeId) {
-      return null;
+    if (lastCompletedNodeId) {
+      const node = nodesById.get(lastCompletedNodeId);
+      const slot = node ? this.options.schema.roleSlots.find((candidate) => candidate.id === node.roleSlotId) : undefined;
+      if (node && slot?.slotType === 'judge') {
+        return node;
+      }
     }
-    const node = nodesById.get(lastCompletedNodeId);
-    const slot = node ? this.options.schema.roleSlots.find((candidate) => candidate.id === node.roleSlotId) : undefined;
-    return node && slot?.slotType === 'judge' ? node : null;
+    return this.lastCompletedJudgeNode(nodesById);
+  }
+
+  private lastCompletedJudgeNode(
+    nodesById: Map<string, ArchitectureSchemaNode>,
+  ): ArchitectureSchemaNode | null {
+    for (const event of [...this.events].reverse()) {
+      if (event.type !== 'node_completed' || !event.nodeId) {
+        continue;
+      }
+      const node = nodesById.get(event.nodeId);
+      const slot = node ? this.options.schema.roleSlots.find((candidate) => candidate.id === node.roleSlotId) : undefined;
+      if (node && slot?.slotType === 'judge') {
+        return node;
+      }
+    }
+    return null;
   }
 
   private selectedNodeIdsFromEvent(event: ArchitectureExecutionEvent): string[] {

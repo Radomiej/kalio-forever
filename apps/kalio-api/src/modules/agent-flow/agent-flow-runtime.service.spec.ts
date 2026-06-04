@@ -2730,4 +2730,104 @@ describe('AgentFlowRuntimeService', () => {
       }),
     );
   });
+
+  it('allows resuming a blocked missing final artifact run with external QA evidence', async () => {
+    const architectureAdapter = adapter() as ReturnType<typeof adapter> & {
+      resume: ReturnType<typeof vi.fn>;
+    };
+    architectureAdapter.resume = vi.fn();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    repository.saveSnapshot({
+      run: {
+        id: 'run-missing-final-artifact',
+        parentSessionId: 'parent-missing-final-artifact',
+        childSessionId: 'child-missing-final-artifact',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'blocked',
+        startMode: 'durable',
+        returnMode: 'summary',
+        checkpoint: {
+          goal: 'Deliver runtime proof',
+          context: { projectPath: 'C:\\Projekty\\TurboProject2' },
+        },
+        createdAt: 1,
+        updatedAt: 2,
+        summary: 'Blocked because the latest architecture attempt completed without a final artifact.',
+      },
+      result: {
+        flowRunId: 'run-missing-final-artifact',
+        childSessionId: 'child-missing-final-artifact',
+        status: 'blocked',
+        summary: 'Blocked because the latest architecture attempt completed without a final artifact.',
+        decisions: [],
+        nextActions: [],
+        artifacts: [],
+      },
+      events: [{
+        id: 'event-missing-final-artifact',
+        sequence: 1,
+        type: 'flow:missing_final_artifact',
+        message: 'AgentFlow blocked because the latest architecture attempt completed without producing a final artifact.',
+        status: 'blocked',
+        createdAt: 2,
+      }],
+    });
+    architectureAdapter.resume.mockResolvedValue({
+      run: {
+        id: 'run-missing-final-artifact',
+        parentSessionId: 'parent-missing-final-artifact',
+        childSessionId: 'child-missing-final-artifact',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'done',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 4,
+      },
+      result: {
+        flowRunId: 'run-missing-final-artifact',
+        childSessionId: 'child-missing-final-artifact',
+        status: 'done',
+        summary: 'External QA accepted missing final artifact recovery.',
+        decisions: [],
+        nextActions: [],
+        artifacts: [],
+      },
+      events: [{
+        id: 'event-final-artifact-accepted',
+        sequence: 2,
+        type: 'flow:final_artifact',
+        message: 'External QA accepted missing final artifact recovery.',
+        status: 'done',
+        createdAt: 4,
+      }],
+    });
+
+    const resumed = await service.resume('run-missing-final-artifact', {
+      input: 'External build passed and visual QA passed.',
+      context: {
+        externalQualityGate: {
+          source: 'manual-build-and-playwright',
+          status: 'passed',
+          highFindings: 0,
+        },
+      },
+    });
+
+    expect(resumed.run.status).toBe('done');
+    expect(architectureAdapter.resume).toHaveBeenCalledWith(
+      'run-missing-final-artifact',
+      expect.objectContaining({ input: 'External build passed and visual QA passed.' }),
+      expect.objectContaining({
+        goal: 'Deliver runtime proof',
+        context: expect.objectContaining({
+          projectPath: 'C:\\Projekty\\TurboProject2',
+        }),
+      }),
+    );
+  });
 });

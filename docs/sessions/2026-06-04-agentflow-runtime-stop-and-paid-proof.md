@@ -75,6 +75,9 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
 - Playwright full-page quality audit after the fix reported `0` high WCAG findings and no runtime findings; remaining medium findings are existing Belle navbar target/focus-size issues.
 - AgentFlow still ended `blocked` with `flow:missing_final_artifact` after resume, because the Orchestrator read host evidence and routed back to Implementer instead of accepting evidence into a terminal final artifact.
 - No AgentFlow event showed an actual `web_search` tool call for the design-debate; the document persisted general source names, not concrete source URLs.
+- Fixed the runtime recovery gap found by run `rH7lbjvi5Sl4EaXWvgT3j`: `flow:missing_final_artifact` and `flow:finalization_missing` blocked snapshots are now resumable, matching `flow:final_artifact_blocker`.
+- Fixed resume routing for the host-evidence recovery case: when external QA is passed and the latest cursor points at a later non-judge node, ArchitectureRuntime re-enters the last completed judge node instead of replaying the pending Implementer.
+- This is intentionally a runtime lifecycle fix, not proof that the already-running backend instance has been restarted with the new code.
 
 ## Verification
 
@@ -118,6 +121,12 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
   - Passed after seeded persona model backfill: `4` files / `84` tests.
 - `npm.cmd run typecheck`
   - Passed after request-scoped persona model routing and seeded model backfill.
+- `corepack pnpm --filter kalio-api exec vitest run src/modules/architecture/architecture-runtime.service.spec.ts`
+  - Passed after host-evidence resume finalization recovery: `1` file / `80` tests.
+- `corepack pnpm --filter kalio-api exec vitest run src/modules/agent-flow/agent-flow-runtime.service.spec.ts`
+  - Passed after missing-final-artifact resume recovery: `1` file / `42` tests.
+- `corepack pnpm --filter kalio-api run typecheck`
+  - Passed after the AgentFlow/ArchitectureRuntime resume recovery changes.
 - `$env:KALIO_API_BASE_URL='http://localhost:3016/api'; npm.cmd run agentflow:paid-readiness`
   - Failed as expected after the recent provider-failure projection check: fresh Talk-started Architecture runs `GDwxvzV-5f-oUY2Mk1iu-` and `2xdteJG6sw4cVNR0fmDqt` contain XiaomiMiMo `451` provider failures.
 - `C:\Projekty\TurboProject2`: `git status --short`

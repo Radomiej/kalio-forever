@@ -1581,6 +1581,142 @@ describe('ArchitectureRuntimeService', () => {
     expect(semantic.at(-1)?.type).toBe('final_artifact');
   });
 
+  it('re-enters the last completed Goal Master after a later orchestrator resume attempt misses the final artifact', async () => {
+    const executor = { execute: vi.fn() } satisfies ArchitectureRoleExecutor;
+    const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop')!;
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
+      message: slot.id === 'goal_master'
+        ? 'Goal Master still asks for another implementation loop. route_to(implementer, continue)'
+        : `${slot.label} completed.`,
+      data: {
+        branchSessionId,
+        personaId,
+        rootSessionId: run.rootSessionId,
+        slotType: slot.slotType,
+        executionMode: run.executionMode,
+        ...(slot.id === 'goal_master'
+          ? {
+              route_to: { targetNodeId: 'implementer', response: 'continue' },
+              toolEvidence: {
+                toolResultCount: 1,
+                successfulToolNames: ['vfs_read'],
+                targetPaths: ['src/runtime-proof-demo57.ts'],
+              },
+            }
+          : {}),
+      },
+    }));
+    const run: ArchitectureRun = {
+      id: 'resume-after-missing-final-artifact-run',
+      schemaId: schema.id,
+      prompt: 'Resume after a later attempt missed final artifact.',
+      status: 'running',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-resume-after-missing-final-artifact-root',
+      branchSessionIds: Object.fromEntries(schema.roleSlots.map((slot) => [slot.id, `branch-${slot.id}`])),
+      createdAt: 1,
+      updatedAt: 1,
+      context: {
+        externalQualityGate: {
+          source: 'external-build',
+          status: 'passed',
+          highFindings: 0,
+          blocking: false,
+          summary: 'Host build and visual QA passed.',
+        },
+        requireGoalMasterLoopProof: true,
+        requireImplementerWriteProof: true,
+      },
+    };
+    const priorEvents: ArchitectureExecutionEvent[] = [
+      {
+        id: 'prior-node-completed-goal-master',
+        runId: run.id,
+        sequence: 1,
+        type: 'node_completed',
+        message: 'Goal Master completed.',
+        nodeId: 'goal-master',
+        roleSlotId: 'goal_master',
+        data: { selectedNodeIds: ['implementer'] },
+        createdAt: 1,
+      },
+      {
+        id: 'prior-implementer-proof',
+        runId: run.id,
+        sequence: 2,
+        type: 'participant_output',
+        message: 'Implementer wrote proof.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
+        data: {
+          toolEvidence: {
+            toolResultCount: 1,
+            successfulToolNames: ['vfs_write'],
+            targetPaths: ['src/runtime-proof-demo57.ts'],
+          },
+        },
+        createdAt: 2,
+      },
+      {
+        id: 'prior-later-orchestrator',
+        runId: run.id,
+        sequence: 3,
+        type: 'node_completed',
+        message: 'Orchestrator completed without a final artifact.',
+        nodeId: 'orchestrator',
+        roleSlotId: 'orchestrator',
+        data: { selectedNodeIds: ['implementer'] },
+        createdAt: 3,
+      },
+    ];
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: 10,
+      roleExecutor: executor,
+      personaForSlot: () => 'default',
+      priorEvents,
+      resumeFrom: {
+        reason: 'return_to_orchestrator',
+        waitingNodeId: 'implementer',
+        pendingNodeIds: ['implementer'],
+        visitCounts: {
+          orchestrator: 1,
+          implementer: 1,
+          verifier: 1,
+          tester: 1,
+          'goal-master': 1,
+        },
+        lastCompletedNodeId: 'orchestrator',
+        message: 'Blocked because the latest architecture attempt completed without a final artifact.',
+      },
+    });
+
+    expect(executor.execute).toHaveBeenCalledWith(expect.objectContaining({
+      slot: expect.objectContaining({ id: 'goal_master' }),
+      node: expect.objectContaining({ id: 'goal-master' }),
+    }));
+    expect(executor.execute).not.toHaveBeenCalledWith(expect.objectContaining({
+      slot: expect.objectContaining({ id: 'implementer' }),
+    }));
+
+    const semantic = semanticEvents(events);
+    const goalDecision = [...semantic].reverse()
+      .find((event) => event.nodeId === 'goal-master' && event.type === 'router_decision');
+    expect(goalDecision).toMatchObject({
+      route: expect.objectContaining({
+        source: 'runtime_fallback',
+        selectedNodeIds: ['final-artifact'],
+        nextNodeId: 'final-artifact',
+      }),
+      data: expect.objectContaining({
+        runtimeGuard: expect.stringContaining('external-build quality gate passed'),
+      }),
+    });
+    expect(semantic.at(-1)?.type).toBe('final_artifact');
+  });
+
   it('marks max-node-visit guard stops as failed instead of leaving the run running', async () => {
     const { service, executor } = createService();
     const baseSchema = new ArchitectureRegistryService().findOne('strategic-decision-council')!;

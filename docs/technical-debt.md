@@ -320,3 +320,8 @@ Acceptance:
 - A resume that contains verified host build/visual evidence must either create a final artifact or return a terminal `blocked` summary that includes that evidence, without routing to Implementer again unless a specific implementation defect is named.
 - Implementer should avoid spawning CLI children for simple bounded file writes when direct file tools are available.
 - Design-debate artifacts must store concrete source URLs or explicit "seeded/no live search" labels so manual QA can distinguish real research from prompt-provided heuristics.
+
+Update 2026-06-04:
+- Runtime regression coverage now proves `flow:missing_final_artifact` blocked snapshots can be resumed with external QA evidence.
+- ArchitectureRuntime regression coverage now proves a passed external QA resume can re-enter the last completed Goal Master even when the latest cursor points at a later Orchestrator attempt and pending Implementer.
+- Remaining debt: rerun a live Kalio instance with the patched backend to prove the next paid/ordinary Xiaomi run reaches terminal `done` or a correctly reasoned terminal `blocked`.

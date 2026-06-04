@@ -344,7 +344,11 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
 
 function isResumableBlockedSnapshot(snapshot: AgentFlowRunSnapshot): boolean {
   return snapshot.run.status === 'blocked'
-    && snapshot.events.some((event) => event.type === 'flow:final_artifact_blocker');
+    && snapshot.events.some((event) => (
+      event.type === 'flow:final_artifact_blocker'
+      || event.type === 'flow:missing_final_artifact'
+      || event.type === 'flow:finalization_missing'
+    ));
 }
 
 function hasRuntimeProgressAfterResume(
