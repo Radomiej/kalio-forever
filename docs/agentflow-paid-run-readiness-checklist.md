@@ -8,6 +8,13 @@ Before any paid/live run, execute:
 npm.cmd run agentflow:paid-readiness
 ```
 
+For runs that require a stronger high-level/orchestrator model while the active credential remains on a cheaper worker model, set the required smoke model explicitly:
+
+```powershell
+$env:AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL='mimo-v2.5-pro'
+npm.cmd run agentflow:paid-readiness
+```
+
 This command checks the managed Kalio API, live LLM provider state, saved/active credentials, active credential provider validation, Web Search configuration/smoke, stale running AgentFlow rows, and Codex CLI default model. A failing result is a hard stop.
 
 If the only missing step is local credential activation, put the provider key in ignored `.env.test`, then run:
@@ -30,6 +37,7 @@ Do not pass real keys in chat, commit them, or print them in logs.
 - [ ] Backend coverage command is either passing or any unrelated coverage blocker is recorded with exact failing specs and reason.
 - [ ] `npm.cmd run agentflow:paid-readiness` passes against the managed Kalio API.
 - [ ] The active credential provider test inside `agentflow:paid-readiness` passes; saved/active DB state alone is not enough.
+- [ ] If a separate high-level model is required, `AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL` is set and the high-level completion smoke passes.
 - [ ] The Web Search config and smoke checks inside `agentflow:paid-readiness` pass when the paid flow requires live research/source persistence.
 - [ ] No live run is already stuck in `running` because of a stale runtime worker.
 - [ ] The run context explicitly disables unavailable paid/CLI backends, or the UI proves the selected backend is available.

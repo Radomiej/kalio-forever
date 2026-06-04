@@ -299,6 +299,7 @@ export class CredentialsController {
   @Post(':id/test-completion')
   async testCompletionById(
     @Param('id') id: string,
+    @Body() body?: { model?: string },
   ): Promise<{
     ok: boolean;
     latencyMs: number;
@@ -326,7 +327,8 @@ export class CredentialsController {
         };
       }
       smokeProvider = cred.provider;
-      smokeModel = cred.model ?? '';
+      const requestedModel = typeof body?.model === 'string' ? body.model.trim() : '';
+      smokeModel = requestedModel || cred.model || '';
 
       const isLocal = isLocalLlmProvider(cred.provider, cred.baseUrl ?? undefined);
       const apiKey = await this.credentialsService.getApiKey(id);
@@ -356,7 +358,7 @@ export class CredentialsController {
       const providerConfig = {
         provider: cred.provider,
         apiKey: apiKey ?? '',
-        model: cred.model,
+        model: smokeModel,
         ...(cred.baseUrl ? { baseUrl: cred.baseUrl } : {}),
       };
       await this.llm.streamChatWithConfig(
@@ -370,7 +372,7 @@ export class CredentialsController {
         latencyMs: Date.now() - start,
         mode: 'runtime_smoke',
         provider: cred.provider,
-        model: cred.model,
+        model: smokeModel,
         source: 'db',
       };
     } catch (err) {

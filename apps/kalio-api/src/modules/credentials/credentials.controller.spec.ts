@@ -157,6 +157,28 @@ describe('CredentialsController', () => {
       expect(result.ok).toBe(true);
     });
 
+    it('can smoke-test a requested model without mutating the saved credential model', async () => {
+      mockService.findAll.mockResolvedValue([makeCredential({ provider: 'xiaomimimo', model: 'mimo-v2.5', baseUrl: undefined })]);
+      mockService.getApiKey.mockResolvedValue('xiao-completion-key');
+
+      const result = await controller.testCompletionById('cred-1', { model: 'mimo-v2.5-pro' });
+
+      expect(result).toEqual(expect.objectContaining({
+        ok: true,
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5-pro',
+      }));
+      expect(mockLLMService.streamChatWithConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'xiaomimimo',
+          model: 'mimo-v2.5-pro',
+        }),
+        expect.any(Array),
+        expect.any(Array),
+        expect.any(Object),
+      );
+    });
+
     it('fails the completion smoke test when a non-local credential has no server-side API key', async () => {
       mockService.findAll.mockResolvedValue([makeCredential({ provider: 'openai' })]);
       mockService.getApiKey.mockResolvedValue('');

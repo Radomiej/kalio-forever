@@ -176,15 +176,15 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
 
 Partially ready.
 
-The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT3j` now ends `done` after external host evidence is resumed through Goal Master and final artifact. Paid readiness still correctly detects prior XiaomiMiMo `mimo-v2.5-pro` cross-border failures. The full original objective remains incomplete because high-level `mimo-v2.5-pro` is still provider-blocked and design-debate research persistence did not prove concrete `web_search` URL capture.
+The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT3j` now ends `done` after external host evidence is resumed through Goal Master and final artifact. Paid readiness can now smoke-test `mimo-v2.5-pro` separately from the active worker model, and the live model-specific smoke passed. The full original objective remains incomplete because design-debate research persistence did not prove concrete `web_search` URL capture.
 
 ## Remaining Blockers
 
 - Live manual stop still needs browser/API evidence on a long-running run after the provider gate is resolved or a controlled mock long-running run is used.
 - AgentFlow verifier did not reconcile the host repo commit/build evidence with its isolated VFS/tool evidence.
 - UI inspector still needs stronger "Open child graph" behavior; current evidence indicates it mostly switches session and may not focus `graphRunId`.
-- Paid Xiaomi readiness now has a real chat-completion smoke request and correctly fails on the provider 451. The remaining blocker is provider-side access, not hidden readiness false-positive behavior.
-- A clean normal-chat paid proof using `mimo-v2.5-pro` is still needed after provider access is fixed; ordinary `mimo-v2.5` now has terminal `done` proof on run `rH7lbjvi5Sl4EaXWvgT3j`.
+- Paid Xiaomi readiness now has a real chat-completion smoke request and can additionally require a model-specific high-level smoke via `AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL`.
+- A clean normal-chat paid proof using `mimo-v2.5-pro` for actual high-level graph nodes is still needed; ordinary `mimo-v2.5` now has terminal `done` proof on run `rH7lbjvi5Sl4EaXWvgT3j`.
 - Resume path remains non-terminal in `Gq-bpKL4-B5ueq4lwhxed` when child CLI enters `spawn_cli_agent` / `wait_for` path without host worktree diff, and trace sequence de-duplication still needs correction.
 - Event sequence de-duplication is now covered at the AgentFlow merge layer, but it still needs live recheck on a fresh resumed run after backend reload.
 - A fresh flow is still needed to prove the new research-source contract creates either concrete `web_search` URLs or a clear `seeded/no live search` label in the persisted design-debate document.
@@ -217,12 +217,14 @@ The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT
   - Passed: `14` tests, including the new Web Search not-configured blocker.
 - `$env:KALIO_API_BASE_URL='http://127.0.0.1:3016/api'; npm.cmd run agentflow:paid-readiness`
   - Failed as expected with `2` blockers: Web Search is not configured and Web Search smoke failed.
+- `$env:KALIO_API_BASE_URL='http://127.0.0.1:3016/api'; $env:AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL='mimo-v2.5-pro'; npm.cmd run agentflow:paid-readiness`
+  - High-level model smoke passed for `xiaomimimo / mimo-v2.5-pro`; command still failed on the same `2` Web Search blockers.
 - `GET http://127.0.0.1:3016/api/agent-flows/runs/0SsbHDnwO_7ZuwzYZjNHn/events`
   - Passed live audit check: no stale `flow:unresolved_cli_children` events remain after the terminal `done` projection.
 
 ## Remaining Blockers After This Slice
 
-- `mimo-v2.5-pro` remains blocked by Xiaomi `451`; ordinary `mimo-v2.5` is the verified paid test model for now.
+- `mimo-v2.5-pro` passes the model-specific readiness smoke, but full multi-node high-level AgentFlow execution on pro is not yet re-proven.
 - The research-source contract is only proven for the honest fallback (`seeded/no live search`), not for actual persisted live `web_search` URLs because the local Web Search provider is not configured.
 
 ## Goal Completion Audit Snapshot
@@ -234,4 +236,5 @@ The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT
 - AgentFlow run `0SsbHDnwO_7ZuwzYZjNHn` is terminal `done`; event audit has `count=181`, `hasFinal=1`, `hasResume=2`, and `hasUnresolved=0`.
 - Research audit note exists, is ASCII-only, contains `seeded/no live search`, contains `2026-06-04`, contains no `2025`, and contains `0` live URLs.
 - Search config remains `provider=perplexity`, `configured=false`, so live `web_search` URL persistence is not currently provable.
-- The original objective is therefore still not complete: it requires live web-search persistence and intended `mimo-v2.5-pro` high-level paid proof, both currently blocked by external/provider configuration.
+- `AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL=mimo-v2.5-pro` readiness smoke passed on the live API.
+- The original objective is therefore still not complete: it requires live web-search persistence and a fresh full high-level AgentFlow proof using `mimo-v2.5-pro` in graph execution, while the current hard blocker is missing Web Search configuration.

@@ -14,6 +14,7 @@ export async function collectPaidReadinessChecks(options = {}) {
   const maxRecentProviderFailureMs = Number(
     options.maxRecentProviderFailureMs ?? process.env.AGENTFLOW_RECENT_PROVIDER_FAILURE_AGE_MS ?? 60 * 60 * 1000,
   );
+  const requiredHighLevelModel = options.requiredHighLevelModel ?? process.env.AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL;
   const fetchJson = options.fetchJson ?? fetch;
   const now = options.now ?? Date.now();
   const checks = [];
@@ -120,6 +121,37 @@ export async function collectPaidReadinessChecks(options = {}) {
             `Active completion smoke source matches effective source (${completionCheck.source ?? 'unknown'})`,
             `Active completion smoke source ${completionCheck.source ?? 'unknown'} does not match effective source ${llmConfig.source ?? 'unknown'}`,
           );
+        }
+      }
+      if (typeof requiredHighLevelModel === 'string' && requiredHighLevelModel.trim().length > 0) {
+        const model = requiredHighLevelModel.trim();
+        const highLevelCompletionCheck = await checkJson(
+          fetchJson,
+          checks,
+          `${apiBase}/credentials/${active.credentialId}/test-completion`,
+          `Required high-level model completion smoke endpoint is reachable (${model})`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model }),
+          },
+        );
+        if (highLevelCompletionCheck) {
+          passOrFail(
+            checks,
+            highLevelCompletionCheck.ok === true,
+            `Required high-level model completion smoke passed (` +
+              `${highLevelCompletionCheck.provider ?? 'unknown'} / ${highLevelCompletionCheck.model ?? 'unknown'})`,
+            `Required high-level model completion smoke failed for ${model}: ${highLevelCompletionCheck.error ?? 'unknown error'}`,
+          );
+          if (highLevelCompletionCheck.ok === true) {
+            passOrFail(
+              checks,
+              highLevelCompletionCheck.model === model,
+              `Required high-level model smoke used ${model}`,
+              `Required high-level model smoke used ${highLevelCompletionCheck.model ?? 'unknown'} instead of ${model}`,
+            );
+          }
         }
       }
     }

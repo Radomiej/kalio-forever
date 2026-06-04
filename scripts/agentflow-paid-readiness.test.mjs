@@ -137,6 +137,70 @@ test('paid readiness blocks when the completion smoke diverges from the effectiv
   )));
 });
 
+test('paid readiness can require a high-level model completion smoke without changing the active model', async () => {
+  const completionBodies = [];
+  const checks = await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    requiredHighLevelModel: 'mimo-v2.5-pro',
+    fetchJson: async (url, init) => {
+      if (url === 'http://kalio.test/api/llm/config') {
+        return response({ provider: 'xiaomimimo', source: 'db', model: 'mimo-v2.5' });
+      }
+      if (url === 'http://kalio.test/api/credentials') {
+        return response([{ id: 'cred-live' }]);
+      }
+      if (url === 'http://kalio.test/api/credentials/active') {
+        return response({ credentialId: 'cred-live' });
+      }
+      if (url === 'http://kalio.test/api/credentials/cred-live/test') {
+        return response({ ok: true, modelCount: 9 });
+      }
+      if (url === 'http://kalio.test/api/credentials/cred-live/test-completion') {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        completionBodies.push(body ?? null);
+        return response(body?.model === 'mimo-v2.5-pro'
+          ? {
+              ok: false,
+              provider: 'xiaomimimo',
+              model: 'mimo-v2.5-pro',
+              source: 'db',
+              error: '451 Unavailable For Legal Reasons',
+            }
+          : {
+              ok: true,
+              provider: 'xiaomimimo',
+              model: 'mimo-v2.5',
+              source: 'db',
+            });
+      }
+      if (url === 'http://kalio.test/api/agent-flows/runs') {
+        return response([]);
+      }
+      if (url === 'http://kalio.test/api/cli-agents/codex/config') {
+        return response({ enabled: true, model: 'gpt-5.4-mini' });
+      }
+      if (url === 'http://kalio.test/api/search/config') {
+        return response({ provider: 'perplexity', configured: true });
+      }
+      if (url === 'http://kalio.test/api/search/test') {
+        return response({ ok: true });
+      }
+      if (url.endsWith('/sessions')) {
+        return response([]);
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+
+  assert.deepEqual(completionBodies, [null, { model: 'mimo-v2.5-pro' }]);
+  assert.ok(checks.some((check) => (
+    check.ok === false
+    && check.message === 'Required high-level model completion smoke failed for mimo-v2.5-pro: 451 Unavailable For Legal Reasons'
+  )));
+});
+
 test('paid readiness honors explicit API base when the managed stack uses random ports', async () => {
   const requestedUrls = [];
 
