@@ -307,3 +307,16 @@ Acceptance:
 - Paid readiness must distinguish exact model availability, effective runtime model, and provider request-shape failures in one traceable report.
 - A successful ordinary-model proof must end as `done` or a clearly reasoned `blocked`, not remain `waiting_on_orchestrator` after host-side build success.
 - The final AgentFlow artifact must include changed files, build result, provider/model, parent session id, run id, and the reason why pro remains blocked if ordinary model is used.
+
+### 2026-06-04 Orchestrated Launch Studio Paid Proof
+
+Debt:
+- Live run `rH7lbjvi5Sl4EaXWvgT3j` on `mimo-v2.5` created a real TurboProject2 page and design-debate document, but AgentFlow ended `blocked` because the Implementer CLI child timed out and the later resume produced `flow:missing_final_artifact`.
+- Host-side evidence proved the generated project was valid after a small QA fix: `npm.cmd run build` passed, `/orchestrated-launch-studio` rendered from Turbo preview, and Playwright quality audit dropped from 4 high WCAG findings to 0 high findings.
+- Resume with explicit host evidence was not accepted as a terminal final artifact; Orchestrator read the evidence and routed back to Implementer instead of finalizing.
+- The design-debate document recorded general source names but did not persist concrete web-search URLs from the AgentFlow trace, so research persistence is still too weak for audit-grade runs.
+
+Acceptance:
+- A resume that contains verified host build/visual evidence must either create a final artifact or return a terminal `blocked` summary that includes that evidence, without routing to Implementer again unless a specific implementation defect is named.
+- Implementer should avoid spawning CLI children for simple bounded file writes when direct file tools are available.
+- Design-debate artifacts must store concrete source URLs or explicit "seeded/no live search" labels so manual QA can distinguish real research from prompt-provided heuristics.

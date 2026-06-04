@@ -65,6 +65,16 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
 - Live run `Gq-bpKL4-B5ueq4lwhxed` confirmed both `flow:resume_input` and `flow:return_to_orchestrator`; after resume, implementer started `spawn_cli_agent` + `wait_for`, but the snapshot returned to `waiting_on_orchestrator` with no new project changes in `C:\Projekty\TurboProject2`.
 - The same run still showed XiaomiMiMo model `mimo-v2.5-pro` returning MiFE `451` cross-border; the paid path should be validated against `mimo-v2.5`.
 - Trace event sequence numbering was duplicated on mixed segments (e.g. repeated `125`), which materially hurts auditability.
+- Live run `rH7lbjvi5Sl4EaXWvgT3j` on parent `paid-xiaomi-orchestrator-multiphase-proof-20260604` used effective provider/model `xiaomimimo` / `mimo-v2.5`.
+- The run proved the high-level Orchestrator can create a design-debate and route implementation work for a new page, but the Implementer path still overuses `spawn_cli_agent` and timed out before capturing build output.
+- Target branch `C:\Projekty\TurboProject2` / `codex/paid-xiaomi-agentflow-orchestrator-proof-4` now contains commit `0f3e3fb feat: add orchestrated launch studio page`.
+- Generated artifacts: `docs/orchestrated-launch-studio-design-debate.md`, `src/pages/OrchestratedLaunchStudio.tsx`, and `src/App.tsx` route `/orchestrated-launch-studio`.
+- Host verification passed after one small orchestrator QA fix: `npm.cmd run build` produced `tsc -b && vite build`, 36 modules transformed, built in 828ms.
+- Text scan passed for the page and design-debate document: no mojibake, no non-ASCII, no fake dates, and demo metrics are labeled.
+- Correct visual QA target was Turbo preview `http://127.0.0.1:5199/orchestrated-launch-studio`; `http://localhost:5188/` is the Kalio shell and is not the generated Turbo route.
+- Playwright full-page quality audit after the fix reported `0` high WCAG findings and no runtime findings; remaining medium findings are existing Belle navbar target/focus-size issues.
+- AgentFlow still ended `blocked` with `flow:missing_final_artifact` after resume, because the Orchestrator read host evidence and routed back to Implementer instead of accepting evidence into a terminal final artifact.
+- No AgentFlow event showed an actual `web_search` tool call for the design-debate; the document persisted general source names, not concrete source URLs.
 
 ## Verification
 
@@ -117,6 +127,11 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
   - Passed with CRLF normalization warnings only.
 - `C:\Projekty\TurboProject2`: `npm.cmd run build`
   - Passed after final commit `737eaf3`.
+- `C:\Projekty\TurboProject2`: `npm.cmd run build`
+  - Passed on branch `codex/paid-xiaomi-agentflow-orchestrator-proof-4` after commit `0f3e3fb`: `tsc -b && vite build`, 36 modules transformed.
+- Playwright quality audit for Turbo preview:
+  - `http://127.0.0.1:5199/orchestrated-launch-studio` after QA fix returned status `warning`, WCAG high `0`, runtime high `0`.
+  - Snapshot: `C:\Projekty\mcp-playwrigh-master\.local-data\mcp-playwright-orchestrator\snapshots\1554c697-204e-410c-a2b7-52dd32de2de2--58dc9db3-b0fb-489a-ad69-1f721f0baf08--turbo-orchestrated-launch-studio-after-fix--\2026-06-04T20-59-37-208Z-594ef69b-0718-4605-b7dd-356db2b45305.png`
 - Playwright trace artifact:
   - `C:\Projekty\mcp-playwrigh-master\.local-data\mcp-playwright-orchestrator\artifacts\224fe816-c44e-4cda-bb83-b0e27d7475b6\paid-xiaomi-ordinary-workflow-1780566788073-4c3db90e-c352-4a93-b31e-f5f54c0f7525.zip`
 - Playwright trace artifact for clean Talk proof:
