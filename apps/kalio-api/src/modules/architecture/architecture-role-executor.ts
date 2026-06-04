@@ -153,6 +153,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         parentToolCallId: `architecture:${input.run.id}:${input.slot.id}`,
         childSessionId: input.branchSessionId,
         personaId: input.personaId,
+        model: this.modelForSlot(input),
         objective: this.buildObjective(input),
         auditContext: {
           architectureRunId: input.run.id,
@@ -217,6 +218,32 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       return configured;
     }
     return input.slot.slotType === 'router' || input.slot.slotType === 'finalizer' ? 300_000 : 120_000;
+  }
+
+  private modelForSlot(input: ArchitectureRoleExecutionInput): string | undefined {
+    const perSlot = input.run.context?.['architectureModelBySlot'];
+    if (perSlot && typeof perSlot === 'object' && !Array.isArray(perSlot)) {
+      const value = (perSlot as Record<string, unknown>)[input.slot.id];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+
+    const preferenceKey = this.isHighLevelSlot(input.slot)
+      ? 'highLevelModelPreference'
+      : 'workerModelPreference';
+    const preference = input.run.context?.[preferenceKey];
+    return typeof preference === 'string' && preference.trim().length > 0
+      ? preference.trim()
+      : undefined;
+  }
+
+  private isHighLevelSlot(slot: ArchitectureRoleSlot): boolean {
+    return slot.slotType === 'router'
+      || slot.slotType === 'finalizer'
+      || slot.slotType === 'judge'
+      || slot.id === 'orchestrator'
+      || slot.id === 'goal_master';
   }
 
   private timeoutMsFromContext(context: Record<string, unknown> | undefined, slotId: string): number | undefined {

@@ -97,6 +97,70 @@ describe('ArchitectureRoleExecutorService', () => {
     expect(call?.objective).toContain('prefer a partial evidence-based conclusion over another read');
   });
 
+  it('passes architecture model preferences to subagent runtime by slot level', async () => {
+    const strategicSchema = getSchema();
+    const participantSlot = strategicSchema.roleSlots.find((candidate) => candidate.slotType === 'participant');
+    const routerSlot = strategicSchema.roleSlots.find((candidate) => candidate.slotType === 'router');
+    const goalMasterSchema = getGoalMasterSchema();
+    const toolSlot = goalMasterSchema.roleSlots.find((candidate) => candidate.slotType === 'tool_executor');
+    if (!participantSlot || !routerSlot || !toolSlot) {
+      throw new Error('Expected participant, router, and tool executor slots');
+    }
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'done',
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+    const strategicRun: ArchitectureRun = {
+      ...createRun('subagent_execution'),
+      context: {
+        workerModelPreference: 'mimo-v2.5',
+        highLevelModelPreference: 'mimo-v2.5-pro',
+        architectureModelBySlot: {
+          [routerSlot.id]: 'mimo-v2.5-router-override',
+        },
+      },
+    };
+    const goalMasterRun: ArchitectureRun = {
+      ...strategicRun,
+      schemaId: 'goal-master-delivery-loop',
+    };
+
+    await service.execute({
+      schema: strategicSchema,
+      run: strategicRun,
+      slot: participantSlot,
+      branchSessionId: 'branch-participant',
+      personaId: participantSlot.defaultPersonaId,
+    });
+    await service.execute({
+      schema: goalMasterSchema,
+      run: goalMasterRun,
+      slot: toolSlot,
+      branchSessionId: 'branch-tool',
+      personaId: toolSlot.defaultPersonaId,
+    });
+    await service.execute({
+      schema: strategicSchema,
+      run: strategicRun,
+      slot: routerSlot,
+      branchSessionId: 'branch-router',
+      personaId: routerSlot.defaultPersonaId,
+    });
+
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].model).toBe('mimo-v2.5');
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[1]?.[0].model).toBe('mimo-v2.5');
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[2]?.[0].model).toBe('mimo-v2.5-router-override');
+  });
+
   it('turns exhausted architecture read loops into bounded evidence output', async () => {
     const schema = getSchema();
     const slot = schema.roleSlots[0];

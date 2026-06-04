@@ -1351,6 +1351,74 @@ describe('SubagentRuntimeService nested subagents', () => {
     }));
   });
 
+  it('uses request model before persona model and records request as the audit source', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([
+        { type: 'text_delta', delta: 'request model complete' },
+        { type: 'done' },
+      ])),
+      getConfig: vi.fn(async () => ({
+        provider: 'xiaomimimo' as const,
+        apiKey: '',
+        baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        model: 'mimo-v2.5-pro',
+        source: 'db' as const,
+      })),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const audit = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: 'mimo-v2.5-pro', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+      audit as never,
+    );
+
+    await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'parent-call-request-model',
+      objective: 'use request model',
+      availableTools: [],
+      timeoutMs: 60000,
+      vfsMode: 'shared',
+      copyOutputs: false,
+      model: 'mimo-v2.5',
+    });
+
+    expect(llmSource.stream).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'mimo-v2.5',
+    }));
+    expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'llm_request',
+      data: expect.objectContaining({
+        parentToolCallId: 'parent-call-request-model',
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5',
+        modelSource: 'request',
+        personaModel: 'mimo-v2.5-pro',
+        requestModel: 'mimo-v2.5',
+      }),
+    }));
+    expect(audit.update).toHaveBeenCalledWith('audit-id', expect.objectContaining({
+      data: expect.objectContaining({
+        model: 'mimo-v2.5',
+        modelSource: 'request',
+        personaModel: 'mimo-v2.5-pro',
+        requestModel: 'mimo-v2.5',
+      }),
+    }));
+  });
+
   it('returns an explicit incomplete result when max iterations are exhausted after tool calls', async () => {
     const llmSource: ILLMSource = {
       stream: vi.fn(() => streamFrom([

@@ -208,6 +208,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           childSessionId,
           objective: objectiveWithAttachmentHint,
           personaId: request.personaId ?? childSession.personaId,
+          model: request.model,
           tools,
           vfsSessionId,
           agentRun,
@@ -287,6 +288,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     childSessionId: string;
     objective: string;
     personaId: string;
+    model?: string;
     tools: ToolMeta[];
     vfsSessionId: string;
     agentRun: AgentRunContext;
@@ -300,7 +302,10 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     let lastMessageId = `subagent-${params.agentRun.agentRunId}`;
     const personaConfig = await this.personaService.getSessionConfig(params.personaId);
     const runtimeConfig = await this.llmSource.getConfig?.();
-    const llmAuditData = buildSubagentLLMAuditData(runtimeConfig, personaConfig?.model);
+    const requestModel = params.model?.trim();
+    const personaModel = personaConfig?.model?.trim();
+    const effectiveModel = requestModel || personaModel || undefined;
+    const llmAuditData = buildSubagentLLMAuditData(runtimeConfig, personaConfig?.model, params.model);
     const activeSkills = personaConfig?.skillIds && personaConfig.skillIds.length > 0
       ? await this.skillsService?.findByIds(personaConfig.skillIds) ?? []
       : [];
@@ -376,7 +381,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         tools: params.tools,
         sessionId: params.childSessionId,
         messageId,
-        model: personaConfig?.model?.trim() || undefined,
+        model: effectiveModel,
         abortSignal: params.abortSignal,
       })) {
         if (params.abortSignal.aborted) {
