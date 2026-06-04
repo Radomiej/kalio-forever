@@ -292,3 +292,18 @@ Debt:
 
 Acceptance:
 - Keep this as blocking technical debt for the paid proof until resume-to-terminal behavior and sequence de-duplication are fixed, and host/tool evidence shows verified progress before claiming success.
+
+### 2026-06-04 Xiaomi Model Mapping / Ordinary-Model Proof
+
+Debt:
+- `/api/llm/active/models` returns exact Xiaomi model ids including `mimo-v2.5` and `mimo-v2.5-pro`; the `mimo-v2.5-pro` failure is not a typo or missing model.
+- Runtime audit shows model override/mapping works: persona defaults can name `mimo-v2.5-pro`, while the effective request model is overridden to `mimo-v2.5`.
+- Full ArchitectureRuntime high-level requests can still receive XiaomiMiMo MiFE `451 Unavailable For Legal Reasons` on `mimo-v2.5-pro`, while simpler completion smoke can pass.
+- Ordinary-model run `Z0clSjSB4g-SbJ83dBbeZ` using `mimo-v2.5` wrote files in `C:\Projekty\TurboProject2` and added the `/xiaomi-ordinary-proof` route, and host-side `npm.cmd run build` passed.
+- The same run still remained `waiting_on_orchestrator` after repeated return-to-orchestrator cycles, so Kalio did not produce a clean terminal final artifact from the verified build evidence.
+- Implementer behavior is still too CLI-heavy: it can spawn/read/wait repeatedly instead of making bounded direct edits and finalizing after a clear external gate.
+
+Acceptance:
+- Paid readiness must distinguish exact model availability, effective runtime model, and provider request-shape failures in one traceable report.
+- A successful ordinary-model proof must end as `done` or a clearly reasoned `blocked`, not remain `waiting_on_orchestrator` after host-side build success.
+- The final AgentFlow artifact must include changed files, build result, provider/model, parent session id, run id, and the reason why pro remains blocked if ordinary model is used.
