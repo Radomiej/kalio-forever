@@ -219,3 +219,14 @@ The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT
 
 - `mimo-v2.5-pro` remains blocked by Xiaomi `451`; ordinary `mimo-v2.5` is the verified paid test model for now.
 - The research-source contract is only proven for the honest fallback (`seeded/no live search`), not for actual persisted live `web_search` URLs because the local Web Search provider is not configured.
+
+## Goal Completion Audit Snapshot
+
+- Kalio FE `http://localhost:5188/` is reachable and returns `200` with title `Kalio`.
+- Active LLM config is `provider=xiaomimimo`, `model=mimo-v2.5`, `source=db`.
+- TurboProject2 branch `codex/paid-xiaomi-agentflow-orchestrator-proof-4` is clean and includes commits `0f3e3fb` (page) and `9416e32` (research-source audit note).
+- Turbo preview `http://127.0.0.1:5199/orchestrated-launch-studio` is reachable and returns `200`.
+- AgentFlow run `0SsbHDnwO_7ZuwzYZjNHn` is terminal `done`; event audit has `count=181`, `hasFinal=1`, `hasResume=2`, and `hasUnresolved=0`.
+- Research audit note exists, is ASCII-only, contains `seeded/no live search`, contains `2026-06-04`, contains no `2025`, and contains `0` live URLs.
+- Search config remains `provider=perplexity`, `configured=false`, so live `web_search` URL persistence is not currently provable.
+- The original objective is therefore still not complete: it requires live web-search persistence and intended `mimo-v2.5-pro` high-level paid proof, both currently blocked by external/provider configuration.
