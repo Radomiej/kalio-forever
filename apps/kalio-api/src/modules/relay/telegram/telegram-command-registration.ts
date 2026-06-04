@@ -107,9 +107,18 @@ export function registerTelegramCommands(bot: Bot, options: TelegramCommandRegis
       const text = textFromContext(ctx);
       const commandHandlers = options.getCommandHandlers();
       if (text && commandHandlers?.handleApprovalReply) {
-        const response = await commandHandlers.handleApprovalReply(text);
-        if (response) {
-          await ctx.reply(escapeMarkdownV2(response), { parse_mode: 'MarkdownV2' });
+        try {
+          const response = await commandHandlers.handleApprovalReply(text);
+          if (response) {
+            await ctx.reply(escapeMarkdownV2(response), { parse_mode: 'MarkdownV2' });
+            return;
+          }
+        } catch (err) {
+          options.logger.error(
+            'Error handling Telegram approval reply',
+            err instanceof Error ? err : new Error(String(err)),
+          );
+          await ctx.reply('Error handling approval reply\\.', { parse_mode: 'MarkdownV2' });
           return;
         }
       }
