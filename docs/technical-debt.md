@@ -4,6 +4,32 @@
 
 Date: 2026-06-04
 
+### Paid Xiaomi Goal Master Proof Gaps
+
+Evidence from run `G2fxR7yTPzkO5tpjzpO1m` against `C:\Projekty\TurboProject2` on branch `codex/paid-xiaomi-simple-workflow-proof`.
+
+What worked:
+- Active provider config and credential smoke passed for `xiaomimimo / mimo-v2.5 / db`.
+- Goal Master AgentFlow emitted durable lifecycle trace: `started`, `node_started`, `tool_called`, `node_completed`, `return_to_orchestrator`, and `resume_input`.
+- Codex CLI child created and committed `/workflow-proof` page in TurboProject2.
+- Follow-up Codex CLI child added `docs/workflow-proof-design.md` and `docs/workflow-proof-research.md`, fixed text encoding, and committed the fix.
+- Independent `npm run build` in TurboProject2 passed.
+
+Debt:
+- Xiaomi still returned `451 Unavailable For Legal Reasons` during long Goal Master branch calls even though direct `test-completion` smoke passed. The provider is usable for short smoke calls, but not yet proven reliable for full AgentFlow runs.
+- The run stayed `waiting_on_orchestrator` after repeated Goal Master 451 failures. This is correct audit behavior, but it means paid proof cannot be marked `done`.
+- `ResumeAgentFlowRunDto` uses `input`; sending `{ message }` silently records "Resume requested with no additional instructions." API ergonomics should reject unknown resume payloads or support `message` as an alias.
+- Implementer slot initially lacked live `web_search`; it wrote research from model knowledge and later marked that honestly in the target doc. Workflow requirements that demand web search need tool availability checks before execution.
+- CLI child status can be falsely marked failed when `expectedChangedFiles` includes speculative paths like `src/router.tsx` or `package.json`. Expected files must be derived from project inspection or treated as hints, not hard failure criteria.
+- Goal Master fallback routed back to implementer after provider errors, but did not produce a terminal `blocked` summary after repeated provider failures.
+
+Acceptance:
+- A paid run may be called complete only when the AgentFlow snapshot reaches `done` or explicit `blocked` with a clear provider/tooling reason.
+- Readiness should include a long/runtime-shaped Xiaomi smoke, not only a short credential completion smoke.
+- Trace should expose the effective provider/model for each node so `mimo-v2.5` vs `mimo-v2.5-pro` drift is visible without reading logs.
+- Resume API should validate payload shape and include the submitted input in `flow:resume_input`.
+- Web-search-dependent flows must fail early or route to a node with `web_search`; they must not produce "research" while pretending live search happened.
+
 ### Conversation-Started Workflow Is The Primary User Path
 
 The Architect graph editor is for editing and inspecting presets. It is not the primary user path for a normal user run.
