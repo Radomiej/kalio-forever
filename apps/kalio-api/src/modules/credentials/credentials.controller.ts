@@ -309,6 +309,8 @@ export class CredentialsController {
     error?: string;
   }> {
     const start = Date.now();
+    let smokeProvider = 'unknown';
+    let smokeModel = 'unknown';
     try {
       const all = await this.credentialsService.findAll();
       const cred = all.find((c) => c.id === id);
@@ -323,6 +325,8 @@ export class CredentialsController {
           error: 'Credential not found',
         };
       }
+      smokeProvider = cred.provider;
+      smokeModel = cred.model ?? '';
 
       const isLocal = isLocalLlmProvider(cred.provider, cred.baseUrl ?? undefined);
       const apiKey = await this.credentialsService.getApiKey(id);
@@ -374,8 +378,8 @@ export class CredentialsController {
         ok: false,
         latencyMs: Date.now() - start,
         mode: 'runtime_smoke',
-        provider: 'unknown',
-        model: 'unknown',
+        provider: smokeProvider,
+        model: smokeModel,
         source: 'db',
         error: err instanceof Error ? err.message : String(err),
       };

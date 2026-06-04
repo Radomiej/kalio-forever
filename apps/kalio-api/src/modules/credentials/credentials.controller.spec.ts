@@ -127,6 +127,9 @@ describe('CredentialsController', () => {
         ok: true,
         latencyMs: expect.any(Number),
         mode: 'runtime_smoke',
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5-pro',
+        source: 'db',
       }));
       expect(mockService.getApiKey).toHaveBeenCalledWith('cred-1');
       expect(mockLLMService.streamChatWithConfig).toHaveBeenCalledWith(
@@ -164,6 +167,23 @@ describe('CredentialsController', () => {
         ok: false,
         mode: 'runtime_smoke',
         error: 'API key not available',
+      }));
+    });
+
+    it('keeps credential identity in completion smoke failures for audit readiness', async () => {
+      mockService.findAll.mockResolvedValue([makeCredential({ provider: 'xiaomimimo', model: 'mimo-v2.5', baseUrl: undefined })]);
+      mockService.getApiKey.mockResolvedValue('xiao-completion-key');
+      mockLLMService.streamChatWithConfig.mockRejectedValueOnce(new Error('451 Unavailable For Legal Reasons'));
+
+      const result = await controller.testCompletionById('cred-1');
+
+      expect(result).toEqual(expect.objectContaining({
+        ok: false,
+        mode: 'runtime_smoke',
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5',
+        source: 'db',
+        error: '451 Unavailable For Legal Reasons',
       }));
     });
   });

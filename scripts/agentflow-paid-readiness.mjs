@@ -295,6 +295,6 @@ function resolveManagedApiBase() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const exitCode = await runPaidReadinessCheck();
+  const exitCode = await runPaidReadinessCheck({ argv: process.argv.slice(2) });
   process.exit(exitCode);
 }
