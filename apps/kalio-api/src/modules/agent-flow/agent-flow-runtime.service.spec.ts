@@ -1613,6 +1613,8 @@ describe('AgentFlowRuntimeService', () => {
 
     expect(snapshot?.run.status).toBe('waiting_on_orchestrator');
     expect(snapshot?.result).toBeUndefined();
+    expect(snapshot?.events.some((event) => event.type === 'flow:unresolved_cli_children')).toBe(false);
+    expect(repository.getSnapshot('run-clear-stale-result')?.events.some((event) => event.type === 'flow:unresolved_cli_children')).toBe(false);
   });
 
   it('keeps a continuation cursor projected as waiting when a refreshed architecture run still says running', async () => {

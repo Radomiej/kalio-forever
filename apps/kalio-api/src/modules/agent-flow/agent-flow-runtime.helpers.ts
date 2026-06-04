@@ -103,7 +103,7 @@ export function mergeRefreshedSnapshot(
     ...refreshed,
     run,
     events: normalizeTraceSequences([
-      ...stored.events,
+      ...storedEventsForRefresh(stored.events, refreshed.events),
       ...refreshed.events.filter((event) => !stored.events.some((existing) => existing.id === event.id)),
     ]),
     result: mergedResult(stored.run, stored.result, refreshed),
@@ -138,7 +138,7 @@ export function mergeRefreshedAfterResume(
   return blockExceededReturnToOrchestratorCap(reconcileContinuationSnapshot({
     run,
     events: normalizeTraceSequences([
-      ...updated.events,
+      ...storedEventsForRefresh(updated.events, refreshed.events),
       ...refreshed.events.filter((event) => !updated.events.some((existing) => existing.id === event.id)),
     ]),
     result: mergedResult(updated.run, updated.result, refreshed),
@@ -241,4 +241,16 @@ function normalizeTraceSequences(events: AgentFlowTraceItem[]): AgentFlowTraceIt
     ...event,
     sequence: index + 1,
   }));
+}
+
+function storedEventsForRefresh(
+  storedEvents: AgentFlowTraceItem[],
+  refreshedEvents: AgentFlowTraceItem[],
+): AgentFlowTraceItem[] {
+  const refreshedTypes = new Set(refreshedEvents.map((event) => event.type));
+  return storedEvents.filter((event) => !isSyntheticBlockerEvent(event) || refreshedTypes.has(event.type));
+}
+
+function isSyntheticBlockerEvent(event: AgentFlowTraceItem): boolean {
+  return event.type === 'flow:unresolved_cli_children';
 }

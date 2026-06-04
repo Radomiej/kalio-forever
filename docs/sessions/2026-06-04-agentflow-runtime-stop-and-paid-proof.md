@@ -197,7 +197,10 @@ The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT
 - Host verification confirmed the audit note is ASCII-only, has `Audit Date: 2026-06-04`, contains no `2025`, and contains the required `seeded/no live search` marker.
 - Resume with `externalQualityGate.status=passed` produced an accepted `flow:final_artifact`, but the live process still projected the snapshot as `blocked` because unresolved CLI child evidence was evaluated after the host QA gate.
 - Patched `ArchitectureAgentFlowAdapter` so an explicit passed external quality gate is treated as independent host verification for unresolved CLI child evidence. This preserves the original guard for weak/no-evidence finalization while avoiding a false `blocked` after host-verified acceptance.
+- Patched AgentFlow snapshot merge to drop stale synthetic `flow:unresolved_cli_children` events when refreshed runtime projection no longer contains that blocker.
+- Live recheck for run `0SsbHDnwO_7ZuwzYZjNHn` now reports `status=done`, event count `181`, last event `flow:node_result`, and `hasUnresolved=0` from `/api/agent-flows/runs/:id/events`.
 - Static routing audit by two subagents found no evidence that `mimo-v2.5-pro` requests bypass the shared text provider. Model override changes only the model field on the selected provider config; the `451` remains a Xiaomi/provider-side cross-border policy/access blocker.
+- Live search check showed `/api/search/config` has `configured=false` and `/api/search/test` fails with `Web search not configured`, so actual persisted online source URLs are blocked by missing search credentials. Unit tests still prove `web_search` with `offline_search=false` calls external search and persists through memory ingestion.
 
 ## Verification Update
 
@@ -207,9 +210,12 @@ The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT
   - Passed: `1` file / `43` tests.
 - `corepack pnpm --filter kalio-api run typecheck`
   - Passed.
+- `corepack pnpm --filter kalio-api exec vitest run src/modules/tool/tools/web-search.tool.spec.ts src/modules/chat/__tests__/tool-dispatch.service.spec.ts`
+  - Passed: `2` files / `39` tests.
+- `GET http://127.0.0.1:3016/api/agent-flows/runs/0SsbHDnwO_7ZuwzYZjNHn/events`
+  - Passed live audit check: no stale `flow:unresolved_cli_children` events remain after the terminal `done` projection.
 
 ## Remaining Blockers After This Slice
 
-- The running Kalio API process still needs rebuild/restart before the external-quality-gate projection fix affects live snapshots.
 - `mimo-v2.5-pro` remains blocked by Xiaomi `451`; ordinary `mimo-v2.5` is the verified paid test model for now.
-- The research-source contract is only proven for the honest fallback (`seeded/no live search`), not for actual persisted live `web_search` URLs.
+- The research-source contract is only proven for the honest fallback (`seeded/no live search`), not for actual persisted live `web_search` URLs because the local Web Search provider is not configured.

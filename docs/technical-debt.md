@@ -186,6 +186,7 @@ Update 2026-06-04:
 - AgentFlow projection now emits `blocked/finalization_missing` when Goal Master accepted host build/git evidence but the Architecture runtime fallback still routes away from `final-artifact`.
 - This prevents a known false `waiting_on_orchestrator` projection after accepted external QA evidence.
 - AgentFlow projection now also treats an explicit `externalQualityGate.status=passed` resume context as independent host verification for unresolved CLI child evidence. This prevents a later accepted `flow:final_artifact` from being overwritten by `flow:unresolved_cli_children` when the host QA evidence was supplied outside the child CLI runtime.
+- AgentFlow snapshot merge now drops stale synthetic `flow:unresolved_cli_children` events when the refreshed runtime projection no longer contains that blocker. This keeps `/api/agent-flows/runs/:id/events` aligned with terminal `done` snapshots after external QA recovery.
 
 ### Last Real Proof Findings
 
@@ -330,4 +331,5 @@ Update 2026-06-04:
 - Audit log confirms the effective request used `provider=xiaomimimo`, `requestModel=mimo-v2.5`, and `personaModel=mimo-v2.5-pro`, so the ordinary-model fallback is traceable.
 - AgentFlow trace merge now has regression coverage for strictly increasing event sequences after resume refresh merges architecture events.
 - Agent Orchestrator seed now requires persisted research/design notes to include concrete `web_search` source URLs, or an explicit `seeded/no live search` label when live search was unavailable or unused.
-- Remaining debt: rerun a fresh live flow to prove the new research-source contract is followed by the model and visible in the generated design-debate document.
+- Fresh live run `0SsbHDnwO_7ZuwzYZjNHn` proved the fallback half of the research-source contract: the generated audit note persisted `seeded/no live search`, `web_search Used: No`, and `Source URLs: None`.
+- Live `web_search` URL persistence cannot currently be proven on the local stack because `/api/search/config` reports `configured=false` and `/api/search/test` returns `Web search not configured`. Unit coverage proves `offline_search=false` persists online results through `MemoryService.ingestWebSearchResult`; a paid/live proof still needs a configured search API key.
