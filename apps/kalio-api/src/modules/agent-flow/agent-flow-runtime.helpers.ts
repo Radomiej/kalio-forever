@@ -102,10 +102,10 @@ export function mergeRefreshedSnapshot(
     ...stored,
     ...refreshed,
     run,
-    events: [
+    events: normalizeTraceSequences([
       ...stored.events,
       ...refreshed.events.filter((event) => !stored.events.some((existing) => existing.id === event.id)),
-    ],
+    ]),
     result: mergedResult(stored.run, stored.result, refreshed),
   }));
 }
@@ -137,10 +137,10 @@ export function mergeRefreshedAfterResume(
   });
   return blockExceededReturnToOrchestratorCap(reconcileContinuationSnapshot({
     run,
-    events: [
+    events: normalizeTraceSequences([
       ...updated.events,
       ...refreshed.events.filter((event) => !updated.events.some((existing) => existing.id === event.id)),
-    ],
+    ]),
     result: mergedResult(updated.run, updated.result, refreshed),
   }));
 }
@@ -234,4 +234,11 @@ function isTerminalRunStatus(status: AgentFlowRun['status']): boolean {
     || status === 'failed'
     || status === 'blocked'
     || status === 'cancelled';
+}
+
+function normalizeTraceSequences(events: AgentFlowTraceItem[]): AgentFlowTraceItem[] {
+  return events.map((event, index) => ({
+    ...event,
+    sequence: index + 1,
+  }));
 }

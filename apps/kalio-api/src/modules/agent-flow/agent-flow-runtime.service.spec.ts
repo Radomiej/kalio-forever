@@ -898,6 +898,133 @@ describe('AgentFlowRuntimeService', () => {
     });
   });
 
+  it('keeps AgentFlow event sequence strictly increasing after resume refresh merges architecture events', async () => {
+    const architectureAdapter = adapter();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    const resume = vi.fn();
+    (architectureAdapter as unknown as { resume: typeof resume }).resume = resume;
+    repository.saveSnapshot({
+      run: {
+        id: 'run-resume-sequence',
+        parentSessionId: 'parent-sequence',
+        childSessionId: 'child-sequence',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'waiting_on_orchestrator',
+        startMode: 'durable',
+        returnMode: 'summary',
+        checkpoint: {
+          goal: 'Resume with host evidence.',
+          continuation: {
+            reason: 'return_to_orchestrator',
+            waitingNodeId: 'implementer',
+            pendingNodeIds: ['implementer'],
+            visitCounts: { orchestrator: 1, implementer: 1, 'goal-master': 1 },
+            lastCompletedNodeId: 'orchestrator',
+          },
+        },
+        createdAt: 1,
+        updatedAt: 4,
+      },
+      events: [
+        {
+          id: 'flow-1',
+          sequence: 1,
+          type: 'flow:run_created',
+          message: 'Created.',
+          createdAt: 1,
+        },
+        {
+          id: 'flow-2',
+          sequence: 2,
+          type: 'flow:node_result',
+          message: 'Orchestrator completed.',
+          nodeId: 'orchestrator',
+          roleSlotId: 'orchestrator',
+          createdAt: 2,
+        },
+        {
+          id: 'flow-3',
+          sequence: 3,
+          type: 'flow:missing_final_artifact',
+          message: 'Missing final artifact.',
+          status: 'blocked',
+          createdAt: 3,
+        },
+      ],
+    });
+    resume.mockResolvedValue({
+      run: {
+        id: 'run-resume-sequence',
+        parentSessionId: 'parent-sequence',
+        childSessionId: 'child-sequence',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'done',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 7,
+      },
+      events: [
+        {
+          id: 'arch-resume-created',
+          sequence: 3,
+          type: 'flow:run_created',
+          message: 'Architecture resumed.',
+          createdAt: 5,
+        },
+        {
+          id: 'arch-goal-master-start',
+          sequence: 4,
+          type: 'flow:node_start',
+          message: 'Goal Master started.',
+          nodeId: 'goal-master',
+          roleSlotId: 'goal_master',
+          createdAt: 6,
+        },
+        {
+          id: 'arch-final-artifact',
+          sequence: 5,
+          type: 'flow:final_artifact',
+          message: 'Final artifact.',
+          nodeId: 'final-artifact',
+          roleSlotId: 'finalizer',
+          status: 'done',
+          createdAt: 7,
+        },
+      ],
+      result: {
+        flowRunId: 'run-resume-sequence',
+        childSessionId: 'child-sequence',
+        status: 'done',
+        summary: 'Final artifact.',
+        decisions: [],
+        nextActions: [],
+        artifacts: [],
+      },
+    } satisfies AgentFlowRunSnapshot);
+
+    const resumed = await service.resume('run-resume-sequence', {
+      input: 'Host evidence passed.',
+    });
+
+    expect(resumed.run.status).toBe('done');
+    expect(resumed.events.map((event) => event.type)).toEqual([
+      'flow:run_created',
+      'flow:node_result',
+      'flow:missing_final_artifact',
+      'flow:return_to_orchestrator',
+      'flow:resume_input',
+      'flow:run_created',
+      'flow:node_start',
+      'flow:final_artifact',
+    ]);
+    expect(resumed.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
   it('marks a resumed run blocked when the adapter throws during resume', async () => {
     const architectureAdapter = adapter();
     const repository = new AgentFlowRunRepository();

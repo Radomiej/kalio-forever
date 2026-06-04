@@ -326,4 +326,6 @@ Update 2026-06-04:
 - ArchitectureRuntime regression coverage now proves a passed external QA resume can re-enter the last completed Goal Master even when the latest cursor points at a later Orchestrator attempt and pending Implementer.
 - Live run `rH7lbjvi5Sl4EaXWvgT3j` was resumed with external host evidence and reached terminal `done`: `flow:resume_input` -> Goal Master -> `flow:final_artifact` -> finalizer completed.
 - Audit log confirms the effective request used `provider=xiaomimimo`, `requestModel=mimo-v2.5`, and `personaModel=mimo-v2.5-pro`, so the ordinary-model fallback is traceable.
-- Remaining debt: event sequence numbering is duplicated around resumed mixed segments, and the proof still does not establish concrete `web_search` URL persistence in the design-debate document.
+- AgentFlow trace merge now has regression coverage for strictly increasing event sequences after resume refresh merges architecture events.
+- Agent Orchestrator seed now requires persisted research/design notes to include concrete `web_search` source URLs, or an explicit `seeded/no live search` label when live search was unavailable or unused.
+- Remaining debt: rerun a fresh live flow to prove the new research-source contract is followed by the model and visible in the generated design-debate document.

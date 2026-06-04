@@ -83,6 +83,8 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
 - The final artifact accepted branch `codex/paid-xiaomi-agentflow-orchestrator-proof-4`, commit `0f3e3fb feat: add orchestrated launch studio page`, changed files, build result, visual QA result, and text QA result.
 - Audit log for `arch-rH7lbjvi5Sl4EaXWvgT3j-goal_master` records provider/model fields: `provider=xiaomimimo`, `model=mimo-v2.5`, `modelSource=request`, `personaModel=mimo-v2.5-pro`, `requestModel=mimo-v2.5`.
 - Event sequence numbering is still not clean after resumed mixed segments: tail evidence includes repeated sequence values around `243` and `247`, so chronology is readable but not yet audit-grade.
+- Added AgentFlowRuntime merge normalization so refreshed/resumed AgentFlow snapshots expose strictly increasing local trace sequences even when underlying architecture events restarted from an older sequence number.
+- Added Agent Orchestrator seed/refresh guidance for research-source auditability: persisted design/research notes must include concrete `web_search` URLs, or explicitly say `seeded/no live search` when live search was unavailable or unused.
 
 ## Verification
 
@@ -132,6 +134,12 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
   - Passed after missing-final-artifact resume recovery: `1` file / `42` tests.
 - `corepack pnpm --filter kalio-api run typecheck`
   - Passed after the AgentFlow/ArchitectureRuntime resume recovery changes.
+- `corepack pnpm --filter kalio-api exec vitest run src/modules/agent-flow/agent-flow-runtime.service.spec.ts`
+  - Passed after trace sequence normalization: `1` file / `43` tests.
+- `corepack pnpm --filter kalio-api exec vitest run src/modules/persona/persona.service.spec.ts`
+  - Passed after Agent Orchestrator research-source seed hardening: `1` file / `40` tests.
+- `corepack pnpm --filter kalio-api run typecheck`
+  - Passed after trace sequence normalization and persona seed hardening.
 - `POST http://127.0.0.1:3016/api/agent-flows/runs/rH7lbjvi5Sl4EaXWvgT3j/resume`
   - Passed as a live paid Xiaomi ordinary-model proof after the recovery fix. Result: `status=done`, `events=263`, last event `flow:node_result` / `Verified Completion Artifact completed.`
 - `GET http://127.0.0.1:3016/api/agent-flows/runs/rH7lbjvi5Sl4EaXWvgT3j/events`
@@ -178,4 +186,5 @@ The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT
 - Paid Xiaomi readiness now has a real chat-completion smoke request and correctly fails on the provider 451. The remaining blocker is provider-side access, not hidden readiness false-positive behavior.
 - A clean normal-chat paid proof using `mimo-v2.5-pro` is still needed after provider access is fixed; ordinary `mimo-v2.5` now has terminal `done` proof on run `rH7lbjvi5Sl4EaXWvgT3j`.
 - Resume path remains non-terminal in `Gq-bpKL4-B5ueq4lwhxed` when child CLI enters `spawn_cli_agent` / `wait_for` path without host worktree diff, and trace sequence de-duplication still needs correction.
-- Event sequence de-duplication remains a real auditability issue after resumed runs even when final status is now correct.
+- Event sequence de-duplication is now covered at the AgentFlow merge layer, but it still needs live recheck on a fresh resumed run after backend reload.
+- A fresh flow is still needed to prove the new research-source contract creates either concrete `web_search` URLs or a clear `seeded/no live search` label in the persisted design-debate document.

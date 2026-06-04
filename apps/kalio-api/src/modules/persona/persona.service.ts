@@ -91,7 +91,10 @@ export class PersonaService implements OnApplicationBootstrap {
 
     if (
       personaId === 'agent-orchestrator'
-      && !existingPrompt.includes('planning/prototyping, implementation, and refactor/QA')
+      && (
+        !existingPrompt.includes('planning/prototyping, implementation, and refactor/QA')
+        || !existingPrompt.includes('seeded/no live search')
+      )
     ) {
       return true;
     }
