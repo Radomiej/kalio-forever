@@ -281,3 +281,14 @@ Acceptance:
 - Resume prompts that contain blocking QA evidence must either route to the requested node or produce a terminal blocker that explicitly says "no route selected".
 - The Orchestrator prompt/parser should accept the structured routerOutput `nextAction` or enforce a compact `route_to(implementer, reason)` command when continuation requires implementation.
 - Manual QA for paid AgentFlow must include at least one failed external gate followed by a successful resume-to-implementation cycle.
+
+### 2026-06-04 Live Resume Regression (Gq-bpKL4-B5ueq4lwhxed)
+
+Debt:
+- Live run `Gq-bpKL4-B5ueq4lwhxed` (parent session `paid-xiaomi-resume-routing-proof-20260604`) confirmed both `flow:resume_input` and `flow:return_to_orchestrator`.
+- After resume, Implementer started `spawn_cli_agent` + `wait_for`, but the AgentFlow snapshot stayed `waiting_on_orchestrator`; no new file changes were observed in `C:\Projekty\TurboProject2`.
+- XiaomiMiMo `mimo-v2.5-pro` still returned MiFE `451 Unavailable For Legal Reasons`; runtime tests should use `mimo-v2.5` for this paid path.
+- Trace quality is still polluted by duplicated mixed-segment sequence numbers (e.g. repeated `125`) in this run, which obscures chronological review.
+
+Acceptance:
+- Keep this as blocking technical debt for the paid proof until resume-to-terminal behavior and sequence de-duplication are fixed, and host/tool evidence shows verified progress before claiming success.

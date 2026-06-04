@@ -62,6 +62,9 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
 - VFS/tool evidence still drifted from host worktree evidence on the CLI child path, and child reconciliation was not fully settled at the time of the proof.
 - The trace was noisy enough that manual review had to filter past unrelated events to find the actual proof signal.
 - Persona worker resolution was still not fully closed in the proof path, so the orchestration split remained partially proven.
+- Live run `Gq-bpKL4-B5ueq4lwhxed` confirmed both `flow:resume_input` and `flow:return_to_orchestrator`; after resume, implementer started `spawn_cli_agent` + `wait_for`, but the snapshot returned to `waiting_on_orchestrator` with no new project changes in `C:\Projekty\TurboProject2`.
+- The same run still showed XiaomiMiMo model `mimo-v2.5-pro` returning MiFE `451` cross-border; the paid path should be validated against `mimo-v2.5`.
+- Trace event sequence numbering was duplicated on mixed segments (e.g. repeated `125`), which materially hurts auditability.
 
 ## Verification
 
@@ -139,3 +142,4 @@ The target repo proof has been materially delivered and verified on the older pr
 - UI inspector still needs stronger "Open child graph" behavior; current evidence indicates it mostly switches session and may not focus `graphRunId`.
 - Paid Xiaomi readiness now has a real chat-completion smoke request and correctly fails on the provider 451. The remaining blocker is provider-side access, not hidden readiness false-positive behavior.
 - A clean normal-chat paid proof is still needed after provider access is fixed to verify resume and final terminal `done` end-to-end.
+- Resume path remains non-terminal in `Gq-bpKL4-B5ueq4lwhxed` when child CLI enters `spawn_cli_agent` / `wait_for` path without host worktree diff, and trace sequence de-duplication still needs correction.
