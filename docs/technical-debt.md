@@ -269,3 +269,15 @@ Debt:
 Acceptance:
 - Provider/runtime errors should be rendered inside the app shell without changing the document title to the upstream error title.
 - Reloading or starting a new ordinary Talk session should restore a normal Kalio document title.
+
+### AgentFlow Resume Routing Fidelity
+
+Debt:
+- Live paid TurboProject2 run `mWa64q6ZBCBVDNbjN86__` accepted `flow:resume_input` after an external build failure, but the resumed Orchestrator produced a detailed implementation directive without a parseable `route_to(...)`.
+- Because no route was taken, the resumed graph ended as `blocked` with `flow:missing_final_artifact` instead of executing the planned Implementer fix.
+- The implementation run also proved that a generated final artifact can correctly declare blockers while the runtime still needs a reliable "continue to implementer" path after QA feedback.
+
+Acceptance:
+- Resume prompts that contain blocking QA evidence must either route to the requested node or produce a terminal blocker that explicitly says "no route selected".
+- The Orchestrator prompt/parser should accept the structured routerOutput `nextAction` or enforce a compact `route_to(implementer, reason)` command when continuation requires implementation.
+- Manual QA for paid AgentFlow must include at least one failed external gate followed by a successful resume-to-implementation cycle.
