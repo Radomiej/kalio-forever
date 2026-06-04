@@ -13,6 +13,9 @@ export class XiaomiMiMoProvider extends BaseOpenAICompatibleProvider {
     return {
       'Content-Type': 'application/json',
       ...buildProviderCompatHeaders('xiaomimimo', this.apiKey),
+      ...(process.env.XIAOMI_MIFE_ALLOW_CROSS_BORDER_ACCESS === 'true'
+        ? { 'X-MiFE-Allow-Cross-Border-Access': 'true' }
+        : {}),
     };
   }
 

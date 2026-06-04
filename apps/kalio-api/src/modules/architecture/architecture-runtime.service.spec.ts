@@ -418,6 +418,45 @@ describe('ArchitectureRuntimeService', () => {
     expect(service.getChat(run.id)?.messages.at(-1)?.speaker).toBe('finalizer');
   });
 
+  it('keeps a stopped async run cancelled when a late role executor rejection arrives', async () => {
+    const { service, executor } = createService();
+    let rejectFirstBranch: ((error: Error) => void) | undefined;
+    vi.mocked(executor.execute).mockImplementation(({ branchSessionId, personaId, run, slot }) => {
+      if (slot.id === 'pragmatist') {
+        return new Promise((_resolve, reject) => {
+          rejectFirstBranch = reject;
+        });
+      }
+      return Promise.resolve({
+        message: `${slot.label} branch prepared for: ${run.prompt}`,
+        data: {
+          branchSessionId,
+          personaId,
+          sessionPersonaId: personaId,
+          rootSessionId: run.rootSessionId,
+          slotType: slot.slotType,
+          executionMode: run.executionMode,
+        },
+      });
+    });
+
+    const run = await service.createRunAsync({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Stop before late branch failure.',
+    });
+    await waitUntil(() => service.getEvents(run.id).some((event) => event.type === 'agent_started'));
+
+    await service.stopRun(run.id);
+    rejectFirstBranch?.(new Error('late branch failure after stop'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(service.findRun(run.id)?.status).toBe('cancelled');
+    expect(service.getEvents(run.id).at(-1)).toMatchObject({
+      type: 'run_stopped',
+      message: 'Architecture run stopped by user.',
+    });
+  });
+
   it('persists an async run start projection to parent chat before graph execution completes', async () => {
     const { service, executor, sessionManager } = createService();
     const resolvers: Array<(value: Awaited<ReturnType<ArchitectureRoleExecutor['execute']>>) => void> = [];

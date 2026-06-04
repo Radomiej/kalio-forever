@@ -71,6 +71,62 @@ describe('AgentFlowRuntimeService', () => {
     vi.useRealTimers();
   });
 
+  it('rewrites adapter parent lineage in durable snapshots and persisted tool results', async () => {
+    vi.useFakeTimers();
+    const architectureAdapter = adapter();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    architectureAdapter.start.mockResolvedValue({
+      run: {
+        id: 'run-lineage-rewrite',
+        parentSessionId: 'adapter-parent',
+        parentToolCallId: 'adapter-tool-call',
+        childSessionId: 'adapter-child',
+        flowDefinitionId: 'wrong-flow',
+        status: 'running',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+      result: {
+        flowRunId: 'run-lineage-rewrite',
+        parentSessionId: 'adapter-parent',
+        parentToolCallId: 'adapter-tool-call',
+        childSessionId: 'adapter-child',
+        status: 'running',
+        summary: 'Adapter snapshot started.',
+        decisions: [],
+        nextActions: [],
+        artifacts: [],
+      },
+    } satisfies AgentFlowRunSnapshot);
+
+    const started = await service.start({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Preserve the run_sub_agentflow caller lineage',
+      parentSessionId: 'real-parent',
+      parentToolCallId: 'real-tool-call',
+      startMode: 'durable',
+    });
+
+    expect(started.run.parentSessionId).toBe('real-parent');
+    expect(started.run.parentToolCallId).toBe('real-tool-call');
+    expect(started.run.flowDefinitionId).toBe('goal_guard_delivery_loop');
+    expect(started.result?.parentSessionId).toBe('real-parent');
+    expect(started.result?.parentToolCallId).toBe('real-tool-call');
+    expect(repository.getSnapshot('run-lineage-rewrite')?.run.parentSessionId).toBe('real-parent');
+    expect(repository.getSnapshot('run-lineage-rewrite')?.run.parentToolCallId).toBe('real-tool-call');
+    expect(repository.getSnapshot('run-lineage-rewrite')?.result?.parentSessionId).toBe('real-parent');
+    expect(repository.getSnapshot('run-lineage-rewrite')?.result?.parentToolCallId).toBe('real-tool-call');
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
   it('copies isolated completed AgentFlow artifacts back into the parent VFS when requested', async () => {
     const architectureAdapter = adapter();
     const repository = new AgentFlowRunRepository();

@@ -208,6 +208,7 @@ async function findRecentProviderFailures(fetchJson, apiBase, sessions, now, max
   const recentSessions = sessions
     .filter((session) => typeof session?.id === 'string' && typeof session?.updatedAt === 'number')
     .filter((session) => now - session.updatedAt <= maxAgeMs)
+    .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, 20);
   const failures = [];
 

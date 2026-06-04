@@ -190,6 +190,70 @@ test('paid readiness fails when recent conversation projection contains Architec
   )));
 });
 
+test('paid readiness inspects the newest sessions before applying the recent provider failure limit', async () => {
+  const sessions = Array.from({ length: 25 }, (_value, index) => ({
+    id: `session-${index + 1}`,
+    updatedAt: 1_000 + index,
+  }));
+  const newestFailedSession = sessions.at(-1);
+  const requestedMessageUrls = [];
+
+  const checks = await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    maxRecentProviderFailureMs: 20_000,
+    fetchJson: async (url) => {
+      if (url === 'http://kalio.test/api/llm/config') {
+        return response({ provider: 'xiaomimimo', source: 'db', model: 'mimo-v2.5' });
+      }
+      if (url === 'http://kalio.test/api/credentials') {
+        return response([{ id: 'cred-live' }]);
+      }
+      if (url === 'http://kalio.test/api/credentials/active') {
+        return response({ credentialId: 'cred-live' });
+      }
+      if (url === 'http://kalio.test/api/credentials/cred-live/test') {
+        return response({ ok: true, modelCount: 9 });
+      }
+      if (url === 'http://kalio.test/api/credentials/cred-live/test-completion') {
+        return response({
+          ok: true,
+          provider: 'xiaomimimo',
+          model: 'mimo-v2.5',
+          source: 'db',
+        });
+      }
+      if (url === 'http://kalio.test/api/agent-flows/runs') {
+        return response([]);
+      }
+      if (url === 'http://kalio.test/api/sessions') {
+        return response(sessions);
+      }
+      if (url === 'http://kalio.test/api/cli-agents/codex/config') {
+        return response({ enabled: true, model: 'gpt-5.4-mini' });
+      }
+      if (url.includes('/sessions/') && url.endsWith('/messages')) {
+        requestedMessageUrls.push(url);
+        return response(url.includes(`/sessions/${newestFailedSession.id}/messages`)
+          ? [{
+              id: 'architecture:newest-failure:text',
+              content: 'Architecture run failed. Reason: [XiaomiMiMo] LLM request failed: 451 Unavailable For Legal Reasons - cross-border isolation policy',
+            }]
+          : []);
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+
+  assert.equal(requestedMessageUrls.length, 20);
+  assert.equal(requestedMessageUrls[0], `http://kalio.test/api/sessions/${newestFailedSession.id}/messages`);
+  assert.ok(checks.some((check) => (
+    check.ok === false
+    && check.message === `Recent Architecture provider failures found: ${newestFailedSession.id}:architecture:newest-failure:text`
+  )));
+});
+
 test('paid readiness fails when the active credential exists but provider validation fails', async () => {
   const checks = await collectPaidReadinessChecks({
     apiBase: 'http://kalio.test/api',

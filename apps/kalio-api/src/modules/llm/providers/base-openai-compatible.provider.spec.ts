@@ -170,6 +170,41 @@ describe('BaseOpenAICompatibleProvider', () => {
         ],
       });
     });
+
+    it('REGRESSION: Xiaomi can opt into MiFE cross-border access through a request header', async () => {
+      process.env.XIAOMI_MIFE_ALLOW_CROSS_BORDER_ACCESS = 'true';
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const xiaomiProvider = new XiaomiMiMoProvider('test-key', 'mimo-v2.5', 'https://api.test.com');
+      (xiaomiProvider as unknown as { logger: typeof mockLogger }).logger = mockLogger;
+
+      const mockStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      try {
+        await xiaomiProvider.streamChat(messages, tools, { sessionId: 'sess-123', messageId: 'msg-456', onChunk: vi.fn() });
+      } finally {
+        delete process.env.XIAOMI_MIFE_ALLOW_CROSS_BORDER_ACCESS;
+      }
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.test.com/chat/completions',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'X-MiFE-Allow-Cross-Border-Access': 'true',
+          }),
+        }),
+      );
+    });
   });
 
   describe('streamChat - Tool Call ID Collision (REGRESSION TEST)', () => {

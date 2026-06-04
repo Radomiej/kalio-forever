@@ -62,7 +62,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
     }
 
     const snapshot = await this.adapter.start(args);
-    const checkpointed = this.copyBackIfNeeded(withCheckpoint(snapshot, args));
+    const checkpointed = this.copyBackIfNeeded(this.withSnapshotRunIdentity(withCheckpoint(snapshot, args), args));
     const normalized = this.withSnapshotResultIdentity(checkpointed);
     this.repository.saveSnapshot(normalized);
     this.scheduleDurableReconciliation(checkpointed.run.id);
@@ -323,6 +323,20 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
         childSessionId: snapshot.run.childSessionId,
         openChatSessionId: snapshot.run.openChatSessionId ?? snapshot.result.openChatSessionId,
         openGraphRunId: snapshot.run.openGraphRunId ?? snapshot.result.openGraphRunId,
+      },
+    };
+  }
+
+  private withSnapshotRunIdentity(snapshot: AgentFlowRunSnapshot, args: RunSubAgentFlowArgs): AgentFlowRunSnapshot {
+    return {
+      ...snapshot,
+      run: {
+        ...snapshot.run,
+        parentSessionId: args.parentSessionId,
+        parentToolCallId: args.parentToolCallId,
+        flowDefinitionId: args.flowId,
+        startMode: args.startMode ?? snapshot.run.startMode,
+        returnMode: args.returnMode ?? snapshot.run.returnMode,
       },
     };
   }
