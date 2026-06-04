@@ -24,6 +24,14 @@ export async function collectPaidReadinessChecks(options = {}) {
   const runs = await checkJson(fetchJson, checks, `${apiBase}/agent-flows/runs`, 'AgentFlow runs endpoint is reachable');
   const sessions = await checkJson(fetchJson, checks, `${apiBase}/sessions`, 'Sessions endpoint is reachable');
   const codexConfig = await checkJson(fetchJson, checks, `${apiBase}/cli-agents/codex/config`, 'Codex CLI config endpoint is reachable');
+  const searchConfig = await checkJson(fetchJson, checks, `${apiBase}/search/config`, 'Web Search config endpoint is reachable');
+  const searchTest = await checkJson(
+    fetchJson,
+    checks,
+    `${apiBase}/search/test`,
+    'Web Search smoke endpoint is reachable',
+    { method: 'POST' },
+  );
 
   if (llmConfig) {
     passOrFail(
@@ -158,6 +166,24 @@ export async function collectPaidReadinessChecks(options = {}) {
       codexConfig.model === 'gpt-5.4-mini',
       'Codex CLI default model is gpt-5.4-mini',
       `Codex CLI default model is ${codexConfig.model ?? '(empty)'}, expected gpt-5.4-mini.`,
+    );
+  }
+
+  if (searchConfig) {
+    passOrFail(
+      checks,
+      searchConfig.configured === true,
+      `Web Search is configured (${searchConfig.provider ?? 'unknown'})`,
+      `Web Search is not configured (${searchConfig.provider ?? 'unknown'}); configure it before paid research/persistence runs.`,
+    );
+  }
+
+  if (searchTest) {
+    passOrFail(
+      checks,
+      searchTest.ok === true,
+      'Web Search smoke passed',
+      `Web Search smoke failed: ${searchTest.error ?? 'unknown error'}`,
     );
   }
 

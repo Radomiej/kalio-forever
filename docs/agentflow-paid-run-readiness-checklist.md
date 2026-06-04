@@ -8,7 +8,7 @@ Before any paid/live run, execute:
 npm.cmd run agentflow:paid-readiness
 ```
 
-This command checks the managed Kalio API, live LLM provider state, saved/active credentials, active credential provider validation, stale running AgentFlow rows, and Codex CLI default model. A failing result is a hard stop.
+This command checks the managed Kalio API, live LLM provider state, saved/active credentials, active credential provider validation, Web Search configuration/smoke, stale running AgentFlow rows, and Codex CLI default model. A failing result is a hard stop.
 
 If the only missing step is local credential activation, put the provider key in ignored `.env.test`, then run:
 
@@ -30,6 +30,7 @@ Do not pass real keys in chat, commit them, or print them in logs.
 - [ ] Backend coverage command is either passing or any unrelated coverage blocker is recorded with exact failing specs and reason.
 - [ ] `npm.cmd run agentflow:paid-readiness` passes against the managed Kalio API.
 - [ ] The active credential provider test inside `agentflow:paid-readiness` passes; saved/active DB state alone is not enough.
+- [ ] The Web Search config and smoke checks inside `agentflow:paid-readiness` pass when the paid flow requires live research/source persistence.
 - [ ] No live run is already stuck in `running` because of a stale runtime worker.
 - [ ] The run context explicitly disables unavailable paid/CLI backends, or the UI proves the selected backend is available.
 - [ ] The test scenario starts from Kalio FE when the requirement is FE+BE, not only from direct API polling.
@@ -71,3 +72,4 @@ Do not start or resume paid/live runs if any item below is true:
 - Conversations or Execution Graph cannot show the run status reliably.
 - The latest live run is still `running` and cannot be reconciled from durable state.
 - The active live credential fails provider validation, including `401 Invalid API Key`.
+- Web Search is not configured or its smoke check fails for a paid flow that requires live research/source URL persistence.

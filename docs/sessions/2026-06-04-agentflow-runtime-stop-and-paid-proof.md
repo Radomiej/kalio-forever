@@ -201,6 +201,7 @@ The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT
 - Live recheck for run `0SsbHDnwO_7ZuwzYZjNHn` now reports `status=done`, event count `181`, last event `flow:node_result`, and `hasUnresolved=0` from `/api/agent-flows/runs/:id/events`.
 - Static routing audit by two subagents found no evidence that `mimo-v2.5-pro` requests bypass the shared text provider. Model override changes only the model field on the selected provider config; the `451` remains a Xiaomi/provider-side cross-border policy/access blocker.
 - Live search check showed `/api/search/config` has `configured=false` and `/api/search/test` fails with `Web search not configured`, so actual persisted online source URLs are blocked by missing search credentials. Unit tests still prove `web_search` with `offline_search=false` calls external search and persists through memory ingestion.
+- Added Web Search config/smoke checks to `agentflow:paid-readiness`, so the pre-paid gate fails before starting another research/source-persistence flow when Web Search is not configured.
 
 ## Verification Update
 
@@ -212,6 +213,10 @@ The ordinary-model paid path has a live terminal proof: run `rH7lbjvi5Sl4EaXWvgT
   - Passed.
 - `corepack pnpm --filter kalio-api exec vitest run src/modules/tool/tools/web-search.tool.spec.ts src/modules/chat/__tests__/tool-dispatch.service.spec.ts`
   - Passed: `2` files / `39` tests.
+- `node scripts\agentflow-paid-readiness.test.mjs`
+  - Passed: `14` tests, including the new Web Search not-configured blocker.
+- `$env:KALIO_API_BASE_URL='http://127.0.0.1:3016/api'; npm.cmd run agentflow:paid-readiness`
+  - Failed as expected with `2` blockers: Web Search is not configured and Web Search smoke failed.
 - `GET http://127.0.0.1:3016/api/agent-flows/runs/0SsbHDnwO_7ZuwzYZjNHn/events`
   - Passed live audit check: no stale `flow:unresolved_cli_children` events remain after the terminal `done` projection.
 

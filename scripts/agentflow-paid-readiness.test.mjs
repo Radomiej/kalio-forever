@@ -26,6 +26,12 @@ function invalidJsonResponse() {
 function fetchFrom(routes) {
   return async (url) => {
     const route = routes[url];
+    if (!route && url.endsWith('/search/config')) {
+      return response({ provider: 'perplexity', configured: true });
+    }
+    if (!route && url.endsWith('/search/test')) {
+      return response({ ok: true });
+    }
     if (!route && (url.endsWith('/sessions') || url.includes('/sessions/'))) {
       return response([]);
     }
@@ -47,6 +53,8 @@ test('paid readiness fails closed for mock provider, missing credentials, stale 
       'http://kalio.test/api/credentials/active': response({ credentialId: null }),
       'http://kalio.test/api/agent-flows/runs': response([{ run: { id: 'run-stale', status: 'running', updatedAt: 1 } }]),
       'http://kalio.test/api/cli-agents/codex/config': response({ enabled: false, model: 'gpt-5.3-codex' }),
+      'http://kalio.test/api/search/config': response({ provider: 'perplexity', configured: false }),
+      'http://kalio.test/api/search/test': response({ ok: false, error: 'Web search not configured.' }),
     }),
   });
 
@@ -61,6 +69,8 @@ test('paid readiness fails closed for mock provider, missing credentials, stale 
     'Found stale running AgentFlow runs: run-stale',
     'Codex CLI agent is disabled.',
     'Codex CLI default model is gpt-5.3-codex, expected gpt-5.4-mini.',
+    'Web Search is not configured (perplexity); configure it before paid research/persistence runs.',
+    'Web Search smoke failed: Web search not configured.',
   ]);
 });
 
@@ -157,9 +167,44 @@ test('paid readiness honors explicit API base when the managed stack uses random
     'http://127.0.0.1:51052/api/agent-flows/runs',
     'http://127.0.0.1:51052/api/sessions',
     'http://127.0.0.1:51052/api/cli-agents/codex/config',
+    'http://127.0.0.1:51052/api/search/config',
+    'http://127.0.0.1:51052/api/search/test',
     'http://127.0.0.1:51052/api/credentials/cred-live/test',
     'http://127.0.0.1:51052/api/credentials/cred-live/test-completion',
   ]);
+});
+
+test('paid readiness fails when Web Search is not configured for research persistence', async () => {
+  const checks = await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    fetchJson: fetchFrom({
+      'http://kalio.test/api/llm/config': response({ provider: 'xiaomimimo', source: 'db', model: 'mimo-v2.5' }),
+      'http://kalio.test/api/credentials': response([{ id: 'cred-live' }]),
+      'http://kalio.test/api/credentials/active': response({ credentialId: 'cred-live' }),
+      'http://kalio.test/api/credentials/cred-live/test': response({ ok: true, modelCount: 9 }),
+      'http://kalio.test/api/credentials/cred-live/test-completion': response({
+        ok: true,
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5',
+        source: 'db',
+      }),
+      'http://kalio.test/api/agent-flows/runs': response([]),
+      'http://kalio.test/api/cli-agents/codex/config': response({ enabled: true, model: 'gpt-5.4-mini' }),
+      'http://kalio.test/api/search/config': response({ provider: 'perplexity', configured: false }),
+      'http://kalio.test/api/search/test': response({ ok: false, error: 'Web search not configured.' }),
+    }),
+  });
+
+  assert.ok(checks.some((check) => (
+    check.ok === false
+    && check.message === 'Web Search is not configured (perplexity); configure it before paid research/persistence runs.'
+  )));
+  assert.ok(checks.some((check) => (
+    check.ok === false
+    && check.message === 'Web Search smoke failed: Web search not configured.'
+  )));
 });
 
 test('paid readiness CLI honors --api instead of silently using managed stack state', async () => {
