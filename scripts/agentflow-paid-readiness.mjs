@@ -8,7 +8,8 @@ const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..');
 const stackStatePath = resolve(repoRoot, '.kalio-stack/qa-stack-state.json');
 
 export async function collectPaidReadinessChecks(options = {}) {
-  const apiBase = (options.apiBase ?? process.env.KALIO_API_BASE_URL ?? resolveManagedApiBase()).replace(/\/$/, '');
+  const cliApiBase = resolveApiBaseFromArgv(options.argv, options.stderr ?? console.error);
+  const apiBase = (options.apiBase ?? (cliApiBase === null ? undefined : cliApiBase) ?? process.env.KALIO_API_BASE_URL ?? resolveManagedApiBase()).replace(/\/$/, '');
   const maxRunningAgeMs = Number(options.maxRunningAgeMs ?? process.env.AGENTFLOW_MAX_RUNNING_AGE_MS ?? 15 * 60 * 1000);
   const maxRecentProviderFailureMs = Number(
     options.maxRecentProviderFailureMs ?? process.env.AGENTFLOW_RECENT_PROVIDER_FAILURE_AGE_MS ?? 60 * 60 * 1000,
@@ -126,6 +127,13 @@ export async function collectPaidReadinessChecks(options = {}) {
       'No stale running AgentFlow runs found',
       `Found stale running AgentFlow runs: ${staleRunning.map((run) => run.id).join(', ')}`,
     );
+    const recentAgentFlowProviderFailures = findRecentAgentFlowProviderFailures(runs, now, maxRecentProviderFailureMs);
+    passOrFail(
+      checks,
+      recentAgentFlowProviderFailures.length === 0,
+      'No recent AgentFlow provider failures found',
+      `Recent AgentFlow provider failures found: ${recentAgentFlowProviderFailures.join(', ')}`,
+    );
   }
 
   if (Array.isArray(sessions)) {
@@ -157,9 +165,13 @@ export async function collectPaidReadinessChecks(options = {}) {
 }
 
 export async function runPaidReadinessCheck(options = {}) {
+  const stderr = options.stderr ?? console.error;
+  const apiBaseFromArgv = resolveApiBaseFromArgv(options.argv, stderr);
+  if (apiBaseFromArgv === null) {
+    return 1;
+  }
   const checks = await collectPaidReadinessChecks(options);
   const stdout = options.stdout ?? console.log;
-  const stderr = options.stderr ?? console.error;
 
   for (const check of checks) {
     stdout(`${check.ok ? 'PASS' : 'FAIL'} ${check.message}`);
@@ -173,6 +185,18 @@ export async function runPaidReadinessCheck(options = {}) {
 
   stdout('\nAgentFlow paid-run readiness passed.');
   return 0;
+}
+
+function resolveApiBaseFromArgv(argv, stderr = console.error) {
+  if (!Array.isArray(argv)) return undefined;
+  const apiIndex = argv.indexOf('--api');
+  if (apiIndex === -1) return undefined;
+  const value = argv[apiIndex + 1];
+  if (typeof value !== 'string' || value.trim().length === 0 || value.startsWith('--')) {
+    stderr('Missing value for --api.');
+    return null;
+  }
+  return value.trim();
 }
 
 async function checkJson(fetchJson, checks, url, successMessage, init) {
@@ -204,6 +228,23 @@ function isStale(updatedAt, now, maxRunningAgeMs) {
   return now - updatedAt > maxRunningAgeMs;
 }
 
+function findRecentAgentFlowProviderFailures(snapshots, now, maxAgeMs) {
+  return snapshots
+    .filter((snapshot) => {
+      const updatedAt = snapshot?.run?.updatedAt;
+      return typeof snapshot?.run?.id === 'string'
+        && typeof updatedAt === 'number'
+        && now - updatedAt <= maxAgeMs;
+    })
+    .flatMap((snapshot) => {
+      const runId = snapshot.run.id;
+      const events = Array.isArray(snapshot.events) ? snapshot.events : [];
+      return events
+        .filter((event) => containsProviderFailureText(event?.message))
+        .map((event) => `${runId}:${event.id ?? 'event'}`);
+    });
+}
+
 async function findRecentProviderFailures(fetchJson, apiBase, sessions, now, maxAgeMs) {
   const recentSessions = sessions
     .filter((session) => typeof session?.id === 'string' && typeof session?.updatedAt === 'number')
@@ -220,8 +261,7 @@ async function findRecentProviderFailures(fetchJson, apiBase, sessions, now, max
       if (!Array.isArray(messages)) continue;
       const providerFailure = messages.find((message) => {
         const content = typeof message?.content === 'string' ? message.content : '';
-        return content.includes('Architecture run failed')
-          && (content.includes('451 Unavailable For Legal Reasons') || content.includes('cross-border isolation policy'));
+        return content.includes('Architecture run failed') && containsProviderFailureText(content);
       });
       if (providerFailure) {
         failures.push(`${session.id}:${providerFailure.id ?? 'message'}`);
@@ -232,6 +272,11 @@ async function findRecentProviderFailures(fetchJson, apiBase, sessions, now, max
   }
 
   return failures;
+}
+
+function containsProviderFailureText(value) {
+  return typeof value === 'string'
+    && (value.includes('451 Unavailable For Legal Reasons') || value.includes('cross-border isolation policy'));
 }
 
 function resolveManagedApiBase() {

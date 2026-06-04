@@ -30,6 +30,12 @@ Acceptance:
 - Resume API should validate payload shape and include the submitted input in `flow:resume_input`.
 - Web-search-dependent flows must fail early or route to a node with `web_search`; they must not produce "research" while pretending live search happened.
 
+Update 2026-06-04:
+- `agentflow-paid-readiness.mjs --api <url>` now honors the explicit API base instead of silently reading the managed stack state.
+- Paid readiness now scans recent AgentFlow snapshot trace events for Xiaomi 451/cross-border failures, so a run like `G2fxR7yTPzkO5tpjzpO1m` blocks the gate even if the parent chat projection is incomplete.
+- AgentFlow resume now maps legacy `{ message }` payloads to canonical `{ input }`, preserving manual QA instructions in `flow:resume_input`.
+- Remaining blocker: full Goal Master Xiaomi runs still need a provider/model-level fix for repeated branch-call 451s.
+
 ### Conversation-Started Workflow Is The Primary User Path
 
 The Architect graph editor is for editing and inspecting presets. It is not the primary user path for a normal user run.

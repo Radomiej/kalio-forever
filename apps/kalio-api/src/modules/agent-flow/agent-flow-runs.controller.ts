@@ -41,6 +41,19 @@ function validateCreateDto(dto: CreateAgentFlowRunDto): void {
   }
 }
 
+function normalizeResumeDto(dto: ResumeAgentFlowRunDto & { message?: unknown }): ResumeAgentFlowRunDto {
+  const input = typeof dto.input === 'string'
+    ? dto.input
+    : typeof dto.message === 'string'
+      ? dto.message
+      : undefined;
+  return {
+    ...(input !== undefined ? { input } : {}),
+    ...(dto.context !== undefined ? { context: dto.context } : {}),
+    ...(dto.maxSteps !== undefined ? { maxSteps: dto.maxSteps } : {}),
+  };
+}
+
 @Controller('agent-flows/runs')
 export class AgentFlowRunsController {
   constructor(private readonly runtime: AgentFlowRuntimeService) {}
@@ -75,7 +88,7 @@ export class AgentFlowRunsController {
 
   @Post(':id/resume')
   resume(@Param('id') id: string, @Body() dto: ResumeAgentFlowRunDto): Promise<AgentFlowRunSnapshot> {
-    return this.runtime.resume(id, dto);
+    return this.runtime.resume(id, normalizeResumeDto(dto));
   }
 
   @Post(':id/stop')
