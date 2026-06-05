@@ -155,6 +155,16 @@ describe('CredentialsController', () => {
 
       expect(result.mode).toBe('runtime_smoke');
       expect(result.ok).toBe(true);
+      const [, messages, tools] = mockLLMService.streamChatWithConfig.mock.calls[0] ?? [];
+      expect(messages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: 'system', content: expect.stringContaining('Kalio LLM runtime smoke-test') }),
+        expect.objectContaining({ role: 'user', content: expect.stringContaining('bounded Kalio runtime readiness smoke') }),
+      ]));
+      expect(JSON.stringify(messages)).not.toContain('TurboProject2');
+      expect(JSON.stringify(messages)).not.toContain('Paid Xiaomi orchestrator proof');
+      expect(tools).toEqual([
+        expect.objectContaining({ name: 'runtime_smoke_tool' }),
+      ]);
     });
 
     it('can smoke-test a requested model without mutating the saved credential model', async () => {

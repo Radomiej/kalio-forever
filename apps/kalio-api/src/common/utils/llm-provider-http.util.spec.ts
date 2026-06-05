@@ -4,6 +4,7 @@ import {
   readEnvBooleanFlag,
   resolveLlmProviderBaseUrl,
   XIAOMI_BASE_URL,
+  XIAOMI_CROSS_BORDER_HEADER,
   XIAOMI_COMPAT_HEADERS,
 } from './llm-provider-http.util';
 
@@ -23,6 +24,7 @@ describe('llm-provider-http.util', () => {
     expect(buildProviderCompatHeaders('xiaomimimo', 'secret-token')).toEqual({
       Authorization: 'Bearer secret-token',
       ...XIAOMI_COMPAT_HEADERS,
+      [XIAOMI_CROSS_BORDER_HEADER]: 'true',
     });
   });
 
@@ -33,8 +35,28 @@ describe('llm-provider-http.util', () => {
   it('REGRESSION: returns Xiaomi compatibility headers without crashing when provider is non-string', () => {
     expect(buildProviderCompatHeaders('xiaomimimo')).toEqual({
       ...XIAOMI_COMPAT_HEADERS,
+      [XIAOMI_CROSS_BORDER_HEADER]: 'true',
     });
     expect(buildProviderCompatHeaders(undefined as unknown as string)).toEqual({});
+  });
+
+  it('REGRESSION: sends Xiaomi MiFE cross-border access header by default and allows disabling it', () => {
+    const original = process.env.XIAOMI_MIFE_ALLOW_CROSS_BORDER_ACCESS;
+    try {
+      delete process.env.XIAOMI_MIFE_ALLOW_CROSS_BORDER_ACCESS;
+      expect(buildProviderCompatHeaders('xiaomimimo')).toMatchObject({
+        [XIAOMI_CROSS_BORDER_HEADER]: 'true',
+      });
+
+      process.env.XIAOMI_MIFE_ALLOW_CROSS_BORDER_ACCESS = 'false';
+      expect(buildProviderCompatHeaders('xiaomimimo')).not.toHaveProperty(XIAOMI_CROSS_BORDER_HEADER);
+    } finally {
+      if (original === undefined) {
+        delete process.env.XIAOMI_MIFE_ALLOW_CROSS_BORDER_ACCESS;
+      } else {
+        process.env.XIAOMI_MIFE_ALLOW_CROSS_BORDER_ACCESS = original;
+      }
+    }
   });
 
   it('exposes a single shared Xiaomi compatibility identity for base URL and headers', () => {

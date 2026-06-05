@@ -2,7 +2,6 @@ import { BaseOpenAICompatibleProvider } from './base-openai-compatible.provider'
 import {
   buildProviderCompatHeaders,
   XIAOMI_BASE_URL,
-  readEnvBooleanFlag,
 } from '../../../common/utils/llm-provider-http.util';
 
 export class XiaomiMiMoProvider extends BaseOpenAICompatibleProvider {
@@ -11,17 +10,9 @@ export class XiaomiMiMoProvider extends BaseOpenAICompatibleProvider {
   }
 
   protected override buildHeaders(): Record<string, string> {
-    const allowCrossBorderAccess = readEnvBooleanFlag(
-      process.env.XIAOMI_MIFE_ALLOW_CROSS_BORDER_ACCESS,
-      true,
-    );
-
     return {
       'Content-Type': 'application/json',
       ...buildProviderCompatHeaders('xiaomimimo', this.apiKey),
-      ...(allowCrossBorderAccess
-        ? { 'X-MiFE-Allow-Cross-Border-Access': 'true' }
-        : {}),
     };
   }
 

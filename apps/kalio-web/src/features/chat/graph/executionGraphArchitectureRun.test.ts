@@ -26,7 +26,12 @@ describe('renderArchitectureRunProjection', () => {
         return stored;
       },
       addEdge: (sourceId, targetId, style) => {
-        edges.push({ sourceId, targetId, ...(style ? { style } : {}) });
+        edges.push({
+          id: `${sourceId}->${targetId}:${style ?? 'solid'}`,
+          sourceId,
+          targetId,
+          style: style ?? 'solid',
+        });
       },
       architectureRun: null,
       branchMaxColumn: 1,

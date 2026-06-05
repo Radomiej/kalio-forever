@@ -11,6 +11,8 @@ export const XIAOMI_COMPAT_HEADERS: Record<string, string> = {
   'X-Coding-Agent': 'Roo Code',
 };
 
+export const XIAOMI_CROSS_BORDER_HEADER = 'X-MiFE-Allow-Cross-Border-Access';
+
 const DEFAULT_LLM_PROVIDER_BASE_URLS: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
   xiaomimimo: DEFAULT_XIAOMI_BASE_URL,
@@ -25,12 +27,36 @@ export const XIAOMI_BASE_URL = DEFAULT_XIAOMI_BASE_URL;
 
 const OPENAI_FALLBACK_BASE_URL = 'https://api.openai.com/v1';
 
-function xiaomiCompatHeaders(apiKey?: string): Record<string, string> {
-  return apiKey ? { Authorization: `Bearer ${apiKey}`, ...XIAOMI_COMPAT_HEADERS } : { ...XIAOMI_COMPAT_HEADERS };
-}
-
 function normalizeProviderKey(provider: unknown): string {
   return typeof provider === 'string' ? provider.toLowerCase() : '';
+}
+
+export function readEnvBooleanFlag(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') {
+    return true;
+  }
+  if (normalized === 'false') {
+    return false;
+  }
+
+  return defaultValue;
+}
+
+function xiaomiCompatHeaders(apiKey?: string): Record<string, string> {
+  const allowCrossBorderAccess = readEnvBooleanFlag(
+    process.env.XIAOMI_MIFE_ALLOW_CROSS_BORDER_ACCESS,
+    true,
+  );
+  return {
+    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    ...XIAOMI_COMPAT_HEADERS,
+    ...(allowCrossBorderAccess ? { [XIAOMI_CROSS_BORDER_HEADER]: 'true' } : {}),
+  };
 }
 
 export function resolveLlmProviderBaseUrl(provider: string, baseUrl?: string): string {
@@ -48,20 +74,4 @@ export function buildProviderCompatHeaders(provider: string, apiKey?: string): R
   }
 
   return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
-}
-
-export function readEnvBooleanFlag(value: string | undefined, defaultValue: boolean): boolean {
-  if (value === undefined) {
-    return defaultValue;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'true') {
-    return true;
-  }
-  if (normalized === 'false') {
-    return false;
-  }
-
-  return defaultValue;
 }

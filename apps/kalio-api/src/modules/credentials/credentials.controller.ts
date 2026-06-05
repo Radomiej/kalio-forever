@@ -22,28 +22,17 @@ export class CredentialsController {
       {
         role: 'system',
         content: [
-          'You are the Kalio ArchitectureRuntime orchestrator smoke-test role.',
-          'Define acceptance criteria, route graph work, delegate to child agents, and require evidence before claiming completion.',
-          'Use the available tool schemas when needed, but keep this smoke response bounded.',
-          'Return a compact JSON object with status, plannedPhases, nextStep, evidenceNeeded, and providerModelObserved.',
+          'You are the Kalio LLM runtime smoke-test role.',
+          'Verify that the active provider, model, streaming, reasoning, and tool schema transport are usable.',
+          'Do not execute tools. Return one compact JSON object with status, providerPath, modelObserved, and notes.',
         ].join(' '),
       },
       {
         role: 'user',
         content: [
-          'Paid Xiaomi orchestrator proof after agent-orchestrator persona hardening.',
-          'Target repo: C:\\Projekty\\TurboProject2, current branch codex/paid-xiaomi-orchestrator-proof-2.',
-          'Create a new real route/page for a Xiaomi-style premium smartphone landing page.',
-          'Use the normal Goal Master Delivery Loop and keep the run auditable.',
-          '',
-          'Required phases:',
-          '1. Planning/prototyping: run a design debate or critique and web-search/research current premium smartphone/product landing page patterns. Persist research/design notes into the target repo, for example docs/xiaomi-orchestrator-proof-research.md.',
-          '2. Implementation: implement the page using existing project patterns. Do not overwrite unrelated salon content. Record exact files changed.',
-          '3. Refactor/QA: run available build/tests, inspect the result, fix issues, and commit the target repo changes.',
-          '',
-          'Evidence contract: final artifact must include parent session id, child/root session id, architecture/AgentFlow run id, branch, commit hash, changed files, research note path, whether web search/research was used, build/test command result, and final status.',
-          'Use mimo-v2.5-pro for orchestration/review and mimo-v2.5 for lower-level work if runtime model routing is available; otherwise record the effective provider/model actually used.',
-          'Do not claim done without real commit and verification evidence.',
+          'Run a bounded Kalio runtime readiness smoke.',
+          'Confirm only that this request can stream a short response with the supplied tool schema available.',
+          'Return JSON only. Do not call any tool and do not perform project work.',
         ].join(' '),
       },
     ];
@@ -52,41 +41,15 @@ export class CredentialsController {
   private runtimeSmokeTools(): LLMToolDef[] {
     return [
       {
-        name: 'spawn_cli_agent',
-        description: 'Start a delegated CLI implementation or review agent for an architecture workflow node.',
+        name: 'runtime_smoke_tool',
+        description: 'No-op tool schema used only to verify provider tool-schema transport during readiness smoke.',
         parameters: {
           type: 'object',
           properties: {
-            agentId: { type: 'string' },
-            role: { type: 'string' },
-            workdir: { type: 'string' },
-            prompt: { type: 'string' },
+            status: { type: 'string' },
+            note: { type: 'string' },
           },
-          required: ['agentId', 'role', 'workdir', 'prompt'],
-        },
-      },
-      {
-        name: 'web_search',
-        description: 'Research current external references before a design or implementation decision.',
-        parameters: {
-          type: 'object',
-          properties: {
-            query: { type: 'string' },
-            maxResults: { type: 'number' },
-          },
-          required: ['query'],
-        },
-      },
-      {
-        name: 'vfs_write',
-        description: 'Persist auditable research, design notes, implementation notes, or final artifacts.',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: { type: 'string' },
-            content: { type: 'string' },
-          },
-          required: ['path', 'content'],
+          required: ['status'],
         },
       },
     ];
