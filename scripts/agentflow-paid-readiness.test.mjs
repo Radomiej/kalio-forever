@@ -137,6 +137,67 @@ test('paid readiness blocks when the completion smoke diverges from the effectiv
   )));
 });
 
+test('paid readiness retries a transient cross-border completion smoke failure once', async () => {
+  let completionCalls = 0;
+  const exitCode = await runPaidReadinessCheck({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    stdout() {},
+    stderr() {},
+    fetchJson: async (url) => {
+      if (url === 'http://kalio.test/api/llm/config') {
+        return response({ provider: 'xiaomimimo', source: 'db', model: 'mimo-v2.5-pro' });
+      }
+      if (url === 'http://kalio.test/api/credentials') {
+        return response([{ id: 'cred-live' }]);
+      }
+      if (url === 'http://kalio.test/api/credentials/active') {
+        return response({ credentialId: 'cred-live' });
+      }
+      if (url === 'http://kalio.test/api/credentials/cred-live/test') {
+        return response({ ok: true, modelCount: 9 });
+      }
+      if (url === 'http://kalio.test/api/credentials/cred-live/test-completion') {
+        completionCalls += 1;
+        return completionCalls === 1
+          ? response({
+              ok: false,
+              provider: 'xiaomimimo',
+              model: 'mimo-v2.5-pro',
+              source: 'db',
+              error: '451 Unavailable For Legal Reasons - cross-border isolation policy',
+            })
+          : response({
+              ok: true,
+              provider: 'xiaomimimo',
+              model: 'mimo-v2.5-pro',
+              source: 'db',
+            });
+      }
+      if (url === 'http://kalio.test/api/agent-flows/runs') {
+        return response([]);
+      }
+      if (url === 'http://kalio.test/api/cli-agents/codex/config') {
+        return response({ enabled: true, model: 'gpt-5.4-mini' });
+      }
+      if (url === 'http://kalio.test/api/search/config') {
+        return response({ provider: 'perplexity', configured: true });
+      }
+      if (url === 'http://kalio.test/api/search/test') {
+        return response({ ok: true });
+      }
+      if (url.endsWith('/sessions')) {
+        return response([]);
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(completionCalls, 2);
+});
+
 test('paid readiness can require a high-level model completion smoke without changing the active model', async () => {
   const completionBodies = [];
   const checks = await collectPaidReadinessChecks({
@@ -194,7 +255,7 @@ test('paid readiness can require a high-level model completion smoke without cha
     },
   });
 
-  assert.deepEqual(completionBodies, [null, { model: 'mimo-v2.5-pro' }]);
+  assert.deepEqual(completionBodies, [null, { model: 'mimo-v2.5-pro' }, { model: 'mimo-v2.5-pro' }]);
   assert.ok(checks.some((check) => (
     check.ok === false
     && check.message === 'Required high-level model completion smoke failed for mimo-v2.5-pro: 451 Unavailable For Legal Reasons'

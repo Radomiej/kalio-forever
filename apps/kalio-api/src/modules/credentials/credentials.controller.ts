@@ -306,13 +306,13 @@ export class CredentialsController {
           error: 'API key not available',
         };
       }
-      if (!cred.model) {
+      if (!smokeModel) {
         return {
           ok: false,
           latencyMs: Date.now() - start,
           mode: 'runtime_smoke',
           provider: cred.provider,
-          model: cred.model ?? '',
+          model: smokeModel,
           source: 'db',
           error: 'Credential model is not set',
         };

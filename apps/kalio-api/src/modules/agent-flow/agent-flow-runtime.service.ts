@@ -348,6 +348,9 @@ function isResumableBlockedSnapshot(snapshot: AgentFlowRunSnapshot): boolean {
       event.type === 'flow:final_artifact_blocker'
       || event.type === 'flow:missing_final_artifact'
       || event.type === 'flow:finalization_missing'
+      || event.type === 'flow:runtime_missing'
+      || event.type === 'flow:runtime_stalled'
+      || event.type === 'flow:resume_failed'
     ));
 }
 

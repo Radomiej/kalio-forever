@@ -94,32 +94,41 @@ export async function collectPaidReadinessChecks(options = {}) {
         'Active credential completion smoke endpoint is reachable',
         { method: 'POST' },
       );
-      if (completionCheck) {
+      const stableCompletionCheck = completionCheck && isRetryableProviderSmokeFailure(completionCheck)
+        ? await retryCompletionSmoke(
+            fetchJson,
+            checks,
+            `${apiBase}/credentials/${active.credentialId}/test-completion`,
+            'Active credential completion smoke retry after provider cross-border failure',
+            { method: 'POST' },
+          )
+        : completionCheck;
+      if (stableCompletionCheck) {
         passOrFail(
           checks,
-          completionCheck.ok === true,
+          stableCompletionCheck.ok === true,
           `Active credential completion smoke passed (` +
-            `${completionCheck.provider ?? 'unknown'} / ${completionCheck.model ?? 'unknown'} / ${completionCheck.source ?? 'unknown'})`,
-          `Active credential completion smoke failed: ${completionCheck.error ?? 'unknown error'}`,
+            `${stableCompletionCheck.provider ?? 'unknown'} / ${stableCompletionCheck.model ?? 'unknown'} / ${stableCompletionCheck.source ?? 'unknown'})`,
+          `Active credential completion smoke failed: ${stableCompletionCheck.error ?? 'unknown error'}`,
         );
-        if (completionCheck.ok === true && llmConfig) {
+        if (stableCompletionCheck.ok === true && llmConfig) {
           passOrFail(
             checks,
-            completionCheck.provider === llmConfig.provider,
-            `Active completion smoke used effective provider (${completionCheck.provider ?? 'unknown'})`,
-            `Active completion smoke used ${completionCheck.provider ?? 'unknown'} but effective provider is ${llmConfig.provider ?? 'unknown'}`,
+            stableCompletionCheck.provider === llmConfig.provider,
+            `Active completion smoke used effective provider (${stableCompletionCheck.provider ?? 'unknown'})`,
+            `Active completion smoke used ${stableCompletionCheck.provider ?? 'unknown'} but effective provider is ${llmConfig.provider ?? 'unknown'}`,
           );
           passOrFail(
             checks,
-            completionCheck.model === llmConfig.model,
-            `Active completion smoke model matches effective model (${completionCheck.model ?? 'unknown'})`,
-            `Active completion smoke model ${completionCheck.model ?? 'unknown'} does not match effective model ${llmConfig.model ?? 'unknown'}`,
+            stableCompletionCheck.model === llmConfig.model,
+            `Active completion smoke model matches effective model (${stableCompletionCheck.model ?? 'unknown'})`,
+            `Active completion smoke model ${stableCompletionCheck.model ?? 'unknown'} does not match effective model ${llmConfig.model ?? 'unknown'}`,
           );
           passOrFail(
             checks,
-            completionCheck.source === llmConfig.source,
-            `Active completion smoke source matches effective source (${completionCheck.source ?? 'unknown'})`,
-            `Active completion smoke source ${completionCheck.source ?? 'unknown'} does not match effective source ${llmConfig.source ?? 'unknown'}`,
+            stableCompletionCheck.source === llmConfig.source,
+            `Active completion smoke source matches effective source (${stableCompletionCheck.source ?? 'unknown'})`,
+            `Active completion smoke source ${stableCompletionCheck.source ?? 'unknown'} does not match effective source ${llmConfig.source ?? 'unknown'}`,
           );
         }
       }
@@ -136,20 +145,33 @@ export async function collectPaidReadinessChecks(options = {}) {
             body: JSON.stringify({ model }),
           },
         );
-        if (highLevelCompletionCheck) {
+        const stableHighLevelCompletionCheck = highLevelCompletionCheck && isRetryableProviderSmokeFailure(highLevelCompletionCheck)
+          ? await retryCompletionSmoke(
+              fetchJson,
+              checks,
+              `${apiBase}/credentials/${active.credentialId}/test-completion`,
+              `Required high-level model completion smoke retry after provider cross-border failure (${model})`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model }),
+              },
+            )
+          : highLevelCompletionCheck;
+        if (stableHighLevelCompletionCheck) {
           passOrFail(
             checks,
-            highLevelCompletionCheck.ok === true,
+            stableHighLevelCompletionCheck.ok === true,
             `Required high-level model completion smoke passed (` +
-              `${highLevelCompletionCheck.provider ?? 'unknown'} / ${highLevelCompletionCheck.model ?? 'unknown'})`,
-            `Required high-level model completion smoke failed for ${model}: ${highLevelCompletionCheck.error ?? 'unknown error'}`,
+              `${stableHighLevelCompletionCheck.provider ?? 'unknown'} / ${stableHighLevelCompletionCheck.model ?? 'unknown'})`,
+            `Required high-level model completion smoke failed for ${model}: ${stableHighLevelCompletionCheck.error ?? 'unknown error'}`,
           );
-          if (highLevelCompletionCheck.ok === true) {
+          if (stableHighLevelCompletionCheck.ok === true) {
             passOrFail(
               checks,
-              highLevelCompletionCheck.model === model,
+              stableHighLevelCompletionCheck.model === model,
               `Required high-level model smoke used ${model}`,
-              `Required high-level model smoke used ${highLevelCompletionCheck.model ?? 'unknown'} instead of ${model}`,
+              `Required high-level model smoke used ${stableHighLevelCompletionCheck.model ?? 'unknown'} instead of ${model}`,
             );
           }
         }
@@ -275,6 +297,15 @@ async function checkJson(fetchJson, checks, url, successMessage, init) {
     checks.push({ ok: false, message: `${successMessage}: ${error instanceof Error ? error.message : String(error)}` });
     return null;
   }
+}
+
+async function retryCompletionSmoke(fetchJson, checks, url, successMessage, init) {
+  const retry = await checkJson(fetchJson, checks, url, successMessage, init);
+  return retry ?? null;
+}
+
+function isRetryableProviderSmokeFailure(value) {
+  return value?.ok === false && containsProviderFailureText(value?.error);
 }
 
 function passOrFail(checks, condition, passMessage, failMessage) {

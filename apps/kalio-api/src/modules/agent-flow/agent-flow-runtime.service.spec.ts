@@ -2959,4 +2959,103 @@ describe('AgentFlowRuntimeService', () => {
       }),
     );
   });
+
+  it('allows resuming a blocked runtime-missing run from its durable checkpoint', async () => {
+    const architectureAdapter = adapter() as ReturnType<typeof adapter> & {
+      resume: ReturnType<typeof vi.fn>;
+    };
+    architectureAdapter.resume = vi.fn();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    repository.saveSnapshot({
+      run: {
+        id: 'run-runtime-missing-resume',
+        parentSessionId: 'parent-runtime-missing',
+        parentToolCallId: 'tool-runtime-missing',
+        childSessionId: 'child-runtime-missing',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'blocked',
+        startMode: 'durable',
+        returnMode: 'summary',
+        checkpoint: {
+          goal: 'Recover the stalled run',
+          context: { projectPath: 'C:\\Projekty\\TurboProject2' },
+          maxSteps: 8,
+        },
+        createdAt: 1,
+        updatedAt: 2,
+        summary: 'Blocked because the live AgentFlow runtime is no longer available.',
+      },
+      result: {
+        flowRunId: 'run-runtime-missing-resume',
+        childSessionId: 'child-runtime-missing',
+        status: 'blocked',
+        summary: 'Blocked because the live AgentFlow runtime is no longer available.',
+        decisions: [],
+        nextActions: [
+          'Restart or resume the AgentFlow run from the durable checkpoint instead of trusting the stale running projection.',
+        ],
+        artifacts: [],
+      },
+      events: [{
+        id: 'event-runtime-missing',
+        sequence: 1,
+        type: 'flow:runtime_missing',
+        message: 'AgentFlow runtime is no longer available for this run.',
+        status: 'blocked',
+        createdAt: 2,
+      }],
+    });
+    architectureAdapter.resume.mockResolvedValue({
+      run: {
+        id: 'run-runtime-missing-resume',
+        parentSessionId: 'parent-runtime-missing',
+        childSessionId: 'child-runtime-missing',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'done',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 4,
+      },
+      result: {
+        flowRunId: 'run-runtime-missing-resume',
+        childSessionId: 'child-runtime-missing',
+        status: 'done',
+        summary: 'Recovered from durable checkpoint.',
+        decisions: [],
+        nextActions: [],
+        artifacts: [],
+      },
+      events: [{
+        id: 'event-recovered',
+        sequence: 2,
+        type: 'flow:done',
+        message: 'Recovered from durable checkpoint.',
+        status: 'done',
+        createdAt: 4,
+      }],
+    });
+
+    const resumed = await service.resume('run-runtime-missing-resume', {
+      input: 'Resume from durable checkpoint.',
+    });
+
+    expect(resumed.run.status).toBe('done');
+    expect(architectureAdapter.resume).toHaveBeenCalledWith(
+      'run-runtime-missing-resume',
+      expect.objectContaining({ input: 'Resume from durable checkpoint.' }),
+      expect.objectContaining({
+        flowId: 'goal_guard_delivery_loop',
+        goal: 'Recover the stalled run',
+        parentSessionId: 'parent-runtime-missing',
+        parentToolCallId: 'tool-runtime-missing',
+        context: { projectPath: 'C:\\Projekty\\TurboProject2' },
+        maxSteps: 8,
+      }),
+    );
+  });
 });
