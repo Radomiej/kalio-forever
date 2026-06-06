@@ -20,7 +20,7 @@ export type LlmActivityStatus = 'running' | 'done' | 'error';
 
 export type CanvasFocusTarget =
   | { kind: 'architecture-branch'; sessionId: string; label?: string }
-  | { kind: 'architecture-run'; runId: string }
+  | { kind: 'architecture-run'; runId: string; eventId?: string; nodeId?: string }
   | null;
 
 export interface LlmActivity {

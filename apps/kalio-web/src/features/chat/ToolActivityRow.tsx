@@ -50,9 +50,9 @@ export function ToolActivityRow({ activity }: ToolActivityRowProps) {
     <div
       data-testid="tool-activity-row"
       data-status={activity.status}
-      className="flex justify-start"
+      className="flex w-full justify-start"
     >
-      <div className="max-w-[75%] rounded-xl border border-base-300 bg-base-200/60 px-3 py-2 text-xs">
+      <div className="w-full rounded-xl border border-base-300 bg-base-200/60 px-2.5 py-1.5 text-xs">
         {/* Header row */}
         <div className="flex items-center gap-2">
           <Wrench size={12} className="text-base-content/40 shrink-0" />

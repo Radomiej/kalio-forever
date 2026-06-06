@@ -3,9 +3,20 @@ import type { ArchitectureChatRunSummary, ChatMessage, ChatSession } from '@kali
 import { compactArchitectureTraceContent } from './architectureChatSummary';
 
 type TraceStep = ArchitectureChatRunSummary['trace'][number];
+type ArchitectureRunFocusedStep = { eventId?: string; nodeId?: string };
 type TraceStage =
   | { kind: 'step'; step: TraceStep }
   | { kind: 'parallel'; steps: TraceStep[] };
+
+function isFocusedTraceStep(step: TraceStep, focusedStep: ArchitectureRunFocusedStep | undefined): boolean {
+  if (!focusedStep) {
+    return false;
+  }
+  if (focusedStep.eventId && step.eventId === focusedStep.eventId) {
+    return true;
+  }
+  return Boolean(focusedStep.nodeId && step.nodeId === focusedStep.nodeId);
+}
 
 function roleLabel(step: TraceStep): string {
   if (step.nodeId) {
@@ -77,12 +88,14 @@ function ArchitectureTraceCard({
   onOpenSession,
   label,
   transcript = [],
+  focused = false,
 }: {
   step: TraceStep;
   sessions: ChatSession[];
   onOpenSession: (sessionId: string) => void;
   label?: string;
   transcript?: ChatMessage[];
+  focused?: boolean;
 }) {
   const branchSessionId = step.stream?.branchSessionId;
   const visibleMessages = visibleTranscript(transcript);
@@ -93,7 +106,11 @@ function ArchitectureTraceCard({
       : 'border-emerald-500/20 bg-emerald-500/5';
 
   return (
-    <div className={`rounded-xl border px-3 py-2 text-xs space-y-2 ${tone}`} data-testid={`architecture-run-step-${step.eventId ?? roleLabel(step)}`}>
+    <div
+      className={`rounded-xl border px-3 py-2 text-xs space-y-2 ${tone} ${focused ? 'ring-1 ring-sky-300/70 shadow-[0_0_0_1px_rgba(125,211,252,0.26)]' : ''}`}
+      data-testid={`architecture-run-step-${step.eventId ?? roleLabel(step)}`}
+      data-focused-step={focused ? 'true' : 'false'}
+    >
       <div className="flex items-start gap-2">
         <div className="mt-0.5 rounded-md border border-base-content/10 bg-base-200/60 p-1">
           {step.speaker === 'participant' ? <GitBranch size={11} /> : <Route size={11} />}
@@ -152,11 +169,13 @@ function ArchitectureParallelGroup({
   sessions,
   onOpenSession,
   getBranchMessages,
+  focusedStep,
 }: {
   steps: TraceStep[];
   sessions: ChatSession[];
   onOpenSession: (sessionId: string) => void;
   getBranchMessages: (sessionId: string) => ChatMessage[];
+  focusedStep?: ArchitectureRunFocusedStep;
 }) {
   if (steps.length === 0) return null;
 
@@ -182,6 +201,7 @@ function ArchitectureParallelGroup({
             sessions={sessions}
             onOpenSession={onOpenSession}
             transcript={step.stream?.branchSessionId ? getBranchMessages(step.stream.branchSessionId) : []}
+            focused={isFocusedTraceStep(step, focusedStep)}
           />
         ))}
       </div>
@@ -202,11 +222,13 @@ function ArchitectureSequentialFlow({
   sessions,
   onOpenSession,
   getBranchMessages,
+  focusedStep,
 }: {
   stages: TraceStage[];
   sessions: ChatSession[];
   onOpenSession: (sessionId: string) => void;
   getBranchMessages: (sessionId: string) => ChatMessage[];
+  focusedStep?: ArchitectureRunFocusedStep;
 }) {
   return (
     <div className="space-y-1.5" data-testid="architecture-run-sequential-flow">
@@ -221,6 +243,7 @@ function ArchitectureSequentialFlow({
               sessions={sessions}
               onOpenSession={onOpenSession}
               getBranchMessages={getBranchMessages}
+              focusedStep={focusedStep}
             />
           ) : (
             <ArchitectureTraceCard
@@ -229,6 +252,7 @@ function ArchitectureSequentialFlow({
               onOpenSession={onOpenSession}
               label={stage.step.speaker === 'finalizer' ? 'Finalizer' : undefined}
               transcript={stage.step.stream?.branchSessionId ? getBranchMessages(stage.step.stream.branchSessionId) : []}
+              focused={isFocusedTraceStep(stage.step, focusedStep)}
             />
           )}
           {index < stages.length - 1 && <ArchitectureFlowSeparator />}
@@ -289,12 +313,14 @@ export function ArchitectureRunCanvasSection({
   onOpenSession,
   getBranchMessages,
   focused = false,
+  focusedStep,
 }: {
   run: ArchitectureChatRunSummary;
   sessions: ChatSession[];
   onOpenSession: (sessionId: string) => void;
   getBranchMessages: (sessionId: string) => ChatMessage[];
   focused?: boolean;
+  focusedStep?: ArchitectureRunFocusedStep;
 }) {
   const stages = buildTraceStages(run.trace);
   const routeText = stages.map(stageLabel).join(' -> ');
@@ -320,6 +346,7 @@ export function ArchitectureRunCanvasSection({
           sessions={sessions}
           onOpenSession={onOpenSession}
           getBranchMessages={getBranchMessages}
+          focusedStep={focusedStep}
         />
         <div className="hidden" data-testid="architecture-run-routing">{routeText}</div>
       </div>

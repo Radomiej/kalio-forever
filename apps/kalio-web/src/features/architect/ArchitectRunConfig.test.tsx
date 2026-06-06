@@ -28,6 +28,26 @@ describe('estimateArchitectureBudget', () => {
     expect(budget.description).toContain('1 loop edges');
   });
 
+  it('separates participant branches from all executable runtime slots', () => {
+    const budget = estimateArchitectureBudget(makeSchema(2, 0, false, 'judge'), 32, 3, 4);
+
+    expect(budget.branchSlots).toBe(1);
+    expect(budget.executableSlots).toBe(2);
+  });
+
+  it('returns the concrete budget formula inputs used by the UI audit', () => {
+    const budget = estimateArchitectureBudget(makeSchema(3, 1, true, 'judge'), 12, 3, 4);
+
+    expect(budget).toMatchObject({
+      executableSlots: 3,
+      branchSlots: 2,
+      parallelNodes: 1,
+      loopEdges: 1,
+      estimatedCalls: 12,
+      estimatedLlmTurns: 48,
+    });
+  });
+
   it('exposes the Goal Master loop proof guard for judge architectures', () => {
     const onRequireGoalMasterLoopProofChange = vi.fn();
     render(
@@ -215,6 +235,54 @@ describe('estimateArchitectureBudget', () => {
     expect(onAutoApproveProjectWritesChange).toHaveBeenCalledWith(true);
     expect(onAutoApproveTerminalChange).toHaveBeenCalledWith(true);
     expect(onAllowOrchestratorSubagentsChange).toHaveBeenCalledWith(true);
+  });
+
+  it('keeps architecture metrics behind a compact run audit disclosure with formula evidence', () => {
+    render(
+      <ArchitectRunConfig
+        activeCredentialId="credential-1"
+        llmConfig={defaultLlmConfig}
+        maxNodeVisits={3}
+        maxSteps={12}
+        maxSubagentIterations={4}
+        projectPath=""
+        requireGoalMasterLoopProof={false}
+        requireImplementerWriteProof={false}
+        autoApproveProjectWrites={false}
+        autoApproveTerminal={false}
+        schema={makeSchema(3, 1, true, 'judge')}
+        taskPrompt="Finish the goal."
+        personaOverrides={{ judge: 'persona-1' }}
+        running={false}
+        onMaxNodeVisitsChange={vi.fn()}
+        onMaxStepsChange={vi.fn()}
+        onMaxSubagentIterationsChange={vi.fn()}
+        onProjectPathChange={vi.fn()}
+        onRequireGoalMasterLoopProofChange={vi.fn()}
+        onRequireImplementerWriteProofChange={vi.fn()}
+        onAutoApproveProjectWritesChange={vi.fn()}
+        onAutoApproveTerminalChange={vi.fn()}
+        onTaskPromptChange={vi.fn()}
+        onStartRun={vi.fn()}
+        onStartGoalGuardFlow={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId('architect-run-audit-panel')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('architect-run-audit-toggle'));
+
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveClass('absolute');
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveTextContent('branch actors');
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveTextContent('participant/critic slots');
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveTextContent('runtime actors');
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveTextContent('router, judge and finalizer slots');
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveTextContent('routing nodes');
+    expect(screen.getByTestId('architect-run-audit-details')).not.toHaveAttribute('open');
+    expect(screen.getByTestId('architect-run-audit-details')).toHaveTextContent('Metric definitions');
+    expect(screen.getByTestId('architect-run-audit-repetition')).toHaveTextContent('revisited up to 3 times');
+    expect(screen.getByTestId('architect-run-audit-repetition')).toHaveTextContent('up to 4 agent iterations');
+    expect(screen.getByTestId('architect-run-audit-formula')).toHaveTextContent('12 node executions x 4 iters = ~48 turns');
   });
 
   it('shows a stop action while an architecture run is running', () => {

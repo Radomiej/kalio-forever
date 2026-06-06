@@ -128,6 +128,8 @@ export function ChatInterface() {
   };
   const [showContextStats, setShowContextStats] = useState(false);
   const [vfsRefreshSignal, setVfsRefreshSignal] = useState(0);
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const answeredCallIds = computeAnsweredCallIds(messages);
@@ -198,6 +200,7 @@ export function ChatInterface() {
     setAwaitingFirstChunk(false);
     toolArgProgressSeenRef.current = {};
     setToolArgProgress(null);
+    shouldAutoScrollRef.current = true;
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -207,8 +210,19 @@ export function ChatInterface() {
   }, [activeSessionId]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (shouldAutoScrollRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, activeToolActivities]);
+
+  const handleMessageListScroll = () => {
+    const list = messageListRef.current;
+    if (!list) {
+      return;
+    }
+    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    shouldAutoScrollRef.current = distanceFromBottom < 96;
+  };
 
   // Flush queued RA-App user actions when agent finishes streaming
   const prevStreamingRef = useRef(isStreaming);
@@ -366,7 +380,7 @@ export function ChatInterface() {
         console.error('[ChatInterface] architecture VFS context check failed', err);
       }
       if (sourceFiles.length === 0) {
-        setRecoveryNotice('Architecture run has no session files attached. Agents will only use the prompt context.');
+        console.debug('[ChatInterface] architecture run has no attached session files');
       }
       const applyArchitectureProjection = (result: Awaited<ReturnType<typeof startArchitectureRun>>) => {
         const projection = buildArchitectureRunTurnProjection(result, activeSessionId);
@@ -462,7 +476,7 @@ export function ChatInterface() {
   };
 
   return (
-    <div data-testid="chat-interface" className="flex h-full flex-col bg-base-200 rounded-xl border border-base-300 overflow-hidden">
+    <div data-testid="chat-interface" className="flex h-full flex-col bg-base-200 overflow-hidden">
       <ChatStatusBanners
         connectionState={connectionState}
         error={error}
@@ -501,56 +515,65 @@ export function ChatInterface() {
         />
       )}
 
-      <div data-testid="message-list" className="flex-1 overflow-y-auto p-4 space-y-1">
-        {messages.length === 0 && (
-          <ChatWelcomeScreen
-            activeSession={activeSession}
-            activeSessionId={activeSessionId}
-            architectures={architectures}
-            isStreaming={composerStreaming}
-            onArchitectureChange={setSelectedArchitectureId}
-            onArchitectureRun={(content, schemaId) => void handleArchitectureRun(content, schemaId)}
-            onPersonaChange={(personaId) => void handlePersonaChange(personaId)}
-            onSend={handleSend}
-            personas={personas}
-            selectedArchitectureId={selectedArchitectureId}
-          />
-        )}
+      <div
+        ref={messageListRef}
+        data-testid="message-list"
+        className="flex-1 overflow-y-auto px-1.5 py-3 sm:px-2 lg:px-2"
+        onScroll={handleMessageListScroll}
+      >
+        <div className="flex w-full flex-col gap-1">
+          {messages.length === 0 && (
+            <ChatWelcomeScreen
+              activeSession={activeSession}
+              activeSessionId={activeSessionId}
+              architectures={architectures}
+              isStreaming={composerStreaming}
+              onArchitectureChange={setSelectedArchitectureId}
+              onArchitectureRun={(content, schemaId) => void handleArchitectureRun(content, schemaId)}
+              onPersonaChange={(personaId) => void handlePersonaChange(personaId)}
+              onSend={handleSend}
+              personas={personas}
+              selectedArchitectureId={selectedArchitectureId}
+            />
+          )}
 
-        {buildConversationTimeline(messages, agentTurns).map((entry) => (
-          entry.kind === 'user_message'
-            ? <MessageBubble key={entry.message.id} message={entry.message} />
-            : (
-              <AgentTurnBubble
-                key={entry.turn.id}
-                turn={entry.turn}
-                toolActivities={activeToolActivities}
-                answeredCallIds={answeredCallIds}
-              />
-            )
-        ))}
+          {buildConversationTimeline(messages, agentTurns).map((entry) => (
+            entry.kind === 'user_message'
+              ? <MessageBubble key={entry.message.id} message={entry.message} />
+              : (
+                <AgentTurnBubble
+                  key={entry.turn.id}
+                  turn={entry.turn}
+                  toolActivities={activeToolActivities}
+                  answeredCallIds={answeredCallIds}
+                />
+              )
+          ))}
 
-        {composerStreaming && activeToolActivities.length === 0 && messages.length === 0 && (
-          <div className="flex justify-start">
-            <div className="bg-base-300 rounded-2xl px-4 py-2">
-              <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
+          {composerStreaming && activeToolActivities.length === 0 && messages.length === 0 && (
+            <div className="flex justify-start">
+              <div className="bg-base-300 rounded-2xl px-4 py-2">
+                <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        <div ref={bottomRef} />
+          <div ref={bottomRef} />
+        </div>
       </div>
 
-      <ChatInput
-        architectures={architectures}
-        disabled={composerStreaming || !activeSessionId}
-        isStreaming={composerStreaming}
-        onArchitectureChange={setSelectedArchitectureId}
-        onArchitectureRun={(content, schemaId) => void handleArchitectureRun(content, schemaId)}
-        onSend={handleComposerSend}
-        onStop={handleStop}
-        selectedArchitectureId={selectedArchitectureId}
-      />
+      {messages.length > 0 && (
+        <ChatInput
+          architectures={architectures}
+          disabled={composerStreaming || !activeSessionId}
+          isStreaming={composerStreaming}
+          onArchitectureChange={setSelectedArchitectureId}
+          onArchitectureRun={(content, schemaId) => void handleArchitectureRun(content, schemaId)}
+          onSend={handleComposerSend}
+          onStop={handleStop}
+          selectedArchitectureId={selectedArchitectureId}
+        />
+      )}
     </div>
   );
 }

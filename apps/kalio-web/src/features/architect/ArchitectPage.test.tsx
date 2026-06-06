@@ -424,7 +424,8 @@ describe('ArchitectPage', () => {
     expect(screen.getByText('Five expert slots produce a decision recommendation.')).toBeInTheDocument();
     expect(screen.getByTestId('architect-node-pragmatist')).toHaveTextContent('Pragmatist');
     expect(screen.getByTestId('architect-node-kind-pragmatist')).toHaveTextContent('role');
-    expect(screen.getByTestId('architect-routing-model')).toHaveTextContent('Node-level routing');
+    expect(screen.queryByTestId('architect-routing-model')).toBeNull();
+    expect(screen.getByTestId('architect-run-audit-toggle')).toHaveTextContent('Run audit');
     expect(screen.getByTestId('architect-node-behavior-router')).toHaveTextContent('rank then merge');
   });
 
@@ -435,8 +436,13 @@ describe('ArchitectPage', () => {
 
     expect(screen.getByTestId('architect-inspector')).toHaveTextContent('Pragmatist');
     expect(screen.getByTestId('architect-inspector')).toHaveTextContent('role');
+    expect(screen.getByTestId('architect-node-properties-summary')).toHaveTextContent('Role');
+    expect(screen.queryByTestId('architect-node-kind-select')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('architect-node-properties-open'));
     expect(screen.getByTestId('architect-node-kind-select')).toHaveValue('role');
 
+    fireEvent.click(screen.getByTestId('architect-node-properties-close'));
     fireEvent.click(screen.getByTestId('architect-slot-pragmatist'));
 
     expect(screen.getByTestId('architect-inspector')).toHaveTextContent('Pragmatist');
@@ -447,6 +453,7 @@ describe('ArchitectPage', () => {
     render(<ArchitectPage />);
 
     fireEvent.click(await screen.findByTestId('architect-node-router'));
+    fireEvent.click(screen.getByTestId('architect-node-properties-open'));
     fireEvent.change(screen.getByTestId('architect-node-behavior-mode'), {
       target: { value: 'choose_one' },
     });
@@ -959,6 +966,7 @@ describe('ArchitectPage', () => {
     render(<ArchitectPage />);
 
     fireEvent.click(await screen.findByTestId('architect-node-pragmatist'));
+    fireEvent.click(screen.getByTestId('architect-node-properties-open'));
     fireEvent.click(screen.getByTestId('architect-context-include-outputs'));
     fireEvent.change(screen.getByTestId('architect-context-compression'), {
       target: { value: 'evidence_only' },
@@ -1057,6 +1065,7 @@ describe('ArchitectPage', () => {
     fireEvent.change(screen.getByTestId('architect-persona-select'), {
       target: { value: 'persona-alt' },
     });
+    fireEvent.click(screen.getByTestId('architect-node-properties-open'));
     fireEvent.change(screen.getByTestId('architect-node-kind-select'), {
       target: { value: 'artifact' },
     });

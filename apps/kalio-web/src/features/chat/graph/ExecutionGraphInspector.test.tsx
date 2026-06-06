@@ -65,7 +65,9 @@ describe('ExecutionGraphInspector', () => {
       />,
     );
 
-    expect(screen.getByText('Inspector')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('graph-inspector-expand'));
+
+    expect(screen.getByText('Node Properties')).toBeTruthy();
     expect(screen.getByText('state:')).toBeTruthy();
     expect(screen.getByText('ready')).toBeTruthy();
     expect(screen.queryByText('Session')).toBeNull();
@@ -78,6 +80,84 @@ describe('ExecutionGraphInspector', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Show raw' }));
     expect(screen.getByText(/"message"/)).toBeTruthy();
+  });
+
+  it('collapses node properties into a compact rail and restores it on demand', () => {
+    render(
+      <ExecutionGraphInspector
+        activeSessionId="session-1234567890"
+        inspectorWidth={360}
+        selectedConfirmation={null}
+        selectedNode={makePromptNode()}
+        setActiveSession={vi.fn()}
+        setPendingConfirmation={vi.fn()}
+        setPendingMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('graph-inspector-expand')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('graph-inspector-expand'));
+    fireEvent.click(screen.getByTestId('graph-inspector-collapse'));
+    expect(screen.queryByText('Prompt details')).toBeNull();
+    expect(screen.getByTestId('graph-inspector-expand')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('graph-inspector-expand'));
+    expect(screen.getByText('Node Properties')).toBeTruthy();
+  });
+
+  it('keeps the inspector collapsed across node selection changes until the user expands it', () => {
+    const firstNode = makeNode({
+      kind: 'turn',
+      turn: { id: 'turn-1', sessionId: 'session-1', promptMessageId: 'prompt-1', done: true, items: [] } as never,
+      textPreview: 'First node.',
+      toolCount: 1,
+      thinkingCount: 0,
+      thinkingPreviews: [],
+      actorLabel: 'Builder',
+      modelLabel: 'mimo-v2.5',
+    }, { id: 'turn-node-1', title: 'First node' });
+    const secondNode = makeNode({
+      kind: 'tool',
+      toolName: 'vfs_read',
+      args: {},
+      activity: null,
+      result: null,
+      confirmationRequired: false,
+    }, { id: 'tool-node-1', title: 'Second node' });
+
+    const { rerender } = render(
+      <ExecutionGraphInspector
+        activeSessionId="session-1"
+        inspectorWidth={360}
+        selectedConfirmation={null}
+        selectedNode={firstNode}
+        setActiveSession={vi.fn()}
+        setPendingConfirmation={vi.fn()}
+        setPendingMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Turn details')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('graph-inspector-collapse'));
+    expect(screen.queryByText('Turn details')).toBeNull();
+
+    rerender(
+      <ExecutionGraphInspector
+        activeSessionId="session-1"
+        inspectorWidth={360}
+        selectedConfirmation={null}
+        selectedNode={secondNode}
+        setActiveSession={vi.fn()}
+        setPendingConfirmation={vi.fn()}
+        setPendingMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Tool details')).toBeNull();
+    expect(screen.getByText('Second node')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('graph-inspector-expand'));
+    expect(screen.getByText('Tool details')).toBeTruthy();
   });
 
   it('shows compact architecture tool evidence without expanding raw payload', () => {
@@ -385,6 +465,74 @@ describe('ExecutionGraphInspector', () => {
 
     expect(screen.getByRole('heading', { name: 'Final response' })).toBeTruthy();
     expect(screen.getByText('Awaiting reply')).toBeTruthy();
+  });
+
+  it('keeps long node preview text collapsed until the user asks for details', () => {
+    const longPreview = [
+      'Router synthesis: choose Next.js with Postgres and search.',
+      'Evidence: five persona branches completed, each with a separate recommendation and risk note.',
+      'Decision details should stay available without turning the inspector into a long reading pane.',
+      'Follow-up: expose the full raw developer payload only when someone explicitly needs it.',
+    ].join(' ');
+
+    render(
+      <ExecutionGraphInspector
+        activeSessionId="session-1"
+        inspectorWidth={360}
+        selectedConfirmation={null}
+        selectedNode={makeNode({
+          kind: 'turn',
+          turn: { id: 'turn-1', sessionId: 'session-1', promptMessageId: 'prompt-1', done: true, items: [] } as never,
+          textPreview: longPreview,
+          toolCount: 2,
+          thinkingCount: 0,
+          thinkingPreviews: [],
+          actorLabel: 'Strategist',
+          modelLabel: 'mimo-v2.5',
+        })}
+        setActiveSession={vi.fn()}
+        setPendingConfirmation={vi.fn()}
+        setPendingMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(longPreview)).toHaveClass('line-clamp-4');
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Preview' }));
+    expect(screen.getByText(longPreview)).not.toHaveClass('line-clamp-4');
+    expect(screen.getByRole('button', { name: 'Collapse Preview' })).toBeInTheDocument();
+  });
+
+  it('keeps long transcript tail entries collapsed inside the inspector', () => {
+    const longTranscript = [
+      'The branch reviewed the graph state, identified the route decision, listed the selected tools,',
+      'and then produced a verbose explanation that should not dominate the node properties panel until expanded.',
+      'The full text remains available because detailed audit work still needs source material.',
+    ].join(' ');
+
+    render(
+      <ExecutionGraphInspector
+        activeSessionId="session-1"
+        inspectorWidth={360}
+        selectedConfirmation={null}
+        selectedNode={makeNode({
+          kind: 'subagent',
+          childExecutionKind: 'sub_agent',
+          result: { childSessionId: 'child-session-1', result: 'Done', taskId: 'task-1' } as never,
+          transcript: [{ id: 'message-1', sessionId: 'session-1', role: 'assistant', content: longTranscript, createdAt: 1 }],
+          copiedFiles: [],
+          actorLabel: 'UX Designer',
+          modelLabel: 'mimo-v2.5',
+          inputPrompt: 'Review the graph layout',
+        })}
+        setActiveSession={vi.fn()}
+        setPendingConfirmation={vi.fn()}
+        setPendingMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(longTranscript)).toHaveClass('line-clamp-4');
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Agent' }));
+    expect(screen.getByText(longTranscript)).not.toHaveClass('line-clamp-4');
   });
 
   it.each([

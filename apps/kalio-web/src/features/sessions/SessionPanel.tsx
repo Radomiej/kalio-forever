@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, type ReactNode } from 'react';
-import { Plus } from 'lucide-react';
+import { ChevronDown, Plus } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
@@ -48,6 +48,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [originFilter, setOriginFilter] = useState<SessionOriginFilter>('all');
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [expandedRoots, setExpandedRoots] = useState<Set<string>>(() => new Set());
   const renameRef = useRef<HTMLInputElement>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -139,6 +140,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const sessionListEntries = buildSessionListEntries(orderedSessions, activeSessionId, originFilter);
   const childSessionsByParent = buildChildSessionsByParent(orderedSessions);
   const descendantCountByParent = new Map<string, number>();
+  const activeOriginFilter = SESSION_ORIGIN_FILTERS.find((filter) => filter.id === originFilter) ?? SESSION_ORIGIN_FILTERS[0];
 
   const getPersonaName = (personaId: string): string | null => {
     const p = personas.find((p) => p.id === personaId);
@@ -234,22 +236,45 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
           </button>
         )}
       </div>
-      <div className="flex gap-1 border-b border-base-300 px-3 py-1.5 shrink-0" data-testid="session-origin-filter">
-        {SESSION_ORIGIN_FILTERS.map((filter) => (
-          <button
-            key={filter.id}
-            type="button"
-            className={`btn btn-ghost btn-xs h-6 min-h-0 flex-1 px-2 text-[10px] ${
-              originFilter === filter.id
-                ? 'bg-sky-500/15 text-sky-300'
-                : 'text-base-content/45 hover:text-base-content/80'
-            }`}
-            onClick={() => setOriginFilter(filter.id)}
-            data-testid={`session-origin-filter-${filter.id}`}
+      <div className="relative border-b border-base-300 px-3 pb-1 pt-5 shrink-0" data-testid="session-origin-filter">
+        <button
+          type="button"
+          className="flex h-8 w-[210px] max-w-full items-center justify-between rounded-md border border-base-300 bg-base-200/70 px-2 text-[11px] font-semibold text-base-content/75 transition-colors hover:text-base-content focus:border-sky-400 focus:outline-none"
+          onClick={() => setFilterMenuOpen((value) => !value)}
+          aria-expanded={filterMenuOpen}
+          aria-haspopup="menu"
+          aria-label="Session filter"
+          data-testid="session-origin-filter-trigger"
+        >
+          <span>{activeOriginFilter.label}</span>
+          <ChevronDown size={13} aria-hidden="true" />
+        </button>
+        {filterMenuOpen && (
+          <div
+            className="absolute left-3 right-3 top-10 z-30 rounded-md border border-base-300 bg-base-100 p-1 shadow-[0_14px_30px_rgba(2,12,27,0.35)]"
+            role="menu"
           >
-            {filter.label}
-          </button>
-        ))}
+            {SESSION_ORIGIN_FILTERS.map((filter) => (
+              <button
+                key={filter.id}
+                type="button"
+                className={`block h-8 w-full rounded px-2 text-left text-[11px] font-semibold transition-colors ${
+                  originFilter === filter.id
+                    ? 'bg-sky-500/15 text-sky-300'
+                    : 'text-base-content/60 hover:bg-base-200 hover:text-base-content'
+                }`}
+                onClick={() => {
+                  setOriginFilter(filter.id);
+                  setFilterMenuOpen(false);
+                }}
+                role="menuitem"
+                data-testid={`session-origin-filter-${filter.id}`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto">

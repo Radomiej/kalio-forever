@@ -25,6 +25,24 @@ const TOOL_FIXTURE: ToolMeta[] = [
     requiresConfirmation: false,
   },
   {
+    name: 'spawn_cli_agent',
+    description: 'Start a durable CLI child.',
+    parameters: {},
+    requiresConfirmation: false,
+  },
+  {
+    name: 'run_sub_agentflow',
+    description: 'Run a child workflow.',
+    parameters: {},
+    requiresConfirmation: false,
+  },
+  {
+    name: 'escalate',
+    description: 'Escalate an issue for review.',
+    parameters: {},
+    requiresConfirmation: false,
+  },
+  {
     name: 'mcp_web_search',
     description: 'Search the web through MCP.',
     parameters: {},
@@ -78,7 +96,10 @@ describe('PersonaToolPicker', () => {
     await screen.findByTestId('group-toggle-vfs');
     expect(screen.getByText('VFS')).toBeInTheDocument();
     expect(screen.getByText('Filesystem')).toBeInTheDocument();
-    expect(screen.getByText('Agent')).toBeInTheDocument();
+    expect(screen.getByText('Subagents')).toBeInTheDocument();
+    expect(screen.getByText('CLI Agents')).toBeInTheDocument();
+    expect(screen.getByText('Agent Workflows')).toBeInTheDocument();
+    expect(screen.getByText('Security & Audit')).toBeInTheDocument();
     expect(screen.getByText('confirm')).toBeInTheDocument();
     expect(screen.getByText('MCP Tools')).toBeInTheDocument();
     expect(screen.getByText('1 available')).toBeInTheDocument();
@@ -88,7 +109,10 @@ describe('PersonaToolPicker', () => {
     await waitFor(() => {
       expect(screen.getByTestId('group-toggle-vfs')).toBeChecked();
       expect(screen.getByTestId('group-toggle-fs')).toBeChecked();
-      expect(screen.getByTestId('group-toggle-agent')).toBeChecked();
+      expect(screen.getByTestId('group-toggle-subagents')).toBeChecked();
+      expect(screen.getByTestId('group-toggle-cli-agents')).toBeChecked();
+      expect(screen.getByTestId('group-toggle-agent-workflows')).toBeChecked();
+      expect(screen.getByTestId('group-toggle-security-audit')).toBeChecked();
     });
 
     fireEvent.click(screen.getByTestId('tools-disable-all'));
@@ -96,7 +120,10 @@ describe('PersonaToolPicker', () => {
     await waitFor(() => {
       expect(screen.getByTestId('group-toggle-vfs')).not.toBeChecked();
       expect(screen.getByTestId('group-toggle-fs')).not.toBeChecked();
-      expect(screen.getByTestId('group-toggle-agent')).not.toBeChecked();
+      expect(screen.getByTestId('group-toggle-subagents')).not.toBeChecked();
+      expect(screen.getByTestId('group-toggle-cli-agents')).not.toBeChecked();
+      expect(screen.getByTestId('group-toggle-agent-workflows')).not.toBeChecked();
+      expect(screen.getByTestId('group-toggle-security-audit')).not.toBeChecked();
     });
 
     fireEvent.click(screen.getByTestId('mcp-policy-allow_list'));

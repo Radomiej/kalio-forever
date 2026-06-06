@@ -104,12 +104,12 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
 
   return (
     <div data-testid="agent-turn-bubble" className="flex justify-start mb-2 w-full">
-      <div className="min-w-0 w-full max-w-[min(100%,68rem)]">
+      <div className="min-w-0 w-full max-w-none">
         <p className="text-xs text-base-content/50 mb-1 ml-1">
           {turn.agentRun?.agentType === 'subagent' ? (turn.agentRun.label ?? 'Sub-agent') : 'Kalio'}
         </p>
 
-        <div className={`group relative rounded-2xl text-base-content text-sm px-4 py-3 flex flex-col gap-2 w-full ${turn.agentRun?.agentType === 'subagent' ? 'bg-sky-500/10 border border-sky-500/20' : 'bg-base-300'}`}>
+        <div className={`group relative rounded-xl text-base-content text-sm px-2.5 py-1.5 flex flex-col gap-1 w-full ${turn.agentRun?.agentType === 'subagent' ? 'bg-sky-500/10 border border-sky-500/20' : 'bg-base-300'}`}>
           {turnArchitectureRun && (
             <>
               <ArchitectureRunTimeline
@@ -119,6 +119,9 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
                 }}
                 onOpenBranch={(sessionId) => {
                   setCanvasFocus({ kind: 'architecture-branch', sessionId });
+                }}
+                onOpenStep={(focus) => {
+                  setCanvasFocus({ kind: 'architecture-run', runId: turnArchitectureRun.runId, ...focus });
                 }}
               />
               {architectureFinalAnswer && (
@@ -154,6 +157,10 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
               const toolName = toolCallIdToName.get(callId) ?? callId;
               const toolResult = toolResultByCallId.get(callId);
               const isAnswered = answeredCallIds?.has(callId) ?? false;
+              const isArchitectureSubagentCall = turnArchitectureRun && toolName === 'run_subagent';
+              if (isArchitectureSubagentCall) {
+                return null;
+              }
               
               // Check if this is a live (in-progress) tool or completed
               const liveActivity = toolActivities.find((a) => a.callId === callId);
@@ -189,7 +196,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
             const messageId = item.messageId;
             const msg = messages.find((m) => m.id === messageId);
             if (!msg) return null;
-            if (turnArchitectureRun && /^###\s+(Router|Finalizer)\b/im.test(msg.content)) {
+            if (turnArchitectureRun && isArchitectureTextOutput(msg.content, msg.architectureRun != null)) {
               return null;
             }
             
@@ -227,6 +234,16 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
       </div>
     </div>
   );
+}
+
+function isArchitectureTextOutput(content: string, hasRunMetadata: boolean): boolean {
+  if (hasRunMetadata) {
+    return true;
+  }
+  return /^###\s+(Router|Finalizer)\b/im.test(content)
+    || /^Architecture run\s+(running|completed|failed):/im.test(content)
+    || /^Execution trace:/im.test(content)
+    || /^Executed route:/im.test(content);
 }
 
 function finalAnswerForArchitectureRun(

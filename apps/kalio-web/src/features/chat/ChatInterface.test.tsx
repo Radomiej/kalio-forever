@@ -8,7 +8,7 @@
  * because addToolActivity was only called from the confirmation handler.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, act, screen } from '@testing-library/react';
+import { render, act, fireEvent, screen } from '@testing-library/react';
 import { buildArchitectureRunContext, ChatInterface } from './ChatInterface';
 import { computeAnsweredCallIds } from './chatUtils';
 import type { ChatMessage, VFSFile } from '@kalio/types';
@@ -387,6 +387,13 @@ beforeEach(() => {
 });
 
 describe('ChatInterface event wiring', () => {
+  it('renders only the welcome composer for an empty active chat', async () => {
+    await renderChatInterface();
+
+    expect(screen.getByTestId('welcome-prompt-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-input')).toBeNull();
+  });
+
   it('hydrates architecture runs from the active session VFS when files are attached', () => {
     const files: VFSFile[] = [{
       sessionId: 'session-1',
@@ -410,6 +417,35 @@ describe('ChatInterface event wiring', () => {
     });
   });
 
+  it('does not show a warning banner for prompt-only architecture runs without VFS files', async () => {
+    mockGetArchitectureSchemas.mockResolvedValue([
+      {
+        id: 'strategic-decision-council',
+        name: 'Strategic Decision Council',
+        version: '0.1.0',
+        description: '',
+        nodes: [],
+        edges: [],
+        roleSlots: [],
+      },
+    ]);
+
+    await renderChatInterface();
+    await act(async () => {
+      fireEvent.change(await screen.findByTestId('welcome-architecture-select'), {
+        target: { value: 'strategic-decision-council' },
+      });
+      fireEvent.change(await screen.findByTestId('welcome-prompt-input'), {
+        target: { value: 'Pick a stack.' },
+      });
+      fireEvent.click(await screen.findByTestId('welcome-run-prompt'));
+      await flushReactEffects();
+    });
+
+    expect(mockStartArchitectureRun).toHaveBeenCalled();
+    expect(screen.queryByTestId('chat-recovery-notice')).toBeNull();
+  });
+
   it('routes Goal Master Delivery Loop from Talk through canonical AgentFlow with strict proof context', async () => {
     mockGetArchitectureSchemas.mockResolvedValue([
       {
@@ -425,14 +461,12 @@ describe('ChatInterface event wiring', () => {
 
     await renderChatInterface();
     await act(async () => {
-      const select = await screen.findByTestId('chat-architecture-select');
-      const input = await screen.findByTestId('chat-input');
-      const send = await screen.findByTestId('chat-send-btn');
-      (select as HTMLSelectElement).value = 'goal-master-delivery-loop';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      (input as HTMLTextAreaElement).value = 'Deliver with proof.';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      send.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const select = await screen.findByTestId('welcome-architecture-select');
+      const input = await screen.findByTestId('welcome-prompt-input');
+      const send = await screen.findByTestId('welcome-run-prompt');
+      fireEvent.change(select, { target: { value: 'goal-master-delivery-loop' } });
+      fireEvent.change(input, { target: { value: 'Deliver with proof.' } });
+      fireEvent.click(send);
       await flushReactEffects();
     });
 
@@ -1179,6 +1213,44 @@ describe('REGRESSION: timeline interleaving preserves chronological order', () =
     // With default mock (empty messages, empty agentTurns), should render nothing
     const bubbles = container.querySelectorAll('[data-testid="message-bubble"], [data-testid="agent-turn-bubble"]');
     expect(bubbles).toHaveLength(0);
+  });
+
+  it('uses a full-width message lane so assistant content starts close to the chat edge', async () => {
+    await renderChatInterface();
+
+    const shell = screen.getByTestId('chat-interface');
+    expect(shell).not.toHaveClass('rounded-xl');
+    expect(shell).not.toHaveClass('border');
+
+    const messageList = screen.getByTestId('message-list');
+    expect(messageList).toHaveClass('px-1.5');
+    expect(messageList).toHaveClass('lg:px-2');
+
+    const lane = screen.getByTestId('message-list').firstElementChild;
+    expect(lane).toHaveClass('w-full');
+    expect(lane).not.toHaveClass('mx-auto');
+    expect(lane).not.toHaveClass('max-w-[72rem]');
+  });
+
+  it('does not force-scroll to the bottom when the user is reading earlier messages', async () => {
+    const { rerender } = await renderChatInterface();
+    const messageList = screen.getByTestId('message-list');
+    Object.defineProperty(messageList, 'scrollHeight', { configurable: true, value: 1200 });
+    Object.defineProperty(messageList, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(messageList, 'scrollTop', { configurable: true, value: 200 });
+    (window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+
+    fireEvent.scroll(messageList);
+    mockMessages = [{
+      id: 'new-message',
+      sessionId: 'session-1',
+      role: 'user',
+      content: 'new content',
+      createdAt: 2,
+    }];
+    await rerenderChatInterface(rerender);
+
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 
   it('timeline loop handles unequal array lengths correctly', () => {

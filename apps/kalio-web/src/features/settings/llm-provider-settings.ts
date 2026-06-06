@@ -26,7 +26,7 @@ export const PROVIDER_BASE_URLS: Record<string, string> = {
 
 export const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o-mini',
-  xiaomimimo: 'mimo-v2.5-pro',
+  xiaomimimo: 'mimo-v2.5',
   deepseek: 'deepseek-reasoner',
   cometapi: 'gpt-4o-mini',
   openrouter: 'openai/gpt-4o-mini',

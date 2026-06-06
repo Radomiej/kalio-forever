@@ -51,6 +51,7 @@ export function ArchitectBehaviorControls({ node, schema, onChange }: ArchitectB
       <div className="mt-2 form-control gap-1">
         <label className="label-text text-xs font-semibold text-base-content/70">Strategy</label>
         <select
+          aria-label="Node routing strategy"
           className="select select-bordered select-sm h-9 min-h-9 w-full"
           value={behavior.mode}
           onChange={(event) => updateMode(event.target.value as ArchitectureNodeBehaviorMode)}
@@ -66,6 +67,7 @@ export function ArchitectBehaviorControls({ node, schema, onChange }: ArchitectB
         <div className="form-control gap-1">
           <label className="label-text text-xs font-semibold text-base-content/70">Fan-out</label>
           <select
+            aria-label="Node fan-out mode"
             className="select select-bordered select-sm h-9 min-h-9 w-full"
             value={behavior.fanOut ?? 'parallel'}
             onChange={(event) => update({ fanOut: event.target.value as ArchitectureNodeFanOutMode })}
@@ -95,6 +97,7 @@ export function ArchitectBehaviorControls({ node, schema, onChange }: ArchitectB
         <div className="mt-2 form-control gap-1">
           <label className="label-text text-xs font-semibold text-base-content/70">Scoring</label>
           <select
+            aria-label="Node scoring policy"
             className="select select-bordered select-sm h-9 min-h-9 w-full"
             value={behavior.scoringPolicy ?? 'confidence'}
             onChange={(event) => update({ scoringPolicy: event.target.value as ArchitectureNodeScoringPolicy })}
@@ -110,6 +113,7 @@ export function ArchitectBehaviorControls({ node, schema, onChange }: ArchitectB
       <div className="mt-2 form-control gap-1">
         <label className="label-text text-xs font-semibold text-base-content/70">Converges to</label>
         <select
+          aria-label="Node converge target"
           className="select select-bordered select-sm h-9 min-h-9 w-full"
           value={behavior.convergeToNodeId ?? ''}
           onChange={(event) => update({ convergeToNodeId: event.target.value || undefined })}

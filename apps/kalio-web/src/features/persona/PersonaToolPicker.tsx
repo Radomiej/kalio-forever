@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { MCPPolicy, ToolMeta } from '@kalio/types';
+import { getNativeToolGroupKey } from '../tools/tool.utils';
 
 const GROUP_LABELS: Record<string, string> = {
   vfs: 'VFS',
@@ -9,7 +10,11 @@ const GROUP_LABELS: Record<string, string> = {
   terminal: 'Terminal',
   kv: 'KV Store',
   raapp: 'RAApp',
-  agent: 'Agent',
+  subagents: 'Subagents',
+  'cli-agents': 'CLI Agents',
+  'agent-workflows': 'Agent Workflows',
+  'security-audit': 'Security & Audit',
+  preview: 'Preview',
   websearch: 'Web Search',
   tools: 'Tools',
   images: 'Images',
@@ -19,19 +24,12 @@ const GROUP_LABELS: Record<string, string> = {
 };
 
 function deriveGroup(name: string): string {
-  if (name.startsWith('vfs_')) return 'vfs';
-  if (name.startsWith('fs_') || name === 'grep_search' || name === 'file_search') return 'fs';
-  if (name.startsWith('memory_')) return 'memory';
-  if (name.startsWith('terminal_')) return 'terminal';
-  if (name.startsWith('kv_')) return 'kv';
-  if (name.startsWith('raapp_') || name === 'run_raapp' || name === 'list_raapps') return 'raapp';
-  if (name === 'run_subagent' || name === 'run_cli_agent') return 'agent';
-  if (name === 'web_search') return 'websearch';
-  if (name === 'list_tools' || name === 'get_tool_details') return 'tools';
-  if (name.startsWith('image_')) return 'images';
-  if (name.startsWith('skill_')) return 'skills';
-  if (name.startsWith('persona_')) return 'persona';
-  return 'other';
+  const key = getNativeToolGroupKey(name);
+
+  if (key === 'search') return 'fs';
+  if (key === 'web') return 'websearch';
+
+  return key;
 }
 
 interface Props {

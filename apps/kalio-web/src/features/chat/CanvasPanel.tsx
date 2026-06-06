@@ -135,7 +135,7 @@ export function CanvasPanel() {
       {/* Toggle tab — only visible when agent is active or canvas is open */}
       {showToggle && (
         <button
-          className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-5 h-12 bg-base-200 border border-base-300 rounded-l-lg hover:bg-base-300 transition-colors"
+          className="absolute right-0 top-1/2 z-20 flex h-14 w-6 -translate-y-1/2 items-center justify-center rounded-l-md border border-base-300 bg-base-200 transition-colors hover:bg-base-300"
           onClick={toggleCanvas}
           aria-label={open ? 'Close canvas' : 'Open canvas'}
           data-testid="canvas-toggle"
@@ -144,122 +144,122 @@ export function CanvasPanel() {
         </button>
       )}
 
-      {/* Panel */}
-      <aside
-        data-testid="canvas-panel"
-        className={`shrink-0 border-l border-base-300 flex flex-col bg-base-100 overflow-hidden transition-all duration-200 ease-in-out ${open ? 'w-72' : 'w-0'}`}
-      >
-        <div className="w-72 flex flex-col h-full overflow-hidden">
-          {/* Header */}
-          <div className="px-4 py-2 border-b border-base-300 bg-base-200 flex items-center gap-2 shrink-0">
-            <Info size={14} className="text-base-content/50" />
-            <span className="text-sm font-semibold flex-1">Canvas</span>
-            {isStreaming && <Loader2 size={12} className="animate-spin text-info" />}
+      {open && (
+        <aside
+          data-testid="canvas-panel"
+          className="shrink-0 border-l border-base-300 bg-base-100 flex w-[20.5rem] flex-col overflow-hidden xl:w-[21rem]"
+        >
+          <div className="flex h-full w-full flex-col overflow-hidden">
+            <div className="flex shrink-0 items-center gap-2 border-b border-base-300 bg-base-200 px-4 py-2">
+              <Info size={14} className="text-base-content/50" />
+              <span className="flex-1 text-sm font-semibold">Canvas</span>
+              {isStreaming && <Loader2 size={12} className="animate-spin text-info" />}
+            </div>
+
+            <div className="flex-1 space-y-4 overflow-y-auto p-3">
+              {isStreaming && (
+                <section>
+                  <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">Live</p>
+                  <ThinkingPreview />
+                </section>
+              )}
+
+              {canvasFocus?.kind === 'architecture-branch' && (
+                <CanvasFocusSection
+                  focus={canvasFocus}
+                  sessions={sessions}
+                  transcript={getSessionMessages(canvasFocus.sessionId)}
+                  onClear={() => setCanvasFocus(null)}
+                  onOpenSession={(sessionId) => setActiveSession(sessionId)}
+                />
+              )}
+
+              {architectureRun && (
+                <ArchitectureRunCanvasSection
+                  run={architectureRun}
+                  sessions={sessions}
+                  onOpenSession={(sessionId) => setCanvasFocus({ kind: 'architecture-branch', sessionId })}
+                  getBranchMessages={(sessionId) => getSessionMessages(sessionId)}
+                  focused={canvasFocus?.kind === 'architecture-run' && canvasFocus.runId === architectureRun.runId}
+                  focusedStep={canvasFocus?.kind === 'architecture-run' && canvasFocus.runId === architectureRun.runId
+                    ? { eventId: canvasFocus.eventId, nodeId: canvasFocus.nodeId }
+                    : undefined}
+                />
+              )}
+
+              {focusedSubAgentFlowResult && (
+                <section data-testid="agentflow-canvas-section">
+                  <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">AgentFlow</p>
+                  <SubAgentFlowResultBlock result={focusedSubAgentFlowResult} />
+                </section>
+              )}
+
+              {agentFlowPreviews.length > 0 && (
+                <section data-testid="canvas-agentflows-section">
+                  <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">AgentFlows</p>
+                  <div className="space-y-1.5">
+                    {agentFlowPreviews.map((preview) => (
+                      <AgentFlowConversationCard
+                        key={preview.flowRunId}
+                        preview={preview}
+                        onOpenChat={() => setActiveSession(preview.sessionId)}
+                        onOpenGraph={() => setCanvasFocus({ kind: 'architecture-run', runId: preview.graphRunId })}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {subagentPreviews.length > 0 && (
+                <section data-testid="canvas-subagents-section">
+                  <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">Sub-agents</p>
+                  <div className="space-y-1.5">
+                    {subagentPreviews.map((preview) => (
+                      <SubagentConversationCard
+                        key={preview.sessionId}
+                        preview={preview}
+                        transcript={getSessionMessages(preview.sessionId)}
+                        onOpen={() => setActiveSession(preview.sessionId)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {subagentActivities.length > 0 && (
+                <section>
+                  <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">
+                    Sub-agent tools ({subagentActivities.length})
+                  </p>
+                  <div className="space-y-1.5">
+                    {subagentActivities.map((a) => (
+                      <ToolCard key={a.callId} activity={a} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {visibleMasterActivities.length > 0 && (
+                <section>
+                  <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">
+                    Tools ({visibleMasterActivities.length})
+                  </p>
+                  <div className="space-y-1.5">
+                    {visibleMasterActivities.map((a) => (
+                      <ToolCard key={a.callId} activity={a} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <section>
+                <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">Session</p>
+                <SessionStats />
+              </section>
+            </div>
           </div>
-
-          <div className="flex-1 overflow-y-auto p-3 space-y-4">
-            {/* Live thinking */}
-            {isStreaming && (
-              <section>
-                <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-2">Live</p>
-                <ThinkingPreview />
-              </section>
-            )}
-
-            {/* Tool activities */}
-            {canvasFocus?.kind === 'architecture-branch' && (
-              <CanvasFocusSection
-                focus={canvasFocus}
-                sessions={sessions}
-                transcript={getSessionMessages(canvasFocus.sessionId)}
-                onClear={() => setCanvasFocus(null)}
-                onOpenSession={(sessionId) => setActiveSession(sessionId)}
-              />
-            )}
-
-            {architectureRun && (
-              <ArchitectureRunCanvasSection
-                run={architectureRun}
-                sessions={sessions}
-                onOpenSession={(sessionId) => setCanvasFocus({ kind: 'architecture-branch', sessionId })}
-                getBranchMessages={(sessionId) => getSessionMessages(sessionId)}
-                focused={canvasFocus?.kind === 'architecture-run' && canvasFocus.runId === architectureRun.runId}
-              />
-            )}
-
-            {focusedSubAgentFlowResult && (
-              <section data-testid="agentflow-canvas-section">
-                <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-2">AgentFlow</p>
-                <SubAgentFlowResultBlock result={focusedSubAgentFlowResult} />
-              </section>
-            )}
-
-            {agentFlowPreviews.length > 0 && (
-              <section data-testid="canvas-agentflows-section">
-                <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-2">AgentFlows</p>
-                <div className="space-y-1.5">
-                  {agentFlowPreviews.map((preview) => (
-                    <AgentFlowConversationCard
-                      key={preview.flowRunId}
-                      preview={preview}
-                      onOpenChat={() => setActiveSession(preview.sessionId)}
-                      onOpenGraph={() => setCanvasFocus({ kind: 'architecture-run', runId: preview.graphRunId })}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {subagentPreviews.length > 0 && (
-              <section data-testid="canvas-subagents-section">
-                <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-2">Sub-agents</p>
-                <div className="space-y-1.5">
-                  {subagentPreviews.map((preview) => (
-                    <SubagentConversationCard
-                      key={preview.sessionId}
-                      preview={preview}
-                      transcript={getSessionMessages(preview.sessionId)}
-                      onOpen={() => setActiveSession(preview.sessionId)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {subagentActivities.length > 0 && (
-              <section>
-                <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-2">
-                  Sub-agent tools ({subagentActivities.length})
-                </p>
-                <div className="space-y-1.5">
-                  {subagentActivities.map((a) => (
-                    <ToolCard key={a.callId} activity={a} />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {visibleMasterActivities.length > 0 && (
-              <section>
-                <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-2">
-                  Tools ({visibleMasterActivities.length})
-                </p>
-                <div className="space-y-1.5">
-                  {visibleMasterActivities.map((a) => (
-                    <ToolCard key={a.callId} activity={a} />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Session stats */}
-            <section>
-              <p className="text-[10px] uppercase tracking-wide text-base-content/40 mb-2">Session</p>
-              <SessionStats />
-            </section>
-          </div>
-        </div>
-      </aside>
+        </aside>
+      )}
     </>
   );
 }

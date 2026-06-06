@@ -93,11 +93,11 @@ export function ArchitectRunProjection({
                 <div className="text-xs font-semibold text-base-content">
                   {event.message}
                 </div>
-                <div className="mt-1 text-[11px] text-base-content/45">
+                <div className="mt-1 text-[11px] text-base-content/65">
                   #{event.sequence} {event.type} {event.nodeId ?? ''}
                 </div>
                 {formatEventSessionMeta(event.data) && (
-                  <div className="mt-1 font-mono text-[10px] text-base-content/40">
+                  <div className="mt-1 font-mono text-[10px] text-base-content/60">
                     {formatEventSessionMeta(event.data)}
                   </div>
                 )}
@@ -110,7 +110,7 @@ export function ArchitectRunProjection({
                 <span>Run started. Waiting for branch events and final artifact...</span>
               </div>
             )}
-            {!run?.events?.length && <p className="text-xs text-base-content/40">No timeline events yet.</p>}
+            {!run?.events?.length && <p className="text-xs text-base-content/60">No timeline events yet.</p>}
           </div>
         )}
 
@@ -133,7 +133,7 @@ export function ArchitectRunProjection({
                 <RouteHop route={message.route} />
               </div>
             ))}
-            {!run?.chat.messages.length && <p className="text-xs text-base-content/40">No chat projection yet.</p>}
+            {!run?.chat.messages.length && <p className="text-xs text-base-content/60">No chat projection yet.</p>}
           </div>
         )}
       </div>
@@ -242,7 +242,7 @@ function GraphStatus({ run, schema }: Pick<ArchitectRunProjectionProps, 'run' | 
   const edges = run?.graph.edges ?? schema?.edges ?? [];
 
   if (nodes.length === 0) {
-    return <p className="text-xs text-base-content/40">No graph projection yet.</p>;
+    return <p className="text-xs text-base-content/60">No graph projection yet.</p>;
   }
 
   return (
@@ -266,7 +266,7 @@ function GraphStatus({ run, schema }: Pick<ArchitectRunProjectionProps, 'run' | 
                   : <Circle size={15} className="mt-0.5 shrink-0 text-base-content/35" />}
               <div className="min-w-0">
                 <div className="truncate text-xs font-semibold text-base-content">{node.label}</div>
-                <div className="mt-0.5 flex items-center gap-1 text-[10px] uppercase tracking-wide text-base-content/40">
+                <div className="mt-0.5 flex items-center gap-1 text-[10px] uppercase tracking-wide text-base-content/60">
                   <span>{node.status}</span>
                   <span>/</span>
                   <span>{node.kind}</span>
@@ -288,7 +288,7 @@ function GraphStatus({ run, schema }: Pick<ArchitectRunProjectionProps, 'run' | 
       </div>
 
       <div className="rounded-lg border border-base-300 bg-base-200/60 p-3">
-        <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-base-content/45">Transitions</div>
+        <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-base-content/65">Transitions</div>
         <div className="space-y-1.5">
           {edges.map((edge) => (
             <div key={edge.id} className="flex items-center gap-2 text-[11px] text-base-content/60">
@@ -297,11 +297,11 @@ function GraphStatus({ run, schema }: Pick<ArchitectRunProjectionProps, 'run' | 
               <span className="min-w-0 truncate font-mono">{edge.toNodeId}</span>
             </div>
           ))}
-          {edges.length === 0 && <p className="text-xs text-base-content/40">No transitions configured.</p>}
+          {edges.length === 0 && <p className="text-xs text-base-content/60">No transitions configured.</p>}
         </div>
         {(run?.graph.routeHops?.length ?? 0) > 0 && (
           <div className="mt-3 border-t border-base-300/70 pt-3">
-            <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-base-content/45">Executed route</div>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-base-content/65">Executed route</div>
             <div className="space-y-1.5" data-testid="architect-executed-route">
               {run?.graph.routeHops?.map((hop, index) => (
                 <RouteLine key={`${hop.eventId}:${hop.toNodeId}:${index}`} source={hop.source} fromNodeId={hop.fromNodeId} toNodeId={hop.toNodeId} />

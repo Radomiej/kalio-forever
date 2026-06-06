@@ -101,31 +101,22 @@ export function GraphNodePreviewThumbnail({ node }: { node: ExecutionGraphNode }
 
   if (preview.kind === 'image') {
     return (
-      <div data-testid={`graph-node-preview-${node.id}`} className="mt-3 overflow-hidden rounded-2xl border border-white/10 bg-black/15">
-        <img src={preview.src} alt={preview.alt} className="h-14 w-full object-cover" />
+      <div data-testid={`graph-node-preview-${node.id}`} className="mt-2 flex items-center gap-2 rounded border border-white/10 bg-black/18 px-2 py-1.5">
+        <span className="h-7 w-9 shrink-0 overflow-hidden rounded border border-white/10 bg-black/25">
+          <img src={preview.src} alt={preview.alt} className="h-full w-full object-cover" />
+        </span>
+        <span className="min-w-0 text-[10px] font-medium leading-3 text-white/70 line-clamp-2">Image preview available</span>
       </div>
     );
   }
 
   return (
-    <div data-testid={`graph-node-preview-${node.id}`} className="mt-3 rounded-2xl border border-white/10 bg-black/15 px-3 py-2">
-      <div className="flex items-center justify-between text-[9px] uppercase tracking-[0.18em] text-white/55">
+    <div data-testid={`graph-node-preview-${node.id}`} className="mt-2 rounded border border-sky-200/15 bg-sky-400/10 px-2 py-1.5">
+      <div className="flex items-center justify-between gap-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-sky-100/70">
         <span>Preview</span>
-        <span>{preview.block.type}</span>
+        <span className="rounded bg-sky-300/15 px-1.5 py-0.5">{preview.block.type}</span>
       </div>
-      <div className="mt-2 rounded-xl border border-white/10 bg-white/8 px-2 py-2">
-        <div className="flex gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-rose-200/70" />
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-200/70" />
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-200/70" />
-        </div>
-        <div className="mt-2 space-y-1">
-          <div className="h-1.5 w-full rounded-full bg-white/18" />
-          <div className="h-1.5 w-4/5 rounded-full bg-white/14" />
-          <div className="h-1.5 w-3/5 rounded-full bg-white/12" />
-        </div>
-      </div>
-      <p className="mt-2 text-[10px] leading-4 text-white/70 break-words">{preview.summary}</p>
+      <p className="mt-1 text-[10px] leading-3 text-white/72 line-clamp-2 break-words">{preview.summary}</p>
     </div>
   );
 }

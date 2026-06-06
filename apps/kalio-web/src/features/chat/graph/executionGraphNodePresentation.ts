@@ -75,7 +75,7 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 2,
     metadataColumns: 1,
     metadataRowHeight: 34,
-    previewHeightBonus: { raapp: 104, image: 92 },
+    previewHeightBonus: { raapp: 44, image: 38 },
     maxHeight: 220,
   },
   turn: {
@@ -86,7 +86,7 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 4,
     metadataColumns: 2,
     metadataRowHeight: 36,
-    previewHeightBonus: { raapp: 108, image: 94 },
+    previewHeightBonus: { raapp: 44, image: 38 },
     maxHeight: 260,
   },
   'tool-group': {
@@ -97,7 +97,7 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 3,
     metadataColumns: 1,
     metadataRowHeight: 34,
-    previewHeightBonus: { raapp: 96, image: 88 },
+    previewHeightBonus: { raapp: 44, image: 38 },
     maxHeight: 190,
   },
   tool: {
@@ -108,8 +108,8 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 3,
     metadataColumns: 2,
     metadataRowHeight: 34,
-    previewHeightBonus: { raapp: 110, image: 96 },
-    maxHeight: 260,
+    previewHeightBonus: { raapp: 44, image: 38 },
+    maxHeight: 220,
   },
   subagent: {
     baseHeight: 90,
@@ -119,7 +119,7 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 4,
     metadataColumns: 1,
     metadataRowHeight: 38,
-    previewHeightBonus: { raapp: 112, image: 96 },
+    previewHeightBonus: { raapp: 44, image: 38 },
     maxHeight: 270,
   },
   'cli-agent': {
@@ -130,7 +130,7 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 4,
     metadataColumns: 1,
     metadataRowHeight: 38,
-    previewHeightBonus: { raapp: 112, image: 96 },
+    previewHeightBonus: { raapp: 44, image: 38 },
     maxHeight: 270,
   },
   'agent-flow': {
@@ -141,7 +141,7 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 4,
     metadataColumns: 1,
     metadataRowHeight: 38,
-    previewHeightBonus: { raapp: 112, image: 96 },
+    previewHeightBonus: { raapp: 44, image: 38 },
     maxHeight: 270,
   },
   'tool-result': {
@@ -152,7 +152,7 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 5,
     metadataColumns: 1,
     metadataRowHeight: 34,
-    previewHeightBonus: { raapp: 96, image: 88 },
+    previewHeightBonus: { raapp: 44, image: 38 },
     maxHeight: 280,
   },
   'architecture-run': {
@@ -163,7 +163,7 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 3,
     metadataColumns: 1,
     metadataRowHeight: 36,
-    previewHeightBonus: { raapp: 100, image: 90 },
+    previewHeightBonus: { raapp: 44, image: 38 },
     maxHeight: 240,
   },
   artifact: {
@@ -174,7 +174,7 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 5,
     metadataColumns: 1,
     metadataRowHeight: 34,
-    previewHeightBonus: { raapp: 104, image: 92 },
+    previewHeightBonus: { raapp: 44, image: 38 },
     maxHeight: 320,
   },
   'final-answer': {
@@ -185,7 +185,7 @@ const NODE_SIZING: Record<ExecutionGraphNode['kind'], GraphNodeSizingProfile> = 
     supportingMaxLines: 5,
     metadataColumns: 1,
     metadataRowHeight: 34,
-    previewHeightBonus: { raapp: 100, image: 90 },
+    previewHeightBonus: { raapp: 44, image: 38 },
     maxHeight: 280,
   },
 };
@@ -454,12 +454,13 @@ export function estimateGraphNodeHeight(node: GraphNodePresentationInput): numbe
   height += Math.max(1, estimateLines(headline, profile.headlineCharsPerLine, profile.headlineMaxLines)) * 20;
 
   if (supporting) {
-    height += estimateLines(supporting, profile.supportingCharsPerLine, profile.supportingMaxLines) * 16 + 12;
+    height += Math.min(estimateLines(supporting, profile.supportingCharsPerLine, profile.supportingMaxLines), 2) * 10;
   }
 
   if (metadata.length > 0) {
-    const metadataRows = Math.ceil(metadata.length / metadataColumns);
-    const longValueRows = Math.ceil(metadata.filter((item) => item.value.length > 18).length / metadataColumns);
+    const visibleMetadata = metadata.slice(0, 1);
+    const metadataRows = Math.ceil(visibleMetadata.length / metadataColumns);
+    const longValueRows = Math.ceil(visibleMetadata.filter((item) => item.value.length > 18).length / metadataColumns);
     height += metadataRows * profile.metadataRowHeight + Math.min(longValueRows, metadataRows) * 8 + 8;
   }
 

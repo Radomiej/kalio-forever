@@ -32,12 +32,17 @@ export function ResultCard({
   result,
   index,
   onDelete,
+  canDelete = true,
 }: {
   result: MemorySearchResult;
   index: number;
   onDelete: () => void;
+  canDelete?: boolean;
 }) {
   const [expanded, setExpanded] = useState(index < 3);
+  const metadataEntries = result.metadata
+    ? Object.entries(result.metadata).map(([key, value]) => [key, String(value)] as const)
+    : [];
 
   return (
     <div
@@ -65,6 +70,7 @@ export function ResultCard({
             <button
               className="btn btn-ghost btn-xs p-1 h-6 w-6 text-error hover:bg-error/10"
               onClick={onDelete}
+              disabled={!canDelete}
               title="Delete"
             >
               <Trash2 size={14} />
@@ -78,9 +84,9 @@ export function ResultCard({
           <p className="mt-2 text-sm line-clamp-2">{result.content}</p>
         )}
 
-        {result.metadata && Object.keys(result.metadata).length > 0 && (
+        {metadataEntries.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
-            {Object.entries(result.metadata).map(([key, value]) => (
+            {metadataEntries.map(([key, value]) => (
               <span
                 key={key}
                 className="badge badge-xs badge-ghost"

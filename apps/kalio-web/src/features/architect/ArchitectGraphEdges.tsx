@@ -1,4 +1,5 @@
 import { edgeClass, edgeDash, edgeHaloClass, edgeWidth, type EdgeKind } from './ArchitectGraphCanvas.model';
+import { GraphSvgLayer } from '../graph/GraphSvgLayer';
 
 export type ArchitectGraphRenderedEdge = {
   id: string;
@@ -9,7 +10,7 @@ export type ArchitectGraphRenderedEdge = {
 
 export function ArchitectGraphEdges({ edges, markerId }: { edges: ArchitectGraphRenderedEdge[]; markerId: string }) {
   return (
-    <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
+    <GraphSvgLayer>
       <defs>
         <marker id={markerId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
           <path d="M 0 0 L 8 4 L 0 8 z" className="fill-sky-400/70" />
@@ -35,6 +36,6 @@ export function ArchitectGraphEdges({ edges, markerId }: { edges: ArchitectGraph
           />
         </g>
       ))}
-    </svg>
+    </GraphSvgLayer>
   );
 }

@@ -19,6 +19,7 @@ const {
   fetchMock,
   agentStoreState,
   setActiveSession,
+  sessionStoreState,
 } = vi.hoisted(() => ({
   setCanvasOpen: vi.fn(),
   setBackendConfig: vi.fn(),
@@ -26,6 +27,11 @@ const {
   setActiveSession: vi.fn(),
   agentStoreState: {
     pendingConfirmations: {} as Record<string, unknown>,
+  },
+  sessionStoreState: {
+    activeSessionId: null as string | null,
+    messages: [] as Array<{ id: string }>,
+    agentTurns: [] as Array<{ id: string }>,
   },
 }));
 
@@ -123,13 +129,25 @@ vi.mock('./features/architect', () => ({
 }));
 
 vi.mock('./store/sessionStore', () => ({
-  useSessionStore: (selector?: (state: { sessions: Array<{ id: string; updatedAt: number }>; setActiveSession: typeof setActiveSession }) => unknown) => {
+  useSessionStore: (selector?: (state: {
+    sessions: Array<{ id: string; updatedAt: number; title?: string }>;
+    activeSessionId: string | null;
+    messages: Array<{ id: string }>;
+    agentTurns: Array<{ id: string }>;
+    setActiveSession: typeof setActiveSession;
+  }) => unknown) => {
     const now = Date.now();
     const state = {
       sessions: [
-        { id: 'session-1', updatedAt: now - 60_000 },
+        { id: 'session-1', title: 'Session 1', updatedAt: now - 60_000 },
         { id: 'session-2', updatedAt: now - 48 * 60 * 60 * 1000 },
+        ...(sessionStoreState.activeSessionId === 'new-chat-session'
+          ? [{ id: 'new-chat-session', title: 'New Chat', updatedAt: now }]
+          : []),
       ],
+      activeSessionId: sessionStoreState.activeSessionId,
+      messages: sessionStoreState.messages,
+      agentTurns: sessionStoreState.agentTurns,
       setActiveSession,
     };
     return selector ? selector(state) : state;
@@ -159,6 +177,9 @@ describe('App view state persistence', () => {
     sessionStorage.clear();
     localStorage.clear();
     agentStoreState.pendingConfirmations = {};
+    sessionStoreState.activeSessionId = null;
+    sessionStoreState.messages = [];
+    sessionStoreState.agentTurns = [];
     setActiveSession.mockReset();
     fetchMock.mockResolvedValue({
       json: async () => ({
@@ -248,6 +269,50 @@ describe('App view state persistence', () => {
     expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
   });
 
+  it('collapses and restores the Talk sidebar so the graph can use the full workspace', () => {
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
+      activeSection: 'talk',
+      talkTab: 'conversations',
+      talkView: 'graph',
+      toolsTab: 'native',
+      mindTab: 'memory',
+      selectedSkillId: null,
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId('talk-sidebar-collapse'));
+
+    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+    expect(screen.queryByTestId('conversation-panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('talk-sidebar-expand'));
+
+    expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('talk-sidebar-collapsed')).not.toBeInTheDocument();
+  });
+
+  it('switches to the graph view from the collapsed Talk sidebar rail', () => {
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
+      activeSection: 'talk',
+      talkTab: 'conversations',
+      talkView: 'conversation',
+      toolsTab: 'native',
+      mindTab: 'memory',
+      selectedSkillId: null,
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId('talk-sidebar-collapse'));
+    const collapsedRail = screen.getByTestId('talk-sidebar-collapsed');
+    fireEvent.click(collapsedRail.querySelector('[data-testid="talk-sidebar-graph-entry"]')!);
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+  });
+
   it('shows the conversation view when landing starts a chat from a stored graph view', () => {
     sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
       activeSection: 'landing',
@@ -264,6 +329,25 @@ describe('App view state persistence', () => {
 
     expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
     expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
+  });
+
+  it('keeps the graph view active for an empty New Chat session', () => {
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
+      activeSection: 'talk',
+      talkTab: 'conversations',
+      talkView: 'graph',
+      toolsTab: 'native',
+      mindTab: 'memory',
+      selectedSkillId: null,
+    }));
+    sessionStoreState.activeSessionId = 'new-chat-session';
+    sessionStoreState.messages = [];
+    sessionStoreState.agentTurns = [];
+
+    render(<App />);
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
   });
 
   it('opens graph child sessions in the conversation view', () => {
