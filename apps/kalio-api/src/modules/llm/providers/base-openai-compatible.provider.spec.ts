@@ -257,6 +257,29 @@ describe('BaseOpenAICompatibleProvider', () => {
         }),
       );
     });
+
+    it('defaults Xiaomi requests to mimo-v2.5 when no model override is provided', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const xiaomiProvider = new XiaomiMiMoProvider('test-key', undefined, 'https://api.test.com');
+      (xiaomiProvider as unknown as { logger: typeof mockLogger }).logger = mockLogger;
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+            controller.close();
+          },
+        }),
+      });
+
+      await xiaomiProvider.streamChat(messages, tools, { sessionId: 'sess-123', messageId: 'msg-456', onChunk: vi.fn() });
+
+      const request = mockFetch.mock.calls[0]?.[1] as { body: string };
+      const parsed = JSON.parse(request.body) as { model: string };
+      expect(parsed.model).toBe('mimo-v2.5');
+    });
   });
 
   describe('streamChat - Tool Call ID Collision (REGRESSION TEST)', () => {

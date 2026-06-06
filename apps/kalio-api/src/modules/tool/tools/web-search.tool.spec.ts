@@ -110,6 +110,48 @@ describe('WebSearchTool', () => {
     expect(result).toMatchObject({ offline: false, memory: { ids: ['mem-2'], count: 1 } });
   });
 
+  it('continues with external search when local web-result recall throws', async () => {
+    const searchResult = {
+      answer: 'Fresh answer after memory failure',
+      citations: ['https://example.com/fresh'],
+      model: 'sonar',
+      provider: 'perplexity' as const,
+    };
+    (memory.searchWebResults as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('local embedding failed'));
+    (webSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue(searchResult);
+    (memory.ingestWebSearchResult as ReturnType<typeof vi.fn>).mockResolvedValue({ ids: ['mem-3'], count: 1 });
+
+    const result = await tool.execute(makeRequest({ query: 'fresh topic despite broken local memory' }));
+
+    expect(webSearch.search).toHaveBeenCalledWith('fresh topic despite broken local memory');
+    expect(result).toMatchObject({
+      ...searchResult,
+      offline: false,
+      memory: { ids: ['mem-3'], count: 1 },
+      memory_warnings: [expect.stringContaining('Memory search failed')],
+    });
+  });
+
+  it('returns the external answer even when silent web-result ingest throws', async () => {
+    const searchResult = {
+      answer: 'Fresh answer despite ingest failure',
+      citations: ['https://example.com/answer'],
+      model: 'sonar',
+      provider: 'perplexity' as const,
+    };
+    (webSearch.search as ReturnType<typeof vi.fn>).mockResolvedValue(searchResult);
+    (memory.ingestWebSearchResult as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('local embedding ingest failed'));
+
+    const result = await tool.execute(makeRequest({ query: 'keep the answer even if ingest breaks', offline_search: false }));
+
+    expect(result).toMatchObject({
+      ...searchResult,
+      offline: false,
+      memory: { ids: [], count: 0 },
+      memory_warnings: [expect.stringContaining('Memory ingest failed')],
+    });
+  });
+
   it.each([
     { label: 'query is missing', args: {} },
     { label: 'query is empty', args: { query: '' } },

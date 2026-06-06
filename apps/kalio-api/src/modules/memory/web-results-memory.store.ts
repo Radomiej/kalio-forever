@@ -94,6 +94,20 @@ export class WebResultsMemoryStore {
       .slice(0, limit);
   }
 
+  getAll(): MemorySearchResult[] {
+    return this.getStore().getAll().map((entry) => ({
+      id: entry.id,
+      content: entry.content,
+      score: 1,
+      metadata: entry.metadata,
+      createdAt: entry.createdAt,
+    }));
+  }
+
+  count(): number {
+    return this.getStore().count();
+  }
+
   async reembed(): Promise<{ count: number; model: string }> {
     if (!this.embeddingService.getStatus().configured) {
       return { count: 0, model: await this.embeddingService.getModelName() };

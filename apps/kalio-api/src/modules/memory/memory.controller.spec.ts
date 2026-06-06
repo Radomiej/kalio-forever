@@ -15,6 +15,14 @@ function makeMemoryService() {
     search: vi.fn().mockResolvedValue([{ id: 'mem-1', score: 0.9, text: 'test' }]),
     searchFTS: vi.fn().mockResolvedValue([{ id: 'mem-1', score: 1.0, text: 'test' }]),
     hybridSearch: vi.fn().mockResolvedValue([{ id: 'mem-1', score: 0.95, text: 'test' }]),
+    searchWebResults: vi.fn().mockResolvedValue([{ id: 'web-1', score: 0.8, text: 'web' }]),
+    getAllWebResults: vi.fn().mockResolvedValue([{ id: 'web-1', score: 1, text: 'web' }]),
+    getSummary: vi.fn().mockReturnValue({
+      totalCount: 2,
+      totalSize: 8,
+      webSearch: { id: 'web_search', label: 'Web search', count: 1, size: 3 },
+      personas: [{ id: 'p-1', label: 'Default', count: 1, size: 5 }],
+    }),
     getEmbeddingService: vi.fn().mockReturnValue(embeddingServiceMock),
     getAll: vi.fn().mockResolvedValue([{ id: 'mem-1', score: 1.0, text: 'text' }]),
     deleteAll: vi.fn().mockReturnValue(undefined),
@@ -64,6 +72,40 @@ describe('MemoryController', () => {
 
       expect(memorySvc.search).toHaveBeenCalledWith('query', 'p-1', 10);
       expect(memorySvc.searchFTS).toHaveBeenCalledWith('query', 'p-1', 3);
+    });
+  });
+
+  describe('summary()', () => {
+    it('summarizes only persona scopes passed by the UI', () => {
+      const result = controller.getSummary('p-1,p-2', 'Default,Web Research');
+
+      expect(memorySvc.getSummary).toHaveBeenCalledWith([
+        { id: 'p-1', name: 'Default' },
+        { id: 'p-2', name: 'Web Research' },
+      ]);
+      expect(result.personas).toEqual([{ id: 'p-1', label: 'Default', count: 1, size: 5 }]);
+    });
+  });
+
+  describe('getWebSearch()', () => {
+    it('browses web search memories when no query is provided', async () => {
+      const result = await controller.getWebSearch();
+
+      expect(memorySvc.getAllWebResults).toHaveBeenCalled();
+      expect(result).toEqual([{ id: 'web-1', score: 1, text: 'web' }]);
+    });
+
+    it('searches web memories when query is provided', async () => {
+      const result = await controller.getWebSearch('rss', '7');
+
+      expect(memorySvc.searchWebResults).toHaveBeenCalledWith('rss', 7);
+      expect(result).toEqual([{ id: 'web-1', score: 0.8, text: 'web' }]);
+    });
+
+    it('falls back to the default limit when the UI sends an invalid web-search limit', async () => {
+      await controller.getWebSearch('rss', 'abc');
+
+      expect(memorySvc.searchWebResults).toHaveBeenCalledWith('rss', 20);
     });
   });
 

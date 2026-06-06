@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import type { MemorySearchResult, ToolCallRequest } from '@kalio/types';
+import type { MemoryIngestResult, MemorySearchResult, ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { DrizzleService } from '../../../database/drizzle.service';
 import { sessions } from '../../../database/schema';
@@ -90,6 +90,8 @@ async function resolvePersonaId(drizzle: DrizzleService, sessionId: string): Pro
   requiresConfirmation: false,
 })
 export class WebSearchTool {
+  private readonly logger = new Logger(WebSearchTool.name);
+
   constructor(
     private readonly webSearch: WebSearchService,
     private readonly memory: MemoryService,
@@ -100,30 +102,51 @@ export class WebSearchTool {
     const query = getQueryArg(request.args);
     const offlineSearch = getOfflineSearchArg(request.args);
     const personaId = await resolvePersonaId(this.drizzle, request.sessionId);
+    const memoryWarnings: string[] = [];
 
     if (offlineSearch) {
-      const memoryResults = await this.memory.searchWebResults(query, 5);
-      if (memoryResults.length > 0) {
-        return {
-          answer: formatOfflineAnswer(memoryResults),
-          citations: [],
-          model: 'persona-memory',
-          provider: 'memory',
-          offline: true,
-          results: memoryResults,
-        };
+      try {
+        const memoryResults = await this.memory.searchWebResults(query, 5);
+        if (memoryResults.length > 0) {
+          return {
+            answer: formatOfflineAnswer(memoryResults),
+            citations: [],
+            model: 'persona-memory',
+            provider: 'memory',
+            offline: true,
+            results: memoryResults,
+          };
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const warning = `Memory search failed: ${message}`;
+        memoryWarnings.push(warning);
+        this.logger.warn(`[web_search] ${warning}`);
       }
     }
 
     const result = await this.webSearch.search(query);
-    const memory = await this.memory.ingestWebSearchResult(formatSearchMemory(query, result), {
-      source: 'web_search',
-      query,
-      persona_id: personaId,
-      provider: result.provider,
-      model: result.model,
-    });
+    let memory: MemoryIngestResult = { ids: [], count: 0 };
+    try {
+      memory = await this.memory.ingestWebSearchResult(formatSearchMemory(query, result), {
+        source: 'web_search',
+        query,
+        persona_id: personaId,
+        provider: result.provider,
+        model: result.model,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const warning = `Memory ingest failed: ${message}`;
+      memoryWarnings.push(warning);
+      this.logger.warn(`[web_search] ${warning}`);
+    }
 
-    return { ...result, offline: false, memory };
+    return {
+      ...result,
+      offline: false,
+      memory,
+      ...(memoryWarnings.length > 0 ? { memory_warnings: memoryWarnings } : {}),
+    };
   }
 }

@@ -14,6 +14,7 @@
 } from '@nestjs/common';
 import type {
   MemoryIngestResult,
+  MemoryScopeSummary,
   MemorySearchResult,
   MemorySearchMode,
   EmbeddingStatus,
@@ -67,6 +68,29 @@ export class MemoryController {
       default:
         return this.memoryService.hybridSearch(query, personaId, parsedLimit);
     }
+  }
+
+  @Get('summary')
+  getSummary(
+    @Query('personaIds') personaIds = '',
+    @Query('personaLabels') personaLabels = ''
+  ): MemoryScopeSummary {
+    const ids = personaIds.split(',').map((id) => id.trim()).filter(Boolean);
+    const labels = personaLabels.split(',').map((label) => label.trim());
+    const personas = ids.map((id, index) => ({ id, name: labels[index] || id }));
+    return this.memoryService.getSummary(personas);
+  }
+
+  @Get('web-search')
+  async getWebSearch(
+    @Query('query') query?: string,
+    @Query('limit') limit?: string
+  ): Promise<MemorySearchResult[]> {
+    const parsedLimit = limit ? parseInt(limit, 10) : 20;
+    if (query?.trim()) {
+      return this.memoryService.searchWebResults(query.trim(), parsedLimit);
+    }
+    return this.memoryService.getAllWebResults();
   }
 
   // ── Embedding status ─────────────────────────────────────────────────────

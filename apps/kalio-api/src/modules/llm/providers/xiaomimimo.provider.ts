@@ -5,7 +5,7 @@ import {
 } from '../../../common/utils/llm-provider-http.util';
 
 export class XiaomiMiMoProvider extends BaseOpenAICompatibleProvider {
-  constructor(apiKey: string, model = 'mimo-v2.5-pro', baseUrl?: string) {
+  constructor(apiKey: string, model = 'mimo-v2.5', baseUrl?: string) {
     super('XiaomiMiMo', apiKey, model, baseUrl ?? XIAOMI_BASE_URL);
   }
 
