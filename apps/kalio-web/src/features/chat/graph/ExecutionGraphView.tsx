@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import type { ArchitectureGraphProjection, ChatMessage, Persona } from '@kalio/types';
+import { nanoid } from 'nanoid';
+import type { ArchitectureGraphProjection, ChatMessage, ChatSession, Persona } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
+import { eventBus } from '../../../services/eventBus';
 import { buildTurnsFromHistory } from '../chatUtils';
 import {
   buildExecutionGraphModel,
@@ -18,7 +20,10 @@ import { extractArchitectureBranchSessionIds, extractExecutionGraphHydrationStat
 import { architectureRunIdFromRootSession, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
 
 const DEFAULT_GRAPH_ZOOM = 0.82;
-const DEFAULT_INSPECTOR_WIDTH = 320;
+const MIN_GRAPH_ZOOM = 0.58;
+const MAX_GRAPH_ZOOM = 1.6;
+const GRAPH_ZOOM_STEP = 0.15;
+const DEFAULT_INSPECTOR_WIDTH = 280;
 
 interface ExecutionGraphViewProps {
   onOpenSessionInConversation?: (sessionId: string) => void;
@@ -32,19 +37,33 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     sessions,
     sessionMessages,
     sessionAgentTurns,
+    addSession,
+    addMessage,
     setActiveSession,
     setMessages,
     setAgentTurns,
     setPendingMessage,
+    updateSession,
   } = useSessionStore();
-  const { toolActivities, activeAgentLoops, pendingConfirmations, setPendingConfirmation } = useAgentStore();
+  const {
+    toolActivities,
+    activeAgentLoops,
+    pendingConfirmations,
+    isStreaming,
+    clearToolActivities,
+    setPendingConfirmation,
+    setStreaming,
+  } = useAgentStore();
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [zoom, setZoom] = useState(DEFAULT_GRAPH_ZOOM);
   const [inspectorWidth, setInspectorWidth] = useState(DEFAULT_INSPECTOR_WIDTH);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState<ExecutionGraphFocusMode>('latest-architecture');
   const [cardDensity, setCardDensity] = useState<GraphCardDensity>('compact');
+  const [resetViewportToken, setResetViewportToken] = useState(0);
   const [architectureRootGraph, setArchitectureRootGraph] = useState<ArchitectureGraphProjection | null>(null);
+  const [emptyPromptError, setEmptyPromptError] = useState<string | null>(null);
+  const [creatingGraphSession, setCreatingGraphSession] = useState(false);
   const inspectorResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
@@ -105,17 +124,26 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     };
   }, []);
 
-  const clampZoom = (value: number) => Math.max(0.55, Math.min(1.6, Number(value.toFixed(2))));
+  const clampZoom = (value: number) => Math.max(MIN_GRAPH_ZOOM, Math.min(MAX_GRAPH_ZOOM, Number(value.toFixed(2))));
   const collapseTools = zoom <= 0.85;
-  const decreaseZoom = () => setZoom((value) => clampZoom(value - 0.15));
-  const increaseZoom = () => setZoom((value) => clampZoom(value + 0.15));
-  const resetZoom = () => setZoom(DEFAULT_GRAPH_ZOOM);
+  const decreaseZoom = () => setZoom((value) => clampZoom(value - GRAPH_ZOOM_STEP));
+  const increaseZoom = () => setZoom((value) => clampZoom(value + GRAPH_ZOOM_STEP));
+  const resetZoom = () => {
+    setZoom(DEFAULT_GRAPH_ZOOM);
+    setResetViewportToken((value) => value + 1);
+  };
+  const fitAll = () => {
+    setZoom(DEFAULT_GRAPH_ZOOM);
+    setResetViewportToken((value) => value + 1);
+  };
   const handleWheelZoom = (deltaY: number) => {
     if (deltaY === 0) {
-      return;
+      return zoom;
     }
 
-    setZoom((value) => clampZoom(value + (deltaY < 0 ? 0.15 : -0.15)));
+    const nextZoom = clampZoom(zoom + (deltaY < 0 ? GRAPH_ZOOM_STEP : -GRAPH_ZOOM_STEP));
+    setZoom(nextZoom);
+    return nextZoom;
   };
   const startInspectorResize = (event: ReactMouseEvent<HTMLDivElement>) => {
     inspectorResizeRef.current = {
@@ -240,6 +268,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
       hydrationStatus={hydrationStatus}
       onCardDensityChange={setCardDensity}
       onDecreaseZoom={decreaseZoom}
+      onFitAll={fitAll}
       onFocusModeChange={(mode) => {
         setFocusMode(mode);
         setSelectedNodeId(null);
@@ -256,6 +285,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
 
   const liveActivitySidebar = (
     <ExecutionGraphLiveSidebar
+      defaultCollapsed={runningLoops.length === 0 && runningToolActivities.length === 0}
       runningLoops={runningLoops}
       runningToolActivities={runningToolActivities}
       sessions={sessions}
@@ -264,14 +294,88 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     />
   );
 
+  const sendGraphPromptToSession = (session: ChatSession, content: string, isFirstMessage: boolean) => {
+    if (isStreaming) {
+      return;
+    }
+    if (!eventBus.connected) {
+      setEmptyPromptError('Backend connection is offline. Reconnect and retry this message.');
+      return;
+    }
+
+    setEmptyPromptError(null);
+    clearToolActivities(session.id);
+    if ((session.title === 'New Chat' || session.title === '') && isFirstMessage) {
+      const preview = content.slice(0, 50).trim();
+      updateSession(session.id, { title: preview + (content.length > 50 ? '...' : '') });
+    }
+
+    addMessage({
+      id: nanoid(),
+      sessionId: session.id,
+      role: 'user',
+      content,
+      createdAt: Date.now(),
+    });
+    setStreaming(true);
+
+    const sent = eventBus.sendMessage({
+      sessionId: session.id,
+      content,
+      personaId: session.personaId,
+    });
+
+    if (!sent) {
+      setStreaming(false);
+      setEmptyPromptError('Backend connection is offline. Reconnect and retry this message.');
+    }
+  };
+
+  const sendEmptyGraphPrompt = (content: string) => {
+    if (!activeSessionId || !activeSession) {
+      return;
+    }
+    sendGraphPromptToSession(activeSession, content, messages.length === 0);
+  };
+
+  const createAndSendGraphPrompt = async (content: string) => {
+    if (isStreaming || creatingGraphSession) {
+      return;
+    }
+    if (!eventBus.connected) {
+      setEmptyPromptError('Backend connection is offline. Reconnect and retry this message.');
+      return;
+    }
+
+    setCreatingGraphSession(true);
+    setEmptyPromptError(null);
+    try {
+      const response = await apiClient.post<ChatSession>('/api/sessions', {
+        personaId: 'default',
+        title: 'New Chat',
+      });
+      addSession(response.data);
+      setActiveSession(response.data.id);
+      setMessages([], response.data.id);
+      sendGraphPromptToSession(response.data, content, true);
+    } catch (err) {
+      setEmptyPromptError(err instanceof Error ? err.message : 'Failed to create a graph chat.');
+    } finally {
+      setCreatingGraphSession(false);
+    }
+  };
+
   if (!activeSessionId) {
     return (
       <div data-testid="execution-graph-view" className="flex h-full overflow-hidden bg-base-100">
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {header}
           <ExecutionGraphNoSessionState
+            disabled={isStreaming || creatingGraphSession}
+            error={emptyPromptError}
             graphSurfaceClassName={graphSurfaceClassName}
             liveActivitySidebar={liveActivitySidebar}
+            onSendPrompt={(content) => void createAndSendGraphPrompt(content)}
             selectableSessions={selectableSessions}
             onSelectSession={setActiveSession}
           />
@@ -301,7 +405,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
 
   const effectiveSelectedId = model.nodes.some((node) => node.id === selectedNodeId)
     ? selectedNodeId
-    : model.defaultSelectedNodeId;
+    : null;
   const selectedNode = model.nodes.find((node) => node.id === effectiveSelectedId) ?? null;
   const selectedConfirmation = selectedNode?.payload.kind === 'tool' && selectedNode.payload.confirmationRequired
     ? pendingConfirmations[selectedNode.sessionId ?? activeSessionId ?? ''] ?? null
@@ -314,8 +418,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
           {header}
           <ExecutionGraphNoNodesState
             activeSession={activeSession}
+            disabled={isStreaming}
+            error={emptyPromptError}
             graphSurfaceClassName={graphSurfaceClassName}
             liveActivitySidebar={liveActivitySidebar}
+            onSendPrompt={sendEmptyGraphPrompt}
           />
         </div>
       </div>
@@ -330,9 +437,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
         <ExecutionGraphBoard
           cardDensity={cardDensity}
           model={model}
+          resetViewportToken={resetViewportToken}
           selectedNodeId={effectiveSelectedId}
           onSelectNode={setSelectedNodeId}
           zoom={zoom}
+          onFitZoom={setZoom}
           onWheelZoom={handleWheelZoom}
         />
       </div>

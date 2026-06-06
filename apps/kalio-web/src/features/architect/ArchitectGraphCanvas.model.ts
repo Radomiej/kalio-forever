@@ -1,13 +1,15 @@
 import type { ArchitectNode, ArchitectSchema } from './architect.types';
+import { getNodeDimensions } from './ArchitectGraphGeometry';
 
 export const MIN_ZOOM = 0.65;
 export const MAX_ZOOM = 1.6;
 export const ZOOM_STEP = 0.1;
+export const ZOOM_FACTOR = 1.12;
 export const DEFAULT_PAN = { x: 0, y: 0 };
 export const DEFAULT_ZOOM = 0.82;
+export const FIT_PADDING = 72;
 export const FREE_SPACE_WIDTH = 2800;
 export const FREE_SPACE_HEIGHT = 1800;
-export const MOUSE_FALLBACK_POINTER_ID = -1;
 export const EMPTY_NODES: ArchitectSchema['nodes'] = [];
 export const EMPTY_EDGES: ArchitectSchema['edges'] = [];
 
@@ -15,6 +17,13 @@ export type EdgeKind = 'parallel' | 'routing' | 'forced';
 
 export function clampZoom(value: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number(value.toFixed(2))));
+}
+
+export function nextArchitectZoom(currentZoom: number, direction: 'in' | 'out'): number {
+  const nextZoom = direction === 'in'
+    ? currentZoom * ZOOM_FACTOR
+    : currentZoom / ZOOM_FACTOR;
+  return clampZoom(nextZoom);
 }
 
 export function connectionPath(source: { x: number; y: number }, target: { x: number; y: number }): string {
@@ -85,13 +94,49 @@ export function edgeWidth(kind: EdgeKind, executed: boolean): string {
   return '1.6';
 }
 
-export function canStartPan(target: EventTarget, altKey: boolean, button: number): boolean {
-  const element = target instanceof Element ? target : null;
-  return !element?.closest('[data-architect-control="true"]') && (altKey || button === 1);
-}
+export function fitArchitectGraphViewport({
+  nodes,
+  viewportHeight,
+  viewportWidth,
+}: {
+  nodes: ArchitectNode[];
+  viewportHeight: number;
+  viewportWidth: number;
+}) {
+  if (nodes.length === 0 || viewportWidth <= 0 || viewportHeight <= 0) {
+    return {
+      pan: DEFAULT_PAN,
+      zoom: DEFAULT_ZOOM,
+    };
+  }
 
-export function hasPointerEvents(): boolean {
-  return typeof window !== 'undefined' && 'PointerEvent' in window;
+  const bounds = nodes.reduce((current, node) => {
+    const dimensions = getNodeDimensions(node);
+    return {
+      minX: Math.min(current.minX, node.x),
+      minY: Math.min(current.minY, node.y),
+      maxX: Math.max(current.maxX, node.x + dimensions.width),
+      maxY: Math.max(current.maxY, node.y + dimensions.height),
+    };
+  }, {
+    minX: Number.POSITIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY,
+  });
+  const graphWidth = Math.max(1, bounds.maxX - bounds.minX);
+  const graphHeight = Math.max(1, bounds.maxY - bounds.minY);
+  const widthZoom = (viewportWidth - FIT_PADDING * 2) / graphWidth;
+  const heightZoom = (viewportHeight - FIT_PADDING * 2) / graphHeight;
+  const zoom = clampZoom(Math.min(DEFAULT_ZOOM, widthZoom, heightZoom));
+
+  return {
+    pan: {
+      x: Math.round((viewportWidth - graphWidth * zoom) / 2 - bounds.minX * zoom),
+      y: Math.round((viewportHeight - graphHeight * zoom) / 2 - bounds.minY * zoom),
+    },
+    zoom,
+  };
 }
 
 export function architectCanvasStyle({

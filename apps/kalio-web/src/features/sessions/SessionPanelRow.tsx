@@ -1,11 +1,48 @@
 import type { Dispatch, MouseEvent, ReactNode, RefObject, SetStateAction } from 'react';
-import { AlertTriangle, Archive, Check, ChevronRight, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Archive, BrainCircuit, Check, ChevronRight, GitBranch, MessageSquare, Pencil, RotateCcw, TerminalSquare, Trash2, X } from 'lucide-react';
 import type { ChatSession } from '@kalio/types';
 import { formatRelativeTime } from './session.utils';
 import { displayTitleForSession } from './sessionTreeDisplay';
 import type { SessionOriginFilter } from './sessionListModel';
 
 const formatChildCount = (count: number): string => count > 99 ? '99+' : String(count);
+
+function sessionKindPresentation(session: ChatSession) {
+  if (session.kind === 'subagent') {
+    return {
+      icon: BrainCircuit,
+      iconClassName: 'text-sky-300 bg-sky-500/10 border-sky-500/20',
+      label: 'Sub-agent',
+      badgeClassName: 'text-sky-300 bg-sky-500/10 border border-sky-500/20',
+      testId: `subagent-session-badge-${session.id}`,
+    };
+  }
+  if (session.kind === 'cli-agent') {
+    return {
+      icon: TerminalSquare,
+      iconClassName: 'text-amber-300 bg-amber-500/10 border-amber-500/20',
+      label: 'CLI agent',
+      badgeClassName: 'text-amber-300 bg-amber-500/10 border border-amber-500/20',
+      testId: `cli-agent-session-badge-${session.id}`,
+    };
+  }
+  if (session.kind === 'agent-flow') {
+    return {
+      icon: GitBranch,
+      iconClassName: 'text-violet-300 bg-violet-500/10 border-violet-500/20',
+      label: 'AgentFlow',
+      badgeClassName: 'text-violet-300 bg-violet-500/10 border border-violet-500/20',
+      testId: `agent-flow-session-badge-${session.id}`,
+    };
+  }
+  return {
+    icon: MessageSquare,
+    iconClassName: 'text-base-content/55 bg-base-300/35 border-base-300/50',
+    label: 'Root chat',
+    badgeClassName: '',
+    testId: `root-chat-session-badge-${session.id}`,
+  };
+}
 
 type ChildToggle = {
   count: number;
@@ -62,19 +99,8 @@ export function SessionPanelSessionItem({
   const isChildSession = Boolean(session.parentSessionId);
   const treeDepth = Math.min(depth, 4);
   const displayTitle = displayTitleForSession(session, childSessionsByParent);
-  const sessionKindBadge = session.kind === 'subagent'
-    ? {
-        label: 'Sub-agent',
-        className: 'text-sky-300 bg-sky-500/10 border border-sky-500/20',
-        testId: `subagent-session-badge-${session.id}`,
-      }
-    : session.kind === 'cli-agent'
-      ? {
-          label: 'CLI agent',
-          className: 'text-amber-300 bg-amber-500/10 border border-amber-500/20',
-          testId: `cli-agent-session-badge-${session.id}`,
-        }
-      : null;
+  const sessionKind = sessionKindPresentation(session);
+  const SessionKindIcon = sessionKind.icon;
 
   return (
     <div
@@ -116,6 +142,14 @@ export function SessionPanelSessionItem({
         <div className="flex flex-1 min-w-0 items-start gap-2">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <div className="flex items-center gap-1.5 min-w-0">
+              <span
+                className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border ${sessionKind.iconClassName}`}
+                data-testid={`session-kind-icon-${session.id}`}
+                title={sessionKind.label}
+                aria-label={sessionKind.label}
+              >
+                <SessionKindIcon size={11} />
+              </span>
               <span className="min-w-0 flex-1 break-words text-xs font-medium leading-snug">
                 {displayTitle}
               </span>
@@ -129,12 +163,12 @@ export function SessionPanelSessionItem({
               )}
             </div>
             <div className="flex items-center gap-1.5 min-w-0">
-              {sessionKindBadge && (
+              {session.kind !== 'chat' && (
                 <span
-                  className={`text-[9px] rounded px-1 py-0.5 leading-none shrink-0 ${sessionKindBadge.className}`}
-                  data-testid={sessionKindBadge.testId}
+                  className={`text-[9px] rounded px-1 py-0.5 leading-none shrink-0 ${sessionKind.badgeClassName}`}
+                  data-testid={sessionKind.testId}
                 >
-                  {sessionKindBadge.label}
+                  {sessionKind.label}
                 </span>
               )}
               {personaName && (
