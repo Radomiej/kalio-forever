@@ -886,6 +886,20 @@ export interface MemorySearchResult {
   createdAt: number;
 }
 
+export interface MemoryScopeStats {
+  id: string;
+  label: string;
+  count: number;
+  size: number;
+}
+
+export interface MemoryScopeSummary {
+  totalCount: number;
+  totalSize: number;
+  webSearch: MemoryScopeStats;
+  personas: MemoryScopeStats[];
+}
+
 // ─── Embedding Credentials ───────────────────────────────────────────────────
 // Independent credential table for embedding providers (separate from LLM
 // credentials — embedding has `dimensions` and different provider set).
