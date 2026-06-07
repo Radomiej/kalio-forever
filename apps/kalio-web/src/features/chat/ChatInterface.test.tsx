@@ -12,6 +12,7 @@ import { render, act, fireEvent, screen } from '@testing-library/react';
 import { buildArchitectureRunContext, ChatInterface } from './ChatInterface';
 import { computeAnsweredCallIds } from './chatUtils';
 import type { ChatMessage, VFSFile } from '@kalio/types';
+import { apiClient } from '../../services/apiClient';
 
 // jsdom does not implement scrollIntoView
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -296,6 +297,7 @@ vi.mock('./hooks/useContextPreview', () => ({
 vi.mock('../../services/apiClient', () => ({
   apiClient: {
     get: vi.fn(() => Promise.resolve({ data: [] })),
+    post: vi.fn(() => Promise.resolve({ data: {} })),
   },
   getSessionVfsFiles: vi.fn(() => Promise.resolve({ files: [] })),
 }));
@@ -513,14 +515,14 @@ describe('ChatInterface event wiring', () => {
   it('REGRESSION: reconnect re-identifies the active session and reloads its history', async () => {
     await renderChatInterface();
     mockIdentifySession.mockClear();
-    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
-    fetchMock.mockClear();
+    const apiGetMock = vi.mocked(apiClient.get);
+    apiGetMock.mockClear();
 
     await emitEvent('socket:reconnect', undefined);
 
     expect(mockIdentifySession).toHaveBeenCalledTimes(1);
     expect(mockIdentifySession).toHaveBeenCalledWith('session-1');
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+    expect(apiGetMock).toHaveBeenCalledWith('/api/sessions/session-1/messages');
   });
 
   it('REGRESSION: reconnect history reload merges server history with local optimistic messages', async () => {
@@ -536,12 +538,9 @@ describe('ChatInterface event wiring', () => {
     setMessages.mockClear();
     setAgentTurns.mockClear();
     getSessionMessages.mockReturnValueOnce([localMessage]);
-    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
-    fetchMock.mockClear();
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve([]),
-    });
+    const apiGetMock = vi.mocked(apiClient.get);
+    apiGetMock.mockClear();
+    apiGetMock.mockResolvedValueOnce({ data: [] });
 
     await emitEvent('socket:reconnect', undefined);
 
@@ -1069,14 +1068,12 @@ describe('ChatInterface event wiring', () => {
       { id: 'assistant-2', sessionId: 'session-1', role: 'assistant', content: 'Done', createdAt: 3 },
     ];
 
-    const fetchMock = vi.fn((input: string | URL | Request) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-      if (url === '/api/sessions/session-1/generate-title') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ title: 'Generated Title' }) });
-      }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-    });
-    vi.stubGlobal('fetch', fetchMock);
+      vi.mocked(apiClient.post).mockImplementationOnce((url: string) => {
+        if (url === '/api/sessions/session-1/generate-title') {
+          return Promise.resolve({ data: { title: 'Generated Title' } } as never);
+        }
+        return Promise.reject(new Error(`unexpected apiClient.post call: ${url}`));
+      });
 
     await renderChatInterface();
     addLlmActivity.mockClear();
@@ -1091,8 +1088,8 @@ describe('ChatInterface event wiring', () => {
     expect(addLlmActivity).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'title-gen', status: 'running' }),
     );
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/session-1/generate-title', { method: 'POST' });
-    expect(updateSession).toHaveBeenCalledWith('session-1', { title: 'Generated Title' });
+      expect(apiClient.post).toHaveBeenCalledWith('/api/sessions/session-1/generate-title');
+      expect(updateSession).toHaveBeenCalledWith('session-1', { title: 'Generated Title' });
     expect(updateLlmActivity).toHaveBeenCalledWith(
       'title-gen',
       expect.objectContaining({ status: 'done' }),
@@ -1672,10 +1669,12 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     const deferred = new Promise((res) => {
       resolveMessages = res;
     });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() => Promise.resolve({ ok: true, json: () => deferred })),
-    );
+      vi.mocked(apiClient.get).mockImplementation((url: string) => {
+        if (url === '/api/sessions/session-1/messages') {
+          return deferred.then((messages) => ({ data: messages } as never));
+        }
+        return Promise.resolve({ data: [] } as never);
+      });
 
     // Simulate that agent:start already fired before the fetch resolves —
     // this is the normal production sequence (agent:start fires in ~1ms,
@@ -1700,8 +1699,9 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     // subsequent addTurnItem / finalizeAgentTurn calls no-ops.
     expect(setAgentTurns).not.toHaveBeenCalled();
 
-    vi.unstubAllGlobals();
-  });
+      vi.mocked(apiClient.get).mockReset();
+      vi.mocked(apiClient.get).mockResolvedValue({ data: [] } as never);
+    });
 
   it('calls setAgentTurns from history when no active agent loop exists for the session', async () => {
     // Normal path: fetch resolves before any agent:start — safe to set history turns.
@@ -1716,10 +1716,12 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     const deferredMessages = new Promise((resolve) => {
       resolveMessages = resolve;
     });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() => Promise.resolve({ ok: true, json: () => deferredMessages })),
-    );
+      vi.mocked(apiClient.get).mockImplementation((url: string) => {
+        if (url === '/api/sessions/session-1/messages') {
+          return deferredMessages.then((messages) => ({ data: messages } as never));
+        }
+        return Promise.resolve({ data: [] } as never);
+      });
 
     agentStoreState.activeAgentLoops = {}; // no active loop
 
@@ -1737,9 +1739,10 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
       expect.arrayContaining([expect.objectContaining({ done: true })]),
     );
 
-    vi.unstubAllGlobals();
+      vi.mocked(apiClient.get).mockReset();
+      vi.mocked(apiClient.get).mockResolvedValue({ data: [] } as never);
+    });
   });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REGRESSION: pendingConfirmations not cleared on session switch / turn lifecycle

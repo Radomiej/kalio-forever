@@ -5,6 +5,7 @@ import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { backendHealth } from '../../../services/backendHealth';
 import { eventBus } from '../../../services/eventBus';
+import { apiClient } from '../../../services/apiClient';
 import { buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
 import { shouldRefreshVfsForToolResult } from '../ChatInterface.Parts';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
@@ -408,9 +409,10 @@ export function useChatSocketEvents({
         removeActiveAgentLoop(sid);
         setPendingConfirmation(sid, null);
         eventBus.identifySession(sid);
-        fetch(`/api/sessions/${sid}/messages`)
-          .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-          .then((data: ChatMessage[]) => {
+        apiClient
+          .get<ChatMessage[]>(`/api/sessions/${sid}/messages`)
+          .then((response) => {
+            const data = response.data;
             if (useSessionStore.getState().activeSessionId !== sid) return;
             const { setMessages, setAgentTurns } = useSessionStore.getState();
             const currentMessages = useSessionStore.getState().getSessionMessages(sid);

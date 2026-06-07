@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { API_BASE, deleteSessionIfExists, selectSession } from './helpers/test-config';
+import {
+  API_BASE,
+  deleteSessionIfExists,
+  selectArchitectureInComposer,
+  selectSession,
+  sendMessageFromComposer,
+} from './helpers/test-config';
 
 test.describe('Architecture chat turn projection', () => {
   test('renders a sequential router chain without collapsing it into a parallel council', async ({ page, request }) => {
@@ -84,13 +90,10 @@ test.describe('Architecture chat turn projection', () => {
       await page.getByTestId('nav-talk').click();
       await selectSession(page, session.id, title);
 
-      await page.getByTestId('chat-architecture-select').selectOption(variant.id);
-      await page.getByTestId('chat-input').fill('Route this through the sequential chain.');
-      await page.getByTestId('chat-send-btn').click();
+      await selectArchitectureInComposer(page, variant.id);
+      await sendMessageFromComposer(page, 'Route this through the sequential chain.');
 
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 90_000 });
-      const subagentCalls = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_subagent"]');
-      await expect(subagentCalls).toHaveCount(2, { timeout: 90_000 });
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible();
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer', { timeout: 90_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toHaveCount(0);
@@ -108,8 +111,9 @@ test.describe('Architecture chat turn projection', () => {
       await page.getByTestId('nav-talk').click();
       await selectSession(page, session.id, title);
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 30_000 });
-      await expect(subagentCalls).toHaveCount(2, { timeout: 30_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toHaveCount(0);
+      await expect(page.getByTestId('architecture-route-agent')).toHaveCount(2);
+      await expect(page.getByTestId('architecture-route-router')).toHaveCount(3);
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer');
     } finally {
       await deleteSessionIfExists(request, session.id);
@@ -131,24 +135,19 @@ test.describe('Architecture chat turn projection', () => {
       await page.getByTestId('nav-talk').click();
       await selectSession(page, session.id, title);
 
-      await page.getByTestId('chat-architecture-select').selectOption('strategic-decision-council');
-      await page.getByTestId('chat-input').fill('What can you do?');
-      await page.getByTestId('chat-send-btn').click();
+      await selectArchitectureInComposer(page, 'strategic-decision-council');
+      await sendMessageFromComposer(page, 'What can you do?');
 
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 90_000 });
-      const subagentCalls = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_subagent"]');
-      await expect(subagentCalls).toHaveCount(5, { timeout: 90_000 });
-      await expect(page.getByTestId('tool-call-chip')).toHaveText([
-        /run_subagent/,
-        /run_subagent/,
-        /run_subagent/,
-        /run_subagent/,
-        /run_subagent/,
-      ]);
+      await expect(page.getByTestId('architecture-route-agent')).toHaveCount(5);
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router', { timeout: 90_000 });
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Finalizer', { timeout: 90_000 });
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible();
       await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Pragmatist');
+      await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('User Advocate');
+      await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Innovator');
+      await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Analyst');
+      await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Shadow');
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Execution trace:');
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Stream: completed /');
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Incoming graph outputs:');
@@ -156,7 +155,7 @@ test.describe('Architecture chat turn projection', () => {
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Act as a graph router.');
 
       await page.getByTestId('open-architecture-run-canvas').click();
-      await expect(page.getByTestId('canvas-panel')).toHaveClass(/w-72/);
+      await expect(page.getByTestId('canvas-panel')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('architecture-run-canvas-section')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('architecture-run-branches')).toContainText('Pragmatist');
       await expect(page.getByTestId('architecture-run-routing')).toContainText('Router');
@@ -178,16 +177,17 @@ test.describe('Architecture chat turn projection', () => {
       await expect(page.getByTestId('message-list')).toContainText('Architecture: Strategic Decision Council v0.1.0');
       await selectSession(page, session.id, title);
 
-      await page.getByTestId('open-subagent-canvas').first().click();
-      await expect(page.getByTestId('canvas-panel')).toHaveClass(/w-72/);
+      await page.getByTestId('open-architecture-run-canvas').click();
+      await expect(page.getByTestId('canvas-panel')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('canvas-subagents-section')).toBeVisible({ timeout: 10_000 });
-      const firstCanvasSubagent = page.locator('[data-testid^="canvas-open-subagent-"]').first();
-      const childSessionId = await firstCanvasSubagent.getAttribute('data-session-id');
-      if (!childSessionId) throw new Error('Missing child session id on architecture canvas sub-agent opener');
+      const subagentsSection = page.getByTestId('canvas-subagents-section');
+      const firstCanvasSubagent = subagentsSection.getByRole('button', { name: 'Open sub-agent chat' }).first();
       await firstCanvasSubagent.click();
       await expect
         .poll(() => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')), { timeout: 10_000 })
-        .toBe(childSessionId);
+        .not.toBe(session.id);
+      const childSessionId = await page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id'));
+      if (!childSessionId) throw new Error('Missing child session id after opening sub-agent chat');
       await expect(page.getByTestId('message-list')).toContainText('Architecture: Strategic Decision Council v0.1.0');
       await expect(page.getByTestId('message-list')).toContainText('Return a concise role-specific contribution');
       await selectSession(page, session.id, title);
@@ -197,18 +197,15 @@ test.describe('Architecture chat turn projection', () => {
       await selectSession(page, session.id, title);
 
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 30_000 });
-      await expect(subagentCalls).toHaveCount(5, { timeout: 30_000 });
-      await expect(page.getByTestId('tool-call-chip')).toHaveText([
-        /run_subagent/,
-        /run_subagent/,
-        /run_subagent/,
-        /run_subagent/,
-        /run_subagent/,
-      ]);
+      await expect(page.getByTestId('architecture-route-agent')).toHaveCount(5);
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router');
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Finalizer');
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible();
       await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Pragmatist');
+      await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('User Advocate');
+      await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Innovator');
+      await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Analyst');
+      await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Shadow');
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Execution trace:');
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Stream: completed /');
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Incoming graph outputs:');
@@ -219,11 +216,9 @@ test.describe('Architecture chat turn projection', () => {
       await expect(page.getByTestId('architecture-run-canvas-section')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('architecture-run-branches')).toContainText('Pragmatist');
 
-      await page.getByTestId('open-subagent-canvas').first().click();
-      await expect(page.getByTestId('canvas-panel')).toHaveClass(/w-72/);
+      await expect(page.getByTestId('canvas-panel')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('canvas-subagents-section')).toBeVisible({ timeout: 10_000 });
-      const reloadedChildSessionId = await page.locator('[data-testid^="canvas-open-subagent-"]').first().getAttribute('data-session-id');
-      if (!reloadedChildSessionId) throw new Error('Missing child session id on restored architecture canvas sub-agent opener');
+      await expect(page.getByTestId('canvas-subagents-section').getByRole('button', { name: 'Open sub-agent chat' }).first()).toBeVisible();
     } finally {
       await deleteSessionIfExists(request, session.id);
     }

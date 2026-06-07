@@ -62,6 +62,11 @@ function mergeSessionsPreservingLocal(current: ChatSession[], incoming: ChatSess
   return Array.from(merged.values()).sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
+async function loadSessionsForReplay(): Promise<ChatSession[]> {
+  const response = await apiClient.get<ChatSession[]>('/api/sessions');
+  return response.data;
+}
+
 export function App() {
   const initialViewState = loadAppViewState();
   const [activeSection, setActiveSection] = useState<ActiveSection>(initialViewState.activeSection);
@@ -97,9 +102,10 @@ export function App() {
   // Initialize on app mount
   useEffect(() => {
     backendHealth.start();
-    void fetch('/api/llm/config')
-      .then((r) => r.json())
-      .then((cfg: LLMConfigWithSource) => {
+    void apiClient
+      .get<LLMConfigWithSource>('/api/llm/config')
+      .then((response) => {
+        const cfg = response.data;
         setBackendConfig(cfg);
       })
       .catch((err: unknown) => {
@@ -113,13 +119,12 @@ export function App() {
     }
     const requestSeq = bootstrapFetchSeqRef.current + 1;
     bootstrapFetchSeqRef.current = requestSeq;
-    apiClient
-      .get<ChatSession[]>('/api/sessions')
-      .then((response) => {
+    void loadSessionsForReplay()
+      .then((sessionsFromApi) => {
         if (bootstrapFetchSeqRef.current !== requestSeq) {
           return;
         }
-        const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, response.data);
+        const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, sessionsFromApi);
         setSessions(mergedSessions);
         rootReplaySessions(mergedSessions).forEach((session) => identifyHitlSession(session.id));
       })
@@ -135,13 +140,21 @@ export function App() {
   useEffect(() => {
     const offReconnect = eventBus.onReconnect(() => {
       identifiedHitlSessionsRef.current.clear();
-      const activeSessionId = useSessionStore.getState().activeSessionId;
-      rootReplaySessions(useSessionStore.getState().sessions)
-        .filter((session) => session.id !== activeSessionId)
-        .forEach((session) => identifyHitlSession(session.id));
+      void loadSessionsForReplay()
+        .then((sessionsFromApi) => {
+          const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, sessionsFromApi);
+          setSessions(mergedSessions);
+          const activeSessionId = useSessionStore.getState().activeSessionId;
+          rootReplaySessions(mergedSessions)
+            .filter((session) => session.id !== activeSessionId)
+            .forEach((session) => identifyHitlSession(session.id));
+        })
+        .catch((err: unknown) => {
+          console.warn('[App] Failed to refresh sessions after reconnect', err);
+        });
     });
     return offReconnect;
-  }, [identifyHitlSession]);
+  }, [identifyHitlSession, setSessions]);
 
   // Close canvas when navigating away from talk
   useEffect(() => {

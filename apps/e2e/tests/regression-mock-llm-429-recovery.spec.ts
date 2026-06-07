@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE, deleteSessionIfExists, selectSession } from './helpers/test-config';
+import {
+  API_BASE,
+  deleteSessionIfExists,
+  expectComposerEnabled,
+  selectSession,
+  sendMessageFromComposer,
+} from './helpers/test-config';
 
 function uniqueSessionTitle(prefix: string): string {
   return `${prefix} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -36,14 +42,12 @@ test.describe('REGRESSION: mock LLM 429 recovery', () => {
       await page.getByTestId('nav-talk').click();
       await selectSession(page, session.id, title);
 
-      const chatInput = page.getByTestId('chat-input');
-      await expect(chatInput).toBeEnabled({ timeout: 5000 });
-      await chatInput.fill('Please fail with a deterministic mock provider 429 [[mock:error:429]]');
-      await page.getByTestId('chat-send-btn').click();
+      const chatInput = await expectComposerEnabled(page, 5000);
+      await sendMessageFromComposer(page, 'Please fail with a deterministic mock provider 429 [[mock:error:429]]');
 
       await expect(page.getByTestId('chat-error')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('chat-error')).toContainText(/429|Too Many Requests|quota exhausted/i);
-      await expect(chatInput).toBeEnabled({ timeout: 10_000 });
+      await expectComposerEnabled(page, 10_000);
       await expect(page.getByTestId('active-tab-pending-dot')).toHaveCount(0);
 
       await page.getByRole('button', { name: 'Active' }).click();

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { MemoryController } from './memory.controller';
 
 const mockStatus = { ready: true, model: 'text-embedding-3-small', dimensions: 1536 };
@@ -17,6 +17,7 @@ function makeMemoryService() {
     hybridSearch: vi.fn().mockResolvedValue([{ id: 'mem-1', score: 0.95, text: 'test' }]),
     searchWebResults: vi.fn().mockResolvedValue([{ id: 'web-1', score: 0.8, text: 'web' }]),
     getAllWebResults: vi.fn().mockResolvedValue([{ id: 'web-1', score: 1, text: 'web' }]),
+    deleteWebResultsDbFile: vi.fn().mockReturnValue('C:\\Users\\Radomiej\\AppData\\Local\\kalio-forever-dev\\memory\\profile\\web-results.db'),
     getSummary: vi.fn().mockReturnValue({
       totalCount: 2,
       totalSize: 8,
@@ -138,6 +139,31 @@ describe('MemoryController', () => {
       await controller.getWebSearch('rss', 'abc');
 
       expect(memorySvc.searchWebResults).toHaveBeenCalledWith('rss', 20);
+    });
+
+    it('deletes the current dev web-search DB outside production', async () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'development';
+      try {
+        const result = await controller.deleteWebSearchDb();
+        expect(memorySvc.deleteWebResultsDbFile).toHaveBeenCalled();
+        expect(result).toEqual({
+          deletedPath: 'C:\\Users\\Radomiej\\AppData\\Local\\kalio-forever-dev\\memory\\profile\\web-results.db',
+        });
+      } finally {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    });
+
+    it('rejects dev DB deletion in production', async () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        await expect(controller.deleteWebSearchDb()).rejects.toThrow(ForbiddenException);
+        expect(memorySvc.deleteWebResultsDbFile).not.toHaveBeenCalled();
+      } finally {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
     });
   });
 

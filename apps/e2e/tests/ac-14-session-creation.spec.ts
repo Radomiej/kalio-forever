@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE } from './helpers/test-config';
+import { API_BASE, expectComposerEnabled } from './helpers/test-config';
 
 // AC-14: New session can be created and becomes the active session
 test.describe('AC-14: Session creation', () => {
@@ -25,9 +25,9 @@ test.describe('AC-14: Session creation', () => {
     await page.getByTestId('new-session-btn').click();
 
     // Chat input should be visible and enabled immediately (split view)
-    const chatInput = page.getByTestId('chat-input');
+    const chatInput = page.getByTestId('welcome-prompt-input').or(page.getByTestId('chat-input'));
     await expect(chatInput).toBeVisible({ timeout: 5000 });
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
+    await expectComposerEnabled(page, 5000);
   });
 
   test('new session is listed in the session panel', async ({ request, page }) => {
@@ -61,7 +61,6 @@ test.describe('AC-14: Session creation', () => {
     await expect(page.getByTestId('chat-interface')).toBeVisible({ timeout: 10_000 });
 
     // Input must eventually re-enable (proves isStreaming was reset and error surfaced correctly)
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    await expectComposerEnabled(page, 30_000);
   });
 });

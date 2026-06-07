@@ -1,13 +1,25 @@
 import { Logger } from '@nestjs/common';
-import { nanoid } from 'nanoid';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { MemoryIngestResult, MemorySearchResult } from '@kalio/types';
 import { EmbeddingService } from './embedding.service';
 import { VectorStoreService } from './vector-store.service';
+import type { WebSearchChunk } from './web-search-chunking';
 
 const WEB_RESULTS_DB_NAME = 'web-results.db';
 const RRF_K = 60;
+const DELETE_RETRY_COUNT = 10;
+const DELETE_RETRY_DELAY_MS = 50;
+
+function isRetryableDeleteError(err: unknown): boolean {
+  return err instanceof Error
+    && 'code' in err
+    && (err.code === 'EPERM' || err.code === 'EBUSY');
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 export class WebResultsMemoryStore {
   private readonly logger = new Logger(WebResultsMemoryStore.name);
@@ -16,24 +28,42 @@ export class WebResultsMemoryStore {
   constructor(
     private readonly dbBasePath: string,
     private readonly embeddingService: EmbeddingService,
-    private readonly splitText: (text: string) => string[],
   ) {}
 
-  async ingest(text: string, metadata: Record<string, string> = {}): Promise<MemoryIngestResult> {
+  async ingest(chunks: WebSearchChunk[]): Promise<MemoryIngestResult> {
     if (!this.embeddingService.getStatus().configured) {
+      return { ids: [], count: 0 };
+    }
+    if (chunks.length === 0) {
       return { ids: [], count: 0 };
     }
 
     const store = this.getStore();
-    const chunks = this.splitText(text);
     const ids: string[] = [];
     const embeddingModel = await this.embeddingService.getModelName();
-    const embeddings = await this.embeddingService.embedBatch(chunks);
+    const embeddings = await this.embeddingService.embedBatch(chunks.map((chunk) => chunk.content));
 
     for (let i = 0; i < chunks.length; i++) {
-      const id = nanoid();
       const chunk = chunks[i]!;
-      store.insert(id, embeddings[i]!, chunk, { ...metadata, namespace: 'web_search', chunk_index: String(i) }, embeddingModel);
+      const id = `${chunk.webResultId}:${chunk.blockIndex}`;
+      store.insert(
+        id,
+        embeddings[i]!,
+        chunk.content,
+        {
+          namespace: 'web_search',
+          chunk_version: 'v2',
+          web_result_id: chunk.webResultId,
+          block_type: chunk.blockType,
+          block_index: String(chunk.blockIndex),
+          citation_urls_json: JSON.stringify(chunk.citationUrls),
+          heading_path_json: JSON.stringify(chunk.headingPath),
+          query: chunk.query,
+          provider: chunk.provider,
+          model: chunk.model,
+        },
+        embeddingModel,
+      );
       ids.push(id);
     }
 
@@ -147,6 +177,24 @@ export class WebResultsMemoryStore {
     return this.getDbPath(this.embeddingService.getProfileId());
   }
 
+  currentDbExists(): boolean {
+    return fs.existsSync(this.getCurrentDbPath());
+  }
+
+  deleteAllCurrentProfile(): void {
+    this.getStore().deleteAll();
+  }
+
+  deleteCurrentDbFile(): string {
+    const profileId = this.embeddingService.getProfileId();
+    const dbPath = this.getDbPath(profileId);
+    this.closeStoreForProfile(profileId);
+    this.removeDbArtifact(dbPath);
+    this.removeDbArtifact(`${dbPath}-wal`);
+    this.removeDbArtifact(`${dbPath}-shm`);
+    return dbPath;
+  }
+
   close(): void {
     for (const [profileId, store] of this.stores) {
       try {
@@ -157,6 +205,18 @@ export class WebResultsMemoryStore {
       }
     }
     this.stores.clear();
+  }
+
+  private closeStoreForProfile(profileId: string): void {
+    const store = this.stores.get(profileId);
+    if (!store) {
+      return;
+    }
+    try {
+      store.close();
+    } finally {
+      this.stores.delete(profileId);
+    }
   }
 
   private getStore(): VectorStoreService {
@@ -174,6 +234,24 @@ export class WebResultsMemoryStore {
 
   private getDbPath(profileId: string): string {
     return path.join(this.dbBasePath, profileId, WEB_RESULTS_DB_NAME);
+  }
+
+  private removeDbArtifact(targetPath: string): void {
+    if (!fs.existsSync(targetPath)) {
+      return;
+    }
+
+    for (let attempt = 1; attempt <= DELETE_RETRY_COUNT; attempt += 1) {
+      try {
+        fs.rmSync(targetPath, { force: true });
+        return;
+      } catch (err) {
+        if (!isRetryableDeleteError(err) || attempt === DELETE_RETRY_COUNT) {
+          throw err;
+        }
+        sleepSync(DELETE_RETRY_DELAY_MS);
+      }
+    }
   }
 
   private listProfileIds(): string[] {

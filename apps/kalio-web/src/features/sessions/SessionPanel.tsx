@@ -52,8 +52,8 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const [expandedRoots, setExpandedRoots] = useState<Set<string>>(() => new Set());
   const renameRef = useRef<HTMLInputElement>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
-  const [newPersonaId] = useState<string>('default');
   const [archivedSessions, setArchivedSessions] = useState<ChatSession[]>([]);
+  const newPersonaId = personas[0]?.id ?? 'default';
 
   useEffect(() => {
     if (activeSessionId) {

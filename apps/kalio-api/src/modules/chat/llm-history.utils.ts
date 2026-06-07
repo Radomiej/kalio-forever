@@ -105,6 +105,60 @@ export function estimateToolTokens(toolMetas: ToolMeta[]): number {
   return estimateTextTokens(serialized);
 }
 
+function isWebSearchChunkRecord(value: unknown): value is {
+  content: string;
+  citationUrls?: unknown;
+  blockType?: unknown;
+  headingPath?: unknown;
+} {
+  return isRecord(value) && typeof value['content'] === 'string';
+}
+
+function isWebSearchPayload(value: unknown): value is {
+  answer?: unknown;
+  citations?: unknown;
+  provider?: unknown;
+  model?: unknown;
+  offline?: unknown;
+  results: unknown[];
+} {
+  return isRecord(value) && Array.isArray(value['results']);
+}
+
+function sanitizeWebSearchPayload(payload: {
+  answer?: unknown;
+  citations?: unknown;
+  provider?: unknown;
+  model?: unknown;
+  offline?: unknown;
+  results: unknown[];
+}): string {
+  const results = payload.results
+    .filter(isWebSearchChunkRecord)
+    .slice(0, 3)
+    .map((chunk) => ({
+      content: truncateText(chunk.content, 760),
+      citationUrls: Array.isArray(chunk.citationUrls)
+        ? chunk.citationUrls.filter((url): url is string => typeof url === 'string').slice(0, 5)
+        : [],
+      blockType: typeof chunk.blockType === 'string' ? chunk.blockType : 'paragraph',
+      headingPath: Array.isArray(chunk.headingPath)
+        ? chunk.headingPath.filter((part): part is string => typeof part === 'string').slice(0, 6)
+        : [],
+    }));
+
+  return JSON.stringify({
+    answer: typeof payload.answer === 'string' ? truncateText(payload.answer, 600) : '',
+    citations: Array.isArray(payload.citations)
+      ? payload.citations.filter((url): url is string => typeof url === 'string').slice(0, 8)
+      : [],
+    provider: typeof payload.provider === 'string' ? payload.provider : '',
+    model: typeof payload.model === 'string' ? payload.model : '',
+    offline: payload.offline === true,
+    results,
+  });
+}
+
 export function getSafeContextTarget(contextWindowSize: number): number {
   return Math.max(256, Math.floor(contextWindowSize * SAFE_CONTEXT_RATIO));
 }
@@ -181,14 +235,16 @@ export function prepareHistoryForLLM(
   systemPrompt: string,
   contextWindowSize: number,
   toolMetas: ToolMeta[],
-): { history: ContextManagedLLMMessage[]; unboundedHistoryCount: number } {
+): { history: ContextManagedLLMMessage[]; unboundedHistoryCount: number; compacted: boolean } {
   const unboundedHistory = systemPrompt
     ? [{ role: 'system', content: systemPrompt } satisfies ContextManagedLLMMessage, ...messages]
     : [...messages];
+  const history = compactLLMHistory(unboundedHistory, contextWindowSize, toolMetas);
 
   return {
-    history: compactLLMHistory(unboundedHistory, contextWindowSize, toolMetas),
+    history,
     unboundedHistoryCount: unboundedHistory.length,
+    compacted: JSON.stringify(history) !== JSON.stringify(unboundedHistory),
   };
 }
 
@@ -199,6 +255,9 @@ export function sanitizeToolResultContentForLLM(content: string): string {
 
   try {
     const parsed = JSON.parse(content) as unknown;
+    if (isWebSearchPayload(parsed)) {
+      return sanitizeWebSearchPayload(parsed);
+    }
     const sanitized = sanitizeJsonValue(parsed, isRecord(parsed) ? parsed : null);
     const serialized = JSON.stringify(sanitized);
 

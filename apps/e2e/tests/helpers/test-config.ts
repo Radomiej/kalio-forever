@@ -1,4 +1,4 @@
-import { expect, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 const PROCESS_ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
 
@@ -30,21 +30,81 @@ export async function isMockLlm(request: APIRequestContext): Promise<boolean> {
 }
 
 export async function selectSession(page: Page, sessionId: string, title: string): Promise<void> {
-	const sessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
-	await expect(sessionItem).toBeVisible({ timeout: 5000 });
-	await sessionItem.evaluate((node) => {
-		if (!(node instanceof HTMLElement)) {
-			throw new Error('Session item is not clickable');
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const sessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
+		if (await sessionItem.isVisible().catch(() => false)) {
+			await sessionItem.evaluate((node) => {
+				if (!(node instanceof HTMLElement)) {
+					throw new Error('Session item is not clickable');
+				}
+
+				node.click();
+			});
+			await expect
+				.poll(
+					() => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')),
+					{ timeout: 5000 },
+				)
+				.toBe(sessionId);
+			return;
 		}
 
-		node.click();
-	});
-	await expect
-		.poll(
-			() => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')),
-			{ timeout: 5000 },
-		)
-		.toBe(sessionId);
+		if (attempt < 2) {
+			await page.reload();
+			const talkNav = page.getByTestId('nav-talk');
+			if (await talkNav.isVisible().catch(() => false)) {
+				await talkNav.click();
+			}
+		}
+	}
+
+	throw new Error(`Session ${sessionId} (${title}) did not appear in the Talk sidebar.`);
+}
+
+export async function sendMessageFromComposer(page: Page, message: string): Promise<void> {
+	const input = await expectComposerEnabled(page, 10_000);
+	await input.fill(message);
+	const sendButton = await getComposerSendButton(page);
+	await sendButton.click();
+}
+
+export async function expectComposerEnabled(page: Page, timeoutMs = 10_000): Promise<Locator> {
+	const welcomeInput = page.getByTestId('welcome-prompt-input');
+	if (await welcomeInput.isVisible().catch(() => false)) {
+		await expect(welcomeInput).toBeEnabled({ timeout: timeoutMs });
+		return welcomeInput;
+	}
+
+	const chatInput = page.getByTestId('chat-input');
+	await expect(chatInput).toBeEnabled({ timeout: timeoutMs });
+	return chatInput;
+}
+
+export async function getComposerSendButton(page: Page): Promise<Locator> {
+	const welcomeButton = page.getByTestId('welcome-run-prompt');
+	if (await welcomeButton.isVisible().catch(() => false)) {
+		return welcomeButton;
+	}
+
+	return page.getByTestId('chat-send-btn');
+}
+
+export async function selectArchitectureInComposer(page: Page, architectureId: string): Promise<void> {
+	const welcomeSelect = page.getByTestId('welcome-architecture-select');
+	if (await welcomeSelect.isVisible().catch(() => false)) {
+		await welcomeSelect.selectOption(architectureId);
+		return;
+	}
+
+	await page.getByTestId('chat-architecture-select').selectOption(architectureId);
+}
+
+export async function selectSessionOriginFilter(
+	page: Page,
+	filterId: 'all' | 'user' | 'agent' | 'archived',
+): Promise<void> {
+	await page.getByTestId('session-origin-filter-trigger').click();
+	await page.getByTestId(`session-origin-filter-${filterId}`).click();
 }
 
 export async function deleteSessionIfExists(request: APIRequestContext, sessionId: string): Promise<void> {

@@ -12,6 +12,7 @@
   Logger,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
@@ -99,6 +100,14 @@ export class MemoryController {
       return this.memoryService.searchWebResults(query.trim(), parsedLimit);
     }
     return this.memoryService.getAllWebResults();
+  }
+
+  @Delete('web-search/dev-db')
+  async deleteWebSearchDb(): Promise<{ deletedPath: string }> {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Deleting the web-search DB is disabled in production.');
+    }
+    return { deletedPath: this.memoryService.deleteWebResultsDbFile() };
   }
 
   // ── Embedding status ─────────────────────────────────────────────────────

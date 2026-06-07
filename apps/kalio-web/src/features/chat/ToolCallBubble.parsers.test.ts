@@ -5,6 +5,7 @@ import {
   extractCLIAgentResult,
   extractCLIAgentSessionSnapshot,
   extractSubAgentFlowResult,
+  extractWebSearchResult,
   getChildImageIdentity,
 } from './ToolCallBubble.parsers';
 
@@ -203,5 +204,57 @@ describe('ToolCallBubble.parsers', () => {
     expect(previews.images[1]).toMatchObject({ image_url: 'data:image/png;base64,CCCC' });
     expect(getChildImageIdentity(previews.images[0]!)).toBe('path:images/hero.png');
     expect(getChildImageIdentity(previews.images[1]!)).toMatch(/^inline:/);
+  });
+
+  it('extracts web_search v2 offline payloads and rejects malformed variants', () => {
+    expect(extractWebSearchResult({
+      offline: true,
+      results: [
+        {
+          content: 'Stored web result about TypeScript 5.8',
+          citationUrls: ['https://example.com/typescript'],
+          blockType: 'paragraph',
+          headingPath: ['Release Notes'],
+          webResultId: 'web-1',
+          blockIndex: 0,
+          query: 'TypeScript latest',
+          provider: 'perplexity',
+          model: 'sonar',
+        },
+      ],
+    })).toEqual({
+      offline: true,
+      results: [
+        {
+          content: 'Stored web result about TypeScript 5.8',
+          citationUrls: ['https://example.com/typescript'],
+          blockType: 'paragraph',
+          headingPath: ['Release Notes'],
+          webResultId: 'web-1',
+          blockIndex: 0,
+          query: 'TypeScript latest',
+          provider: 'perplexity',
+          model: 'sonar',
+        },
+      ],
+    });
+
+    expect(extractWebSearchResult({
+      offline: false,
+      results: [],
+    })).toEqual({
+      offline: false,
+      results: [],
+    });
+
+    expect(extractWebSearchResult({
+      offline: true,
+      results: [{ content: 'missing fields' }],
+    })).toBeNull();
+
+    expect(extractWebSearchResult({
+      answer: 'legacy blob',
+      citations: [],
+    })).toBeNull();
   });
 });

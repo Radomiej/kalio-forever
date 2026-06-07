@@ -185,9 +185,9 @@ export function ChatInterface() {
     }
 
     addLlmActivity({ id: 'title-gen', label: 'Generating title...', status: 'running', startedAt: Date.now() });
-    fetch(`/api/sessions/${sessionId}/generate-title`, { method: 'POST' })
-      .then((response) => response.json())
-      .then((data: { title: string }) => {
+    apiClient.post<{ title: string }>(`/api/sessions/${sessionId}/generate-title`)
+      .then((response) => {
+        const data = response.data;
         useSessionStore.getState().updateSession(sessionId, { title: data.title });
         updateLlmActivity('title-gen', { status: 'done', finishedAt: Date.now() });
       })

@@ -9,6 +9,7 @@ import { VectorStoreService } from './vector-store.service';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { WebResultsMemoryStore } from './web-results-memory.store';
 import { buildMemoryScopeSummary } from './memory-summary.utils';
+import type { WebSearchChunk } from './web-search-chunking';
 
 // ── Text splitting constants ────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ export class MemoryService implements OnModuleDestroy {
     private readonly embeddingService: EmbeddingService,
   ) {
     this.dbBasePath = this.config.get<string>('MEMORY_DB_PATH', './data/memory');
-    this.webResults = new WebResultsMemoryStore(this.dbBasePath, this.embeddingService, splitTextIntoChunks);
+    this.webResults = new WebResultsMemoryStore(this.dbBasePath, this.embeddingService);
     this.logger.log(`MemoryService initialized: ${this.dbBasePath}`);
   }
 
@@ -126,10 +127,9 @@ export class MemoryService implements OnModuleDestroy {
   }
 
   async ingestWebSearchResult(
-    text: string,
-    metadata: Record<string, string> = {}
+    chunks: WebSearchChunk[],
   ): Promise<MemoryIngestResult> {
-    return this.webResults.ingest(text, metadata);
+    return this.webResults.ingest(chunks);
   }
 
   async ingestConversation(
@@ -308,6 +308,10 @@ export class MemoryService implements OnModuleDestroy {
 
   getAllWebResults(): MemorySearchResult[] {
     return this.webResults.getAll();
+  }
+
+  deleteWebResultsDbFile(): string {
+    return this.webResults.deleteCurrentDbFile();
   }
 
   getSummary(personas: Array<{ id: string; name: string }>): MemoryScopeSummary {

@@ -44,10 +44,21 @@ describe('WebSearchTool', () => {
 
   it('returns persona memory when offline_search is omitted and related entries exist', async () => {
     const memoryResults = [{
-      id: 'mem-1',
+      id: 'web-1:0',
       content: 'Stored web result about TypeScript 5.8',
       score: 0.9,
-      metadata: { source: 'web_search' },
+      metadata: {
+        namespace: 'web_search',
+        chunk_version: 'v2',
+        citation_urls_json: JSON.stringify(['https://example.com/typescript']),
+        block_type: 'paragraph',
+        heading_path_json: JSON.stringify(['Release Notes']),
+        web_result_id: 'web-1',
+        block_index: '0',
+        query: 'TypeScript latest',
+        provider: 'perplexity',
+        model: 'sonar',
+      },
       createdAt: 1,
     }];
     (memory.searchWebResults as ReturnType<typeof vi.fn>).mockResolvedValue(memoryResults);
@@ -61,7 +72,19 @@ describe('WebSearchTool', () => {
       provider: 'memory',
       model: 'persona-memory',
       offline: true,
-      results: memoryResults,
+      citations: ['https://example.com/typescript'],
+      memory: { ids: ['web-1:0'], count: 1 },
+      results: [{
+        content: 'Stored web result about TypeScript 5.8',
+        citationUrls: ['https://example.com/typescript'],
+        blockType: 'paragraph',
+        headingPath: ['Release Notes'],
+        webResultId: 'web-1',
+        blockIndex: 0,
+        query: 'TypeScript latest',
+        provider: 'perplexity',
+        model: 'sonar',
+      }],
     });
   });
 
@@ -80,16 +103,22 @@ describe('WebSearchTool', () => {
     expect(memory.searchWebResults).not.toHaveBeenCalled();
     expect(webSearch.search).toHaveBeenCalledWith('latest status');
     expect(memory.ingestWebSearchResult).toHaveBeenCalledWith(
-      expect.stringContaining('Web search query: latest status'),
-      {
-        source: 'web_search',
-        query: 'latest status',
-        persona_id: 'persona-web',
-        provider: 'perplexity',
-        model: 'sonar',
-      },
+      expect.arrayContaining([
+        expect.objectContaining({
+          content: 'Latest answer',
+          citationUrls: ['https://example.com'],
+          query: 'latest status',
+          provider: 'perplexity',
+          model: 'sonar',
+        }),
+      ]),
     );
-    expect(result).toEqual({ ...searchResult, offline: false, memory: { ids: ['mem-1'], count: 1 } });
+    expect(result).toMatchObject({
+      ...searchResult,
+      offline: false,
+      memory: { ids: ['mem-1'], count: 1 },
+      results: [expect.objectContaining({ content: 'Latest answer' })],
+    });
   });
 
   it('falls back to external search and stores result when memory has no related entries', async () => {
@@ -107,7 +136,11 @@ describe('WebSearchTool', () => {
     expect(memory.searchWebResults).toHaveBeenCalledWith('fresh topic', 5);
     expect(webSearch.search).toHaveBeenCalledWith('fresh topic');
     expect(memory.ingestWebSearchResult).toHaveBeenCalledOnce();
-    expect(result).toMatchObject({ offline: false, memory: { ids: ['mem-2'], count: 1 } });
+    expect(result).toMatchObject({
+      offline: false,
+      memory: { ids: ['mem-2'], count: 1 },
+      results: [expect.objectContaining({ content: 'Fresh answer' })],
+    });
   });
 
   it('continues with external search when local web-result recall throws', async () => {
@@ -128,6 +161,7 @@ describe('WebSearchTool', () => {
       ...searchResult,
       offline: false,
       memory: { ids: ['mem-3'], count: 1 },
+      results: [expect.objectContaining({ content: 'Fresh answer after memory failure' })],
       memory_warnings: [expect.stringContaining('Memory search failed')],
     });
   });
@@ -148,6 +182,7 @@ describe('WebSearchTool', () => {
       ...searchResult,
       offline: false,
       memory: { ids: [], count: 0 },
+      results: [expect.objectContaining({ content: 'Fresh answer despite ingest failure' })],
       memory_warnings: [expect.stringContaining('Memory ingest failed')],
     });
   });

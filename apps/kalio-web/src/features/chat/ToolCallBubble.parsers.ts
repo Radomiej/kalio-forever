@@ -10,6 +10,23 @@ import type {
 import type { ImageResultData } from './ImageResultRenderer';
 export { extractSubAgentFlowResult } from './subAgentFlowResult.parser';
 
+export interface WebSearchResultChunk {
+  content: string;
+  citationUrls: string[];
+  blockType: 'heading' | 'paragraph' | 'list' | 'quote' | 'code';
+  headingPath: string[];
+  webResultId: string;
+  blockIndex: number;
+  query: string;
+  provider: string;
+  model: string;
+}
+
+export interface WebSearchResultData {
+  offline: boolean;
+  results: WebSearchResultChunk[];
+}
+
 export function extractRAAppBlock(data: unknown): RAAppBlock | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
@@ -97,6 +114,37 @@ export function extractImageResult(data: unknown): ImageResultData | null {
     return d as unknown as ImageResultData;
   }
   return null;
+}
+
+function isWebSearchResultChunk(data: unknown): data is WebSearchResultChunk {
+  if (!data || typeof data !== 'object') return false;
+  const result = data as Record<string, unknown>;
+  return (
+    typeof result['content'] === 'string' &&
+    Array.isArray(result['citationUrls']) &&
+    result['citationUrls'].every((value) => typeof value === 'string') &&
+    typeof result['blockType'] === 'string' &&
+    Array.isArray(result['headingPath']) &&
+    result['headingPath'].every((value) => typeof value === 'string') &&
+    typeof result['webResultId'] === 'string' &&
+    typeof result['blockIndex'] === 'number' &&
+    typeof result['query'] === 'string' &&
+    typeof result['provider'] === 'string' &&
+    typeof result['model'] === 'string'
+  );
+}
+
+export function extractWebSearchResult(data: unknown): WebSearchResultData | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d['offline'] !== 'boolean' || !Array.isArray(d['results']) || !d['results'].every(isWebSearchResultChunk)) {
+    return null;
+  }
+
+  return {
+    offline: d['offline'],
+    results: d['results'],
+  };
 }
 
 function hashString(value: string): string {

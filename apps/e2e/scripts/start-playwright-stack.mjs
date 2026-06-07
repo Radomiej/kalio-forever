@@ -15,6 +15,7 @@ const explicitPlaywrightBase = process.env.PLAYWRIGHT_BASE_URL;
 const explicitPlaywrightApi = process.env.PLAYWRIGHT_API_ORIGIN;
 const explicitDatabasePath = process.env.DATABASE_PATH;
 const explicitWorkspaceRoot = process.env.WORKSPACE_ROOT;
+const explicitMemoryDbPath = process.env.MEMORY_DB_PATH;
 
 if (existsSync(envFilePath)) {
   process.loadEnvFile?.(envFilePath);
@@ -120,6 +121,7 @@ const backendEnv = {
   PORT: apiUrl.port,
   DATABASE_PATH: explicitDatabasePath ?? resolve(runStateDir, 'kalio-e2e.db'),
   WORKSPACE_ROOT: explicitWorkspaceRoot ?? resolve(runStateDir, 'workspaces'),
+  MEMORY_DB_PATH: explicitMemoryDbPath ?? resolve(runStateDir, 'memory'),
   CORS_ORIGIN: webUrl.origin,
 };
 

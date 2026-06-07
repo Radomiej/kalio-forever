@@ -3,6 +3,7 @@ import type { MutableRefObject } from 'react';
 import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
+import { apiClient } from '../../../services/apiClient';
 import { buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
 
 interface UseChatSessionActivationParams {
@@ -29,9 +30,10 @@ export function useChatSessionActivation({
     setPendingConfirmation(activeSessionId, null);
     console.debug('[ChatInterface] session activated', activeSessionId);
 
-    fetch(`/api/sessions/${activeSessionId}/messages`)
-      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-      .then((data: ChatMessage[]) => {
+    apiClient
+      .get<ChatMessage[]>(`/api/sessions/${activeSessionId}/messages`)
+      .then((response) => {
+        const data = response.data;
         if (useSessionStore.getState().activeSessionId !== activeSessionId) return;
         const currentMessages = useSessionStore.getState().getSessionMessages(activeSessionId);
         const mergedMessages = mergeFetchedMessages(currentMessages, data);

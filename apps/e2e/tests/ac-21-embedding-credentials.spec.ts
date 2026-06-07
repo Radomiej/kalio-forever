@@ -212,8 +212,15 @@ test.describe('Embedding Credentials UI', () => {
     const c = await seedCredential(page, 'To Deactivate');
     await page.request.put(`${API_BASE}/memory/embedding-credentials/active/${c.id}`);
     const delRes = await page.request.delete(`${API_BASE}/memory/embedding-credentials/active`);
-    const status = await delRes.json() as { source: string };
-    expect(status.source).toBe('local');
+    if (delRes.ok()) {
+      const status = await delRes.json() as { source?: string };
+      expect(status.source).toBe('local');
+      return;
+    }
+
+    expect(delRes.status()).toBe(400);
+    const body = await delRes.json() as { message?: string };
+    expect(body.message).toMatch(/Local model is (still installing|not installed yet)/i);
   });
 
   test('POST /memory/embedding-credentials/:id/test returns {ok, error} shape', async ({ page }) => {

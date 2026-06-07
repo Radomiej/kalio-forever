@@ -113,6 +113,7 @@ server.listen(port, () => {
     port,
     'db=' + process.env.DATABASE_PATH,
     'workspace=' + process.env.WORKSPACE_ROOT,
+    'memory=' + process.env.MEMORY_DB_PATH,
     'forceLlm=' + process.env.KALIO_FORCE_ENV_LLM,
     'fastMock=' + process.env.KALIO_MOCK_LLM_FAST,
     'model=' + process.env.LLM_MODEL,
@@ -607,6 +608,7 @@ test('playwright wrapper gives each run isolated database and workspace paths', 
       assert.equal(code, 0, fullOutput);
       assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]kalio-e2e\.db/);
       assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]workspaces/);
+      assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]memory/);
       assert.doesNotMatch(fullOutput, /shared-from-env-file/);
     } finally {
       stopCollecting();

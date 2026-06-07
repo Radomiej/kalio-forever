@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { io, Socket } from 'socket.io-client';
-import { API_BASE, selectSession, deleteSessionIfExists } from './helpers/test-config';
+import { API_BASE, selectSession, sendMessageFromComposer, deleteSessionIfExists } from './helpers/test-config';
 
 const WS_BASE = API_BASE.replace('/api', '');
 const LIVE_PROVIDER = process.env['KALIO_LIVE_LLM_PROVIDER'] ?? 'xiaomimimo';
@@ -110,13 +110,10 @@ async function runLiveRaappFlow(page: Page, request: APIRequestContext): Promise
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
     await selectSession(page, sessionId, sessionTitle);
-
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 10_000 });
-    await chatInput.fill(
+    await sendMessageFromComposer(
+      page,
       'Opublikuj to bezpośrednio jako RA-App HTML używając dokładnie narzędzia raapp_create. Nie używaj VFS ani design_preview. Stwórz dużą interaktywną aplikację "Task Planner Pro" jako pojedynczy dokument HTML z rozbudowanym CSS i JavaScript, tabelą zadań, filtrowaniem, formularzem, panelem statystyk i lokalnym stanem. Wygeneruj dużo kodu i nie odpowiadaj zwykłym tekstem.',
     );
-    await page.getByTestId('chat-send-btn').click();
 
     const agentBubble = page.getByTestId('agent-turn-bubble').first();
     await expect(agentBubble).toBeVisible({ timeout: 20_000 });

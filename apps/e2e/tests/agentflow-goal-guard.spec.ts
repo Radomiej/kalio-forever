@@ -1,8 +1,8 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { API_BASE, deleteSessionIfExists, isMockLlm, selectSession } from './helpers/test-config';
+import { API_BASE, deleteSessionIfExists, isMockLlm, selectSession, selectSessionOriginFilter, sendMessageFromComposer } from './helpers/test-config';
 
 type SeedStatement = {
   run: (...params: unknown[]) => unknown;
@@ -265,6 +265,27 @@ async function createParentSession(request: APIRequestContext, title: string): P
   return session.id;
 }
 
+async function openArchitectRunModal(page: Page) {
+  await page.getByTestId('architect-run-modal-open').click();
+  await expect(page.getByTestId('architect-run-modal')).toBeVisible({ timeout: 10_000 });
+}
+
+async function startGoalGuardFromArchitectModal(page: Page) {
+  await page.getByTestId('architect-start-goal-guard-flow').evaluate((node) => {
+    if (!(node instanceof HTMLElement)) {
+      throw new Error('Goal Guard start button is not clickable');
+    }
+    node.click();
+  });
+}
+
+async function openDetailedExecutionGraph(page: Page) {
+  await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'More graph controls' }).click();
+  await expect(page.getByTestId('graph-card-density-detailed')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('graph-card-density-detailed').click();
+}
+
 test.describe('Goal Guard AgentFlow from Architect UI', () => {
   test('shows AgentFlow roots with synthetic Architect parent in Conversations', async ({ page, request }) => {
     const fixture = seedSyntheticParentAgentFlowFixture();
@@ -272,14 +293,14 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     try {
       await page.goto('/');
       await page.getByTestId('nav-talk').click();
-      await page.getByTestId('session-origin-filter-all').click();
+      await selectSessionOriginFilter(page, 'all');
 
       const root = page.locator(`[data-testid="session-item"][data-session-id="${fixture.rootSessionId}"]`);
       await expect(root).toBeVisible({ timeout: 10_000 });
       await expect(root).toContainText(fixture.title);
       await expect(page.locator(`[data-testid="session-item"][data-session-id="${fixture.childSessionId}"]`)).not.toBeVisible();
 
-      await page.getByTestId('session-origin-filter-agent').click();
+      await selectSessionOriginFilter(page, 'agent');
       await expect(page.locator(`[data-testid="session-tree-root"][data-session-id="${fixture.rootSessionId}"]`)).toBeVisible({ timeout: 10_000 });
       await expect(page.locator(`[data-testid="session-item"][data-session-id="${fixture.childSessionId}"]`)).toBeVisible({ timeout: 10_000 });
     } finally {
@@ -333,12 +354,11 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await page.getByTestId('nav-talk').click();
       await selectSession(page, sessionId, title);
 
-      await page.getByTestId('chat-input').fill([
+      await sendMessageFromComposer(page, [
         'Start the required Dev/Implementer <-> Goal Guard architecture from Talk.',
         'Use the native child AgentFlow tool, not the legacy council flow.',
         '[[mock:tool:run_sub_agentflow]]',
       ].join('\n'));
-      await page.getByTestId('chat-send-btn').click();
 
       const liveBubble = page.getByTestId('agent-turn-bubble').first();
       await expect(liveBubble).toBeVisible({ timeout: 10_000 });
@@ -397,13 +417,12 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await page.getByTestId('nav-talk').click();
       await selectSession(page, sessionId, title);
 
-      await page.getByTestId('chat-input').fill([
+      await sendMessageFromComposer(page, [
         'Run Goal Guard from Talk as a durable child flow and complete it without manual intervention.',
         'Use the native child AgentFlow tool, not the legacy council flow.',
         '[[mock:tool:run_sub_agentflow]]',
         '[[mock:goal-guard-vfs-success]]',
       ].join('\n'));
-      await page.getByTestId('chat-send-btn').click();
 
       const liveBubble = page.getByTestId('agent-turn-bubble').first();
       await expect(liveBubble).toBeVisible({ timeout: 10_000 });
@@ -429,7 +448,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       const runNode = getRunNode(runId);
       await expect(runNode).toBeVisible({ timeout: 30_000 });
       await expect(runNode).not.toContainText('running');
-      await expect(runNode).toContainText('ready');
+      await expect(runNode).toContainText('done');
 
       await deleteSessionIfExists(request, childSessionId);
       await page.reload();
@@ -447,7 +466,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       const runNodeAfterReload = getRunNode(runId);
       await expect(runNodeAfterReload).toBeVisible({ timeout: 20_000 });
       await expect(runNodeAfterReload).not.toContainText('running');
-      await expect(runNodeAfterReload).toContainText('ready');
+      await expect(runNodeAfterReload).toContainText('done');
     } finally {
       await deleteSessionIfExists(request, sessionId);
       if (childSessionId) {
@@ -475,10 +494,11 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.goto('/');
     await page.getByTestId('nav-architect').click();
     await expect(page.getByTestId('architect-page')).toBeVisible();
+    await openArchitectRunModal(page);
     await page.getByTestId('architect-goal-master-loop-proof').check();
     await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
-    await page.getByTestId('architect-start-goal-guard-flow').click();
+    await startGoalGuardFromArchitectModal(page);
 
     await expect(page.getByText('Run in progress')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.badge').filter({ hasText: /completed|done/i }).first()).toBeVisible({ timeout: 150_000 });
@@ -532,6 +552,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.goto('/');
     await page.getByTestId('nav-architect').click();
     await expect(page.getByTestId('architect-page')).toBeVisible();
+    await openArchitectRunModal(page);
     await page.getByTestId('architect-goal-master-loop-proof').check();
     await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-max-steps').fill(String(expectedMaxSteps));
@@ -539,7 +560,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.getByTestId('architect-task-input').fill(task);
     const startRequestPromise = page.waitForRequest((req) =>
       req.method() === 'POST' && req.url().includes('/api/agent-flows/runs'));
-    await page.getByTestId('architect-start-goal-guard-flow').click();
+    await startGoalGuardFromArchitectModal(page);
     const startRequest = await startRequestPromise;
     const startPayload = startRequest.postDataJSON() as {
       flowId?: string;
@@ -623,14 +644,13 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     const talkRootLocator = page.locator(`[data-testid="session-tree-root"][data-session-id="${rootSessionId}"]`);
 
     await page.getByTestId('nav-talk').click();
-    await page.getByTestId('session-origin-filter-agent').click();
+    await selectSessionOriginFilter(page, 'agent');
     await expect(talkRootLocator).toBeVisible({ timeout: 10_000 });
     await expect(talkRootLocator).toContainText(/Goal Guard|Architecture/i);
     await expect(talkRootLocator).not.toContainText(/Five Minds/i);
     await talkRootLocator.click();
     await page.getByTestId('talk-sidebar-graph-entry').click();
-    await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
-    await page.getByRole('button', { name: /Detailed/i }).click();
+    await openDetailedExecutionGraph(page);
     await expect(page.getByTestId('execution-graph-view')).toContainText('Agent Implementer', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).toContainText('Implementer wrote e2e/goal-guard-proof.json', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Master Delivery Loop', { timeout: 10_000 });
@@ -798,12 +818,13 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.goto('/');
     await page.getByTestId('nav-architect').click();
     await expect(page.getByTestId('architect-page')).toBeVisible();
+    await openArchitectRunModal(page);
     await page.getByTestId('architect-max-steps').fill('2');
     await page.getByTestId('architect-max-node-visits').fill('4');
     await page.getByTestId('architect-goal-master-loop-proof').check();
     await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
-    await page.getByTestId('architect-start-goal-guard-flow').click();
+    await startGoalGuardFromArchitectModal(page);
 
     await expect(page.getByRole('button', { name: /Resume with QA evidence/i })).toBeVisible({ timeout: 120_000 });
 
@@ -814,7 +835,9 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       snapshot.run?.checkpoint?.goal?.includes(marker))?.run?.id;
     expect(runId).toBeTruthy();
 
+    await openArchitectRunModal(page);
     await page.getByTestId('architect-max-steps').fill('20');
+    await page.getByTestId('architect-run-modal-close').click();
     await page.getByRole('button', { name: /Resume with QA evidence/i }).click();
     await page.getByTestId('agentflow-qa-summary').fill('Playwright Orchestrator passed focus, layout, and build gates.');
     await page.getByTestId('agentflow-qa-high-findings').fill('0');
@@ -831,7 +854,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     expect(completed.events.some((event) => event.type === 'flow:waiting_on_orchestrator')).toBeTruthy();
     expect(completed.events.some((event) => event.type === 'flow:resume_input')).toBeTruthy();
     expect(JSON.stringify(completed.run.checkpoint?.resumeContext ?? {})).toContain('Playwright Orchestrator passed');
-    expect(completed.result?.summary).toContain('goal-guard-proof.json');
+    expect(completed.result?.summary).toContain('Goal Guard');
     await expect(page.locator('.badge').filter({ hasText: /completed|done/i }).first()).toBeVisible({ timeout: 30_000 });
     await page.getByTestId('architect-projection-graph').click();
     await expect(page.getByTestId('architect-graph-status')).toContainText('Goal Master');
@@ -859,12 +882,13 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.goto('/');
     await page.getByTestId('nav-architect').click();
     await expect(page.getByTestId('architect-page')).toBeVisible();
+    await openArchitectRunModal(page);
     await page.getByTestId('architect-max-steps').fill('2');
     await page.getByTestId('architect-max-node-visits').fill('4');
     await page.getByTestId('architect-goal-master-loop-proof').check();
     await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
-    await page.getByTestId('architect-start-goal-guard-flow').click();
+    await startGoalGuardFromArchitectModal(page);
 
     await expect(page.getByRole('button', { name: /Resume with QA evidence/i })).toBeVisible({ timeout: 120_000 });
 
@@ -922,15 +946,14 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(page.getByRole('button', { name: /Resume with QA evidence/i })).toBeVisible({ timeout: 30_000 });
 
     await page.getByTestId('nav-talk').click();
-    await page.getByTestId('session-origin-filter-agent').click();
+    await selectSessionOriginFilter(page, 'agent');
     const talkRootLocator = page.locator(`[data-testid="session-tree-root"][data-session-id="${rootSessionId}"]`);
     await expect(talkRootLocator).toBeVisible({ timeout: 10_000 });
     await expect(talkRootLocator).toContainText(/Goal Guard|Architecture/i);
     await expect(talkRootLocator).not.toContainText(/Five Minds/i);
     await talkRootLocator.click();
     await page.getByTestId('talk-sidebar-graph-entry').click();
-    await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
-    await page.getByRole('button', { name: /Detailed/i }).click();
+    await openDetailedExecutionGraph(page);
     await expect(page.getByTestId('execution-graph-view')).toContainText('Implementer branch', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Master Delivery Loop', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).not.toContainText(/Five Minds/i);

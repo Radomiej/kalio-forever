@@ -128,9 +128,19 @@ describe('ToolDispatchService', () => {
       expect(memory.searchWebResults).not.toHaveBeenCalled();
       expect(webSearch.search).toHaveBeenCalledWith('latest status');
       expect(memory.ingestWebSearchResult).toHaveBeenCalledWith(
-        expect.stringContaining('Fresh external answer'),
-        expect.objectContaining({ source: 'web_search', query: 'latest status', persona_id: 'persona-dispatch' }),
+        expect.arrayContaining([
+          expect.objectContaining({
+            content: 'Fresh external answer',
+            citationUrls: ['https://example.com/fresh'],
+            query: 'latest status',
+            provider: 'perplexity',
+            model: 'sonar',
+          }),
+        ]),
       );
+      expect(result.data).toEqual(expect.objectContaining({
+        results: [expect.objectContaining({ content: 'Fresh external answer' })],
+      }));
     });
   });
 

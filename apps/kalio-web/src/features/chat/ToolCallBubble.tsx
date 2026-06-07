@@ -23,6 +23,7 @@ import { RAAppRenderer } from '../raapp/RAAppRenderer';
 import { TerminalOutputBlock } from './TerminalOutputBlock';
 import { LiveCLIAgentBlock } from './LiveCLIAgentBlock';
 import { ImageResultRenderer } from './ImageResultRenderer';
+import { WebSearchResultRenderer } from './WebSearchResultRenderer';
 import {
   extractCLIAgentResult,
   extractCLIAgentSessionSnapshot,
@@ -30,6 +31,7 @@ import {
   extractRAAppBlock,
   extractSubAgentFlowResult,
   extractSubagentResult,
+  extractWebSearchResult,
 } from './ToolCallBubble.parsers';
 import { Chip, ConfirmationInlineBubble, formatArgValue } from './ToolCallBubble.Chrome';
 import { SubagentResultBlock, CLIAgentSessionStatusBlock, SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
@@ -226,18 +228,19 @@ export function HistoryToolCallBubble({
   const cliResult = isCliAgent ? extractCLIAgentResult(parsed) : null;
   const cliSessionSnapshot = isDurableCliAgent ? extractCLIAgentSessionSnapshot(parsed) : null;
   const imageResult = extractImageResult(parsed);
+  const webSearchResult = toolName === 'web_search' ? extractWebSearchResult(parsed) : null;
   const subagentResult = isSubagent ? extractSubagentResult(parsed) : null;
   const subAgentFlowResult = isSubAgentFlow ? extractSubAgentFlowResult(parsed) : null;
   const [refreshedSubAgentFlowResult, setRefreshedSubAgentFlowResult] = useState<SubAgentFlowResult | null>(null);
   const displayedSubAgentFlowResult = refreshedSubAgentFlowResult ?? subAgentFlowResult;
   const hasArgs = args != null && Object.keys(args).length > 0;
-  const inferredDefaultOpen = (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
+  const inferredDefaultOpen = (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || webSearchResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
   const defaultOpen = defaultOpenOverride ?? inferredDefaultOpen;
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const open = isAnswered ? false : (manualOpen ?? defaultOpen);
 
-  const hasResult = !raapp && !cliResult && !cliSessionSnapshot && !imageResult && !subagentResult && !displayedSubAgentFlowResult && content.length > 0;
-  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
+  const hasResult = !raapp && !cliResult && !cliSessionSnapshot && !imageResult && !webSearchResult && !subagentResult && !displayedSubAgentFlowResult && content.length > 0;
+  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || webSearchResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
   const agentFlowOpenGraphRunId = displayedSubAgentFlowResult?.openGraphRunId ?? displayedSubAgentFlowResult?.flowRunId;
 
   useEffect(() => {
@@ -323,6 +326,7 @@ export function HistoryToolCallBubble({
         {displayedSubAgentFlowResult && <SubAgentFlowResultBlock result={displayedSubAgentFlowResult} />}
         {subagentResult && <SubagentResultBlock key={subagentResult.childSessionId} result={subagentResult} />}
         {imageResult && <ImageResultRenderer data={imageResult} />}
+        {webSearchResult && <WebSearchResultRenderer data={webSearchResult} />}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}
       </Chip>
       {raapp && isAnswered && (

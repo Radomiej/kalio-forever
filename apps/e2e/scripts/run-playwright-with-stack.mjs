@@ -19,6 +19,7 @@ const explicitPlaywrightBase = process.env.PLAYWRIGHT_BASE_URL;
 const explicitPlaywrightApi = process.env.PLAYWRIGHT_API_ORIGIN;
 const explicitDatabasePath = process.env.DATABASE_PATH;
 const explicitWorkspaceRoot = process.env.WORKSPACE_ROOT;
+const explicitMemoryDbPath = process.env.MEMORY_DB_PATH;
 
 if (existsSync(envFilePath)) {
   process.loadEnvFile?.(envFilePath);
@@ -129,6 +130,7 @@ const playwrightBaseWasExplicit = explicitEnvBeforeFile.has('PLAYWRIGHT_BASE_URL
 const playwrightApiWasExplicit = explicitEnvBeforeFile.has('PLAYWRIGHT_API_ORIGIN') || explicitPlaywrightApi !== undefined;
 const databasePathWasExplicit = explicitEnvBeforeFile.has('DATABASE_PATH') || explicitDatabasePath !== undefined;
 const workspaceRootWasExplicit = explicitEnvBeforeFile.has('WORKSPACE_ROOT') || explicitWorkspaceRoot !== undefined;
+const memoryDbPathWasExplicit = explicitEnvBeforeFile.has('MEMORY_DB_PATH') || explicitMemoryDbPath !== undefined;
 const resolvedPlaywrightBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
 const resolvedPlaywrightApiOrigin = process.env.PLAYWRIGHT_API_ORIGIN;
 if (shouldIgnoreLegacyPlaywrightUrl(resolvedPlaywrightBaseUrl, playwrightBaseWasExplicit, 'PLAYWRIGHT_BASE_URL')) {
@@ -143,6 +145,9 @@ if (!databasePathWasExplicit) {
 if (!workspaceRootWasExplicit) {
   delete process.env.WORKSPACE_ROOT;
 }
+if (!memoryDbPathWasExplicit) {
+  delete process.env.MEMORY_DB_PATH;
+}
 
 const playwrightBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${await getFreePort()}`;
 const playwrightApiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? `http://127.0.0.1:${await getFreePort()}`;
@@ -150,6 +155,7 @@ const runId = `${Date.now()}-${process.pid}`;
 const playwrightStateDir = resolve(repoRoot, 'data/playwright-stack', runId);
 const playwrightDatabasePath = process.env.DATABASE_PATH ?? resolve(playwrightStateDir, 'kalio-e2e.db');
 const playwrightWorkspaceRoot = process.env.WORKSPACE_ROOT ?? resolve(playwrightStateDir, 'workspaces');
+const playwrightMemoryDbPath = process.env.MEMORY_DB_PATH ?? resolve(playwrightStateDir, 'memory');
 mkdirSync(playwrightStateDir, { recursive: true });
 const stackEnv = normalizedWindowsEnv(process.env);
 const stack = spawn(process.execPath, ['./scripts/start-playwright-stack.mjs'], {
@@ -161,6 +167,7 @@ const stack = spawn(process.execPath, ['./scripts/start-playwright-stack.mjs'], 
     KALIO_PLAYWRIGHT_STATE_DIR: playwrightStateDir,
     DATABASE_PATH: playwrightDatabasePath,
     WORKSPACE_ROOT: playwrightWorkspaceRoot,
+    MEMORY_DB_PATH: playwrightMemoryDbPath,
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -249,6 +256,7 @@ try {
     TEST_API_URL: `${playwrightApiOrigin}/api`,
     DATABASE_PATH: playwrightDatabasePath,
     WORKSPACE_ROOT: playwrightWorkspaceRoot,
+    MEMORY_DB_PATH: playwrightMemoryDbPath,
   });
   const result = await run(process.execPath, [playwrightCli, 'test', ...forwardedArgs], {
     cwd: e2eDir,

@@ -211,6 +211,36 @@ describe('HistoryToolCallBubble — tool input args display', () => {
     expect(screen.getByText('input')).toBeInTheDocument();
   });
 
+  it('renders structured web_search v2 results instead of raw JSON', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="web_search"
+        content={JSON.stringify({
+          offline: true,
+          results: [
+            {
+              content: 'Stored web result about TypeScript 5.8',
+              citationUrls: ['https://example.com/typescript'],
+              blockType: 'paragraph',
+              headingPath: ['Release Notes'],
+              webResultId: 'web-1',
+              blockIndex: 0,
+              query: 'TypeScript latest',
+              provider: 'perplexity',
+              model: 'sonar',
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('web-search-result-renderer')).toBeInTheDocument();
+    expect(screen.getByText('Stored web result about TypeScript 5.8')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'https://example.com/typescript' })).toBeInTheDocument();
+    expect(screen.queryByText(/"offline": true/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/"results": \[/)).not.toBeInTheDocument();
+  });
+
   it('does NOT show args section when args is undefined', () => {
     render(<HistoryToolCallBubble toolName="list_raapps" content={NON_RAAPP_RESULT} />);
     // Open the expandable section if any
