@@ -86,7 +86,8 @@ export class MemoryController {
     @Query('query') query?: string,
     @Query('limit') limit?: string
   ): Promise<MemorySearchResult[]> {
-    const parsedLimit = limit ? parseInt(limit, 10) : 20;
+    const rawLimit = limit ? parseInt(limit, 10) : 20;
+    const parsedLimit = Number.isFinite(rawLimit) ? rawLimit : 20;
     if (query?.trim()) {
       return this.memoryService.searchWebResults(query.trim(), parsedLimit);
     }
