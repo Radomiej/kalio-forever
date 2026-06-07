@@ -12,6 +12,7 @@
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type {
   MemoryIngestResult,
   MemoryScopeSummary,
@@ -24,10 +25,13 @@ import type {
 } from '@kalio/types';
 import { MemoryService } from './memory.service';
 import { EmbeddingCredentialsService } from './embedding-credentials.service';
+import { LocalEmbeddingInstallService, type LocalEmbeddingAvailability } from './local-embedding-install.service';
 import {
   OpenAICompatibleEmbeddingProvider,
   OllamaEmbeddingProvider,
+  buildDefaultLocalEmbeddingConfig,
 } from './embedding.service';
+import { LocalTransformersEmbeddingProvider } from './local-transformers-embedding.provider';
 import type { IngestDto, IngestConversationDto } from './dto';
 
 @Controller('memory')
@@ -37,6 +41,8 @@ export class MemoryController {
   constructor(
     private readonly memoryService: MemoryService,
     private readonly embeddingCredentials: EmbeddingCredentialsService,
+    private readonly config: ConfigService,
+    private readonly localEmbeddingInstall: LocalEmbeddingInstallService,
   ) {}
 
   // ── Memory CRUD ─────────────────────────────────────────────────────────
@@ -106,6 +112,76 @@ export class MemoryController {
     await this.embeddingCredentials.updateLocalConfig(dto);
     await this.memoryService.getEmbeddingService().reloadFromCredential();
     return this.memoryService.getEmbeddingService().getStatus();
+  }
+
+  @Get('embedding-local')
+  async getLocalEmbeddingConfig(): Promise<UpdateLocalEmbeddingConfigDto> {
+    const config = await this.embeddingCredentials.getLocalConfig(buildDefaultLocalEmbeddingConfig(this.config));
+    return {
+      enabled: config.enabled,
+      model: config.model,
+      dimensions: config.dimensions,
+      backend: config.backend,
+    };
+  }
+
+  @Get('embedding-local/availability')
+  async getLocalEmbeddingAvailability(): Promise<LocalEmbeddingAvailability> {
+    const config = await this.embeddingCredentials.getLocalConfig(buildDefaultLocalEmbeddingConfig(this.config));
+    return this.localEmbeddingInstall.getAvailability(config);
+  }
+
+  @Post('embedding-local/install')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async installLocalEmbeddingModel(
+    @Body() dto?: UpdateLocalEmbeddingConfigDto,
+  ): Promise<LocalEmbeddingAvailability> {
+    const config = dto
+      ? { ...buildDefaultLocalEmbeddingConfig(this.config), ...dto }
+      : await this.embeddingCredentials.getLocalConfig(buildDefaultLocalEmbeddingConfig(this.config));
+    return this.localEmbeddingInstall.install(config);
+  }
+
+  @Post('embedding-local/test')
+  @HttpCode(HttpStatus.OK)
+  async testLocalEmbeddingConfig(
+    @Body() dto?: UpdateLocalEmbeddingConfigDto,
+  ): Promise<{ ok: boolean; error?: string; model: string; dimensions: number; backend: string }> {
+    const config = dto
+      ? { ...buildDefaultLocalEmbeddingConfig(this.config), ...dto }
+      : await this.embeddingCredentials.getLocalConfig(buildDefaultLocalEmbeddingConfig(this.config));
+    const availability = await this.localEmbeddingInstall.getAvailability(config);
+    if (availability.status !== 'ready') {
+      return {
+        ok: false,
+        error: availability.status === 'installing'
+          ? 'Local model is still installing. Wait for installation to finish before testing.'
+          : 'Local model is not installed yet. Use Install first.',
+        model: config.model,
+        dimensions: config.dimensions,
+        backend: config.backend,
+      };
+    }
+    const provider = new LocalTransformersEmbeddingProvider(config);
+    try {
+      const [vector] = await provider.embed(['test local embedding']);
+      return {
+        ok: true,
+        model: config.model,
+        dimensions: vector?.length ?? config.dimensions,
+        backend: config.backend,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        model: config.model,
+        dimensions: config.dimensions,
+        backend: config.backend,
+      };
+    } finally {
+      await provider.dispose();
+    }
   }
 
   // ── Embedding credentials CRUD ───────────────────────────────────────────

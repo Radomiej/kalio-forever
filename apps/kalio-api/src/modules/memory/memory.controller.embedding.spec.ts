@@ -8,6 +8,8 @@ import { DrizzleService } from '../../database/drizzle.service';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { EmbeddingCredentialsService } from './embedding-credentials.service';
 import { EmbeddingService } from './embedding.service';
+import { LocalEmbeddingInstallService } from './local-embedding-install.service';
+import { LocalTransformersEmbeddingProvider } from './local-transformers-embedding.provider';
 import { MemoryController } from './memory.controller';
 import { MemoryService } from './memory.service';
 
@@ -47,8 +49,27 @@ function makeTestDeps() {
     reembedAll: vi.fn(async () => ({ personas: 0, count: 0, model: 'Xenova/multilingual-e5-small' })),
   } as unknown as MemoryService;
 
-  const controller = new MemoryController(memoryService, embeddingCredentials);
-  return { controller, embeddingCredentials, embeddingService };
+  const localEmbeddingInstall = {
+    getAvailability: vi.fn(async () => ({
+      status: 'ready',
+      installed: true,
+      model: 'Xenova/multilingual-e5-small',
+      dimensions: 384,
+      backend: 'cpu',
+      message: 'Model installed and ready.',
+    })),
+    install: vi.fn(async () => ({
+      status: 'installing',
+      installed: false,
+      model: 'Xenova/multilingual-e5-small',
+      dimensions: 384,
+      backend: 'cpu',
+      message: 'Installing local model...',
+    })),
+  } as unknown as LocalEmbeddingInstallService;
+
+  const controller = new MemoryController(memoryService, embeddingCredentials, config, localEmbeddingInstall);
+  return { controller, embeddingCredentials, embeddingService, localEmbeddingInstall };
 }
 
 const BASE_DTO = {
@@ -66,9 +87,10 @@ describe('MemoryController — embedding credential routes', () => {
   let controller: MemoryController;
   let credentials: EmbeddingCredentialsService;
   let embeddingService: EmbeddingService;
+  let localEmbeddingInstall: LocalEmbeddingInstallService;
 
   beforeEach(async () => {
-    ({ controller, embeddingCredentials: credentials, embeddingService } = makeTestDeps());
+    ({ controller, embeddingCredentials: credentials, embeddingService, localEmbeddingInstall } = makeTestDeps());
     await embeddingService.reloadFromCredential();
   });
 
@@ -196,6 +218,114 @@ describe('MemoryController — embedding credential routes', () => {
       const status = await controller.getEmbeddingStatus();
       expect(status.source).toBe('db');
       expect(status.configured).toBe(true);
+    });
+  });
+
+  describe('local embedding config routes', () => {
+    it('returns the persisted local config separately from the active runtime status', async () => {
+      await controller.updateLocalEmbeddingConfig({
+        enabled: true,
+        model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+        dimensions: 384,
+        backend: 'cpu',
+      });
+
+      const remote = await controller.createEmbeddingCredential(BASE_DTO);
+      await controller.setActiveEmbeddingCredential(remote.id);
+
+      const localConfig = await controller.getLocalEmbeddingConfig();
+      const status = await controller.getEmbeddingStatus();
+
+      expect(localConfig).toEqual({
+        enabled: true,
+        model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+        dimensions: 384,
+        backend: 'cpu',
+      });
+      expect(status.source).toBe('db');
+      expect(status.model).toBe('text-embedding-3-small');
+    });
+
+    it('tests the current local form without requiring it to be saved first', async () => {
+      vi.mocked(localEmbeddingInstall.getAvailability).mockResolvedValueOnce({
+        status: 'ready',
+        installed: true,
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+        message: 'Model installed and ready.',
+      });
+      const embedSpy = vi.spyOn(LocalTransformersEmbeddingProvider.prototype, 'embed')
+        .mockResolvedValueOnce([[0.1, 0.2, 0.3]]);
+      const disposeSpy = vi.spyOn(LocalTransformersEmbeddingProvider.prototype, 'dispose')
+        .mockResolvedValueOnce();
+
+      const result = await controller.testLocalEmbeddingConfig({
+        enabled: true,
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+      });
+
+      expect(result).toEqual({
+        ok: true,
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 3,
+        backend: 'cpu',
+      });
+      expect(embedSpy).toHaveBeenCalledWith(['test local embedding']);
+      expect(disposeSpy).toHaveBeenCalled();
+    });
+
+    it('uses the persisted local config when no dto is provided and returns provider errors', async () => {
+      await controller.updateLocalEmbeddingConfig({
+        enabled: true,
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+      });
+      const embedSpy = vi.spyOn(LocalTransformersEmbeddingProvider.prototype, 'embed')
+        .mockRejectedValueOnce(new Error('model download failed'));
+      const disposeSpy = vi.spyOn(LocalTransformersEmbeddingProvider.prototype, 'dispose')
+        .mockResolvedValueOnce();
+
+      const result = await controller.testLocalEmbeddingConfig();
+
+      expect(result).toEqual({
+        ok: false,
+        error: 'model download failed',
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+      });
+      expect(embedSpy).toHaveBeenCalledWith(['test local embedding']);
+      expect(disposeSpy).toHaveBeenCalled();
+    });
+
+    it('blocks local test until the model is installed', async () => {
+      vi.mocked(localEmbeddingInstall.getAvailability).mockResolvedValueOnce({
+        status: 'missing',
+        installed: false,
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+        message: 'Model not installed yet.',
+      });
+
+      const result = await controller.testLocalEmbeddingConfig({
+        enabled: true,
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        error: 'Local model is not installed yet. Use Install first.',
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+      });
     });
   });
 

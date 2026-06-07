@@ -38,6 +38,7 @@ function makeEmbeddingCredentials() {
     clearActive: vi.fn().mockResolvedValue(undefined),
     setActive: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
+    getLocalConfig: vi.fn().mockImplementation(async (defaults) => defaults),
     getConfigById: vi.fn().mockResolvedValue({
       id: 'ec-1',
       apiKey: 'sk-key',
@@ -48,15 +49,46 @@ function makeEmbeddingCredentials() {
   };
 }
 
+function makeConfigService() {
+  return {
+    get: vi.fn().mockImplementation((_key: string, def?: unknown) => def),
+  };
+}
+
+function makeLocalEmbeddingInstall() {
+  return {
+    getAvailability: vi.fn().mockResolvedValue({
+      status: 'ready',
+      installed: true,
+      model: 'Xenova/multilingual-e5-small',
+      dimensions: 384,
+      backend: 'cpu',
+      message: 'Model installed and ready.',
+    }),
+    install: vi.fn().mockResolvedValue({
+      status: 'installing',
+      installed: false,
+      model: 'Xenova/multilingual-e5-small',
+      dimensions: 384,
+      backend: 'cpu',
+      message: 'Installing local model...',
+    }),
+  };
+}
+
 describe('MemoryController', () => {
   let controller: MemoryController;
   let memorySvc: ReturnType<typeof makeMemoryService>;
   let embeddingCreds: ReturnType<typeof makeEmbeddingCredentials>;
+  let config: ReturnType<typeof makeConfigService>;
+  let localInstall: ReturnType<typeof makeLocalEmbeddingInstall>;
 
   beforeEach(() => {
     memorySvc = makeMemoryService();
     embeddingCreds = makeEmbeddingCredentials();
-    controller = new MemoryController(memorySvc as never, embeddingCreds as never);
+    config = makeConfigService();
+    localInstall = makeLocalEmbeddingInstall();
+    controller = new MemoryController(memorySvc as never, embeddingCreds as never, config as never, localInstall as never);
   });
 
   describe('search()', () => {
@@ -115,6 +147,41 @@ describe('MemoryController', () => {
       expect(embeddingCreds.setActive).toHaveBeenCalledWith('ec-1');
       expect(memorySvc.getEmbeddingService().reloadFromCredential).toHaveBeenCalled();
       expect(result).toEqual(mockStatus);
+    });
+  });
+
+  describe('local embedding install routes', () => {
+    it('returns local availability for the persisted local config', async () => {
+      const result = await controller.getLocalEmbeddingAvailability();
+
+      expect(localInstall.getAvailability).toHaveBeenCalledWith(expect.objectContaining({
+        model: 'Xenova/multilingual-e5-small',
+        dimensions: 384,
+        backend: 'cpu',
+      }));
+      expect(result).toMatchObject({
+        status: 'ready',
+        installed: true,
+      });
+    });
+
+    it('starts an explicit local install for the current form config', async () => {
+      const result = await controller.installLocalEmbeddingModel({
+        enabled: true,
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+      });
+
+      expect(localInstall.install).toHaveBeenCalledWith(expect.objectContaining({
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+      }));
+      expect(result).toMatchObject({
+        status: 'installing',
+        installed: false,
+      });
     });
   });
 

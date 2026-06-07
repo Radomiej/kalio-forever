@@ -11,7 +11,7 @@ import {
   emptyForm,
   type AddForm,
 } from './EmbeddingProviderForm';
-import { LOCAL_BACKEND_LABELS, LocalEmbeddingConfigCard } from './LocalEmbeddingConfigCard';
+import { LOCAL_BACKEND_LABELS, LOCAL_MODELS, LocalEmbeddingConfigCard } from './LocalEmbeddingConfigCard';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -28,9 +28,38 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const LOCAL_MODEL_BY_ID = new Map<string, (typeof LOCAL_MODELS)[number]>(
+  LOCAL_MODELS.map((item) => [item.model, item]),
+);
+const DEFAULT_LOCAL_MODEL = LOCAL_MODELS[0];
+
+function normalizeLocalConfig(localCfg: UpdateLocalEmbeddingConfigDto) {
+  const supportedModel = LOCAL_MODEL_BY_ID.get(localCfg.model);
+  if (supportedModel) {
+    return { form: localCfg, warning: null as string | null };
+  }
+
+  return {
+    form: {
+      ...localCfg,
+      model: DEFAULT_LOCAL_MODEL.model,
+      dimensions: DEFAULT_LOCAL_MODEL.dimensions,
+    },
+    warning: `Saved local model ${localCfg.model} is not supported for local embeddings. Pick a supported local model and apply the settings.`,
+  };
+}
+
 // ── EmbeddingsPanel ────────────────────────────────────────────────────────
 
 export function EmbeddingsPanel() {
+  type LocalEmbeddingAvailability = {
+    status: 'missing' | 'installing' | 'ready' | 'error';
+    installed: boolean;
+    model: string;
+    dimensions: number;
+    backend: UpdateLocalEmbeddingConfigDto['backend'];
+    message: string | null;
+  };
   const [credentials, setCredentials] = useState<EmbeddingCredential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [status, setStatus] = useState<EmbeddingStatus | null>(null);
@@ -43,6 +72,10 @@ export function EmbeddingsPanel() {
   const [testErrors, setTestErrors] = useState<Record<string, string | null>>({});
   const [addTestState, setAddTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
   const [addTestError, setAddTestError] = useState<string | null>(null);
+  const [localTestState, setLocalTestState] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
+  const [localTestMessage, setLocalTestMessage] = useState<string | null>(null);
+  const [localConfigWarning, setLocalConfigWarning] = useState<string | null>(null);
+  const [localAvailability, setLocalAvailability] = useState<LocalEmbeddingAvailability | null>(null);
   const [localForm, setLocalForm] = useState<UpdateLocalEmbeddingConfigDto>({
     enabled: true,
     model: 'Xenova/multilingual-e5-small',
@@ -50,26 +83,27 @@ export function EmbeddingsPanel() {
     backend: 'cpu',
   });
   const [localDirty, setLocalDirty] = useState(false);
-  const [reindexPersonaId, setReindexPersonaId] = useState('');
   const [reindexResult, setReindexResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [creds, st] = await Promise.all([
+      const [creds, st, localCfg] = await Promise.all([
         apiFetch<EmbeddingCredential[]>('/memory/embedding-credentials'),
         apiFetch<EmbeddingStatus>('/memory/status/embedding'),
+        apiFetch<UpdateLocalEmbeddingConfigDto>('/memory/embedding-local'),
       ]);
+      const normalizedLocal = normalizeLocalConfig(localCfg);
+      const availability = await apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability');
       setCredentials(creds);
       setStatus(st);
       setActiveId(st.activeCredentialId ?? null);
-      setLocalForm({
-        enabled: st.provider !== 'disabled',
-        model: st.model || 'Xenova/multilingual-e5-small',
-        dimensions: st.dimensions || 384,
-        backend: 'cpu',
-      });
-      setLocalDirty(false);
+      setLocalForm(normalizedLocal.form);
+      setLocalDirty(Boolean(normalizedLocal.warning));
+      setLocalConfigWarning(normalizedLocal.warning);
+      setLocalAvailability(availability);
+      setLocalTestState('idle');
+      setLocalTestMessage(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
@@ -78,6 +112,22 @@ export function EmbeddingsPanel() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (localAvailability?.status !== 'installing') {
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability')
+        .then((availability) => {
+          setLocalAvailability(availability);
+        })
+        .catch(() => {
+          // keep current installing state until the next explicit action
+        });
+    }, 1200);
+    return () => window.clearTimeout(handle);
+  }, [localAvailability]);
 
   const handleProviderChange = (provider: string) => {
     const label = PROVIDER_LABELS[provider] ?? provider;
@@ -103,28 +153,13 @@ export function EmbeddingsPanel() {
       });
       setStatus(st);
       setActiveId(st.activeCredentialId ?? null);
+      setLocalForm(localForm);
       setLocalDirty(false);
+      setLocalConfigWarning(null);
+      setLocalAvailability(await apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability'));
       setReindexResult('Settings saved. Run reindex to refresh existing memories.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save local embedding config');
-    } finally {
-      setSyncing(null);
-    }
-  };
-
-  const reindexPersona = async () => {
-    if (!reindexPersonaId.trim()) {
-      setError('Enter persona id before reindexing');
-      return;
-    }
-    setSyncing('reindex');
-    setError(null);
-    setReindexResult(null);
-    try {
-      const result = await apiFetch<{ count: number; model: string }>(`/memory/${encodeURIComponent(reindexPersonaId.trim())}/reembed`, { method: 'POST' });
-      setReindexResult(`Reindexed ${result.count} memories`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reindex memories');
     } finally {
       setSyncing(null);
     }
@@ -139,6 +174,45 @@ export function EmbeddingsPanel() {
       setActiveId(st.activeCredentialId ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to activate local embeddings');
+    } finally {
+      setSyncing(null);
+    }
+  };
+
+  const testLocalProvider = async () => {
+    setLocalTestState('testing');
+    setLocalTestMessage(null);
+    try {
+      const result = await apiFetch<{ ok: boolean; error?: string; model: string; dimensions: number; backend: string }>('/memory/embedding-local/test', {
+        method: 'POST',
+        body: JSON.stringify(localForm),
+      });
+      if (result.ok) {
+        setLocalTestState('ok');
+        setLocalTestMessage(`Local embedding ready: ${result.model} (${result.dimensions}d, ${result.backend})`);
+      } else {
+        setLocalTestState('error');
+        setLocalTestMessage(result.error ?? 'Local embedding test failed');
+      }
+    } catch (err) {
+      setLocalTestState('error');
+      setLocalTestMessage(err instanceof Error ? err.message : 'Local embedding test failed');
+    }
+  };
+
+  const installLocalProvider = async () => {
+    setSyncing('install-local');
+    setError(null);
+    setLocalTestState('idle');
+    setLocalTestMessage(null);
+    try {
+      const result = await apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/install', {
+        method: 'POST',
+        body: JSON.stringify(localForm),
+      });
+      setLocalAvailability(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to install local model');
     } finally {
       setSyncing(null);
     }
@@ -325,16 +399,24 @@ export function EmbeddingsPanel() {
             form={localForm}
             dirty={localDirty}
             syncing={syncing}
-            reindexPersonaId={reindexPersonaId}
             reindexResult={reindexResult}
-            status={status}
-            onChange={setLocalForm}
-            onDirtyChange={setLocalDirty}
-            onSave={() => void saveLocalConfig()}
-            onUseLocal={() => void activateLocalProvider()}
-            onReindex={() => void reindexPersona()}
-            onReindexAll={() => void reindexAll()}
-            onReindexPersonaChange={setReindexPersonaId}
+              status={status}
+              localTestState={localTestState}
+              localTestMessage={localTestMessage}
+              localConfigWarning={localConfigWarning}
+              localAvailability={localAvailability}
+              onChange={setLocalForm}
+              onDirtyChange={(dirty) => {
+                setLocalDirty(dirty);
+                setLocalAvailability(null);
+                setLocalTestState('idle');
+                setLocalTestMessage(null);
+              }}
+              onSave={() => void saveLocalConfig()}
+              onInstall={() => void installLocalProvider()}
+              onTest={() => void testLocalProvider()}
+              onUseLocal={() => void activateLocalProvider()}
+              onReindexAll={() => void reindexAll()}
           />
 
           {/* Add provider form */}

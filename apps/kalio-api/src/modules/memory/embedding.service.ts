@@ -60,7 +60,43 @@ function buildLocalProvider(config: LocalEmbeddingConfig): IEmbeddingProvider {
     dimensions: config.dimensions,
     cacheDir: config.cacheDir,
     backend: config.backend,
+    allowRemoteModels: false,
   });
+}
+
+function parseNumberOrDefault(value: string, fallback: number): number {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function buildDefaultLocalEmbeddingConfig(config: ConfigService): LocalEmbeddingConfig {
+  const hasRemoteEmbeddingEnv = Boolean(config.get<string>('EMBEDDING_API_KEY', '') && config.get<string>('EMBEDDING_BASE_URL', ''));
+  const legacyLocalModel = hasRemoteEmbeddingEnv
+    ? DEFAULT_LOCAL_EMBEDDING_MODEL
+    : config.get<string>('EMBEDDING_MODEL', DEFAULT_LOCAL_EMBEDDING_MODEL);
+  const legacyLocalDimensions = hasRemoteEmbeddingEnv
+    ? DEFAULT_LOCAL_EMBEDDING_DIMENSIONS
+    : parseNumberOrDefault(
+      config.get<string>('EMBEDDING_DIMENSIONS', String(DEFAULT_LOCAL_EMBEDDING_DIMENSIONS)),
+      DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
+    );
+
+  return {
+    enabled: config.get<string>('EMBEDDING_ENABLED', 'true') !== 'false',
+    model: config.get<string>('EMBEDDING_LOCAL_MODEL', legacyLocalModel),
+    dimensions: parseNumberOrDefault(
+      config.get<string>('EMBEDDING_LOCAL_DIMENSIONS', String(legacyLocalDimensions)),
+      legacyLocalDimensions,
+    ),
+    cacheDir: config.get<string>(
+      'EMBEDDING_LOCAL_CACHE_DIR',
+      config.get<string>('EMBEDDING_CACHE_DIR', DEFAULT_LOCAL_EMBEDDING_CACHE_DIR),
+    ),
+    backend: config.get<LocalEmbeddingBackend>(
+      'EMBEDDING_LOCAL_BACKEND',
+      config.get<LocalEmbeddingBackend>('EMBEDDING_BACKEND', DEFAULT_LOCAL_EMBEDDING_BACKEND),
+    ),
+  };
 }
 
 function sanitizeProfilePart(value: string): string {
@@ -137,13 +173,7 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
     // it causes confusing runtime failures.
     const apiKey = this.config.get<string>('EMBEDDING_API_KEY', '');
     const baseUrl = this.config.get<string>('EMBEDDING_BASE_URL', '');
-    const localDefaults: LocalEmbeddingConfig = {
-      enabled: this.config.get<string>('EMBEDDING_ENABLED', 'true') !== 'false',
-      model: this.config.get<string>('EMBEDDING_MODEL', DEFAULT_LOCAL_EMBEDDING_MODEL),
-      dimensions: parseInt(this.config.get<string>('EMBEDDING_DIMENSIONS', String(DEFAULT_LOCAL_EMBEDDING_DIMENSIONS)), 10),
-      cacheDir: this.config.get<string>('EMBEDDING_CACHE_DIR', DEFAULT_LOCAL_EMBEDDING_CACHE_DIR),
-      backend: this.config.get<LocalEmbeddingBackend>('EMBEDDING_BACKEND', DEFAULT_LOCAL_EMBEDDING_BACKEND),
-    };
+    const localDefaults = buildDefaultLocalEmbeddingConfig(this.config);
     const localConfig = await this.embeddingCredentials.getLocalConfig(localDefaults);
     const remoteModel = this.config.get<string>('EMBEDDING_MODEL', DEFAULT_REMOTE_EMBEDDING_MODEL);
     const remoteDimensions = parseInt(
@@ -263,12 +293,12 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
   }
 
   getDimensions(): number {
-    return this.activeDimensions ?? parseInt(this.config.get<string>('EMBEDDING_DIMENSIONS', String(DEFAULT_LOCAL_EMBEDDING_DIMENSIONS)), 10);
+    return this.activeDimensions ?? buildDefaultLocalEmbeddingConfig(this.config).dimensions;
   }
 
   async getModelName(): Promise<string> {
     if (this.activeModel) return this.activeModel;
-    return this.config.get<string>('EMBEDDING_MODEL', DEFAULT_LOCAL_EMBEDDING_MODEL);
+    return buildDefaultLocalEmbeddingConfig(this.config).model;
   }
 
   getProfileId(): string {
