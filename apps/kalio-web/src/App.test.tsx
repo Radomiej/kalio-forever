@@ -16,7 +16,6 @@ const CONFIG_WITH_API_KEY: LLMConfigWithSource = {
 const {
   setCanvasOpen,
   setBackendConfig,
-  fetchMock,
   apiGet,
   identifySession,
   onReconnect,
@@ -28,7 +27,6 @@ const {
 } = vi.hoisted(() => ({
   setCanvasOpen: vi.fn(),
   setBackendConfig: vi.fn(),
-  fetchMock: vi.fn(),
   apiGet: vi.fn(),
   identifySession: vi.fn(),
   reconnectHandlers: [] as Array<() => void>,
@@ -230,16 +228,25 @@ describe('App view state persistence', () => {
         { id: 'agent-child-1', title: 'Agent child', updatedAt: Date.now(), kind: 'subagent', parentSessionId: 'session-1' },
       ],
     });
-    fetchMock.mockResolvedValue({
-      json: async () => ({
-        provider: 'mock',
-        model: 'test-model',
-        baseUrl: 'http://localhost',
-        contextWindowSize: 32000,
-        maxToolAttempts: 4,
-      }),
+    apiGet.mockImplementation((url: string) => {
+      if (url === '/api/llm/config') {
+        return Promise.resolve({
+          data: {
+            provider: 'mock',
+            model: 'test-model',
+            baseUrl: 'http://localhost',
+            contextWindowSize: 32000,
+            maxToolAttempts: 4,
+          },
+        });
+      }
+      return Promise.resolve({
+        data: [
+          { id: 'session-1', title: 'Session 1', updatedAt: Date.now() },
+          { id: 'agent-child-1', title: 'Agent child', updatedAt: Date.now(), kind: 'subagent', parentSessionId: 'session-1' },
+        ],
+      });
     });
-    vi.stubGlobal('fetch', fetchMock);
   });
 
   it('hydrates the stored section and nested tab on first mount', () => {
@@ -447,11 +454,18 @@ describe('App view state persistence', () => {
 
   it('identifies every known non-archived session once so Home can replay HITL confirmations', async () => {
     sessionStoreState.sessions = [];
-    apiGet.mockResolvedValueOnce({
-      data: [
-        { id: 'session-1', title: 'Session 1', updatedAt: 1 },
-        { id: 'agent-child-1', title: 'Agent child', updatedAt: 2, kind: 'subagent', parentSessionId: 'session-1' },
-      ],
+    const sessionsFromApi = [
+      { id: 'session-1', title: 'Session 1', updatedAt: 1 },
+      { id: 'agent-child-1', title: 'Agent child', updatedAt: 2, kind: 'subagent', parentSessionId: 'session-1' },
+    ];
+    apiGet.mockImplementation((url: string) => {
+      if (url === '/api/llm/config') {
+        return Promise.resolve({ data: CONFIG_WITH_API_KEY });
+      }
+      if (url === '/api/sessions') {
+        return Promise.resolve({ data: sessionsFromApi });
+      }
+      return Promise.resolve({ data: [] });
     });
 
     render(<App />);
@@ -460,8 +474,8 @@ describe('App view state persistence', () => {
       expect(apiGet).toHaveBeenCalledWith('/api/sessions');
     });
     expect(setSessions).toHaveBeenCalledWith([
-      { id: 'agent-child-1', title: 'Agent child', updatedAt: 2, kind: 'subagent', parentSessionId: 'session-1' },
-      { id: 'session-1', title: 'Session 1', updatedAt: 1 },
+      sessionsFromApi[1],
+      sessionsFromApi[0],
     ]);
     expect(identifySession).toHaveBeenCalledWith('session-1');
     expect(identifySession).not.toHaveBeenCalledWith('agent-child-1');
@@ -477,9 +491,11 @@ describe('App view state persistence', () => {
     identifySession.mockClear();
     reconnectHandlers[0]?.();
 
-    expect(identifySession).toHaveBeenCalledWith('session-1');
-    expect(identifySession).toHaveBeenCalledWith('session-2');
-    expect(identifySession).toHaveBeenCalledTimes(2);
+    return waitFor(() => {
+      expect(identifySession).toHaveBeenCalledWith('session-1');
+      expect(identifySession).toHaveBeenCalledWith('session-2');
+      expect(identifySession).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('skips re-identifying the active session on reconnect because chat already replays it', () => {
@@ -490,16 +506,26 @@ describe('App view state persistence', () => {
     identifySession.mockClear();
     reconnectHandlers[0]?.();
 
-    expect(identifySession).toHaveBeenCalledWith('session-2');
-    expect(identifySession).not.toHaveBeenCalledWith('session-1');
-    expect(identifySession).toHaveBeenCalledTimes(1);
+    return waitFor(() => {
+      expect(identifySession).toHaveBeenCalledWith('session-2');
+      expect(identifySession).not.toHaveBeenCalledWith('session-1');
+      expect(identifySession).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('merges bootstrap sessions without dropping newer local ones when the api response arrives late', async () => {
     let resolveSessions!: (value: { data: Array<{ id: string; updatedAt: number; title?: string; kind?: string; parentSessionId?: string }> }) => void;
-    apiGet.mockReturnValueOnce(new Promise((resolve) => {
-      resolveSessions = resolve;
-    }));
+    apiGet.mockImplementation((url: string) => {
+      if (url === '/api/llm/config') {
+        return Promise.resolve({ data: CONFIG_WITH_API_KEY });
+      }
+      if (url === '/api/sessions') {
+        return new Promise((resolve) => {
+          resolveSessions = resolve;
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
     sessionStoreState.sessions = [];
 
     render(<App />);
@@ -508,18 +534,20 @@ describe('App view state persistence', () => {
       { id: 'session-local-new', title: 'Local New', updatedAt: 10 },
     ];
 
+    const delayedSessions = [
+      { id: 'session-1', title: 'Session 1', updatedAt: 1 },
+    ];
+
     await act(async () => {
       resolveSessions({
-        data: [
-          { id: 'session-1', title: 'Session 1', updatedAt: 1 },
-        ],
+        data: delayedSessions,
       });
     });
 
     await waitFor(() => {
       expect(setSessions).toHaveBeenCalledWith([
         { id: 'session-local-new', title: 'Local New', updatedAt: 10 },
-        { id: 'session-1', title: 'Session 1', updatedAt: 1 },
+        ...delayedSessions,
       ]);
     });
   });

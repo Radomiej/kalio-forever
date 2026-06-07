@@ -1139,6 +1139,7 @@ describe('SubagentRuntimeService nested subagents', () => {
           ? [{ role: 'tool' as const, content: savedToolResults[0]!.content, toolCallId: savedToolResults[0]!.toolCallId }]
           : [],
         unboundedHistoryCount: 0,
+        compacted: false,
       })),
     } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const audit = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
@@ -1300,6 +1301,7 @@ describe('SubagentRuntimeService nested subagents', () => {
           ? [{ role: 'tool' as const, content: savedToolResults[0]!.content, toolCallId: savedToolResults[0]!.toolCallId }]
           : [],
         unboundedHistoryCount: 0,
+        compacted: false,
       })),
     } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const audit = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };

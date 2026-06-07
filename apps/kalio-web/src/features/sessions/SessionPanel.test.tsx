@@ -461,6 +461,38 @@ describe('SessionPanel', () => {
     await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ title: 'New Chat' })));
   });
 
+  it('new session button uses the first available persona instead of hardcoded default', async () => {
+    mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'p1', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId('new-session-btn'));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
+      personaId: 'p1',
+      title: 'New Chat',
+    })));
+  });
+
+  it('falls back to default persona when personas are unavailable during new session creation', async () => {
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+    mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'default', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId('new-session-btn'));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
+      personaId: 'default',
+      title: 'New Chat',
+    })));
+  });
+
   it('calls onSelect when a session is clicked', async () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
