@@ -54,7 +54,7 @@ describe('EmbeddingsPanel', () => {
       'GET /api/memory/embedding-credentials': [[]],
       'GET /api/memory/status/embedding': [LOCAL_STATUS],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }, { status: 'missing', installed: false, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu', message: 'Model not installed yet.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }, { status: 'missing', installed: false, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu', message: 'Model not installed yet.' }],
       'PUT /api/memory/embedding-local': [{ ...LOCAL_STATUS, backend: 'cpu', profileId: 'local-transformers-xenova-multilingual-e5-small-384-cpu' }],
     });
 
@@ -84,7 +84,7 @@ describe('EmbeddingsPanel', () => {
       'GET /api/memory/embedding-credentials': [[]],
       'GET /api/memory/status/embedding': [LOCAL_STATUS],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
     });
 
     render(<EmbeddingsPanel />);
@@ -106,7 +106,7 @@ describe('EmbeddingsPanel', () => {
       'GET /api/memory/embedding-credentials': [[]],
       'GET /api/memory/status/embedding': [LOCAL_STATUS],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
       'PUT /api/memory/embedding-local': [disabledStatus],
     });
 
@@ -130,7 +130,7 @@ describe('EmbeddingsPanel', () => {
       'GET /api/memory/embedding-credentials': [[]],
       'GET /api/memory/status/embedding': [LOCAL_STATUS],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
     });
 
     render(<EmbeddingsPanel />);
@@ -158,7 +158,7 @@ describe('EmbeddingsPanel', () => {
       'GET /api/memory/embedding-credentials': [[]],
       'GET /api/memory/status/embedding': [LOCAL_STATUS],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
       'POST /api/memory/reembed-all': [{ personas: 2, count: 7, model: 'Xenova/multilingual-e5-small' }],
     });
 
@@ -195,7 +195,10 @@ describe('EmbeddingsPanel', () => {
       }]],
       'GET /api/memory/status/embedding': [remoteStatus],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
+      'POST /api/memory/embedding-local/availability': [
+        { status: 'ready', installed: true, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' },
+        { status: 'ready', installed: true, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' },
+      ],
       'DELETE /api/memory/embedding-credentials/active': [LOCAL_STATUS],
     });
 
@@ -206,6 +209,37 @@ describe('EmbeddingsPanel', () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/memory/embedding-credentials/active' && init?.method === 'DELETE')).toBe(true);
     });
+  });
+
+  it('blocks switching from a remote provider back to local embeddings when the local model is missing', async () => {
+    const remoteStatus: EmbeddingStatus = {
+      ...LOCAL_STATUS,
+      provider: 'openai-compatible',
+      source: 'db',
+      activeCredentialId: 'cred-1',
+      activeCredentialName: 'Remote',
+      model: 'text-embedding-3-small',
+      dimensions: 1536,
+    };
+    const fetchMock = installFetchQueue({
+      'GET /api/memory/embedding-credentials': [[{
+        id: 'cred-1',
+        name: 'Remote',
+        provider: 'openai',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'text-embedding-3-small',
+        dimensions: 1536,
+        createdAt: Date.now(),
+      }]],
+      'GET /api/memory/status/embedding': [remoteStatus],
+      'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'missing', installed: false, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu', message: 'Model not installed yet.' }],
+    });
+
+    render(<EmbeddingsPanel />);
+
+    expect(await screen.findByTestId('embedding-use-local-btn')).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/memory/embedding-credentials/active' && init?.method === 'DELETE')).toBe(false);
   });
 
   it('can configure, probe, and add an Ollama embedding provider without an API key', async () => {
@@ -223,7 +257,7 @@ describe('EmbeddingsPanel', () => {
       'GET /api/memory/embedding-credentials': [[]],
       'GET /api/memory/status/embedding': [LOCAL_STATUS],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
       'POST /api/memory/embedding-credentials/probe': [{ ok: true }],
       'POST /api/memory/embedding-credentials': [createdCredential],
     });
@@ -283,7 +317,7 @@ describe('EmbeddingsPanel', () => {
         dimensions: 1536,
         backend: 'cpu',
       }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'missing', installed: false, model: 'text-embedding-3-small', dimensions: 1536, backend: 'cpu', message: 'Model not installed yet.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'missing', installed: false, model: 'text-embedding-3-small', dimensions: 1536, backend: 'cpu', message: 'Model not installed yet.' }],
     });
 
     render(<EmbeddingsPanel />);
@@ -299,7 +333,7 @@ describe('EmbeddingsPanel', () => {
       'GET /api/memory/embedding-credentials': [[]],
       'GET /api/memory/status/embedding': [LOCAL_STATUS],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
       'POST /api/memory/embedding-local/test': [{ ok: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
     });
 
@@ -330,7 +364,7 @@ describe('EmbeddingsPanel', () => {
         dimensions: 768,
         backend: 'cpu',
       }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-base', dimensions: 768, backend: 'cpu', message: 'Model installed and ready.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-base', dimensions: 768, backend: 'cpu', message: 'Model installed and ready.' }],
     });
 
     render(<EmbeddingsPanel />);
@@ -347,7 +381,7 @@ describe('EmbeddingsPanel', () => {
       'GET /api/memory/embedding-credentials': [[]],
       'GET /api/memory/status/embedding': [LOCAL_STATUS],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
       'POST /api/memory/embedding-local/test': [{ ok: false, error: 'pipeline init failed', model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
     });
 
@@ -365,7 +399,7 @@ describe('EmbeddingsPanel', () => {
       'GET /api/memory/embedding-credentials': [[]],
       'GET /api/memory/status/embedding': [LOCAL_STATUS],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'missing', installed: false, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model not installed yet.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'missing', installed: false, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model not installed yet.' }],
     });
 
     render(<EmbeddingsPanel />);
@@ -381,7 +415,7 @@ describe('EmbeddingsPanel', () => {
       'GET /api/memory/embedding-credentials': [[]],
       'GET /api/memory/status/embedding': [LOCAL_STATUS],
       'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
-      'GET /api/memory/embedding-local/availability': [{ status: 'missing', installed: false, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model not installed yet.' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'missing', installed: false, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model not installed yet.' }],
       'POST /api/memory/embedding-local/install': [
         { status: 'installing', installed: false, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Installing local model...' },
       ],

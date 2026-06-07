@@ -109,6 +109,14 @@ describe('ContextStats', () => {
       ],
       messages: [
         { role: 'system', content: 'Persona base', source: 'system_prompt', estimatedTokens: 20 },
+        {
+          role: 'assistant',
+          content: 'tool call wrapper',
+          source: 'history',
+          estimatedTokens: 12,
+          toolCalls: [{ id: 'call-1', name: 'vfs_read', args: { path: 'README.md' } }],
+        },
+        { role: 'tool', content: '{"ok":true}', source: 'history', estimatedTokens: 6, toolCallId: 'call-1' },
         { role: 'user', content: 'draft question', source: 'draft', estimatedTokens: 4 },
       ],
     };
@@ -128,6 +136,8 @@ describe('ContextStats', () => {
     expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('Messages sent to model');
     expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('draft question');
     expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('vfs_read');
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('call-1');
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('README.md');
     expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('8 -> 4');
   });
 

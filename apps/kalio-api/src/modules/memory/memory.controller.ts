@@ -11,6 +11,7 @@
   HttpStatus,
   Logger,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
@@ -127,8 +128,9 @@ export class MemoryController {
 
   @Get('embedding-local/availability')
   async getLocalEmbeddingAvailability(): Promise<LocalEmbeddingAvailability> {
-    const config = await this.embeddingCredentials.getLocalConfig(buildDefaultLocalEmbeddingConfig(this.config));
-    return this.localEmbeddingInstall.getAvailability(config);
+    return this.localEmbeddingInstall.getAvailability(
+      await this.resolveEffectiveLocalEmbeddingConfig(),
+    );
   }
 
   @Post('embedding-local/install')
@@ -136,10 +138,18 @@ export class MemoryController {
   async installLocalEmbeddingModel(
     @Body() dto?: UpdateLocalEmbeddingConfigDto,
   ): Promise<LocalEmbeddingAvailability> {
-    const config = dto
-      ? { ...buildDefaultLocalEmbeddingConfig(this.config), ...dto }
-      : await this.embeddingCredentials.getLocalConfig(buildDefaultLocalEmbeddingConfig(this.config));
+    const config = await this.resolveEffectiveLocalEmbeddingConfig(dto);
     return this.localEmbeddingInstall.install(config);
+  }
+
+  @Post('embedding-local/availability')
+  @HttpCode(HttpStatus.OK)
+  async getEffectiveLocalEmbeddingAvailability(
+    @Body() dto?: UpdateLocalEmbeddingConfigDto,
+  ): Promise<LocalEmbeddingAvailability> {
+    return this.localEmbeddingInstall.getAvailability(
+      await this.resolveEffectiveLocalEmbeddingConfig(dto),
+    );
   }
 
   @Post('embedding-local/test')
@@ -147,9 +157,7 @@ export class MemoryController {
   async testLocalEmbeddingConfig(
     @Body() dto?: UpdateLocalEmbeddingConfigDto,
   ): Promise<{ ok: boolean; error?: string; model: string; dimensions: number; backend: string }> {
-    const config = dto
-      ? { ...buildDefaultLocalEmbeddingConfig(this.config), ...dto }
-      : await this.embeddingCredentials.getLocalConfig(buildDefaultLocalEmbeddingConfig(this.config));
+    const config = await this.resolveEffectiveLocalEmbeddingConfig(dto);
     const availability = await this.localEmbeddingInstall.getAvailability(config);
     if (availability.status !== 'ready') {
       return {
@@ -205,6 +213,7 @@ export class MemoryController {
   @Delete('embedding-credentials/active')
   async clearActiveEmbeddingCredential(): Promise<EmbeddingStatus> {
     this.logger.log('Active embedding credential cleared');
+    await this.ensureLocalEmbeddingReadyBeforeActivation();
     await this.embeddingCredentials.clearActive();
     await this.memoryService.getEmbeddingService().reloadFromCredential();
     return this.memoryService.getEmbeddingService().getStatus();
@@ -319,5 +328,32 @@ export class MemoryController {
   ): Promise<{ deleted: boolean }> {
     const deleted = this.memoryService.delete(id, personaId);
     return { deleted };
+  }
+
+  private async resolveEffectiveLocalEmbeddingConfig(dto?: UpdateLocalEmbeddingConfigDto) {
+    const defaults = buildDefaultLocalEmbeddingConfig(this.config);
+    const persisted = await this.embeddingCredentials.getLocalConfig(defaults);
+    if (!dto) {
+      return persisted;
+    }
+    return {
+      ...persisted,
+      ...dto,
+    };
+  }
+
+  private async ensureLocalEmbeddingReadyBeforeActivation(): Promise<void> {
+    const config = await this.resolveEffectiveLocalEmbeddingConfig();
+    if (!config.enabled) {
+      return;
+    }
+    const availability = await this.localEmbeddingInstall.getAvailability(config);
+    if (availability.status === 'ready') {
+      return;
+    }
+    if (availability.status === 'installing') {
+      throw new BadRequestException('Local model is still installing. Wait for installation to finish before using local embeddings.');
+    }
+    throw new BadRequestException('Local model is not installed yet. Install the selected local model before using local embeddings.');
   }
 }

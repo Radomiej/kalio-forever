@@ -48,6 +48,20 @@ function rootReplaySessions(sessions: ChatSession[]): ChatSession[] {
   return sessions.filter((session) => !session.parentSessionId || !ids.has(session.parentSessionId));
 }
 
+function mergeSessionsPreservingLocal(current: ChatSession[], incoming: ChatSession[]): ChatSession[] {
+  const merged = new Map<string, ChatSession>();
+  for (const session of current) {
+    merged.set(session.id, session);
+  }
+  for (const session of incoming) {
+    const existing = merged.get(session.id);
+    if (!existing || session.updatedAt >= existing.updatedAt) {
+      merged.set(session.id, existing ? { ...existing, ...session } : session);
+    }
+  }
+  return Array.from(merged.values()).sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
 export function App() {
   const initialViewState = loadAppViewState();
   const [activeSection, setActiveSection] = useState<ActiveSection>(initialViewState.activeSection);
@@ -70,6 +84,7 @@ export function App() {
   const hasPendingConfirmation = pendingConfirmationCount > 0;
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
   const identifiedHitlSessionsRef = useRef<Set<string>>(new Set());
+  const bootstrapFetchSeqRef = useRef(0);
 
   const identifyHitlSession = useCallback((sessionId: string) => {
     if (!sessionId.trim() || identifiedHitlSessionsRef.current.has(sessionId)) {
@@ -96,11 +111,17 @@ export function App() {
     if (sessions.length > 0) {
       return;
     }
+    const requestSeq = bootstrapFetchSeqRef.current + 1;
+    bootstrapFetchSeqRef.current = requestSeq;
     apiClient
       .get<ChatSession[]>('/api/sessions')
       .then((response) => {
-        setSessions(response.data);
-        rootReplaySessions(response.data).forEach((session) => identifyHitlSession(session.id));
+        if (bootstrapFetchSeqRef.current !== requestSeq) {
+          return;
+        }
+        const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, response.data);
+        setSessions(mergedSessions);
+        rootReplaySessions(mergedSessions).forEach((session) => identifyHitlSession(session.id));
       })
       .catch((err: unknown) => {
         console.warn('[App] Failed to load sessions for HITL replay', err);
@@ -114,7 +135,10 @@ export function App() {
   useEffect(() => {
     const offReconnect = eventBus.onReconnect(() => {
       identifiedHitlSessionsRef.current.clear();
-      rootReplaySessions(useSessionStore.getState().sessions).forEach((session) => identifyHitlSession(session.id));
+      const activeSessionId = useSessionStore.getState().activeSessionId;
+      rootReplaySessions(useSessionStore.getState().sessions)
+        .filter((session) => session.id !== activeSessionId)
+        .forEach((session) => identifyHitlSession(session.id));
     });
     return offReconnect;
   }, [identifyHitlSession]);

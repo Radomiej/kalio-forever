@@ -67,6 +67,7 @@ export function LocalEmbeddingConfigCard({
   };
   const runtimeDiffers = status?.source === 'local'
     && (status.model !== form.model || status.dimensions !== form.dimensions || (status.backend && status.backend !== form.backend));
+  const canUseLocal = localAvailability?.status === 'ready';
 
   return (
     <div className="border border-base-300 rounded-lg p-3 flex flex-col gap-3" data-testid="embedding-local-config">
@@ -149,7 +150,7 @@ export function LocalEmbeddingConfigCard({
           {localTestState === 'testing' ? <Loader2 size={13} className="animate-spin" /> : null}
           Test local
         </button>
-        <button className="btn btn-outline btn-sm" disabled={syncing === 'use-local'} onClick={onUseLocal} data-testid="embedding-use-local-btn">
+        <button className="btn btn-outline btn-sm" disabled={!canUseLocal || syncing === 'use-local'} onClick={onUseLocal} data-testid="embedding-use-local-btn">
           {syncing === 'use-local' ? <Loader2 size={13} className="animate-spin" /> : null}
           Use local
         </button>

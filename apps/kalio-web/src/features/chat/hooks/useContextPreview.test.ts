@@ -155,4 +155,25 @@ describe('useContextPreview', () => {
     expect(result.current.preview).toBeNull();
     expect(result.current.tokenCount).toBeNull();
   });
+
+  it('keeps the previous preview marked stale when a refresh fails', async () => {
+    apiPostMock
+      .mockResolvedValueOnce({ data: makePreview() })
+      .mockRejectedValueOnce(new Error('Preview failed'));
+
+    const { result } = renderHook(() => useContextPreview({
+      sessionId: 'session-1',
+      personaId: 'persona-1',
+      draftUserMessage: 'draft',
+      refreshKey: 0,
+    }));
+
+    await waitFor(() => expect(result.current.preview).toBeTruthy());
+
+    act(() => result.current.invalidate());
+
+    await waitFor(() => expect(result.current.error).toBe('Preview failed'));
+    expect(result.current.preview).toBeTruthy();
+    expect(result.current.stale).toBe(true);
+  });
 });

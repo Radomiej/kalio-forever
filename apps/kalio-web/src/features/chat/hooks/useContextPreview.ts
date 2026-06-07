@@ -54,10 +54,16 @@ export function useContextPreview({
   const [preview, setPreview] = useState<LLMContextPreview | null>(null);
   const [tokenCount, setTokenCount] = useState<TokenCount | null>(null);
   const [loading, setLoading] = useState(false);
+  const [stale, setStale] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [manualRefreshKey, setManualRefreshKey] = useState(0);
   const requestSeqRef = useRef(0);
+  const previewRef = useRef<LLMContextPreview | null>(null);
   const attachmentsSignature = JSON.stringify(attachments ?? []);
+
+  useEffect(() => {
+    previewRef.current = preview;
+  }, [preview]);
 
   const invalidate = useCallback(() => {
     setManualRefreshKey((value) => value + 1);
@@ -69,6 +75,7 @@ export function useContextPreview({
       setPreview(null);
       setTokenCount(null);
       setLoading(false);
+      setStale(false);
       setError(null);
       return;
     }
@@ -76,6 +83,7 @@ export function useContextPreview({
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
     setLoading(true);
+    setStale(previewRef.current !== null);
     setError(null);
 
     const timeout = window.setTimeout(() => {
@@ -90,11 +98,13 @@ export function useContextPreview({
           setPreview(response.data);
           setTokenCount(tokenCountFromPreview(response.data));
           setLoading(false);
+          setStale(false);
         })
         .catch((err: unknown) => {
           if (requestSeqRef.current !== requestSeq) return;
           setError(err instanceof Error ? err.message : 'Context preview failed');
           setLoading(false);
+          setStale(previewRef.current !== null);
         });
     }, 150);
 
@@ -105,7 +115,7 @@ export function useContextPreview({
     preview,
     tokenCount,
     loading,
-    stale: loading && preview !== null,
+    stale,
     error,
     invalidate,
   };

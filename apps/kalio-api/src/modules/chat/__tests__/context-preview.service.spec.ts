@@ -133,4 +133,45 @@ describe('ContextPreviewService', () => {
     expect(preview.messages.some((message) => message.source === 'draft')).toBe(false);
     expect(preview.messages.some((message) => message.source === 'history' && message.role === 'user')).toBe(true);
   });
+
+  it('marks compaction as applied when fallback truncation edits a message in place', async () => {
+    const repo = makeRepo([
+      { id: 'u1', sessionId: 'sid', role: 'user', content: 'kept user question', createdAt: 1 },
+      { id: 'a1', sessionId: 'sid', role: 'assistant', content: 'a'.repeat(12_000), createdAt: 2 },
+    ]);
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ContextPreviewService,
+        ContextAssemblyService,
+        SessionManagerService,
+        { provide: MESSAGE_REPOSITORY, useValue: repo },
+        { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
+        { provide: CredentialsService, useValue: { getContextWindowSize: vi.fn().mockResolvedValue(2_000) } },
+        {
+          provide: PersonaService,
+          useValue: {
+            getSessionConfig: vi.fn().mockResolvedValue({
+              systemPrompt: 'Persona base prompt.',
+              model: 'mimo-v2.5',
+              skillIds: [],
+              allowedTools: [],
+              mcpPolicy: 'allow_all',
+              kv: {},
+            }),
+          },
+        },
+        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
+        { provide: ToolDispatchService, useValue: { getToolMetas: vi.fn().mockReturnValue([]) } },
+      ],
+    }).compile();
+
+    const service = moduleRef.get(ContextPreviewService);
+    const preview = await service.buildPreview('sid', {
+      personaId: 'persona-1',
+    });
+
+    expect(preview.compaction.applied).toBe(true);
+    expect(preview.compaction.unboundedMessageCount).toBe(3);
+    expect(preview.compaction.finalMessageCount).toBe(2);
+  });
 });

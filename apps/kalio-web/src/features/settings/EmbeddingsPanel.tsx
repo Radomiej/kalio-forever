@@ -85,6 +85,16 @@ export function EmbeddingsPanel() {
   const [localDirty, setLocalDirty] = useState(false);
   const [reindexResult, setReindexResult] = useState<string | null>(null);
 
+  const refreshLocalAvailability = useCallback(async (config?: UpdateLocalEmbeddingConfigDto) => {
+    if (config) {
+      return apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability', {
+        method: 'POST',
+        body: JSON.stringify(config),
+      });
+    }
+    return apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability');
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -94,7 +104,7 @@ export function EmbeddingsPanel() {
         apiFetch<UpdateLocalEmbeddingConfigDto>('/memory/embedding-local'),
       ]);
       const normalizedLocal = normalizeLocalConfig(localCfg);
-      const availability = await apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability');
+      const availability = await refreshLocalAvailability(normalizedLocal.form);
       setCredentials(creds);
       setStatus(st);
       setActiveId(st.activeCredentialId ?? null);
@@ -109,7 +119,7 @@ export function EmbeddingsPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshLocalAvailability]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -118,7 +128,7 @@ export function EmbeddingsPanel() {
       return;
     }
     const handle = window.setTimeout(() => {
-      apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability')
+      refreshLocalAvailability(localForm)
         .then((availability) => {
           setLocalAvailability(availability);
         })
@@ -127,7 +137,7 @@ export function EmbeddingsPanel() {
         });
     }, 1200);
     return () => window.clearTimeout(handle);
-  }, [localAvailability]);
+  }, [localAvailability, localForm, refreshLocalAvailability]);
 
   const handleProviderChange = (provider: string) => {
     const label = PROVIDER_LABELS[provider] ?? provider;
@@ -156,7 +166,7 @@ export function EmbeddingsPanel() {
       setLocalForm(localForm);
       setLocalDirty(false);
       setLocalConfigWarning(null);
-      setLocalAvailability(await apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability'));
+      setLocalAvailability(await refreshLocalAvailability(localForm));
       setReindexResult('Settings saved. Run reindex to refresh existing memories.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save local embedding config');
@@ -169,6 +179,16 @@ export function EmbeddingsPanel() {
     setSyncing('use-local');
     setError(null);
     try {
+      const availability = await refreshLocalAvailability(localForm);
+      setLocalAvailability(availability);
+      if (availability.status !== 'ready') {
+        setError(
+          availability.status === 'installing'
+            ? 'Local model is still installing. Wait for installation to finish before using local embeddings.'
+            : 'Local model is not installed yet. Install the selected local model before using local embeddings.',
+        );
+        return;
+      }
       const st = await apiFetch<EmbeddingStatus>('/memory/embedding-credentials/active', { method: 'DELETE' });
       setStatus(st);
       setActiveId(st.activeCredentialId ?? null);

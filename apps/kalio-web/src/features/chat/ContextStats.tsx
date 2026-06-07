@@ -50,6 +50,10 @@ function contentToPreviewText(content: LLMContent): string {
   return typeof content === 'string' ? content : JSON.stringify(content, null, 2);
 }
 
+function valueToPreviewText(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
 export function ContextStats({ tokenCount, onCompactNow, onClose, systemPrompt, activeToolNames, contextPreview, contextPreviewStatus }: ContextStatsProps) {
   const { total, breakdown, cacheable, contextLimit, usagePercent } = tokenCount;
   const [promptOpen, setPromptOpen] = useState(false);
@@ -228,6 +232,12 @@ export function ContextStats({ tokenCount, onCompactNow, onClose, systemPrompt, 
                           </div>
                           {message.reasoningContent && (
                             <pre className="mb-1 whitespace-pre-wrap break-words font-mono text-warning/80">{message.reasoningContent}</pre>
+                          )}
+                          {message.toolCallId && (
+                            <pre className="mb-1 whitespace-pre-wrap break-words font-mono text-info/80">{message.toolCallId}</pre>
+                          )}
+                          {message.toolCalls && message.toolCalls.length > 0 && (
+                            <pre className="mb-1 whitespace-pre-wrap break-words font-mono text-info/80">{valueToPreviewText(message.toolCalls)}</pre>
                           )}
                           <pre className="whitespace-pre-wrap break-words font-mono">{contentToPreviewText(message.content)}</pre>
                         </div>

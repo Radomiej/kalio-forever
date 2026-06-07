@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App';
 import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
 
@@ -169,6 +169,7 @@ vi.mock('./store/sessionStore', () => ({
   }, {
     getState: () => ({
       sessions: sessionStoreState.sessions,
+      activeSessionId: sessionStoreState.activeSessionId,
     }),
   }),
 }));
@@ -459,8 +460,8 @@ describe('App view state persistence', () => {
       expect(apiGet).toHaveBeenCalledWith('/api/sessions');
     });
     expect(setSessions).toHaveBeenCalledWith([
-      { id: 'session-1', title: 'Session 1', updatedAt: 1 },
       { id: 'agent-child-1', title: 'Agent child', updatedAt: 2, kind: 'subagent', parentSessionId: 'session-1' },
+      { id: 'session-1', title: 'Session 1', updatedAt: 1 },
     ]);
     expect(identifySession).toHaveBeenCalledWith('session-1');
     expect(identifySession).not.toHaveBeenCalledWith('agent-child-1');
@@ -479,6 +480,48 @@ describe('App view state persistence', () => {
     expect(identifySession).toHaveBeenCalledWith('session-1');
     expect(identifySession).toHaveBeenCalledWith('session-2');
     expect(identifySession).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips re-identifying the active session on reconnect because chat already replays it', () => {
+    sessionStoreState.activeSessionId = 'session-1';
+
+    render(<App />);
+
+    identifySession.mockClear();
+    reconnectHandlers[0]?.();
+
+    expect(identifySession).toHaveBeenCalledWith('session-2');
+    expect(identifySession).not.toHaveBeenCalledWith('session-1');
+    expect(identifySession).toHaveBeenCalledTimes(1);
+  });
+
+  it('merges bootstrap sessions without dropping newer local ones when the api response arrives late', async () => {
+    let resolveSessions!: (value: { data: Array<{ id: string; updatedAt: number; title?: string; kind?: string; parentSessionId?: string }> }) => void;
+    apiGet.mockReturnValueOnce(new Promise((resolve) => {
+      resolveSessions = resolve;
+    }));
+    sessionStoreState.sessions = [];
+
+    render(<App />);
+
+    sessionStoreState.sessions = [
+      { id: 'session-local-new', title: 'Local New', updatedAt: 10 },
+    ];
+
+    await act(async () => {
+      resolveSessions({
+        data: [
+          { id: 'session-1', title: 'Session 1', updatedAt: 1 },
+        ],
+      });
+    });
+
+    await waitFor(() => {
+      expect(setSessions).toHaveBeenCalledWith([
+        { id: 'session-local-new', title: 'Local New', updatedAt: 10 },
+        { id: 'session-1', title: 'Session 1', updatedAt: 1 },
+      ]);
+    });
   });
 
   it('clears recent talk badge when user opens Talk', () => {

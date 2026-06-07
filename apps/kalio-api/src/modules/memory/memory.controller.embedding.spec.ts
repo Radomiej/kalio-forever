@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
@@ -326,6 +326,46 @@ describe('MemoryController — embedding credential routes', () => {
         dimensions: 768,
         backend: 'cpu',
       });
+    });
+
+    it('checks availability against the unsaved local form instead of the persisted config', async () => {
+      vi.mocked(localEmbeddingInstall.getAvailability).mockResolvedValueOnce({
+        status: 'missing',
+        installed: false,
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+        message: 'Model not installed yet.',
+      });
+
+      const result = await controller.getEffectiveLocalEmbeddingAvailability({
+        enabled: true,
+        model: 'Xenova/multilingual-e5-base',
+        dimensions: 768,
+        backend: 'cpu',
+      });
+
+      expect(result.model).toBe('Xenova/multilingual-e5-base');
+      expect(vi.mocked(localEmbeddingInstall.getAvailability)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'Xenova/multilingual-e5-base',
+          dimensions: 768,
+          backend: 'cpu',
+        }),
+      );
+    });
+
+    it('blocks switching back to local embeddings when the local model is missing', async () => {
+      vi.mocked(localEmbeddingInstall.getAvailability).mockResolvedValueOnce({
+        status: 'missing',
+        installed: false,
+        model: 'Xenova/multilingual-e5-small',
+        dimensions: 384,
+        backend: 'cpu',
+        message: 'Model not installed yet.',
+      });
+
+      await expect(controller.clearActiveEmbeddingCredential()).rejects.toThrow(BadRequestException);
     });
   });
 

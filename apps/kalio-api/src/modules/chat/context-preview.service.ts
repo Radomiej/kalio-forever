@@ -37,7 +37,7 @@ export class ContextPreviewService {
       contextLimit: prepared.contextWindowSize,
       estimatedTokens,
       compaction: {
-        applied: prepared.history.length !== prepared.unboundedHistoryCount,
+        applied: prepared.compacted,
         unboundedMessageCount: prepared.unboundedHistoryCount,
         finalMessageCount: prepared.history.length,
         safeTargetTokens: getSafeContextTarget(prepared.contextWindowSize),
