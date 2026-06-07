@@ -48,7 +48,8 @@ function shouldIgnoreLegacyPlaywrightUrl(urlLike, wasExplicitlySet, key) {
   return false;
 }
 
-const forwardedArgs = process.argv.slice(2);
+const rawForwardedArgs = process.argv.slice(2);
+const forwardedArgs = rawForwardedArgs[0] === '--' ? rawForwardedArgs.slice(1) : rawForwardedArgs;
 
 async function getFreePort() {
   const server = createServer();
