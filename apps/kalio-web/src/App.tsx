@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   MessageSquare, GitBranch, Gauge, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
@@ -33,12 +33,20 @@ import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
 import { useSessionStore } from './store/sessionStore';
 import { useAgentStore } from './store/agentStore';
 import { backendHealth } from './services/backendHealth';
+import { apiClient } from './services/apiClient';
+import { eventBus } from './services/eventBus';
 import { useSettingsStore } from './features/settings/settingsStore';
+import type { ChatSession } from '@kalio/types';
 
 const TALK_VIEW_OPTIONS: ReadonlyArray<{ id: TalkView; label: string; icon: React.ReactNode }> = [
   { id: 'conversation', label: 'Conversation', icon: <MessageSquare size={14} /> },
   { id: 'graph', label: 'Execution graph', icon: <GitBranch size={14} /> },
 ];
+
+function rootReplaySessions(sessions: ChatSession[]): ChatSession[] {
+  const ids = new Set(sessions.map((session) => session.id));
+  return sessions.filter((session) => !session.parentSessionId || !ids.has(session.parentSessionId));
+}
 
 export function App() {
   const initialViewState = loadAppViewState();
@@ -55,12 +63,21 @@ export function App() {
 
   const openSettings = (tab?: string) => { setSettingsInitialTab(tab); setSettingsOpen(true); };
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
-  const { sessions, setActiveSession } = useSessionStore();
+  const { sessions, setActiveSession, setSessions } = useSessionStore();
   const recentTalkCount = recentTalkBadgeCount(sessions, lastTalkActiveAt);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const pendingConfirmationCount = Object.keys(pendingConfirmations).length;
   const hasPendingConfirmation = pendingConfirmationCount > 0;
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
+  const identifiedHitlSessionsRef = useRef<Set<string>>(new Set());
+
+  const identifyHitlSession = useCallback((sessionId: string) => {
+    if (!sessionId.trim() || identifiedHitlSessionsRef.current.has(sessionId)) {
+      return;
+    }
+    eventBus.identifySession(sessionId);
+    identifiedHitlSessionsRef.current.add(sessionId);
+  }, []);
 
   // Initialize on app mount
   useEffect(() => {
@@ -74,6 +91,33 @@ export function App() {
         console.warn('[App] Failed to load backend LLM config', err);
       });
   }, [setBackendConfig]);
+
+  useEffect(() => {
+    if (sessions.length > 0) {
+      return;
+    }
+    apiClient
+      .get<ChatSession[]>('/api/sessions')
+      .then((response) => {
+        setSessions(response.data);
+        rootReplaySessions(response.data).forEach((session) => identifyHitlSession(session.id));
+      })
+      .catch((err: unknown) => {
+        console.warn('[App] Failed to load sessions for HITL replay', err);
+      });
+  }, [identifyHitlSession, sessions.length, setSessions]);
+
+  useEffect(() => {
+    rootReplaySessions(sessions).forEach((session) => identifyHitlSession(session.id));
+  }, [identifyHitlSession, sessions]);
+
+  useEffect(() => {
+    const offReconnect = eventBus.onReconnect(() => {
+      identifiedHitlSessionsRef.current.clear();
+      rootReplaySessions(useSessionStore.getState().sessions).forEach((session) => identifyHitlSession(session.id));
+    });
+    return offReconnect;
+  }, [identifyHitlSession]);
 
   // Close canvas when navigating away from talk
   useEffect(() => {
@@ -183,7 +227,7 @@ export function App() {
       />
       <main className="flex-1 overflow-hidden min-w-0" data-testid="main-chat">
         {activeSection === 'landing' && (
-          <LandingPage onNavigateToChat={openConversationFromLanding} />
+          <LandingPage onNavigateToChat={openConversationFromLanding} onOpenSessionInChat={openSessionInConversation} />
         )}
 
         {/* talk section: always mounted so ChatInterface never loses socket listeners
@@ -268,9 +312,10 @@ export function App() {
             <div className="flex-1 min-w-0 flex overflow-hidden">
               <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-hidden min-h-0">
-                  {talkView === 'conversation'
-                    ? <ChatInterface />
-                    : <ExecutionGraphView onOpenSessionInConversation={openSessionInConversation} />}
+                  <div className={talkView === 'conversation' ? 'h-full' : 'hidden'}>
+                    <ChatInterface />
+                  </div>
+                  {talkView === 'graph' && <ExecutionGraphView onOpenSessionInConversation={openSessionInConversation} />}
                 </div>
               </div>
 

@@ -125,7 +125,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.warn(`tool:confirm rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
-    const status = this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId);
+    const status = payload.message
+      ? this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId, payload.message)
+      : this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId);
     if (status === 'not_found') {
       client.emit('tool:confirmation_invalidated', {
         requestId: payload.requestId,
@@ -146,7 +148,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.warn(`tool:cancel rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
-    const status = this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId);
+    const status = payload.message
+      ? this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId, payload.message)
+      : this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId);
     if (status === 'not_found') {
       client.emit('tool:confirmation_invalidated', {
         requestId: payload.requestId,

@@ -7,7 +7,7 @@ import type { RAAppHITLService, SavedApproval } from '../../raapp/raapp-hitl.ser
 import type { AgentFlowRunSnapshot, ToolConfirmationRequest } from '@kalio/types';
 import type { AgentFlowRuntimePort } from '../../agent-flow/agent-flow-runtime.port';
 
-type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string }) => void;
+type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
 
 describe('ChatGateway', () => {
   let gateway: ChatGateway;
@@ -361,6 +361,18 @@ describe('ChatGateway', () => {
       expect(toolDispatch.resolveConfirmation).toHaveBeenCalledWith('req-1', 'session-1');
     });
 
+    it('passes optional confirmation message through for an owned session', () => {
+      const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
+
+      handleToolConfirm(client as never, {
+        requestId: 'req-1',
+        sessionId: 'session-1',
+        message: 'Looks safe, continue.',
+      });
+
+      expect(toolDispatch.resolveConfirmation).toHaveBeenCalledWith('req-1', 'session-1', 'Looks safe, continue.');
+    });
+
     it('rejects tool cancel when socket does not own the session', () => {
       const handleToolCancel = (gateway as unknown as { handleToolCancel: ConfirmHandler }).handleToolCancel.bind(gateway);
 
@@ -375,6 +387,22 @@ describe('ChatGateway', () => {
       handleToolCancel(client as never, { requestId: 'req-1', sessionId: 'session-1' });
 
       expect(toolDispatch.cancelConfirmation).toHaveBeenCalledWith('req-1', 'session-1');
+    });
+
+    it('passes optional rejection message through for an owned session', () => {
+      const handleToolCancel = (gateway as unknown as { handleToolCancel: ConfirmHandler }).handleToolCancel.bind(gateway);
+
+      handleToolCancel(client as never, {
+        requestId: 'req-1',
+        sessionId: 'session-1',
+        message: 'Do not write files; explain the plan instead.',
+      });
+
+      expect(toolDispatch.cancelConfirmation).toHaveBeenCalledWith(
+        'req-1',
+        'session-1',
+        'Do not write files; explain the plan instead.',
+      );
     });
   });
 });

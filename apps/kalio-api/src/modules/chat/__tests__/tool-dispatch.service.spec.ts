@@ -168,6 +168,28 @@ describe('ToolDispatchService', () => {
       expect(result.status).toBe('cancelled');
     });
 
+    it('returns cancelled result with the user rejection message visible to the agent', async () => {
+      const ctx = makeCtx();
+
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => service.cancelConfirmation(
+            data['requestId'],
+            'sid',
+            'Do not write files; explain the plan instead.',
+          ));
+        }
+      });
+
+      const result = await service.dispatch('c1', 'dangerous_tool', {}, ctx);
+
+      expect(result).toEqual({
+        callId: 'c1',
+        status: 'cancelled',
+        errorMessage: 'User rejected tool confirmation: Do not write files; explain the plan instead.',
+      });
+    });
+
     it('executes tool when confirmed', async () => {
       const ctx = makeCtx();
 
@@ -181,7 +203,7 @@ describe('ToolDispatchService', () => {
       expect(result.status).toBe('success');
     });
 
-    it('logs requested and confirmed HITL lifecycle events when confirmed', async () => {
+    it('logs requested and confirmed HITL lifecycle events with the optional approval note when confirmed', async () => {
       const entry = makeEntry('dangerous_tool', true, { done: true });
       const hitlNotifications = {
         notifyApprovalRequested: vi.fn().mockResolvedValue(undefined),
@@ -199,7 +221,7 @@ describe('ToolDispatchService', () => {
 
       ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
         if (event === 'tool:confirmation_required') {
-          setImmediate(() => scopedService.resolveConfirmation(data['requestId']));
+          setImmediate(() => scopedService.resolveConfirmation(data['requestId'], 'sid', 'Looks safe, continue.'));
         }
       });
 
@@ -217,6 +239,7 @@ describe('ToolDispatchService', () => {
       expect(hitlNotifications.logApprovalLifecycle).toHaveBeenCalledWith(expect.objectContaining({
         eventType: 'hitl_approval_confirmed',
         source: 'manual',
+        reason: 'Looks safe, continue.',
         request: expect.objectContaining({
           kind: 'tool',
           sessionId: 'sid',

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App';
 import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
 
@@ -17,18 +17,32 @@ const {
   setCanvasOpen,
   setBackendConfig,
   fetchMock,
+  apiGet,
+  identifySession,
+  onReconnect,
+  reconnectHandlers,
   agentStoreState,
   setActiveSession,
+  setSessions,
   sessionStoreState,
 } = vi.hoisted(() => ({
   setCanvasOpen: vi.fn(),
   setBackendConfig: vi.fn(),
   fetchMock: vi.fn(),
+  apiGet: vi.fn(),
+  identifySession: vi.fn(),
+  reconnectHandlers: [] as Array<() => void>,
+  onReconnect: vi.fn((handler: () => void) => {
+    reconnectHandlers.push(handler);
+    return () => undefined;
+  }),
   setActiveSession: vi.fn(),
+  setSessions: vi.fn(),
   agentStoreState: {
     pendingConfirmations: {} as Record<string, unknown>,
   },
   sessionStoreState: {
+    sessions: [] as Array<{ id: string; updatedAt: number; title?: string; kind?: string; parentSessionId?: string }>,
     activeSessionId: null as string | null,
     messages: [] as Array<{ id: string }>,
     agentTurns: [] as Array<{ id: string }>,
@@ -129,18 +143,18 @@ vi.mock('./features/architect', () => ({
 }));
 
 vi.mock('./store/sessionStore', () => ({
-  useSessionStore: (selector?: (state: {
+  useSessionStore: Object.assign((selector?: (state: {
     sessions: Array<{ id: string; updatedAt: number; title?: string }>;
     activeSessionId: string | null;
     messages: Array<{ id: string }>;
     agentTurns: Array<{ id: string }>;
     setActiveSession: typeof setActiveSession;
+    setSessions: typeof setSessions;
   }) => unknown) => {
     const now = Date.now();
     const state = {
       sessions: [
-        { id: 'session-1', title: 'Session 1', updatedAt: now - 60_000 },
-        { id: 'session-2', updatedAt: now - 48 * 60 * 60 * 1000 },
+        ...sessionStoreState.sessions,
         ...(sessionStoreState.activeSessionId === 'new-chat-session'
           ? [{ id: 'new-chat-session', title: 'New Chat', updatedAt: now }]
           : []),
@@ -149,8 +163,27 @@ vi.mock('./store/sessionStore', () => ({
       messages: sessionStoreState.messages,
       agentTurns: sessionStoreState.agentTurns,
       setActiveSession,
+      setSessions,
     };
     return selector ? selector(state) : state;
+  }, {
+    getState: () => ({
+      sessions: sessionStoreState.sessions,
+    }),
+  }),
+}));
+
+vi.mock('./services/apiClient', () => ({
+  apiClient: {
+    get: apiGet,
+  },
+}));
+
+vi.mock('./services/eventBus', () => ({
+  eventBus: {
+    connected: true,
+    identifySession,
+    onReconnect,
   },
 }));
 
@@ -177,10 +210,25 @@ describe('App view state persistence', () => {
     sessionStorage.clear();
     localStorage.clear();
     agentStoreState.pendingConfirmations = {};
+    sessionStoreState.sessions = [
+      { id: 'session-1', title: 'Session 1', updatedAt: Date.now() - 60_000 },
+      { id: 'session-2', updatedAt: Date.now() - 48 * 60 * 60 * 1000 },
+    ];
     sessionStoreState.activeSessionId = null;
     sessionStoreState.messages = [];
     sessionStoreState.agentTurns = [];
     setActiveSession.mockReset();
+    setSessions.mockReset();
+    identifySession.mockReset();
+    onReconnect.mockClear();
+    reconnectHandlers.length = 0;
+    apiGet.mockReset();
+    apiGet.mockResolvedValue({
+      data: [
+        { id: 'session-1', title: 'Session 1', updatedAt: Date.now() },
+        { id: 'agent-child-1', title: 'Agent child', updatedAt: Date.now(), kind: 'subagent', parentSessionId: 'session-1' },
+      ],
+    });
     fetchMock.mockResolvedValue({
       json: async () => ({
         provider: 'mock',
@@ -239,7 +287,7 @@ describe('App view state persistence', () => {
     render(<App />);
 
     expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
     expect(screen.queryByTestId('canvas-panel')).not.toBeInTheDocument();
   });
 
@@ -256,7 +304,7 @@ describe('App view state persistence', () => {
     render(<App />);
 
     expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
   });
 
   it('shows a dedicated graph entry in the Talk sidebar and switches views without creating a session first', () => {
@@ -266,7 +314,7 @@ describe('App view state persistence', () => {
     fireEvent.click(screen.getByTestId('talk-sidebar-graph-entry'));
 
     expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
   });
 
   it('collapses and restores the Talk sidebar so the graph can use the full workspace', () => {
@@ -310,7 +358,7 @@ describe('App view state persistence', () => {
     fireEvent.click(collapsedRail.querySelector('[data-testid="talk-sidebar-graph-entry"]')!);
 
     expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
   });
 
   it('shows the conversation view when landing starts a chat from a stored graph view', () => {
@@ -347,7 +395,7 @@ describe('App view state persistence', () => {
     render(<App />);
 
     expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-interface')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
   });
 
   it('opens graph child sessions in the conversation view', () => {
@@ -394,6 +442,43 @@ describe('App view state persistence', () => {
     expect(badge).toHaveAttribute('title', '2 approvals waiting');
     expect(badge).toHaveClass('badge-warning');
     expect(badge).toHaveClass('animate-pulse');
+  });
+
+  it('identifies every known non-archived session once so Home can replay HITL confirmations', async () => {
+    sessionStoreState.sessions = [];
+    apiGet.mockResolvedValueOnce({
+      data: [
+        { id: 'session-1', title: 'Session 1', updatedAt: 1 },
+        { id: 'agent-child-1', title: 'Agent child', updatedAt: 2, kind: 'subagent', parentSessionId: 'session-1' },
+      ],
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenCalledWith('/api/sessions');
+    });
+    expect(setSessions).toHaveBeenCalledWith([
+      { id: 'session-1', title: 'Session 1', updatedAt: 1 },
+      { id: 'agent-child-1', title: 'Agent child', updatedAt: 2, kind: 'subagent', parentSessionId: 'session-1' },
+    ]);
+    expect(identifySession).toHaveBeenCalledWith('session-1');
+    expect(identifySession).not.toHaveBeenCalledWith('agent-child-1');
+    expect(identifySession).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-identifies known sessions after socket reconnect for Home HITL replay', () => {
+    render(<App />);
+
+    expect(identifySession).toHaveBeenCalledWith('session-1');
+    expect(identifySession).toHaveBeenCalledWith('session-2');
+
+    identifySession.mockClear();
+    reconnectHandlers[0]?.();
+
+    expect(identifySession).toHaveBeenCalledWith('session-1');
+    expect(identifySession).toHaveBeenCalledWith('session-2');
+    expect(identifySession).toHaveBeenCalledTimes(2);
   });
 
   it('clears recent talk badge when user opens Talk', () => {
