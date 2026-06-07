@@ -12,7 +12,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function estimateTextTokens(text: string): number {
+export function estimateTextTokens(text: string): number {
   if (!text) return 0;
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
@@ -61,7 +61,7 @@ function sanitizeJsonValue(value: unknown, root: Record<string, unknown> | null)
   return sanitized;
 }
 
-function estimateContentTokens(content: ContextManagedLLMMessage['content']): number {
+export function estimateContentTokens(content: ContextManagedLLMMessage['content']): number {
   if (typeof content === 'string') {
     return estimateTextTokens(content);
   }
@@ -80,7 +80,7 @@ function estimateContentTokens(content: ContextManagedLLMMessage['content']): nu
   return total;
 }
 
-function estimateMessageTokens(message: ContextManagedLLMMessage): number {
+export function estimateMessageTokens(message: ContextManagedLLMMessage): number {
   let total = estimateContentTokens(message.content);
 
   total += estimateTextTokens(getReasoningContent(message));
@@ -96,13 +96,17 @@ function estimateMessageTokens(message: ContextManagedLLMMessage): number {
   return total;
 }
 
-function estimateToolTokens(toolMetas: ToolMeta[]): number {
+export function estimateToolTokens(toolMetas: ToolMeta[]): number {
   if (toolMetas.length === 0) {
     return 0;
   }
 
   const serialized = toolMetas.map((toolMeta) => JSON.stringify(toolMeta)).join('\n');
   return estimateTextTokens(serialized);
+}
+
+export function getSafeContextTarget(contextWindowSize: number): number {
+  return Math.max(256, Math.floor(contextWindowSize * SAFE_CONTEXT_RATIO));
 }
 
 function totalHistoryTokens(messages: ContextManagedLLMMessage[], toolMetas: ToolMeta[]): number {
@@ -217,7 +221,7 @@ export function compactLLMHistory(
     return messages;
   }
 
-  const safeTarget = Math.max(256, Math.floor(contextWindowSize * SAFE_CONTEXT_RATIO));
+  const safeTarget = getSafeContextTarget(contextWindowSize);
   if (totalHistoryTokens(messages, toolMetas) <= safeTarget) {
     return messages;
   }

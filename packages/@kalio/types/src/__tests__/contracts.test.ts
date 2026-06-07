@@ -4,9 +4,15 @@ import type {
   Timestamp,
   LLMStreamChunk,
   LLMConfig,
+  LLMContent,
+  LLMContextPreview,
   LLMProviderType,
+  LLMToolCall,
   Persona,
   CreatePersonaDto,
+  ContextCompactionStrategy,
+  ContextPreviewMessage,
+  ContextPreviewRequest,
   ChatMessage,
   ChatSession,
   CreateSessionDto,
@@ -125,6 +131,16 @@ describe('@kalio/types contract shape', () => {
       toolName: string;
       args: Record<string, unknown>;
       timeoutMs: number;
+    }>();
+    expectTypeOf<SocketEvents['tool:confirm']>().toEqualTypeOf<{
+      requestId: string;
+      sessionId: ID;
+      message?: string;
+    }>();
+    expectTypeOf<SocketEvents['tool:cancel']>().toEqualTypeOf<{
+      requestId: string;
+      sessionId: ID;
+      message?: string;
     }>();
   });
 
@@ -367,6 +383,45 @@ describe('@kalio/types contract shape', () => {
       sessionId: ID;
       content: string;
       personaId: ID;
+    }>();
+  });
+
+  it('keeps LLM context preview contracts explicit', () => {
+    expectTypeOf<ContextCompactionStrategy>().toEqualTypeOf<'backend-default' | 'summary' | 'evidence_only'>();
+    expectTypeOf<ContextPreviewRequest>().toEqualTypeOf<{
+      personaId: ID;
+      draftUserMessage?: string;
+      attachments?: ChatMessage['attachments'];
+    }>();
+    expectTypeOf<ContextPreviewMessage>().toEqualTypeOf<{
+      role: 'system' | 'user' | 'assistant' | 'tool';
+      content: LLMContent;
+      reasoningContent?: string;
+      toolCalls?: LLMToolCall[];
+      toolCallId?: string;
+      source: 'system_prompt' | 'history' | 'draft';
+      estimatedTokens: number;
+    }>();
+    expectTypeOf<Pick<LLMContextPreview, 'sessionId' | 'personaId' | 'model' | 'contextLimit' | 'effectiveSystemPrompt'>>().toEqualTypeOf<{
+      sessionId: ID;
+      personaId: ID;
+      model: string;
+      contextLimit: number;
+      effectiveSystemPrompt: string;
+    }>();
+    expectTypeOf<LLMContextPreview['estimatedTokens']>().toEqualTypeOf<{
+      total: number;
+      systemPrompt: number;
+      tools: number;
+      history: number;
+      images: number;
+      reasoning: number;
+    }>();
+    expectTypeOf<LLMContextPreview['compaction']>().toEqualTypeOf<{
+      applied: boolean;
+      unboundedMessageCount: number;
+      finalMessageCount: number;
+      safeTargetTokens: number;
     }>();
   });
 

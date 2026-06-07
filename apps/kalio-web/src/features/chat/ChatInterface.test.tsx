@@ -281,6 +281,17 @@ vi.mock('./hooks/useContextUsage', () => ({
   }),
 }));
 
+vi.mock('./hooks/useContextPreview', () => ({
+  useContextPreview: () => ({
+    preview: null,
+    tokenCount: null,
+    loading: false,
+    stale: false,
+    error: null,
+    invalidate: vi.fn(),
+  }),
+}));
+
 // ── apiClient mock ────────────────────────────────────────────────────────────
 vi.mock('../../services/apiClient', () => ({
   apiClient: {

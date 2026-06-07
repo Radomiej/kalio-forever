@@ -24,6 +24,48 @@ export interface LLMMessage {
   toolCalls?: LLMToolCall[];  // for role='assistant' with tool calls
 }
 
+export type ContextCompactionStrategy = 'backend-default' | 'summary' | 'evidence_only';
+
+export interface ContextPreviewRequest {
+  personaId: ID;
+  draftUserMessage?: string;
+  attachments?: ChatAttachment[];
+}
+
+export interface ContextPreviewMessage {
+  role: LLMRole;
+  content: LLMContent;
+  reasoningContent?: string;
+  toolCalls?: LLMToolCall[];
+  toolCallId?: string;
+  source: 'system_prompt' | 'history' | 'draft';
+  estimatedTokens: number;
+}
+
+export interface LLMContextPreview {
+  sessionId: ID;
+  personaId: ID;
+  model: string;
+  contextLimit: number;
+  estimatedTokens: {
+    total: number;
+    systemPrompt: number;
+    tools: number;
+    history: number;
+    images: number;
+    reasoning: number;
+  };
+  compaction: {
+    applied: boolean;
+    unboundedMessageCount: number;
+    finalMessageCount: number;
+    safeTargetTokens: number;
+  };
+  effectiveSystemPrompt: string;
+  tools: ToolMeta[];
+  messages: ContextPreviewMessage[];
+}
+
 export interface LLMStreamChunk {
   delta: string;
   done: boolean;
@@ -763,8 +805,8 @@ export interface SocketEvents {
   'tool:confirmation_invalidated': ToolConfirmationInvalidated;
 
   // Tool HITL — client → server
-  'tool:confirm': { requestId: string; sessionId: ID };
-  'tool:cancel': { requestId: string; sessionId: ID };
+  'tool:confirm': { requestId: string; sessionId: ID; message?: string };
+  'tool:cancel': { requestId: string; sessionId: ID; message?: string };
 
   // Tool execution lifecycle — server → client
   'tool:start': { callId: ID; toolName: string; args: Record<string, unknown>; sessionId?: ID; agentRun?: AgentRunContext };

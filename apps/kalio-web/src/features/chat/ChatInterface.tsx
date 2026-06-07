@@ -9,6 +9,7 @@ import { MessageBubble } from './MessageBubble';
 import { AgentTurnBubble } from './AgentTurnBubble';
 import { ChatInput } from './ChatInput';
 import { useContextUsage } from './hooks/useContextUsage';
+import { useContextPreview } from './hooks/useContextPreview';
 import { useChatSessionActivation } from './hooks/useChatSessionActivation';
 import { useChatSocketEvents } from './hooks/useChatSocketEvents';
 import { computeAnsweredCallIds, buildConversationTimeline } from './chatUtils';
@@ -101,6 +102,8 @@ export function ChatInterface() {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [architectures, setArchitectures] = useState<ArchitectSchema[]>([]);
   const [selectedArchitectureId, setSelectedArchitectureId] = useState('single-chat');
+  const [draftUserMessage, setDraftUserMessage] = useState('');
+  const [contextPreviewRefreshKey, setContextPreviewRefreshKey] = useState(0);
   const toolArgProgressSeenRef = useRef<Record<string, Set<string>>>({});
   const { updateSession } = useSessionStore();
 
@@ -134,7 +137,18 @@ export function ChatInterface() {
 
   const answeredCallIds = computeAnsweredCallIds(messages);
 
-  const { tokenCount, needsCompact, compactMessages, rawContext } = useContextUsage();
+  const { tokenCount: fallbackTokenCount, compactMessages } = useContextUsage();
+  const invalidateContextPreview = useCallback(() => {
+    setContextPreviewRefreshKey((value) => value + 1);
+  }, []);
+  const contextPreview = useContextPreview({
+    sessionId: activeSessionId,
+    personaId: activeSession?.personaId ?? null,
+    draftUserMessage,
+    refreshKey: contextPreviewRefreshKey,
+  });
+  const tokenCount = contextPreview.tokenCount ?? fallbackTokenCount;
+  const needsCompact = tokenCount.total > tokenCount.contextLimit;
 
   const hasPendingChunksForSession = useCallback((sessionId: string | null): boolean => {
     if (!sessionId) return false;
@@ -192,6 +206,7 @@ export function ChatInterface() {
     setRecoveryNotice,
     setVfsRefreshSignal,
     toolArgProgressSeenRef,
+    onContextInvalidated: invalidateContextPreview,
   });
 
 
@@ -200,8 +215,10 @@ export function ChatInterface() {
     setAwaitingFirstChunk(false);
     toolArgProgressSeenRef.current = {};
     setToolArgProgress(null);
+    setDraftUserMessage('');
+    invalidateContextPreview();
     shouldAutoScrollRef.current = true;
-  }, [activeSessionId]);
+  }, [activeSessionId, invalidateContextPreview, setToolArgProgress]);
 
   useEffect(() => {
     if (activeSessionId && eventBus.connected) {
@@ -318,6 +335,7 @@ export function ChatInterface() {
     setError(null);
     setRetryError(null);
     lastSentContentRef.current = content;
+    setDraftUserMessage('');
     clearToolActivities(activeSessionId);
 
     const { sessions, updateSession } = useSessionStore.getState();
@@ -510,7 +528,12 @@ export function ChatInterface() {
           onToggleContextStats={() => setShowContextStats((value) => !value)}
           showContextStats={showContextStats}
           tokenCount={tokenCount}
-          rawContext={rawContext}
+          contextPreview={contextPreview.preview}
+          contextPreviewStatus={{
+            loading: contextPreview.loading,
+            stale: contextPreview.stale,
+            error: contextPreview.error,
+          }}
           vfsRefreshSignal={vfsRefreshSignal}
         />
       )}
@@ -530,6 +553,7 @@ export function ChatInterface() {
               isStreaming={composerStreaming}
               onArchitectureChange={setSelectedArchitectureId}
               onArchitectureRun={(content, schemaId) => void handleArchitectureRun(content, schemaId)}
+              onDraftChange={setDraftUserMessage}
               onPersonaChange={(personaId) => void handlePersonaChange(personaId)}
               onSend={handleSend}
               personas={personas}
@@ -569,6 +593,7 @@ export function ChatInterface() {
           isStreaming={composerStreaming}
           onArchitectureChange={setSelectedArchitectureId}
           onArchitectureRun={(content, schemaId) => void handleArchitectureRun(content, schemaId)}
+          onDraftChange={setDraftUserMessage}
           onSend={handleComposerSend}
           onStop={handleStop}
           selectedArchitectureId={selectedArchitectureId}

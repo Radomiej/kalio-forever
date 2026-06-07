@@ -37,15 +37,45 @@ function makeRunJournal() {
   };
 }
 
+function makeContextPreviewService() {
+  return {
+    buildPreview: vi.fn().mockResolvedValue({
+      sessionId: 'sess-1',
+      personaId: 'persona-1',
+      model: 'test-model',
+      contextLimit: 32000,
+      estimatedTokens: {
+        total: 12,
+        systemPrompt: 2,
+        tools: 1,
+        history: 9,
+        images: 0,
+        reasoning: 0,
+      },
+      compaction: {
+        applied: false,
+        unboundedMessageCount: 2,
+        finalMessageCount: 2,
+        safeTargetTokens: 25600,
+      },
+      effectiveSystemPrompt: 'system',
+      tools: [],
+      messages: [],
+    }),
+  };
+}
+
 describe('SessionsController', () => {
   let controller: SessionsController;
   let svc: ReturnType<typeof makeService>;
   let runJournal: ReturnType<typeof makeRunJournal>;
+  let contextPreview: ReturnType<typeof makeContextPreviewService>;
 
   beforeEach(() => {
     svc = makeService();
     runJournal = makeRunJournal();
-    controller = new SessionsController(svc as never, runJournal as never);
+    contextPreview = makeContextPreviewService();
+    controller = new SessionsController(svc as never, runJournal as never, contextPreview as never);
   });
 
   describe('list()', () => {
@@ -97,6 +127,16 @@ describe('SessionsController', () => {
 
       expect(runJournal.getCurrentRun).toHaveBeenCalledWith('sess-1');
       expect(result).toMatchObject({ id: 'run-1', safeResume: true });
+    });
+  });
+
+  describe('getContextPreview()', () => {
+    it('delegates preview building to context preview service', async () => {
+      const request = { personaId: 'persona-1', draftUserMessage: 'draft' };
+      const result = await controller.getContextPreview('sess-1', request);
+
+      expect(contextPreview.buildPreview).toHaveBeenCalledWith('sess-1', request);
+      expect(result.sessionId).toBe('sess-1');
     });
   });
 

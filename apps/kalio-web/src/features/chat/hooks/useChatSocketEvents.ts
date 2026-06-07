@@ -19,6 +19,7 @@ interface UseChatSocketEventsOptions {
   setRecoveryNotice: (value: string | null) => void;
   setVfsRefreshSignal: (updater: (value: number) => number) => void;
   toolArgProgressSeenRef: RefObject<Record<string, Set<string>>>;
+  onContextInvalidated?: () => void;
 }
 
 export function useChatSocketEvents({
@@ -30,6 +31,7 @@ export function useChatSocketEvents({
   setRecoveryNotice,
   setVfsRefreshSignal,
   toolArgProgressSeenRef,
+  onContextInvalidated,
 }: UseChatSocketEventsOptions): void {
   const {
     appendChunk,
@@ -117,6 +119,7 @@ export function useChatSocketEvents({
         setStreaming(false);
         requestGeneratedTitleIfNeeded(payload.sessionId);
       }
+      onContextInvalidated?.();
     });
 
     const offError = eventBus.onError((payload) => {
@@ -284,6 +287,7 @@ export function useChatSocketEvents({
 
     const offContext = eventBus.onContext((payload) => {
       setContext(payload.systemPrompt, payload.toolNames, payload.sessionId);
+      onContextInvalidated?.();
     });
 
     const offToolResult = eventBus.onToolResult((result) => {
@@ -311,6 +315,7 @@ export function useChatSocketEvents({
         };
         addMessage(toolResultMsg);
       }
+      onContextInvalidated?.();
       if (
         resultSessionId === activeSessionId
         && canReleaseComposerAfterToolResult({
@@ -414,6 +419,7 @@ export function useChatSocketEvents({
             if (!useAgentStore.getState().hasActiveLoopForSession(sid)) {
               setAgentTurns(buildTurnsFromHistory(mergedMessages, sid));
             }
+            onContextInvalidated?.();
           })
           .catch((err: unknown) => {
             console.error('[ChatInterface] reconnect history reload failed', err instanceof Error ? err : new Error(String(err)));
@@ -460,6 +466,7 @@ export function useChatSocketEvents({
     removeActiveAgentLoop,
     removeLastAgentTurn,
     requestGeneratedTitleIfNeeded,
+    onContextInvalidated,
     setAwaitingFirstChunk,
     setConnectionState,
     setContext,

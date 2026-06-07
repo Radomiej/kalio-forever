@@ -11,6 +11,8 @@ import { StreamProcessorService } from './stream-processor.service';
 import { ToolConfirmationService } from './tool-confirmation.service';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionManagerService } from './session-manager.service';
+import { ContextAssemblyService } from './context-assembly.service';
+import { ContextPreviewService } from './context-preview.service';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
 import { SessionPipelineService } from './session-pipeline.service';
@@ -75,6 +77,8 @@ import {
     ToolConfirmationService,
     ToolDispatchService,
     SessionManagerService,
+    ContextAssemblyService,
+    ContextPreviewService,
     SessionsService,
     ChatTestSupportService,
     RunJournalService,
@@ -130,7 +134,7 @@ import {
       useExisting: DrizzleMessageRepository,
     },
   ],
-  exports: [ChatService, ChatGateway, ToolDispatchService, SessionManagerService, SessionsService, RunJournalService, SubagentRuntimeService, AuditService, SUBAGENT_RUNTIME],
+  exports: [ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, SessionsService, RunJournalService, SubagentRuntimeService, AuditService, SUBAGENT_RUNTIME],
 })
 export class ChatModule implements OnModuleInit {
   constructor(
@@ -161,16 +165,16 @@ export class ChatModule implements OnModuleInit {
           return null;
         }
         return parsed.decision === 'approve'
-          ? this.resolveTelegramConfirmation(parsed.requestId, 'approve')
-          : this.resolveTelegramConfirmation(parsed.requestId, 'cancel');
+          ? this.resolveTelegramConfirmation(parsed.requestId, 'approve', parsed.reason)
+          : this.resolveTelegramConfirmation(parsed.requestId, 'cancel', parsed.reason);
       },
     });
   }
 
-  private resolveTelegramConfirmation(requestId: string, decision: 'approve' | 'cancel'): string {
+  private resolveTelegramConfirmation(requestId: string, decision: 'approve' | 'cancel', message?: string): string {
     const status = decision === 'approve'
-      ? this.toolDispatch.resolveConfirmation(requestId)
-      : this.toolDispatch.cancelConfirmation(requestId);
+      ? this.toolDispatch.resolveConfirmation(requestId, undefined, message)
+      : this.toolDispatch.cancelConfirmation(requestId, undefined, message);
 
     if (status === 'resolved') {
       return `Approved HITL request ${requestId}.`;

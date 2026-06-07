@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ContextStats } from './ContextStats';
 import type { TokenCount } from '../../services/tokenCounter';
+import type { LLMContextPreview } from '@kalio/types';
 
 const makeTokenCount = (overrides: Partial<TokenCount> = {}): TokenCount => ({
   total: 1000,
@@ -83,27 +84,66 @@ describe('ContextStats', () => {
   });
 
   it('shows sanitized raw context details when provided', () => {
+    const preview: LLMContextPreview = {
+      sessionId: 'sid',
+      personaId: 'persona-1',
+      model: 'mimo-v2.5',
+      contextLimit: 32000,
+      estimatedTokens: {
+        total: 1000,
+        systemPrompt: 200,
+        tools: 100,
+        history: 650,
+        images: 0,
+        reasoning: 50,
+      },
+      compaction: {
+        applied: true,
+        unboundedMessageCount: 8,
+        finalMessageCount: 4,
+        safeTargetTokens: 25600,
+      },
+      effectiveSystemPrompt: 'Persona base\n\n## Active skills\nKeep a delegation ledger.',
+      tools: [
+        { name: 'vfs_read', description: 'Read file', parameters: {}, requiresConfirmation: false },
+      ],
+      messages: [
+        { role: 'system', content: 'Persona base', source: 'system_prompt', estimatedTokens: 20 },
+        { role: 'user', content: 'draft question', source: 'draft', estimatedTokens: 4 },
+      ],
+    };
+
     render(
       <ContextStats
         tokenCount={makeTokenCount()}
         onClose={vi.fn()}
-        rawContext={{
-          contextLimit: 32000,
-          systemPromptChars: 1234,
-          activeToolNames: ['fs_read'],
-          history: [
-            { id: 'm1', role: 'user', textChars: 12 },
-            { id: 'm2', role: 'assistant', textChars: 400000, preview: 'large result preview' },
-          ],
-          imageCount: 1,
-        }}
+        contextPreview={preview}
+        contextPreviewStatus={{ loading: false, stale: false, error: null }}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /raw context/i }));
+    fireEvent.click(screen.getByRole('button', { name: /llm payload preview/i }));
 
-    expect(screen.getByTestId('context-stats-raw')).toHaveTextContent('"systemPromptChars": 1234');
-    expect(screen.getByTestId('context-stats-raw')).toHaveTextContent('"textChars": 400000');
-    expect(screen.getByTestId('context-stats-raw')).toHaveTextContent('large result preview');
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('Effective system prompt');
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('Messages sent to model');
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('draft question');
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('vfs_read');
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('8 -> 4');
+  });
+
+  it('shows stale and error states for backend context preview', () => {
+    render(
+      <ContextStats
+        tokenCount={makeTokenCount()}
+        onClose={vi.fn()}
+        contextPreview={null}
+        contextPreviewStatus={{ loading: false, stale: true, error: 'Preview failed' }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /llm payload preview/i }));
+
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('stale');
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('Preview failed');
   });
 });
