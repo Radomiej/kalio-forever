@@ -4,9 +4,10 @@ import type { ToolDispatchService } from '../tool-dispatch.service';
 import type { SessionPipelineService } from '../session-pipeline.service';
 import type { SessionsService } from '../sessions.service';
 import type { RAAppHITLService, SavedApproval } from '../../raapp/raapp-hitl.service';
-import type { ToolConfirmationRequest } from '@kalio/types';
+import type { AgentFlowRunSnapshot, ToolConfirmationRequest } from '@kalio/types';
+import type { AgentFlowRuntimePort } from '../../agent-flow/agent-flow-runtime.port';
 
-type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string }) => void;
+type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
 
 describe('ChatGateway', () => {
   let gateway: ChatGateway;
@@ -14,6 +15,7 @@ describe('ChatGateway', () => {
   let pipeline: SessionPipelineService;
   let sessions: SessionsService;
   let raappHITL: RAAppHITLService;
+  let agentFlowRuntime: AgentFlowRuntimePort;
   let client: { id: string; emit: ReturnType<typeof vi.fn> };
   let observer: { id: string; emit: ReturnType<typeof vi.fn> };
 
@@ -42,6 +44,12 @@ describe('ChatGateway', () => {
       getPendingForSession: vi.fn(),
     } as unknown as RAAppHITLService;
 
+    agentFlowRuntime = {
+      findAll: vi.fn().mockResolvedValue([]),
+      stop: vi.fn().mockResolvedValue(null),
+      run: vi.fn(),
+    } as unknown as AgentFlowRuntimePort;
+
     client = {
       id: 'socket-1',
       emit: vi.fn(),
@@ -51,7 +59,7 @@ describe('ChatGateway', () => {
       emit: vi.fn(),
     };
 
-    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL, sessions);
+    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL, sessions, agentFlowRuntime);
     gateway.handleConnection(client as never);
     gateway.handleConnection(observer as never);
     (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
@@ -158,6 +166,55 @@ describe('ChatGateway', () => {
 
     expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'session-1');
     expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'child-session');
+  });
+
+  it('REGRESSION: stopping a parent session cascades to active AgentFlow runs', async () => {
+    const snapshot: AgentFlowRunSnapshot = {
+      run: {
+        id: 'flow-run-1',
+        parentSessionId: 'session-1',
+        childSessionId: 'arch-flow-run-1-root',
+        openChatSessionId: 'arch-flow-run-1-root',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'running',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+    };
+    (agentFlowRuntime.findAll as ReturnType<typeof vi.fn>).mockResolvedValue([snapshot]);
+
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+
+    expect(agentFlowRuntime.stop).toHaveBeenCalledWith('flow-run-1');
+  });
+
+  it('REGRESSION: stopping an AgentFlow child session cascades to the matching AgentFlow run', async () => {
+    const snapshot: AgentFlowRunSnapshot = {
+      run: {
+        id: 'flow-run-child',
+        parentSessionId: 'parent-session',
+        childSessionId: 'arch-flow-run-child-root',
+        openChatSessionId: 'arch-flow-run-child-root',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'waiting_on_orchestrator',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+    };
+    (agentFlowRuntime.findAll as ReturnType<typeof vi.fn>).mockResolvedValue([snapshot]);
+    (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+      .get(client.id)
+      ?.add('arch-flow-run-child-root');
+
+    await gateway.handleChatStop(client as never, { sessionId: 'arch-flow-run-child-root' });
+
+    expect(agentFlowRuntime.stop).toHaveBeenCalledWith('flow-run-child');
   });
 
 
@@ -304,6 +361,18 @@ describe('ChatGateway', () => {
       expect(toolDispatch.resolveConfirmation).toHaveBeenCalledWith('req-1', 'session-1');
     });
 
+    it('passes optional confirmation message through for an owned session', () => {
+      const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
+
+      handleToolConfirm(client as never, {
+        requestId: 'req-1',
+        sessionId: 'session-1',
+        message: 'Looks safe, continue.',
+      });
+
+      expect(toolDispatch.resolveConfirmation).toHaveBeenCalledWith('req-1', 'session-1', 'Looks safe, continue.');
+    });
+
     it('rejects tool cancel when socket does not own the session', () => {
       const handleToolCancel = (gateway as unknown as { handleToolCancel: ConfirmHandler }).handleToolCancel.bind(gateway);
 
@@ -318,6 +387,22 @@ describe('ChatGateway', () => {
       handleToolCancel(client as never, { requestId: 'req-1', sessionId: 'session-1' });
 
       expect(toolDispatch.cancelConfirmation).toHaveBeenCalledWith('req-1', 'session-1');
+    });
+
+    it('passes optional rejection message through for an owned session', () => {
+      const handleToolCancel = (gateway as unknown as { handleToolCancel: ConfirmHandler }).handleToolCancel.bind(gateway);
+
+      handleToolCancel(client as never, {
+        requestId: 'req-1',
+        sessionId: 'session-1',
+        message: 'Do not write files; explain the plan instead.',
+      });
+
+      expect(toolDispatch.cancelConfirmation).toHaveBeenCalledWith(
+        'req-1',
+        'session-1',
+        'Do not write files; explain the plan instead.',
+      );
     });
   });
 });

@@ -39,7 +39,7 @@ class BackendHealthService {
   subscribe(fn: BackendHealthListener): () => void {
     this.listeners.add(fn);
     // Fire immediately so new subscribers know current state
-    try { fn(this.state, this.state); } catch { /* listener errors are not fatal */ }
+    try { fn(this.state, this.state); } catch (err) { console.warn('[backendHealth] listener failed during subscribe', err); }
     return () => { this.listeners.delete(fn); };
   }
 
@@ -78,7 +78,7 @@ class BackendHealthService {
     if (prev === next) return;
     this.state = next;
     for (const fn of this.listeners) {
-      try { fn(next, prev); } catch { /* listener errors are not fatal */ }
+      try { fn(next, prev); } catch (err) { console.warn('[backendHealth] listener failed during state change', err); }
     }
   }
 
@@ -87,7 +87,8 @@ class BackendHealthService {
       await apiClient.get('/health');
       this.consecutiveFailures = 0;
       this.reportSuccess();
-    } catch {
+    } catch (err) {
+      console.debug('[backendHealth] health probe failed', err);
       this.consecutiveFailures += 1;
       // Only transition to 'offline' after consecutive failures — avoids false
       // positives from brief REST hiccups while Socket.IO/LLM traffic is healthy.

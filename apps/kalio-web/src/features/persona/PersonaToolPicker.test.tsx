@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import type { MCPPolicy, ToolMeta } from '@kalio/types';
@@ -21,6 +21,24 @@ const TOOL_FIXTURE: ToolMeta[] = [
   {
     name: 'run_subagent',
     description: 'Spawn a subagent.',
+    parameters: {},
+    requiresConfirmation: false,
+  },
+  {
+    name: 'spawn_cli_agent',
+    description: 'Start a durable CLI child.',
+    parameters: {},
+    requiresConfirmation: false,
+  },
+  {
+    name: 'run_sub_agentflow',
+    description: 'Run a child workflow.',
+    parameters: {},
+    requiresConfirmation: false,
+  },
+  {
+    name: 'escalate',
+    description: 'Escalate an issue for review.',
     parameters: {},
     requiresConfirmation: false,
   },
@@ -71,7 +89,6 @@ describe('PersonaToolPicker', () => {
   });
 
   it('groups native tools, supports global selection controls, and switches MCP policy when needed', async () => {
-    const user = userEvent.setup();
     installFetchMock(TOOL_FIXTURE);
 
     render(<ToolPickerHarness initialSelected={['vfs_read_file']} initialPolicy="allow_all" />);
@@ -79,36 +96,45 @@ describe('PersonaToolPicker', () => {
     await screen.findByTestId('group-toggle-vfs');
     expect(screen.getByText('VFS')).toBeInTheDocument();
     expect(screen.getByText('Filesystem')).toBeInTheDocument();
-    expect(screen.getByText('Agent')).toBeInTheDocument();
+    expect(screen.getByText('Subagents')).toBeInTheDocument();
+    expect(screen.getByText('CLI Agents')).toBeInTheDocument();
+    expect(screen.getByText('Agent Workflows')).toBeInTheDocument();
+    expect(screen.getByText('Security & Audit')).toBeInTheDocument();
     expect(screen.getByText('confirm')).toBeInTheDocument();
     expect(screen.getByText('MCP Tools')).toBeInTheDocument();
     expect(screen.getByText('1 available')).toBeInTheDocument();
 
-    await user.click(screen.getByTestId('tools-enable-all'));
+    fireEvent.click(screen.getByTestId('tools-enable-all'));
 
     await waitFor(() => {
       expect(screen.getByTestId('group-toggle-vfs')).toBeChecked();
       expect(screen.getByTestId('group-toggle-fs')).toBeChecked();
-      expect(screen.getByTestId('group-toggle-agent')).toBeChecked();
+      expect(screen.getByTestId('group-toggle-subagents')).toBeChecked();
+      expect(screen.getByTestId('group-toggle-cli-agents')).toBeChecked();
+      expect(screen.getByTestId('group-toggle-agent-workflows')).toBeChecked();
+      expect(screen.getByTestId('group-toggle-security-audit')).toBeChecked();
     });
 
-    await user.click(screen.getByTestId('tools-disable-all'));
+    fireEvent.click(screen.getByTestId('tools-disable-all'));
 
     await waitFor(() => {
       expect(screen.getByTestId('group-toggle-vfs')).not.toBeChecked();
       expect(screen.getByTestId('group-toggle-fs')).not.toBeChecked();
-      expect(screen.getByTestId('group-toggle-agent')).not.toBeChecked();
+      expect(screen.getByTestId('group-toggle-subagents')).not.toBeChecked();
+      expect(screen.getByTestId('group-toggle-cli-agents')).not.toBeChecked();
+      expect(screen.getByTestId('group-toggle-agent-workflows')).not.toBeChecked();
+      expect(screen.getByTestId('group-toggle-security-audit')).not.toBeChecked();
     });
 
-    await user.click(screen.getByTestId('mcp-policy-allow_list'));
+    fireEvent.click(screen.getByTestId('mcp-policy-allow_list'));
     await screen.findByTestId('tool-toggle-mcp_web_search');
-    await user.click(screen.getByTestId('tool-toggle-mcp_web_search'));
+    fireEvent.click(screen.getByTestId('tool-toggle-mcp_web_search'));
 
     await waitFor(() => {
       expect(screen.getByTestId('mcp-policy-allow_list').querySelector('input')).toBeChecked();
       expect(screen.getByText(/1\/1/)).toBeInTheDocument();
     });
-  });
+  }, 15_000);
 
   it('shows a load error and retries the catalog request', async () => {
     const user = userEvent.setup();

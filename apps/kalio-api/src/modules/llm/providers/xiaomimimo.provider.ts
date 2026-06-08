@@ -1,9 +1,12 @@
 import { BaseOpenAICompatibleProvider } from './base-openai-compatible.provider';
-import { buildProviderCompatHeaders } from '../../../common/utils/llm-provider-http.util';
+import {
+  buildProviderCompatHeaders,
+  XIAOMI_BASE_URL,
+} from '../../../common/utils/llm-provider-http.util';
 
 export class XiaomiMiMoProvider extends BaseOpenAICompatibleProvider {
-  constructor(apiKey: string, model = 'mimo-v2.5-pro', baseUrl?: string) {
-    super('XiaomiMiMo', apiKey, model, baseUrl ?? 'https://token-plan-ams.xiaomimimo.com/v1');
+  constructor(apiKey: string, model = 'mimo-v2.5', baseUrl?: string) {
+    super('XiaomiMiMo', apiKey, model, baseUrl ?? XIAOMI_BASE_URL);
   }
 
   protected override buildHeaders(): Record<string, string> {

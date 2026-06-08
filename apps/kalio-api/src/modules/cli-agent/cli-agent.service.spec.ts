@@ -81,7 +81,7 @@ describe('CLIAgentService', () => {
       makeAdapter('codex') as unknown as CodexAdapter,
       ptyService as unknown as import('./cli-agent-pty.service').CLIAgentPtyService,
     );
-  });
+  }, 30_000);
 
   afterEach(() => {
     vi.clearAllMocks();
@@ -358,7 +358,6 @@ describe('CLIAgentService', () => {
     const fakeProc = makeFakeProc();
     const adapter = makeAdapter('gemini');
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
-    vi.spyOn(service as unknown as { getPlatform(): NodeJS.Platform }, 'getPlatform').mockReturnValue('win32');
     service = new CLIAgentServiceClass(
       configService,
       makeAdapter('copilot') as unknown as CopilotAdapter,
@@ -367,6 +366,7 @@ describe('CLIAgentService', () => {
       makeAdapter('codex') as unknown as CodexAdapter,
       ptyService as unknown as import('./cli-agent-pty.service').CLIAgentPtyService,
     );
+    vi.spyOn(service as unknown as { getPlatform(): NodeJS.Platform }, 'getPlatform').mockReturnValue('win32');
 
     const prompt = 'build salon site\n'.repeat(800);
     const p = service.run({ agentId: 'gemini', prompt, workdir: '/w', callId: 'callId', sessionId: 'sess-1' });

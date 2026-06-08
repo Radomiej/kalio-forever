@@ -24,6 +24,48 @@ export interface LLMMessage {
   toolCalls?: LLMToolCall[];  // for role='assistant' with tool calls
 }
 
+export type ContextCompactionStrategy = 'backend-default' | 'summary' | 'evidence_only';
+
+export interface ContextPreviewRequest {
+  personaId: ID;
+  draftUserMessage?: string;
+  attachments?: ChatAttachment[];
+}
+
+export interface ContextPreviewMessage {
+  role: LLMRole;
+  content: LLMContent;
+  reasoningContent?: string;
+  toolCalls?: LLMToolCall[];
+  toolCallId?: string;
+  source: 'system_prompt' | 'history' | 'draft';
+  estimatedTokens: number;
+}
+
+export interface LLMContextPreview {
+  sessionId: ID;
+  personaId: ID;
+  model: string;
+  contextLimit: number;
+  estimatedTokens: {
+    total: number;
+    systemPrompt: number;
+    tools: number;
+    history: number;
+    images: number;
+    reasoning: number;
+  };
+  compaction: {
+    applied: boolean;
+    unboundedMessageCount: number;
+    finalMessageCount: number;
+    safeTargetTokens: number;
+  };
+  effectiveSystemPrompt: string;
+  tools: ToolMeta[];
+  messages: ContextPreviewMessage[];
+}
+
 export interface LLMStreamChunk {
   delta: string;
   done: boolean;
@@ -281,6 +323,7 @@ export interface AgentFlowTraceItem {
   id: ID;
   sequence: number;
   type: string;
+  lifecycle?: AgentFlowLifecycleEvent;
   message: string;
   nodeId?: string;
   roleSlotId?: string;
@@ -290,8 +333,28 @@ export interface AgentFlowTraceItem {
   createdAt: Timestamp;
 }
 
+export type AgentFlowLifecycleEvent =
+  | 'started'
+  | 'node_started'
+  | 'node_completed'
+  | 'edge_taken'
+  | 'guard_result'
+  | 'tool_called'
+  | 'return_to_orchestrator'
+  | 'waiting_on_orchestrator'
+  | 'resume_input'
+  | 'done'
+  | 'blocked'
+  | 'failed'
+  | 'cancelled'
+  | 'runtime_missing'
+  | 'runtime_stalled'
+  | 'copy_back';
+
 export interface SubAgentFlowResult {
   flowRunId: ID;
+  parentSessionId?: ID;
+  parentToolCallId?: ID;
   childSessionId: ID;
   status: AgentFlowRunStatus;
   summary: string;
@@ -742,8 +805,8 @@ export interface SocketEvents {
   'tool:confirmation_invalidated': ToolConfirmationInvalidated;
 
   // Tool HITL — client → server
-  'tool:confirm': { requestId: string; sessionId: ID };
-  'tool:cancel': { requestId: string; sessionId: ID };
+  'tool:confirm': { requestId: string; sessionId: ID; message?: string };
+  'tool:cancel': { requestId: string; sessionId: ID; message?: string };
 
   // Tool execution lifecycle — server → client
   'tool:start': { callId: ID; toolName: string; args: Record<string, unknown>; sessionId?: ID; agentRun?: AgentRunContext };
@@ -863,6 +926,20 @@ export interface MemorySearchResult {
   score: number;
   metadata: Record<string, string>;
   createdAt: number;
+}
+
+export interface MemoryScopeStats {
+  id: string;
+  label: string;
+  count: number;
+  size: number;
+}
+
+export interface MemoryScopeSummary {
+  totalCount: number;
+  totalSize: number;
+  webSearch: MemoryScopeStats;
+  personas: MemoryScopeStats[];
 }
 
 // ─── Embedding Credentials ───────────────────────────────────────────────────
@@ -1140,7 +1217,7 @@ export type ArchitectureNodeBehaviorMode =
   | 'finalize';
 export type ArchitectureNodeFanOutMode = 'parallel' | 'sequential';
 export type ArchitectureNodeScoringPolicy = 'confidence' | 'risk' | 'cost' | 'custom';
-export type ArchitectureRunStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type ArchitectureRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ArchitectureExecutionMode = 'session_branches' | 'subagent_execution';
 export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime_fallback';
 export type ArchitectureExecutionEventType =
@@ -1155,7 +1232,8 @@ export type ArchitectureExecutionEventType =
   | 'artifact_created'
   | 'memory_persisted'
   | 'final_artifact'
-  | 'node_completed';
+  | 'node_completed'
+  | 'run_stopped';
 
 export interface ArchitectureRoleSlot {
   id: string;

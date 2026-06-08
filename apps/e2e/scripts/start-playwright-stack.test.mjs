@@ -108,7 +108,16 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 server.listen(port, () => {
-  console.log('[fake-backend] listening on', port, 'db=' + process.env.DATABASE_PATH, 'workspace=' + process.env.WORKSPACE_ROOT);
+  console.log(
+    '[fake-backend] listening on',
+    port,
+    'db=' + process.env.DATABASE_PATH,
+    'workspace=' + process.env.WORKSPACE_ROOT,
+    'memory=' + process.env.MEMORY_DB_PATH,
+    'forceLlm=' + process.env.KALIO_FORCE_ENV_LLM,
+    'fastMock=' + process.env.KALIO_MOCK_LLM_FAST,
+    'model=' + process.env.LLM_MODEL,
+  );
 });
 `,
     'utf8',
@@ -599,7 +608,54 @@ test('playwright wrapper gives each run isolated database and workspace paths', 
       assert.equal(code, 0, fullOutput);
       assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]kalio-e2e\.db/);
       assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]workspaces/);
+      assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]memory/);
       assert.doesNotMatch(fullOutput, /shared-from-env-file/);
+    } finally {
+      stopCollecting();
+    }
+  } finally {
+    await removeSandbox(sandboxRoot);
+  }
+});
+
+test('playwright wrapper forces env mock LLM and fast mock streaming', async () => {
+  const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-runner-fast-mock-'));
+  const output = [];
+
+  try {
+    const { runnerPath, binDir } = await createSandboxRepo(sandboxRoot);
+    await writeFile(
+      resolve(sandboxRoot, '.env.test'),
+      [
+        'KALIO_PLAYWRIGHT_SKIP_BUILD=1',
+        'LLM_PROVIDER=mock',
+        'LLM_BASE_URL=https://paid.example.test/v1',
+        'LLM_MODEL=',
+        'KALIO_FORCE_ENV_LLM=0',
+        'KALIO_MOCK_LLM_FAST=0',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const child = spawn(process.execPath, [runnerPath], {
+      cwd: sandboxRoot,
+      env: {
+        ...withoutPlaywrightUrls(process.env),
+        CI: 'true',
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const stopCollecting = collectOutput(child, output);
+
+    try {
+      const [code] = await once(child, 'exit');
+      const fullOutput = output.join('');
+      assert.equal(code, 0, fullOutput);
+      assert.match(fullOutput, /forceLlm=1/);
+      assert.match(fullOutput, /fastMock=1/);
+      assert.match(fullOutput, /model=mock/);
     } finally {
       stopCollecting();
     }

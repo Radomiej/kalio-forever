@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE, deleteSessionIfExists } from './helpers/test-config';
+import { API_BASE, deleteSessionIfExists, sendMessageFromComposer } from './helpers/test-config';
 
 const LAST_ACTIVE_SESSION_STORAGE_KEY = 'kalio:last-active-session-id';
 
@@ -44,9 +44,6 @@ test.describe('AC-21: Session auto-title', () => {
       await expect(newSessionButton).toBeVisible({ timeout: 5000 });
       await newSessionButton.click();
 
-      const activeSessionTitle = page.getByTestId('session-item').first().locator('span').first();
-      await expect(activeSessionTitle).toHaveText('New Chat', { timeout: 5000 });
-
       await expect
         .poll(
           () => page.evaluate((storageKey) => window.sessionStorage.getItem(storageKey), LAST_ACTIVE_SESSION_STORAGE_KEY),
@@ -54,24 +51,22 @@ test.describe('AC-21: Session auto-title', () => {
         )
         .not.toBeNull();
       sessionId = await page.evaluate((storageKey) => window.sessionStorage.getItem(storageKey), LAST_ACTIVE_SESSION_STORAGE_KEY);
+      const activeSessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
+      await expect(activeSessionItem).toContainText('New Chat', { timeout: 5000 });
 
-      const chatInput = page.getByTestId('chat-input');
-      await expect(chatInput).toBeEnabled({ timeout: 5000 });
-      await chatInput.fill(prompt);
-      await page.getByTestId('chat-send-btn').click();
+      await sendMessageFromComposer(page, prompt);
 
       await expect
         .poll(
           async () => {
-            const title = (await activeSessionTitle.textContent())?.trim();
+            const title = (await activeSessionItem.textContent())?.trim();
             return Boolean(title && title !== 'New Chat');
           },
           { timeout: 10_000 },
         )
         .toBe(true);
 
-      await expect(chatInput).toBeEnabled({ timeout: 30_000 });
-      await expect(activeSessionTitle).toHaveText(generatedTitle, { timeout: 10_000 });
+      await expect(activeSessionItem).toContainText(generatedTitle, { timeout: 10_000 });
     } finally {
       if (sessionId) {
         await deleteSessionIfExists(request, sessionId);

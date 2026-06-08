@@ -3,7 +3,7 @@ import { env, pipeline } from '@huggingface/transformers';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { IEmbeddingProvider } from './embedding.service';
+import type { IEmbeddingProvider } from './embedding-provider.types';
 
 export const DEFAULT_LOCAL_EMBEDDING_MODEL = 'Xenova/multilingual-e5-small';
 export const DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384;
@@ -29,6 +29,8 @@ type FeatureExtractor = ((
 interface FeatureExtractionPipelineOptions {
   device?: 'webgpu' | 'cpu';
   dtype?: 'fp16' | 'q8';
+  local_files_only?: boolean;
+  progress_callback?: (progress: unknown) => void;
 }
 
 type FeatureExtractionPipelineFactory = (
@@ -42,6 +44,8 @@ interface LocalTransformersEmbeddingProviderConfig {
   dimensions: number;
   cacheDir: string;
   backend: LocalEmbeddingBackend;
+  allowRemoteModels?: boolean;
+  progressCallback?: (progress: unknown) => void;
 }
 
 function toVector(output: unknown): number[] {
@@ -62,37 +66,53 @@ export class LocalTransformersEmbeddingProvider implements IEmbeddingProvider {
     const cacheDir = path.resolve(this.config.cacheDir);
     fs.mkdirSync(cacheDir, { recursive: true });
     env.cacheDir = cacheDir;
-    env.allowRemoteModels = true;
+    env.allowRemoteModels = this.config.allowRemoteModels ?? false;
+  }
+
+  static isMissingLocalModelError(err: unknown): boolean {
+    const message = err instanceof Error ? err.message : String(err);
+    return /file was not found locally/i.test(message)
+      || /local_files_only=true/i.test(message)
+      || /allowRemoteModels=false/i.test(message);
+  }
+
+  private buildPipelineOptions(device: 'webgpu' | 'cpu', dtype: 'fp16' | 'q8'): FeatureExtractionPipelineOptions {
+    return {
+      device,
+      dtype,
+      local_files_only: !(this.config.allowRemoteModels ?? false),
+      progress_callback: this.config.progressCallback,
+    };
   }
 
   private async createExtractor(): Promise<FeatureExtractor> {
     const pipelineFactory = pipeline as unknown as FeatureExtractionPipelineFactory;
 
     if (this.config.backend === 'webgpu') {
-      const extractor = await pipelineFactory('feature-extraction', this.config.model, { device: 'webgpu', dtype: 'fp16' });
+      const extractor = await pipelineFactory('feature-extraction', this.config.model, this.buildPipelineOptions('webgpu', 'fp16'));
       this.activeBackend = 'webgpu';
       return extractor;
     }
 
     if (this.config.backend === 'cpu') {
-      const extractor = await pipelineFactory('feature-extraction', this.config.model, { device: 'cpu', dtype: 'q8' });
+      const extractor = await pipelineFactory('feature-extraction', this.config.model, this.buildPipelineOptions('cpu', 'q8'));
       this.activeBackend = 'cpu';
       return extractor;
     }
 
     if (process.platform === 'win32') {
-      const extractor = await pipelineFactory('feature-extraction', this.config.model, { device: 'cpu', dtype: 'q8' });
+      const extractor = await pipelineFactory('feature-extraction', this.config.model, this.buildPipelineOptions('cpu', 'q8'));
       this.activeBackend = 'cpu';
       return extractor;
     }
 
     try {
-      const extractor = await pipelineFactory('feature-extraction', this.config.model, { device: 'webgpu', dtype: 'fp16' });
+      const extractor = await pipelineFactory('feature-extraction', this.config.model, this.buildPipelineOptions('webgpu', 'fp16'));
       this.activeBackend = 'webgpu';
       return extractor;
     } catch (err) {
       this.logger.warn(`WebGPU unavailable for ${this.config.model}, falling back to CPU`, err instanceof Error ? err : new Error(String(err)));
-      const extractor = await pipelineFactory('feature-extraction', this.config.model, { device: 'cpu', dtype: 'q8' });
+      const extractor = await pipelineFactory('feature-extraction', this.config.model, this.buildPipelineOptions('cpu', 'q8'));
       this.activeBackend = 'cpu';
       return extractor;
     }
@@ -132,6 +152,22 @@ export class LocalTransformersEmbeddingProvider implements IEmbeddingProvider {
 
   getDimensions(): number {
     return this.config.dimensions;
+  }
+
+  async prepare(): Promise<void> {
+    await this.getExtractor();
+  }
+
+  async isInstalled(): Promise<boolean> {
+    try {
+      await this.prepare();
+      return true;
+    } catch (err) {
+      if (LocalTransformersEmbeddingProvider.isMissingLocalModelError(err)) {
+        return false;
+      }
+      throw err;
+    }
   }
 
   getActiveBackend(): ActiveLocalEmbeddingBackend | null {

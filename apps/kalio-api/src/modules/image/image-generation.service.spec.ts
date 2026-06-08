@@ -247,6 +247,16 @@ describe('ImageGenerationService — error handling', () => {
     ).rejects.toThrow('quota exceeded');
   });
 
+  it('falls back to a readable HTTP error when error JSON is malformed', async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeTextResponse('not-json upstream failure', false, 502, 'application/json'),
+    );
+
+    await expect(
+      service.generate({ prompt: 'test', model: 'dall-e-3', apiKey: 'k', provider: 'openai' }),
+    ).rejects.toThrow('not-json upstream failure');
+  });
+
   it('throws when response has no image data', async () => {
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ data: [] }));
     await expect(

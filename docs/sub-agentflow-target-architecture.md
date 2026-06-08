@@ -17,10 +17,10 @@ As of 2026-05-31, Kalio has the first AgentFlow product boundary:
 - External QA evidence can now be passed back through AgentFlow resume context as `externalQualityGate` / `externalQualityGates`; Goal Master finalization is blocked while a failing/high-severity Playwright gate is present.
 - Paid/live AgentFlow runs are gated by `docs/agentflow-paid-run-readiness-checklist.md`; mock E2E, focused regressions, typecheck, affected build, and active provider credential validation must pass before using paid LLM/CLI backends.
 - Runtime context can now hard-disable CLI-agent tools with `availableCliAgents: []` or `architectureCliAgentsEnabled: false`, so unavailable paid backends are hidden instead of prompt-discouraged.
-- Two-agent Goal Guard proof can opt into strict Implementer materialization with `requireImplementerWriteProof: true`; this fails a prose-only Implementer even if downstream nodes try to compensate.
+- Two-agent Goal Guard proof can opt into strict Implementer write proof with `requireImplementerWriteProof: true`; this fails a prose-only Implementer even if downstream nodes try to compensate.
 - Parent Talk/Canvas projection now reconstructs persisted `run_sub_agentflow` results, identifies the linked child `agent-flow` session, and exposes open-chat/open-graph actions from the parent conversation.
 - Mock full-stack Playwright coverage now verifies Talk-started two-agent Goal Guard flow, graph opening, durable result refresh, bounded resume, QA evidence resume, and bad-case rejection without paid LLM/CLI backends.
-- Manual Playwright Orchestrator QA on 2026-06-01 verified the managed Kalio FE can open Talk, show the AgentFlow conversation, switch to Execution Graph, and render completed Orchestrator, Implementer, Materializer, Verifier, Tester, Goal Master, and final artifact nodes for run `0FLljN55_LvMDK0cO8AN1`. Runtime signals were clean. The quality bundle is warning-only after the graph layout fix; remaining warnings are compact-label clipping and the intentional hidden-overflow graph viewport.
+- Manual Playwright Orchestrator QA on 2026-06-01 verified the managed Kalio FE could open Talk, show the AgentFlow conversation, switch to Execution Graph, and render completed architecture nodes for run `0FLljN55_LvMDK0cO8AN1`. That run used the older split-write schema and is historical evidence only. Current Goal Master Delivery Loop proof is Implementer-owned and is covered by the newer mock E2E gate below.
 
 Remaining gap: resume now records resume input, preserves the run checkpoint envelope, exposes a typed continuation cursor for bounded runtime stops, delegates to the Architecture adapter, and is covered by Architecture runtime tests plus full-stack mock E2E. Live paid real-project proof is still intentionally gated until the mock checklist remains green, warning-only manual UI findings are accepted or resolved, and the run is launched from Kalio FE.
 
@@ -347,17 +347,17 @@ Current live proof:
 - FE-triggered run `7LyDLGyYj0t1wtPrvlCY8` created `agent_flow_runs.flow_definition_id = goal_guard_delivery_loop`.
 - Root session `arch-7LyDLGyYj0t1wtPrvlCY8-root` was persisted as `kind = agent-flow`.
 - The run persisted 12 trace events and reconciled from `running` to `failed`.
-- Failure reason was valid guard behavior: the materializer produced no required write/tool evidence.
-- Later FE-triggered VFS proof run completed with `done`: production Goal Guard flow produced materializer `vfs_write` evidence, verifier/tester/Goal Master `vfs_read` evidence, and a final accepted artifact.
-- Latest full-stack mock E2E run passed through Kalio FE on 2026-06-01:
+- Failure reason was valid guard behavior: the implementation path produced no required write/tool evidence.
+- Later FE-triggered VFS proof run completed with `done`: production Goal Guard flow produced Implementer `vfs_write` evidence, Verifier/Tester/Goal Master `vfs_read` evidence, and a final accepted artifact.
+- Latest full-stack mock E2E run passed through Kalio FE on 2026-06-03:
   - `apps/e2e/tests/agentflow-goal-guard.spec.ts` starts the dedicated Goal Guard AgentFlow from the Architect UI.
   - The graph projection asserts `Implementer` and `Goal Master` are visible and explicitly rejects `Five Minds`.
-  - The run materializes `e2e/goal-guard-proof.json` through `vfs_write`, renders the executed route, and shows final chat evidence.
-  - The test attaches `goal-guard-agentflow-graph` and `goal-guard-agentflow-chat` screenshots to the Playwright report; latest screenshot artifacts were written under `apps/e2e/playwright-report/data/`.
-  - The suite also verifies failure-first behavior for prose-only materialization and resumes a bounded waiting run through `POST /api/agent-flows/runs/:id/resume`.
+  - The run writes `e2e/goal-guard-proof.json` from the Implementer through `vfs_write`, renders the executed route, and shows final chat evidence.
+  - The test attaches `goal-guard-agentflow-graph` and `goal-guard-agentflow-chat` screenshots to the Playwright report.
+  - The suite also verifies failure-first behavior for prose-only Implementer output and resumes a bounded waiting run through `POST /api/agent-flows/runs/:id/resume`.
 - The suite now verifies the FE "Resume with QA evidence" path: a waiting Goal Guard AgentFlow receives structured Playwright evidence, persists `checkpoint.resumeContext.externalQualityGate`, and does not reach `done`.
 - Parent Talk/Conversations now renders waiting Goal Guard flow results with QA next actions and trace handoff details; Canvas shows the waiting flow preview; Execution Graph opens the child Goal Guard run without substituting Five Minds.
-- Latest verification command on 2026-06-01: `corepack pnpm --filter @kalio/e2e run test:e2e -- agentflow-goal-guard.spec.ts` passed with 11 tests on a random-port mock stack.
+- Latest verification command on 2026-06-03: `npm.cmd --prefix apps/e2e run test:e2e -- agentflow-goal-guard.spec.ts --project=chromium` passed with 11 tests on a random-port mock stack after the Implementer-proof refactor.
 - Latest local readiness gate on 2026-06-01:
   - `kalio-api` typecheck passed.
   - `kalio-api` build passed.
@@ -366,7 +366,7 @@ Current live proof:
   - `kalio-api` coverage: statements 87.64%, branches 80.94%, functions 89.45%, lines 87.64%.
   - `kalio-web` coverage: statements 80.98%, branches 73.09%, functions 79.78%, lines 82.97%.
 - Live managed Kalio QA on `http://localhost:5188` verified Settings -> MCP Servers -> Import can import only the repo-local `mcp-dev-servers`; after import the live API reported `Playwright Orchestrator` connected with 49 tools and `mcp-dev-servers` connected with 16 tools.
-- Live FE-triggered bounded Goal Guard run `BFRt4WbQ3or_vluixhH89` used `goal_guard_delivery_loop`, `maxArchitectureSteps = 2`, and reached `waiting_on_orchestrator` with continuation cursor waiting on `materializer`.
+- Live FE-triggered bounded Goal Guard run `BFRt4WbQ3or_vluixhH89` used `goal_guard_delivery_loop`, `maxArchitectureSteps = 2`, and reached `waiting_on_orchestrator` under the older split-write schema. Treat it as historical, not current release evidence.
 - Live Playwright QA evidence was submitted from the Architect UI and persisted as `checkpoint.resumeContext.externalQualityGate` with `status = failed`, `highFindings = 1`, and a screenshot artifact; the run correctly stayed `waiting_on_orchestrator` instead of finalizing.
 - Live paid real-project proof is currently blocked by provider authentication. `npm.cmd run agentflow:activate-live-credential -- --provider xiaomimimo --model mimo-v2.5-pro --base-url https://token-plan-ams.xiaomimimo.com/v1` can create and activate the DB-backed Kalio credential from ignored `.env.test`, and the managed API then reports live Xiaomi provider state from DB.
 - `npm.cmd run agentflow:paid-readiness` now enforces the pre-paid gate and validates the active credential through Kalio's provider-test endpoint. It currently fails for one hard blocker: the active Xiaomi credential returns `Invalid API Key`.
@@ -378,14 +378,14 @@ Mock/runtime test scenario coverage:
 | MockLLM reject-then-accept loop | `architecture-runtime.llm-integration.spec.ts` | Proves return-to-implementer routing then finalization when Goal Master accepts. |
 | MockLLM immediate accept | `architecture-runtime.llm-integration.spec.ts` | Proves direct Goal Master acceptance path. |
 | MockLLM reject-forever bounded failure | `architecture-runtime.llm-integration.spec.ts` | Proves max-step guard emits stop payload and prevents final artifact. |
-| Production Goal Master schema with deterministic tool events | `architecture-runtime.llm-integration.spec.ts` | Proves real `tool_executor` materializer/verifier evidence path: `vfs_write`, `vfs_read`, Goal Master acceptance. |
+| Production Goal Master schema with deterministic tool events | `architecture-runtime.llm-integration.spec.ts` | Proves real `tool_executor` Implementer/Verifier evidence path: `vfs_write`, `vfs_read`, Goal Master acceptance. |
 
 Remaining gaps before calling this architecture production-complete:
 
 - Resume is API-visible, E2E-covered, and has architecture runtime re-entry. Unit/runtime evidence proves cursor-based resume can avoid replaying completed root nodes; broader process-restart E2E should still abuse waiting runs and stale worker projections.
-- Unresolved CLI child materialization now has settled runtime semantics: ArchitectureRuntime keeps continuation-capable max-node-visit stops `running`, hard max-step exhaustion remains `failed`, and AgentFlow projects continuation stops as `waiting_on_orchestrator`.
+- Unresolved CLI child implementation now has settled runtime semantics: ArchitectureRuntime keeps continuation-capable max-node-visit stops `running`, hard max-step exhaustion remains `failed`, and AgentFlow projects continuation stops as `waiting_on_orchestrator`.
 - Native `run_sub_agentflow` is now wired into the executable chat tool registry, not only the catalog/API layer.
-- The live materializer still needs a fresh real-project proof after the CLI-child status contract is fixed, so project creation through the full Dev/Goal-Guard loop is not yet production-proven.
+- The live Implementer/CLI-child path still needs a fresh real-project proof after the CLI-child status contract is fixed, so project creation through the full Dev/Goal-Guard loop is not yet production-proven.
 - Frontend Conversations visibility now has focused Canvas tests and mock full-stack E2E coverage for Talk-started AgentFlow runs. It still needs a live manual QA screenshot pass against the managed localhost Kalio service.
-- The live bounded proof exposed a product-level flow gap: the Implementer slot is intentionally read-only and reported it could not create the proof artifact; the next continuation target is `materializer`. This is correct supervision behavior, but the full materializer -> Goal Guard acceptance path still needs live proof.
+- The live bounded proof exposed a product-level flow gap in the older schema: the Implementer slot was effectively read-only and the next continuation target was a separate write node. Current schema removes that handoff; the Implementer owns write proof directly, and the current mock E2E proves that path before any paid rerun.
 - Final paid/live proof remains gated: do not run the real `C:\Projekty\TurboProject2` generation until the managed FE manual QA screenshot pass confirms Conversations, child chat, Execution Graph, QA resume evidence, and no stale running projection.

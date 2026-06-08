@@ -112,9 +112,25 @@ describe('ArchitectGraphCanvas', () => {
     const canvas = screen.getByTestId('architect-graph-canvas');
     const transform = screen.getByTestId('architect-canvas-transform');
 
-    fireEvent.wheel(canvas, { ctrlKey: true, deltaY: -100 });
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 800,
+      width: 1000,
+      height: 800,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.wheel(canvas, { clientX: 200, clientY: 100, deltaY: -100 });
     expect(screen.getByTestId('architect-zoom-label')).toHaveTextContent('92%');
-    expect(transform).toHaveStyle({ transform: 'translate(0px, 0px) scale(0.92)' });
+    expect(transform).toHaveStyle({ transform: 'translate(-24px, -12px) scale(0.92)' });
+
+    fireEvent.click(screen.getByLabelText('Zoom in'));
+    expect(screen.getByTestId('architect-zoom-label')).toHaveTextContent('103%');
+    expect(transform).toHaveStyle({ transform: 'translate(-87px, -61px) scale(1.03)' });
 
     for (let index = 0; index < 20; index += 1) {
       fireEvent.click(screen.getByLabelText('Zoom in'));
@@ -141,7 +157,7 @@ describe('ArchitectGraphCanvas', () => {
     renderCanvas();
 
     const canvas = screen.getByTestId('architect-graph-canvas');
-    const wheelEvent = new WheelEvent('wheel', { cancelable: true, ctrlKey: true, deltaY: -120 });
+    const wheelEvent = new WheelEvent('wheel', { cancelable: true, deltaY: -120 });
     canvas.dispatchEvent(wheelEvent);
 
     const hasNonPassiveWheelListener = addEventListenerSpy.mock.calls.some(
@@ -164,35 +180,98 @@ describe('ArchitectGraphCanvas', () => {
 
     expect(transform).toHaveStyle({ transform: 'translate(32px, 40px) scale(0.82)' });
 
+    openGraphControls();
     fireEvent.click(screen.getByLabelText('Reset viewport'));
     expect(transform).toHaveStyle({ transform: 'translate(0px, 0px) scale(0.82)' });
   });
 
-  it('does not start pan from node controls', () => {
+  it('resets an active canvas pan even before the pointer is released', () => {
+    renderCanvas();
+    const canvas = screen.getByTestId('architect-graph-canvas');
+    const transform = screen.getByTestId('architect-canvas-transform');
+
+    fireEvent(canvas, new MouseEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      clientX: 120,
+      clientY: 140,
+    }));
+    fireEvent(canvas, new MouseEvent('pointermove', {
+      bubbles: true,
+      clientX: 180,
+      clientY: 185,
+    }));
+
+    expect(transform).toHaveStyle({ transform: 'translate(60px, 45px) scale(0.82)' });
+
+    openGraphControls();
+    fireEvent.click(screen.getByLabelText('Reset viewport'));
+
+    expect(transform).toHaveStyle({ transform: 'translate(0px, 0px) scale(0.82)' });
+  });
+
+  it('does not start canvas pan from graph toolbar controls', () => {
+    renderCanvas();
+    const transform = screen.getByTestId('architect-canvas-transform');
+    openGraphControls();
+    const resetButton = screen.getByLabelText('Reset viewport');
+
+    fireEvent(resetButton, new MouseEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      clientX: 120,
+      clientY: 140,
+    }));
+    fireEvent(screen.getByTestId('architect-graph-canvas'), new MouseEvent('pointermove', {
+      bubbles: true,
+      clientX: 180,
+      clientY: 185,
+    }));
+
+    expect(transform).toHaveStyle({ transform: 'translate(0px, 0px) scale(0.82)' });
+  });
+
+  it('pans the canvas with alt drag even when starting over a node', () => {
     const onSelectNode = vi.fn();
     renderCanvas(baseSchema, onSelectNode);
     const transform = screen.getByTestId('architect-canvas-transform');
-
-    fireEvent.mouseDown(screen.getByTestId('architect-node-start'), {
-      altKey: true,
-      button: 0,
-      clientX: 10,
-      clientY: 12,
+    const canvas = screen.getByTestId('architect-graph-canvas');
+    Object.assign(canvas, {
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+      hasPointerCapture: vi.fn().mockReturnValue(true),
     });
-    fireEvent.mouseMove(screen.getByTestId('architect-graph-canvas'), {
-      clientX: 42,
-      clientY: 52,
-    });
-    fireEvent.click(screen.getByTestId('architect-node-start'));
 
-    expect(transform).toHaveStyle({ transform: 'translate(0px, 0px) scale(0.82)' });
-    expect(onSelectNode).toHaveBeenCalledWith('start');
+    fireArchitectPointerEvent(screen.getByTestId('architect-node-card-start'), 'pointerdown', { altKey: true, button: 0, pointerId: 26, clientX: 10, clientY: 12 });
+    fireArchitectPointerEvent(canvas, 'pointermove', { altKey: true, pointerId: 26, clientX: 42, clientY: 52 });
+
+    expect(transform).toHaveStyle({ transform: 'translate(32px, 40px) scale(0.82)' });
+    expect(onSelectNode).not.toHaveBeenCalled();
+  });
+
+  it('pans the canvas with alt drag even when starting over a connector pin', () => {
+    const onToggleEdge = vi.fn();
+    renderCanvas(baseSchema, vi.fn(), vi.fn(), vi.fn(), vi.fn(), onToggleEdge);
+    const canvas = screen.getByTestId('architect-graph-canvas');
+    const transform = screen.getByTestId('architect-canvas-transform');
+    Object.assign(canvas, {
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+      hasPointerCapture: vi.fn().mockReturnValue(true),
+    });
+
+    fireArchitectPointerEvent(screen.getByTestId('architect-node-output-pin-start'), 'pointerdown', { altKey: true, button: 0, pointerId: 28, clientX: 240, clientY: 178 });
+    fireArchitectPointerEvent(canvas, 'pointermove', { altKey: true, pointerId: 28, clientX: 286, clientY: 206 });
+
+    expect(transform).toHaveStyle({ transform: 'translate(46px, 28px) scale(0.82)' });
+    expect(onToggleEdge).not.toHaveBeenCalled();
   });
 
   it('adds a node at the clicked canvas position in add mode', () => {
     const onAddNode = vi.fn();
     renderCanvas(baseSchema, vi.fn(), vi.fn(), vi.fn(), onAddNode);
 
+    openGraphControls();
     fireEvent.click(screen.getByTestId('architect-mode-add-node'));
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 240, clientY: 180 });
 
@@ -203,6 +282,7 @@ describe('ArchitectGraphCanvas', () => {
     const onAddNode = vi.fn();
     renderCanvas(baseSchema, vi.fn(), vi.fn(), vi.fn(), onAddNode);
 
+    openGraphControls();
     fireEvent.click(screen.getByTestId('architect-mode-add-router'));
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 260, clientY: 210 });
 
@@ -233,6 +313,95 @@ describe('ArchitectGraphCanvas', () => {
     expect(screen.getByTestId('architect-canvas-transform')).toHaveStyle({ transform: 'translate(0px, 0px) scale(0.82)' });
   });
 
+  it('does not move a node for tiny pointer drift on the drag handle', () => {
+    const onSelectNode = vi.fn();
+    const onMoveNode = vi.fn();
+    renderCanvas(baseSchema, onSelectNode, vi.fn(), onMoveNode);
+
+    const dragHandle = screen.getByTestId('architect-node-drag-start');
+    fireEvent(dragHandle, new MouseEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    }));
+    fireEvent(dragHandle, new MouseEvent('pointermove', {
+      bubbles: true,
+      clientX: 103,
+      clientY: 103,
+    }));
+    fireEvent(dragHandle, new MouseEvent('pointerup', { bubbles: true }));
+
+    expect(onSelectNode).toHaveBeenCalledWith('start');
+    expect(onMoveNode).not.toHaveBeenCalled();
+  });
+
+  it('selects a node from the card body without dragging it', () => {
+    const onSelectNode = vi.fn();
+    const onMoveNode = vi.fn();
+    renderCanvas(baseSchema, onSelectNode, vi.fn(), onMoveNode);
+
+    const nodeCard = screen.getByTestId('architect-node-card-start');
+    fireArchitectPointerEvent(nodeCard, 'pointerdown', { button: 0, pointerId: 16, clientX: 140, clientY: 145 });
+    fireArchitectPointerEvent(nodeCard, 'pointermove', { pointerId: 16, clientX: 210, clientY: 190 });
+    fireArchitectPointerEvent(nodeCard, 'pointerup', { pointerId: 16, clientX: 210, clientY: 190 });
+    fireEvent.click(nodeCard);
+
+    expect(onMoveNode).not.toHaveBeenCalled();
+    expect(onSelectNode).toHaveBeenCalledWith('start');
+    expect(screen.getByTestId('architect-canvas-transform')).toHaveStyle({ transform: 'translate(0px, 0px) scale(0.82)' });
+  });
+
+  it('pans the canvas from over a node while the space key is held', () => {
+    const onSelectNode = vi.fn();
+    const onMoveNode = vi.fn();
+    renderCanvas(baseSchema, onSelectNode, vi.fn(), onMoveNode);
+
+    const canvas = screen.getByTestId('architect-graph-canvas');
+    const nodeCard = screen.getByTestId('architect-node-card-start');
+    const transform = screen.getByTestId('architect-canvas-transform');
+    Object.assign(canvas, {
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+      hasPointerCapture: vi.fn().mockReturnValue(true),
+    });
+
+    fireEvent.keyDown(window, { key: ' ' });
+    expect(canvas).toHaveAttribute('data-space-panning', 'true');
+
+    fireArchitectPointerEvent(nodeCard, 'pointerdown', { button: 0, pointerId: 14, clientX: 120, clientY: 140 });
+    fireArchitectPointerEvent(canvas, 'pointermove', { pointerId: 14, clientX: 180, clientY: 174 });
+
+    expect(transform).toHaveStyle({ transform: 'translate(60px, 34px) scale(0.82)' });
+    expect(onMoveNode).not.toHaveBeenCalled();
+    expect(onSelectNode).not.toHaveBeenCalled();
+
+    fireEvent.keyUp(window, { key: ' ' });
+    expect(canvas).toHaveAttribute('data-space-panning', 'false');
+  });
+
+  it('pans the canvas with middle-button drag even when starting over a node', () => {
+    const onSelectNode = vi.fn();
+    const onMoveNode = vi.fn();
+    renderCanvas(baseSchema, onSelectNode, vi.fn(), onMoveNode);
+
+    const canvas = screen.getByTestId('architect-graph-canvas');
+    const nodeCard = screen.getByTestId('architect-node-card-start');
+    const transform = screen.getByTestId('architect-canvas-transform');
+    Object.assign(canvas, {
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+      hasPointerCapture: vi.fn().mockReturnValue(true),
+    });
+
+    fireArchitectPointerEvent(nodeCard, 'pointerdown', { button: 1, pointerId: 18, clientX: 120, clientY: 140 });
+    fireArchitectPointerEvent(canvas, 'pointermove', { pointerId: 18, clientX: 170, clientY: 176 });
+
+    expect(transform).toHaveStyle({ transform: 'translate(50px, 36px) scale(0.82)' });
+    expect(onMoveNode).not.toHaveBeenCalled();
+    expect(onSelectNode).not.toHaveBeenCalled();
+  });
+
   it('toggles an edge by selecting two nodes in connect mode', () => {
     const onToggleEdge = vi.fn();
     renderCanvas(baseSchema, vi.fn(), vi.fn(), vi.fn(), vi.fn(), onToggleEdge);
@@ -244,10 +413,140 @@ describe('ArchitectGraphCanvas', () => {
     expect(onToggleEdge).toHaveBeenCalledWith('start', 'end');
   });
 
+  it('toggles an edge by clicking node connector pins without opening connect mode first', () => {
+    const onToggleEdge = vi.fn();
+    renderCanvas(baseSchema, vi.fn(), vi.fn(), vi.fn(), vi.fn(), onToggleEdge);
+
+    fireEvent.click(screen.getByTestId('architect-node-output-pin-start'));
+    fireEvent.click(screen.getByTestId('architect-router-input-pin-end'));
+
+    expect(onToggleEdge).toHaveBeenCalledWith('start', 'end');
+  });
+
+  it('does not preview a connector for tiny pointer drift on a large connector hitbox', () => {
+    const onToggleEdge = vi.fn();
+    renderCanvas(baseSchema, vi.fn(), vi.fn(), vi.fn(), vi.fn(), onToggleEdge);
+
+    const outputPin = screen.getByTestId('architect-node-output-pin-start');
+    Object.assign(outputPin, {
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+      hasPointerCapture: vi.fn().mockReturnValue(true),
+    });
+
+    fireArchitectPointerEvent(outputPin, 'pointerdown', { button: 0, pointerId: 22, clientX: 242, clientY: 178 });
+    fireArchitectPointerEvent(outputPin, 'pointermove', { pointerId: 22, clientX: 245, clientY: 181 });
+
+    expect(screen.queryByTestId('architect-connection-preview')).toBeNull();
+
+    fireArchitectPointerEvent(outputPin, 'pointerup', { pointerId: 22, clientX: 245, clientY: 181 });
+
+    expect(onToggleEdge).not.toHaveBeenCalled();
+  });
+
+  it('previews and completes a connector by dragging from an output pin to an input pin', () => {
+    const onToggleEdge = vi.fn();
+    renderCanvas(baseSchema, vi.fn(), vi.fn(), vi.fn(), vi.fn(), onToggleEdge);
+
+    const canvas = screen.getByTestId('architect-graph-canvas');
+    const outputPin = screen.getByTestId('architect-node-output-pin-start');
+    const inputPin = screen.getByTestId('architect-router-input-pin-end');
+    const setPointerCapture = vi.fn();
+    const releasePointerCapture = vi.fn();
+    const hasPointerCapture = vi.fn().mockReturnValue(true);
+    Object.assign(outputPin, { setPointerCapture, releasePointerCapture, hasPointerCapture });
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 800,
+      width: 1000,
+      height: 800,
+      toJSON: () => ({}),
+    });
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn().mockReturnValue(inputPin),
+    });
+
+    fireArchitectPointerEvent(outputPin, 'pointerdown', { button: 0, pointerId: 12, clientX: 242, clientY: 178 });
+    fireArchitectPointerEvent(outputPin, 'pointermove', { pointerId: 12, clientX: 360, clientY: 210 });
+
+    expect(screen.getByTestId('architect-connection-preview')).toBeInTheDocument();
+    expect(screen.getByTestId('architect-node-card-end')).toHaveAttribute('data-architect-connection-drop-target', 'true');
+    expect(inputPin).toHaveClass('ring-2');
+
+    fireArchitectPointerEvent(outputPin, 'pointerup', { pointerId: 12, clientX: 360, clientY: 210 });
+
+    expect(setPointerCapture).toHaveBeenCalledWith(12);
+    expect(releasePointerCapture).toHaveBeenCalledWith(12);
+    expect(onToggleEdge).toHaveBeenCalledWith('start', 'end');
+    expect(screen.queryByTestId('architect-connection-preview')).toBeNull();
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: originalElementFromPoint,
+    });
+  });
+
+  it('auto-pans the map while dragging a connector near the viewport edge', () => {
+    renderCanvas(baseSchema, vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn());
+
+    const canvas = screen.getByTestId('architect-graph-canvas');
+    const transform = screen.getByTestId('architect-canvas-transform');
+    const outputPin = screen.getByTestId('architect-node-output-pin-start');
+    Object.assign(outputPin, {
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+      hasPointerCapture: vi.fn().mockReturnValue(true),
+    });
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 1000,
+      bottom: 800,
+      width: 1000,
+      height: 800,
+      toJSON: () => ({}),
+    });
+
+    fireArchitectPointerEvent(outputPin, 'pointerdown', { button: 0, pointerId: 24, clientX: 242, clientY: 178 });
+    fireArchitectPointerEvent(outputPin, 'pointermove', { pointerId: 24, clientX: 980, clientY: 360 });
+
+    expect(screen.getByTestId('architect-connection-preview')).toBeInTheDocument();
+    expect(transform).toHaveStyle({ transform: 'translate(-28px, 0px) scale(0.82)' });
+  });
+
+  it('pans the map with a left-button drag on empty canvas space', () => {
+    renderCanvas();
+
+    const canvas = screen.getByTestId('architect-graph-canvas');
+    const transform = screen.getByTestId('architect-canvas-transform');
+
+    fireEvent(canvas, new MouseEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      clientX: 300,
+      clientY: 220,
+    }));
+    fireEvent(canvas, new MouseEvent('pointermove', {
+      bubbles: true,
+      clientX: 345,
+      clientY: 250,
+    }));
+
+    expect(transform).toHaveStyle({ transform: 'translate(45px, 30px) scale(0.82)' });
+  });
+
   it('runs auto-layout on demand from the toolbar', () => {
     const onAutoLayout = vi.fn();
     renderCanvas(baseSchema, vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn(), [], false, onAutoLayout);
 
+    openGraphControls();
     fireEvent.click(screen.getByTestId('architect-auto-layout'));
 
     expect(onAutoLayout).toHaveBeenCalledTimes(1);
@@ -263,6 +562,7 @@ describe('ArchitectGraphCanvas', () => {
 
     expect(screen.getByTestId('architect-runtime-mode-indicator')).toHaveTextContent('Runtime');
 
+    openGraphControls();
     fireEvent.click(screen.getByTestId('architect-mode-add-node'));
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 640, clientY: 220 });
     fireEvent.click(screen.getByTestId('architect-mode-connect'));
@@ -289,6 +589,7 @@ describe('ArchitectGraphCanvas', () => {
     const onAutoLayout = vi.fn();
     renderCanvas(baseSchema, vi.fn(), vi.fn(), onMoveNode, onAddNode, onToggleEdge, [], true, onAutoLayout);
 
+    openGraphControls();
     fireEvent.click(screen.getByTestId('architect-auto-layout'));
 
     expect(onAutoLayout).not.toHaveBeenCalled();
@@ -297,6 +598,24 @@ describe('ArchitectGraphCanvas', () => {
     expect(onToggleEdge).not.toHaveBeenCalled();
   });
 });
+
+function fireArchitectPointerEvent(
+  element: Element,
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  options: { altKey?: boolean; button?: number; pointerId: number; clientX: number; clientY: number },
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'altKey', { value: options.altKey ?? false });
+  Object.defineProperty(event, 'button', { value: options.button ?? 0 });
+  Object.defineProperty(event, 'pointerId', { value: options.pointerId });
+  Object.defineProperty(event, 'clientX', { value: options.clientX });
+  Object.defineProperty(event, 'clientY', { value: options.clientY });
+  fireEvent(element, event);
+}
+
+function openGraphControls() {
+  fireEvent.click(screen.getByRole('button', { name: 'More graph controls' }));
+}
 
 function renderCanvas(
   schema: ArchitectSchema = baseSchema,

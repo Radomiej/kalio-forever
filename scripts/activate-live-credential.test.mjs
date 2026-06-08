@@ -98,6 +98,26 @@ test('activation creates and activates a DB credential without printing the API 
   assert.match(stdout.join('\n'), /"credentialId": "cred-live"/);
 });
 
+test('activation defaults Xiaomi live credentials to the cheaper mimo-v2.5 model', async () => {
+  const calls = [];
+
+  await activateLiveCredential({
+    args: ['--api-url', 'http://127.0.0.1:51052/api'],
+    env: {
+      LLM_API_KEY: 'secret-live-key',
+    },
+    repoRoot: mkdtempSync(join(tmpdir(), 'kalio-activate-live-default-model-')),
+    fetchJson: async (url, init) => {
+      calls.push({ url, init });
+      return url.endsWith('/credentials') ? response({ id: 'cred-live' }) : response('');
+    },
+  });
+
+  const body = JSON.parse(calls[0].init.body);
+  assert.equal(body.provider, 'xiaomimimo');
+  assert.equal(body.model, 'mimo-v2.5');
+});
+
 test('activation fails before network calls when no API key is available', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kalio-activate-live-empty-env-'));
   let called = false;

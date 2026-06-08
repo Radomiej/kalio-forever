@@ -4,6 +4,7 @@ import { AppSettingsService } from '../../../database/app-settings.service';
 import { RemoteRelayChannel } from '../remote-relay-channel.interface';
 import type { RelayCommandHandlers } from '../relay-command-handlers.interface';
 import { escapeMarkdownV2, splitMessage } from './telegram.utils';
+import { registerTelegramCommands } from './telegram-command-registration';
 
 const KEY_BOT_TOKEN = 'relay.telegram.bot_token';
 const KEY_CHAT_ID = 'relay.telegram.chat_id';
@@ -72,7 +73,6 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
     if (this.bot) {
       await this.stopBot();
     }
-
     try {
       const botUsername = await this.startBot(botToken, { waitForPollingStart: true });
       this.botToken = botToken;
@@ -98,7 +98,6 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
       await this.bot.api.sendMessage(this.chatId, escapeMarkdownV2(chunk), { parse_mode: 'MarkdownV2' });
     }
   }
-
   setCommandHandlers(handlers: RelayCommandHandlers): void {
     this.commandHandlers = handlers;
   }
@@ -194,7 +193,6 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
     if (!previousConnection) {
       return;
     }
-
     try {
       await this.startBot(previousConnection.botToken, { waitForPollingStart: true });
       this.botToken = previousConnection.botToken;
@@ -208,170 +206,12 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
   }
 
   private registerCommands(bot: Bot): void {
-    bot.command('start', async (ctx) => {
-      if (!this.chatId) {
-        await ctx.reply(
-          'Welcome to Kalio\\! Send any message or /register to link this chat and receive notifications\\.',
-          { parse_mode: 'MarkdownV2' },
-        );
-      } else {
-        await ctx.reply('Kalio is connected\\. Use /help to see available commands\\.', {
-          parse_mode: 'MarkdownV2',
-        });
-      }
+    registerTelegramCommands(bot, {
+      getChatId: () => this.chatId,
+      persistChatId: (chatId) => this.persistChatId(chatId),
+      getCommandHandlers: () => this.commandHandlers,
+      logger: this.logger,
     });
-
-    bot.command('register', async (ctx) => {
-      try {
-        await this.persistChatId(String(ctx.chat.id));
-        await ctx.reply(
-          'Registered\\! Kalio notifications will be sent to this chat\\.',
-          { parse_mode: 'MarkdownV2' },
-        );
-      } catch (err) {
-        this.logger.error(
-          'Failed to register Telegram chat',
-          err instanceof Error ? err : new Error(String(err)),
-        );
-        await ctx.reply('Failed to register this chat\\. Try again in a moment\\.', {
-          parse_mode: 'MarkdownV2',
-        });
-      }
-    });
-
-    bot.command('help', async (ctx) => {
-      await ctx.reply(
-        'Send any message to auto-register this chat\n\n' +
-          '/register - Link this chat to receive notifications\n' +
-          '/status - Show active sessions\n' +
-          '/stop - Stop all running sessions\n' +
-          '/approve <requestId> [reason] - Approve a HITL request\n' +
-          '/cancel <requestId> [reason] - Cancel a HITL request\n' +
-          '/help - Show this message',
-        { parse_mode: 'MarkdownV2' },
-      );
-    });
-
-
-    bot.command('status', async (ctx) => {
-      if (!this.commandHandlers) {
-        await ctx.reply('Status not available yet.');
-        return;
-      }
-      try {
-        const status = await this.commandHandlers.getStatus();
-        await ctx.reply(escapeMarkdownV2(status), { parse_mode: 'MarkdownV2' });
-      } catch (err) {
-        this.logger.error(
-          'Error handling /status command',
-          err instanceof Error ? err : new Error(String(err)),
-        );
-        await ctx.reply('Error retrieving status.');
-      }
-    });
-
-    bot.command('stop', async (ctx) => {
-      if (!this.commandHandlers) {
-        await ctx.reply('Stop not available yet.');
-        return;
-      }
-      try {
-        await this.commandHandlers.stopAll();
-        await ctx.reply('All sessions stopped\\.');
-      } catch (err) {
-        this.logger.error(
-          'Error handling /stop command',
-          err instanceof Error ? err : new Error(String(err)),
-        );
-        await ctx.reply('Error stopping sessions.');
-      }
-    });
-
-    bot.command('approve', async (ctx) => {
-      await this.handleApprovalCommand(ctx, 'approve');
-    });
-
-    bot.command('cancel', async (ctx) => {
-      await this.handleApprovalCommand(ctx, 'cancel');
-    });
-
-    const handleTextContact = async (ctx: { chat: { id: number }; reply: (text: string, extra?: { parse_mode: 'MarkdownV2' }) => Promise<unknown> }) => {
-      const incomingChatId = String(ctx.chat.id);
-
-      if (!this.chatId) {
-        await this.persistChatId(incomingChatId);
-        await ctx.reply(
-          'Registered\\! Kalio notifications will be sent to this chat\\.',
-          { parse_mode: 'MarkdownV2' },
-        );
-        return;
-      }
-
-      if (this.chatId === incomingChatId) {
-        const text = textFromContext(ctx);
-        if (text && this.commandHandlers?.handleApprovalReply) {
-          const response = await this.commandHandlers.handleApprovalReply(text);
-          if (response) {
-            await ctx.reply(escapeMarkdownV2(response), { parse_mode: 'MarkdownV2' });
-            return;
-          }
-        }
-
-        await ctx.reply(
-          'Kalio is connected\\. Use /status, /stop or /help\\.',
-          { parse_mode: 'MarkdownV2' },
-        );
-        return;
-      }
-
-      await ctx.reply(
-        'This bot is already linked to another chat\\. Send /register here if you want to move it\\.',
-        { parse_mode: 'MarkdownV2' },
-      );
-    };
-
-    bot.on('message:text', handleTextContact);
-    bot.on('channel_post:text', handleTextContact);
-  }
-
-  private async handleApprovalCommand(
-    ctx: {
-      chat: { id: number };
-      match?: string;
-      message?: { text?: string };
-      channelPost?: { text?: string };
-      reply: (text: string, extra?: { parse_mode: 'MarkdownV2' }) => Promise<unknown>;
-    },
-    decision: 'approve' | 'cancel',
-  ): Promise<void> {
-    if (!this.commandHandlers) {
-      await ctx.reply('Approval commands are not available yet\\.', { parse_mode: 'MarkdownV2' });
-      return;
-    }
-
-    if (this.chatId !== String(ctx.chat.id)) {
-      await ctx.reply('This chat is not registered for Kalio approvals\\.', { parse_mode: 'MarkdownV2' });
-      return;
-    }
-
-    const parsed = parseCommandArgs(ctx.match ?? textFromContext(ctx)?.replace(/^\/(?:approve|cancel)(?:@\S+)?\s*/i, '') ?? '');
-    if (!parsed.requestId) {
-      await ctx.reply(`Usage: /${decision} <requestId> [reason]`, { parse_mode: 'MarkdownV2' });
-      return;
-    }
-
-    try {
-      const response = decision === 'approve'
-        ? await this.commandHandlers.approveToolConfirmation(parsed.requestId, parsed.reason)
-        : await this.commandHandlers.cancelToolConfirmation(parsed.requestId, parsed.reason);
-      await ctx.reply(escapeMarkdownV2(response), { parse_mode: 'MarkdownV2' });
-    } catch (err) {
-      this.logger.error(
-        `Error handling /${decision} command`,
-        err instanceof Error ? err : new Error(String(err)),
-      );
-      await ctx.reply(`Error handling /${decision}\\.`, { parse_mode: 'MarkdownV2' });
-    }
   }
 
   private async persistChatId(chatId: string): Promise<void> {
@@ -379,21 +219,4 @@ export class TelegramRelayService extends RemoteRelayChannel implements OnModule
     await this.settings.set(KEY_CHAT_ID, chatId);
     this.logger.log(`Telegram chat registered: ${chatId}`);
   }
-}
-
-function parseCommandArgs(input: string): { requestId: string | null; reason?: string } {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return { requestId: null };
-  }
-  const [requestId, ...reasonParts] = trimmed.split(/\s+/);
-  const reason = reasonParts.join(' ').trim();
-  return {
-    requestId,
-    ...(reason ? { reason } : {}),
-  };
-}
-
-function textFromContext(ctx: { message?: { text?: string }; channelPost?: { text?: string }; chat?: unknown; reply?: unknown }): string | null {
-  return ctx.message?.text ?? ctx.channelPost?.text ?? null;
 }

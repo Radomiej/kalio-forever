@@ -255,7 +255,7 @@ function graphStatus(nodes: ArchitectureGraphProjectionNode[]): ArchitectureRunS
 }
 
 function executionStatusFromArchitectureStatus(status: ArchitectureRunStatus | undefined, nodeStatus: ArchitectureGraphProjectionNode['status']) {
-  if (status === 'failed') return 'error' as const;
+  if (status === 'failed' || status === 'cancelled') return 'error' as const;
   if (status === 'completed') return 'success' as const;
   if (status === 'running' && nodeStatus === 'completed') return 'success' as const;
   if (status === 'running') return 'running' as const;

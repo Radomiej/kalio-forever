@@ -6,15 +6,17 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { Logger, UseFilters } from '@nestjs/common';
+import { Inject, Logger, Optional, UseFilters } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import type { Socket } from 'socket.io';
-import type { SocketEvents } from '@kalio/types';
+import type { AgentFlowRunSnapshot, SocketEvents } from '@kalio/types';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { RAAppHITLService } from '../raapp/raapp-hitl.service';
+import { AGENT_FLOW_RUNTIME, type AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port';
 
 @UseFilters(WsExceptionFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -31,6 +33,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly pipeline: SessionPipelineService,
     private readonly raappHITL: RAAppHITLService,
     private readonly sessionsService: SessionsService,
+    @Optional() @Inject(AGENT_FLOW_RUNTIME) private readonly agentFlowRuntime?: AgentFlowRuntimePort,
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
   handleConnection(client: Socket): void {
@@ -108,6 +112,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const descendantSessionIds = await this.collectDescendantSessionIds(payload.sessionId);
     descendantSessionIds.forEach((sessionId) => this.pipeline.stop(sessionId));
+    await this.stopAgentFlowRunsForSessions([payload.sessionId, ...descendantSessionIds]);
   }
 
   @SubscribeMessage('tool:confirm')
@@ -120,7 +125,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.warn(`tool:confirm rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
-    const status = this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId);
+    const status = payload.message
+      ? this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId, payload.message)
+      : this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId);
     if (status === 'not_found') {
       client.emit('tool:confirmation_invalidated', {
         requestId: payload.requestId,
@@ -141,7 +148,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.warn(`tool:cancel rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
-    const status = this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId);
+    const status = payload.message
+      ? this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId, payload.message)
+      : this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId);
     if (status === 'not_found') {
       client.emit('tool:confirmation_invalidated', {
         requestId: payload.requestId,
@@ -308,5 +317,63 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return descendantSessionIds;
+  }
+
+  private async stopAgentFlowRunsForSessions(sessionIds: string[]): Promise<void> {
+    const agentFlowRuntime = this.getAgentFlowRuntime();
+    if (!agentFlowRuntime?.stop) {
+      return;
+    }
+    const sessionIdSet = new Set(sessionIds);
+    const snapshots = await this.findAgentFlowSnapshotsForSessions(agentFlowRuntime, sessionIds);
+    const activeSnapshots = snapshots.filter((snapshot) => (
+      this.isActiveAgentFlowSnapshot(snapshot)
+      && (
+        sessionIdSet.has(snapshot.run.parentSessionId)
+        || sessionIdSet.has(snapshot.run.childSessionId)
+        || (snapshot.run.openChatSessionId !== undefined && sessionIdSet.has(snapshot.run.openChatSessionId))
+      )
+    ));
+    const stoppedRunIds = new Set<string>();
+    for (const snapshot of activeSnapshots) {
+      if (stoppedRunIds.has(snapshot.run.id)) {
+        continue;
+      }
+      stoppedRunIds.add(snapshot.run.id);
+      try {
+        await agentFlowRuntime.stop(snapshot.run.id);
+      } catch (error) {
+        this.logger.warn(`Failed to stop AgentFlow run ${snapshot.run.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  private getAgentFlowRuntime(): AgentFlowRuntimePort | undefined {
+    if (this.agentFlowRuntime) {
+      return this.agentFlowRuntime;
+    }
+    try {
+      return this.moduleRef?.get<AgentFlowRuntimePort>(AGENT_FLOW_RUNTIME, { strict: false });
+    } catch (error) {
+      this.logger.warn(`AgentFlow runtime lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    }
+  }
+
+  private async findAgentFlowSnapshotsForSessions(agentFlowRuntime: AgentFlowRuntimePort, sessionIds: string[]): Promise<AgentFlowRunSnapshot[]> {
+    if (agentFlowRuntime.findAll) {
+      return agentFlowRuntime.findAll();
+    }
+    if (!agentFlowRuntime.findByParentSessionId) {
+      return [];
+    }
+    const snapshots = await Promise.all(sessionIds.map((sessionId) => agentFlowRuntime.findByParentSessionId?.(sessionId) ?? Promise.resolve([])));
+    return snapshots.flat();
+  }
+
+  private isActiveAgentFlowSnapshot(snapshot: AgentFlowRunSnapshot): boolean {
+    return snapshot.run.status === 'running'
+      || snapshot.run.status === 'queued'
+      || snapshot.run.status === 'waiting_on_orchestrator';
   }
 }

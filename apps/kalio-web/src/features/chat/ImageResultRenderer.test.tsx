@@ -7,7 +7,7 @@ describe('ImageResultRenderer', () => {
     render(
       <ImageResultRenderer
         data={{
-          image_url: 'https://example.com/generated.png',
+          image_url: 'data:image/png;base64,ZmFrZQ==',
           download_url: 'https://example.com/download/generated.png',
           path: '/tmp/generated.png',
           model: 'gpt-image-1',
@@ -20,7 +20,7 @@ describe('ImageResultRenderer', () => {
       />,
     );
 
-    expect(screen.getByAltText('Mountain at sunrise')).toHaveAttribute('src', 'https://example.com/generated.png');
+    expect(screen.getByAltText('Mountain at sunrise')).toHaveAttribute('src', 'data:image/png;base64,ZmFrZQ==');
     expect(screen.getByText('gpt-image-1')).toBeInTheDocument();
     expect(screen.getByText('1024x1024')).toBeInTheDocument();
     expect(screen.getByText('.png')).toBeInTheDocument();
@@ -29,13 +29,14 @@ describe('ImageResultRenderer', () => {
     expect(screen.getByText('/tmp/generated.png')).toBeInTheDocument();
 
     const downloadLink = screen.getByRole('link', { name: /download/i });
-    expect(downloadLink).toHaveAttribute('href', 'https://example.com/download/generated.png');
+    expect(downloadLink).toHaveAttribute('href', 'data:image/png;base64,ZmFrZQ==');
     expect(downloadLink).toHaveAttribute('download', 'generated.png');
 
     fireEvent.click(screen.getByRole('button', { name: /view full size/i }));
 
     expect(document.querySelector('dialog.modal-open')).not.toBeNull();
-    expect(screen.getAllByAltText('Mountain at sunrise')[1]).toHaveAttribute('src', 'https://example.com/generated.png');
+    expect(screen.getAllByAltText('Mountain at sunrise')[1]).toHaveAttribute('src', 'data:image/png;base64,ZmFrZQ==');
+    expect(screen.getByText('Open original').closest('a')).toHaveAttribute('href', 'https://example.com/download/generated.png');
 
     fireEvent.click(screen.getByText('Close'));
 

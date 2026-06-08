@@ -19,6 +19,11 @@ const mockSessions: ChatSession[] = [
   { id: 'sub-1', personaId: 'default', title: 'Sub-agent: Landing page', kind: 'subagent', parentSessionId: 's1', createdAt: 2500, updatedAt: Date.now() - 90_000 },
 ];
 
+function chooseOriginFilter(filterId: 'all' | 'user' | 'agent' | 'archived'): void {
+  fireEvent.click(screen.getByTestId('session-origin-filter-trigger'));
+  fireEvent.click(screen.getByTestId(`session-origin-filter-${filterId}`));
+}
+
 const mockPersonas: Persona[] = [
   { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', allowedTools: [], skillIds: [], mcpPolicy: 'allow_all', createdAt: 0, updatedAt: 0 },
 ];
@@ -133,6 +138,8 @@ describe('SessionPanel', () => {
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
     expect(screen.getByText('Chat about React')).toBeTruthy();
     expect(screen.getByText('New Chat')).toBeTruthy();
+    expect(screen.getByTestId('session-kind-icon-s1')).toHaveAttribute('aria-label', 'Root chat');
+    expect(screen.getByTestId('session-kind-icon-s2')).toHaveAttribute('aria-label', 'Root chat');
   });
 
   it('shows persona badge for non-default persona', async () => {
@@ -205,6 +212,9 @@ describe('SessionPanel', () => {
     expect(screen.getByText('Goal Master Delivery Loop: Orchestrator')).toBeTruthy();
     expect(screen.getByText('Goal Master Delivery Loop: Implementer')).toBeTruthy();
     expect(screen.getByText('codex CLI: Write proof file')).toBeTruthy();
+    expect(screen.getByTestId('session-kind-icon-flow-root')).toHaveAttribute('aria-label', 'AgentFlow');
+    expect(screen.getByTestId('session-kind-icon-orchestrator')).toHaveAttribute('aria-label', 'Sub-agent');
+    expect(screen.getByTestId('session-kind-icon-cli-proof')).toHaveAttribute('aria-label', 'CLI agent');
     expect(screen.getByTestId('cli-agent-session-badge-cli-proof')).toBeTruthy();
   });
 
@@ -317,7 +327,7 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
 
-    fireEvent.click(screen.getByTestId('session-origin-filter-user'));
+    chooseOriginFilter('user');
 
     expect(screen.getByText('Chat about React')).toBeTruthy();
     expect(screen.getByText('New Chat')).toBeTruthy();
@@ -328,7 +338,7 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
 
-    fireEvent.click(screen.getByTestId('session-origin-filter-agent'));
+    chooseOriginFilter('agent');
 
     expect(screen.getByTestId('session-tree-root')).toHaveTextContent('Chat about React');
     expect(screen.queryByText('New Chat')).toBeNull();
@@ -355,7 +365,7 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(nestedSessions));
 
-    fireEvent.click(screen.getByTestId('session-origin-filter-agent'));
+    chooseOriginFilter('agent');
 
     expect(screen.getByTestId('session-tree-root')).toHaveTextContent('Main task');
     const items = screen.getAllByTestId('session-item');
@@ -384,7 +394,7 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(staleSessions));
 
-    fireEvent.click(screen.getByTestId('session-origin-filter-agent'));
+    chooseOriginFilter('agent');
 
     expect(screen.queryByText('Sub-agent: stale')).toBeNull();
     expect(screen.getByText('Sub-agent: fresh')).toBeTruthy();
@@ -394,7 +404,7 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
 
-    fireEvent.click(screen.getByTestId('session-origin-filter-agent'));
+    chooseOriginFilter('agent');
     fireEvent.click(screen.getByTestId('archive-session-sub-1'));
 
     await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions/sub-1/archive'));
@@ -424,7 +434,7 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
 
-    fireEvent.click(screen.getByTestId('session-origin-filter-archived'));
+    chooseOriginFilter('archived');
     await waitFor(() => expect(screen.getByText('Archived Sub-agent')).toBeTruthy());
     fireEvent.click(screen.getByTestId('restore-session-archived-sub'));
 
@@ -449,6 +459,38 @@ describe('SessionPanel', () => {
     fireEvent.click(newBtn);
 
     await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ title: 'New Chat' })));
+  });
+
+  it('new session button uses the first available persona instead of hardcoded default', async () => {
+    mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'p1', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId('new-session-btn'));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
+      personaId: 'p1',
+      title: 'New Chat',
+    })));
+  });
+
+  it('falls back to default persona when personas are unavailable during new session creation', async () => {
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+    mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'default', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId('new-session-btn'));
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
+      personaId: 'default',
+      title: 'New Chat',
+    })));
   });
 
   it('calls onSelect when a session is clicked', async () => {

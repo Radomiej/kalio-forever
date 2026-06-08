@@ -20,6 +20,7 @@ slow (downloads to npm cache), subsequent runs are fast.
 | Tool | Purpose | Raw output |
 |---|---|---|
 | built-in scanner | file sizes, silent catches, `any` types | `file-stats.json` |
+| regression review leads | Portal-style review leads for TODO/HACK/workaround, literal UI copy, locale branches, browser dialogs, and search/domain-list drift | `file-stats.json` |
 | governance scanner | README / CONTRIBUTING / CODE_OF_CONDUCT / agent-doc drift | `docs-governance.json` |
 | `madge` | circular dependencies | `madge-circular.json` |
 | `jscpd` | copy/paste detection | `jscpd/jscpd-report.json` |
@@ -51,6 +52,20 @@ Current governance thresholds:
 Rationale: these root instruction files are coordination entry points. Once they
 grow beyond these limits, they tend to accumulate duplicated policy and drift
 from the canonical nested docs.
+
+## Regression review leads
+
+The built-in scan also carries the portable parts of the Portal regression audit:
+
+- `TODO`, `HACK`, `temporary`, and `workaround` markers
+- browser `confirm()` / `alert()` calls with inline strings
+- literal `placeholder`, `aria-label`, and `title` attributes in frontend TSX
+- `locale === ...` branches that may bypass translation files
+- search/domain-list terms such as `category`, `facet`, `searchFields`, and `availableFields`
+
+These rows are review leads, not automatic failures. The report caps this section
+at 60 rows and expects reviewers to suppress false positives with a concrete
+reason rather than treating every match as a bug.
 
 ## Severity rules
 

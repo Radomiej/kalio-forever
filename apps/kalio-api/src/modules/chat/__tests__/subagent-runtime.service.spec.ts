@@ -1139,11 +1139,22 @@ describe('SubagentRuntimeService nested subagents', () => {
           ? [{ role: 'tool' as const, content: savedToolResults[0]!.content, toolCallId: savedToolResults[0]!.toolCallId }]
           : [],
         unboundedHistoryCount: 0,
+        compacted: false,
       })),
     } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const audit = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
+    const llmSourceWithConfig = {
+      ...llmSource,
+      getConfig: vi.fn(async () => ({
+        provider: 'xiaomimimo' as const,
+        apiKey: '',
+        baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        model: 'mimo-v2.5-pro',
+        source: 'db' as const,
+      })),
+    };
     const runtime = new SubagentRuntimeService(
-      llmSource,
+      llmSourceWithConfig,
       makeProcessor(sessionManager) as StreamProcessorService,
       {
         dispatch: vi.fn(async (callId: string): Promise<ToolResult> => ({
@@ -1159,7 +1170,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       sessionManager as unknown as SessionManagerService,
       { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
       { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
-      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: 'mimo-v2.5', availableSkills: [], kv: {} }) } as unknown as PersonaService,
       audit as never,
     );
 
@@ -1190,6 +1201,10 @@ describe('SubagentRuntimeService nested subagents', () => {
         parentToolCallId: 'parent-call-1',
         iteration: 1,
         toolCount: tools.length,
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5',
+        modelSource: 'persona',
+        personaModel: 'mimo-v2.5',
       }),
     }));
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
@@ -1203,6 +1218,10 @@ describe('SubagentRuntimeService nested subagents', () => {
         parentSessionId: 'master',
         parentToolCallId: 'parent-call-1',
         iteration: 1,
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5',
+        modelSource: 'persona',
+        personaModel: 'mimo-v2.5',
       }),
       chunkCount: 0,
     }));
@@ -1213,6 +1232,10 @@ describe('SubagentRuntimeService nested subagents', () => {
         kind: 'subagent_llm_response',
         architectureRunId: 'architecture-run-1',
         toolCallCount: expect.any(Number),
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5',
+        modelSource: 'persona',
+        personaModel: 'mimo-v2.5',
       }),
     }));
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
@@ -1241,6 +1264,159 @@ describe('SubagentRuntimeService nested subagents', () => {
         parentSessionId: 'master',
         parentToolCallId: 'parent-call-1',
         fileTool: expect.objectContaining({ path: 'project/SimulationApp.tsx' }),
+      }),
+    }));
+  });
+
+  it('falls back to runtime LLM config in audit rows when the persona model is blank', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn((params: LLMSourceParams) => {
+        const hasResult = params.messages.some((message) => message.role === 'tool');
+        if (!hasResult) {
+          return streamFrom([
+            { type: 'tool_call', callId: 'read-call-runtime-fallback', name: 'vfs_read', args: { filePath: 'README.md' } },
+            { type: 'done' },
+          ]);
+        }
+        return streamFrom([{ type: 'text_delta', delta: 'runtime fallback complete' }, { type: 'done' }]);
+      }),
+      getConfig: vi.fn(async () => ({
+        provider: 'xiaomimimo' as const,
+        apiKey: '',
+        baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        model: 'mimo-v2.5-pro',
+        source: 'db' as const,
+      })),
+    };
+    const savedToolResults: Array<{ toolCallId: string; content: string }> = [];
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn(async (_sessionId: string, toolCallId: string, content: string) => {
+        savedToolResults.push({ toolCallId, content });
+      }),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn(async () => ({
+        history: savedToolResults.length > 0
+          ? [{ role: 'tool' as const, content: savedToolResults[0]!.content, toolCallId: savedToolResults[0]!.toolCallId }]
+          : [],
+        unboundedHistoryCount: 0,
+        compacted: false,
+      })),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const audit = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      {
+        dispatch: vi.fn(async (callId: string): Promise<ToolResult> => ({
+          callId,
+          status: 'success',
+          data: { content: 'ok' },
+        })),
+        getToolMetas: vi.fn(),
+      } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '   ', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+      audit as never,
+    );
+
+    await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'parent-call-runtime-fallback',
+      objective: 'read with runtime fallback audit',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'shared',
+      copyOutputs: false,
+    });
+
+    expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'llm_request',
+      data: expect.objectContaining({
+        parentToolCallId: 'parent-call-runtime-fallback',
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5-pro',
+        modelSource: 'db',
+        personaModel: '',
+      }),
+    }));
+    expect(audit.update).toHaveBeenCalledWith('audit-id', expect.objectContaining({
+      data: expect.objectContaining({
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5-pro',
+        modelSource: 'db',
+        personaModel: '',
+      }),
+    }));
+  });
+
+  it('uses request model before persona model and records request as the audit source', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([
+        { type: 'text_delta', delta: 'request model complete' },
+        { type: 'done' },
+      ])),
+      getConfig: vi.fn(async () => ({
+        provider: 'xiaomimimo' as const,
+        apiKey: '',
+        baseUrl: 'https://token-plan-ams.xiaomimimo.com/v1',
+        model: 'mimo-v2.5-pro',
+        source: 'db' as const,
+      })),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const audit = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
+    const runtime = new SubagentRuntimeService(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: 'mimo-v2.5-pro', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+      audit as never,
+    );
+
+    await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'parent-call-request-model',
+      objective: 'use request model',
+      availableTools: [],
+      timeoutMs: 60000,
+      vfsMode: 'shared',
+      copyOutputs: false,
+      model: 'mimo-v2.5',
+    });
+
+    expect(llmSource.stream).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'mimo-v2.5',
+    }));
+    expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'llm_request',
+      data: expect.objectContaining({
+        parentToolCallId: 'parent-call-request-model',
+        provider: 'xiaomimimo',
+        model: 'mimo-v2.5',
+        modelSource: 'request',
+        personaModel: 'mimo-v2.5-pro',
+        requestModel: 'mimo-v2.5',
+      }),
+    }));
+    expect(audit.update).toHaveBeenCalledWith('audit-id', expect.objectContaining({
+      data: expect.objectContaining({
+        model: 'mimo-v2.5',
+        modelSource: 'request',
+        personaModel: 'mimo-v2.5-pro',
+        requestModel: 'mimo-v2.5',
       }),
     }));
   });

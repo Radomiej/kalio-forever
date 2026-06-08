@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { io, Socket } from 'socket.io-client';
-import { API_BASE, selectSession, deleteSessionIfExists } from './helpers/test-config';
+import { API_BASE, selectSession, sendMessageFromComposer, deleteSessionIfExists } from './helpers/test-config';
 
 const WS_BASE = API_BASE.replace('/api', '');
 const MOCK_TRIGGER = '[[mock:tool:raapp_create:no-arg-progress]]';
@@ -83,7 +83,7 @@ async function runMockFallbackFlow(page: Page, request: APIRequestContext): Prom
     const llmConfig = await llmConfigResponse.json() as { provider?: string; model?: string; source?: string };
     expect(llmConfig.provider).toBe('mock');
     expect(llmConfig.model).toBe('mock');
-    expect(llmConfig.source).toBe('db');
+    expect(llmConfig.source).toBe('env');
 
     const createSession = await request.post(`${API_BASE}/sessions`, {
       data: { title: sessionTitle, personaId: 'designer' },
@@ -103,11 +103,7 @@ async function runMockFallbackFlow(page: Page, request: APIRequestContext): Prom
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
     await selectSession(page, sessionId, sessionTitle);
-
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 10_000 });
-    await chatInput.fill(`${MOCK_TRIGGER} Użyj dokładnie narzędzia raapp_create i niczego więcej.`);
-    await page.getByTestId('chat-send-btn').click();
+    await sendMessageFromComposer(page, `${MOCK_TRIGGER} Użyj dokładnie narzędzia raapp_create i niczego więcej.`);
 
     const agentBubble = page.getByTestId('agent-turn-bubble').first();
     await expect(agentBubble).toBeVisible({ timeout: 10_000 });

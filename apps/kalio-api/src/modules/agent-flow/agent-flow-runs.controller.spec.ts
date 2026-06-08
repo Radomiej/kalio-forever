@@ -36,6 +36,17 @@ describe('AgentFlowRunsController', () => {
       parentSessionId: 'parent-1',
       startMode: 'durable',
     }));
+
+    await controller.create({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Build project',
+      parentSessionId: 'parent-1',
+      parentToolCallId: 'call-parent-tool',
+    });
+
+    expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
+      parentToolCallId: 'call-parent-tool',
+    }));
     expect(result.run.status).toBe('running');
   });
 
@@ -124,6 +135,31 @@ describe('AgentFlowRunsController', () => {
     expect(runtime.stop).toHaveBeenCalledWith('run-2');
     expect(resumed.run.status).toBe('running');
     expect(stopped.run.status).toBe('cancelled');
+  });
+
+  it('maps legacy resume message payloads to canonical input', async () => {
+    const snapshot = {
+      run: {
+        id: 'run-message',
+        parentSessionId: 'parent-1',
+        childSessionId: 'child-1',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'waiting_on_orchestrator' as const,
+        startMode: 'durable' as const,
+        returnMode: 'summary' as const,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      events: [],
+    };
+    const runtime = {
+      resume: vi.fn().mockResolvedValue(snapshot),
+    };
+    const controller = new AgentFlowRunsController(runtime as unknown as AgentFlowRuntimeService);
+
+    await controller.resume('run-message', { message: 'Continue with docs fix.' } as never);
+
+    expect(runtime.resume).toHaveBeenCalledWith('run-message', { input: 'Continue with docs fix.' });
   });
 
   it('exposes AgentFlow runs by parent session for Conversations visibility', async () => {

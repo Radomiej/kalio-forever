@@ -120,7 +120,10 @@ export class ArchitectureRegistryService implements OnModuleInit {
 
   private async runExclusive<T>(key: string, task: () => Promise<T>): Promise<T> {
     const previous = this.variantWriteQueues.get(key) ?? Promise.resolve();
-    const ready = previous.catch(() => undefined);
+    const ready = previous.catch((err) => {
+      this.logger.warn(`Previous architecture variant write failed for ${key}; continuing queue`, err);
+      return undefined;
+    });
     let release = (): void => undefined;
     const current = new Promise<void>((resolve) => {
       release = resolve;

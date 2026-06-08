@@ -86,6 +86,7 @@ export class ArchitectureRuntimeService {
     this.runs.set(prepared.run.id, prepared.run);
     this.schemasByRunId.set(prepared.run.id, this.cloneSchema(prepared.schema));
     this.eventsByRunId.set(prepared.run.id, liveEvents);
+    await this.persistParentChatProjectionSafely(prepared.schema, prepared.run, liveEvents);
 
     void this.executePreparedRun(prepared, emit, liveEvents).catch(async (error: unknown) => {
       if (prepared.run.status !== 'running' || this.stoppedRunIds.has(prepared.run.id)) {
@@ -282,7 +283,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
     const now = Date.now();
     const stoppedRun: ArchitectureRun = {
       ...run,
-      status: 'failed',
+      status: 'cancelled',
       updatedAt: now,
       completedAt: now,
     };
@@ -293,9 +294,14 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
       id: `${id}:event:${events.length + 1}`,
       runId: id,
       sequence: events.length + 1,
-      type: 'router_decision',
+      type: 'run_stopped',
       message: 'Architecture run stopped by user.',
-      data: { stoppedByUser: true },
+      data: {
+        reasonCode: 'user_stop',
+        stoppedByUser: true,
+        previousStatus: run.status,
+        source: 'user',
+      },
       createdAt: now,
     };
     const nextEvents = [...events, stopEvent];
@@ -935,7 +941,8 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
       || value === 'artifact_created'
       || value === 'memory_persisted'
       || value === 'final_artifact'
-      || value === 'node_completed';
+      || value === 'node_completed'
+      || value === 'run_stopped';
   }
 
   private isArchitectureRouteDecision(value: unknown): value is ArchitectureRouteDecision {

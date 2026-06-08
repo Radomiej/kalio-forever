@@ -1,4 +1,4 @@
-import type { CSSProperties, PointerEvent } from 'react';
+import type { CSSProperties, MouseEvent, PointerEvent } from 'react';
 import { Box, Bot, GitBranch, Route } from 'lucide-react';
 import type { ArchitectNode, ArchitectSlot } from './architect.types';
 import { getNodeDimensions } from './ArchitectGraphGeometry';
@@ -8,8 +8,15 @@ interface ArchitectGraphNodeCardProps {
   selectedNodeId: string | null;
   selectedSlotId: string | null;
   connectSourceId: string | null;
+  connectionDropTarget: boolean;
+  zoom: number;
   onNodeClick: (nodeId: string) => void;
   onSlotClick: (nodeId: string, slotId: string) => void;
+  onStartConnection: (nodeId: string) => void;
+  onCompleteConnection: (nodeId: string) => void;
+  onStartConnectionDrag: (event: PointerEvent<HTMLElement>, nodeId: string) => void;
+  onMoveConnectionDrag: (event: PointerEvent<HTMLElement>) => void;
+  onEndConnectionDrag: (event: PointerEvent<HTMLElement>) => void;
   onDragStart: (event: PointerEvent<HTMLElement>, node: ArchitectNode) => void;
   onDragMove: (event: PointerEvent<HTMLElement>) => void;
   onDragEnd: (event: PointerEvent<HTMLElement>) => void;
@@ -62,8 +69,15 @@ export function ArchitectGraphNodeCard({
   selectedNodeId,
   selectedSlotId,
   connectSourceId,
+  connectionDropTarget,
+  zoom,
   onNodeClick,
   onSlotClick,
+  onStartConnection,
+  onCompleteConnection,
+  onStartConnectionDrag,
+  onMoveConnectionDrag,
+  onEndConnectionDrag,
   onDragStart,
   onDragMove,
   onDragEnd,
@@ -74,17 +88,37 @@ export function ArchitectGraphNodeCard({
     : 'border-emerald-100/75 shadow-[0_0_12px_rgba(16,185,129,0.38)]';
   const outputPinDotClass = node.kind === 'router' ? 'bg-amber-200' : 'bg-emerald-200';
   const dimensions = getNodeDimensions(node);
+  const connectorHitboxSize = Math.max(48, Math.round(56 / Math.max(zoom, 0.2)));
+  const handleCardPointerDown = (event: PointerEvent<HTMLElement>) => {
+    if (event.altKey) {
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('button') || target?.closest('[data-architect-pin="true"]')) {
+      event.stopPropagation();
+    }
+  };
+  const handleCardClick = (event: MouseEvent<HTMLElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('button') || target?.closest('[data-architect-pin="true"]')) {
+      return;
+    }
+    onNodeClick(node.id);
+  };
 
   return (
     <div
       className={`absolute rounded-lg border p-2 backdrop-blur transition-colors ${nodeSurfaceClass(node)} ${
         selectedNodeId === node.id || connectSourceId === node.id ? 'ring-1 ring-sky-400/60' : ''
+      } ${connectionDropTarget ? 'ring-2 ring-sky-200/90 shadow-[0_0_0_1px_rgba(125,211,252,0.45),0_18px_38px_rgba(8,47,73,0.32)]' : ''
       }`}
+      data-architect-connection-drop-target={connectionDropTarget ? 'true' : undefined}
       data-architect-control="true"
-      onPointerDown={(event) => event.stopPropagation()}
+      onPointerDown={handleCardPointerDown}
       onPointerMove={onDragMove}
       onPointerUp={onDragEnd}
       onPointerCancel={onDragEnd}
+      onClick={handleCardClick}
       style={{
         left: node.x,
         top: node.y,
@@ -94,22 +128,43 @@ export function ArchitectGraphNodeCard({
       } as CSSProperties}
       data-testid={`architect-node-card-${node.id}`}
     >
-      <span
-        className="absolute left-0 top-[var(--architect-node-pin-y)] z-10 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-sky-200/80 bg-[#07111d] shadow-[0_0_12px_rgba(56,189,248,0.48)]"
+      <button
+        type="button"
+        className={`group absolute left-0 top-[var(--architect-node-pin-y)] z-10 flex h-14 w-14 -translate-x-[70%] -translate-y-1/2 items-center justify-center rounded-full bg-transparent transition-transform hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300 ${connectionDropTarget ? 'scale-110 ring-2 ring-sky-200/80 ring-offset-2 ring-offset-[#07111d]' : ''}`}
+        style={{ height: connectorHitboxSize, width: connectorHitboxSize }}
         data-testid={node.kind === 'router' ? `architect-router-input-pin-${node.id}` : `architect-node-input-pin-${node.id}`}
         title={`${node.label} input`}
-        aria-hidden="true"
+        aria-label={`Connect to ${node.label}`}
+        data-architect-pin="true"
+        data-architect-input-node-id={node.id}
+        onClick={() => onCompleteConnection(node.id)}
+        onPointerDown={(event) => {
+          if (!event.altKey) {
+            event.stopPropagation();
+          }
+        }}
+        onPointerMove={onMoveConnectionDrag}
+        onPointerUp={onEndConnectionDrag}
+        onPointerCancel={onEndConnectionDrag}
       >
-        <span className="h-1.5 w-1.5 rounded-full bg-sky-200" />
-      </span>
-      <span
-        className={`absolute right-0 top-[var(--architect-node-pin-y)] z-10 flex h-4 w-4 translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-[#07111d] ${outputPinClass}`}
+        <span className={`h-1.5 w-1.5 rounded-full border border-sky-200/75 bg-[#07111d] shadow-[0_0_5px_rgba(56,189,248,0.32)] group-hover:h-2 group-hover:w-2 group-hover:bg-sky-950 ${connectionDropTarget ? 'h-2 w-2 bg-sky-200 shadow-[0_0_12px_rgba(125,211,252,0.8)]' : ''}`} />
+      </button>
+      <button
+        type="button"
+        className="group absolute right-0 top-[var(--architect-node-pin-y)] z-10 flex h-14 w-14 translate-x-[70%] -translate-y-1/2 items-center justify-center rounded-full bg-transparent transition-transform hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
+        style={{ height: connectorHitboxSize, width: connectorHitboxSize }}
         data-testid={node.kind === 'router' ? `architect-router-output-pin-${node.id}` : `architect-node-output-pin-${node.id}`}
         title={`${node.label} output`}
-        aria-hidden="true"
+        aria-label={`Connect from ${node.label}`}
+        data-architect-pin="true"
+        onClick={() => onStartConnection(node.id)}
+        onPointerDown={(event) => onStartConnectionDrag(event, node.id)}
+        onPointerMove={onMoveConnectionDrag}
+        onPointerUp={onEndConnectionDrag}
+        onPointerCancel={onEndConnectionDrag}
       >
-        <span className={`h-1.5 w-1.5 rounded-full ${outputPinDotClass}`} />
-      </span>
+        <span className={`h-1.5 w-1.5 rounded-full border bg-[#07111d] group-hover:h-2 group-hover:w-2 group-hover:bg-slate-950 ${outputPinClass} ${outputPinDotClass}`} />
+      </button>
       <div className="flex w-full items-start gap-2">
         <span
           className={`mt-0.5 flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded-md border active:cursor-grabbing ${nodeAccentClass(node)}`}
@@ -142,7 +197,7 @@ export function ArchitectGraphNodeCard({
               </span>
             )}
             {node.role && (
-              <span className="truncate text-[9px] uppercase tracking-wide text-base-content/40">
+              <span className="truncate text-[9px] uppercase tracking-wide text-base-content/60">
                 {node.role}
               </span>
             )}

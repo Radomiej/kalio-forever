@@ -14,7 +14,7 @@ const { pipelineMock } = vi.hoisted(() => ({
 vi.mock('@huggingface/transformers', () => ({
   env: {
     cacheDir: '',
-    allowRemoteModels: true,
+    allowRemoteModels: false,
   },
   pipeline: pipelineMock,
 }));
@@ -30,7 +30,7 @@ function makeProvider(backend: 'auto' | 'webgpu' | 'cpu' = DEFAULT_LOCAL_EMBEDDI
 
 beforeEach(() => {
   pipelineMock.mockReset();
-  env.allowRemoteModels = true;
+  env.allowRemoteModels = false;
   env.cacheDir = '';
 });
 
@@ -38,6 +38,7 @@ describe('LocalTransformersEmbeddingProvider', () => {
   it('uses cpu in auto mode on Windows to avoid WebGPU shutdown crashes', async () => {
     pipelineMock.mockImplementation(async (_task: string, _model: string, options?: { device?: string }) => {
       expect(options).toMatchObject({ device: process.platform === 'win32' ? 'cpu' : 'webgpu' });
+      expect(options).toMatchObject({ local_files_only: true });
       return async (text: string) => ({ data: new Float32Array(384).fill(text.length) });
     });
 
@@ -54,6 +55,7 @@ describe('LocalTransformersEmbeddingProvider', () => {
   it('uses explicit webgpu backend without falling back', async () => {
     pipelineMock.mockImplementation(async (_task: string, _model: string, options?: { device?: string }) => {
       expect(options).toMatchObject({ device: 'webgpu', dtype: 'fp16' });
+      expect(options).toMatchObject({ local_files_only: true });
       return async (text: string) => ({ data: new Float32Array(384).fill(text.length) });
     });
 
@@ -67,6 +69,7 @@ describe('LocalTransformersEmbeddingProvider', () => {
   it('uses explicit cpu backend without attempting webgpu', async () => {
     pipelineMock.mockImplementation(async (_task: string, _model: string, options?: { device?: string }) => {
       expect(options).toMatchObject({ device: 'cpu', dtype: 'q8' });
+      expect(options).toMatchObject({ local_files_only: true });
       return async (text: string) => ({ data: new Float32Array(384).fill(text.length) });
     });
 
@@ -91,5 +94,24 @@ describe('LocalTransformersEmbeddingProvider', () => {
 
     expect(provider.getActiveBackend()).toBe(process.platform === 'win32' ? 'cpu' : 'webgpu');
     expect(provider.isGpuAvailable()).toBe(process.platform === 'win32' ? false : true);
+  });
+
+  it('can be configured to allow remote model downloads for explicit install flows', async () => {
+    pipelineMock.mockImplementation(async (_task: string, _model: string, options?: { local_files_only?: boolean }) => {
+      expect(options?.local_files_only).toBe(false);
+      return async () => ({ data: new Float32Array(384).fill(1) });
+    });
+
+    const provider = new LocalTransformersEmbeddingProvider({
+      model: DEFAULT_LOCAL_EMBEDDING_MODEL,
+      dimensions: DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
+      cacheDir: './data/embeddings-cache',
+      backend: 'cpu',
+      allowRemoteModels: true,
+    });
+
+    await provider.prepare();
+
+    expect(pipelineMock).toHaveBeenCalledTimes(1);
   });
 });

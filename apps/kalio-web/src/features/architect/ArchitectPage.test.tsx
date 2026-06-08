@@ -244,6 +244,10 @@ function mockArchitectureProjectionOnce(runId: string, message: string) {
   });
 }
 
+function openGraphControls() {
+  fireEvent.click(screen.getByLabelText('More graph controls'));
+}
+
 describe('ArchitectPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -421,10 +425,14 @@ describe('ArchitectPage', () => {
     render(<ArchitectPage />);
 
     expect(await screen.findByTestId('architect-schema-strategic-decision-council')).toHaveTextContent('Strategic Decision Council');
-    expect(screen.getByText('Five expert slots produce a decision recommendation.')).toBeInTheDocument();
+    expect(screen.getByTestId('architect-schema-description-strategic-decision-council')).toHaveAttribute(
+      'aria-label',
+      'Preset description: Five expert slots produce a decision recommendation.',
+    );
     expect(screen.getByTestId('architect-node-pragmatist')).toHaveTextContent('Pragmatist');
     expect(screen.getByTestId('architect-node-kind-pragmatist')).toHaveTextContent('role');
-    expect(screen.getByTestId('architect-routing-model')).toHaveTextContent('Node-level routing');
+    expect(screen.queryByTestId('architect-routing-model')).toBeNull();
+    expect(screen.getByTestId('architect-run-audit-toggle')).toHaveTextContent('Run audit');
     expect(screen.getByTestId('architect-node-behavior-router')).toHaveTextContent('rank then merge');
   });
 
@@ -435,8 +443,13 @@ describe('ArchitectPage', () => {
 
     expect(screen.getByTestId('architect-inspector')).toHaveTextContent('Pragmatist');
     expect(screen.getByTestId('architect-inspector')).toHaveTextContent('role');
+    expect(screen.getByTestId('architect-node-properties-summary')).toHaveTextContent('Role');
+    expect(screen.queryByTestId('architect-node-kind-select')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('architect-node-properties-open'));
     expect(screen.getByTestId('architect-node-kind-select')).toHaveValue('role');
 
+    fireEvent.click(screen.getByTestId('architect-node-properties-close'));
     fireEvent.click(screen.getByTestId('architect-slot-pragmatist'));
 
     expect(screen.getByTestId('architect-inspector')).toHaveTextContent('Pragmatist');
@@ -447,6 +460,7 @@ describe('ArchitectPage', () => {
     render(<ArchitectPage />);
 
     fireEvent.click(await screen.findByTestId('architect-node-router'));
+    fireEvent.click(screen.getByTestId('architect-node-properties-open'));
     fireEvent.change(screen.getByTestId('architect-node-behavior-mode'), {
       target: { value: 'choose_one' },
     });
@@ -959,6 +973,7 @@ describe('ArchitectPage', () => {
     render(<ArchitectPage />);
 
     fireEvent.click(await screen.findByTestId('architect-node-pragmatist'));
+    fireEvent.click(screen.getByTestId('architect-node-properties-open'));
     fireEvent.click(screen.getByTestId('architect-context-include-outputs'));
     fireEvent.change(screen.getByTestId('architect-context-compression'), {
       target: { value: 'evidence_only' },
@@ -984,9 +999,11 @@ describe('ArchitectPage', () => {
   it('starts a run with unsaved graph draft schema data', async () => {
     render(<ArchitectPage />);
 
-    fireEvent.click(await screen.findByTestId('architect-mode-add-node'));
+    await screen.findByTestId('architect-node-pragmatist');
+    openGraphControls();
+    fireEvent.click(screen.getByTestId('architect-mode-add-node'));
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 640, clientY: 220 });
-    const customNode = await screen.findByTestId('architect-node-custom-node-4');
+    const customNode = await screen.findByTestId('architect-node-custom-node-4', undefined, { timeout: 5000 });
     fireEvent.click(screen.getByTestId('architect-mode-connect'));
     fireEvent.click(customNode);
     fireEvent.click(screen.getByTestId('architect-node-router'));
@@ -1021,10 +1038,14 @@ describe('ArchitectPage', () => {
   it('adds router nodes from the graph palette with router defaults', async () => {
     render(<ArchitectPage />);
 
-    fireEvent.click(await screen.findByTestId('architect-mode-add-router'));
+    await screen.findByTestId('architect-node-pragmatist');
+    openGraphControls();
+    fireEvent.click(screen.getByTestId('architect-mode-add-router'));
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 660, clientY: 260 });
 
-    expect(screen.getByTestId('architect-node-custom-node-4')).toHaveTextContent('Router 4');
+    const customNode = await screen.findByTestId('architect-node-custom-node-4', undefined, { timeout: 5000 });
+
+    expect(customNode).toHaveTextContent('Router 4');
     expect(screen.getByTestId('architect-node-kind-custom-node-4')).toHaveTextContent('router');
     expect(screen.getByTestId('architect-node-behavior-custom-node-4')).toHaveTextContent('choose one');
 
@@ -1055,6 +1076,7 @@ describe('ArchitectPage', () => {
     fireEvent.change(screen.getByTestId('architect-persona-select'), {
       target: { value: 'persona-alt' },
     });
+    fireEvent.click(screen.getByTestId('architect-node-properties-open'));
     fireEvent.change(screen.getByTestId('architect-node-kind-select'), {
       target: { value: 'artifact' },
     });
@@ -1070,8 +1092,10 @@ describe('ArchitectPage', () => {
       clientY: 130,
     }));
     fireEvent(screen.getByTestId('architect-node-drag-pragmatist'), new MouseEvent('pointerup', { bubbles: true }));
+    openGraphControls();
     fireEvent.click(screen.getByTestId('architect-mode-add-node'));
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 640, clientY: 220 });
+    openGraphControls();
     fireEvent.click(screen.getByTestId('architect-mode-connect'));
     fireEvent.click(screen.getByTestId('architect-node-custom-node-4'));
     fireEvent.click(screen.getByTestId('architect-node-router'));
@@ -1121,7 +1145,9 @@ describe('ArchitectPage', () => {
     apiPost.mockResolvedValueOnce({ data: strategicCouncilVariant });
     render(<ArchitectPage />);
 
-    fireEvent.click(await screen.findByTestId('architect-auto-layout'));
+    await screen.findByTestId('architect-node-pragmatist');
+    openGraphControls();
+    fireEvent.click(screen.getByTestId('architect-auto-layout'));
     fireEvent.click(screen.getByTestId('architect-save-variant'));
     fireEvent.change(await screen.findByTestId('architect-variant-name-input'), {
       target: { value: 'Auto layout council' },

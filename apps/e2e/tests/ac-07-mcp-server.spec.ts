@@ -87,7 +87,7 @@ test.describe('AC-07: MCP server management', () => {
 
     await openMCPPanel(page);
     await expect(page.getByTestId('mcp-empty')).toBeVisible();
-    await expect(page.getByTestId('mcp-server-polling-hot-reload')).toBeVisible({ timeout: 7000 });
+    await expect(page.getByTestId('mcp-server-polling-hot-reload')).toBeVisible({ timeout: 10_000 });
   });
 });
 

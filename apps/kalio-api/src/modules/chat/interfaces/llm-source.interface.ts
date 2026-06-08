@@ -1,4 +1,4 @@
-import type { ToolMeta } from '@kalio/types';
+import type { LLMConfig, ToolMeta } from '@kalio/types';
 import type { InternalLLMChunk } from './llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 
@@ -7,6 +7,7 @@ export interface LLMSourceParams {
   tools: ToolMeta[];
   sessionId: string;
   messageId: string;
+  model?: string;
   abortSignal?: AbortSignal;
 }
 
@@ -19,4 +20,5 @@ export interface LLMSourceParams {
  */
 export interface ILLMSource {
   stream(params: LLMSourceParams): AsyncIterable<InternalLLMChunk>;
+  getConfig?(): Promise<LLMConfig & { source: 'db' | 'env' }>;
 }

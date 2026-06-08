@@ -11,9 +11,13 @@
   HttpStatus,
   Logger,
   NotFoundException,
+  BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type {
   MemoryIngestResult,
+  MemoryScopeSummary,
   MemorySearchResult,
   MemorySearchMode,
   EmbeddingStatus,
@@ -23,10 +27,13 @@ import type {
 } from '@kalio/types';
 import { MemoryService } from './memory.service';
 import { EmbeddingCredentialsService } from './embedding-credentials.service';
+import { LocalEmbeddingInstallService, type LocalEmbeddingAvailability } from './local-embedding-install.service';
 import {
   OpenAICompatibleEmbeddingProvider,
   OllamaEmbeddingProvider,
+  buildDefaultLocalEmbeddingConfig,
 } from './embedding.service';
+import { LocalTransformersEmbeddingProvider } from './local-transformers-embedding.provider';
 import type { IngestDto, IngestConversationDto } from './dto';
 
 @Controller('memory')
@@ -36,6 +43,8 @@ export class MemoryController {
   constructor(
     private readonly memoryService: MemoryService,
     private readonly embeddingCredentials: EmbeddingCredentialsService,
+    private readonly config: ConfigService,
+    private readonly localEmbeddingInstall: LocalEmbeddingInstallService,
   ) {}
 
   // ── Memory CRUD ─────────────────────────────────────────────────────────
@@ -69,6 +78,38 @@ export class MemoryController {
     }
   }
 
+  @Get('summary')
+  getSummary(
+    @Query('personaIds') personaIds = '',
+    @Query('personaLabels') personaLabels = ''
+  ): MemoryScopeSummary {
+    const ids = personaIds.split(',').map((id) => id.trim()).filter(Boolean);
+    const labels = personaLabels.split(',').map((label) => label.trim());
+    const personas = ids.map((id, index) => ({ id, name: labels[index] || id }));
+    return this.memoryService.getSummary(personas);
+  }
+
+  @Get('web-search')
+  async getWebSearch(
+    @Query('query') query?: string,
+    @Query('limit') limit?: string
+  ): Promise<MemorySearchResult[]> {
+    const rawLimit = limit ? parseInt(limit, 10) : 20;
+    const parsedLimit = Number.isFinite(rawLimit) ? rawLimit : 20;
+    if (query?.trim()) {
+      return this.memoryService.searchWebResults(query.trim(), parsedLimit);
+    }
+    return this.memoryService.getAllWebResults();
+  }
+
+  @Delete('web-search/dev-db')
+  async deleteWebSearchDb(): Promise<{ deletedPath: string }> {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Deleting the web-search DB is disabled in production.');
+    }
+    return { deletedPath: this.memoryService.deleteWebResultsDbFile() };
+  }
+
   // ── Embedding status ─────────────────────────────────────────────────────
 
   @Get('status/embedding')
@@ -81,6 +122,83 @@ export class MemoryController {
     await this.embeddingCredentials.updateLocalConfig(dto);
     await this.memoryService.getEmbeddingService().reloadFromCredential();
     return this.memoryService.getEmbeddingService().getStatus();
+  }
+
+  @Get('embedding-local')
+  async getLocalEmbeddingConfig(): Promise<UpdateLocalEmbeddingConfigDto> {
+    const config = await this.embeddingCredentials.getLocalConfig(buildDefaultLocalEmbeddingConfig(this.config));
+    return {
+      enabled: config.enabled,
+      model: config.model,
+      dimensions: config.dimensions,
+      backend: config.backend,
+    };
+  }
+
+  @Get('embedding-local/availability')
+  async getLocalEmbeddingAvailability(): Promise<LocalEmbeddingAvailability> {
+    return this.localEmbeddingInstall.getAvailability(
+      await this.resolveEffectiveLocalEmbeddingConfig(),
+    );
+  }
+
+  @Post('embedding-local/install')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async installLocalEmbeddingModel(
+    @Body() dto?: UpdateLocalEmbeddingConfigDto,
+  ): Promise<LocalEmbeddingAvailability> {
+    const config = await this.resolveEffectiveLocalEmbeddingConfig(dto);
+    return this.localEmbeddingInstall.install(config);
+  }
+
+  @Post('embedding-local/availability')
+  @HttpCode(HttpStatus.OK)
+  async getEffectiveLocalEmbeddingAvailability(
+    @Body() dto?: UpdateLocalEmbeddingConfigDto,
+  ): Promise<LocalEmbeddingAvailability> {
+    return this.localEmbeddingInstall.getAvailability(
+      await this.resolveEffectiveLocalEmbeddingConfig(dto),
+    );
+  }
+
+  @Post('embedding-local/test')
+  @HttpCode(HttpStatus.OK)
+  async testLocalEmbeddingConfig(
+    @Body() dto?: UpdateLocalEmbeddingConfigDto,
+  ): Promise<{ ok: boolean; error?: string; model: string; dimensions: number; backend: string }> {
+    const config = await this.resolveEffectiveLocalEmbeddingConfig(dto);
+    const availability = await this.localEmbeddingInstall.getAvailability(config);
+    if (availability.status !== 'ready') {
+      return {
+        ok: false,
+        error: availability.status === 'installing'
+          ? 'Local model is still installing. Wait for installation to finish before testing.'
+          : 'Local model is not installed yet. Use Install first.',
+        model: config.model,
+        dimensions: config.dimensions,
+        backend: config.backend,
+      };
+    }
+    const provider = new LocalTransformersEmbeddingProvider(config);
+    try {
+      const [vector] = await provider.embed(['test local embedding']);
+      return {
+        ok: true,
+        model: config.model,
+        dimensions: vector?.length ?? config.dimensions,
+        backend: config.backend,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        model: config.model,
+        dimensions: config.dimensions,
+        backend: config.backend,
+      };
+    } finally {
+      await provider.dispose();
+    }
   }
 
   // ── Embedding credentials CRUD ───────────────────────────────────────────
@@ -104,6 +222,7 @@ export class MemoryController {
   @Delete('embedding-credentials/active')
   async clearActiveEmbeddingCredential(): Promise<EmbeddingStatus> {
     this.logger.log('Active embedding credential cleared');
+    await this.ensureLocalEmbeddingReadyBeforeActivation();
     await this.embeddingCredentials.clearActive();
     await this.memoryService.getEmbeddingService().reloadFromCredential();
     return this.memoryService.getEmbeddingService().getStatus();
@@ -218,5 +337,32 @@ export class MemoryController {
   ): Promise<{ deleted: boolean }> {
     const deleted = this.memoryService.delete(id, personaId);
     return { deleted };
+  }
+
+  private async resolveEffectiveLocalEmbeddingConfig(dto?: UpdateLocalEmbeddingConfigDto) {
+    const defaults = buildDefaultLocalEmbeddingConfig(this.config);
+    const persisted = await this.embeddingCredentials.getLocalConfig(defaults);
+    if (!dto) {
+      return persisted;
+    }
+    return {
+      ...persisted,
+      ...dto,
+    };
+  }
+
+  private async ensureLocalEmbeddingReadyBeforeActivation(): Promise<void> {
+    const config = await this.resolveEffectiveLocalEmbeddingConfig();
+    if (!config.enabled) {
+      return;
+    }
+    const availability = await this.localEmbeddingInstall.getAvailability(config);
+    if (availability.status === 'ready') {
+      return;
+    }
+    if (availability.status === 'installing') {
+      throw new BadRequestException('Local model is still installing. Wait for installation to finish before using local embeddings.');
+    }
+    throw new BadRequestException('Local model is not installed yet. Install the selected local model before using local embeddings.');
   }
 }

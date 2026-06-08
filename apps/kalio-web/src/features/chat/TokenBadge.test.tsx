@@ -30,7 +30,10 @@ describe('TokenBadge', () => {
 
     const badge = screen.getByTestId('token-badge');
     expect(badge).toHaveTextContent('~1.2k/2.0k');
-    expect(badge).toHaveAttribute('title', expect.stringContaining('1234 / 2000 tokens (62%)'));
+    expect(badge).toHaveAttribute(
+      'title',
+      expect.stringMatching(/^Context usage: ~1,?234 \/ 2,?000 tokens \(62%\)$/),
+    );
     expect(badge).toHaveClass('badge-ghost');
 
     await user.click(badge);

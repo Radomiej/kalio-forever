@@ -307,4 +307,91 @@ describe('TelegramRelayService', () => {
       { parse_mode: 'MarkdownV2' },
     );
   });
+
+  it('parses /approve command arguments from message text when grammy match is unavailable', async () => {
+    const service = new TelegramRelayService(settings as never);
+    const reply = vi.fn(async () => undefined);
+    const commandHandlers = {
+      getStatus: vi.fn(async () => 'All systems nominal'),
+      stopAll: vi.fn(async () => undefined),
+      approveToolConfirmation: vi.fn(async () => 'Approved HITL request req-42.'),
+      cancelToolConfirmation: vi.fn(async () => 'Cancelled HITL request req-42.'),
+    };
+
+    await service.connect('test-token');
+    service.setCommandHandlers(commandHandlers);
+
+    const onCalls = grammyMock.on.mock.calls as unknown as Array<[string, unknown]>;
+    const messageHandler = onCalls.find((call) => call[0] === 'message:text')?.[1] as
+      | ((ctx: TextContext & { message?: { text?: string } }) => Promise<void>)
+      | undefined;
+    const commandCalls = grammyMock.command.mock.calls as unknown as Array<[string, unknown]>;
+    const approveHandler = commandCalls.find((call) => call[0] === 'approve')?.[1] as
+      | ((ctx: CommandContext & { match?: string; message?: { text?: string } }) => Promise<void>)
+      | undefined;
+
+    await messageHandler!({ chat: { id: 42 }, reply });
+    await approveHandler!({
+      chat: { id: 42 },
+      reply,
+      message: { text: '/approve@kalio_test_bot req-42 looks good' },
+    });
+
+    expect(commandHandlers.approveToolConfirmation).toHaveBeenCalledWith('req-42', 'looks good');
+    expect(reply).toHaveBeenCalledWith('Approved HITL request req\\-42\\.', { parse_mode: 'MarkdownV2' });
+  });
+
+  it('replies with an error when a text approval handler throws', async () => {
+    const service = new TelegramRelayService(settings as never);
+    const reply = vi.fn(async () => undefined);
+    const commandHandlers = {
+      getStatus: vi.fn(async () => 'All systems nominal'),
+      stopAll: vi.fn(async () => undefined),
+      approveToolConfirmation: vi.fn(async () => 'Approved HITL request req-text.'),
+      cancelToolConfirmation: vi.fn(async () => 'Cancelled HITL request req-text.'),
+      handleApprovalReply: vi.fn(async () => {
+        throw new Error('approval parser exploded');
+      }),
+    };
+
+    await service.connect('test-token');
+    service.setCommandHandlers(commandHandlers);
+
+    const onCalls = grammyMock.on.mock.calls as unknown as Array<[string, unknown]>;
+    const messageHandler = onCalls.find((call) => call[0] === 'message:text')?.[1] as
+      | ((ctx: TextContext & { message?: { text?: string } }) => Promise<void>)
+      | undefined;
+
+    await messageHandler!({ chat: { id: 42 }, reply });
+    await expect(messageHandler!({ chat: { id: 42 }, reply, message: { text: 'approve req-text safe' } })).resolves.toBeUndefined();
+
+    expect(reply).toHaveBeenCalledWith('Error handling approval reply\\.', { parse_mode: 'MarkdownV2' });
+  });
+
+  it('rejects approval commands from chats that are not registered', async () => {
+    const service = new TelegramRelayService(settings as never);
+    const reply = vi.fn(async () => undefined);
+    const commandHandlers = {
+      getStatus: vi.fn(async () => 'All systems nominal'),
+      stopAll: vi.fn(async () => undefined),
+      approveToolConfirmation: vi.fn(async () => 'Approved HITL request req-1.'),
+      cancelToolConfirmation: vi.fn(async () => 'Cancelled HITL request req-1.'),
+    };
+
+    await service.connect('test-token');
+    service.setCommandHandlers(commandHandlers);
+    settings.get.mockResolvedValue('42');
+
+    const commandCalls = grammyMock.command.mock.calls as unknown as Array<[string, unknown]>;
+    const approveHandler = commandCalls.find((call) => call[0] === 'approve')?.[1] as
+      | ((ctx: CommandContext & { match?: string }) => Promise<void>)
+      | undefined;
+
+    await approveHandler!({ chat: { id: 77 }, reply, match: 'req-1 because' });
+
+    expect(commandHandlers.approveToolConfirmation).not.toHaveBeenCalled();
+    expect(reply).toHaveBeenCalledWith('This chat is not registered for Kalio approvals\\.', {
+      parse_mode: 'MarkdownV2',
+    });
+  });
 });

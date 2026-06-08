@@ -11,6 +11,8 @@ import {
   MockEmbeddingProvider,
   OpenAICompatibleEmbeddingProvider,
   OllamaEmbeddingProvider,
+  buildDefaultLocalEmbeddingConfig,
+  readEmbeddingEnabled,
 } from './embedding.service';
 
 const { pipelineMock } = vi.hoisted(() => ({
@@ -62,8 +64,10 @@ function makeTestDeps(): {
   return { drizzleSvc, appSettings, embeddingCredentials };
 }
 
-function makeConfig(env: Record<string, string> = {}): ConfigService {
-  return { get: (key: string, def = '') => env[key] ?? def } as unknown as ConfigService;
+function makeConfig(env: Record<string, string | boolean> = {}): ConfigService {
+  return {
+    get: <T>(key: string, def?: T) => (key in env ? env[key] as T : def as T),
+  } as unknown as ConfigService;
 }
 
 function makeService(env: Record<string, string> = {}): {
@@ -304,6 +308,70 @@ describe('EmbeddingService', () => {
       await svc.reloadFromCredential();
       expect(svc.getStatus().source).toBe('local');
       expect(svc.getStatus().model).toBe('Xenova/multilingual-e5-small');
+    });
+
+    it('does not leak remote EMBEDDING_MODEL into forced-local runtime defaults', async () => {
+      const { svc, credentials } = makeService({
+        EMBEDDING_API_KEY: 'sk-env',
+        EMBEDDING_BASE_URL: 'https://api.openai.com/v1',
+        EMBEDDING_MODEL: 'text-embedding-3-small',
+        EMBEDDING_DIMENSIONS: '1536',
+      });
+      await credentials.clearActive();
+      await svc.reloadFromCredential();
+
+      const status = svc.getStatus();
+      expect(status.source).toBe('local');
+      expect(status.model).toBe('Xenova/multilingual-e5-small');
+      expect(status.dimensions).toBe(384);
+    });
+
+    it('prefers explicit EMBEDDING_LOCAL_* overrides for local runtime defaults', async () => {
+      const { svc, credentials } = makeService({
+        EMBEDDING_API_KEY: 'sk-env',
+        EMBEDDING_BASE_URL: 'https://api.openai.com/v1',
+        EMBEDDING_MODEL: 'text-embedding-3-small',
+        EMBEDDING_DIMENSIONS: '1536',
+        EMBEDDING_LOCAL_MODEL: 'Xenova/multilingual-e5-base',
+        EMBEDDING_LOCAL_DIMENSIONS: '768',
+        EMBEDDING_LOCAL_BACKEND: 'cpu',
+      });
+      await credentials.clearActive();
+      await svc.reloadFromCredential();
+
+      const status = svc.getStatus();
+      expect(status.source).toBe('local');
+      expect(status.model).toBe('Xenova/multilingual-e5-base');
+      expect(status.dimensions).toBe(768);
+      expect(status.profileId).toBe('local-transformers-xenova-multilingual-e5-base-768-cpu');
+    });
+  });
+
+  describe('readEmbeddingEnabled', () => {
+    it('treats boolean false from Joi config as disabled', () => {
+      const config = makeConfig({ EMBEDDING_ENABLED: false });
+      expect(readEmbeddingEnabled(config)).toBe(false);
+      expect(buildDefaultLocalEmbeddingConfig(config).enabled).toBe(false);
+    });
+
+    it('treats string "false" as disabled', () => {
+      const config = makeConfig({ EMBEDDING_ENABLED: 'false' });
+      expect(readEmbeddingEnabled(config)).toBe(false);
+    });
+  });
+
+  describe('buildDefaultLocalEmbeddingConfig', () => {
+    it('falls back to legacy dimensions when EMBEDDING_LOCAL_DIMENSIONS is invalid', () => {
+      const config = makeConfig({
+        EMBEDDING_MODEL: 'Xenova/distiluse-base-multilingual-cased-v2',
+        EMBEDDING_DIMENSIONS: '512',
+        EMBEDDING_LOCAL_DIMENSIONS: 'invalid',
+      });
+
+      expect(buildDefaultLocalEmbeddingConfig(config)).toMatchObject({
+        model: 'Xenova/distiluse-base-multilingual-cased-v2',
+        dimensions: 512,
+      });
     });
   });
 

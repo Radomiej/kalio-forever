@@ -25,10 +25,10 @@ describe('reconstructDurableArchitectureGraph', () => {
           createdAt: 105,
         },
       ],
-      [`arch-${runId}-materializer`]: [
+      [`arch-${runId}-implementer`]: [
         {
           id: `architecture:${runId}:spawn`,
-          sessionId: `arch-${runId}-materializer`,
+          sessionId: `arch-${runId}-implementer`,
           role: 'assistant',
           content: '',
           toolCalls: [{
@@ -36,8 +36,8 @@ describe('reconstructDurableArchitectureGraph', () => {
             name: 'spawn_cli_agent',
             args: {
               architectureRunId: runId,
-              nodeId: 'materializer',
-              roleSlotId: 'materializer',
+              nodeId: 'implementer',
+              roleSlotId: 'implementer',
               agentId: 'copilot',
               workdir: 'C:\\Projekty\\TurboProject2',
               expectedChangedFiles: ['src/App.tsx'],
@@ -47,7 +47,7 @@ describe('reconstructDurableArchitectureGraph', () => {
         },
         {
           id: `architecture:${runId}:spawn-result`,
-          sessionId: `arch-${runId}-materializer`,
+          sessionId: `arch-${runId}-implementer`,
           role: 'tool_result',
           toolCallId: `architecture:${runId}:tool-call:1`,
           content: JSON.stringify({
@@ -60,7 +60,7 @@ describe('reconstructDurableArchitectureGraph', () => {
         },
         {
           id: `architecture:${runId}:status`,
-          sessionId: `arch-${runId}-materializer`,
+          sessionId: `arch-${runId}-implementer`,
           role: 'assistant',
           content: '',
           toolCalls: [{
@@ -69,15 +69,15 @@ describe('reconstructDurableArchitectureGraph', () => {
             args: {
               architectureRunId: runId,
               childSessionId: 'cli-child-1',
-              nodeId: 'materializer',
-              roleSlotId: 'materializer',
+              nodeId: 'implementer',
+              roleSlotId: 'implementer',
             },
           }],
           createdAt: 103,
         },
         {
           id: `architecture:${runId}:status-result`,
-          sessionId: `arch-${runId}-materializer`,
+          sessionId: `arch-${runId}-implementer`,
           role: 'tool_result',
           toolCallId: `architecture:${runId}:tool-call:2`,
           content: JSON.stringify({
@@ -97,13 +97,13 @@ describe('reconstructDurableArchitectureGraph', () => {
       runId,
       nodes: expect.arrayContaining([
         expect.objectContaining({ id: 'final-artifact', status: 'completed' }),
-        expect.objectContaining({ id: 'materializer', status: 'pending' }),
+        expect.objectContaining({ id: 'implementer', status: 'pending' }),
       ]),
       childAgents: [
         expect.objectContaining({
           id: 'cli-child-1',
-          parentNodeId: 'materializer',
-          parentRoleSlotId: 'materializer',
+          parentNodeId: 'implementer',
+          parentRoleSlotId: 'implementer',
           backend: 'copilot',
           status: 'completed',
           toolName: 'get_cli_agent_status',
@@ -114,7 +114,7 @@ describe('reconstructDurableArchitectureGraph', () => {
     });
   });
 
-  it('normalizes success and exited CLI child snapshots to completed status during durable reconstruction', async () => {
+  it('normalizes success, terminal-success and exited CLI child snapshots to completed status during durable reconstruction', async () => {
     const runId = 'durable-child-terminal-aliases-run';
     const registry = new ArchitectureRegistryService();
     const sessions = createPersistedSessions({
@@ -134,10 +134,10 @@ describe('reconstructDurableArchitectureGraph', () => {
           createdAt: 106,
         },
       ],
-      [`arch-${runId}-materializer`]: [
+      [`arch-${runId}-implementer`]: [
         {
           id: `architecture:${runId}:spawn`,
-          sessionId: `arch-${runId}-materializer`,
+          sessionId: `arch-${runId}-implementer`,
           role: 'assistant',
           content: '',
           toolCalls: [{
@@ -145,8 +145,8 @@ describe('reconstructDurableArchitectureGraph', () => {
             name: 'spawn_cli_agent',
             args: {
               architectureRunId: runId,
-              nodeId: 'materializer',
-              roleSlotId: 'materializer',
+              nodeId: 'implementer',
+              roleSlotId: 'implementer',
               agentId: 'copilot',
               workdir: 'C:\\Projekty\\TurboProject2',
               expectedChangedFiles: ['src/App.tsx'],
@@ -156,7 +156,7 @@ describe('reconstructDurableArchitectureGraph', () => {
         },
         {
           id: `architecture:${runId}:spawn-result`,
-          sessionId: `arch-${runId}-materializer`,
+          sessionId: `arch-${runId}-implementer`,
           role: 'tool_result',
           toolCallId: `architecture:${runId}:tool-call:1`,
           content: JSON.stringify({
@@ -169,7 +169,7 @@ describe('reconstructDurableArchitectureGraph', () => {
         },
         {
           id: `architecture:${runId}:status`,
-          sessionId: `arch-${runId}-materializer`,
+          sessionId: `arch-${runId}-implementer`,
           role: 'assistant',
           content: '',
           toolCalls: [{
@@ -178,21 +178,21 @@ describe('reconstructDurableArchitectureGraph', () => {
             args: {
               architectureRunId: runId,
               childSessionId: 'cli-child-2',
-              nodeId: 'materializer',
-              roleSlotId: 'materializer',
+              nodeId: 'implementer',
+              roleSlotId: 'implementer',
             },
           }],
           createdAt: 103,
         },
         {
           id: `architecture:${runId}:status-result`,
-          sessionId: `arch-${runId}-materializer`,
+          sessionId: `arch-${runId}-implementer`,
           role: 'tool_result',
           toolCallId: `architecture:${runId}:tool-call:2`,
           content: JSON.stringify({
             childSessionId: 'cli-child-2',
             agentId: 'copilot',
-            status: 'exited',
+            status: 'terminal-success',
             workdir: 'C:\\Projekty\\TurboProject2',
           }),
           createdAt: 104,
@@ -207,8 +207,8 @@ describe('reconstructDurableArchitectureGraph', () => {
       childAgents: [
         expect.objectContaining({
           id: 'cli-child-2',
-          parentNodeId: 'materializer',
-          parentRoleSlotId: 'materializer',
+          parentNodeId: 'implementer',
+          parentRoleSlotId: 'implementer',
           backend: 'copilot',
           status: 'completed',
           toolName: 'get_cli_agent_status',

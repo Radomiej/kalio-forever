@@ -74,6 +74,8 @@ export function ArchitectPage() {
   const [variantDescription, setVariantDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [registryCollapsed, setRegistryCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const runOptions = useArchitectRunOptions();
   const [llmConfig, setLlmConfig] = useState<LLMConfigWithSource | null>(null);
   const [activeCredentialId, setActiveCredentialId] = useState<string | null>(null);
@@ -347,7 +349,7 @@ export function ArchitectPage() {
           selectedSchema.id,
           runOptions.taskPrompt,
           personaOverrides,
-          'subagent_execution',
+          runOptions.executionMode,
           hasDraftSchemaChanges ? editableSchema ?? undefined : undefined,
           runOptions.runContext(),
         );
@@ -491,14 +493,46 @@ export function ArchitectPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-base-100" data-testid="architect-page">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-base-300 bg-base-100/95 px-4">
-        <div className="min-w-0">
+      <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-base-300 bg-base-100/95 px-4">
+        <div className="min-w-0 shrink-0">
           <h1 className="truncate text-sm font-semibold text-base-content">Architect</h1>
-          <p className="truncate text-[11px] text-base-content/45">
+          <p className="truncate text-[11px] text-base-content/65">
             {selectedSchema ? `Architecture Graph: ${selectedSchema.name}` : 'Architecture Graph editor'}
           </p>
         </div>
-        <div className="flex-1" />
+        <ArchitectRunConfig
+          activeCredentialId={activeCredentialId}
+          llmConfig={llmConfig}
+          maxNodeVisits={runOptions.maxArchitectureNodeVisits}
+          maxSteps={runOptions.maxArchitectureSteps}
+          maxSubagentIterations={runOptions.maxArchitectureSubagentIterations}
+          executionMode={runOptions.executionMode}
+          projectPath={runOptions.projectPath}
+          requireGoalMasterLoopProof={runOptions.requireGoalMasterLoopProof}
+          requireImplementerWriteProof={runOptions.requireImplementerWriteProof}
+          autoApproveProjectWrites={runOptions.autoApproveProjectWrites}
+          autoApproveTerminal={runOptions.autoApproveTerminal}
+          allowOrchestratorSubagents={runOptions.allowOrchestratorSubagents}
+          schema={selectedSchema}
+          taskPrompt={runOptions.taskPrompt}
+          personaOverrides={personaOverrides}
+          running={running}
+          onMaxNodeVisitsChange={runOptions.setMaxArchitectureNodeVisits}
+          onMaxStepsChange={runOptions.setMaxArchitectureSteps}
+          onMaxSubagentIterationsChange={runOptions.setMaxArchitectureSubagentIterations}
+          onExecutionModeChange={runOptions.setExecutionMode}
+          onProjectPathChange={runOptions.setProjectPath}
+          onRequireGoalMasterLoopProofChange={runOptions.setRequireGoalMasterLoopProof}
+          onRequireImplementerWriteProofChange={runOptions.setRequireImplementerWriteProof}
+          onAutoApproveProjectWritesChange={runOptions.setAutoApproveProjectWrites}
+          onAutoApproveTerminalChange={runOptions.setAutoApproveTerminal}
+          onAllowOrchestratorSubagentsChange={runOptions.setAllowOrchestratorSubagents}
+          onTaskPromptChange={runOptions.setTaskPrompt}
+          onStartRun={() => void startRun()}
+          onStartGoalGuardFlow={() => void startGoalGuardFlow()}
+          onStopRun={() => void stopRun()}
+          embedded
+        />
         {error && (
           <div className="alert alert-error max-w-md py-1.5 text-xs">
             <AlertCircle size={14} />
@@ -521,37 +555,6 @@ export function ArchitectPage() {
         </button>
       </header>
 
-      <ArchitectRunConfig
-        activeCredentialId={activeCredentialId}
-        llmConfig={llmConfig}
-        maxNodeVisits={runOptions.maxArchitectureNodeVisits}
-        maxSteps={runOptions.maxArchitectureSteps}
-        maxSubagentIterations={runOptions.maxArchitectureSubagentIterations}
-        projectPath={runOptions.projectPath}
-        requireGoalMasterLoopProof={runOptions.requireGoalMasterLoopProof}
-        requireImplementerWriteProof={runOptions.requireImplementerWriteProof}
-        autoApproveProjectWrites={runOptions.autoApproveProjectWrites}
-        autoApproveTerminal={runOptions.autoApproveTerminal}
-        allowOrchestratorSubagents={runOptions.allowOrchestratorSubagents}
-        schema={selectedSchema}
-        taskPrompt={runOptions.taskPrompt}
-        personaOverrides={personaOverrides}
-        running={running}
-        onMaxNodeVisitsChange={runOptions.setMaxArchitectureNodeVisits}
-        onMaxStepsChange={runOptions.setMaxArchitectureSteps}
-        onMaxSubagentIterationsChange={runOptions.setMaxArchitectureSubagentIterations}
-        onProjectPathChange={runOptions.setProjectPath}
-        onRequireGoalMasterLoopProofChange={runOptions.setRequireGoalMasterLoopProof}
-        onRequireImplementerWriteProofChange={runOptions.setRequireImplementerWriteProof}
-        onAutoApproveProjectWritesChange={runOptions.setAutoApproveProjectWrites}
-        onAutoApproveTerminalChange={runOptions.setAutoApproveTerminal}
-        onAllowOrchestratorSubagentsChange={runOptions.setAllowOrchestratorSubagents}
-        onTaskPromptChange={runOptions.setTaskPrompt}
-        onStartRun={() => void startRun()}
-        onStartGoalGuardFlow={() => void startGoalGuardFlow()}
-        onStopRun={() => void stopRun()}
-      />
-
       <div className="flex min-h-0 flex-1 overflow-hidden bg-[#080b12]">
         <ArchitectRegistryPanel
           schemas={schemas}
@@ -561,6 +564,8 @@ export function ArchitectPage() {
           onSelectSchema={selectSchema}
           deletingSchemaId={deletingSchemaId}
           onDeleteSchema={(schemaId) => void deleteSchema(schemaId)}
+          collapsed={registryCollapsed}
+          onCollapsedChange={setRegistryCollapsed}
         />
         <div className="relative flex min-w-0 flex-1 overflow-hidden">
           <ArchitectGraphCanvas
@@ -601,9 +606,11 @@ export function ArchitectPage() {
           personas={personas}
           personaOverrides={personaOverrides}
           nodeKindOverrides={nodeKindOverrides}
+          collapsed={inspectorCollapsed}
           onPersonaOverride={setPersonaOverride}
           onNodeKindOverride={setNodeKindOverride}
           onNodeBehaviorOverride={setNodeBehaviorOverride}
+          onCollapsedChange={setInspectorCollapsed}
           onContextPolicyOverride={setContextPolicyOverride}
         />
       </div>

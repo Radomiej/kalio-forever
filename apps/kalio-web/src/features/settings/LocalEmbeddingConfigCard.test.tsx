@@ -28,9 +28,9 @@ const LOCAL_STATUS: EmbeddingStatus = {
 function renderHarness() {
   const saveMock = vi.fn();
   const useLocalMock = vi.fn();
-  const reindexMock = vi.fn();
+  const testLocalMock = vi.fn();
+  const installLocalMock = vi.fn();
   const reindexAllMock = vi.fn();
-  const personaChangeMock = vi.fn();
 
   function Harness() {
     const [form, setForm] = useState<UpdateLocalEmbeddingConfigDto>(INITIAL_FORM);
@@ -41,16 +41,19 @@ function renderHarness() {
         form={form}
         dirty={dirty}
         syncing={null}
-        reindexPersonaId=""
         reindexResult={null}
         status={LOCAL_STATUS}
+        localTestState="idle"
+        localTestMessage={null}
+        localConfigWarning={null}
+        localAvailability={{ status: 'missing', installed: false, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model not installed yet.' }}
         onChange={setForm}
         onDirtyChange={setDirty}
         onSave={() => saveMock(form)}
+        onInstall={installLocalMock}
+        onTest={testLocalMock}
         onUseLocal={useLocalMock}
-        onReindex={reindexMock}
         onReindexAll={reindexAllMock}
-        onReindexPersonaChange={personaChangeMock}
       />
     );
   }
@@ -59,9 +62,9 @@ function renderHarness() {
     ...render(<Harness />),
     saveMock,
     useLocalMock,
-    reindexMock,
+    installLocalMock,
+    testLocalMock,
     reindexAllMock,
-    personaChangeMock,
   };
 }
 
@@ -96,5 +99,13 @@ describe('LocalEmbeddingConfigCard', () => {
         backend: 'cpu',
       }));
     });
+  });
+
+  it('shows install state and keeps local testing disabled until the model is ready', async () => {
+    renderHarness();
+
+    expect(screen.getByTestId('embedding-local-install-btn')).toHaveTextContent('Install model');
+    expect(screen.getByTestId('embedding-local-test-btn')).toBeDisabled();
+    expect(screen.getByTestId('embedding-local-availability-message')).toHaveTextContent('Model not installed yet.');
   });
 });

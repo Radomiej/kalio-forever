@@ -54,6 +54,10 @@ function makeToolArgRateTracker(
 export class LLMServiceAdapter implements ILLMSource {
   constructor(private readonly llm: LLMService) {}
 
+  getConfig(): ReturnType<LLMService['getConfig']> {
+    return this.llm.getConfig();
+  }
+
   async *stream(params: LLMSourceParams): AsyncGenerator<InternalLLMChunk> {
     const pending: Array<InternalLLMChunk | null> = [];
     let notify: (() => void) | null = null;
@@ -109,6 +113,7 @@ export class LLMServiceAdapter implements ILLMSource {
         {
           sessionId: params.sessionId,
           messageId: params.messageId,
+          modelOverride: params.model,
           abortSignal: controller.signal,
           onToolArgChunk,
           onChunk: (chunk) => {

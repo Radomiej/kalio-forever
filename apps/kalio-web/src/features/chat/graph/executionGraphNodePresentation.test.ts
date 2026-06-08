@@ -45,10 +45,6 @@ describe('executionGraphNodePresentation', () => {
   it('keeps context-heavy subagent cards compact while preserving extra detail space', () => {
     const sharedContext = 'Design a polished execution graph that preserves orchestration readability while keeping previews, child turns, and tools legible at a glance. '.repeat(2);
 
-    const turnNode = makeNode({
-      detail: `${sharedContext} Completed the orchestration turn with previews and grouped outcomes.`,
-    });
-
     const subagentNode = makeNode({
       kind: 'subagent',
       title: 'RaBuilder',
@@ -81,11 +77,11 @@ describe('executionGraphNodePresentation', () => {
       },
     });
 
-    expect(estimateGraphNodeHeight(subagentNode)).toBeGreaterThanOrEqual(260);
-    expect(estimateGraphNodeHeight(subagentNode)).toBeLessThanOrEqual(estimateGraphNodeHeight(turnNode) + 16);
+    expect(estimateGraphNodeHeight(subagentNode)).toBeGreaterThanOrEqual(200);
+    expect(estimateGraphNodeHeight(subagentNode)).toBeLessThanOrEqual(230);
   });
 
-  it('gives preview-heavy tool nodes more height than plain tool nodes without oversized cards', () => {
+  it('gives preview-capable tool nodes only enough extra height for a compact preview strip', () => {
     const plainTool = makeNode({
       kind: 'tool',
       title: 'design_preview',
@@ -129,8 +125,9 @@ describe('executionGraphNodePresentation', () => {
       },
     });
 
-    expect(estimateGraphNodeHeight(previewTool)).toBeGreaterThanOrEqual(estimateGraphNodeHeight(plainTool) + 40);
-    expect(estimateGraphNodeHeight(previewTool)).toBeLessThanOrEqual(260);
+    expect(estimateGraphNodeHeight(previewTool)).toBeGreaterThanOrEqual(estimateGraphNodeHeight(plainTool));
+    expect(estimateGraphNodeHeight(previewTool)).toBeLessThanOrEqual(estimateGraphNodeHeight(plainTool) + 44);
+    expect(estimateGraphNodeHeight(previewTool)).toBeLessThanOrEqual(220);
   });
 
   it('formats tool metadata with human-readable labels for prominent fields', () => {

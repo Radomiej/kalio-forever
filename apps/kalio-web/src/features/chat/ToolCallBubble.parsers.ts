@@ -10,6 +10,23 @@ import type {
 import type { ImageResultData } from './ImageResultRenderer';
 export { extractSubAgentFlowResult } from './subAgentFlowResult.parser';
 
+export interface WebSearchResultChunk {
+  content: string;
+  citationUrls: string[];
+  blockType: 'heading' | 'paragraph' | 'list' | 'quote' | 'code';
+  headingPath: string[];
+  webResultId: string;
+  blockIndex: number;
+  query: string;
+  provider: string;
+  model: string;
+}
+
+export interface WebSearchResultData {
+  offline: boolean;
+  results: WebSearchResultChunk[];
+}
+
 export function extractRAAppBlock(data: unknown): RAAppBlock | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
@@ -99,6 +116,37 @@ export function extractImageResult(data: unknown): ImageResultData | null {
   return null;
 }
 
+function isWebSearchResultChunk(data: unknown): data is WebSearchResultChunk {
+  if (!data || typeof data !== 'object') return false;
+  const result = data as Record<string, unknown>;
+  return (
+    typeof result['content'] === 'string' &&
+    Array.isArray(result['citationUrls']) &&
+    result['citationUrls'].every((value) => typeof value === 'string') &&
+    typeof result['blockType'] === 'string' &&
+    Array.isArray(result['headingPath']) &&
+    result['headingPath'].every((value) => typeof value === 'string') &&
+    typeof result['webResultId'] === 'string' &&
+    typeof result['blockIndex'] === 'number' &&
+    typeof result['query'] === 'string' &&
+    typeof result['provider'] === 'string' &&
+    typeof result['model'] === 'string'
+  );
+}
+
+export function extractWebSearchResult(data: unknown): WebSearchResultData | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d['offline'] !== 'boolean' || !Array.isArray(d['results']) || !d['results'].every(isWebSearchResultChunk)) {
+    return null;
+  }
+
+  return {
+    offline: d['offline'],
+    results: d['results'],
+  };
+}
+
 function hashString(value: string): string {
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
@@ -113,6 +161,15 @@ export function getChildImageIdentity(image: ImageResultData): string {
   }
 
   return `inline:${hashString(image.image_url)}`;
+}
+
+function safeParseJson(value: string): unknown | null {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (err) {
+    void err;
+    return null;
+  }
 }
 
 function isSubagentCopiedFile(data: unknown): data is SubagentToolResult['copiedFiles'][number] {
@@ -161,28 +218,26 @@ export function extractChildToolPreviews(messages: ChatMessage[]): { raapp: RAAp
 
   for (const message of messages) {
     if (!message || message.role !== 'tool_result') continue;
-    try {
-      const parsed = JSON.parse(message.content);
-      const nextRaapp = extractRAAppBlock(parsed);
-      if (nextRaapp) {
-        raapp = nextRaapp;
-      }
+    const parsed = safeParseJson(message.content);
+    if (parsed === null) continue;
 
-      const image = extractImageResult(parsed);
-      if (!image) {
-        continue;
-      }
-
-      const imageKey = getChildImageIdentity(image);
-      if (seenImages.has(imageKey)) {
-        continue;
-      }
-
-      seenImages.add(imageKey);
-      images.push(image);
-    } catch {
-      // ignore invalid JSON payloads in history lookup
+    const nextRaapp = extractRAAppBlock(parsed);
+    if (nextRaapp) {
+      raapp = nextRaapp;
     }
+
+    const image = extractImageResult(parsed);
+    if (!image) {
+      continue;
+    }
+
+    const imageKey = getChildImageIdentity(image);
+    if (seenImages.has(imageKey)) {
+      continue;
+    }
+
+    seenImages.add(imageKey);
+    images.push(image);
   }
 
   return { raapp, images };

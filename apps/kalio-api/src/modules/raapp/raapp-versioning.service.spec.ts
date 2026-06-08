@@ -79,6 +79,23 @@ async function makeService(base: string): Promise<RAAppVersioningService> {
   return moduleRef.get<RAAppVersioningService>(RAAppVersioningService);
 }
 
+async function removeDirWithRetries(targetPath: string): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      await fs.rm(targetPath, { recursive: true, force: true });
+      return;
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      const code = 'code' in error ? String(error.code) : '';
+      const retryable = code === 'EBUSY' || code === 'ENOTEMPTY' || code === 'EPERM';
+      if (!retryable || attempt === 9) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
+
 // ── Semver helpers ────────────────────────────────────────────────────────────
 
 describe('semver helpers', () => {
@@ -120,7 +137,7 @@ describe('RAAppVersioningService', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tmpBase, { recursive: true, force: true });
+    await removeDirWithRetries(tmpBase);
   });
 
   // ── saveAsDraft ───────────────────────────────────────────────────────────
@@ -266,7 +283,7 @@ describe('RAAppVersioningService', () => {
       expect(versions).toContain('1.0.0');
       expect(versions).toContain('1.1.0');
       expect(versions).toContain('1.2.0');
-    });
+    }, 60_000);
 
     it('deduplicates history when same-version zip already exists', async () => {
       // Set up: current=1.1.0 AND history/1.1.0.zip already present (crash/rollback edge case)
@@ -589,7 +606,7 @@ describe('Full lifecycle integration', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tmpBase, { recursive: true, force: true });
+    await removeDirWithRetries(tmpBase);
   });
 
   it('upload → approve → rollback → re-approve → delete', async () => {

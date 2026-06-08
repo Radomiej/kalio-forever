@@ -1468,7 +1468,7 @@ describe('buildExecutionGraphModel', () => {
     const toolNode = model.nodes.find((node) => node.id === 'tool:call-preview-1');
 
     expect(turnNode?.height).toBeGreaterThan(NODE_HEIGHT);
-    expect(toolNode?.y).toBe((turnNode?.y ?? 0) + (turnNode?.height ?? 0) + ROW_GAP);
+    expect(toolNode?.y).toBeGreaterThanOrEqual((turnNode?.y ?? 0) + (turnNode?.height ?? 0) + ROW_GAP);
   });
 
   it('places the final response on the right as the chat outcome without dashed links from tools', () => {

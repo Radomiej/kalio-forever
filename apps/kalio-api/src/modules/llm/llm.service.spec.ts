@@ -5,6 +5,7 @@ import { LLMService } from './llm.service';
 import { CredentialsService } from '../credentials/credentials.service';
 import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
 import { ProviderStreamLimiterService } from './provider-stream-limiter.service';
+import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../common/utils/llm-provider-http.util';
 
 // ─── DB overrides env — bootstrap-only rule ───────────────────────────────────
 // Requirement: .env vars are ONLY the fallback bootstrap when no active DB
@@ -138,7 +139,7 @@ describe('LLMService - DB credential overrides env', () => {
 
       expect(config.source).toBe('env');
       expect(config.provider).toBe('mock');
-      expect(config.model).toBe('');
+      expect(config.model).toBe('mock');
       expect(forcedCreds.getActiveProviderConfig).not.toHaveBeenCalled();
     });
 
@@ -279,6 +280,45 @@ describe('LLMService - DB credential overrides env', () => {
       }
     });
 
+    it('uses a per-request model override without mutating the active DB credential model', async () => {
+      credentialsService.getActiveProviderConfig.mockResolvedValue({
+        provider: 'openai' as const,
+        apiKey: 'db-key',
+        model: 'mimo-v2.5-pro',
+        baseUrl: 'https://db.endpoint.com/v1',
+      });
+
+      const originalFetch = globalThis.fetch;
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response('data: [DONE]\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      );
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      try {
+        await service.streamChat(
+          [{ role: 'user', content: 'hello' }],
+          [],
+          {
+            sessionId: 'session-1',
+            messageId: 'msg-1',
+            modelOverride: 'mimo-v2.5',
+            onChunk: () => {},
+          },
+        );
+
+        const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+        const body = JSON.parse(String(requestInit?.body)) as { model: string };
+
+        expect(body.model).toBe('mimo-v2.5');
+        expect(credentialsService.updateModel).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it('REGRESSION: does not rebuild the fallback env provider on first use when the configured baseUrl is mock', async () => {
       const mockCreds = buildCredentialsMock();
       mockCreds.getActiveProviderConfig.mockResolvedValue(null);
@@ -311,6 +351,66 @@ describe('LLMService - DB credential overrides env', () => {
       );
 
       expect((mockBaseUrlService as unknown as { envProviderKey: string }).envProviderKey).toBe(initialProviderKey);
+    });
+  });
+
+  describe('streamChatWithConfig()', () => {
+    it('shares the same Xiaomi request shape as the runtime active-provider path', async () => {
+      const xiaomiConfig = {
+        provider: 'xiaomimimo',
+        apiKey: 'xiao-key',
+        model: 'mimo-v2.5',
+      };
+      credentialsService.getActiveProviderConfig.mockResolvedValue(xiaomiConfig);
+
+      const originalFetch = globalThis.fetch;
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock as typeof fetch;
+      fetchMock
+        .mockResolvedValueOnce(new Response('data: [DONE]\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }))
+        .mockResolvedValueOnce(new Response('data: [DONE]\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }));
+
+      try {
+        await service.streamChat(
+          [{ role: 'user', content: 'hello' }],
+          [],
+          { sessionId: 'session-1', messageId: 'msg-1', onChunk: () => {} },
+        );
+
+        await service.streamChatWithConfig(
+          xiaomiConfig,
+          [{ role: 'user', content: 'hello' }],
+          [],
+          { sessionId: 'session-2', messageId: 'msg-2', onChunk: () => {} },
+        );
+
+        const runtimeCall = fetchMock.mock.calls[0];
+        const smokeCall = fetchMock.mock.calls[1];
+        const runtimeInit = runtimeCall?.[1] as RequestInit | undefined;
+        const smokeInit = smokeCall?.[1] as RequestInit | undefined;
+        const expectedHeaders = buildProviderCompatHeaders('xiaomimimo', 'xiao-key');
+
+        expect(runtimeCall?.[0]).toBe(`${resolveLlmProviderBaseUrl('xiaomimimo')}/chat/completions`);
+        expect(smokeCall?.[0]).toBe(runtimeCall?.[0]);
+        expect(runtimeInit).toEqual(expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+            ...expectedHeaders,
+          }),
+        }));
+        expect(smokeInit?.method).toBe(runtimeInit?.method);
+        expect(smokeInit?.body).toBe(runtimeInit?.body);
+        expect(smokeInit?.headers).toEqual(runtimeInit?.headers);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
   });
 

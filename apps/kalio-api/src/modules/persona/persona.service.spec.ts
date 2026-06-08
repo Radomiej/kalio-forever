@@ -675,6 +675,140 @@ describe('PersonaService', () => {
     });
   });
 
+  describe('onApplicationBootstrap — seeded model sync', () => {
+    it('fills an empty stored seeded model from personas config', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        'agent-orchestrator': {
+          name: 'Agent Orchestrator',
+          systemPrompt: 'current prompt with planning/prototyping, implementation, and refactor/QA',
+          model: 'mimo-v2.5-pro',
+          allowedTools: ['run_sub_agentflow'],
+          skillIds: ['architecture-agent-superpowers'],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'agent-orchestrator',
+            systemPrompt: 'current prompt with planning/prototyping, implementation, and refactor/QA',
+            model: '',
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'mimo-v2.5-pro' }),
+      );
+    });
+
+    it('fills a null stored seeded model from personas config', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        'agent-orchestrator': {
+          name: 'Agent Orchestrator',
+          systemPrompt: 'current prompt with planning/prototyping, implementation, and refactor/QA',
+          model: 'mimo-v2.5-pro',
+          allowedTools: ['run_sub_agentflow'],
+          skillIds: ['architecture-agent-superpowers'],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'agent-orchestrator',
+            systemPrompt: 'current prompt with planning/prototyping, implementation, and refactor/QA',
+            model: null,
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'mimo-v2.5-pro' }),
+      );
+    });
+
+    it('does not overwrite an existing custom model', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        'agent-qa': {
+          name: 'Agent QA',
+          systemPrompt: 'qa prompt',
+          model: 'mimo-v2.5',
+          allowedTools: ['web_search'],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'agent-qa',
+            systemPrompt: 'qa prompt',
+            model: 'custom-model',
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.not.objectContaining({ model: expect.any(String) }),
+      );
+    });
+  });
+
   describe('onApplicationBootstrap — specialized persona seeding', () => {
     it('seeds web-research and orchestrator personas from personas.json', async () => {
       mockDb.select.mockReturnValue({
@@ -779,6 +913,12 @@ describe('PersonaService', () => {
         'spawn_cli_agent',
         'get_cli_agent_status',
       ]));
+      expect(config['agent-orchestrator']?.systemPrompt).toContain('planning/prototyping, implementation, and refactor/QA');
+      expect(config['agent-orchestrator']?.systemPrompt).toContain('persisted research/design note');
+      expect(config['agent-orchestrator']?.systemPrompt).toContain('concrete source URLs');
+      expect(config['agent-orchestrator']?.systemPrompt).toContain('seeded/no live search');
+      expect(config['agent-orchestrator']?.systemPrompt).toContain('parent session id');
+      expect(config['agent-orchestrator']?.systemPrompt).toContain('commit hash');
       expect(config['agent-release-guard']?.systemPrompt).toContain('GO/NO-GO');
     });
 
@@ -936,6 +1076,54 @@ describe('PersonaService', () => {
       expect(setMock).toHaveBeenCalledWith(
         expect.objectContaining({
           systemPrompt: 'new graph-mode orchestrator prompt with spawn_cli_agent plus status polling',
+        }),
+      );
+    });
+
+    it('refreshes Agent Orchestrator prompts that lack the research source audit contract', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        'agent-orchestrator': {
+          name: 'Agent Orchestrator',
+          systemPrompt: 'new agent-orchestrator prompt with seeded/no live search and concrete source URLs',
+          model: 'mimo-v2.5-pro',
+          allowedTools: ['run_sub_agentflow', 'web_search', 'fs_write'],
+          skillIds: ['architecture-agent-superpowers'],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'agent-orchestrator',
+            systemPrompt: [
+              'planning/prototyping, implementation, and refactor/QA',
+              'persisted research/design note',
+            ].join('\n'),
+          }]),
+        }),
+      });
+
+      const setMock = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      mockDb.update.mockReturnValue({ set: setMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(setMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemPrompt: 'new agent-orchestrator prompt with seeded/no live search and concrete source URLs',
         }),
       );
     });

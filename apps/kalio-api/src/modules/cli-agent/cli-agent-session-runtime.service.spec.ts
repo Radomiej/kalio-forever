@@ -1,9 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { promisify } from 'node:util';
 import type { ChatSession } from '@kalio/types';
 import type { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 import type { CLIAgentService } from './cli-agent.service';
@@ -11,7 +6,17 @@ import type { CLIAgentConfigService } from './cli-agent-config.service';
 import type { CLIAgentSessionService } from './cli-agent-session.service';
 import { CLIAgentSessionRuntimeService } from './cli-agent-session-runtime.service';
 
-const execFileAsync = promisify(execFile);
+const { getWorktreeStatusSummaryMock } = vi.hoisted(() => ({
+  getWorktreeStatusSummaryMock: vi.fn(),
+}));
+
+vi.mock('./cli-agent-worktree-summary', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./cli-agent-worktree-summary')>();
+  return {
+    ...actual,
+    getWorktreeStatusSummary: getWorktreeStatusSummaryMock,
+  };
+});
 
 function makeChildSession(): ChatSession {
   return {
@@ -33,6 +38,9 @@ describe('CLIAgentSessionRuntimeService', () => {
   let config: CLIAgentConfigService;
 
   beforeEach(() => {
+    getWorktreeStatusSummaryMock.mockReset();
+    getWorktreeStatusSummaryMock.mockResolvedValue(null);
+
     cliAgent = {
       isRunning: vi.fn().mockReturnValue(false),
       run: vi.fn(),
@@ -41,6 +49,7 @@ describe('CLIAgentSessionRuntimeService', () => {
 
     sessions = {
       getChildSession: vi.fn().mockResolvedValue(makeChildSession()),
+      getAccessibleChildSession: vi.fn().mockResolvedValue(makeChildSession()),
       loadSessionMetadata: vi.fn().mockResolvedValue({ agentId: 'codex', workdir: 'C:/repo' }),
       listMessages: vi.fn().mockResolvedValue([]),
       persistUserMessage: vi.fn(),
@@ -85,6 +94,43 @@ describe('CLIAgentSessionRuntimeService', () => {
     expect(allowedPaths.isAllowed).toHaveBeenCalledWith('C:/repo');
     expect(cliAgent.run).not.toHaveBeenCalled();
     expect(sessions.listMessages).not.toHaveBeenCalled();
+  });
+
+  it('reads CLI child status through architecture sibling sessions in the same session tree', async () => {
+    vi.mocked(sessions.getAccessibleChildSession).mockResolvedValue({
+      ...makeChildSession(),
+      parentSessionId: 'arch-run-materializer',
+    });
+    vi.mocked(sessions.loadLatestToolResult).mockResolvedValue({
+      id: 'tool-result-1',
+      sessionId: 'cli-child-1',
+      role: 'tool_result',
+      toolCallId: 'cli-run-1',
+      content: JSON.stringify({
+        childSessionId: 'cli-child-1',
+        parentSessionId: 'arch-run-materializer',
+        agentId: 'codex',
+        workdir: 'C:/repo',
+        status: 'completed',
+        lastPrompt: 'Change files',
+        updatedAt: 20,
+        lastOutput: 'build passed',
+        lastExitCode: 0,
+      }),
+      createdAt: 20,
+    });
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    const status = await service.getStatus('arch-run-verifier', 'cli-child-1');
+
+    expect(sessions.getAccessibleChildSession).toHaveBeenCalledWith('arch-run-verifier', 'cli-child-1');
+    expect(status).toMatchObject({
+      childSessionId: 'cli-child-1',
+      parentSessionId: 'arch-run-verifier',
+      status: 'completed',
+      lastOutput: 'build passed',
+      lastExitCode: 0,
+    });
   });
 
   it('auto-recovers a durable CLI session after idle timeout when enabled', async () => {
@@ -199,43 +245,45 @@ describe('CLIAgentSessionRuntimeService', () => {
   });
 
   it('marks a zero-exit CLI turn failed when expected changed files are missing', async () => {
-    const repoPath = await mkdtemp(join(tmpdir(), 'kalio-cli-acceptance-'));
-    try {
-      await execFileAsync('git', ['init'], { cwd: repoPath, windowsHide: true });
-      allowedPaths = {
-        isAllowed: vi.fn().mockResolvedValue(true),
-      } as unknown as AllowedPathsService;
-      vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
-      vi.mocked(cliAgent.run).mockResolvedValue({
-        agentId: 'gemini',
-        output: 'Ready for next instruction.',
-        exitCode: 0,
-        durationMs: 10,
-      });
-      const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    } as unknown as AllowedPathsService;
+    vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
+    vi.mocked(cliAgent.run).mockResolvedValue({
+      agentId: 'gemini',
+      output: 'Ready for next instruction.',
+      exitCode: 0,
+      durationMs: 10,
+    });
+    getWorktreeStatusSummaryMock.mockResolvedValue([
+      'Worktree status after CLI agent: clean.',
+      '',
+      'Acceptance hints:',
+      '- expected changed files present in worktree: 0/2',
+      '- missing expected changed files: package.json, src/App.tsx',
+    ].join('\n'));
 
-      await service.spawnSession({
-        parentSessionId: 'sess-parent',
-        parentToolCallId: 'call-cli-tools',
-        prompt: 'Build the site',
-        workdir: repoPath,
-        agentId: 'gemini',
-        acceptanceHints: {
-          expectedChangedFiles: ['package.json', 'src/App.tsx'],
-        },
-      });
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
 
-      await vi.waitFor(() => expect(sessions.saveToolResult).toHaveBeenCalled());
-      const saved = JSON.parse(vi.mocked(sessions.saveToolResult).mock.calls[0]?.[2] ?? '{}') as {
-        status?: string;
-        exitCode?: number;
-        output?: string;
-      };
-      expect(saved.status).toBe('failed');
-      expect(saved.exitCode).toBe(1);
-      expect(saved.output).toContain('missing expected changed files: package.json, src/App.tsx');
-    } finally {
-      await rm(repoPath, { recursive: true, force: true });
-    }
+    await service.spawnSession({
+      parentSessionId: 'sess-parent',
+      parentToolCallId: 'call-cli-tools',
+      prompt: 'Build the site',
+      workdir: 'C:/repo',
+      agentId: 'gemini',
+      acceptanceHints: {
+        expectedChangedFiles: ['package.json', 'src/App.tsx'],
+      },
+    });
+
+    await vi.waitFor(() => expect(sessions.saveToolResult).toHaveBeenCalled());
+    const saved = JSON.parse(vi.mocked(sessions.saveToolResult).mock.calls[0]?.[2] ?? '{}') as {
+      status?: string;
+      exitCode?: number;
+      output?: string;
+    };
+    expect(saved.status).toBe('failed');
+    expect(saved.exitCode).toBe(1);
+    expect(saved.output).toContain('missing expected changed files: package.json, src/App.tsx');
   });
 });

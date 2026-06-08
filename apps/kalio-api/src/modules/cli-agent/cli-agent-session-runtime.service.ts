@@ -86,7 +86,7 @@ export class CLIAgentSessionRuntimeService {
   }
 
   async continueSession(params: ContinueSessionParams): Promise<CLIAgentSessionSnapshot> {
-    const childSession = await this.sessions.getChildSession(params.parentSessionId, params.childSessionId);
+    const childSession = await this.sessions.getAccessibleChildSession(params.parentSessionId, params.childSessionId);
     if (!childSession || childSession.kind !== 'cli-agent') {
       throw new Error(`CLI_AGENT_SESSION_NOT_FOUND: ${params.childSessionId}`);
     }
@@ -122,7 +122,7 @@ export class CLIAgentSessionRuntimeService {
   }
 
   async getStatus(parentSessionId: string, childSessionId: string): Promise<CLIAgentSessionSnapshot> {
-    const childSession = await this.sessions.getChildSession(parentSessionId, childSessionId);
+    const childSession = await this.sessions.getAccessibleChildSession(parentSessionId, childSessionId);
     if (!childSession || childSession.kind !== 'cli-agent') {
       throw new Error(`CLI_AGENT_SESSION_NOT_FOUND: ${childSessionId}`);
     }
@@ -165,7 +165,7 @@ export class CLIAgentSessionRuntimeService {
     emit?: ToolCallRequest['_emit'],
   ): Promise<CLIAgentSessionSnapshot> {
     void emit;
-    const childSession = await this.sessions.getChildSession(parentSessionId, childSessionId);
+    const childSession = await this.sessions.getAccessibleChildSession(parentSessionId, childSessionId);
     if (!childSession || childSession.kind !== 'cli-agent') {
       throw new Error(`CLI_AGENT_SESSION_NOT_FOUND: ${childSessionId}`);
     }

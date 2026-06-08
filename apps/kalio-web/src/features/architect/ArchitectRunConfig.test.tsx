@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ArchitectRunConfig, estimateArchitectureBudget } from './ArchitectRunConfig';
 import type { ArchitectSchema } from './architect.types';
@@ -27,6 +26,26 @@ describe('estimateArchitectureBudget', () => {
     expect(budget.description).toContain('19 executable slots');
     expect(budget.description).toContain('3 parallel nodes');
     expect(budget.description).toContain('1 loop edges');
+  });
+
+  it('separates participant branches from all executable runtime slots', () => {
+    const budget = estimateArchitectureBudget(makeSchema(2, 0, false, 'judge'), 32, 3, 4);
+
+    expect(budget.branchSlots).toBe(1);
+    expect(budget.executableSlots).toBe(2);
+  });
+
+  it('returns the concrete budget formula inputs used by the UI audit', () => {
+    const budget = estimateArchitectureBudget(makeSchema(3, 1, true, 'judge'), 12, 3, 4);
+
+    expect(budget).toMatchObject({
+      executableSlots: 3,
+      branchSlots: 2,
+      parallelNodes: 1,
+      loopEdges: 1,
+      estimatedCalls: 12,
+      estimatedLlmTurns: 48,
+    });
   });
 
   it('exposes the Goal Master loop proof guard for judge architectures', () => {
@@ -218,6 +237,54 @@ describe('estimateArchitectureBudget', () => {
     expect(onAllowOrchestratorSubagentsChange).toHaveBeenCalledWith(true);
   });
 
+  it('keeps architecture metrics behind a compact run audit disclosure with formula evidence', () => {
+    render(
+      <ArchitectRunConfig
+        activeCredentialId="credential-1"
+        llmConfig={defaultLlmConfig}
+        maxNodeVisits={3}
+        maxSteps={12}
+        maxSubagentIterations={4}
+        projectPath=""
+        requireGoalMasterLoopProof={false}
+        requireImplementerWriteProof={false}
+        autoApproveProjectWrites={false}
+        autoApproveTerminal={false}
+        schema={makeSchema(3, 1, true, 'judge')}
+        taskPrompt="Finish the goal."
+        personaOverrides={{ judge: 'persona-1' }}
+        running={false}
+        onMaxNodeVisitsChange={vi.fn()}
+        onMaxStepsChange={vi.fn()}
+        onMaxSubagentIterationsChange={vi.fn()}
+        onProjectPathChange={vi.fn()}
+        onRequireGoalMasterLoopProofChange={vi.fn()}
+        onRequireImplementerWriteProofChange={vi.fn()}
+        onAutoApproveProjectWritesChange={vi.fn()}
+        onAutoApproveTerminalChange={vi.fn()}
+        onTaskPromptChange={vi.fn()}
+        onStartRun={vi.fn()}
+        onStartGoalGuardFlow={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId('architect-run-audit-panel')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('architect-run-audit-toggle'));
+
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveClass('absolute');
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveTextContent('branch actors');
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveTextContent('participant/critic slots');
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveTextContent('runtime actors');
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveTextContent('router, judge and finalizer slots');
+    expect(screen.getByTestId('architect-run-audit-panel')).toHaveTextContent('routing nodes');
+    expect(screen.getByTestId('architect-run-audit-details')).not.toHaveAttribute('open');
+    expect(screen.getByTestId('architect-run-audit-details')).toHaveTextContent('Metric definitions');
+    expect(screen.getByTestId('architect-run-audit-repetition')).toHaveTextContent('revisited up to 3 times');
+    expect(screen.getByTestId('architect-run-audit-repetition')).toHaveTextContent('up to 4 agent iterations');
+    expect(screen.getByTestId('architect-run-audit-formula')).toHaveTextContent('12 node executions x 4 iters = ~48 turns');
+  });
+
   it('shows a stop action while an architecture run is running', () => {
     const onStopRun = vi.fn();
     render(
@@ -256,22 +323,20 @@ describe('estimateArchitectureBudget', () => {
     expect(onStopRun).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps Start run disabled until a schema is loaded, while still allowing Goal Guard flow entry', async () => {
-    const user = userEvent.setup();
+  it('keeps Start run disabled until a schema is loaded, while still allowing Goal Guard flow entry', () => {
     render(<RunConfigHarness schema={null} />);
 
     const taskInput = screen.getByRole('textbox', { name: /task/i });
     const startRunButton = screen.getByRole('button', { name: /start run/i });
     const goalGuardButton = screen.getByRole('button', { name: /goal guard/i });
 
-    await user.type(taskInput, 'Deliver the architecture slice.');
+    fireEvent.change(taskInput, { target: { value: 'Deliver the architecture slice.' } });
 
     expect(startRunButton).toBeDisabled();
     expect(goalGuardButton).toBeEnabled();
   });
 
-  it('enables and disables the start actions based on the task prompt content', async () => {
-    const user = userEvent.setup();
+  it('enables and disables the start actions based on the task prompt content', () => {
     render(<RunConfigHarness />);
 
     const taskInput = screen.getByRole('textbox', { name: /task/i });
@@ -281,12 +346,12 @@ describe('estimateArchitectureBudget', () => {
     expect(startRunButton).toBeDisabled();
     expect(goalGuardButton).toBeDisabled();
 
-    await user.type(taskInput, 'Deliver the architecture slice.');
+    fireEvent.change(taskInput, { target: { value: 'Deliver the architecture slice.' } });
 
     expect(startRunButton).toBeEnabled();
     expect(goalGuardButton).toBeEnabled();
 
-    await user.clear(taskInput);
+    fireEvent.change(taskInput, { target: { value: '' } });
 
     expect(startRunButton).toBeDisabled();
     expect(goalGuardButton).toBeDisabled();

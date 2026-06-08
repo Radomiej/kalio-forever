@@ -12,6 +12,7 @@ import { EmbeddingCredentialsService } from './embedding-credentials.service';
 import { EmbeddingService } from './embedding.service';
 import { MemoryService } from './memory.service';
 import { VectorStoreService } from './vector-store.service';
+import type { WebSearchChunk } from './web-search-chunking';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -59,6 +60,33 @@ function makeMemoryService() {
 
   const memoryService = new MemoryService(config, appSettings, embeddingService);
   return { memoryService, embeddingService, embedBatch, memoryPath };
+}
+
+function makeWebChunks(query = 'local embeddings'): WebSearchChunk[] {
+  return [
+    {
+      content: 'Alpha paragraph cites [1].',
+      citationUrls: ['https://example.com/alpha'],
+      blockType: 'paragraph',
+      headingPath: ['Overview'],
+      webResultId: 'web-result-1',
+      blockIndex: 0,
+      query,
+      provider: 'perplexity',
+      model: 'sonar',
+    },
+    {
+      content: '- Bullet one [2]\n- Bullet two [2]',
+      citationUrls: ['https://example.com/beta'],
+      blockType: 'list',
+      headingPath: ['Overview'],
+      webResultId: 'web-result-1',
+      blockIndex: 1,
+      query,
+      provider: 'perplexity',
+      model: 'sonar',
+    },
+  ];
 }
 
 describe('MemoryService reembedPersona', () => {
@@ -172,15 +200,17 @@ describe('MemoryService reembedPersona', () => {
   it('stores web search results in a dedicated web-results.db for the active profile', async () => {
     const { memoryService, memoryPath } = makeMemoryService();
 
-    await memoryService.ingestWebSearchResult('Search answer about local embeddings.', {
-      source: 'web_search',
-      query: 'local embeddings',
-    });
+    await memoryService.ingestWebSearchResult(makeWebChunks());
 
     const results = await memoryService.searchWebResults('local embeddings');
 
-    expect(results).toHaveLength(1);
-    expect(results[0]?.metadata).toMatchObject({ source: 'web_search', namespace: 'web_search' });
+    expect(results).toHaveLength(2);
+    expect(results[0]?.metadata).toMatchObject({
+      namespace: 'web_search',
+      chunk_version: 'v2',
+      web_result_id: 'web-result-1',
+    });
+    expect(results[0]?.metadata['citation_urls_json']).toContain('https://example.com/');
     expect(fs.existsSync(path.join(
       memoryPath,
       'local-transformers-xenova-multilingual-e5-small-384-auto',
@@ -193,10 +223,7 @@ describe('MemoryService reembedPersona', () => {
     const searchVector = vi.spyOn(VectorStoreService.prototype, 'search');
     const searchFts = vi.spyOn(VectorStoreService.prototype, 'searchFTS');
 
-    await memoryService.ingestWebSearchResult('Web result mentions tungsten carbide.', {
-      source: 'web_search',
-      query: 'tungsten carbide',
-    });
+    await memoryService.ingestWebSearchResult(makeWebChunks('tungsten carbide'));
     await memoryService.searchWebResults('tungsten carbide');
 
     expect(searchVector).toHaveBeenCalledWith(expect.any(Array), expect.any(Number));
@@ -207,17 +234,14 @@ describe('MemoryService reembedPersona', () => {
     const { memoryService, embeddingService, memoryPath } = makeMemoryService();
     const getProfileId = vi.mocked(embeddingService.getProfileId);
 
-    await memoryService.ingestWebSearchResult('Old web result memory.', {
-      source: 'web_search',
-      query: 'old web result',
-    });
+    await memoryService.ingestWebSearchResult(makeWebChunks('old web result'));
     getProfileId.mockReturnValue('local-transformers-xenova-multilingual-e5-small-384-cpu');
 
     const result = await memoryService.reembedAll();
     const results = await memoryService.searchWebResults('old web result');
 
-    expect(result.count).toBe(1);
-    expect(results).toHaveLength(1);
+    expect(result.count).toBe(2);
+    expect(results).toHaveLength(2);
     expect(fs.existsSync(path.join(
       memoryPath,
       'local-transformers-xenova-multilingual-e5-small-384-cpu',
@@ -230,10 +254,30 @@ describe('MemoryService reembedPersona', () => {
     vi.mocked(embeddingService.getStatus).mockReturnValue({ configured: false } as ReturnType<EmbeddingService['getStatus']>);
 
     await expect(memoryService.ingest('Disabled memory.', 'persona-disabled')).resolves.toEqual({ ids: [], count: 0 });
-    await expect(memoryService.ingestWebSearchResult('Disabled web result.')).resolves.toEqual({ ids: [], count: 0 });
+    await expect(memoryService.ingestWebSearchResult(makeWebChunks('disabled web result'))).resolves.toEqual({ ids: [], count: 0 });
     await expect(memoryService.search('anything', 'persona-disabled')).resolves.toEqual([]);
     await expect(memoryService.hybridSearch('anything', 'persona-disabled')).resolves.toEqual([]);
     await expect(memoryService.searchWebResults('anything')).resolves.toEqual([]);
+  });
+
+  it('deletes the active profile web-results.db file and recreates it on the next ingest', async () => {
+    const { memoryService, memoryPath } = makeMemoryService();
+    const dbPath = path.join(
+      memoryPath,
+      'local-transformers-xenova-multilingual-e5-small-384-auto',
+      'web-results.db',
+    );
+
+    await memoryService.ingestWebSearchResult(makeWebChunks('wipe me'));
+    expect(fs.existsSync(dbPath)).toBe(true);
+
+    const removedPath = memoryService.deleteWebResultsDbFile();
+    expect(removedPath).toBe(dbPath);
+    expect(fs.existsSync(dbPath)).toBe(false);
+
+    await memoryService.ingestWebSearchResult(makeWebChunks('after wipe'));
+    expect(fs.existsSync(dbPath)).toBe(true);
+    expect(await memoryService.searchWebResults('after wipe')).toHaveLength(2);
   });
 
   it('deletes memories from all profile databases and legacy database for a persona', async () => {

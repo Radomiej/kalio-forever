@@ -48,14 +48,14 @@ export function buildArchitectureParentChatMessages(
   }
 
   const textEvents = events.filter((event) => (
-    (event.type === 'router_decision' || event.type === 'final_artifact')
+    (event.type === 'router_decision' || event.type === 'final_artifact' || event.type === 'run_stopped')
     && !isSyntheticParallelMessage(event.message)
   ));
   messages.push(...textEvents.map((event, index) => ({
     id: `architecture:${run.id}:text:${event.id}`,
     sessionId: parentSessionId,
     role: 'assistant' as const,
-    content: formatParentChatText(event),
+    content: formatParentChatText(run, event),
     createdAt: now + 2 + toolCalls.length + index,
   })));
   return messages;
@@ -113,7 +113,10 @@ function streamFromEventData(data: Record<string, unknown> | undefined): string 
   return typeof branchSessionId === 'string' ? branchSessionId : null;
 }
 
-function formatParentChatText(event: ArchitectureExecutionEvent): string {
+function formatParentChatText(run: ArchitectureRun, event: ArchitectureExecutionEvent): string {
+  if (event.type === 'run_stopped') {
+    return formatRunStoppedText(run, event);
+  }
   const header = event.type === 'final_artifact' ? '### Finalizer' : '### Router';
   const route = event.route?.nextNodeId
     ? `Route: ${event.route.source} -> ${event.route.nextNodeId}`
@@ -130,6 +133,17 @@ function formatParentChatText(event: ArchitectureExecutionEvent): string {
     incompleteReason ? `Incomplete: ${incompleteReason}` : null,
     body,
     failureReason ? `Reason: ${failureReason}` : null,
+  ].filter(Boolean).join('\n\n');
+}
+
+function formatRunStoppedText(run: ArchitectureRun, event: ArchitectureExecutionEvent): string {
+  const reason = runStoppedReasonFromEvent(event);
+  const reasonCode = runStoppedReasonCodeFromEvent(event);
+  return [
+    '### Run stopped',
+    `Status: ${run.status}`,
+    reason ? `Reason: ${reason}` : null,
+    reasonCode ? `Reason code: ${reasonCode}` : null,
   ].filter(Boolean).join('\n\n');
 }
 
@@ -207,6 +221,23 @@ function incompleteReasonFromEvent(event: ArchitectureExecutionEvent): string | 
     return null;
   }
   return reason.trim();
+}
+
+function runStoppedReasonFromEvent(event: ArchitectureExecutionEvent): string | null {
+  const reason = event.data?.['reason'];
+  if (typeof reason === 'string' && reason.trim().length > 0) {
+    return reason.trim();
+  }
+  const message = event.message.trim();
+  return message.length > 0 ? message : null;
+}
+
+function runStoppedReasonCodeFromEvent(event: ArchitectureExecutionEvent): string | null {
+  const reasonCode = event.data?.['reasonCode'];
+  if (typeof reasonCode === 'string' && reasonCode.trim().length > 0) {
+    return reasonCode.trim();
+  }
+  return null;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

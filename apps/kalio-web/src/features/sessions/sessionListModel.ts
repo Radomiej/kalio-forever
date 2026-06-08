@@ -8,11 +8,11 @@ export type SessionListEntry =
   | { type: 'session'; session: ChatSession; depth: number }
   | { type: 'root'; session: ChatSession; childCount: number };
 
-export const SESSION_ORIGIN_FILTERS: ReadonlyArray<{ id: SessionOriginFilter; label: string }> = [
+export const SESSION_ORIGIN_FILTERS: ReadonlyArray<{ id: SessionOriginFilter; label: string; shortLabel?: string }> = [
   { id: 'all', label: 'All' },
   { id: 'user', label: 'User' },
   { id: 'agent', label: 'Agents' },
-  { id: 'archived', label: 'Archived' },
+  { id: 'archived', label: 'Archived', shortLabel: 'Old' },
 ];
 
 export function sortSessionsForSidebar(sessions: ChatSession[]): ChatSession[] {

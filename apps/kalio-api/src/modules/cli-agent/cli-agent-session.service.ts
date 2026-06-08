@@ -135,6 +135,32 @@ export class CLIAgentSessionService {
     return row ? this.toChatSession(row) : null;
   }
 
+  async getAccessibleChildSession(requestingSessionId: string, childSessionId: string): Promise<ChatSession | null> {
+    const directChild = await this.getChildSession(requestingSessionId, childSessionId);
+    if (directChild) {
+      return directChild;
+    }
+
+    const childSession = await this.getSession(childSessionId);
+    if (!childSession || childSession.kind !== 'cli-agent') {
+      return null;
+    }
+
+    const requesterAncestors = await this.getAncestorSessionIds(requestingSessionId);
+    if (requesterAncestors.size === 0) {
+      return null;
+    }
+
+    const childAncestors = await this.getAncestorSessionIds(childSession.id);
+    for (const ancestorId of childAncestors) {
+      if (requesterAncestors.has(ancestorId)) {
+        return childSession;
+      }
+    }
+
+    return null;
+  }
+
   async listMessages(sessionId: string): Promise<ChatMessage[]> {
     const rows = await this.drizzle.db
       .select()
@@ -184,6 +210,32 @@ export class CLIAgentSessionService {
       content,
       toolCallId,
     });
+  }
+
+  private async getSession(sessionId: string): Promise<ChatSession | null> {
+    const [row] = await this.drizzle.db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+
+    return row ? this.toChatSession(row) : null;
+  }
+
+  private async getAncestorSessionIds(sessionId: string): Promise<Set<string>> {
+    const ancestors = new Set<string>();
+    let currentId: string | undefined = sessionId;
+
+    for (let depth = 0; currentId && depth < 32; depth += 1) {
+      const session = await this.getSession(currentId);
+      if (!session) {
+        break;
+      }
+      ancestors.add(session.id);
+      currentId = session.parentSessionId;
+    }
+
+    return ancestors;
   }
 
   private async insertMessage(params: {

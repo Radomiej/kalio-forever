@@ -546,8 +546,8 @@ export function ObservabilityPage() {
       if (retentionRes.ok) {
         setRetention(await retentionRes.json() as AuditRetentionStatus);
       }
-    } catch {
-      // network errors are non-fatal
+    } catch (err) {
+      console.warn('[ObservabilityPage] Failed to load audit events', err);
     } finally {
       setLoading(false);
     }
@@ -564,8 +564,8 @@ export function ObservabilityPage() {
     try {
       await fetch('/api/audit-log?confirm=true', { method: 'DELETE' });
       await load();
-    } catch {
-      // network error — silently ignore
+    } catch (err) {
+      console.warn('[ObservabilityPage] Failed to clear audit log', err);
     } finally {
       setClearing(false);
     }

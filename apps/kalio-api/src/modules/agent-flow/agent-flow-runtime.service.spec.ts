@@ -13,6 +13,7 @@ function adapter() {
     run: vi.fn(),
     start: vi.fn(),
     getSnapshot: vi.fn(),
+    stop: vi.fn(),
   };
 }
 
@@ -66,6 +67,62 @@ describe('AgentFlowRuntimeService', () => {
       copyBack: true,
       maxSteps: 8,
     });
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('rewrites adapter parent lineage in durable snapshots and persisted tool results', async () => {
+    vi.useFakeTimers();
+    const architectureAdapter = adapter();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    architectureAdapter.start.mockResolvedValue({
+      run: {
+        id: 'run-lineage-rewrite',
+        parentSessionId: 'adapter-parent',
+        parentToolCallId: 'adapter-tool-call',
+        childSessionId: 'adapter-child',
+        flowDefinitionId: 'wrong-flow',
+        status: 'running',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+      result: {
+        flowRunId: 'run-lineage-rewrite',
+        parentSessionId: 'adapter-parent',
+        parentToolCallId: 'adapter-tool-call',
+        childSessionId: 'adapter-child',
+        status: 'running',
+        summary: 'Adapter snapshot started.',
+        decisions: [],
+        nextActions: [],
+        artifacts: [],
+      },
+    } satisfies AgentFlowRunSnapshot);
+
+    const started = await service.start({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Preserve the run_sub_agentflow caller lineage',
+      parentSessionId: 'real-parent',
+      parentToolCallId: 'real-tool-call',
+      startMode: 'durable',
+    });
+
+    expect(started.run.parentSessionId).toBe('real-parent');
+    expect(started.run.parentToolCallId).toBe('real-tool-call');
+    expect(started.run.flowDefinitionId).toBe('goal_guard_delivery_loop');
+    expect(started.result?.parentSessionId).toBe('real-parent');
+    expect(started.result?.parentToolCallId).toBe('real-tool-call');
+    expect(repository.getSnapshot('run-lineage-rewrite')?.run.parentSessionId).toBe('real-parent');
+    expect(repository.getSnapshot('run-lineage-rewrite')?.run.parentToolCallId).toBe('real-tool-call');
+    expect(repository.getSnapshot('run-lineage-rewrite')?.result?.parentSessionId).toBe('real-parent');
+    expect(repository.getSnapshot('run-lineage-rewrite')?.result?.parentToolCallId).toBe('real-tool-call');
     vi.clearAllTimers();
     vi.useRealTimers();
   });
@@ -841,6 +898,133 @@ describe('AgentFlowRuntimeService', () => {
     });
   });
 
+  it('keeps AgentFlow event sequence strictly increasing after resume refresh merges architecture events', async () => {
+    const architectureAdapter = adapter();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    const resume = vi.fn();
+    (architectureAdapter as unknown as { resume: typeof resume }).resume = resume;
+    repository.saveSnapshot({
+      run: {
+        id: 'run-resume-sequence',
+        parentSessionId: 'parent-sequence',
+        childSessionId: 'child-sequence',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'waiting_on_orchestrator',
+        startMode: 'durable',
+        returnMode: 'summary',
+        checkpoint: {
+          goal: 'Resume with host evidence.',
+          continuation: {
+            reason: 'return_to_orchestrator',
+            waitingNodeId: 'implementer',
+            pendingNodeIds: ['implementer'],
+            visitCounts: { orchestrator: 1, implementer: 1, 'goal-master': 1 },
+            lastCompletedNodeId: 'orchestrator',
+          },
+        },
+        createdAt: 1,
+        updatedAt: 4,
+      },
+      events: [
+        {
+          id: 'flow-1',
+          sequence: 1,
+          type: 'flow:run_created',
+          message: 'Created.',
+          createdAt: 1,
+        },
+        {
+          id: 'flow-2',
+          sequence: 2,
+          type: 'flow:node_result',
+          message: 'Orchestrator completed.',
+          nodeId: 'orchestrator',
+          roleSlotId: 'orchestrator',
+          createdAt: 2,
+        },
+        {
+          id: 'flow-3',
+          sequence: 3,
+          type: 'flow:missing_final_artifact',
+          message: 'Missing final artifact.',
+          status: 'blocked',
+          createdAt: 3,
+        },
+      ],
+    });
+    resume.mockResolvedValue({
+      run: {
+        id: 'run-resume-sequence',
+        parentSessionId: 'parent-sequence',
+        childSessionId: 'child-sequence',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'done',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 7,
+      },
+      events: [
+        {
+          id: 'arch-resume-created',
+          sequence: 3,
+          type: 'flow:run_created',
+          message: 'Architecture resumed.',
+          createdAt: 5,
+        },
+        {
+          id: 'arch-goal-master-start',
+          sequence: 4,
+          type: 'flow:node_start',
+          message: 'Goal Master started.',
+          nodeId: 'goal-master',
+          roleSlotId: 'goal_master',
+          createdAt: 6,
+        },
+        {
+          id: 'arch-final-artifact',
+          sequence: 5,
+          type: 'flow:final_artifact',
+          message: 'Final artifact.',
+          nodeId: 'final-artifact',
+          roleSlotId: 'finalizer',
+          status: 'done',
+          createdAt: 7,
+        },
+      ],
+      result: {
+        flowRunId: 'run-resume-sequence',
+        childSessionId: 'child-sequence',
+        status: 'done',
+        summary: 'Final artifact.',
+        decisions: [],
+        nextActions: [],
+        artifacts: [],
+      },
+    } satisfies AgentFlowRunSnapshot);
+
+    const resumed = await service.resume('run-resume-sequence', {
+      input: 'Host evidence passed.',
+    });
+
+    expect(resumed.run.status).toBe('done');
+    expect(resumed.events.map((event) => event.type)).toEqual([
+      'flow:run_created',
+      'flow:node_result',
+      'flow:missing_final_artifact',
+      'flow:return_to_orchestrator',
+      'flow:resume_input',
+      'flow:run_created',
+      'flow:node_start',
+      'flow:final_artifact',
+    ]);
+    expect(resumed.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
   it('marks a resumed run blocked when the adapter throws during resume', async () => {
     const architectureAdapter = adapter();
     const repository = new AgentFlowRunRepository();
@@ -1429,6 +1613,8 @@ describe('AgentFlowRuntimeService', () => {
 
     expect(snapshot?.run.status).toBe('waiting_on_orchestrator');
     expect(snapshot?.result).toBeUndefined();
+    expect(snapshot?.events.some((event) => event.type === 'flow:unresolved_cli_children')).toBe(false);
+    expect(repository.getSnapshot('run-clear-stale-result')?.events.some((event) => event.type === 'flow:unresolved_cli_children')).toBe(false);
   });
 
   it('keeps a continuation cursor projected as waiting when a refreshed architecture run still says running', async () => {
@@ -2434,6 +2620,57 @@ describe('AgentFlowRuntimeService', () => {
     expect(repository.getSnapshot('run-stale-global-list')?.run.status).toBe('blocked');
   });
 
+  it('cascades stop to the runtime adapter before storing a cancelled snapshot', async () => {
+    const architectureAdapter = adapter();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    repository.saveSnapshot({
+      run: {
+        id: 'run-stop-cascade',
+        parentSessionId: 'parent-stop-cascade',
+        parentToolCallId: 'tool-stop-cascade',
+        childSessionId: 'arch-run-stop-cascade-root',
+        openGraphRunId: 'run-stop-cascade',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'running',
+        startMode: 'durable',
+        returnMode: 'summary',
+        checkpoint: {
+          goal: 'Stop the underlying architecture worker',
+          context: { workdir: 'C:\\Projekty\\TurboProject2' },
+          vfsMode: 'isolated',
+          copyBack: false,
+          maxSteps: 8,
+        },
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+    });
+
+    const stopped = await service.stop('run-stop-cascade');
+
+    expect(architectureAdapter.stop).toHaveBeenCalledWith('run-stop-cascade', expect.objectContaining({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Stop the underlying architecture worker',
+      parentSessionId: 'parent-stop-cascade',
+      parentToolCallId: 'tool-stop-cascade',
+      context: { workdir: 'C:\\Projekty\\TurboProject2' },
+      vfsMode: 'isolated',
+      copyBack: false,
+      maxSteps: 8,
+    }));
+    expect(stopped.run.status).toBe('cancelled');
+    expect(stopped.events.at(-1)).toMatchObject({
+      type: 'flow:stopped',
+      status: 'cancelled',
+    });
+    expect(repository.getSnapshot('run-stop-cascade')?.run.status).toBe('cancelled');
+  });
+
   it('RED: preserves checkpoint fields when refreshed durable snapshots omit them', async () => {
     const architectureAdapter = adapter();
     const repository = new AgentFlowRunRepository();
@@ -2619,6 +2856,205 @@ describe('AgentFlowRuntimeService', () => {
         context: expect.objectContaining({
           projectPath: 'C:\\Projekty\\TurboProject2-demo63',
         }),
+      }),
+    );
+  });
+
+  it('allows resuming a blocked missing final artifact run with external QA evidence', async () => {
+    const architectureAdapter = adapter() as ReturnType<typeof adapter> & {
+      resume: ReturnType<typeof vi.fn>;
+    };
+    architectureAdapter.resume = vi.fn();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    repository.saveSnapshot({
+      run: {
+        id: 'run-missing-final-artifact',
+        parentSessionId: 'parent-missing-final-artifact',
+        childSessionId: 'child-missing-final-artifact',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'blocked',
+        startMode: 'durable',
+        returnMode: 'summary',
+        checkpoint: {
+          goal: 'Deliver runtime proof',
+          context: { projectPath: 'C:\\Projekty\\TurboProject2' },
+        },
+        createdAt: 1,
+        updatedAt: 2,
+        summary: 'Blocked because the latest architecture attempt completed without a final artifact.',
+      },
+      result: {
+        flowRunId: 'run-missing-final-artifact',
+        childSessionId: 'child-missing-final-artifact',
+        status: 'blocked',
+        summary: 'Blocked because the latest architecture attempt completed without a final artifact.',
+        decisions: [],
+        nextActions: [],
+        artifacts: [],
+      },
+      events: [{
+        id: 'event-missing-final-artifact',
+        sequence: 1,
+        type: 'flow:missing_final_artifact',
+        message: 'AgentFlow blocked because the latest architecture attempt completed without producing a final artifact.',
+        status: 'blocked',
+        createdAt: 2,
+      }],
+    });
+    architectureAdapter.resume.mockResolvedValue({
+      run: {
+        id: 'run-missing-final-artifact',
+        parentSessionId: 'parent-missing-final-artifact',
+        childSessionId: 'child-missing-final-artifact',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'done',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 4,
+      },
+      result: {
+        flowRunId: 'run-missing-final-artifact',
+        childSessionId: 'child-missing-final-artifact',
+        status: 'done',
+        summary: 'External QA accepted missing final artifact recovery.',
+        decisions: [],
+        nextActions: [],
+        artifacts: [],
+      },
+      events: [{
+        id: 'event-final-artifact-accepted',
+        sequence: 2,
+        type: 'flow:final_artifact',
+        message: 'External QA accepted missing final artifact recovery.',
+        status: 'done',
+        createdAt: 4,
+      }],
+    });
+
+    const resumed = await service.resume('run-missing-final-artifact', {
+      input: 'External build passed and visual QA passed.',
+      context: {
+        externalQualityGate: {
+          source: 'manual-build-and-playwright',
+          status: 'passed',
+          highFindings: 0,
+        },
+      },
+    });
+
+    expect(resumed.run.status).toBe('done');
+    expect(architectureAdapter.resume).toHaveBeenCalledWith(
+      'run-missing-final-artifact',
+      expect.objectContaining({ input: 'External build passed and visual QA passed.' }),
+      expect.objectContaining({
+        goal: 'Deliver runtime proof',
+        context: expect.objectContaining({
+          projectPath: 'C:\\Projekty\\TurboProject2',
+        }),
+      }),
+    );
+  });
+
+  it('allows resuming a blocked runtime-missing run from its durable checkpoint', async () => {
+    const architectureAdapter = adapter() as ReturnType<typeof adapter> & {
+      resume: ReturnType<typeof vi.fn>;
+    };
+    architectureAdapter.resume = vi.fn();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    repository.saveSnapshot({
+      run: {
+        id: 'run-runtime-missing-resume',
+        parentSessionId: 'parent-runtime-missing',
+        parentToolCallId: 'tool-runtime-missing',
+        childSessionId: 'child-runtime-missing',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'blocked',
+        startMode: 'durable',
+        returnMode: 'summary',
+        checkpoint: {
+          goal: 'Recover the stalled run',
+          context: { projectPath: 'C:\\Projekty\\TurboProject2' },
+          maxSteps: 8,
+        },
+        createdAt: 1,
+        updatedAt: 2,
+        summary: 'Blocked because the live AgentFlow runtime is no longer available.',
+      },
+      result: {
+        flowRunId: 'run-runtime-missing-resume',
+        childSessionId: 'child-runtime-missing',
+        status: 'blocked',
+        summary: 'Blocked because the live AgentFlow runtime is no longer available.',
+        decisions: [],
+        nextActions: [
+          'Restart or resume the AgentFlow run from the durable checkpoint instead of trusting the stale running projection.',
+        ],
+        artifacts: [],
+      },
+      events: [{
+        id: 'event-runtime-missing',
+        sequence: 1,
+        type: 'flow:runtime_missing',
+        message: 'AgentFlow runtime is no longer available for this run.',
+        status: 'blocked',
+        createdAt: 2,
+      }],
+    });
+    architectureAdapter.resume.mockResolvedValue({
+      run: {
+        id: 'run-runtime-missing-resume',
+        parentSessionId: 'parent-runtime-missing',
+        childSessionId: 'child-runtime-missing',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'done',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 4,
+      },
+      result: {
+        flowRunId: 'run-runtime-missing-resume',
+        childSessionId: 'child-runtime-missing',
+        status: 'done',
+        summary: 'Recovered from durable checkpoint.',
+        decisions: [],
+        nextActions: [],
+        artifacts: [],
+      },
+      events: [{
+        id: 'event-recovered',
+        sequence: 2,
+        type: 'flow:done',
+        message: 'Recovered from durable checkpoint.',
+        status: 'done',
+        createdAt: 4,
+      }],
+    });
+
+    const resumed = await service.resume('run-runtime-missing-resume', {
+      input: 'Resume from durable checkpoint.',
+    });
+
+    expect(resumed.run.status).toBe('done');
+    expect(architectureAdapter.resume).toHaveBeenCalledWith(
+      'run-runtime-missing-resume',
+      expect.objectContaining({ input: 'Resume from durable checkpoint.' }),
+      expect.objectContaining({
+        flowId: 'goal_guard_delivery_loop',
+        goal: 'Recover the stalled run',
+        parentSessionId: 'parent-runtime-missing',
+        parentToolCallId: 'tool-runtime-missing',
+        context: { projectPath: 'C:\\Projekty\\TurboProject2' },
+        maxSteps: 8,
       }),
     );
   });

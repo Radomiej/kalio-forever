@@ -8,43 +8,55 @@ interface SessionEntry {
   sessionId: string;
   title: string;
   files: VFSListResult['files'];
-  loading: boolean;
   expanded: boolean;
   error?: string;
 }
 
+const FILE_SCAN_CONCURRENCY = 8;
+
 export function WorkspacePanel() {
   const sessions = useSessionStore((s) => s.sessions);
   const [entries, setEntries] = useState<SessionEntry[]>([]);
+  const [loadedCount, setLoadedCount] = useState(0);
 
-  // Eagerly fetch VFS for every session so we can hide empty ones.
   useEffect(() => {
-    sessions.forEach((s) => {
-      setEntries((prev) => {
-        if (prev.find((e) => e.sessionId === s.id)) return prev;
-        return [
-          ...prev,
-          { sessionId: s.id, title: s.title || 'Untitled', files: [], loading: true, expanded: false },
-        ];
-      });
+    let cancelled = false;
+    setEntries([]);
+    setLoadedCount(0);
 
-      apiClient
-        .get<VFSListResult>(`/api/sessions/${s.id}/vfs`)
-        .then(({ data }) => {
-          setEntries((prev) =>
-            prev.map((e) =>
-              e.sessionId === s.id ? { ...e, files: data.files ?? [], loading: false } : e,
-            ),
-          );
-        })
-        .catch(() => {
-          setEntries((prev) =>
-            prev.map((e) =>
-              e.sessionId === s.id ? { ...e, loading: false, error: 'Failed to load files' } : e,
-            ),
-          );
-        });
-    });
+    const scanSession = async (session: (typeof sessions)[number]) => {
+      try {
+        const { data } = await apiClient.get<VFSListResult>(`/api/sessions/${session.id}/vfs`);
+        if (cancelled) return;
+        const files = data.files ?? [];
+        if (files.length > 0) {
+          setEntries((prev) => [
+            ...prev,
+            { sessionId: session.id, title: session.title || 'Untitled', files, expanded: false },
+          ]);
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          console.warn(`[WorkspacePanel] Failed to load VFS for session ${session.id}`, err);
+          setEntries((prev) => [
+            ...prev,
+            { sessionId: session.id, title: session.title || 'Untitled', files: [], expanded: false, error: 'Failed to load files' },
+          ]);
+        }
+      } finally {
+        if (!cancelled) setLoadedCount((count) => count + 1);
+      }
+    };
+
+    const run = async () => {
+      for (let index = 0; index < sessions.length; index += FILE_SCAN_CONCURRENCY) {
+        if (cancelled) return;
+        await Promise.all(sessions.slice(index, index + FILE_SCAN_CONCURRENCY).map(scanSession));
+      }
+    };
+
+    void run();
+    return () => { cancelled = true; };
   }, [sessions]);
 
   // Files already fetched on mount — just toggle expanded state.
@@ -60,25 +72,36 @@ export function WorkspacePanel() {
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
   };
 
-  const visibleEntries = entries.filter((e) => e.loading || e.files.length > 0);
+  const scanning = loadedCount < sessions.length;
+  const visibleEntries = entries.filter((e) => e.error || e.files.length > 0);
 
   return (
-    <div className="p-3 flex flex-col gap-1 overflow-y-auto h-full">
+    <div className="p-4 flex flex-col gap-2 overflow-y-auto h-full">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-xs font-semibold text-base-content/60 uppercase tracking-wider">
           Session Files ({entries.filter((e) => e.files.length > 0).length})
         </h2>
+        {scanning && (
+          <span className="flex items-center gap-2 text-xs text-base-content/45">
+            <RefreshCw size={12} className="animate-spin" />
+            {loadedCount}/{sessions.length}
+          </span>
+        )}
       </div>
 
-      {entries.length > 0 && visibleEntries.length === 0 && (
-        <p className="text-sm text-base-content/40 text-center py-8">No files in any session</p>
+      {sessions.length > 0 && visibleEntries.length === 0 && (
+        <div className="rounded-lg border border-base-300 bg-base-200/30 p-8 text-center text-sm text-base-content/45">
+          {scanning ? 'Scanning session files...' : 'No files in any session'}
+        </div>
       )}
-      {entries.length === 0 && (
-        <p className="text-sm text-base-content/40 text-center py-8">No sessions yet</p>
+      {sessions.length === 0 && (
+        <div className="rounded-lg border border-base-300 bg-base-200/30 p-8 text-center text-sm text-base-content/45">
+          No sessions yet
+        </div>
       )}
 
       {visibleEntries.map((entry) => (
-        <div key={entry.sessionId} className="rounded border border-base-300 overflow-hidden">
+        <div key={entry.sessionId} className="rounded-lg border border-base-300 bg-base-200/25 overflow-hidden">
           <button
             className="w-full flex items-center gap-2 px-3 py-2 hover:bg-base-200 transition-colors text-left"
             onClick={() => toggleExpand(entry.sessionId)}
@@ -89,14 +112,11 @@ export function WorkspacePanel() {
               <Folder size={14} className="text-base-content/50 shrink-0" />
             )}
             <span className="text-sm font-medium flex-1 truncate">{entry.title}</span>
-            {entry.loading && <RefreshCw size={12} className="animate-spin text-base-content/40" />}
-            {!entry.loading && (
-              <span className="text-xs text-base-content/40 shrink-0">{entry.files.length}</span>
-            )}
+            <span className="text-xs text-base-content/70 shrink-0">{entry.error ? 'error' : entry.files.length}</span>
           </button>
 
-          {entry.expanded && !entry.loading && (
-            <div className="border-t border-base-300 bg-base-50">
+          {entry.expanded && (
+            <div className="border-t border-base-300 bg-base-100/40">
               {entry.error && (
                 <div className="flex items-center gap-2 px-3 py-2 text-xs text-error">
                   <AlertCircle size={12} />
@@ -105,9 +125,9 @@ export function WorkspacePanel() {
               )}
               {entry.files.map((file) => (
                 <div key={file.path} className="flex items-center gap-2 px-4 py-1.5 hover:bg-base-200 text-xs">
-                  <FileText size={12} className="text-base-content/40 shrink-0" />
+                  <FileText size={12} className="text-base-content/60 shrink-0" />
                   <span className="flex-1 truncate font-mono">{file.path}</span>
-                  <span className="text-base-content/40 shrink-0">{formatSize(file.sizeBytes)}</span>
+                  <span className="text-base-content/65 shrink-0">{formatSize(file.sizeBytes)}</span>
                 </div>
               ))}
             </div>

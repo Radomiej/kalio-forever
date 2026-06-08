@@ -332,28 +332,29 @@ describe('MockLLMProvider', () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();
     const onToolArgChunk = vi.fn();
-    const materializerMessages: ContextManagedLLMMessage[] = [
+    const implementerMessages: ContextManagedLLMMessage[] = [
       {
         role: 'user',
         content: [
           'Architecture: Goal Master Delivery Loop v0.1.0',
-          'Slot: Materializer (tool_executor)',
+          'Slot: Implementer (tool_executor)',
+          'Implementation proof mode: the Implementer must create or update at least one artifact with vfs_write before completing.',
           'Task: build proof [[mock:goal-guard-vfs-success]]',
           '[[mock:script]]',
-          'when("Slot: Materializer") return("script should not bypass tool evidence")',
+          'when("Slot: Implementer") return("script should not bypass tool evidence")',
           '[[/mock:script]]',
         ].join('\n'),
       },
     ];
 
-    const materializerCalls = await provider.streamChat(
-      materializerMessages,
+    const implementerCalls = await provider.streamChat(
+      implementerMessages,
       [{ name: 'vfs_write', description: 'Write to VFS', parameters: {} }],
       { sessionId: 'session-1', messageId: 'message-1', onChunk, onToolArgChunk },
     );
 
     expect(onChunk).not.toHaveBeenCalled();
-    expect(materializerCalls).toEqual([
+    expect(implementerCalls).toEqual([
       expect.objectContaining({
         name: 'vfs_write',
         args: expect.objectContaining({
@@ -425,7 +426,8 @@ describe('MockLLMProvider', () => {
         role: 'user',
         content: [
           'Architecture: Goal Master Delivery Loop v0.1.0',
-          'Slot: Materializer (tool_executor)',
+          'Slot: Implementer (tool_executor)',
+          'Implementation proof mode: the Implementer must create or update at least one artifact with vfs_write before completing.',
           'Task: build proof [[mock:goal-guard-vfs-success]]',
         ].join('\n'),
       },
@@ -439,13 +441,13 @@ describe('MockLLMProvider', () => {
       },
     ];
 
-    const materializerCalls = await provider.streamChat(
+    const implementerCalls = await provider.streamChat(
       messages,
       [{ name: 'vfs_write', description: 'Write to VFS', parameters: {} }],
       { sessionId: 'session-1', messageId: 'message-1', onChunk },
     );
 
-    expect(materializerCalls).toEqual([]);
+    expect(implementerCalls).toEqual([]);
     expect(onChunk).toHaveBeenCalledWith(expect.objectContaining({
       delta: expect.stringContaining('vfs_write evidence'),
       done: false,
@@ -576,5 +578,66 @@ describe('MockLLMProvider', () => {
     expect(onChunk).toHaveBeenNthCalledWith(1, expect.objectContaining({
       delta: 'first;second',
     }));
+  });
+
+  it('skips default script waits when KALIO_MOCK_LLM_FAST is enabled', async () => {
+    vi.stubEnv('KALIO_MOCK_LLM_FAST', '1');
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: [
+          'Architecture: Demo',
+          'Slot: Finalizer',
+          '[[mock:script]]',
+          'when("Slot: Finalizer") wait(5000) return("fast finalizer")',
+          '[[/mock:script]]',
+        ].join('\n'),
+      },
+    ];
+
+    try {
+      await expect(Promise.race([
+        provider.streamChat(
+          messages,
+          [],
+          { sessionId: 'session-1', messageId: 'message-1', onChunk },
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('mock wait was not skipped')), 100)),
+      ])).resolves.toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(onChunk).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      delta: 'fast finalizer',
+    }));
+  });
+
+  it('emits architecture slot fallback responses immediately in fast mock mode', async () => {
+    vi.stubEnv('KALIO_MOCK_LLM_FAST', '1');
+    const delay = vi.fn().mockResolvedValue(undefined);
+    const provider = new MockLLMProvider({ delay });
+    const onChunk = vi.fn();
+
+    try {
+      await provider.streamChat(
+        [{
+          role: 'user',
+          content: `Architecture: Demo\nSlot: Finalizer\n${'large context '.repeat(200)}`,
+        }],
+        [],
+        { sessionId: 'session-1', messageId: 'message-1', onChunk },
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(delay).not.toHaveBeenCalled();
+    expect(onChunk).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      delta: expect.stringContaining('[MockLLM] Echo: Architecture: Demo'),
+    }));
+    expect(onChunk).toHaveBeenLastCalledWith(expect.objectContaining({ done: true }));
   });
 });

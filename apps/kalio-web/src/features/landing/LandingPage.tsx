@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { tileSizeForIndex } from './tileColors';
 import { AppTile } from './AppTile';
 import { QuickChatWidget } from './QuickChatWidget';
+import { HomeHitlInbox } from './HomeHitlInbox';
 import { useTileIcons } from './useTileIcons';
 import { useSessionStore } from '../../store/sessionStore';
 import { apiClient, getRAApps, getRAAppGroups } from '../../services/apiClient';
@@ -31,9 +32,10 @@ function createTileItem(id: string | undefined, name: string | undefined, descri
 
 interface LandingPageProps {
   onNavigateToChat: () => void;
+  onOpenSessionInChat?: (sessionId: string) => void;
 }
 
-export function LandingPage({ onNavigateToChat }: LandingPageProps) {
+export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPageProps) {
   const [tiles, setTiles] = useState<TileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const { icons, generating, generateIcon, removeIcon } = useTileIcons('raapp');
@@ -118,6 +120,8 @@ export function LandingPage({ onNavigateToChat }: LandingPageProps) {
         </span>
         <span className="text-base-content/40 text-sm">Your apps at a glance</span>
       </div>
+
+      <HomeHitlInbox onOpenSession={onOpenSessionInChat ?? (() => onNavigateToChat())} />
 
       {/* Grid: quick-chat widget + app tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 pb-8">
