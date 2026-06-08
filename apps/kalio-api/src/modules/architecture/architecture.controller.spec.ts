@@ -100,14 +100,19 @@ describe('Architecture controllers', () => {
     const stopped = await controller.stop(run.id);
     const events = await controller.events(run.id);
 
-    expect(stopped.status).toBe('failed');
+    expect(stopped.status).toBe('cancelled');
     expect(stopped.completedAt).toBeDefined();
     expect(events.at(-1)).toMatchObject({
-      type: 'router_decision',
+      type: 'run_stopped',
       message: 'Architecture run stopped by user.',
-      data: { stoppedByUser: true },
+      data: {
+        reasonCode: 'user_stop',
+        stoppedByUser: true,
+        previousStatus: 'running',
+        source: 'user',
+      },
     });
-    await expect(controller.findOne(run.id)).resolves.toMatchObject({ status: 'failed' });
+    await expect(controller.findOne(run.id)).resolves.toMatchObject({ status: 'cancelled' });
   });
 
   it('enriches architecture run context with configured CLI-agent preferences', async () => {
@@ -303,8 +308,8 @@ describe('Architecture controllers', () => {
           name: 'spawn_cli_agent',
           args: {
             architectureRunId: runId,
-            nodeId: 'materializer',
-            roleSlotId: 'materializer',
+            nodeId: 'implementer',
+            roleSlotId: 'implementer',
             agentId: 'copilot',
             workdir: 'C:\\Projekty\\TurboProject2',
             expectedChangedFiles: ['src/App.tsx'],
@@ -337,8 +342,8 @@ describe('Architecture controllers', () => {
 
     expect(graph?.childAgents).toEqual([{
       id: 'cli-child-1',
-      parentNodeId: 'materializer',
-      parentRoleSlotId: 'materializer',
+      parentNodeId: 'implementer',
+      parentRoleSlotId: 'implementer',
       parentEventId: `${runId}:event:4`,
       kind: 'cli-agent',
       backend: 'copilot',

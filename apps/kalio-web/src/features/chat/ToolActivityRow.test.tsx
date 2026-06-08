@@ -30,6 +30,15 @@ describe('ToolActivityRow', () => {
     expect(screen.getByText('1.5s')).toBeInTheDocument();
   });
 
+  it('uses the full available chat width with compact padding', () => {
+    render(<ToolActivityRow activity={makeActivity({ status: 'running' })} />);
+
+    const row = screen.getByTestId('tool-activity-row');
+    expect(row).toHaveClass('w-full');
+    expect(row.firstElementChild).toHaveClass('w-full', 'px-2.5', 'py-1.5');
+    expect(row.firstElementChild).not.toHaveClass('max-w-[75%]');
+  });
+
   it('expands and formats input arguments, including long values and nulls', () => {
     render(
       <ToolActivityRow

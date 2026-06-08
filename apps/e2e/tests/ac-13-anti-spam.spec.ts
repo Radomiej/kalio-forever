@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE, deleteSessionIfExists, selectSession } from './helpers/test-config';
+import {
+  API_BASE,
+  deleteSessionIfExists,
+  expectComposerEnabled,
+  getComposerSendButton,
+  selectSession,
+} from './helpers/test-config';
 
 const LONG_STREAMING_PROMPT = `Repeat this text slowly: ${'HELLO '.repeat(120).trim()}`;
 
@@ -19,10 +25,8 @@ test.describe('AC-13: Anti-spam protection', () => {
     await page.getByTestId('nav-talk').click();
     await selectSession(page, session.id, title);
 
-    const chatInput = page.getByTestId('chat-input');
-    const sendBtn = page.getByTestId('chat-send-btn');
-
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
+    const chatInput = await expectComposerEnabled(page, 5000);
+    const sendBtn = await getComposerSendButton(page);
 
     // Send first message
     await chatInput.fill(LONG_STREAMING_PROMPT);
@@ -36,7 +40,7 @@ test.describe('AC-13: Anti-spam protection', () => {
     await sendBtn.click({ timeout: 1000 }).catch(() => { /* expected to be blocked */ });
 
     // Wait for first response to complete
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    await expectComposerEnabled(page, 30_000);
 
     // Verify only one user message was sent
     const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
@@ -65,8 +69,7 @@ test.describe('AC-13: Anti-spam protection', () => {
     await page.getByTestId('nav-talk').click();
     await selectSession(page, session.id, title);
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
+    const chatInput = await expectComposerEnabled(page, 5000);
 
     await chatInput.fill(LONG_STREAMING_PROMPT);
     await chatInput.press('Enter');
@@ -74,11 +77,11 @@ test.describe('AC-13: Anti-spam protection', () => {
     // Spam Enter while streaming
     for (let i = 0; i < 5; i++) {
       await page.waitForTimeout(200);
-      await chatInput.press('Enter').catch(() => { /* expected blocked */ });
+      await page.keyboard.press('Enter').catch(() => { /* expected blocked */ });
     }
 
     // Wait for completion
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    await expectComposerEnabled(page, 30_000);
 
     // Only one user message
     const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');

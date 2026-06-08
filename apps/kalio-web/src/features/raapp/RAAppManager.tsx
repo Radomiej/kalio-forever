@@ -23,6 +23,28 @@ interface RAAppManagerProps {
   onRunWithAgent: () => void;
 }
 
+function safeParseRAAppMessage(content: string): RAAppBlock | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content) as unknown;
+  } catch (err) {
+    void err;
+    return null;
+  }
+
+  if (
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    'type' in parsed &&
+    'content' in parsed &&
+    ((parsed as { type: string }).type === 'html' || (parsed as { type: string }).type === 'gui')
+  ) {
+    return parsed as RAAppBlock;
+  }
+
+  return null;
+}
+
 export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
   const [groups, setGroups] = useState<RAAppGroup[]>([]);
   const [coreApps, setCoreApps] = useState<RAAppSummary[]>([]);
@@ -46,19 +68,9 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
     let idx = 0;
     for (const msg of messages) {
       if (msg.role !== 'tool_result' || !msg.content) continue;
-      try {
-        const parsed: unknown = JSON.parse(msg.content);
-        if (
-          parsed !== null &&
-          typeof parsed === 'object' &&
-          'type' in parsed &&
-          'content' in parsed &&
-          ((parsed as { type: string }).type === 'html' || (parsed as { type: string }).type === 'gui')
-        ) {
-          found.push({ messageId: msg.id, block: parsed as RAAppBlock, index: idx++ });
-        }
-      } catch {
-        // Not a RAApp payload.
+      const block = safeParseRAAppMessage(msg.content);
+      if (block) {
+        found.push({ messageId: msg.id, block, index: idx++ });
       }
     }
     return found;
@@ -141,8 +153,8 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
       try {
         await uploadRAApp(file);
         await refreshCatalog();
-      } catch {
-        setCatalogError('Upload failed - check that the ZIP contains a valid meta.yml.');
+      } catch (err) {
+        setCatalogError(`Upload failed - check that the ZIP contains a valid meta.yml. ${err instanceof Error ? err.message : ''}`.trim());
       } finally {
         setUploading(false);
       }

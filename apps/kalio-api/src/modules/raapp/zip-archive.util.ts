@@ -39,8 +39,10 @@ export async function archiveDirectoryToZip(options: ArchiveDirectoryToZipOption
       settled = true;
       try {
         arc.abort?.();
-      } catch {
-        // Best effort only.
+      } catch (abortErr) {
+        new Logger('ZipArchiveUtil').warn(
+          `[archiveDirectoryToZip] archive abort failed for ${options.zipPath}: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`,
+        );
       }
 
       const error = err instanceof Error ? err : new Error(String(err));

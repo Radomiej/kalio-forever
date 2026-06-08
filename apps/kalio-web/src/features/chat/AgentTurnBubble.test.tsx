@@ -94,6 +94,15 @@ describe('AgentTurnBubble', () => {
     expect(screen.getByTestId('agent-turn-bubble')).toBeInTheDocument();
   });
 
+  it('keeps agent answers visually compact inside the wide chat lane', () => {
+    mockMessages.push(makeMsg({ id: 'msg-1', content: 'Hello' }));
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }])} toolActivities={[]} />);
+
+    const lane = screen.getByTestId('agent-turn-bubble').firstElementChild;
+    expect(lane).toHaveClass('max-w-none');
+    expect(lane?.querySelector('.group')).toHaveClass('px-2.5', 'py-1.5', 'gap-1');
+  });
+
   it('shows thinking block when thinkingChunks exist', () => {
     // Override session store mock for this test
     vi.doMock('../../store/sessionStore', () => ({
@@ -251,7 +260,7 @@ describe('AgentTurnBubble', () => {
     });
   });
 
-  it('keeps architecture sub-agent tool calls discoverable under the route timeline', () => {
+  it('keeps architecture sub-agent tool calls collapsed into the route timeline', () => {
     mockMessages.push(
       makeMsg({
         id: 'msg-arch',
@@ -305,7 +314,48 @@ describe('AgentTurnBubble', () => {
     render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-arch' }, { kind: 'tool', callId: 'tc-subagent' }])} toolActivities={[]} />);
 
     expect(screen.getByTestId('architecture-run-timeline')).toHaveTextContent('Router -> Pragmatist');
-    expect(screen.getByTestId('history-tool-run_subagent')).toHaveAttribute('data-default-open', 'unset');
+    expect(screen.getByTestId('architecture-route-agent')).toHaveTextContent('Pragmatist branch result');
+    expect(screen.queryByTestId('history-tool-run_subagent')).not.toBeInTheDocument();
+  });
+
+  it('does not mark reconstructed in-flight architecture runs as completed', () => {
+    mockMessages.push(
+      makeMsg({
+        id: 'assistant-tools',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{
+          id: 'architecture:run-1:event-pragmatist',
+          name: 'run_subagent',
+          args: {
+            architectureRunId: 'run-1',
+            nodeId: 'pragmatist',
+            roleSlotId: 'pragmatist',
+            childSessionId: 'branch-pragmatist',
+          },
+        }],
+      }),
+      makeMsg({
+        id: 'tool-pragmatist',
+        role: 'tool_result',
+        content: JSON.stringify({
+          result: 'Pragmatist branch answer',
+          taskId: 'event-pragmatist',
+          childSessionId: 'branch-pragmatist',
+          parentSessionId: 's1',
+          vfsMode: 'shared',
+          vfsSessionId: 's1',
+          copiedFiles: [],
+          durationMs: 0,
+        }),
+        toolCallId: 'architecture:run-1:event-pragmatist',
+      }),
+    );
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'tool', callId: 'architecture:run-1:event-pragmatist' }], false)} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-run-timeline')).toHaveTextContent('running / 1 graph steps');
+    expect(screen.getByTestId('architecture-run-timeline')).not.toHaveTextContent('completed / 1 graph steps');
   });
 
   it('hides duplicate router and finalizer markdown when the route timeline is present', () => {
@@ -339,6 +389,34 @@ describe('AgentTurnBubble', () => {
     expect(screen.getByTestId('architecture-run-timeline')).toBeInTheDocument();
     expect(screen.queryByText('Verbose router body')).not.toBeInTheDocument();
     expect(screen.getByTestId('architecture-final-answer')).toHaveTextContent('Compact final body');
+  });
+
+  it('hides architecture fallback summary text when the route timeline is present', () => {
+    mockMessages.push(makeMsg({
+      id: 'summary-msg',
+      content: 'Architecture run completed: strategic-decision-council\n\nExecution trace:\n1. router -> pragmatist: routed\n\nExecuted route:\n- parallel: start -> pragmatist',
+      architectureRun: {
+        runId: 'run-summary',
+        schemaId: 'strategic-decision-council',
+        status: 'completed',
+        trace: [
+          {
+            speaker: 'router',
+            content: 'Routed to pragmatist',
+            nodeId: 'router',
+            nextNodeId: 'pragmatist',
+          },
+        ],
+        routeHops: [],
+      },
+    }));
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'summary-msg' }])} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-run-timeline')).toBeInTheDocument();
+    expect(screen.queryByText(/Architecture run completed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Execution trace/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('architecture-route-router')).toHaveTextContent('Routed to pragmatist');
   });
 
   it('renders the finalizer trace as final answer when finalArtifact metadata is missing', () => {

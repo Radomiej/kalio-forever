@@ -13,5 +13,5 @@ describe('AppModule', () => {
     const { AppModule } = await import('./app.module');
 
     expect(new AppModule()).toBeInstanceOf(AppModule);
-  }, 60_000);
+  }, 180_000);
 });

@@ -23,7 +23,8 @@ function stringifyNativeResult(value: unknown): string {
 
   try {
     return JSON.stringify(value, null, 2);
-  } catch {
+  } catch (err) {
+    console.debug('[RAAppRenderer] Failed to stringify value', err);
     return String(value);
   }
 }
@@ -53,6 +54,15 @@ function NativeResultsPanel({ results }: { results: RaAppNativeResult[] }) {
       </div>
     </div>
   );
+}
+
+function safeParseJson(value: string): unknown | null {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (err) {
+    void err;
+    return null;
+  }
 }
 
 export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) {
@@ -129,27 +139,23 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
 
   if (block.type === 'gui') {
     // Try to parse as GUI DSL payload {nodes, data}
-    try {
-      const parsed: unknown = typeof content === 'string' ? JSON.parse(content) : content;
-      if (
-        parsed !== null &&
-        typeof parsed === 'object' &&
-        'nodes' in parsed &&
-        Array.isArray((parsed as GuiDslPayload).nodes) &&
-        'data' in parsed &&
-        typeof (parsed as GuiDslPayload).data === 'object' &&
-        (parsed as GuiDslPayload).data !== null
-      ) {
-        return (
-          <>
-            <GuiDslRenderer payload={parsed as GuiDslPayload} onAction={handleGuiAction} />
-            {nativeResultsPanel}
-            {hitlOverlay}
-          </>
-        );
-      }
-    } catch {
-      // not JSON — fall through
+    const parsed = typeof content === 'string' ? safeParseJson(content) : content;
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      'nodes' in parsed &&
+      Array.isArray((parsed as GuiDslPayload).nodes) &&
+      'data' in parsed &&
+      typeof (parsed as GuiDslPayload).data === 'object' &&
+      (parsed as GuiDslPayload).data !== null
+    ) {
+      return (
+        <>
+          <GuiDslRenderer payload={parsed as GuiDslPayload} onAction={handleGuiAction} />
+          {nativeResultsPanel}
+          {hitlOverlay}
+        </>
+      );
     }
 
     // Fallback: sniff raw HTML in content
@@ -162,20 +168,15 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
         </>
       );
     }
-    try {
-      const parsed: unknown = typeof content === 'string' ? JSON.parse(content) : content;
-      const sniffed = findHtmlInData(parsed);
-      if (sniffed) {
-        return (
-          <>
-            <HtmlIframeRenderer html={sniffed} title="RA-App" mode={block.mode} />
-            {nativeResultsPanel}
-            {hitlOverlay}
-          </>
-        );
-      }
-    } catch {
-      // not JSON
+    const sniffed = findHtmlInData(parsed);
+    if (sniffed) {
+      return (
+        <>
+          <HtmlIframeRenderer html={sniffed} title="RA-App" mode={block.mode} />
+          {nativeResultsPanel}
+          {hitlOverlay}
+        </>
+      );
     }
   }
 

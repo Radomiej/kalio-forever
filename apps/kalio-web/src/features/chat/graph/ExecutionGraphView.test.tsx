@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ChatSession, Persona, ToolConfirmationRequest } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
@@ -14,9 +14,12 @@ type SessionStateShape = {
   sessionMessages: Record<string, ChatMessage[]>;
   sessionAgentTurns: Record<string, AgentTurn[]>;
   setActiveSession: ReturnType<typeof vi.fn>;
+  addSession: ReturnType<typeof vi.fn>;
   setMessages: ReturnType<typeof vi.fn>;
   setAgentTurns: ReturnType<typeof vi.fn>;
   setPendingMessage: ReturnType<typeof vi.fn>;
+  addMessage: ReturnType<typeof vi.fn>;
+  updateSession: ReturnType<typeof vi.fn>;
 };
 
 type AgentLoopShape = {
@@ -34,16 +37,21 @@ type AgentStateShape = {
   toolActivities: ToolActivity[];
   activeAgentLoops: Record<string, AgentLoopShape>;
   pendingConfirmations: Record<string, ToolConfirmationRequest>;
+  isStreaming: boolean;
+  clearToolActivities: ReturnType<typeof vi.fn>;
   setPendingConfirmation: ReturnType<typeof vi.fn>;
+  setStreaming: ReturnType<typeof vi.fn>;
 };
 
 const {
   sessionState,
   agentState,
   apiGetMock,
+  apiPostMock,
   confirmToolMock,
   cancelToolMock,
   stopTurnMock,
+  sendMessageMock,
 } = vi.hoisted(() => ({
   sessionState: {
     activeSessionId: null as string | null,
@@ -53,20 +61,28 @@ const {
     sessionMessages: {} as Record<string, ChatMessage[]>,
     sessionAgentTurns: {} as Record<string, AgentTurn[]>,
     setActiveSession: vi.fn(),
+    addSession: vi.fn(),
     setMessages: vi.fn(),
     setAgentTurns: vi.fn(),
     setPendingMessage: vi.fn(),
+    addMessage: vi.fn(),
+    updateSession: vi.fn(),
   },
   agentState: {
     toolActivities: [] as ToolActivity[],
     activeAgentLoops: {} as Record<string, AgentLoopShape>,
     pendingConfirmations: {} as Record<string, ToolConfirmationRequest>,
+    isStreaming: false,
+    clearToolActivities: vi.fn(),
     setPendingConfirmation: vi.fn(),
+    setStreaming: vi.fn(),
   },
   apiGetMock: vi.fn(),
+  apiPostMock: vi.fn(),
   confirmToolMock: vi.fn(),
   cancelToolMock: vi.fn(),
   stopTurnMock: vi.fn(),
+  sendMessageMock: vi.fn(),
 }));
 
 vi.mock('../../../store/sessionStore', () => ({
@@ -80,11 +96,14 @@ vi.mock('../../../store/agentStore', () => ({
 vi.mock('../../../services/apiClient', () => ({
   apiClient: {
     get: apiGetMock,
+    post: apiPostMock,
   },
 }));
 
 vi.mock('../../../services/eventBus', () => ({
   eventBus: {
+    connected: true,
+    sendMessage: sendMessageMock,
     confirmTool: confirmToolMock,
     cancelTool: cancelToolMock,
     stopTurn: stopTurnMock,
@@ -111,6 +130,10 @@ async function renderExecutionGraphView(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
   });
+}
+
+function openGraphControlsMenu(): void {
+  fireEvent.click(screen.getByRole('button', { name: 'More graph controls' }));
 }
 
 function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
@@ -164,10 +187,23 @@ describe('ExecutionGraphView empty-session state', () => {
     ];
     sessionState.sessionMessages = {};
     sessionState.setActiveSession.mockReset();
+    sessionState.addSession.mockReset();
     sessionState.setMessages.mockReset();
     sessionState.setAgentTurns.mockReset();
     sessionState.setPendingMessage.mockReset();
+    sessionState.addMessage.mockReset();
+    sessionState.updateSession.mockReset();
     apiGetMock.mockResolvedValue({ data: [makePersona(), makePersona({ id: 'persona-child', name: 'UX Designer', model: 'claude-sonnet-4.6' })] });
+    apiPostMock.mockReset();
+    apiPostMock.mockResolvedValue({
+      data: {
+        id: 'new-graph-session',
+        personaId: 'default',
+        title: 'New Chat',
+        createdAt: 20,
+        updatedAt: 20,
+      },
+    });
 
     agentState.toolActivities = [
       {
@@ -192,16 +228,22 @@ describe('ExecutionGraphView empty-session state', () => {
       },
     };
     agentState.pendingConfirmations = {};
+    agentState.isStreaming = false;
+    agentState.clearToolActivities.mockReset();
     agentState.setPendingConfirmation.mockReset();
+    agentState.setStreaming.mockReset();
     confirmToolMock.mockReset();
     cancelToolMock.mockReset();
     stopTurnMock.mockReset();
+    sendMessageMock.mockReset();
+    sendMessageMock.mockReturnValue(true);
   });
 
   it('shows session suggestions and live agent activity when no session is selected', async () => {
     await renderExecutionGraphView();
 
-    expect(screen.getByText('Pick a session or inspect live activity')).toBeInTheDocument();
+    expect(screen.getByText('Pick a session')).toBeInTheDocument();
+    expect(screen.getByLabelText('Graph overview help')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open session Main UI task from graph overview' })).toBeInTheDocument();
     expect(screen.getAllByText('UX Designer').length).toBeGreaterThan(0);
     expect(screen.getAllByText('run_subagent').length).toBeGreaterThan(0);
@@ -215,6 +257,35 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(sessionState.setActiveSession).toHaveBeenCalledWith('session-1');
   });
 
+  it('creates a new chat and sends the first prompt when graph view has no active session', async () => {
+    sessionState.activeSessionId = null;
+    sessionState.sessions = [];
+
+    await renderExecutionGraphView();
+
+    fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
+      target: { value: 'Start from graph' },
+    });
+    fireEvent.click(screen.getByTestId('graph-empty-send-prompt'));
+
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
+      personaId: 'default',
+      title: 'New Chat',
+    }));
+    expect(sessionState.addSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'new-graph-session' }));
+    expect(sessionState.setActiveSession).toHaveBeenCalledWith('new-graph-session');
+    expect(sessionState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'new-graph-session',
+      role: 'user',
+      content: 'Start from graph',
+    }));
+    expect(sendMessageMock).toHaveBeenCalledWith({
+      sessionId: 'new-graph-session',
+      content: 'Start from graph',
+      personaId: 'default',
+    });
+  });
+
   it('keeps the graph shell visible when the active session has no execution nodes yet', async () => {
     sessionState.activeSessionId = 'session-1';
     sessionState.sessionMessages = { 'session-1': [] };
@@ -222,7 +293,41 @@ describe('ExecutionGraphView empty-session state', () => {
     await renderExecutionGraphView();
 
     expect(screen.getByRole('heading', { name: 'Execution Graph' })).toBeInTheDocument();
-    expect(screen.getByText('No execution nodes yet for this session.')).toBeInTheDocument();
+    expect(screen.getByText('Main UI task')).toBeInTheDocument();
+    expect(screen.getByLabelText('Empty graph help')).toBeInTheDocument();
+    expect(screen.getByLabelText('Empty graph help').tagName).toBe('BUTTON');
+    expect(screen.queryByText('No execution nodes yet for this session.')).toBeNull();
+    expect(screen.getByTestId('graph-empty-composer')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-empty-send-prompt')).toHaveClass('min-h-10');
+  });
+
+  it('starts the first chat message directly from the empty graph state', async () => {
+    sessionState.activeSessionId = 'session-1';
+    sessionState.sessionMessages = { 'session-1': [] };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'New Chat', createdAt: 1, updatedAt: 10 },
+    ];
+
+    await renderExecutionGraphView();
+
+    fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
+      target: { value: 'Start this graph session' },
+    });
+    fireEvent.click(screen.getByTestId('graph-empty-send-prompt'));
+
+    expect(sessionState.updateSession).toHaveBeenCalledWith('session-1', { title: 'Start this graph session' });
+    expect(sessionState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      role: 'user',
+      content: 'Start this graph session',
+    }));
+    expect(agentState.clearToolActivities).toHaveBeenCalledWith('session-1');
+    expect(agentState.setStreaming).toHaveBeenCalledWith(true);
+    expect(sendMessageMock).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      content: 'Start this graph session',
+      personaId: 'default',
+    });
   });
 
   it('renders durable architecture graph nodes for architecture root sessions without chat messages', async () => {
@@ -304,6 +409,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
+    openGraphControlsMenu();
     expect(screen.getByTestId('graph-card-density-compact')).toHaveClass('text-cyan-200');
     expect(screen.queryByText('Objective')).toBeNull();
 
@@ -395,6 +501,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
+    openGraphControlsMenu();
     expect(screen.getByTestId('graph-focus-latest-architecture')).toBeInTheDocument();
     expect(screen.getByTestId('graph-focus-all')).toBeInTheDocument();
     expect(screen.queryByTestId('graph-node-architecture-run:a1')).toBeNull();
@@ -554,6 +661,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     expect(screen.getByTestId(`graph-node-tool-group:${sessionState.agentTurns[0]?.id}`)).toBeInTheDocument();
 
+    openGraphControlsMenu();
     fireEvent.click(await screen.findByTestId('graph-zoom-in'));
 
     expect(await screen.findByTestId('graph-node-tool:call-list-1')).toBeInTheDocument();
@@ -591,6 +699,97 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(await screen.findByText('97%')).toBeInTheDocument();
   });
 
+  it('keeps wheel zoom clamped at the readable minimum instead of drifting below the board floor', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Build graph layout', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-list-1', name: 'list_tools', args: {} }],
+      }),
+      makeMessage({ id: 'tr1', role: 'tool_result', toolCallId: 'call-list-1', content: JSON.stringify({ ok: true }), createdAt: 3 }),
+      makeMessage({ id: 'a2', role: 'assistant', content: 'Done.', createdAt: 4 }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [];
+
+    await renderExecutionGraphView();
+
+    const viewport = await screen.findByTestId('execution-graph-viewport');
+    for (let index = 0; index < 8; index += 1) {
+      fireEvent.wheel(viewport, { deltaY: 120 });
+    }
+
+    expect(await screen.findByText('58%')).toBeInTheDocument();
+    expect(screen.queryByText('55%')).toBeNull();
+  });
+
+  it('fits the whole graph from the controls menu without forcing small graphs down to overview zoom', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Build graph layout', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-list-1', name: 'list_tools', args: {} }],
+      }),
+      makeMessage({ id: 'tr1', role: 'tool_result', toolCallId: 'call-list-1', content: JSON.stringify({ ok: true }), createdAt: 3 }),
+      makeMessage({ id: 'a2', role: 'assistant', content: 'Done.', createdAt: 4 }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [];
+
+    await renderExecutionGraphView();
+
+    expect(await screen.findByText('82%')).toBeInTheDocument();
+
+    openGraphControlsMenu();
+    fireEvent.click(screen.getByTestId('graph-fit-all'));
+
+    expect(await screen.findByText('82%')).toBeInTheDocument();
+  });
+
+  it('keeps node properties collapsed until a graph node is selected', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Build graph layout', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-list-1', name: 'list_tools', args: {} }],
+      }),
+      makeMessage({ id: 'tr1', role: 'tool_result', toolCallId: 'call-list-1', content: JSON.stringify({ ok: true }), createdAt: 3 }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [];
+
+    await renderExecutionGraphView();
+
+    expect(await screen.findByTestId('graph-inspector-expand')).toBeDisabled();
+    expect(screen.queryByText('Node Properties')).toBeNull();
+
+    fireEvent.click(await screen.findByTestId('graph-node-tool:call-list-1'));
+
+    expect(await screen.findByText('Node Properties')).toBeInTheDocument();
+    expect(screen.getByText('Tool details')).toBeInTheDocument();
+  });
+
   it('lets the inspector panel be resized from the graph view', async () => {
     const messages = [
       makeMessage({ id: 'u1', role: 'user', content: 'Build graph layout', createdAt: 1 }),
@@ -613,15 +812,16 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
+    fireEvent.click(await screen.findByTestId('graph-node-tool:call-list-1'));
     const inspector = await screen.findByTestId('execution-graph-inspector');
 
-    expect(inspector.style.getPropertyValue('--graph-inspector-width')).toBe('320px');
+    expect(inspector.style.getPropertyValue('--graph-inspector-width')).toBe('280px');
 
     fireEvent.mouseDown(screen.getByTestId('graph-inspector-resize-handle'), { clientX: 1000 });
     fireEvent.mouseMove(document, { clientX: 920 });
     fireEvent.mouseUp(document);
 
-    expect(inspector.style.getPropertyValue('--graph-inspector-width')).toBe('400px');
+    expect(inspector.style.getPropertyValue('--graph-inspector-width')).toBe('360px');
   });
 
   it('renders a real preview panel for preview-capable tool nodes and a miniature in the node', async () => {
@@ -660,6 +860,8 @@ describe('ExecutionGraphView empty-session state', () => {
 
     fireEvent.click(screen.getByTestId('graph-node-tool:call-preview-1'));
 
+    expect(screen.queryByTestId('graph-live-preview')).toBeNull();
+    fireEvent.click(await screen.findByTestId('graph-live-preview-toggle'));
     expect(await screen.findByTestId('graph-live-preview')).toBeInTheDocument();
     expect(await screen.findByTestId('graph-raapp-renderer')).toHaveTextContent('html:session-1:calculator/index.html');
   });

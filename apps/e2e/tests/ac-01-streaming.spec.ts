@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE, deleteSessionIfExists, selectSession } from './helpers/test-config';
+import {
+  API_BASE,
+  deleteSessionIfExists,
+  expectComposerEnabled,
+  selectSession,
+  sendMessageFromComposer,
+} from './helpers/test-config';
 
 const LONG_STREAMING_PROMPT = `Repeat this text slowly: ${'HELLO '.repeat(160).trim()}`;
 
@@ -23,10 +29,8 @@ test.describe('AC-01: LLM streaming', () => {
     await page.getByTestId('nav-talk').click();
     await selectSession(page, session.id, title);
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
-    await chatInput.fill(LONG_STREAMING_PROMPT);
-    await page.getByTestId('chat-send-btn').click();
+    const chatInput = await expectComposerEnabled(page, 5000);
+    await sendMessageFromComposer(page, LONG_STREAMING_PROMPT);
 
     // AC-13 owns the transient "composer locks during streaming" assertion.
     // Here we keep the stable streaming contract: an agent turn appears and the
@@ -35,7 +39,7 @@ test.describe('AC-01: LLM streaming', () => {
     await expect(assistantBubbles.first()).toBeVisible({ timeout: 10_000 });
 
     // Wait for response — input re-enables when chat:complete fires
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    await expectComposerEnabled(page, 30_000);
 
     // At least one agent turn bubble should be present (assistant replies use AgentTurnBubble)
     const content = await assistantBubbles.first().textContent();
@@ -59,17 +63,15 @@ test.describe('AC-01: LLM streaming', () => {
     await page.getByTestId('nav-talk').click();
     await selectSession(page, session.id, title);
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
+    const chatInput = await expectComposerEnabled(page, 5000);
 
     // Delete the session via API — the next message send will trigger SESSION_NOT_FOUND
     await deleteSessionIfExists(request, session.id);
 
-    await chatInput.fill('trigger error');
-    await page.getByTestId('chat-send-btn').click();
+    await sendMessageFromComposer(page, 'trigger error');
 
     // Input should re-enable quickly after the error (no LLM involved)
-    await expect(chatInput).toBeEnabled({ timeout: 10_000 });
+    await expectComposerEnabled(page, 10_000);
 
     // Error banner should be visible
     await expect(page.getByTestId('chat-error')).toBeVisible({ timeout: 5000 });
@@ -92,14 +94,12 @@ test.describe('AC-01: LLM streaming', () => {
     // Delete the session from the backend WHILE it is active in the UI
     await deleteSessionIfExists(request, session.id);
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
-    await chatInput.fill('This should fail with SESSION_NOT_FOUND');
-    await page.getByTestId('chat-send-btn').click();
+    const chatInput = await expectComposerEnabled(page, 5000);
+    await sendMessageFromComposer(page, 'This should fail with SESSION_NOT_FOUND');
 
     // Error banner should appear
     await expect(page.getByTestId('chat-error')).toBeVisible({ timeout: 10_000 });
     // Input re-enables after error
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
+    await expectComposerEnabled(page, 5000);
   });
 });

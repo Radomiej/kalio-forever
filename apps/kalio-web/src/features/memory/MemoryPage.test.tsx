@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { Persona, MemorySearchResult, MemoryIngestResult } from '@kalio/types';
+import type { Persona, MemoryScopeSummary, MemorySearchResult, MemoryIngestResult } from '@kalio/types';
 import { MemoryPage } from './MemoryPage';
 
 const { apiGet, apiPost, apiDelete } = vi.hoisted(() => ({
@@ -37,6 +37,13 @@ const SEARCH_RESULT: MemorySearchResult = {
   createdAt: 1700000000000,
 };
 
+const SUMMARY: MemoryScopeSummary = {
+  totalCount: 2,
+  totalSize: 28,
+  webSearch: { id: 'web_search', label: 'Web search', count: 1, size: 12 },
+  personas: [{ id: PERSONA.id, label: PERSONA.name, count: 1, size: 16 }],
+};
+
 describe('MemoryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -48,7 +55,7 @@ describe('MemoryPage', () => {
     const perPersonaResponses = [
       [{ id: 'entry-existing', content: 'Old memory', score: 0.7, metadata: {}, createdAt: 1 }],
       [{ id: 'entry-existing', content: 'Old memory', score: 0.7, metadata: {}, createdAt: 1 }],
-      [],
+      [SEARCH_RESULT],
     ];
     let memoryPersonaCall = 0;
 
@@ -57,8 +64,16 @@ describe('MemoryPage', () => {
         return Promise.resolve({ data: [PERSONA] });
       }
 
+      if (url === '/api/memory/summary') {
+        return Promise.resolve({ data: SUMMARY });
+      }
+
       if (url === '/api/memory/search') {
         return Promise.resolve({ data: [SEARCH_RESULT] });
+      }
+
+      if (url === '/api/memory/web-search') {
+        return Promise.resolve({ data: [] });
       }
 
       if (url === `/api/memory/${PERSONA.id}`) {
@@ -83,8 +98,11 @@ describe('MemoryPage', () => {
 
     render(<MemoryPage />);
 
-    await screen.findByText('Default persona');
+    await screen.findByTestId(`memory-scope-persona-${PERSONA.id}`);
     await waitFor(() => expect(screen.getByTestId('memory-freshness')).toHaveTextContent('load @'));
+
+    fireEvent.click(screen.getByTestId(`memory-scope-persona-${PERSONA.id}`));
+    await waitFor(() => expect(screen.getByTestId('memory-freshness')).toHaveTextContent('browse @'));
 
     fireEvent.click(screen.getByTestId('memory-browse-btn'));
     await waitFor(() => expect(screen.getByTestId('memory-freshness')).toHaveTextContent('browse @'));
@@ -114,13 +132,21 @@ describe('MemoryPage', () => {
     expect(apiGet).toHaveBeenCalledWith(`/api/memory/${PERSONA.id}`);
   });
 
-  it('enables actions for the default active persona before explicit selection', async () => {
+  it('shows memory scopes first and enables persona-only ingest after choosing a persona', async () => {
     apiGet.mockImplementation((url: string) => {
       if (url === '/api/personas') {
         return Promise.resolve({ data: [PERSONA] });
       }
 
+      if (url === '/api/memory/summary') {
+        return Promise.resolve({ data: SUMMARY });
+      }
+
       if (url === `/api/memory/${PERSONA.id}`) {
+        return Promise.resolve({ data: [] });
+      }
+
+      if (url === '/api/memory/web-search') {
         return Promise.resolve({ data: [] });
       }
 
@@ -129,9 +155,16 @@ describe('MemoryPage', () => {
 
     render(<MemoryPage />);
 
-    await screen.findByText('Default persona');
+    await screen.findByTestId('memory-scope-overview');
 
-    expect(screen.getByTestId('memory-ingest-btn')).toBeEnabled();
+    expect(screen.getByTestId('memory-scope-all')).toHaveTextContent('All memory');
+    expect(screen.getByTestId('memory-scope-web_search')).toHaveTextContent('Web search');
+    expect(screen.getByTestId(`memory-scope-persona-${PERSONA.id}`)).toHaveTextContent('Default persona');
+    expect(screen.getByTestId('memory-ingest-btn')).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId(`memory-scope-persona-${PERSONA.id}`));
+
+    await waitFor(() => expect(screen.getByTestId('memory-ingest-btn')).toBeEnabled());
     expect(screen.getByTestId('memory-browse-btn')).toBeEnabled();
 
     fireEvent.change(screen.getByTestId('memory-search-input'), {

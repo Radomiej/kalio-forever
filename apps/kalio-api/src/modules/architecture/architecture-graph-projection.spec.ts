@@ -10,7 +10,7 @@ describe('buildArchitectureGraphProjection', () => {
       description: 'Test schema',
       version: '0.1.0',
       roleSlots: [],
-      nodes: [{ id: 'materializer', label: 'Materializer', kind: 'role' }],
+      nodes: [{ id: 'implementer', label: 'Implementer', kind: 'role' }],
       edges: [],
       routerPolicy: {
         mode: 'rank_then_merge',
@@ -147,7 +147,7 @@ describe('buildArchitectureGraphProjection', () => {
       description: 'Test schema',
       version: '0.1.0',
       roleSlots: [],
-      nodes: [{ id: 'materializer', label: 'Materializer', kind: 'role', roleSlotId: 'materializer' }],
+      nodes: [{ id: 'implementer', label: 'Implementer', kind: 'role', roleSlotId: 'implementer' }],
       edges: [],
       routerPolicy: {
         mode: 'rank_then_merge',
@@ -171,9 +171,9 @@ describe('buildArchitectureGraphProjection', () => {
       runId: 'run-1',
       sequence: 1,
       type: 'participant_output',
-      message: 'Materializer spawned Copilot child.',
-      nodeId: 'materializer',
-      roleSlotId: 'materializer',
+      message: 'Implementer spawned Copilot child.',
+      nodeId: 'implementer',
+      roleSlotId: 'implementer',
       data: {
         toolEvidence: {
           toolCallCount: 1,
@@ -196,8 +196,8 @@ describe('buildArchitectureGraphProjection', () => {
 
     expect(graph.childAgents).toEqual([{
       id: 'cli-child-1',
-      parentNodeId: 'materializer',
-      parentRoleSlotId: 'materializer',
+      parentNodeId: 'implementer',
+      parentRoleSlotId: 'implementer',
       parentEventId: 'event-cli',
       kind: 'cli-agent',
       backend: 'copilot',

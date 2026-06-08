@@ -153,6 +153,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         parentToolCallId: `architecture:${input.run.id}:${input.slot.id}`,
         childSessionId: input.branchSessionId,
         personaId: input.personaId,
+        model: this.modelForSlot(input),
         objective: this.buildObjective(input),
         auditContext: {
           architectureRunId: input.run.id,
@@ -219,6 +220,32 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     return input.slot.slotType === 'router' || input.slot.slotType === 'finalizer' ? 300_000 : 120_000;
   }
 
+  private modelForSlot(input: ArchitectureRoleExecutionInput): string | undefined {
+    const perSlot = input.run.context?.['architectureModelBySlot'];
+    if (perSlot && typeof perSlot === 'object' && !Array.isArray(perSlot)) {
+      const value = (perSlot as Record<string, unknown>)[input.slot.id];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+
+    const preferenceKey = this.isHighLevelSlot(input.slot)
+      ? 'highLevelModelPreference'
+      : 'workerModelPreference';
+    const preference = input.run.context?.[preferenceKey];
+    return typeof preference === 'string' && preference.trim().length > 0
+      ? preference.trim()
+      : undefined;
+  }
+
+  private isHighLevelSlot(slot: ArchitectureRoleSlot): boolean {
+    return slot.slotType === 'router'
+      || slot.slotType === 'finalizer'
+      || slot.slotType === 'judge'
+      || slot.id === 'orchestrator'
+      || slot.id === 'goal_master';
+  }
+
   private timeoutMsFromContext(context: Record<string, unknown> | undefined, slotId: string): number | undefined {
     const perSlot = context?.['maxArchitectureSubagentTimeoutMsBySlot'];
     if (perSlot && typeof perSlot === 'object' && !Array.isArray(perSlot)) {
@@ -266,10 +293,10 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
   }
 
   private autoApproveToolsForSlot(input: ArchitectureRoleExecutionInput): string[] | undefined {
-    const canUseCliAgents = this.canUseCliAgents(input.run.context);
+    const canUseCliAgents = this.canUseCliAgentsForSlot(input.run.context, input.slot);
     if (input.slot.slotType === 'tool_executor') {
       const tools = ['vfs_write'];
-      if (this.isMaterializerSlot(input.slot) && canUseCliAgents) {
+      if (this.isImplementationWriterSlot(input.slot) && canUseCliAgents) {
         tools.push('spawn_cli_agent', 'message_cli_agent');
       }
       if (this.canAutoApproveProjectWrites(input.run.context)) {
@@ -301,22 +328,22 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       return [];
     }
     const hasLocalProjectContext = this.hasLocalProjectContext(input.run.context);
-    const canUseCliAgents = this.canUseCliAgents(input.run.context);
+    const canUseCliAgents = this.canUseCliAgentsForSlot(input.run.context, input.slot);
     if (input.slot.slotType === 'tool_executor') {
-      const gateMaterializerReads = this.isMaterializerSlot(input.slot)
+      const gateImplementationReads = this.isImplementationWriterSlot(input.slot)
         && this.hasIncomingReadEvidence(input.incomingEvents);
       return this.withCliToolPreferences(allTools.filter((tool) => (
         (ARCHITECTURE_TOOL_EXECUTOR_TOOL_NAMES.has(tool.name) && (
-          !gateMaterializerReads || !ARCHITECTURE_BRANCH_TOOL_NAMES.has(tool.name)
+          !gateImplementationReads || !ARCHITECTURE_BRANCH_TOOL_NAMES.has(tool.name)
         ))
         || (canUseCliAgents && (tool.name === 'get_cli_agent_status' || tool.name === 'wait_for'))
-        || (canUseCliAgents && this.isMaterializerSlot(input.slot) && ARCHITECTURE_CLI_AGENT_TOOL_NAMES.has(tool.name))
+        || (canUseCliAgents && this.isImplementationWriterSlot(input.slot) && ARCHITECTURE_CLI_AGENT_TOOL_NAMES.has(tool.name))
         || (hasLocalProjectContext && (
-          (!gateMaterializerReads && ARCHITECTURE_PROJECT_READ_TOOL_NAMES.has(tool.name))
+          (!gateImplementationReads && ARCHITECTURE_PROJECT_READ_TOOL_NAMES.has(tool.name))
           || ARCHITECTURE_PROJECT_WRITE_TOOL_NAMES.has(tool.name)
         ))
         || (
-          !gateMaterializerReads
+          !gateImplementationReads
           && this.hasExecutionCwd(input.run.context)
           && ARCHITECTURE_TERMINAL_TOOL_NAMES.has(tool.name)
         )
@@ -442,7 +469,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       this.instructionForSlot(
         input.slot,
         outgoingNodeIds,
-        this.canUseCliAgents(input.run.context),
+        this.canUseCliAgentsForSlot(input.run.context, input.slot),
         this.canUseOrchestratorSubagents(input.run.context),
       ),
       this.goalGuardProofImplementerInstruction(input),
@@ -473,7 +500,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       lines.push(
         '',
         `Local host project path: ${localProjectPath}`,
-        'If your answer depends on host project files, call fs_list or fs_read first. Use fs_write only from tool-executor slots when an approved materialization is required.',
+        'If your answer depends on host project files, call fs_list or fs_read first. Use fs_write only from tool-executor slots when an approved implementation write is required.',
       );
     }
     const context = this.contextForObjective(input.run.context, policy);
@@ -570,6 +597,16 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     return !Array.isArray(available) || available.some((value) => typeof value === 'string' && value.trim().length > 0);
   }
 
+  private canUseCliAgentsForSlot(
+    context: Record<string, unknown> | undefined,
+    slot: ArchitectureRoleSlot,
+  ): boolean {
+    if (!this.canUseCliAgents(context)) {
+      return false;
+    }
+    return !this.isOrchestrationSlot(slot) || this.canUseOrchestratorSubagents(context);
+  }
+
   private canUseOrchestratorSubagents(context: Record<string, unknown> | undefined): boolean {
     return context?.['allowArchitectureOrchestratorSubagents'] === true;
   }
@@ -614,8 +651,8 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
   }
 
   private cliBackendPolicyInstruction(input: ArchitectureRoleExecutionInput): string | null {
-    if (!this.canUseCliAgents(input.run.context)) {
-      return 'CLI agents are unavailable for this run. Do not call CLI-agent tools or claim CLI materialization; use Kalio sub-agents and visible VFS/tool evidence instead.';
+    if (!this.canUseCliAgentsForSlot(input.run.context, input.slot)) {
+      return 'CLI agents are unavailable for this run. Do not call CLI-agent tools or claim CLI implementation proof; use Kalio sub-agents and visible VFS/tool evidence instead.';
     }
     const policy = this.cliBackendPolicyForSlot(input.run.context, input.slot);
     if (!policy) {
@@ -642,21 +679,14 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     if (this.isOrchestrationSlot(slot)) {
       return {
         allowed: ['gemini', 'copilot', 'codex'],
-        purpose: 'Use Gemini for reconnaissance or brainstorming, Copilot for implementation/materialization delegation, and Codex for conservative analysis or final verification delegation',
+        purpose: 'Use Gemini for reconnaissance or brainstorming, Copilot for implementation delegation, and Codex for conservative analysis or final verification delegation',
       };
     }
     if (slot.id === 'implementer') {
       return {
-        preferred: 'copilot',
-        allowed: ['copilot', 'codex'],
-        purpose: 'Use Copilot for implementation work; use Codex only for conservative fallback or code-analysis support',
-      };
-    }
-    if (slot.id === 'materializer') {
-      return {
         preferred: 'codex',
-        allowed: ['gemini', 'codex', 'copilot'],
-        purpose: 'Use Codex for implementation delivery by default, Gemini for broad file generation fallback, and Copilot only as an explicit last fallback when credit limits allow it',
+        allowed: ['codex', 'copilot'],
+        purpose: 'Use Codex for implementation work; use Copilot only as an explicit fallback when Codex is unavailable or the run config selects Copilot',
       };
     }
     if (slot.id === 'verifier' || slot.id === 'tester') {
@@ -764,10 +794,10 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     if (slot.slotType === 'tool_executor') {
       return [
         'Act as an execution slot, not a planner.',
-        'Use the available tools to materialize or verify the incoming implementation evidence.',
-        'If this slot is a materializer, create or update the required artifacts first with vfs_write, fs_write, or a durable CLI child agent. A materializer cannot pass by only inspecting an existing artifact or running build/test commands; build-only work belongs to verifier slots. Do not spend early tool calls on environment probes such as node -v, npm -v, or git branch unless the incoming evidence says those probes are required before writing.',
-        'If this materializer delegates writes to a CLI child, use spawn_cli_agent with expectedChangedFiles and verificationCommands when possible, then poll get_cli_agent_status and report the childSessionId, status, changed paths, and weak points. Do not spawn a second materialization path when an existing CLI child already owns the same work; poll or message that child instead.',
-        'After a materializer has visible write evidence, it may run install/build commands when terminal tools are available, then report exact paths written and command results.',
+        'Use the available tools to implement or verify the incoming architecture step.',
+        'If this slot is an implementer, create or update the required artifacts first with vfs_write, fs_write, or a durable CLI child agent. An implementer cannot pass by only inspecting an existing artifact or running build/test commands; build-only work belongs to verifier slots. Do not spend early tool calls on environment probes such as node -v, npm -v, or git branch unless the incoming evidence says those probes are required before writing.',
+        'If this implementer delegates writes to a CLI child, use spawn_cli_agent with expectedChangedFiles and verificationCommands when possible, then poll get_cli_agent_status and report the childSessionId, status, changed paths, and weak points. Do not spawn a second implementation path when an existing CLI child already owns the same work; poll or message that child instead.',
+        'After an implementer has visible write evidence, it may run install/build commands when terminal tools are available, then report exact paths written and command results.',
         'If this slot is a verifier, use VFS or host-project reads as evidence unless terminal tools are available with an explicit execution cwd in context; when incoming evidence references a CLI child session, inspect it with get_cli_agent_status before judging the delegated work.',
         'When terminal tools are available, run the narrowest relevant command and report exact command, exit status, and tool output summary.',
         'If a required write or command needs human approval, request it through the tool flow and stop after reporting the pending approval.',
@@ -833,8 +863,8 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     return slot.slotType === 'router' && /\borchestrator\b/i.test(`${slot.id} ${slot.label}`);
   }
 
-  private isMaterializerSlot(slot: ArchitectureRoleSlot): boolean {
-    return /\bmateriali[sz]er\b/i.test(`${slot.id} ${slot.label}`);
+  private isImplementationWriterSlot(slot: ArchitectureRoleSlot): boolean {
+    return slot.id === 'implementer';
   }
 
   private baseData(
@@ -853,6 +883,14 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
 }
 
 function parseRouteToCall(message: string): { targetNodeId: string; response?: string } | null {
+  const proseRoute = parseRouteToCallFromProse(message);
+  if (proseRoute) {
+    return proseRoute;
+  }
+  return parseRouteToCallFromStructuredOutput(message);
+}
+
+function parseRouteToCallFromProse(message: string): { targetNodeId: string; response?: string } | null {
   const marker = 'route_to(';
   const start = message.toLowerCase().indexOf(marker);
   if (start < 0) {
@@ -881,12 +919,154 @@ function parseRouteToCall(message: string): { targetNodeId: string; response?: s
   const body = message.slice(bodyStart, bodyEnd);
   const commaIndex = body.indexOf(',');
   const rawTarget = commaIndex >= 0 ? body.slice(0, commaIndex) : body;
-  const targetNodeId = rawTarget.trim();
+  const targetNodeId = normalizedRouteTarget(rawTarget);
   if (!/^[A-Za-z0-9_.:-]+$/.test(targetNodeId)) {
     return null;
   }
   const response = commaIndex >= 0 ? body.slice(commaIndex + 1).trim() : undefined;
   return { targetNodeId, response };
+}
+
+function parseRouteToCallFromStructuredOutput(message: string): { targetNodeId: string; response?: string } | null {
+  const candidates = [
+    ...extractFencedJsonBlocks(message),
+    ...extractTaggedJsonBlocks(message, 'routerOutput'),
+    ...extractTaggedJsonBlocks(message, 'router_output'),
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseStructuredRouteOutputCandidate(candidate);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function parseStructuredRouteOutputCandidate(raw: string): { targetNodeId: string; response?: string } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  const output = routeOutputCandidate(parsed);
+  if (!output) {
+    return null;
+  }
+  const nextAction = output['nextAction'];
+  if (typeof nextAction !== 'string' || nextAction.toLowerCase() !== 'route_to') {
+    return null;
+  }
+  const targetNodeIdValue = typeof output['targetNodeId'] === 'string'
+    ? output['targetNodeId']
+    : typeof output['nodeId'] === 'string'
+      ? output['nodeId']
+      : undefined;
+  if (typeof targetNodeIdValue !== 'string') {
+    return null;
+  }
+  const targetNodeId = targetNodeIdValue.trim();
+  if (!/^[A-Za-z0-9_.:-]+$/.test(targetNodeId)) {
+    return null;
+  }
+  const explicitResponse = typeof output['response'] === 'string' && output['response'].trim().length > 0
+    ? output['response'].trim()
+    : undefined;
+  const mergedDecision = typeof output['mergedDecision'] === 'string' && output['mergedDecision'].trim().length > 0
+    ? output['mergedDecision'].trim()
+    : undefined;
+
+  return {
+    targetNodeId,
+    response: explicitResponse ?? mergedDecision,
+  };
+}
+
+function routeOutputCandidate(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (isStructuredRouteOutput(value)) {
+    return value;
+  }
+  if (isRecord(value['routerOutput'])) {
+    return isStructuredRouteOutput(value['routerOutput']) ? value['routerOutput'] : null;
+  }
+  return null;
+}
+
+function isStructuredRouteOutput(value: unknown): value is Record<string, unknown> {
+  return isRecord(value)
+    && (typeof value['nextAction'] === 'string')
+    && (
+      typeof value['targetNodeId'] === 'string'
+      || typeof value['nodeId'] === 'string'
+    )
+    && (
+      typeof value['mergedDecision'] === 'undefined'
+      || typeof value['mergedDecision'] === 'string'
+    )
+    && (
+      typeof value['response'] === 'undefined'
+      || typeof value['response'] === 'string'
+    );
+}
+
+function extractFencedJsonBlocks(text: string): string[] {
+  return [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1]?.trim() ?? '');
+}
+
+function extractTaggedJsonBlocks(text: string, tag: string): string[] {
+  const tagIndex = text.toLowerCase().indexOf(tag.toLowerCase());
+  if (tagIndex < 0) {
+    return [];
+  }
+  const braceIndex = text.indexOf('{', tagIndex);
+  if (braceIndex < 0) {
+    return [];
+  }
+  const block = balancedJsonObject(text, braceIndex);
+  return block ? [block] : [];
+}
+
+function balancedJsonObject(text: string, startIndex: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = startIndex; index < text.length; index += 1) {
+    const char = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(startIndex, index + 1);
+      }
+    }
+  }
+  return null;
+}
+
+function normalizedRouteTarget(rawTarget: string): string {
+  const trimmed = rawTarget.trim();
+  const namedTarget = trimmed.match(/^(?:targetNodeId|nodeId)\s*=\s*['"]?([^'"]+)['"]?$/i);
+  return (namedTarget?.[1] ?? trimmed).trim();
 }
 
 function architectureSlotMessage(

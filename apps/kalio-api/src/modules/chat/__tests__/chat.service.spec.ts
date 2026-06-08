@@ -148,6 +148,63 @@ describe('ChatService', () => {
     expect(emit).toHaveBeenCalledWith('chat:context', expect.objectContaining({ toolNames: ['tool_a'] }));
   });
 
+  it('emits chat:context with the same effective prompt that is sent to the LLM', async () => {
+    toolDispatch.getToolMetas.mockReturnValue([
+      { name: 'tool_a', description: 'Reads the project state.', parameters: {}, requiresConfirmation: false },
+    ]);
+    personaService.getSessionConfig = vi.fn().mockResolvedValue({
+      systemPrompt: 'Persona base prompt.',
+      model: 'mimo-test',
+      skillIds: ['skill-1'],
+      allowedTools: [],
+      mcpPolicy: 'allow_all',
+      kv: {},
+    });
+
+    const skillPrompt = 'Always apply the architecture checklist.';
+    const llmSource = makeLLMSource([]);
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ChatService,
+        {
+          provide: StreamProcessorService,
+          useValue: {
+            process: vi.fn().mockResolvedValue(undefined),
+            onModuleInit: vi.fn(),
+          },
+        },
+        { provide: SessionManagerService, useValue: sessionManager },
+        { provide: ToolDispatchService, useValue: toolDispatch },
+        { provide: PersonaService, useValue: personaService },
+        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([{ id: 'skill-1', name: 'Architecture Discipline', description: 'Keep the runtime aligned.', prompt: skillPrompt }]) } },
+        { provide: CredentialsService, useValue: credentialsService },
+        { provide: AuditService, useValue: auditService },
+        { provide: LLM_SOURCE, useValue: llmSource },
+        { provide: CHUNK_HANDLERS, useValue: [] },
+        { provide: STREAM_MIDDLEWARES, useValue: [] },
+        { provide: TOOL_REGISTRY, useValue: [] },
+      ],
+    }).compile();
+    service = moduleRef.get(ChatService);
+
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    expect(emit).toHaveBeenCalledWith('chat:context', expect.objectContaining({
+      systemPrompt: expect.stringContaining('Always apply the architecture checklist.'),
+      toolNames: ['tool_a'],
+    }));
+
+    const params = (llmSource.stream as ReturnType<typeof vi.fn>).mock.calls[0][0] as LLMSourceParams;
+    expect(params.model).toBe('mimo-test');
+    const systemMessage = params.messages.find((message) => message.role === 'system');
+    expect(systemMessage).toBeDefined();
+    expect(systemMessage?.content).toContain('Persona base prompt.');
+    expect(systemMessage?.content).toContain('## Active skills');
+    expect(systemMessage?.content).toContain(skillPrompt);
+    expect(systemMessage?.content).toContain('## Available tools (1)');
+    expect(systemMessage?.content).toContain('- tool_a: Reads the project state.');
+  });
+
   it('calls llmSource.stream with messages and tools', async () => {
     const llmSource = makeLLMSource([]);
     await buildService(llmSource);

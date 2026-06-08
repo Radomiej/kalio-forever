@@ -1,10 +1,12 @@
 import { useCallback, useState } from 'react';
+import type { ArchitectExecutionMode } from './architect.types';
 
 export function useArchitectRunOptions() {
   const [taskPrompt, setTaskPrompt] = useState('Decide the smallest valuable architecture runtime slice.');
   const [maxArchitectureSteps, setMaxArchitectureSteps] = useState(64);
   const [maxArchitectureNodeVisits, setMaxArchitectureNodeVisits] = useState(4);
   const [maxArchitectureSubagentIterations, setMaxArchitectureSubagentIterations] = useState(4);
+  const [executionMode, setExecutionMode] = useState<ArchitectExecutionMode>('subagent_execution');
   const [requireGoalMasterLoopProof, setRequireGoalMasterLoopProof] = useState(false);
   const [requireImplementerWriteProof, setRequireImplementerWriteProof] = useState(false);
   const [projectPath, setProjectPath] = useState('');
@@ -46,6 +48,7 @@ export function useArchitectRunOptions() {
     allowOrchestratorSubagents,
     autoApproveTerminal,
     autoApproveProjectWrites,
+    executionMode,
     maxArchitectureNodeVisits,
     maxArchitectureSteps,
     maxArchitectureSubagentIterations,
@@ -59,6 +62,7 @@ export function useArchitectRunOptions() {
     setMaxArchitectureNodeVisits,
     setMaxArchitectureSteps,
     setMaxArchitectureSubagentIterations,
+    setExecutionMode,
     setProjectPath,
     setRequireImplementerWriteProof,
     setRequireGoalMasterLoopProof,

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE } from './helpers/test-config';
+import { API_BASE, expectComposerEnabled, sendMessageFromComposer } from './helpers/test-config';
 
 // AC-26: After page reload, selecting a session restores the full conversation history
 test.describe('AC-26: Session history restored after reload', () => {
@@ -18,14 +18,11 @@ test.describe('AC-26: Session history restored after reload', () => {
     ).toBeVisible({ timeout: 5000 });
     await page.getByTestId('session-item').filter({ hasText: 'AC26 Reload Test' }).first().click();
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
-
-    await chatInput.fill('Say the single word: PINEAPPLE');
-    await page.getByTestId('chat-send-btn').click();
+    await expectComposerEnabled(page, 5000);
+    await sendMessageFromComposer(page, 'Say the single word: PINEAPPLE');
 
     // Wait for streaming to finish
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    await expectComposerEnabled(page, 30_000);
 
     // Confirm agent turn appeared with content
     const turnBubble = page.getByTestId('agent-turn-bubble').first();

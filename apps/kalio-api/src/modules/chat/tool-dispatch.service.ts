@@ -71,9 +71,9 @@ export class ToolDispatchService {
           // Check requiresConfirmation for MCP tools the same way native tools do
           const mcpMeta = this.mcpService.getToolByName(toolName);
           if (mcpMeta?.requiresConfirmation) {
-            const approved = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx);
-            if (!approved) {
-              return this.withMeta({ callId, status: 'cancelled' }, toolName, ctx);
+            const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx);
+            if (!approval.approved) {
+              return this.cancelledResult(callId, toolName, ctx, approval.rejectionMessage);
             }
           }
           try {
@@ -95,9 +95,9 @@ export class ToolDispatchService {
     }
 
     if (entry.meta.requiresConfirmation) {
-      const approved = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx);
-      if (!approved) {
-        return this.withMeta({ callId, status: 'cancelled' }, toolName, ctx);
+      const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx);
+      if (!approval.approved) {
+        return this.cancelledResult(callId, toolName, ctx, approval.rejectionMessage);
       }
     }
 
@@ -131,12 +131,12 @@ export class ToolDispatchService {
     }
   }
 
-  resolveConfirmation(requestId: string, sessionId?: string): ConfirmationResolutionStatus {
-    return this.confirmations.resolveConfirmation(requestId, sessionId);
+  resolveConfirmation(requestId: string, sessionId?: string, message?: string): ConfirmationResolutionStatus {
+    return this.confirmations.resolveConfirmation(requestId, sessionId, message);
   }
 
-  cancelConfirmation(requestId: string, sessionId?: string): ConfirmationResolutionStatus {
-    return this.confirmations.cancelConfirmation(requestId, sessionId);
+  cancelConfirmation(requestId: string, sessionId?: string, message?: string): ConfirmationResolutionStatus {
+    return this.confirmations.cancelConfirmation(requestId, sessionId, message);
   }
 
   getPendingConfirmations(sessionId: string): ToolConfirmationRequest[] {
@@ -159,6 +159,14 @@ export class ToolDispatchService {
       toolName,
       agentRun: ctx.agentRun,
     };
+  }
+
+  private cancelledResult(callId: string, toolName: string, ctx: StreamContext, rejectionMessage?: string): ToolResult {
+    return this.withMeta({
+      callId,
+      status: 'cancelled',
+      ...(rejectionMessage ? { errorMessage: `User rejected tool confirmation: ${rejectionMessage}` } : {}),
+    }, toolName, ctx);
   }
 
 }

@@ -57,8 +57,9 @@ test.describe('Embedding Credentials UI', () => {
     await expect(page.getByTestId('embeddings-panel')).toBeVisible();
   });
 
-  test('shows mock warning card when no credentials configured', async ({ page }) => {
-    await expect(page.getByTestId('embedding-mock-card')).toBeVisible();
+  test('shows local fallback when no remote credentials are configured', async ({ page }) => {
+    await expect(page.getByText('No remote embedding providers configured. Local embeddings are used by default.')).toBeVisible();
+    await expect(page.getByTestId('embedding-env-card').getByText('Local embeddings')).toBeVisible();
   });
 
   test('"Add Provider" button opens the add form', async ({ page }) => {
@@ -188,11 +189,11 @@ test.describe('Embedding Credentials UI', () => {
     expect(json.activeCredentialId).toBe(c.id);
   });
 
-  test('GET /memory/status/embedding returns mock when no credential active', async ({ page }) => {
+  test('GET /memory/status/embedding returns local provider when no credential active', async ({ page }) => {
     const status = await page.request.get(`${API_BASE}/memory/status/embedding`);
     const json = await status.json() as { source: string; configured: boolean };
-    expect(json.source).toBe('mock');
-    expect(json.configured).toBe(false);
+    expect(json.source).toBe('local');
+    expect(json.configured).toBe(true);
   });
 
   // ── API: CRUD ─────────────────────────────────────────────────────────────
@@ -211,8 +212,15 @@ test.describe('Embedding Credentials UI', () => {
     const c = await seedCredential(page, 'To Deactivate');
     await page.request.put(`${API_BASE}/memory/embedding-credentials/active/${c.id}`);
     const delRes = await page.request.delete(`${API_BASE}/memory/embedding-credentials/active`);
-    const status = await delRes.json() as { source: string };
-    expect(status.source).toBe('mock');
+    if (delRes.ok()) {
+      const status = await delRes.json() as { source?: string };
+      expect(status.source).toBe('local');
+      return;
+    }
+
+    expect(delRes.status()).toBe(400);
+    const body = await delRes.json() as { message?: string };
+    expect(body.message).toMatch(/Local model is (still installing|not installed yet)/i);
   });
 
   test('POST /memory/embedding-credentials/:id/test returns {ok, error} shape', async ({ page }) => {

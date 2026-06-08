@@ -34,8 +34,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   if (isUser) {
     return (
       <div data-testid="message-bubble" data-role="user" className="flex justify-end">
-        <div className="flex flex-col items-end max-w-[75%]">
-          <div className="rounded-2xl px-4 py-2 text-sm bg-sky-700 text-white">
+        <div className="flex flex-col items-end max-w-[min(100%,72rem)]">
+          <div className="rounded-2xl px-3.5 py-2 text-sm bg-sky-700 text-white">
             <span data-testid="message-content">{displayContent}</span>
           </div>
         </div>
@@ -47,10 +47,10 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   if (message.role === 'tool_result') return null;
   return (
     <div data-testid="message-bubble" data-role="assistant" className="flex justify-start mb-1 w-full">
-      <div className="min-w-0 w-full max-w-[min(100%,68rem)]">
+      <div className="min-w-0 w-full max-w-none">
         <p className="text-xs text-base-content/50 mb-1 ml-1">Kalio</p>
 
-        <div className="group relative rounded-2xl bg-base-300 text-base-content text-sm px-4 py-3 flex flex-col gap-2 w-full">
+        <div className="group relative rounded-xl bg-base-300 text-base-content text-sm px-2.5 py-1.5 flex flex-col gap-1.5 w-full">
           {/* Thinking block */}
           {hasThinking && (
             <div className="border border-base-content/10 rounded-lg overflow-hidden">

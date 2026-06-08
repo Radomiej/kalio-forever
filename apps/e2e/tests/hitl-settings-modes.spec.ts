@@ -1,5 +1,11 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { API_BASE, deleteSessionIfExists, isMockLlm, selectSession } from './helpers/test-config';
+import {
+  API_BASE,
+  deleteSessionIfExists,
+  isMockLlm,
+  selectSession,
+  sendMessageFromComposer,
+} from './helpers/test-config';
 
 const MOCK_VFS_WRITE_TRIGGER = '[[mock:tool:vfs_write:no-arg-progress]]';
 const MOCK_VFS_WRITE_PATH = 'e2e/mock-tool-trigger.txt';
@@ -189,10 +195,7 @@ async function openTalk(page: Page): Promise<void> {
 }
 
 async function runMockVfsWriteTool(page: Page): Promise<void> {
-  const chatInput = page.getByTestId('chat-input');
-  await expect(chatInput).toBeEnabled({ timeout: 10_000 });
-  await chatInput.fill(`${MOCK_VFS_WRITE_TRIGGER} Use exactly the vfs_write tool and nothing else.`);
-  await page.getByTestId('chat-send-btn').click();
+  await sendMessageFromComposer(page, `${MOCK_VFS_WRITE_TRIGGER} Use exactly the vfs_write tool and nothing else.`);
 }
 
 test.describe('HITL settings modes', () => {

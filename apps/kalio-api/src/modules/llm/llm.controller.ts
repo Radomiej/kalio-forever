@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpException, HttpStatus, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, HttpStatus, Logger, Put, Query } from '@nestjs/common';
 import { LLMService } from './llm.service';
 import { CredentialsService } from '../credentials/credentials.service';
 import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
@@ -18,6 +18,8 @@ export interface LLMConfigResponse extends LLMConfig {
 
 @Controller('llm')
 export class LLMController {
+  private readonly logger = new Logger(LLMController.name);
+
   constructor(
     private readonly llm: LLMService,
     private readonly credentials: CredentialsService,
@@ -96,7 +98,9 @@ export class LLMController {
         try {
           const parsed = JSON.parse(text) as { error?: { message?: string } };
           if (parsed?.error?.message) errorMessage = parsed.error.message;
-        } catch { /* not JSON */ }
+        } catch (err) {
+          this.logger.debug(`Provider error body was not JSON: ${err instanceof Error ? err.message : String(err)}`);
+        }
         throw new HttpException({ error: errorMessage, detail: text.slice(0, 500) }, upstream.status);
       }
 

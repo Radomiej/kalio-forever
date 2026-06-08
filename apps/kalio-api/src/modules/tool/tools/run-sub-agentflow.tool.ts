@@ -77,10 +77,26 @@ function getMaxSteps(args: ToolCallRequest['args']): number | undefined {
   return Math.min(numeric, MAX_STEPS);
 }
 
-function resultFromSnapshot(snapshot: AgentFlowRunSnapshot): SubAgentFlowResult {
-  if (snapshot.result) return snapshot.result;
+function resultFromSnapshot(
+  snapshot: AgentFlowRunSnapshot,
+  requestContext?: Pick<RunSubAgentFlowArgs, 'parentSessionId' | 'parentToolCallId'>,
+): SubAgentFlowResult {
+  const parentSessionId = snapshot.run.parentSessionId || requestContext?.parentSessionId;
+  const parentToolCallId = snapshot.run.parentToolCallId ?? requestContext?.parentToolCallId;
+  if (snapshot.result) {
+    return {
+      ...snapshot.result,
+      parentSessionId,
+      parentToolCallId,
+      childSessionId: snapshot.run.childSessionId,
+      openChatSessionId: snapshot.run.openChatSessionId ?? snapshot.result.openChatSessionId,
+      openGraphRunId: snapshot.run.openGraphRunId ?? snapshot.result.openGraphRunId,
+    };
+  }
   return {
     flowRunId: snapshot.run.id,
+    parentSessionId,
+    parentToolCallId,
     childSessionId: snapshot.run.childSessionId,
     status: snapshot.run.status,
     summary: snapshot.run.summary ?? `AgentFlow ${snapshot.run.flowDefinitionId} started.`,
@@ -181,7 +197,7 @@ export class RunSubAgentFlowTool {
     this.logger.log(`[run_sub_agentflow] flowId=${args.flowId} parentSessionId=${parentSessionId}`);
     const runtime = this.getRuntime();
     if (args.startMode === 'durable' && runtime.start) {
-      return resultFromSnapshot(await runtime.start(args));
+      return resultFromSnapshot(await runtime.start(args), args);
     }
     return runtime.run(args);
   }

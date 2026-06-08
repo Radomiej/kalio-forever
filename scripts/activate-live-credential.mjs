@@ -110,7 +110,7 @@ export async function activateLiveCredential(options = {}) {
   assertLocalApiUrl(apiUrl, allowRemoteApiUrl);
 
   const provider = getArgValue(args, '--provider', env.LLM_PROVIDER ?? fileEnv.LLM_PROVIDER ?? 'xiaomimimo');
-  const model = getArgValue(args, '--model', env.LLM_MODEL ?? fileEnv.LLM_MODEL ?? 'mimo-v2.5-pro');
+  const model = getArgValue(args, '--model', env.LLM_MODEL ?? fileEnv.LLM_MODEL ?? 'mimo-v2.5');
   const baseUrl = getArgValue(args, '--base-url', env.LLM_BASE_URL ?? fileEnv.LLM_BASE_URL ?? 'https://token-plan-ams.xiaomimimo.com/v1');
   const apiKey = env.LLM_API_KEY ?? fileEnv.LLM_API_KEY ?? '';
   const name = getArgValue(args, '--name', `Live ${provider} ${model}`);

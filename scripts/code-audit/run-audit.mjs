@@ -19,6 +19,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { extractRegressionReviewLeads } from './regression-checks.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -142,6 +143,7 @@ async function fileStats(files) {
   const rows = [];
   let silentCatchHits = [];
   let anyHits = [];
+  let regressionReviewLeads = [];
 
   for (const f of files) {
     let text;
@@ -151,6 +153,7 @@ async function fileStats(files) {
 
     const relativeFile = path.relative(REPO_ROOT, f).replaceAll('\\', '/');
     silentCatchHits.push(...extractSilentCatchHits(text, relativeFile));
+    regressionReviewLeads.push(...extractRegressionReviewLeads(text, relativeFile));
     const anyCount = countAnyHits(text);
     if (anyCount > 0) {
       anyHits.push({ file: relativeFile, count: anyCount });
@@ -158,7 +161,7 @@ async function fileStats(files) {
   }
   rows.sort((a, b) => b.lines - a.lines);
   anyHits.sort((a, b) => b.count - a.count);
-  return { rows, silentCatchHits, anyHits };
+  return { rows, silentCatchHits, anyHits, regressionReviewLeads };
 }
 
 async function governanceDocStats() {

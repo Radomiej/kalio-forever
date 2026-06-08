@@ -19,7 +19,11 @@ const OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set([
 
 type SubagentAgentRunContext = NonNullable<StreamContext['agentRun']> & { autoApproveTools?: string[] };
 export type ConfirmationResolutionStatus = 'resolved' | 'rejected' | 'not_found' | 'session_mismatch';
-type ConfirmationWaitResult = { status: 'approved' | 'rejected' | 'timeout'; requestId: string };
+type ConfirmationWaitResult = { status: 'approved' | 'rejected' | 'timeout'; requestId: string; message?: string };
+export interface ToolApprovalOutcome {
+  approved: boolean;
+  rejectionMessage?: string;
+}
 export type PendingMutationStatus = 'removed' | 'not_found' | 'session_mismatch';
 
 interface PendingConfirmation {
@@ -27,7 +31,7 @@ interface PendingConfirmation {
   payload: ToolConfirmationRequest;
   emit: StreamContext['emit'];
   resolve: () => void;
-  reject: (err: Error) => void;
+  reject: (message?: string) => void;
 }
 
 @Injectable()
@@ -40,7 +44,7 @@ export class ToolConfirmationService {
     @Optional() @Inject(HitlNotificationService) private readonly hitlNotifications: HitlNotificationService | null,
   ) {}
 
-  resolveConfirmation(requestId: string, sessionId?: string): ConfirmationResolutionStatus {
+  resolveConfirmation(requestId: string, sessionId?: string, message?: string): ConfirmationResolutionStatus {
     const pending = this.pending.get(requestId);
     if (!pending) return 'not_found';
     if (sessionId && pending.sessionId !== sessionId) {
@@ -51,12 +55,12 @@ export class ToolConfirmationService {
     }
     this.pending.delete(requestId);
     this.emitConfirmationInvalidated(pending, 'confirmed');
-    this.logConfirmationLifecycle(pending, 'hitl_approval_confirmed', 'manual');
+    this.logConfirmationLifecycle(pending, 'hitl_approval_confirmed', 'manual', message);
     pending.resolve();
     return 'resolved';
   }
 
-  cancelConfirmation(requestId: string, sessionId?: string): ConfirmationResolutionStatus {
+  cancelConfirmation(requestId: string, sessionId?: string, message?: string): ConfirmationResolutionStatus {
     const pending = this.pending.get(requestId);
     if (!pending) return 'not_found';
     if (sessionId && pending.sessionId !== sessionId) {
@@ -67,8 +71,8 @@ export class ToolConfirmationService {
     }
     this.pending.delete(requestId);
     this.emitConfirmationInvalidated(pending, 'cancelled');
-    this.logConfirmationLifecycle(pending, 'hitl_approval_cancelled', 'manual');
-    pending.reject(new Error('User cancelled tool confirmation'));
+    this.logConfirmationLifecycle(pending, 'hitl_approval_cancelled', 'manual', message);
+    pending.reject(message);
     return 'rejected';
   }
 
@@ -104,9 +108,9 @@ export class ToolConfirmationService {
     toolName: string,
     args: Record<string, unknown>,
     ctx: StreamContext,
-  ): Promise<boolean> {
+  ): Promise<ToolApprovalOutcome> {
     if (this.canAutoApprove(toolName, ctx)) {
-      return true;
+      return { approved: true };
     }
 
     if (this.hitlPolicy) {
@@ -122,14 +126,14 @@ export class ToolConfirmationService {
         });
 
         if (resolution.status === 'approved') {
-          return true;
+          return { approved: true };
         }
 
         if (resolution.status === 'rejected') {
           this.logger.log(
             `Global HITL policy rejected tool [${toolName}] for session ${ctx.sessionId}${resolution.reason ? `: ${resolution.reason}` : ''}`,
           );
-          return false;
+          return { approved: false };
         }
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
@@ -142,11 +146,14 @@ export class ToolConfirmationService {
 
     const waitResult = await this.awaitConfirmation(callId, toolName, args, ctx);
     if (waitResult.status === 'approved') {
-      return true;
+      return { approved: true };
     }
 
     if (waitResult.status === 'rejected' || !this.hitlPolicy) {
-      return false;
+      return {
+        approved: false,
+        ...(waitResult.message ? { rejectionMessage: waitResult.message } : {}),
+      };
     }
 
     try {
@@ -162,7 +169,7 @@ export class ToolConfirmationService {
 
       if (resolution.status === 'approved') {
         this.logUnattendedLifecycle('hitl_approval_representative_approved', waitResult.requestId, callId, toolName, args, ctx, resolution.reason);
-        return true;
+        return { approved: true };
       }
 
       if (resolution.status === 'rejected') {
@@ -181,7 +188,10 @@ export class ToolConfirmationService {
       );
     }
 
-    return false;
+    return {
+      approved: false,
+      ...(waitResult.message ? { rejectionMessage: waitResult.message } : {}),
+    };
   }
 
   private awaitConfirmation(
@@ -257,10 +267,10 @@ export class ToolConfirmationService {
           cleanupAbortListener();
           resolve({ status: 'approved', requestId });
         },
-        reject: () => {
+        reject: (message?: string) => {
           if (timeout) clearTimeout(timeout);
           cleanupAbortListener();
-          resolve({ status: 'rejected', requestId });
+          resolve({ status: 'rejected', requestId, ...(message ? { message } : {}) });
         },
       });
 
@@ -293,11 +303,13 @@ export class ToolConfirmationService {
     pending: PendingConfirmation,
     eventType: Parameters<HitlNotificationService['logApprovalLifecycle']>[0]['eventType'],
     source: string,
+    reason?: string,
   ): void {
     void this.hitlNotifications?.logApprovalLifecycle({
       eventType,
       requestId: pending.payload.requestId,
       source,
+      ...(reason ? { reason } : {}),
       request: {
         kind: 'tool',
         sessionId: pending.payload.sessionId,

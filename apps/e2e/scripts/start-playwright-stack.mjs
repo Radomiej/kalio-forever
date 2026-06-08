@@ -15,6 +15,7 @@ const explicitPlaywrightBase = process.env.PLAYWRIGHT_BASE_URL;
 const explicitPlaywrightApi = process.env.PLAYWRIGHT_API_ORIGIN;
 const explicitDatabasePath = process.env.DATABASE_PATH;
 const explicitWorkspaceRoot = process.env.WORKSPACE_ROOT;
+const explicitMemoryDbPath = process.env.MEMORY_DB_PATH;
 
 if (existsSync(envFilePath)) {
   process.loadEnvFile?.(envFilePath);
@@ -97,13 +98,20 @@ if (pnpmCandidates.length === 0) {
 
 let selectedPnpm = pnpmCandidates[0];
 
+function envValueOrDefault(name, fallback) {
+  const value = process.env[name];
+  return typeof value === 'string' && value.trim().length > 0 ? value : fallback;
+}
+
 const sharedEnv = {
   ...process.env,
   NODE_ENV: 'test',
-  LLM_PROVIDER: process.env.LLM_PROVIDER ?? 'mock',
-  LLM_API_KEY: process.env.LLM_API_KEY ?? 'mock',
-  LLM_BASE_URL: process.env.LLM_BASE_URL ?? 'mock',
-  LLM_MODEL: process.env.LLM_MODEL ?? 'mock',
+  LLM_PROVIDER: envValueOrDefault('LLM_PROVIDER', 'mock'),
+  LLM_API_KEY: envValueOrDefault('LLM_API_KEY', 'mock'),
+  LLM_BASE_URL: envValueOrDefault('LLM_BASE_URL', 'mock'),
+  LLM_MODEL: envValueOrDefault('LLM_MODEL', 'mock'),
+  KALIO_FORCE_ENV_LLM: '1',
+  KALIO_MOCK_LLM_FAST: '1',
   CREDENTIALS_MASTER_KEY: process.env.CREDENTIALS_MASTER_KEY ?? 'playwright-test-master-key-32-chars-minimum',
 };
 const runStateDir = resolve(e2eStateDir);
@@ -113,6 +121,7 @@ const backendEnv = {
   PORT: apiUrl.port,
   DATABASE_PATH: explicitDatabasePath ?? resolve(runStateDir, 'kalio-e2e.db'),
   WORKSPACE_ROOT: explicitWorkspaceRoot ?? resolve(runStateDir, 'workspaces'),
+  MEMORY_DB_PATH: explicitMemoryDbPath ?? resolve(runStateDir, 'memory'),
   CORS_ORIGIN: webUrl.origin,
 };
 

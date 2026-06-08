@@ -12,6 +12,7 @@ interface ChatInputProps {
   selectedArchitectureId?: string;
   onArchitectureChange?: (schemaId: string) => void;
   onArchitectureRun?: (content: string, schemaId: string) => void;
+  onDraftChange?: (content: string) => void;
 }
 
 export function ChatInput({
@@ -20,6 +21,7 @@ export function ChatInput({
   isStreaming = false,
   onArchitectureChange,
   onArchitectureRun,
+  onDraftChange,
   onSend,
   onStop,
   selectedArchitectureId = 'single-chat',
@@ -65,6 +67,7 @@ export function ChatInput({
       throw error;
     }
     setValue('');
+    onDraftChange?.('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   };
 
@@ -115,7 +118,10 @@ export function ChatInput({
             rows={1}
             value={value}
             disabled={effectiveDisabled}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              setValue(e.target.value);
+              onDraftChange?.(e.target.value);
+            }}
             onKeyDown={handleKeyDown}
             onInput={handleInput}
           />

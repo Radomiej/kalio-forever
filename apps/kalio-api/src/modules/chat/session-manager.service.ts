@@ -38,16 +38,62 @@ export class SessionManagerService {
   async loadHistoryForLLM(
     sessionId: string,
     options: { systemPrompt: string; toolMetas: ToolMeta[] },
-  ): Promise<{ history: ContextManagedLLMMessage[]; unboundedHistoryCount: number }> {
+  ): Promise<{ history: ContextManagedLLMMessage[]; unboundedHistoryCount: number; compacted: boolean }> {
     const rawHistory = await this.loadHistory(sessionId);
     const contextWindowSize = await this.credentialsService.getContextWindowSize();
-
-    return prepareHistoryForLLM(
+    const prepared = prepareHistoryForLLM(
       rawHistory,
       options.systemPrompt,
       contextWindowSize,
       options.toolMetas,
     );
+    const unboundedHistory = options.systemPrompt
+      ? [{ role: 'system', content: options.systemPrompt } satisfies ContextManagedLLMMessage, ...rawHistory]
+      : [...rawHistory];
+
+    return {
+      ...prepared,
+      compacted: JSON.stringify(prepared.history) !== JSON.stringify(unboundedHistory),
+    };
+  }
+
+  async loadPreviewHistoryForLLM(
+    sessionId: string,
+    options: { systemPrompt: string; toolMetas: ToolMeta[]; draftUserMessage?: string; attachments?: ChatAttachment[] },
+  ): Promise<{ history: ContextManagedLLMMessage[]; unboundedHistoryCount: number; compacted: boolean; contextWindowSize: number }> {
+    const rawHistory = await this.loadHistory(sessionId);
+    const hasDraftText = typeof options.draftUserMessage === 'string' && options.draftUserMessage.length > 0;
+    const hasDraftAttachments = Boolean(options.attachments && options.attachments.length > 0);
+    const draftHistory = hasDraftText || hasDraftAttachments
+      ? await this.toLLMMessages(sessionId, {
+          id: 'context-preview-draft',
+          sessionId,
+          role: 'user',
+          content: options.draftUserMessage ?? '',
+          ...(options.attachments && options.attachments.length > 0 ? { attachments: options.attachments } : {}),
+          createdAt: Date.now(),
+        })
+      : [];
+    const markedDraftHistory = draftHistory.map((message) => ({
+      ...message,
+      contextPreviewSource: 'draft' as const,
+    }));
+    const contextWindowSize = await this.credentialsService.getContextWindowSize();
+    const prepared = prepareHistoryForLLM(
+      [...rawHistory, ...markedDraftHistory],
+      options.systemPrompt,
+      contextWindowSize,
+      options.toolMetas,
+    );
+    const unboundedHistory = options.systemPrompt
+      ? [{ role: 'system', content: options.systemPrompt } satisfies ContextManagedLLMMessage, ...rawHistory, ...markedDraftHistory]
+      : [...rawHistory, ...markedDraftHistory];
+
+    return {
+      ...prepared,
+      compacted: JSON.stringify(prepared.history) !== JSON.stringify(unboundedHistory),
+      contextWindowSize,
+    };
   }
 
   async persistUserMessage(

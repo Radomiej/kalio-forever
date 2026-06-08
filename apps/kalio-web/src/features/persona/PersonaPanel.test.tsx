@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Persona } from '@kalio/types';
 import { PersonaPanel } from './PersonaPanel';
@@ -68,11 +68,9 @@ describe('PersonaPanel', () => {
     const saveButton = screen.getByTestId('persona-save-btn');
     expect(saveButton).toBeDisabled();
 
-    await user.type(screen.getByTestId('persona-name-input'), 'New Planner');
-    await user.clear(screen.getByTestId('persona-model-input'));
-    await user.type(screen.getByTestId('persona-model-input'), 'gpt-4o-mini');
-    await user.clear(screen.getByTestId('persona-prompt-textarea'));
-    await user.type(screen.getByTestId('persona-prompt-textarea'), 'Plan the next step before acting.');
+    fireEvent.change(screen.getByTestId('persona-name-input'), { target: { value: 'New Planner' } });
+    fireEvent.change(screen.getByTestId('persona-model-input'), { target: { value: 'gpt-4o-mini' } });
+    fireEvent.change(screen.getByTestId('persona-prompt-textarea'), { target: { value: 'Plan the next step before acting.' } });
 
     expect(saveButton).toBeEnabled();
     await user.click(saveButton);
@@ -103,13 +101,10 @@ describe('PersonaPanel', () => {
 
     const row = screen.getByTestId('persona-item');
     const scoped = within(row);
-    await user.clear(scoped.getByDisplayValue('Existing Persona'));
-    await user.type(scoped.getByPlaceholderText('Name'), 'Updated Persona');
-    await user.clear(scoped.getByDisplayValue('gpt-4o-mini'));
-    await user.type(scoped.getByPlaceholderText('Model'), 'gpt-4.1-mini');
+    fireEvent.change(scoped.getByDisplayValue('Existing Persona'), { target: { value: 'Updated Persona' } });
+    fireEvent.change(scoped.getByDisplayValue('gpt-4o-mini'), { target: { value: 'gpt-4.1-mini' } });
     const promptField = scoped.getByDisplayValue('Stay focused on the current plan.');
-    await user.clear(promptField);
-    await user.type(promptField, 'Trimmed prompt.');
+    fireEvent.change(promptField, { target: { value: 'Trimmed prompt.' } });
 
     await user.click(scoped.getByRole('button', { name: /save/i }));
 

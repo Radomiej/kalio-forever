@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import type { LLMContent, ToolMeta } from '@kalio/types';
+import type { LLMContent, MCPPolicy, ToolMeta } from '@kalio/types';
 import type { ILLMSource } from './interfaces/llm-source.interface';
 import type { EmitFn, StreamContext } from './interfaces/stream-context.interface';
 import { TurnState } from './turn-state';
@@ -11,6 +11,7 @@ import { AuditService } from './audit.service';
 import { LLM_SOURCE } from './chat.tokens';
 import { TurnErrorAlreadyEmitted } from './turn-error';
 import { RunJournalService } from './run-journal.service';
+import { ContextAssemblyService, type AssembledContext } from './context-assembly.service';
 import { PersonaService } from '../persona/persona.service';
 import { SkillsService } from '../skills/skills.service';
 import { CredentialsService } from '../credentials/credentials.service';
@@ -78,6 +79,7 @@ export class ChatService {
     private readonly credentialsService: CredentialsService,
     private readonly audit: AuditService,
     @Optional() private readonly runJournal?: RunJournalService,
+    @Optional() private readonly contextAssembly?: ContextAssemblyService,
   ) {}
 
   async handleTurn(
@@ -123,45 +125,18 @@ export class ChatService {
       await this.sessionManager.ensureSession(sessionId, personaId);
 
       // Resolve persona config for system prompt and tool filtering
-      const personaConfig = await this.personaService.getSessionConfig(personaId);
-      const systemPrompt = personaConfig?.systemPrompt ?? '';
+      const assembledContext = this.contextAssembly
+        ? await this.contextAssembly.assemble(personaId)
+        : await this.assembleContextFallback(personaId);
 
       await this.sessionManager.persistUserMessage(sessionId, content, attachments);
 
-      // Filter tools to persona's allowed skill set (empty = all tools allowed)
-      const allToolMetas = this.toolDispatch.getToolMetas();
-      const toolMetas = this.filterTools(
-        allToolMetas,
-        personaConfig?.allowedTools,
-        personaConfig?.mcpPolicy ?? 'allow_all',
-      );
-
-      // Inject active skill prompts into system prompt
-      const skillIds = personaConfig?.skillIds ?? [];
-      const activeSkills = skillIds.length > 0
-        ? await this.skillsService.findByIds(skillIds)
-        : [];
-      const skillsSection = activeSkills.length > 0
-        ? `\n\n## Active skills\n` +
-          activeSkills.map((s) => `### ${s.name}\n${s.description}\n\n${s.prompt}`).join('\n\n')
-        : '';
-
-      // Append a compact tool listing to the system prompt so the agent
-      // knows what tools are available without calling list_tools first.
-      const toolsSection = toolMetas.length > 0
-        ? `\n\n## Available tools (${toolMetas.length})\n` +
-          toolMetas.map(t => {
-            const desc = t.description.length > 80
-              ? t.description.slice(0, 79) + '…'
-              : t.description;
-            return `- ${t.name}: ${desc}`;
-          }).join('\n')
-        : '';
-      const effectiveSystemPrompt = systemPrompt + skillsSection + toolsSection;
+      const toolMetas = assembledContext.toolMetas;
+      const effectiveSystemPrompt = assembledContext.effectiveSystemPrompt;
 
       trackingEmit('chat:context', {
         sessionId,
-        systemPrompt,
+        systemPrompt: effectiveSystemPrompt,
         toolNames: toolMetas.map(t => t.name),
       });
 
@@ -244,6 +219,7 @@ export class ChatService {
           tools: toolMetas,
           sessionId,
           messageId: iterationMessageId,
+          model: assembledContext.model,
           abortSignal: controller.signal,
         };
 
@@ -427,30 +403,59 @@ export class ChatService {
     }
   }
 
-  private filterTools(tools: ToolMeta[], allowedTools?: string[], mcpPolicy: import('@kalio/types').MCPPolicy = 'allow_all'): ToolMeta[] {
-    const nativeTools = tools.filter(t => !t.name.startsWith('mcp_'));
-    const mcpTools = tools.filter(t => t.name.startsWith('mcp_'));
+  private async assembleContextFallback(personaId: string): Promise<AssembledContext> {
+    const personaConfig = await this.personaService.getSessionConfig(personaId);
+    const systemPrompt = personaConfig?.systemPrompt ?? '';
+    const toolMetas = this.filterTools(
+      this.toolDispatch.getToolMetas(),
+      personaConfig?.allowedTools,
+      personaConfig?.mcpPolicy ?? 'allow_all',
+    );
+    const skillIds = personaConfig?.skillIds ?? [];
+    const activeSkills = skillIds.length > 0
+      ? await this.skillsService.findByIds(skillIds)
+      : [];
+    const skillsSection = activeSkills.length > 0
+      ? `\n\n## Active skills\n` +
+        activeSkills.map((skill) => `### ${skill.name}\n${skill.description}\n\n${skill.prompt}`).join('\n\n')
+      : '';
+    const toolsSection = toolMetas.length > 0
+      ? `\n\n## Available tools (${toolMetas.length})\n` +
+        toolMetas.map((toolMeta) => {
+          const desc = toolMeta.description.length > 80
+            ? toolMeta.description.slice(0, 79) + '...'
+            : toolMeta.description;
+          return `- ${toolMeta.name}: ${desc}`;
+        }).join('\n')
+      : '';
 
-    // Native tools: empty allowedTools = all allowed; otherwise filter by name list
+    return {
+      personaConfig: personaConfig ?? null,
+      model: personaConfig?.model ?? '',
+      systemPrompt,
+      effectiveSystemPrompt: systemPrompt + skillsSection + toolsSection,
+      toolMetas,
+      activeSkills,
+    };
+  }
+
+  private filterTools(tools: ToolMeta[], allowedTools?: string[], mcpPolicy: MCPPolicy = 'allow_all'): ToolMeta[] {
+    const nativeTools = tools.filter((toolMeta) => !toolMeta.name.startsWith('mcp_'));
+    const mcpTools = tools.filter((toolMeta) => toolMeta.name.startsWith('mcp_'));
     const filteredNative = !allowedTools || allowedTools.length === 0
       ? nativeTools
-      : nativeTools.filter(t => allowedTools.includes(t.name));
+      : nativeTools.filter((toolMeta) => allowedTools.includes(toolMeta.name));
 
-    // MCP tools: controlled by policy
     let filteredMcp: ToolMeta[];
     if (mcpPolicy === 'allow_all') {
       filteredMcp = mcpTools;
     } else if (mcpPolicy === 'deny_all') {
       filteredMcp = [];
     } else {
-      // allow_list: specific mcp_* names stored in allowedTools array
       const toolSet = new Set(allowedTools ?? []);
-      filteredMcp = mcpTools.filter(t => toolSet.has(t.name));
+      filteredMcp = mcpTools.filter((toolMeta) => toolSet.has(toolMeta.name));
     }
 
     return [...filteredNative, ...filteredMcp];
   }
 }
-
-
-

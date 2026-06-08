@@ -4,7 +4,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ArchitectureSchema } from '@kalio/types';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LAB_PRESET_IDS } from './architecture-seed-schemas.lab-presets';
 import { ArchitectureRegistryService } from './architecture-registry.service';
 
@@ -90,7 +90,6 @@ describe('ArchitectureRegistryService', () => {
     expect(goalMaster?.roleSlots.map((slot) => slot.id)).toEqual([
       'orchestrator',
       'implementer',
-      'materializer',
       'verifier',
       'tester',
       'goal_master',
@@ -98,8 +97,7 @@ describe('ArchitectureRegistryService', () => {
     ]);
     expect(goalMaster?.edges.map((edge) => `${edge.fromNodeId}->${edge.toNodeId}`)).toEqual([
       'orchestrator->implementer',
-      'implementer->materializer',
-      'materializer->verifier',
+      'implementer->verifier',
       'verifier->tester',
       'tester->goal-master',
       'goal-master->final-artifact',
@@ -158,7 +156,8 @@ describe('ArchitectureRegistryService', () => {
     expect(slotsById.get('orchestrator')?.description).toMatch(/sub-?agents?.*CLI|CLI.*sub-?agents?/i);
     expect(slotsById.get('orchestrator')?.defaultPersonaId).toBe('agent-orchestrator');
     expect(slotsById.get('implementer')?.defaultPersonaId).toBe('agent-implementer');
-    expect(slotsById.get('materializer')?.description).toMatch(/CLI child/i);
+    expect(slotsById.get('implementer')?.description).toMatch(/CLI child/i);
+    expect(slotsById.get('implementer')?.slotType).toBe('tool_executor');
     expect(slotsById.get('verifier')?.description).toMatch(/CLI child/i);
     expect(slotsById.get('verifier')?.defaultPersonaId).toBe('agent-qa');
     expect(slotsById.get('goal_master')?.description).toMatch(/routes back/i);
@@ -417,6 +416,27 @@ describe('ArchitectureRegistryService', () => {
     );
     await expect(readFile(join(registryPath, 'schemas', 'strategic-decision-council-variant-2.json'), 'utf8')).resolves.toContain(
       'strategic-decision-council-variant-2',
+    );
+  });
+
+  it('continues a variant write queue after a previous queued promise rejects', async () => {
+    const registryPath = await makeTempRegistryPath(tempDirs);
+    const service = new ArchitectureRegistryService(makeConfig(registryPath));
+    const internals = service as unknown as {
+      variantWriteQueues: Map<string, Promise<void>>;
+      logger: { warn: (message: string, error: unknown) => void };
+    };
+    const warnSpy = vi.spyOn(internals.logger, 'warn').mockImplementation(() => undefined);
+    internals.variantWriteQueues.set('strategic-decision-council', Promise.reject(new Error('previous write failed')));
+
+    const variant = await service.createVariant('strategic-decision-council', {
+      name: 'Recovered queue council',
+    });
+
+    expect(variant?.id).toBe('strategic-decision-council-variant-1');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Previous architecture variant write failed'),
+      expect.any(Error),
     );
   });
 

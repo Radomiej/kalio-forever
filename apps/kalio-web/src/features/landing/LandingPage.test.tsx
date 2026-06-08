@@ -10,6 +10,11 @@ const {
   getRAApps,
   getRAAppGroups,
   apiPost,
+  confirmTool,
+  cancelTool,
+  setPendingConfirmation,
+  updateToolActivity,
+  agentStoreState,
 } = vi.hoisted(() => ({
   addSession: vi.fn(),
   setActiveSession: vi.fn(),
@@ -17,6 +22,28 @@ const {
   getRAApps: vi.fn<() => Promise<RAAppSummary[]>>(),
   getRAAppGroups: vi.fn<() => Promise<RAAppGroup[]>>(),
   apiPost: vi.fn(),
+  confirmTool: vi.fn(),
+  cancelTool: vi.fn(),
+  setPendingConfirmation: vi.fn(),
+  updateToolActivity: vi.fn(),
+  agentStoreState: {
+    pendingConfirmations: {} as Record<string, {
+      requestId: string;
+      toolCallId: string;
+      sessionId: string;
+      toolName: string;
+      args: Record<string, unknown>;
+      timeoutMs: number;
+      agentRun?: { label?: string };
+    }>,
+    sessionToolActivities: {} as Record<string, Array<{
+      callId: string;
+      toolName: string;
+      args: Record<string, unknown>;
+      status: string;
+      startedAt: number;
+    }>>,
+  },
 }));
 
 vi.mock('./QuickChatWidget', () => ({
@@ -42,10 +69,39 @@ vi.mock('./useTileIcons', () => ({
 
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: (selector: (state: {
+    sessions: Array<{ id: string; title: string; updatedAt: number }>;
     addSession: typeof addSession;
     setActiveSession: typeof setActiveSession;
     setPendingMessage: typeof setPendingMessage;
-  }) => unknown) => selector({ addSession, setActiveSession, setPendingMessage }),
+  }) => unknown) => selector({
+    sessions: [
+      { id: 'session-hitl', title: 'Agent delivery run', updatedAt: 1 },
+    ],
+    addSession,
+    setActiveSession,
+    setPendingMessage,
+  }),
+}));
+
+vi.mock('../../store/agentStore', () => ({
+  useAgentStore: (selector: (state: {
+    pendingConfirmations: typeof agentStoreState.pendingConfirmations;
+    sessionToolActivities: typeof agentStoreState.sessionToolActivities;
+    setPendingConfirmation: typeof setPendingConfirmation;
+    updateToolActivity: typeof updateToolActivity;
+  }) => unknown) => selector({
+    pendingConfirmations: agentStoreState.pendingConfirmations,
+    sessionToolActivities: agentStoreState.sessionToolActivities,
+    setPendingConfirmation,
+    updateToolActivity,
+  }),
+}));
+
+vi.mock('../../services/eventBus', () => ({
+  eventBus: {
+    confirmTool,
+    cancelTool,
+  },
 }));
 
 vi.mock('../../services/apiClient', () => ({
@@ -74,6 +130,8 @@ function makeSummary(id: string, source: 'core' | 'user', name = id): RAAppSumma
 describe('LandingPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    agentStoreState.pendingConfirmations = {};
+    agentStoreState.sessionToolActivities = {};
   });
 
   it('renders home tiles from the same catalog system as RA-App manager', async () => {
@@ -104,6 +162,11 @@ describe('LandingPage', () => {
     ]);
 
     render(<LandingPage onNavigateToChat={() => undefined} />);
+
+    expect(screen.getByTestId('home-hitl-inbox')).toBeInTheDocument();
+    expect(screen.getByText('Ongoing actions')).toBeInTheDocument();
+    expect(screen.getByText('Nothing to do. Waiting for agents that need your approval.')).toBeInTheDocument();
+    expect(screen.getByTestId('quick-chat-widget')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(getRAApps).toHaveBeenCalledTimes(1);
@@ -235,5 +298,89 @@ describe('LandingPage', () => {
 
     expect(await screen.findByTestId('tile-core-calc')).toBeInTheDocument();
     expect(screen.queryByTestId('tile-undefined')).toBeNull();
+  });
+
+  it('renders Home HITL inbox and approves a pending tool with an optional note', async () => {
+    getRAApps.mockResolvedValue([]);
+    getRAAppGroups.mockResolvedValue([]);
+    agentStoreState.pendingConfirmations = {
+      'session-hitl': {
+        requestId: 'req-approve',
+        toolCallId: 'call-approve',
+        sessionId: 'session-hitl',
+        toolName: 'fs_write',
+        args: { filePath: 'README.md', content: 'Updated' },
+        timeoutMs: 0,
+        agentRun: { label: 'Implementer' },
+      },
+    };
+    agentStoreState.sessionToolActivities = {
+      'session-hitl': [
+        {
+          callId: 'call-approve',
+          toolName: 'fs_write',
+          args: { filePath: 'README.md', content: 'Updated' },
+          status: 'awaiting_confirmation',
+          startedAt: 1,
+        },
+      ],
+    };
+
+    render(<LandingPage onNavigateToChat={() => undefined} />);
+
+    expect(await screen.findByTestId('home-hitl-inbox')).toBeInTheDocument();
+    expect(screen.getByText('Agent delivery run')).toBeInTheDocument();
+    expect(screen.getByText('Implementer')).toBeInTheDocument();
+    expect(screen.getByText('fs_write')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('home-hitl-note-req-approve'), {
+      target: { value: 'Looks safe, continue.' },
+    });
+    fireEvent.click(screen.getByTestId('home-hitl-approve-req-approve'));
+
+    expect(updateToolActivity).toHaveBeenCalledWith('call-approve', {
+      status: 'running',
+      startedAt: expect.any(Number),
+    });
+    expect(confirmTool).toHaveBeenCalledWith({
+      requestId: 'req-approve',
+      sessionId: 'session-hitl',
+      message: 'Looks safe, continue.',
+    });
+    expect(setPendingConfirmation).toHaveBeenCalledWith('session-hitl', null);
+  });
+
+  it('rejects a pending tool from Home and sends the rejection note to the agent', async () => {
+    getRAApps.mockResolvedValue([]);
+    getRAAppGroups.mockResolvedValue([]);
+    agentStoreState.pendingConfirmations = {
+      'session-hitl': {
+        requestId: 'req-reject',
+        toolCallId: 'call-reject',
+        sessionId: 'session-hitl',
+        toolName: 'terminal_spawn',
+        args: { command: 'pnpm build' },
+        timeoutMs: 600000,
+      },
+    };
+
+    render(<LandingPage onNavigateToChat={() => undefined} />);
+
+    await screen.findByTestId('home-hitl-inbox');
+    fireEvent.change(screen.getByTestId('home-hitl-note-req-reject'), {
+      target: { value: 'Do not run commands; explain the plan instead.' },
+    });
+    fireEvent.click(screen.getByTestId('home-hitl-reject-req-reject'));
+
+    expect(updateToolActivity).toHaveBeenCalledWith('call-reject', {
+      status: 'cancelled',
+      finishedAt: expect.any(Number),
+    });
+    expect(cancelTool).toHaveBeenCalledWith({
+      requestId: 'req-reject',
+      sessionId: 'session-hitl',
+      message: 'Do not run commands; explain the plan instead.',
+    });
+    expect(setPendingConfirmation).toHaveBeenCalledWith('session-hitl', null);
   });
 });

@@ -5,6 +5,7 @@ import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { backendHealth } from '../../../services/backendHealth';
 import { eventBus } from '../../../services/eventBus';
+import { apiClient } from '../../../services/apiClient';
 import { buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
 import { shouldRefreshVfsForToolResult } from '../ChatInterface.Parts';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
@@ -19,6 +20,7 @@ interface UseChatSocketEventsOptions {
   setRecoveryNotice: (value: string | null) => void;
   setVfsRefreshSignal: (updater: (value: number) => number) => void;
   toolArgProgressSeenRef: RefObject<Record<string, Set<string>>>;
+  onContextInvalidated?: () => void;
 }
 
 export function useChatSocketEvents({
@@ -30,6 +32,7 @@ export function useChatSocketEvents({
   setRecoveryNotice,
   setVfsRefreshSignal,
   toolArgProgressSeenRef,
+  onContextInvalidated,
 }: UseChatSocketEventsOptions): void {
   const {
     appendChunk,
@@ -117,6 +120,7 @@ export function useChatSocketEvents({
         setStreaming(false);
         requestGeneratedTitleIfNeeded(payload.sessionId);
       }
+      onContextInvalidated?.();
     });
 
     const offError = eventBus.onError((payload) => {
@@ -284,6 +288,7 @@ export function useChatSocketEvents({
 
     const offContext = eventBus.onContext((payload) => {
       setContext(payload.systemPrompt, payload.toolNames, payload.sessionId);
+      onContextInvalidated?.();
     });
 
     const offToolResult = eventBus.onToolResult((result) => {
@@ -311,6 +316,7 @@ export function useChatSocketEvents({
         };
         addMessage(toolResultMsg);
       }
+      onContextInvalidated?.();
       if (
         resultSessionId === activeSessionId
         && canReleaseComposerAfterToolResult({
@@ -361,10 +367,10 @@ export function useChatSocketEvents({
     });
 
     const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
-      const sid = useSessionStore.getState().activeSessionId;
+      const sid = payload.sessionId;
       if (!sid) return;
-      const { messages, setMessages } = useSessionStore.getState();
-      const updated = messages.map((message) => {
+      const { getSessionMessages, setMessages } = useSessionStore.getState();
+      const updated = getSessionMessages(sid).map((message) => {
         if (message.toolCallId !== payload.toolCallId || message.role !== 'tool_result') return message;
         try {
           const data = JSON.parse(message.content) as Record<string, unknown>;
@@ -377,7 +383,7 @@ export function useChatSocketEvents({
           return message;
         }
       });
-      setMessages(updated);
+      setMessages(updated, sid);
     });
 
     const offConnectionState = eventBus.onConnectionState((state) => {
@@ -403,9 +409,10 @@ export function useChatSocketEvents({
         removeActiveAgentLoop(sid);
         setPendingConfirmation(sid, null);
         eventBus.identifySession(sid);
-        fetch(`/api/sessions/${sid}/messages`)
-          .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-          .then((data: ChatMessage[]) => {
+        apiClient
+          .get<ChatMessage[]>(`/api/sessions/${sid}/messages`)
+          .then((response) => {
+            const data = response.data;
             if (useSessionStore.getState().activeSessionId !== sid) return;
             const { setMessages, setAgentTurns } = useSessionStore.getState();
             const currentMessages = useSessionStore.getState().getSessionMessages(sid);
@@ -414,6 +421,7 @@ export function useChatSocketEvents({
             if (!useAgentStore.getState().hasActiveLoopForSession(sid)) {
               setAgentTurns(buildTurnsFromHistory(mergedMessages, sid));
             }
+            onContextInvalidated?.();
           })
           .catch((err: unknown) => {
             console.error('[ChatInterface] reconnect history reload failed', err instanceof Error ? err : new Error(String(err)));
@@ -460,6 +468,7 @@ export function useChatSocketEvents({
     removeActiveAgentLoop,
     removeLastAgentTurn,
     requestGeneratedTitleIfNeeded,
+    onContextInvalidated,
     setAwaitingFirstChunk,
     setConnectionState,
     setContext,

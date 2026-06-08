@@ -15,15 +15,22 @@ describe('groupToolsByPrefix', () => {
   it('groups tools into the expected buckets in declaration order', () => {
     const result = groupToolsByPrefix([
       makeTool('run_subagent'),
+      makeTool('spawn_subagent'),
+      makeTool('message_subagent'),
+      makeTool('run_cli_agent'),
       makeTool('spawn_cli_agent'),
       makeTool('message_cli_agent'),
       makeTool('get_cli_agent_status'),
       makeTool('stop_cli_agent'),
+      makeTool('run_sub_agentflow'),
+      makeTool('wait_for'),
+      makeTool('escalate'),
       makeTool('vfs_read'),
       makeTool('fs_write'),
       makeTool('kv_get'),
       makeTool('terminal_exec'),
       makeTool('run_raapp'),
+      makeTool('design_preview'),
       makeTool('memory_search'),
       makeTool('grep_search'),
       makeTool('web_search'),
@@ -34,12 +41,16 @@ describe('groupToolsByPrefix', () => {
     ]);
 
     expect(result.map((group) => group.label)).toEqual([
-      'Agent',
+      'Subagents',
+      'CLI Agents',
+      'Agent Workflows',
+      'Security & Audit',
       'Virtual Filesystem',
       'Filesystem',
       'Key-Value Store',
       'Terminal',
       'RAApp',
+      'Preview',
       'Memory',
       'Search',
       'Web',
@@ -51,10 +62,25 @@ describe('groupToolsByPrefix', () => {
 
     expect(result[0]?.tools.map((tool) => tool.name)).toEqual([
       'run_subagent',
+      'spawn_subagent',
+      'message_subagent',
+    ]);
+
+    expect(result[1]?.tools.map((tool) => tool.name)).toEqual([
+      'run_cli_agent',
       'spawn_cli_agent',
       'message_cli_agent',
       'get_cli_agent_status',
       'stop_cli_agent',
+    ]);
+
+    expect(result[2]?.tools.map((tool) => tool.name)).toEqual([
+      'run_sub_agentflow',
+      'wait_for',
+    ]);
+
+    expect(result[3]?.tools.map((tool) => tool.name)).toEqual([
+      'escalate',
     ]);
   });
 
@@ -83,11 +109,11 @@ describe('groupToolsByPrefix', () => {
     ]);
 
     expect(result).toHaveLength(1);
-    expect(result[0]?.label).toBe('Agent');
+    expect(result[0]?.label).toBe('CLI Agents');
     expect(result[0]?.tools).toHaveLength(2);
   });
 
-  it('keeps durable CLI session tools in the Agent bucket', () => {
+  it('keeps durable CLI session tools in the CLI Agents bucket', () => {
     const result = groupToolsByPrefix([
       makeTool('spawn_cli_agent'),
       makeTool('message_cli_agent'),
@@ -96,7 +122,7 @@ describe('groupToolsByPrefix', () => {
       makeTool('custom_tool'),
     ]);
 
-    expect(result[0]).toMatchObject({ label: 'Agent' });
+    expect(result[0]).toMatchObject({ label: 'CLI Agents' });
     expect(result[0]?.tools.map((tool) => tool.name)).toEqual([
       'spawn_cli_agent',
       'message_cli_agent',

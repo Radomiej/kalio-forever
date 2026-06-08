@@ -119,14 +119,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CI: 'true'
-      PLAYWRIGHT_BASE_URL: http://localhost:5288
-      PLAYWRIGHT_API_ORIGIN: http://localhost:3316
-      TEST_API_URL: http://localhost:3316/api
       LLM_PROVIDER: mock
       CREDENTIALS_MASTER_KEY: ci-test-master-key-32-chars-minimum
-      WORKSPACE_ROOT: /tmp/kalio-ci-workspace
-      DATABASE_PATH: /tmp/kalio-ci.db
-      MEMORY_DB_PATH: /tmp/kalio-ci-memory
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -150,7 +144,7 @@ jobs:
         run: pnpm --filter @kalio/e2e exec playwright install --with-deps chromium
 
       - name: Smoke E2E gate
-        run: pnpm --filter @kalio/e2e exec playwright test --project=chromium
+        run: pnpm --filter @kalio/e2e test:e2e -- --project=chromium
 
   quality-gate:
     runs-on: ubuntu-latest

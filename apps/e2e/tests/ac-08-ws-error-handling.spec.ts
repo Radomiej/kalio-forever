@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE } from './helpers/test-config';
+import {
+  API_BASE,
+  expectComposerEnabled,
+  selectSession,
+  sendMessageFromComposer,
+} from './helpers/test-config';
 
 // AC-08: ChatGateway disconnects gracefully and emits error event
 test.describe('AC-08: WebSocket error handling', () => {
@@ -12,18 +17,13 @@ test.describe('AC-08: WebSocket error handling', () => {
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC08 Error Banner' }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC08 Error Banner' }).first().click();
+    await selectSession(page, session.id, 'AC08 Error Banner');
 
     // Delete session in DB so next send triggers SESSION_NOT_FOUND on backend
     await request.delete(`${API_BASE}/sessions/${session.id}`);
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
-    await chatInput.fill('trigger error');
-    await page.getByTestId('chat-send-btn').click();
+    await expectComposerEnabled(page, 5000);
+    await sendMessageFromComposer(page, 'trigger error');
 
     // Error banner must appear (proves chat:error event reaches the frontend)
     await expect(page.getByTestId('chat-error')).toBeVisible({ timeout: 10_000 });
@@ -37,20 +37,15 @@ test.describe('AC-08: WebSocket error handling', () => {
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC08 Streaming Recovery' }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC08 Streaming Recovery' }).first().click();
+    await selectSession(page, session.id, 'AC08 Streaming Recovery');
 
     await request.delete(`${API_BASE}/sessions/${session.id}`);
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
-    await chatInput.fill('recovery test');
-    await page.getByTestId('chat-send-btn').click();
+    await expectComposerEnabled(page, 5000);
+    await sendMessageFromComposer(page, 'recovery test');
 
     // Input must re-enable after error (not stuck in streaming state)
-    await expect(chatInput).toBeEnabled({ timeout: 10_000 });
+    await expectComposerEnabled(page, 10_000);
   });
 
   test('user can send another message after an error', async ({ page, request }) => {
@@ -61,22 +56,17 @@ test.describe('AC-08: WebSocket error handling', () => {
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC08 Resend' }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC08 Resend' }).first().click();
+    await selectSession(page, session.id, 'AC08 Resend');
 
     await request.delete(`${API_BASE}/sessions/${session.id}`);
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
-    await chatInput.fill('first attempt');
-    await page.getByTestId('chat-send-btn').click();
+    await expectComposerEnabled(page, 5000);
+    await sendMessageFromComposer(page, 'first attempt');
     await expect(page.getByTestId('chat-error')).toBeVisible({ timeout: 10_000 });
 
     // Dismiss error and verify we can type again
     await page.getByTestId('chat-error').getByRole('button').click();
-    await expect(chatInput).toBeEnabled();
+    const chatInput = await expectComposerEnabled(page, 10_000);
     await chatInput.fill('second attempt');
     // Verify input accepts text — not locked
     await expect(chatInput).toHaveValue('second attempt');

@@ -135,7 +135,7 @@ describe('MCPExternalImportService', () => {
   it('marks duplicate signatures within the same discovery scan and skips duplicate batch imports', async () => {
     accessMock.mockImplementation(async (path) => {
       const normalized = String(path).toLowerCase();
-      if (normalized.includes('.cursor') || normalized.includes('code\\user')) {
+      if (normalized.includes('.cursor') || normalized.includes('code\\user') || normalized.includes('code/user')) {
         return undefined;
       }
       throw new Error('ENOENT');
@@ -152,7 +152,7 @@ describe('MCPExternalImportService', () => {
           },
         });
       }
-      if (normalized.includes('code\\user')) {
+      if (normalized.includes('code\\user') || normalized.includes('code/user')) {
         return JSON.stringify({
           servers: {
             localToolsAgain: {
@@ -183,8 +183,13 @@ describe('MCPExternalImportService', () => {
   });
 
   it('discovers workspace VS Code MCP configs for the Kalio Settings import flow', async () => {
-    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('C:\\Projekty\\kalio-forever\\apps\\kalio-api');
-    const workspaceConfig = 'c:/projekty/kalio-forever/.vscode/mcp.json';
+    const mockedCwd = process.platform === 'win32'
+      ? 'C:\\Projekty\\kalio-forever\\apps\\kalio-api'
+      : '/workspace/kalio-forever/apps/kalio-api';
+    const workspaceConfig = process.platform === 'win32'
+      ? 'c:/projekty/kalio-forever/.vscode/mcp.json'
+      : '/workspace/kalio-forever/.vscode/mcp.json';
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(mockedCwd);
 
     accessMock.mockImplementation(async (path) => {
       const normalized = String(path).toLowerCase().replaceAll('\\', '/');

@@ -2,6 +2,15 @@ import type { ArchitectureGraphProjection, ArchitectureSchema, ChatMessage } fro
 import type { SessionsService } from '../chat/sessions.service';
 import type { ArchitectureRegistryService } from './architecture-registry.service';
 import { isCompletedCliChildStatus } from './architecture-cli-child-status';
+import {
+  eventIdFromToolCallId,
+  isCliAgentToolName,
+  normalizeCliStatus,
+  normalizeIdentifier,
+  parseJsonObject,
+  stringField,
+  targetPathsFrom,
+} from './architecture-durable-graph.utils';
 
 export async function reconstructDurableArchitectureGraph(
   runId: string,
@@ -241,69 +250,6 @@ function inferParentFromToolCall(
   return node ? { nodeId: node.id, roleSlotId: node.roleSlotId } : {};
 }
 
-function normalizeIdentifier(value: string): string {
-  return value.replace(/[_-]/g, '').toLowerCase();
-}
-
-function isCliAgentToolName(name: string): boolean {
-  return name === 'run_cli_agent'
-    || name === 'spawn_cli_agent'
-    || name === 'message_cli_agent'
-    || name === 'get_cli_agent_status';
-}
-
-function parseJsonObject(content: string): Record<string, unknown> | null {
-  try {
-    const parsed: unknown = JSON.parse(content);
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function targetPathsFrom(
-  toolName: string,
-  args: Record<string, unknown>,
-  result: Record<string, unknown>,
-): string[] | undefined {
-  const expected = stringArrayField(args, 'expectedChangedFiles') ?? stringArrayField(result, 'expectedChangedFiles');
-  if (expected) {
-    return expected;
-  }
-  if (toolName === 'get_cli_agent_status') {
-    return undefined;
-  }
-  const workdir = stringField(result, 'workdir') ?? stringField(args, 'workdir');
-  return workdir ? [workdir] : undefined;
-}
-
-function stringArrayField(record: Record<string, unknown>, key: string): string[] | undefined {
-  const value = record[key];
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const values = value.filter((item): item is string => typeof item === 'string' && item.length > 0);
-  return values.length > 0 ? values : undefined;
-}
-
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-function normalizeCliStatus(status: string | undefined): NonNullable<ArchitectureGraphProjection['childAgents']>[number]['status'] | undefined {
-  if (status === 'idle' || status === 'running' || status === 'completed' || status === 'failed' || status === 'stopped') {
-    return status;
-  }
-  if (status === 'success' || status === 'exited') {
-    return 'completed';
-  }
-  if (status === 'error') {
-    return 'failed';
-  }
-  return undefined;
-}
-
 function schemaForPersistedRun(
   schemaId: string | undefined,
   messages: ChatMessage[],
@@ -388,13 +334,4 @@ function markCompletedParallelNodes(
       const childEventIds = outgoing.flatMap((edge) => eventIdsByNodeId.get(edge.toNodeId) ?? []);
       eventIdsByNodeId.set(node.id, Array.from(new Set(childEventIds)));
     });
-}
-
-function eventIdFromToolCallId(callId: string): string {
-  const architecturePrefix = callId.match(/^architecture:[^:]+:(.+)$/);
-  return architecturePrefix?.[1] ?? callId;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

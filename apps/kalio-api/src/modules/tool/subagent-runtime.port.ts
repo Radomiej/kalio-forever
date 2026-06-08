@@ -13,6 +13,7 @@ export interface RunSubagentRequest {
   autoApproveTools?: string[];
   childSessionId?: string;
   personaId?: string;
+  model?: string;
   availableTools: ToolMeta[];
   timeoutMs: number;
   maxIterations?: number;

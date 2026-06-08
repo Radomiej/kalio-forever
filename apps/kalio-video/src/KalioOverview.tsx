@@ -1,7 +1,7 @@
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 
 const assistantText =
-  'Jasne. Sprawdzam strukturę repo, składam demo, uruchamiam render Remotion i podpinam statyczny build pod GitHub Pages.';
+  'Got it. I am scanning the repo, composing the demo, rendering the Remotion trailer, and preparing the static GitHub Pages build.';
 
 const toolRuns = [
   { name: 'read_file', detail: 'apps/kalio-web/src/components', start: 34, done: 74 },
@@ -11,12 +11,12 @@ const toolRuns = [
 ];
 
 const graphNodes = [
-  { label: 'Goal', x: 190, y: 258, start: 150 },
-  { label: 'Plan', x: 520, y: 142, start: 166 },
-  { label: 'Chat Stream', x: 850, y: 258, start: 184 },
-  { label: 'Tool Calls', x: 520, y: 436, start: 202 },
-  { label: 'Review', x: 850, y: 510, start: 222 },
-  { label: 'Deployable Demo', x: 1180, y: 436, start: 242 },
+  { label: 'Goal', sublabel: 'request', x: 90, y: 278, start: 150 },
+  { label: 'Plan', sublabel: 'steps', x: 394, y: 128, start: 166 },
+  { label: 'Chat Stream', sublabel: 'tokens', x: 704, y: 278, start: 184 },
+  { label: 'Tool Calls', sublabel: 'evidence', x: 394, y: 458, start: 202 },
+  { label: 'Review', sublabel: 'checks', x: 704, y: 536, start: 222 },
+  { label: 'Demo Build', sublabel: 'artifact', x: 1014, y: 458, start: 242 },
 ];
 
 const edges = [
@@ -37,10 +37,12 @@ function visible(frame: number, start: number, end: number) {
 
 function ChatMessage() {
   const frame = useCurrentFrame();
-  const typedCharacters = Math.floor(interpolate(frame, [16, 130], [0, assistantText.length], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  }));
+  const typedCharacters = Math.floor(
+    interpolate(frame, [16, 130], [0, assistantText.length], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp',
+    }),
+  );
   const cursorVisible = Math.floor(frame / 10) % 2 === 0 && typedCharacters < assistantText.length;
 
   return (
@@ -59,7 +61,7 @@ function ChatMessage() {
           fontWeight: 700,
         }}
       >
-        Zrób publiczne demo Kalio i pokaż, jak agent pracuje.
+        Build a public Kalio demo and show how the agent works.
       </div>
       <div
         style={{
@@ -75,7 +77,7 @@ function ChatMessage() {
         <div style={{ color: '#7dd3fc', fontSize: 18, fontWeight: 900, marginBottom: 12 }}>KALIO AGENT</div>
         <div style={{ color: '#e2e8f0', fontSize: 28, lineHeight: 1.36, fontWeight: 650 }}>
           {assistantText.slice(0, typedCharacters)}
-          <span style={{ color: '#38bdf8', opacity: cursorVisible ? 1 : 0 }}>▌</span>
+          <span style={{ color: '#38bdf8', opacity: cursorVisible ? 1 : 0 }}>|</span>
         </div>
       </div>
     </div>
@@ -144,6 +146,9 @@ function ExecutionGraph() {
   const frame = useCurrentFrame();
   const graphOpacity = visible(frame, 138, 172);
   const graphScale = interpolate(graphOpacity, [0, 1], [0.94, 1]);
+  const nodeWidth = 222;
+  const nodeHeight = 92;
+  const pinRadius = 8;
 
   return (
     <div
@@ -155,55 +160,91 @@ function ExecutionGraph() {
         padding: 30,
       }}
     >
-      <svg width="100%" height="100%" viewBox="0 0 1600 720" style={{ position: 'absolute', inset: 0 }}>
+      <svg width="100%" height="100%" viewBox="0 0 1326 720" style={{ position: 'absolute', inset: 0 }}>
+        <defs>
+          <filter id="activeGlow" x="-40%" y="-60%" width="180%" height="220%">
+            <feGaussianBlur stdDeviation="14" result="blur" />
+            <feFlood floodColor="#0ea5e9" floodOpacity="0.38" />
+            <feComposite in2="blur" operator="in" />
+            <feMerge>
+              <feMergeNode />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <linearGradient id="edgeGradient" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.32" />
+            <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0.72" />
+          </linearGradient>
+        </defs>
         {edges.map(([from, to]) => {
           const a = graphNodes[from];
           const b = graphNodes[to];
           const edgeOpacity = visible(frame, Math.max(a.start, b.start) - 10, Math.max(a.start, b.start) + 16);
+          const startX = a.x + nodeWidth;
+          const startY = a.y + nodeHeight / 2;
+          const endX = b.x;
+          const endY = b.y + nodeHeight / 2;
+          const midX = startX + Math.max(80, (endX - startX) / 2);
+
           return (
-            <line
+            <path
               key={`${a.label}-${b.label}`}
-              x1={a.x + 140}
-              y1={a.y + 48}
-              x2={b.x + 140}
-              y2={b.y + 48}
-              stroke="rgba(56, 189, 248, 0.45)"
-              strokeWidth="5"
+              d={`M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`}
+              fill="none"
+              stroke="url(#edgeGradient)"
               strokeLinecap="round"
+              strokeWidth="4"
               opacity={edgeOpacity}
             />
           );
         })}
+        {graphNodes.map((node, index) => {
+          const nodeOpacity = visible(frame, node.start, node.start + 18);
+          const active = frame >= node.start && frame < node.start + 44;
+          const accent = index === graphNodes.length - 1 ? '#2dd4bf' : '#38bdf8';
+          const fill = active ? 'rgba(14, 165, 233, 0.22)' : 'rgba(15, 23, 42, 0.92)';
+          const stroke = active ? 'rgba(125, 211, 252, 0.95)' : 'rgba(148, 163, 184, 0.30)';
+          const translateY = interpolate(nodeOpacity, [0, 1], [22, 0]);
+
+          return (
+            <g key={node.label} opacity={nodeOpacity} transform={`translate(0 ${translateY})`}>
+              <rect
+                x={node.x}
+                y={node.y}
+                width={nodeWidth}
+                height={nodeHeight}
+                rx="18"
+                fill={fill}
+                stroke={stroke}
+                strokeWidth="2"
+                filter={active ? 'url(#activeGlow)' : undefined}
+              />
+              <circle
+                cx={node.x}
+                cy={node.y + nodeHeight / 2}
+                r={pinRadius}
+                fill="#020617"
+                stroke={accent}
+                strokeWidth="4"
+              />
+              <circle
+                cx={node.x + nodeWidth}
+                cy={node.y + nodeHeight / 2}
+                r={pinRadius}
+                fill="#020617"
+                stroke={accent}
+                strokeWidth="4"
+              />
+              <text x={node.x + 26} y={node.y + 40} fill="#f8fafc" fontSize="25" fontWeight="900">
+                {node.label}
+              </text>
+              <text x={node.x + 26} y={node.y + 66} fill="rgba(203, 213, 225, 0.68)" fontSize="17" fontWeight="800">
+                {node.sublabel}
+              </text>
+            </g>
+          );
+        })}
       </svg>
-      {graphNodes.map((node, index) => {
-        const nodeOpacity = visible(frame, node.start, node.start + 18);
-        const active = frame >= node.start && frame < node.start + 44;
-        return (
-          <div
-            key={node.label}
-            style={{
-              position: 'absolute',
-              left: node.x,
-              top: node.y,
-              width: 280,
-              minHeight: 96,
-              display: 'grid',
-              placeItems: 'center',
-              opacity: nodeOpacity,
-              transform: `translateY(${interpolate(nodeOpacity, [0, 1], [22, 0])}px)`,
-              borderRadius: 18,
-              background: active ? 'rgba(14, 165, 233, 0.22)' : 'rgba(15, 23, 42, 0.92)',
-              border: `2px solid ${active ? 'rgba(125, 211, 252, 0.9)' : 'rgba(148, 163, 184, 0.22)'}`,
-              color: index === graphNodes.length - 1 ? '#99f6e4' : '#f8fafc',
-              fontSize: 24,
-              fontWeight: 900,
-              boxShadow: active ? '0 0 46px rgba(14, 165, 233, 0.32)' : '0 20px 55px rgba(2, 6, 23, 0.35)',
-            }}
-          >
-            {node.label}
-          </div>
-        );
-      })}
     </div>
   );
 }

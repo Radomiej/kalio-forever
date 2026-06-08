@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { MouseEvent, PointerEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import type { ArchitectureGraphProjection, ArchitectureNodeKind } from '@kalio/types';
+import { GRAPH_MOUSE_FALLBACK_POINTER_ID, graphViewportCenter, graphViewportPointFromClient, graphWorldDeltaFromClientDelta, hasGraphDragStarted, hasPointerEvents, nextGraphPan, nextGraphPanForAutoPan, releasePointerCaptureIfHeld, shouldStartGraphPan, useGraphViewport, useGraphWheelListener, useSpacePanning } from '../graph/useGraphInteraction';
+import { GraphWorldLayer } from '../graph/GraphWorldLayer';
+import { GraphSvgLayer } from '../graph/GraphSvgLayer';
 import type { ArchitectNode, ArchitectSchema } from './architect.types';
-import { ArchitectGraphNodeCard } from './ArchitectGraphNodeCard';
-import { ArchitectGraphToolbar } from './ArchitectGraphToolbar';
+import { ArchitectGraphCanvasToolbar, ArchitectGraphEmptyState, ArchitectRuntimeModeIndicator } from './ArchitectGraphCanvasChrome';
+import { ArchitectGraphEdges } from './ArchitectGraphEdges';
+import { ArchitectGraphNodeLayer } from './ArchitectGraphNodeLayer';
 import { inputPin, outputPin } from './ArchitectGraphGeometry';
+import { DEFAULT_PAN, DEFAULT_ZOOM, EMPTY_EDGES, EMPTY_NODES, FREE_SPACE_HEIGHT, FREE_SPACE_WIDTH, architectCanvasStyle, connectionPath, edgeKind, fitArchitectGraphViewport, nextArchitectZoom } from './ArchitectGraphCanvas.model';
 
 interface ArchitectGraphCanvasProps {
   schema: ArchitectSchema | null;
@@ -18,100 +22,6 @@ interface ArchitectGraphCanvasProps {
   onAutoLayout: () => void;
   routeHops?: ArchitectureGraphProjection['routeHops'];
   runtimeMode?: boolean;
-}
-
-const MIN_ZOOM = 0.65;
-const MAX_ZOOM = 1.6;
-const ZOOM_STEP = 0.1;
-const DEFAULT_PAN = { x: 0, y: 0 };
-const DEFAULT_ZOOM = 0.82;
-const FREE_SPACE_WIDTH = 2800;
-const FREE_SPACE_HEIGHT = 1800;
-const MOUSE_FALLBACK_POINTER_ID = -1;
-const EMPTY_NODES: ArchitectSchema['nodes'] = [];
-const EMPTY_EDGES: ArchitectSchema['edges'] = [];
-
-type EdgeKind = 'parallel' | 'routing' | 'forced';
-
-function clampZoom(value: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number(value.toFixed(2))));
-}
-
-function connectionPath(source: { x: number; y: number }, target: { x: number; y: number }): string {
-  const dx = target.x - source.x;
-  const tension = Math.max(48, Math.abs(dx) * 0.4);
-  const controlDirection = dx >= 0 ? 1 : -1;
-  const cx1 = source.x + tension * controlDirection;
-  const cx2 = target.x - tension * controlDirection;
-  return `M ${source.x} ${source.y} C ${cx1} ${source.y}, ${cx2} ${target.y}, ${target.x} ${target.y}`;
-}
-
-function edgeKind(sourceNode: ArchitectNode): EdgeKind {
-  if (sourceNode.kind === 'parallel' || sourceNode.behavior?.mode === 'fan_out_all') {
-    return 'parallel';
-  }
-  if (sourceNode.kind === 'router' || sourceNode.behavior?.mode === 'choose_one' || sourceNode.behavior?.mode === 'rank_then_merge') {
-    return 'routing';
-  }
-  return 'forced';
-}
-
-function edgeClass(kind: EdgeKind, executed: boolean): string {
-  if (executed) {
-    return 'stroke-emerald-300/90 animate-pulse';
-  }
-  if (kind === 'parallel') {
-    return 'stroke-violet-300/70';
-  }
-  if (kind === 'routing') {
-    return 'stroke-amber-300/75';
-  }
-  return 'stroke-sky-500/55';
-}
-
-function edgeHaloClass(kind: EdgeKind, executed: boolean): string {
-  if (executed) {
-    return 'stroke-emerald-400/20';
-  }
-  if (kind === 'parallel') {
-    return 'stroke-violet-400/16';
-  }
-  if (kind === 'routing') {
-    return 'stroke-amber-400/18';
-  }
-  return 'stroke-sky-500/15';
-}
-
-function edgeDash(kind: EdgeKind): string | undefined {
-  if (kind === 'routing') {
-    return '7 5';
-  }
-  if (kind === 'parallel') {
-    return '2 7';
-  }
-  return undefined;
-}
-
-function edgeWidth(kind: EdgeKind, executed: boolean): string {
-  if (executed) {
-    return '2.8';
-  }
-  if (kind === 'parallel') {
-    return '2.2';
-  }
-  if (kind === 'routing') {
-    return '2';
-  }
-  return '1.6';
-}
-
-function canStartPan(target: EventTarget, altKey: boolean, button: number): boolean {
-  const element = target instanceof Element ? target : null;
-  return !element?.closest('[data-architect-control="true"]') && (altKey || button === 1);
-}
-
-function hasPointerEvents(): boolean {
-  return typeof window !== 'undefined' && 'PointerEvent' in window;
 }
 
 export function ArchitectGraphCanvas({
@@ -130,8 +40,14 @@ export function ArchitectGraphCanvas({
   const [editMode, setEditMode] = useState<'select' | 'add' | 'connect'>('select');
   const [addNodeKind, setAddNodeKind] = useState<ArchitectureNodeKind>('role');
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const [pan, setPan] = useState(DEFAULT_PAN);
+  const {
+    clientToWorld,
+    pan,
+    setCamera,
+    setPan,
+    zoom,
+    zoomTo: setViewportZoom,
+  } = useGraphViewport({ initialPan: DEFAULT_PAN, initialZoom: DEFAULT_ZOOM });
   const [panning, setPanning] = useState<{
     pointerId: number;
     startX: number;
@@ -146,25 +62,67 @@ export function ArchitectGraphCanvas({
     startY: number;
     originX: number;
     originY: number;
+    moved: boolean;
   } | null>(null);
+  const [draggingConnection, setDraggingConnection] = useState<{
+    moved: boolean;
+    sourceNodeId: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    targetNodeId: string | null;
+    x: number;
+    y: number;
+  } | null>(null);
+  const spacePanning = useSpacePanning();
   const canvasRef = useRef<HTMLElement | null>(null);
   const markerId = `architect-edge-arrow-${useId().replaceAll(':', '')}`;
 
+  const fitViewport = useCallback((nodes: ArchitectNode[] = schema?.nodes ?? []) => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      setCamera({ pan: DEFAULT_PAN, zoom: DEFAULT_ZOOM });
+      return;
+    }
+    const bounds = canvas.getBoundingClientRect();
+    const nextViewport = fitArchitectGraphViewport({
+      nodes,
+      viewportHeight: bounds.height,
+      viewportWidth: bounds.width,
+    });
+    setCamera(nextViewport);
+  }, [schema?.nodes, setCamera]);
+
   useEffect(() => {
-    setZoom(DEFAULT_ZOOM);
-    setPan(DEFAULT_PAN);
+    fitViewport(schema?.nodes ?? []);
     setPanning(null);
     setDraggingNode(null);
+    setDraggingConnection(null);
     setEditMode('select');
     setConnectSourceId(null);
-  }, [schema?.id]);
+  }, [fitViewport, schema?.id, schema?.nodes]);
 
-  const zoomIn = useCallback(() => setZoom((current) => clampZoom(current + ZOOM_STEP)), []);
-  const zoomOut = useCallback(() => setZoom((current) => clampZoom(current - ZOOM_STEP)), []);
+  const zoomTo = useCallback((nextZoom: number, focalPoint?: { x: number; y: number }) => {
+    if (nextZoom === zoom) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const bounds = canvas?.getBoundingClientRect();
+    const focal = focalPoint ?? (bounds ? graphViewportCenter(bounds) : { x: 0, y: 0 });
+
+    setViewportZoom(nextZoom, focal);
+  }, [setViewportZoom, zoom]);
+
+  const zoomIn = useCallback(() => zoomTo(nextArchitectZoom(zoom, 'in')), [zoom, zoomTo]);
+  const zoomOut = useCallback(() => zoomTo(nextArchitectZoom(zoom, 'out')), [zoom, zoomTo]);
   const resetViewport = useCallback(() => {
-    setZoom(DEFAULT_ZOOM);
-    setPan(DEFAULT_PAN);
-  }, []);
+    fitViewport();
+    setPanning(null);
+    setDraggingNode(null);
+    setDraggingConnection(null);
+    setConnectSourceId(null);
+  }, [fitViewport]);
 
   const setMode = useCallback((mode: 'select' | 'add' | 'connect', kind?: ArchitectureNodeKind) => {
     setEditMode(mode);
@@ -175,7 +133,12 @@ export function ArchitectGraphCanvas({
   }, []);
 
   const startPan = useCallback((event: PointerEvent<HTMLElement>) => {
-    if (!canStartPan(event.target, event.altKey, event.button)) {
+    if (!shouldStartGraphPan({
+      blockedSelector: '[data-architect-control="true"]',
+      button: event.button,
+      forcePan: spacePanning || event.altKey || event.button === 1,
+      target: event.target,
+    })) {
       return;
     }
     event.preventDefault();
@@ -190,17 +153,14 @@ export function ArchitectGraphCanvas({
       originX: pan.x,
       originY: pan.y,
     });
-  }, [pan]);
+  }, [pan, spacePanning]);
 
   const movePan = useCallback((event: PointerEvent<HTMLElement>) => {
     const pointerId = event.pointerId ?? 0;
     if (!panning || pointerId !== panning.pointerId) {
       return;
     }
-    setPan({
-      x: panning.originX + (event.clientX - panning.startX),
-      y: panning.originY + (event.clientY - panning.startY),
-    });
+    setPan(nextGraphPan(panning, event.clientX, event.clientY));
   }, [panning]);
 
   const endPan = useCallback((event: PointerEvent<HTMLElement>) => {
@@ -208,70 +168,67 @@ export function ArchitectGraphCanvas({
     if (!panning || pointerId !== panning.pointerId) {
       return;
     }
-    if (
-      typeof event.currentTarget.hasPointerCapture === 'function'
-      && typeof event.currentTarget.releasePointerCapture === 'function'
-      && event.currentTarget.hasPointerCapture(pointerId)
-    ) {
-      event.currentTarget.releasePointerCapture(pointerId);
-    }
+    releasePointerCaptureIfHeld(event.currentTarget, pointerId);
     setPanning(null);
   }, [panning]);
 
-  const handleWheel = useCallback((event: WheelEvent) => {
-    if (!event.ctrlKey && !event.metaKey) {
+  const handleWheel = useCallback((event: WheelEvent, canvas: HTMLElement) => {
+    const nextZoom = nextArchitectZoom(zoom, event.deltaY > 0 ? 'out' : 'in');
+    if (nextZoom === zoom) {
       return;
     }
-    event.preventDefault();
-    setZoom((current) => clampZoom(current + (event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP)));
-  }, []);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return undefined;
-    }
-    canvas.addEventListener('wheel', handleWheel, { passive: false });
-    return () => canvas.removeEventListener('wheel', handleWheel);
-  }, [handleWheel]);
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    zoomTo(nextZoom, graphViewportPointFromClient(rect, event.clientX, event.clientY));
+  }, [zoom, zoomTo]);
+
+  useGraphWheelListener(canvasRef, handleWheel);
 
   const startMousePan = useCallback((event: MouseEvent<HTMLElement>) => {
-    if (hasPointerEvents() || !canStartPan(event.target, event.altKey, event.button)) {
+    if (hasPointerEvents() || !shouldStartGraphPan({
+      blockedSelector: '[data-architect-control="true"]',
+      button: event.button,
+      forcePan: spacePanning || event.altKey || event.button === 1,
+      target: event.target,
+    })) {
       return;
     }
     event.preventDefault();
     setPanning({
-      pointerId: MOUSE_FALLBACK_POINTER_ID,
+      pointerId: GRAPH_MOUSE_FALLBACK_POINTER_ID,
       startX: event.clientX,
       startY: event.clientY,
       originX: pan.x,
       originY: pan.y,
     });
-  }, [pan]);
+  }, [pan, spacePanning]);
 
   const moveMousePan = useCallback((event: MouseEvent<HTMLElement>) => {
-    if (!panning || panning.pointerId !== MOUSE_FALLBACK_POINTER_ID) {
+    if (!panning || panning.pointerId !== GRAPH_MOUSE_FALLBACK_POINTER_ID) {
       return;
     }
-    setPan({
-      x: panning.originX + (event.clientX - panning.startX),
-      y: panning.originY + (event.clientY - panning.startY),
-    });
+    setPan(nextGraphPan(panning, event.clientX, event.clientY));
   }, [panning]);
 
   const endMousePan = useCallback(() => {
-    if (panning?.pointerId === MOUSE_FALLBACK_POINTER_ID) {
+    if (panning?.pointerId === GRAPH_MOUSE_FALLBACK_POINTER_ID) {
       setPanning(null);
     }
   }, [panning]);
 
   const canvasPosition = useCallback((event: { clientX: number; clientY: number }, element: HTMLElement) => {
     const rect = element.getBoundingClientRect();
-    return {
-      x: (event.clientX - rect.left - pan.x) / zoom,
-      y: (event.clientY - rect.top - pan.y) / zoom,
-    };
-  }, [pan, zoom]);
+    return clientToWorld(rect, event.clientX, event.clientY);
+  }, [clientToWorld]);
+
+  const canvasPositionFromClient = useCallback((event: { clientX: number; clientY: number }) => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return null;
+    }
+    return canvasPosition(event, canvas);
+  }, [canvasPosition]);
 
   const handleCanvasClick = useCallback((event: MouseEvent<HTMLElement>) => {
     if (runtimeMode || editMode !== 'add') {
@@ -303,12 +260,138 @@ export function ArchitectGraphCanvas({
     setMode('select');
   }, [connectSourceId, editMode, onSelectNode, onToggleEdge, runtimeMode, setMode]);
 
+  const startConnectionFromNode = useCallback((nodeId: string) => {
+    if (runtimeMode) {
+      onSelectNode(nodeId);
+      return;
+    }
+    setEditMode('connect');
+    setConnectSourceId(nodeId);
+    onSelectNode(nodeId);
+  }, [onSelectNode, runtimeMode]);
+
+  const startConnectionDrag = useCallback((event: PointerEvent<HTMLElement>, nodeId: string) => {
+    if (event.altKey) {
+      return;
+    }
+    if (runtimeMode || event.button !== 0) {
+      startConnectionFromNode(nodeId);
+      return;
+    }
+    const position = canvasPositionFromClient(event);
+    if (!position) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const pointerId = event.pointerId ?? 0;
+    if (typeof event.currentTarget.setPointerCapture === 'function') {
+      event.currentTarget.setPointerCapture(pointerId);
+    }
+    setEditMode('connect');
+    setConnectSourceId(nodeId);
+    setDraggingConnection({
+      moved: false,
+      sourceNodeId: nodeId,
+      pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      targetNodeId: null,
+      x: position.x,
+      y: position.y,
+    });
+    onSelectNode(nodeId);
+  }, [canvasPositionFromClient, onSelectNode, runtimeMode, startConnectionFromNode]);
+
+  const connectionTargetFromClient = useCallback((clientX: number, clientY: number, sourceNodeId: string) => {
+    if (typeof document.elementFromPoint !== 'function') {
+      return null;
+    }
+    const pointTarget = document.elementFromPoint(clientX, clientY);
+    const target = pointTarget?.closest('[data-architect-input-node-id]');
+    const targetNodeId = target?.getAttribute('data-architect-input-node-id') ?? null;
+    return targetNodeId && targetNodeId !== sourceNodeId ? targetNodeId : null;
+  }, []);
+
+  const completeConnectionToNode = useCallback((nodeId: string) => {
+    if (runtimeMode) {
+      onSelectNode(nodeId);
+      return;
+    }
+    if (!connectSourceId || connectSourceId === nodeId) {
+      setEditMode('connect');
+      setConnectSourceId(nodeId);
+      onSelectNode(nodeId);
+      return;
+    }
+    onToggleEdge(connectSourceId, nodeId);
+    setMode('select');
+  }, [connectSourceId, onSelectNode, onToggleEdge, runtimeMode, setMode]);
+
+  const moveConnectionDrag = useCallback((event: PointerEvent<HTMLElement>) => {
+    const pointerId = event.pointerId ?? 0;
+    if (!draggingConnection || draggingConnection.pointerId !== pointerId) {
+      return;
+    }
+    if (!draggingConnection.moved && !hasGraphDragStarted({
+      startX: draggingConnection.startX,
+      startY: draggingConnection.startY,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    })) {
+      return;
+    }
+    const position = canvasPositionFromClient(event);
+    if (!position) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setDraggingConnection((current) => current && current.pointerId === pointerId
+      ? {
+        ...current,
+        moved: true,
+        targetNodeId: connectionTargetFromClient(event.clientX, event.clientY, current.sourceNodeId),
+        x: position.x,
+        y: position.y,
+      }
+      : current);
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    if (bounds) {
+      setPan((currentPan) => nextGraphPanForAutoPan({
+        bounds,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        pan: currentPan,
+      }));
+    }
+  }, [canvasPositionFromClient, connectionTargetFromClient, draggingConnection, setPan]);
+
+  const endConnectionDrag = useCallback((event: PointerEvent<HTMLElement>) => {
+    const pointerId = event.pointerId ?? 0;
+    if (!draggingConnection || draggingConnection.pointerId !== pointerId) {
+      return;
+    }
+    releasePointerCaptureIfHeld(event.currentTarget, pointerId);
+    const targetNodeId = draggingConnection.moved
+      ? connectionTargetFromClient(event.clientX, event.clientY, draggingConnection.sourceNodeId)
+      : null;
+    if (targetNodeId && targetNodeId !== draggingConnection.sourceNodeId) {
+      onToggleEdge(draggingConnection.sourceNodeId, targetNodeId);
+      setMode('select');
+    }
+    setDraggingConnection(null);
+  }, [connectionTargetFromClient, draggingConnection, onToggleEdge, setMode]);
+
   const startNodeDrag = useCallback((event: PointerEvent<HTMLElement>, node: ArchitectNode) => {
     if (runtimeMode) {
       onSelectNode(node.id);
       return;
     }
     if (event.button !== 0 && event.button !== undefined) {
+      return;
+    }
+    if (spacePanning || event.altKey) {
       return;
     }
     event.preventDefault();
@@ -325,8 +408,9 @@ export function ArchitectGraphCanvas({
       startY: event.clientY,
       originX: node.x,
       originY: node.y,
+      moved: false,
     });
-  }, [onSelectNode, runtimeMode]);
+  }, [onSelectNode, runtimeMode, spacePanning]);
 
   const moveNodeDrag = useCallback((event: PointerEvent<HTMLElement>) => {
     const pointerId = event.pointerId ?? 0;
@@ -334,9 +418,28 @@ export function ArchitectGraphCanvas({
       return;
     }
     event.preventDefault();
+    const moved = draggingNode.moved || hasGraphDragStarted({
+      startX: draggingNode.startX,
+      startY: draggingNode.startY,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+    if (!moved) {
+      return;
+    }
+    if (!draggingNode.moved) {
+      setDraggingNode((current) => current && current.pointerId === pointerId ? { ...current, moved: true } : current);
+    }
+    const delta = graphWorldDeltaFromClientDelta({
+      startX: draggingNode.startX,
+      startY: draggingNode.startY,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      zoom,
+    });
     onMoveNode(draggingNode.nodeId, {
-      x: draggingNode.originX + (event.clientX - draggingNode.startX) / zoom,
-      y: draggingNode.originY + (event.clientY - draggingNode.startY) / zoom,
+      x: draggingNode.originX + delta.x,
+      y: draggingNode.originY + delta.y,
     });
   }, [draggingNode, onMoveNode, zoom]);
 
@@ -345,13 +448,7 @@ export function ArchitectGraphCanvas({
     if (!draggingNode || pointerId !== draggingNode.pointerId) {
       return;
     }
-    if (
-      typeof event.currentTarget.hasPointerCapture === 'function'
-      && typeof event.currentTarget.releasePointerCapture === 'function'
-      && event.currentTarget.hasPointerCapture(pointerId)
-    ) {
-      event.currentTarget.releasePointerCapture(pointerId);
-    }
+    releasePointerCaptureIfHeld(event.currentTarget, pointerId);
     setDraggingNode(null);
   }, [draggingNode]);
 
@@ -385,13 +482,19 @@ export function ArchitectGraphCanvas({
       };
     });
   }, [executedEdgeIds, nodeById, nodes, schemaEdges]);
+  const connectionPreviewPath = useMemo(() => {
+    if (!draggingConnection?.moved) {
+      return null;
+    }
+    const sourceNode = nodeById.get(draggingConnection.sourceNodeId);
+    if (!sourceNode) {
+      return null;
+    }
+    return connectionPath(outputPin(sourceNode), { x: draggingConnection.x, y: draggingConnection.y });
+  }, [draggingConnection, nodeById]);
 
   if (!schema) {
-    return (
-      <section className="flex flex-1 items-center justify-center bg-[#080b12] text-sm text-base-content/40">
-        No architecture schema loaded.
-      </section>
-    );
+    return <ArchitectGraphEmptyState />;
   }
 
   return (
@@ -399,6 +502,7 @@ export function ArchitectGraphCanvas({
       ref={canvasRef}
       className="relative flex-1 overflow-hidden bg-[#080b12]"
       data-testid="architect-graph-canvas"
+      data-space-panning={spacePanning ? 'true' : 'false'}
       onPointerDown={startPan}
       onPointerMove={movePan}
       onPointerUp={endPan}
@@ -408,95 +512,68 @@ export function ArchitectGraphCanvas({
       onMouseUp={endMousePan}
       onMouseLeave={endMousePan}
       onClick={handleCanvasClick}
-      style={{
-        backgroundImage: [
-          'radial-gradient(circle at 72% 18%, rgba(34, 197, 94, 0.12), transparent 34%)',
-          'radial-gradient(circle at 28% 70%, rgba(56, 189, 248, 0.10), transparent 32%)',
-          'radial-gradient(circle, rgba(148, 163, 184, 0.20) 1px, transparent 1px)',
-        ].join(', '),
-        backgroundSize: `auto, auto, ${22 * zoom}px ${22 * zoom}px`,
-        backgroundPosition: `center, center, ${pan.x}px ${pan.y}px`,
-        cursor: panning ? 'grabbing' : editMode === 'add' ? 'crosshair' : 'default',
-      }}
+      style={architectCanvasStyle({ cursor: panning ? 'grabbing' : spacePanning ? 'grab' : editMode === 'add' ? 'crosshair' : 'default', pan, zoom })}
     >
-      <div
+      <GraphWorldLayer
+        camera={{ pan, zoom }}
         className="absolute inset-0"
-        data-testid="architect-canvas-transform"
-        style={{
-          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-          transformOrigin: '0 0',
-        }}
+        minHeight={FREE_SPACE_HEIGHT}
+        minWidth={FREE_SPACE_WIDTH}
+        testId="architect-canvas-transform"
       >
         <div
           className="relative"
-          style={{ minHeight: FREE_SPACE_HEIGHT, minWidth: FREE_SPACE_WIDTH }}
           data-testid="architect-canvas-free-space"
+          style={{ minHeight: FREE_SPACE_HEIGHT, minWidth: FREE_SPACE_WIDTH }}
         >
-          <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
-            <defs>
-              <marker id={markerId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                <path d="M 0 0 L 8 4 L 0 8 z" className="fill-sky-400/70" />
-              </marker>
-            </defs>
-            {edges.map((edge) => (
-              <g key={edge.id}>
-                <path
-                  d={edge.path}
-                  fill="none"
-                  className={edgeHaloClass(edge.kind, edge.executed)}
-                  strokeWidth={edge.executed ? '7' : '5'}
-                />
-                <path
-                  d={edge.path}
-                  fill="none"
-                  className={edgeClass(edge.kind, edge.executed)}
-                  markerEnd={`url(#${markerId})`}
-                  strokeDasharray={edgeDash(edge.kind)}
-                  strokeWidth={edgeWidth(edge.kind, edge.executed)}
-                  data-testid={`architect-edge-${edge.id}`}
-                  data-edge-kind={edge.kind}
-                />
-              </g>
-            ))}
-          </svg>
-
-          {schema.nodes.map((node) => (
-            <ArchitectGraphNodeCard
-              key={node.id}
-              node={node}
-              selectedNodeId={selectedNodeId}
-              selectedSlotId={selectedSlotId}
-              connectSourceId={connectSourceId}
-              onNodeClick={handleNodeClick}
-              onSlotClick={onSelectSlot}
-              onDragStart={startNodeDrag}
-              onDragMove={moveNodeDrag}
-              onDragEnd={endNodeDrag}
+        <ArchitectGraphEdges edges={edges} markerId={markerId} />
+        {connectionPreviewPath ? (
+          <GraphSvgLayer>
+            <path
+              d={connectionPreviewPath}
+              fill="none"
+              className="stroke-sky-200/85"
+              strokeDasharray="6 6"
+              strokeLinecap="round"
+              strokeWidth={2.4}
+              data-testid="architect-connection-preview"
             />
-          ))}
-        </div>
-      </div>
+          </GraphSvgLayer>
+        ) : null}
 
-      <ArchitectGraphToolbar
-        editMode={runtimeMode ? 'select' : editMode}
+        <ArchitectGraphNodeLayer
+          nodes={schema.nodes}
+          selectedNodeId={selectedNodeId}
+          selectedSlotId={selectedSlotId}
+          connectSourceId={connectSourceId}
+          connectionDropTargetId={draggingConnection?.moved ? draggingConnection.targetNodeId : null}
+          onNodeClick={handleNodeClick}
+          onSlotClick={onSelectSlot}
+          onStartConnection={startConnectionFromNode}
+          onCompleteConnection={completeConnectionToNode}
+          onStartConnectionDrag={startConnectionDrag}
+          onMoveConnectionDrag={moveConnectionDrag}
+          onEndConnectionDrag={endConnectionDrag}
+          onDragStart={startNodeDrag}
+          onDragMove={moveNodeDrag}
+          onDragEnd={endNodeDrag}
+          zoom={zoom}
+        />
+        </div>
+      </GraphWorldLayer>
+
+      <ArchitectGraphCanvasToolbar
+        editMode={editMode}
         addNodeKind={addNodeKind}
         zoom={zoom}
-        onModeChange={runtimeMode ? () => undefined : setMode}
+        onModeChange={setMode}
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
         onResetViewport={resetViewport}
-        onAutoLayout={runtimeMode ? () => undefined : onAutoLayout}
+        onAutoLayout={onAutoLayout}
+        runtimeMode={runtimeMode}
       />
-      <div
-        className={`absolute right-3 top-3 z-10 rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
-          runtimeMode
-            ? 'border-sky-400/40 bg-sky-500/15 text-sky-100'
-            : 'border-base-300/70 bg-base-100/80 text-base-content/45'
-        }`}
-        data-testid="architect-runtime-mode-indicator"
-      >
-        {runtimeMode ? 'Runtime preview' : 'Editor'}
-      </div>
+      <ArchitectRuntimeModeIndicator runtimeMode={runtimeMode} />
     </section>
   );
 }

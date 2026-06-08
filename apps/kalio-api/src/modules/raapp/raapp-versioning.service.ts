@@ -250,12 +250,12 @@ export class RAAppVersioningService implements OnModuleInit {
             zipPath: hp,
             createdAt: hStat.mtimeMs,
           });
-        } catch {
-          // skip corrupt history entry
+        } catch (err) {
+          this.logger.warn(`loadGroup: corrupt history entry ${h} for slug=${slug}, skipping`, err);
         }
       }
-    } catch {
-      // history dir may not exist yet
+    } catch (err) {
+      this.logger.debug(`loadGroup: no readable history dir for slug=${slug}: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Newest version first (semver descending)
@@ -498,7 +498,9 @@ export class RAAppVersioningService implements OnModuleInit {
         });
       }
     } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {/* best effort */});
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch((err) => {
+        this.logger.warn(`extractMeta: failed to clean temp dir ${tmpDir}`, err);
+      });
     }
   }
 
@@ -572,10 +574,14 @@ export class RAAppVersioningService implements OnModuleInit {
       });
       await fs.rename(tmpZip, zipPath);
     } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {/* best effort */});
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch((err) => {
+        this.logger.warn(`writeZipAtomic: failed to clean temp dir ${tmpDir}`, err);
+      });
       // Clean up the .tmp file if rename didn't happen (e.g. archiver error or rename failure).
       // fs.rm with force:true is a no-op when the file doesn't exist, so this is always safe.
-      await fs.rm(tmpZip, { force: true }).catch(() => {/* best effort */});
+      await fs.rm(tmpZip, { force: true }).catch((err) => {
+        this.logger.warn(`writeZipAtomic: failed to clean temp zip ${tmpZip}`, err);
+      });
     }
   }
 }

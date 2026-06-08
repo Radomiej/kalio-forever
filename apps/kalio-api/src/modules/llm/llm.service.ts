@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
 import type { ILLMProvider, ProviderConfig, LLMToolDef, StreamChatOptions } from './llm.types';
-import { createLLMProvider } from './providers/provider-factory';
+import { createRuntimeLLMProvider } from './providers/provider-factory';
 import { CredentialsService } from '../credentials/credentials.service';
 import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
@@ -35,7 +35,7 @@ export class LLMService {
 
     this.envConfig = { provider, apiKey, model, baseUrl };
     this.envProviderKey = this.getProviderConfigKey(this.envConfig);
-    this.envProvider = createLLMProvider(this.envConfig);
+    this.envProvider = createRuntimeLLMProvider(this.envConfig);
 
     if (this.forceEnvLlm) {
       this.logger.warn('LLM provider forced to env config; active DB credential is ignored');
@@ -67,7 +67,7 @@ export class LLMService {
   private getOrCreateEnvProvider(config: ProviderConfig): ILLMProvider {
     const nextKey = this.getProviderConfigKey(config);
     if (nextKey !== this.envProviderKey) {
-      this.envProvider = createLLMProvider(config);
+      this.envProvider = createRuntimeLLMProvider(config);
       this.envProviderKey = nextKey;
     }
     return this.envProvider;
@@ -82,7 +82,7 @@ export class LLMService {
       const dbConfig = await this.credentialsService.getActiveProviderConfig();
       if (dbConfig) {
         this.logger.log(`LLM provider: ${dbConfig.provider} / ${dbConfig.model} (from DB)`);
-        return { provider: createLLMProvider(dbConfig), config: dbConfig };
+        return { provider: createRuntimeLLMProvider(dbConfig), config: dbConfig };
       }
     }
 
@@ -90,19 +90,22 @@ export class LLMService {
     return { provider: this.getOrCreateEnvProvider(envConfig), config: envConfig };
   }
 
+  async streamChatWithConfig(
+    config: ProviderConfig,
+    messages: ContextManagedLLMMessage[],
+    tools: LLMToolDef[],
+    options: StreamChatOptions,
+  ): Promise<LLMToolCall[]> {
+    return this.runStreamChatWithConfig(config, messages, tools, options);
+  }
+
   async streamChat(
     messages: ContextManagedLLMMessage[],
     tools: LLMToolDef[],
     options: StreamChatOptions,
   ): Promise<LLMToolCall[]> {
-    const { provider, config } = await this.getActiveProvider();
-    const limiterKey = this.providerLimiterKey(config);
-    const maxConcurrent = await this.maxConcurrentStreamsFor(config.provider);
-    return this.streamLimiter.run(
-      limiterKey,
-      maxConcurrent,
-      () => provider.streamChat(messages, tools, options),
-    );
+    const active = await this.getActiveProvider();
+    return this.runStreamChatWithConfig(active.config, messages, tools, options, active.provider);
   }
 
   async getConfig(): Promise<LLMConfig & { source: 'db' | 'env' }> {
@@ -125,7 +128,7 @@ export class LLMService {
       provider: envConfig.provider as LLMProviderType,
       apiKey: '',
       baseUrl: this.normalizeEnvDisplayValue(envConfig.baseUrl),
-      model: this.normalizeEnvDisplayValue(envConfig.model),
+      model: envConfig.model,
       source: 'env',
     };
   }
@@ -152,7 +155,30 @@ export class LLMService {
   }
 
   createProvider(config: ProviderConfig): ILLMProvider {
-    return createLLMProvider(config);
+    return createRuntimeLLMProvider(config);
+  }
+
+  private async runStreamChatWithConfig(
+    config: ProviderConfig,
+    messages: ContextManagedLLMMessage[],
+    tools: LLMToolDef[],
+    options: StreamChatOptions,
+    provider?: ILLMProvider,
+  ): Promise<LLMToolCall[]> {
+    const override = options.modelOverride?.trim();
+    const effectiveConfig = override && override !== config.model
+      ? { ...config, model: override }
+      : config;
+    const providerToUse = override && override !== config.model
+      ? this.createProvider(effectiveConfig)
+      : (provider ?? this.createProvider(effectiveConfig));
+    const limiterKey = this.providerLimiterKey(effectiveConfig);
+    const maxConcurrent = await this.maxConcurrentStreamsFor(effectiveConfig.provider);
+    return this.streamLimiter.run(
+      limiterKey,
+      maxConcurrent,
+      () => providerToUse.streamChat(messages, tools, options),
+    );
   }
 
   private providerLimiterKey(config: ProviderConfig): string {

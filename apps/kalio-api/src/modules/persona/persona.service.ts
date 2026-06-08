@@ -22,7 +22,7 @@ export class PersonaService implements OnApplicationBootstrap {
 
     for (const [id, config] of Object.entries(personasConfig)) {
       const existing = await this.drizzle.db
-        .select({ id: personas.id, systemPrompt: personas.systemPrompt })
+        .select({ id: personas.id, systemPrompt: personas.systemPrompt, model: personas.model })
         .from(personas)
         .where(eq(personas.id, id))
         .then((r) => r[0]);
@@ -46,6 +46,7 @@ export class PersonaService implements OnApplicationBootstrap {
           skillIds: string[];
           updatedAt: Date;
           systemPrompt?: string;
+          model?: string;
         } = {
           name: config.name,
           allowedTools: config.allowedTools,
@@ -56,11 +57,19 @@ export class PersonaService implements OnApplicationBootstrap {
         if (this.shouldRefreshSeededSystemPrompt(id, existing.systemPrompt, config.systemPrompt)) {
           updatePayload.systemPrompt = config.systemPrompt;
         }
+        if (this.shouldRefreshSeededModel(existing.model, config.model)) {
+          updatePayload.model = config.model;
+        }
 
         await this.drizzle.db.update(personas).set(updatePayload).where(eq(personas.id, id));
         this.logger.log(`Updated ${id} persona`);
       }
     }
+  }
+
+  private shouldRefreshSeededModel(existingModel: string | null | undefined, nextModel: string): boolean {
+    return (existingModel == null || existingModel.trim().length === 0)
+      && nextModel.trim().length > 0;
   }
 
   private shouldRefreshSeededSystemPrompt(
@@ -77,6 +86,16 @@ export class PersonaService implements OnApplicationBootstrap {
     }
 
     if (this.matchesLegacyCliPrompt(personaId, existingPrompt)) {
+      return true;
+    }
+
+    if (
+      personaId === 'agent-orchestrator'
+      && (
+        !existingPrompt.includes('planning/prototyping, implementation, and refactor/QA')
+        || !existingPrompt.includes('seeded/no live search')
+      )
+    ) {
       return true;
     }
 

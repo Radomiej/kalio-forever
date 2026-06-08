@@ -8,109 +8,24 @@ import yaml from 'js-yaml';
 import type { RAAppBlock, RAAppResult } from '@kalio/types';
 import { compileGui } from './gui/guiDslExpand';
 import { GuiParseError } from './gui/guiDslParser';
+import {
+  type LoadedRAApp,
+  type RAAppMeta,
+  getRenderableScore,
+  isDirectoryOrigin,
+} from './raapp.service.helpers';
 
-export interface RAAppMeta {
-  id: string;
-  name: string;
-  version?: string;
-  description?: string;
-  author?: string;
-  tags?: string[];
-  expose_as_tool?: boolean;
-  tool_description?: string;
-  input_schema?: unknown;
-  output_type?: string;
-  execution?: {
-    timeout_ms?: number;
-    requires_user_approval?: boolean;
-    render_as?: string;
-  };
-}
-
-export interface LoadedRAApp {
-  id: string;
-  zipPath: string;
-  meta: RAAppMeta;
-  source: 'core' | 'user';
-  htmlContent: string | null;   // null = no main.html in zip
-  guiContent: string | null;    // null = no ui.gui in zip
-  systemsContent: string | null; // null = no systems.yml in zip
-  appMode: 'display' | 'interactive';
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface SaveGeneratedAppInput {
-  type: 'html' | 'gui';
-  content: string;
-  mode: 'display' | 'interactive';
-  sessionId: string;
-  title?: string;
-}
+export {
+  type LoadedRAApp,
+  type RAAppMeta,
+  type SaveGeneratedAppInput,
+  deriveGeneratedAppName,
+} from './raapp.service.helpers';
 
 const DEFAULT_RUNTIME_RA_APPS_PATH = './data/ra-apps';
 
 function getPackagedRAAppsPath(): string {
   return path.resolve(__dirname, '../../assets/ra-apps');
-}
-
-function getRenderableScore(app: LoadedRAApp): number {
-  let score = 0;
-  if (app.htmlContent) score += 1;
-  if (app.guiContent) score += 1;
-  return score;
-}
-
-function isDirectoryOrigin(app: LoadedRAApp): boolean {
-  return !app.zipPath.endsWith('.zip');
-}
-
-function cleanTitle(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
-function stripHtmlTags(value: string): string {
-  return value.replace(/<[^>]+>/g, ' ');
-}
-
-function tryExtractHtmlTitle(content: string): string | null {
-  const titleMatch = content.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (titleMatch?.[1]) {
-    const cleaned = cleanTitle(stripHtmlTags(titleMatch[1]));
-    if (cleaned.length > 0) return cleaned;
-  }
-
-  const h1Match = content.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  if (h1Match?.[1]) {
-    const cleaned = cleanTitle(stripHtmlTags(h1Match[1]));
-    if (cleaned.length > 0) return cleaned;
-  }
-
-  return null;
-}
-
-function tryExtractGuiTitle(content: string): string | null {
-  const titleAssignment = content.match(/(^|\n)\s*title\s*=\s*["']([^"']+)["']/i);
-  if (titleAssignment?.[2]) {
-    const cleaned = cleanTitle(titleAssignment[2]);
-    if (cleaned.length > 0) return cleaned;
-  }
-  return null;
-}
-
-export function deriveGeneratedAppName(input: SaveGeneratedAppInput): string {
-  const explicit = typeof input.title === 'string' ? cleanTitle(input.title) : '';
-  const extracted =
-    input.type === 'html'
-      ? tryExtractHtmlTitle(input.content)
-      : tryExtractGuiTitle(input.content);
-
-  const chosen = explicit || extracted;
-  if (chosen) {
-    return chosen.length > 80 ? chosen.slice(0, 80) : chosen;
-  }
-
-  return `Generated ${input.type.toUpperCase()} ${new Date().toISOString()}`;
 }
 
 @Injectable()
@@ -210,7 +125,9 @@ export class RAAppService implements OnModuleInit {
             );
             count++;
             continue;
-          } catch { /* no unpacked RA-App in this subdir — try versioned zip */ }
+          } catch (err) {
+            this.logger.debug(`No unpacked RA-App meta.yml in ${appDir}; trying current.zip: ${err instanceof Error ? err.message : String(err)}`);
+          }
 
           // versioned user apps live in {slug}/current.zip after migration
           const currentZip = path.join(appDir, 'current.zip');
@@ -220,7 +137,9 @@ export class RAAppService implements OnModuleInit {
               this.logger.warn(`Failed to load versioned RA-App ${entry.name}/current.zip: ${String(err)}`),
             );
             count++;
-          } catch { /* no current.zip in this subdir — skip */ }
+          } catch (err) {
+            this.logger.debug(`No versioned RA-App current.zip in ${appDir}; skipping: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
       this.logger.log(`Loaded ${source} RA-Apps (${count})`);
@@ -248,18 +167,24 @@ export class RAAppService implements OnModuleInit {
       try {
         htmlContent = await fs.readFile(path.join(appDir, candidate), 'utf-8');
         break;
-      } catch { /* not found, try next */ }
+      } catch (err) {
+        this.logger.debug(`Optional RA-App HTML candidate ${candidate} not found in ${appDir}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     let guiContent: string | null = null;
     try {
       guiContent = await fs.readFile(path.join(appDir, 'ui.gui'), 'utf-8');
-    } catch { /* not found */ }
+    } catch (err) {
+      this.logger.debug(`Optional RA-App ui.gui not found in ${appDir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     let systemsContent: string | null = null;
     try {
       systemsContent = await fs.readFile(path.join(appDir, 'systems.yml'), 'utf-8');
-    } catch { /* not found */ }
+    } catch (err) {
+      this.logger.debug(`Optional RA-App systems.yml not found in ${appDir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     const renderAs = (meta.execution?.render_as as string | undefined) ?? (meta as { ui?: { render_as?: string } }).ui?.render_as;
     const appMode: 'display' | 'interactive' = renderAs === 'interactive' ? 'interactive' : 'display';
@@ -338,7 +263,9 @@ export class RAAppService implements OnModuleInit {
       for (const name of candidates) {
         try {
           result[name] = await fs.readFile(path.join(tmpDir, name), 'utf-8');
-        } catch { /* file absent — skip */ }
+        } catch (err) {
+          this.logger.debug(`Optional RA-App file ${name} absent in extracted archive: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
       return result;
     } finally {

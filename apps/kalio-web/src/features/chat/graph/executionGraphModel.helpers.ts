@@ -3,10 +3,10 @@ import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
 export { extractSubAgentFlowResult } from '../subAgentFlowResult.parser';
 
-export const NODE_WIDTH = 176;
+export const NODE_WIDTH = 220;
 export const NODE_HEIGHT = 112;
-export const COLUMN_GAP = 44;
-export const ROW_GAP = 32;
+export const COLUMN_GAP = 72;
+export const ROW_GAP = 44;
 export const BOARD_PADDING_X = 28;
 export const BOARD_PADDING_Y = 28;
 

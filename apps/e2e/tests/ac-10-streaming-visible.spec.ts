@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE } from './helpers/test-config';
+import {
+  API_BASE,
+  expectComposerEnabled,
+  selectSession,
+  sendMessageFromComposer,
+} from './helpers/test-config';
 
 function uniqueSessionTitle(prefix: string): string {
   return `${prefix} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -21,30 +26,19 @@ test.describe('AC-10: Streaming visibility', () => {
     await page.getByTestId('nav-talk').click();
 
     // Select the session
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: title }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
+    await selectSession(page, session.id, title);
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
+    const chatInput = await expectComposerEnabled(page, 5000);
 
-    // Send message
-    await chatInput.fill('Say the word HELLO and nothing else.');
-    await page.getByTestId('chat-send-btn').click();
+    await sendMessageFromComposer(page, 'Say the word HELLO and nothing else.');
 
     // Agent turn bubble should appear quickly
     const agentBubble = page.getByTestId('agent-turn-bubble').first();
     await expect(agentBubble).toBeVisible({ timeout: 10000 });
 
     // Loading indicator should appear initially
-    const loadingIndicator = agentBubble.locator('[data-testid="turn-loading-indicator"]').or(
-      agentBubble.locator('.loading')
-    );
-    // Loading might be brief, just verify bubble exists
-
     // Wait for streaming to complete
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    await expectComposerEnabled(page, 30_000);
 
     // Verify content is present after completion
     const bubbleText = await agentBubble.textContent();
@@ -66,23 +60,17 @@ test.describe('AC-10: Streaming visibility', () => {
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
 
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: title }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: title }).first().click();
+    await selectSession(page, session.id, title);
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
+    const chatInput = await expectComposerEnabled(page, 5000);
 
     // First message
-    await chatInput.fill('First message.');
-    await page.getByTestId('chat-send-btn').click();
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    await sendMessageFromComposer(page, 'First message.');
+    await expectComposerEnabled(page, 30_000);
 
     // Second message
-    await chatInput.fill('Second message.');
-    await page.getByTestId('chat-send-btn').click();
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    await sendMessageFromComposer(page, 'Second message.');
+    await expectComposerEnabled(page, 30_000);
 
     // Verify interleaved order: user, agent, user, agent
     const allBubbles = page.locator('[data-testid="message-bubble"], [data-testid="agent-turn-bubble"]');

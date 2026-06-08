@@ -13,6 +13,7 @@ function toRunArgs(dto: CreateAgentFlowRunDto): RunSubAgentFlowArgs {
     flowId: dto.flowId,
     goal: dto.goal,
     parentSessionId: dto.parentSessionId,
+    ...(dto.parentToolCallId ? { parentToolCallId: dto.parentToolCallId } : {}),
     context: dto.context,
     startMode: dto.startMode ?? 'durable',
     vfsMode: dto.vfsMode,
@@ -39,6 +40,19 @@ function validateCreateDto(dto: CreateAgentFlowRunDto): void {
   if (dto.maxSteps !== undefined && (!Number.isInteger(dto.maxSteps) || dto.maxSteps < 1)) {
     throw new BadRequestException('maxSteps must be a positive integer');
   }
+}
+
+function normalizeResumeDto(dto: ResumeAgentFlowRunDto & { message?: unknown }): ResumeAgentFlowRunDto {
+  const input = typeof dto.input === 'string'
+    ? dto.input
+    : typeof dto.message === 'string'
+      ? dto.message
+      : undefined;
+  return {
+    ...(input !== undefined ? { input } : {}),
+    ...(dto.context !== undefined ? { context: dto.context } : {}),
+    ...(dto.maxSteps !== undefined ? { maxSteps: dto.maxSteps } : {}),
+  };
 }
 
 @Controller('agent-flows/runs')
@@ -75,7 +89,7 @@ export class AgentFlowRunsController {
 
   @Post(':id/resume')
   resume(@Param('id') id: string, @Body() dto: ResumeAgentFlowRunDto): Promise<AgentFlowRunSnapshot> {
-    return this.runtime.resume(id, dto);
+    return this.runtime.resume(id, normalizeResumeDto(dto));
   }
 
   @Post(':id/stop')

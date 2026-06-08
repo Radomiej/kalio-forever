@@ -16,6 +16,9 @@ export interface ImageResultData {
 
 export function ImageResultRenderer({ data }: { data: ImageResultData }) {
   const [expanded, setExpanded] = useState(false);
+  const fileName = data.path?.split('/').pop() ?? 'image.png';
+  const downloadHref = data.image_url.startsWith('data:') ? data.image_url : data.download_url;
+  const showManualLink = Boolean(data.download_url && downloadHref !== data.download_url);
 
   return (
     <div className="mt-2 space-y-1">
@@ -35,10 +38,10 @@ export function ImageResultRenderer({ data }: { data: ImageResultData }) {
           >
             <Maximize2 size={10} />
           </button>
-          {data.download_url && (
+          {downloadHref && (
             <a
-              href={data.download_url}
-              download={data.path?.split('/').pop() ?? 'image.png'}
+              href={downloadHref}
+              download={fileName}
               title="Download"
               className="btn btn-xs btn-circle bg-base-300/80 border-0 backdrop-blur-sm"
               onClick={(e) => e.stopPropagation()}
@@ -73,11 +76,21 @@ export function ImageResultRenderer({ data }: { data: ImageResultData }) {
               <div className="flex gap-2">
                 {data.download_url && (
                   <a
-                    href={data.download_url}
-                    download={data.path?.split('/').pop() ?? 'image.png'}
+                    href={downloadHref}
+                    download={fileName}
                     className="btn btn-xs btn-ghost gap-1"
                   >
                     <Download size={11} /> Download
+                  </a>
+                )}
+                {showManualLink && (
+                  <a
+                    href={data.download_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-xs btn-ghost"
+                  >
+                    Open original
                   </a>
                 )}
                 <button type="button" className="btn btn-xs btn-ghost" onClick={() => setExpanded(false)}>

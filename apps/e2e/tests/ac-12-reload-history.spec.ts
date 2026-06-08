@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE } from './helpers/test-config';
+import {
+  API_BASE,
+  expectComposerEnabled,
+  selectSession,
+  sendMessageFromComposer,
+} from './helpers/test-config';
 
 // AC-12: Full conversation history survives page reload
 test.describe('AC-12: History after reload', () => {
@@ -15,28 +20,22 @@ test.describe('AC-12: History after reload', () => {
     await page.getByTestId('nav-talk').click();
 
     // Select the session
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC12 Reload Test' }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC12 Reload Test' }).first().click();
+    await selectSession(page, session.id, 'AC12 Reload Test');
 
-    const chatInput = page.getByTestId('chat-input');
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
+    const chatInput = await expectComposerEnabled(page, 5000);
 
     // Send first message and wait for response
-    await chatInput.fill('Say HELLO.');
-    await page.getByTestId('chat-send-btn').click();
+    await sendMessageFromComposer(page, 'Say HELLO.');
 
     // Wait for response
     await expect(page.getByTestId('agent-turn-bubble').first()).toBeVisible({ timeout: 30_000 });
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    await expectComposerEnabled(page, 30_000);
 
     // Send second message
-    await chatInput.fill('Say WORLD.');
-    await page.getByTestId('chat-send-btn').click();
+    await sendMessageFromComposer(page, 'Say WORLD.');
 
     await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(2, { timeout: 30_000 });
-    await expect(chatInput).toBeEnabled({ timeout: 30_000 });
+    await expectComposerEnabled(page, 30_000);
 
     // Count messages before reload
     const userMessagesBefore = await page.getByTestId('message-bubble').count();
@@ -49,10 +48,7 @@ test.describe('AC-12: History after reload', () => {
     await page.getByTestId('nav-talk').click();
 
     // Select same session
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC12 Reload Test' }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC12 Reload Test' }).first().click();
+    await selectSession(page, session.id, 'AC12 Reload Test');
 
     // Wait for history to load
     await page.waitForTimeout(2000);

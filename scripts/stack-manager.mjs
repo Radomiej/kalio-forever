@@ -244,7 +244,21 @@ async function startStack() {
   });
   const frontend = spawnProcess(
     pnpm.command,
-    [...pnpm.argsPrefix, '--filter', 'kalio-web', 'exec', 'vite', 'preview', '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort'],
+    [
+      ...pnpm.argsPrefix,
+      '--filter',
+      'kalio-web',
+      'exec',
+      'vite',
+      'preview',
+      '--configLoader',
+      'runner',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(frontendPort),
+      '--strictPort',
+    ],
     {
       cwd: repoRoot,
       env: {
@@ -282,7 +296,7 @@ async function startStack() {
     frontend: {
       pid: frontend.pid,
       cwd: repoRoot,
-      command: `${pnpm.command} ${pnpm.argsPrefix.join(' ')} --filter kalio-web exec vite preview --strictPort`,
+      command: `${pnpm.command} ${pnpm.argsPrefix.join(' ')} --filter kalio-web exec vite preview --configLoader runner --strictPort`,
     },
     backendPort,
     frontendPort,

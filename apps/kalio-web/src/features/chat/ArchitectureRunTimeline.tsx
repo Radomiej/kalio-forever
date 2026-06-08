@@ -20,6 +20,26 @@ function compact(step: TraceStep): string {
   return compactArchitectureTraceContent(step.content, step.speaker).replace(/\s+/g, ' ').trim();
 }
 
+function shortSummary(step: TraceStep, maxLength = 120): string {
+  const fullText = compactArchitectureTraceContent(step.content, step.speaker);
+  const summary = fullText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .find((line) => (
+      line.length > 0
+      && !/^#{1,6}\s/.test(line)
+      && !/^\|/.test(line)
+      && !/^[-|:\s]+$/.test(line)
+    ))
+    ?.replace(/^[-*]\s*/, '')
+    .replace(/\*\*/g, '')
+    .trim() ?? compact(step);
+  if (summary.length <= maxLength) {
+    return summary;
+  }
+  return `${summary.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
+}
+
 function routeSegmentLabel(step: TraceStep): string {
   if (step.speaker === 'participant') return nodeLabel(step);
   if (step.speaker === 'router') return 'Router';
@@ -69,14 +89,32 @@ function routeSegmentTone(step: TraceStep): string {
   return 'text-base-content bg-base-100/50 border-base-content/20';
 }
 
-function RouterStep({ step, label }: { step: TraceStep | undefined; label: string }) {
+function stepFocus(step: TraceStep): { eventId?: string; nodeId?: string } {
+  return { eventId: step.eventId, nodeId: step.nodeId };
+}
+
+function RouterStep({
+  step,
+  label,
+  onOpenStep,
+}: {
+  step: TraceStep | undefined;
+  label: string;
+  onOpenStep: (step: TraceStep) => void;
+}) {
   const routerOutput = step?.routerOutput;
   const contractIsFallback = routerOutput
     ? routerOutput.acceptedInputs.every((input) => /^Input from\s/i.test(input.insight))
     : false;
 
   return (
-    <div className="rounded-lg border border-amber-400/20 bg-amber-400/5 px-2.5 py-2" data-testid="architecture-route-router">
+    <button
+      type="button"
+      className="w-full rounded-lg border border-amber-400/20 bg-amber-400/5 px-2.5 py-2 text-left transition-colors hover:border-amber-300/40 hover:bg-amber-400/10 disabled:cursor-default disabled:hover:border-amber-400/20 disabled:hover:bg-amber-400/5"
+      data-testid="architecture-route-router"
+      onClick={() => step && onOpenStep(step)}
+      disabled={!step}
+    >
       <div className="flex items-center gap-2">
         <Route size={12} className="text-amber-300" />
         <span className="text-xs font-medium text-base-content">{label}</span>
@@ -85,7 +123,9 @@ function RouterStep({ step, label }: { step: TraceStep | undefined; label: strin
         )}
       </div>
       {step?.content && (
-        <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55">{compact(step)}</p>
+        <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
+          {shortSummary(step)}
+        </p>
       )}
       {routerOutput && (
         <div className="mt-2 grid gap-1.5 rounded-md border border-amber-400/15 bg-base-100/40 p-2" data-testid="architecture-router-contract">
@@ -115,16 +155,18 @@ function RouterStep({ step, label }: { step: TraceStep | undefined; label: strin
           </p>
         </div>
       )}
-    </div>
+    </button>
   );
 }
 
 function AgentStep({
   step,
   onOpenBranch,
+  onOpenStep,
 }: {
   step: TraceStep;
   onOpenBranch: (sessionId: string) => void;
+  onOpenStep: (step: TraceStep) => void;
 }) {
   const branchSessionId = step.stream?.branchSessionId;
 
@@ -134,8 +176,13 @@ function AgentStep({
       className="min-w-0 rounded-lg border border-sky-400/20 bg-sky-400/5 px-2.5 py-2 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-400/10 disabled:cursor-default disabled:hover:border-sky-400/20 disabled:hover:bg-sky-400/5"
       data-testid="architecture-route-agent"
       data-session-id={branchSessionId}
-      onClick={() => branchSessionId && onOpenBranch(branchSessionId)}
-      disabled={!branchSessionId}
+      onClick={() => {
+        if (branchSessionId) {
+          onOpenBranch(branchSessionId);
+          return;
+        }
+        onOpenStep(step);
+      }}
     >
       <div className="flex items-center gap-2">
         <GitBranch size={12} className="text-sky-300" />
@@ -146,7 +193,9 @@ function AgentStep({
           </span>
         )}
       </div>
-      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55">{compact(step)}</p>
+      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
+        {shortSummary(step)}
+      </p>
     </button>
   );
 }
@@ -154,9 +203,11 @@ function AgentStep({
 function ParallelBranches({
   steps,
   onOpenBranch,
+  onOpenStep,
 }: {
   steps: TraceStep[];
   onOpenBranch: (sessionId: string) => void;
+  onOpenStep: (step: TraceStep) => void;
 }) {
   return (
     <div className="rounded-lg border border-sky-400/20 bg-sky-400/5 px-2.5 py-2" data-testid="architecture-route-parallel-agents">
@@ -177,8 +228,13 @@ function ParallelBranches({
             className="min-w-0 rounded-md border border-base-content/10 bg-base-300/45 px-2 py-1.5 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-400/10 disabled:cursor-default disabled:hover:border-base-content/10 disabled:hover:bg-base-300/45"
             data-testid="architecture-route-agent"
             data-session-id={branchSessionId}
-            onClick={() => branchSessionId && onOpenBranch(branchSessionId)}
-            disabled={!branchSessionId}
+            onClick={() => {
+              if (branchSessionId) {
+                onOpenBranch(branchSessionId);
+                return;
+              }
+              onOpenStep(step);
+            }}
           >
             <div className="flex min-w-0 items-center gap-1.5">
               <span className="truncate text-[11px] font-medium text-base-content">{nodeLabel(step)}</span>
@@ -188,7 +244,9 @@ function ParallelBranches({
                 </span>
               )}
             </div>
-            <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-base-content/50">{compact(step)}</p>
+            <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-base-content/50" title={compact(step)}>
+              {shortSummary(step, 92)}
+            </p>
           </button>
           );
         })}
@@ -197,17 +255,31 @@ function ParallelBranches({
   );
 }
 
-function FinalizerStep({ step }: { step: TraceStep | undefined }) {
+function FinalizerStep({
+  step,
+  onOpenStep,
+}: {
+  step: TraceStep | undefined;
+  onOpenStep: (step: TraceStep) => void;
+}) {
   return (
-    <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/5 px-2.5 py-2" data-testid="architecture-route-finalizer">
+    <button
+      type="button"
+      className="w-full rounded-lg border border-emerald-400/20 bg-emerald-400/5 px-2.5 py-2 text-left transition-colors hover:border-emerald-300/40 hover:bg-emerald-400/10 disabled:cursor-default disabled:hover:border-emerald-400/20 disabled:hover:bg-emerald-400/5"
+      data-testid="architecture-route-finalizer"
+      onClick={() => step && onOpenStep(step)}
+      disabled={!step}
+    >
       <div className="flex items-center gap-2">
         <ShieldCheck size={12} className="text-emerald-300" />
         <span className="text-xs font-medium text-base-content">Finalizer</span>
       </div>
       {step?.content && (
-        <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55">{compact(step)}</p>
+        <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
+          {shortSummary(step)}
+        </p>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -234,10 +306,12 @@ export function ArchitectureRunTimeline({
   run,
   onOpenCanvas,
   onOpenBranch,
+  onOpenStep,
 }: {
   run: ArchitectureChatRunSummary;
   onOpenCanvas: () => void;
   onOpenBranch: (sessionId: string) => void;
+  onOpenStep?: (focus: { eventId?: string; nodeId?: string }) => void;
 }) {
   const routers = run.trace.filter((step) => step.speaker === 'router');
   const firstRouter = routers[0];
@@ -245,6 +319,9 @@ export function ArchitectureRunTimeline({
   const hasMerge = Boolean(finalRouter && finalRouter !== firstRouter);
   const stages = buildTraceStages(run.trace);
   const shellSegments = stages.map(stageSegment);
+  const openStep = (step: TraceStep) => {
+    onOpenStep?.(stepFocus(step));
+  };
 
   return (
     <div className="space-y-2 rounded-xl border border-sky-400/20 bg-base-200/45 p-2.5 shadow-sm shadow-sky-950/20" data-testid="architecture-run-timeline">
@@ -269,19 +346,19 @@ export function ArchitectureRunTimeline({
       <div className="grid gap-2 border-l border-sky-400/20 pl-2">
         {stages.map((stage, index) => {
           if (stage.kind === 'parallel') {
-            return <ParallelBranches key={`parallel-${index}`} steps={stage.steps} onOpenBranch={onOpenBranch} />;
+            return <ParallelBranches key={`parallel-${index}`} steps={stage.steps} onOpenBranch={onOpenBranch} onOpenStep={openStep} />;
           }
 
           const { step } = stage;
             if (step.speaker === 'participant') {
-              return <AgentStep key={step.eventId ?? `${step.nodeId}-${index}`} step={step} onOpenBranch={onOpenBranch} />;
+              return <AgentStep key={step.eventId ?? `${step.nodeId}-${index}`} step={step} onOpenBranch={onOpenBranch} onOpenStep={openStep} />;
             }
             if (step.speaker === 'router') {
               const label = step === firstRouter ? 'Router dispatch' : step === finalRouter && hasMerge ? 'Router merge' : nodeLabel(step);
-              return <RouterStep key={step.eventId ?? `${step.nodeId}-${index}`} step={step} label={label} />;
+              return <RouterStep key={step.eventId ?? `${step.nodeId}-${index}`} step={step} label={label} onOpenStep={openStep} />;
             }
             if (step.speaker === 'finalizer') {
-              return <FinalizerStep key={step.eventId ?? `${step.nodeId}-${index}`} step={step} />;
+              return <FinalizerStep key={step.eventId ?? `${step.nodeId}-${index}`} step={step} onOpenStep={openStep} />;
             }
             return null;
         })}

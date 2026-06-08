@@ -216,4 +216,34 @@ describe('useContextUsage', () => {
       systemPromptText: 'BACKEND SYSTEM PROMPT',
     }));
   });
+
+  it('returns rawContext as sanitized stats rather than the literal system prompt text', () => {
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = [makeMessage({ id: 'assistant-1', role: 'assistant', content: 'assistant reply', thinking: 'internal notes' })];
+    agentState.getContextForSession = vi.fn<AgentStoreShape['getContextForSession']>(() => ({
+      systemPrompt: 'BACKEND SYSTEM PROMPT',
+      activeToolNames: ['vfs_read'],
+    }));
+    buildHistoryMock.mockReturnValue([
+      { role: 'assistant', content: 'assistant reply' },
+    ]);
+
+    const { result } = renderHook(() => useContextUsage());
+
+    expect(result.current.rawContext).toEqual({
+      contextLimit: 32000,
+      systemPromptChars: 'BACKEND SYSTEM PROMPT'.length,
+      activeToolNames: ['vfs_read'],
+      history: [
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          textChars: 'internal notesassistant reply'.length,
+          preview: 'assistant reply',
+        },
+      ],
+      imageCount: 0,
+    });
+    expect('systemPrompt' in result.current.rawContext).toBe(false);
+  });
 });

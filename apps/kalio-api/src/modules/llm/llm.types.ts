@@ -21,6 +21,8 @@ export interface StreamChatOptions {
   onChunk: (chunk: LLMStreamChunk) => void;
   /** Optional: called with incremental tool-argument character counts while streaming. */
   onToolArgChunk?: (toolName: string, deltaChars: number) => void;
+  /** Optional per-request model override. Does not mutate the active provider config. */
+  modelOverride?: string;
   abortSignal?: AbortSignal;
 }
 

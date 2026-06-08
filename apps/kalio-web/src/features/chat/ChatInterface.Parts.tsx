@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { Check, Copy, Play } from 'lucide-react';
-import type { ChatMessage, ChatSession, Persona } from '@kalio/types';
+import type { ChatMessage, ChatSession, LLMContextPreview, Persona } from '@kalio/types';
 import type { TokenCount } from '../../services/tokenCounter';
 import { ConversationFilesBar } from '../vfs/ConversationFilesBar';
-import { ContextStats } from './ContextStats';
-import type { RawContextStats } from './ContextStats';
+import { ContextStats, type ContextPreviewStatus } from './ContextStats';
 import { TokenBadge } from './TokenBadge';
 import type { ArchitectSchema } from '../architect/architect.types';
 
@@ -146,7 +145,8 @@ interface ChatSessionHeaderProps {
   onToggleContextStats: () => void;
   showContextStats: boolean;
   tokenCount: TokenCount;
-  rawContext: RawContextStats;
+  contextPreview: LLMContextPreview | null;
+  contextPreviewStatus: ContextPreviewStatus;
   vfsRefreshSignal: number;
 }
 
@@ -164,7 +164,8 @@ export function ChatSessionHeader({
   onToggleContextStats,
   showContextStats,
   tokenCount,
-  rawContext,
+  contextPreview,
+  contextPreviewStatus,
   vfsRefreshSignal,
 }: ChatSessionHeaderProps) {
   return (
@@ -189,7 +190,8 @@ export function ChatSessionHeader({
             onClose={onCloseContextStats}
             systemPrompt={activeContext.systemPrompt}
             activeToolNames={activeContext.activeToolNames}
-            rawContext={rawContext}
+            contextPreview={contextPreview}
+            contextPreviewStatus={contextPreviewStatus}
           />
         )}
       </div>
@@ -209,6 +211,7 @@ interface ChatWelcomeScreenProps {
   isStreaming: boolean;
   onArchitectureChange: (schemaId: string) => void;
   onArchitectureRun: (content: string, schemaId: string) => void;
+  onDraftChange: (content: string) => void;
   onPersonaChange: (personaId: string) => void;
   onSend: (content: string, personaId: string) => void;
   personas: Persona[];
@@ -222,6 +225,7 @@ export function ChatWelcomeScreen({
   isStreaming,
   onArchitectureChange,
   onArchitectureRun,
+  onDraftChange,
   onPersonaChange,
   onSend,
   personas,
@@ -240,6 +244,7 @@ export function ChatWelcomeScreen({
     } else {
       onSend(trimmed, activeSession?.personaId ?? 'default');
     }
+    onDraftChange('');
     setPrompt('');
   };
 
@@ -299,7 +304,10 @@ export function ChatWelcomeScreen({
             <textarea
               className="textarea textarea-ghost min-h-24 w-full resize-none text-sm leading-6 focus:outline-none"
               value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                onDraftChange(event.target.value);
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
