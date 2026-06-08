@@ -59,6 +59,10 @@ function xiaomiCompatHeaders(apiKey?: string): Record<string, string> {
   };
 }
 
+export function isBuiltInLlmProvider(provider: string): boolean {
+  return normalizeProviderKey(provider) in DEFAULT_LLM_PROVIDER_BASE_URLS;
+}
+
 export function resolveLlmProviderBaseUrl(provider: string, baseUrl?: string): string {
   const trimmedBaseUrl = baseUrl?.trim();
   if (trimmedBaseUrl) {

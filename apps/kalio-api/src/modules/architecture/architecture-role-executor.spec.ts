@@ -1,8 +1,26 @@
-import type { ArchitectureExecutionEvent, ArchitectureRun, ArchitectureSchema, ToolMeta } from '@kalio/types';
+import type { ArchitectureExecutionEvent, ArchitectureRoleSlot, ArchitectureRun, ArchitectureSchema, ToolMeta } from '@kalio/types';
 import { describe, expect, it, vi } from 'vitest';
-import type { SubagentRuntimePort } from '../tool/subagent-runtime.port';
+import type { RunSubagentRequest, SubagentRuntimePort } from '../tool/subagent-runtime.port';
+import { buildArchitectureSlotToolPolicy } from '../chat/architecture-slot-tool-policy';
 import { ArchitectureRoleExecutorService } from './architecture-role-executor';
 import { ArchitectureRegistryService } from './architecture-registry.service';
+
+function slotToolNames(call: RunSubagentRequest | undefined): string[] {
+  return call?.slotPolicy?.allowedToolNames ?? [];
+}
+
+function expectSlotPolicy(
+  call: RunSubagentRequest | undefined,
+  slot: ArchitectureRoleSlot,
+  architectureContext?: Record<string, unknown>,
+  incomingEvents?: ArchitectureExecutionEvent[],
+): void {
+  expect(call?.slotPolicy).toEqual(buildArchitectureSlotToolPolicy({
+    slot,
+    architectureContext,
+    incomingEvents,
+  }));
+}
 
 describe('ArchitectureRoleExecutorService', () => {
   it('prepares branch sessions without invoking live subagents by default', async () => {
@@ -51,7 +69,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'terminal_spawn', description: 'Run terminal', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     const result = await service.execute({
       schema,
@@ -77,16 +95,15 @@ describe('ArchitectureRoleExecutorService', () => {
       childSessionId: 'branch-1',
       personaId: 'dev',
       maxIterations: 4,
-      availableTools: [
-        expect.objectContaining({ name: 'vfs_list' }),
-        expect.objectContaining({ name: 'vfs_read' }),
-      ],
+      slotPolicy: expect.objectContaining({
+        allowedToolNames: expect.arrayContaining(['vfs_list', 'vfs_read']),
+      }),
       timeoutMs: 120_000,
       vfsMode: 'shared',
       copyOutputs: false,
     }));
-    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].availableTools.map((tool) => tool.name)).not.toContain('vfs_write');
-    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].availableTools.map((tool) => tool.name)).not.toContain('terminal_spawn');
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0]?.slotPolicy?.allowedToolNames).not.toContain('vfs_write');
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0]?.slotPolicy?.allowedToolNames).not.toContain('terminal_spawn');
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
     expect(call?.objective).toContain('Architecture: Strategic Decision Council v0.1.0');
     expect(call?.objective).toContain('Slot: Pragmatist (participant)');
@@ -291,7 +308,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'terminal_output', description: 'Read terminal output', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     const result = await service.execute({
       schema,
@@ -413,7 +430,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'fs_read', description: 'Read host files', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     const result = await service.execute({
       schema,
@@ -521,7 +538,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'terminal_output', description: 'Read terminal output', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     const result = await service.execute({
       schema,
@@ -535,11 +552,7 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'vfs_write',
-    ]);
+    expectSlotPolicy(call, implementer);
     expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent']);
     expect(call?.maxIterations).toBe(2);
     expect(call?.objective).toContain('Slot: Implementer (tool_executor)');
@@ -612,7 +625,7 @@ describe('ArchitectureRoleExecutorService', () => {
       },
       createdAt: Date.now(),
     }];
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -629,8 +642,15 @@ describe('ArchitectureRoleExecutorService', () => {
       incomingEvents,
     });
 
-    const toolNames = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].availableTools.map((tool) => tool.name);
-    expect(toolNames).toEqual(['fs_write']);
+    const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
+    const architectureContext = {
+      projectPath: 'C:\\Projekty\\TurboProject2',
+      executionCwd: 'C:\\Projekty\\TurboProject2',
+    };
+    expectSlotPolicy(call, implementer, architectureContext, incomingEvents);
+    expect(slotToolNames(call)).not.toContain('fs_read');
+    expect(slotToolNames(call)).not.toContain('vfs_read');
+    expect(slotToolNames(call)).toContain('fs_write');
   });
 
   it('grants host project read tools to non-executor slots when a local project path is configured', async () => {
@@ -658,7 +678,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'fs_write', description: 'Write host files', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -672,13 +692,9 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'fs_list',
-      'fs_read',
-    ]);
-    expect(call?.availableTools.map((tool) => tool.name)).not.toContain('fs_write');
+    const architectureContext = { projectPath: 'C:\\Projekty\\bitecs-gpu---shared-memory-explorer' };
+    expectSlotPolicy(call, slot, architectureContext);
+    expect(slotToolNames(call)).not.toContain('fs_write');
     expect(call?.objective).toContain('Local host project path: C:\\Projekty\\bitecs-gpu---shared-memory-explorer');
     expect(call?.objective).toContain('call fs_list or fs_read first');
   });
@@ -710,7 +726,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'fs_write', description: 'Write host files', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -725,14 +741,8 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'vfs_write',
-      'fs_list',
-      'fs_read',
-      'fs_write',
-    ]);
+    const architectureContext = { executionCwd: 'C:\\Projekty\\bitecs-gpu---shared-memory-explorer' };
+    expectSlotPolicy(call, implementer, architectureContext);
     expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent']);
     expect(call?.objective).toContain('Use fs_write only from tool-executor slots when an approved implementation write is required.');
   });
@@ -760,7 +770,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'fs_write', description: 'Write host files', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -810,7 +820,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'terminal_output', description: 'Read terminal output', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -825,16 +835,7 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'vfs_write',
-      'fs_list',
-      'fs_read',
-      'fs_write',
-      'terminal_spawn',
-      'terminal_output',
-    ]);
+    expectSlotPolicy(call, verifier, { executionCwd: 'C:\\Projekty\\kalio-forever' });
     expect(call?.autoApproveTools).toEqual(['vfs_write']);
   });
 
@@ -861,7 +862,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'terminal_spawn', description: 'Run terminal', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -916,7 +917,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'stop_cli_agent', description: 'Stop CLI agent', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     const result = await service.execute({
       schema,
@@ -935,21 +936,13 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'fs_list',
-      'fs_read',
-      'run_subagent',
-      'spawn_subagent',
-      'message_subagent',
-      'spawn_cli_agent',
-      'message_cli_agent',
-      'get_cli_agent_status',
-      'wait_for',
-    ]);
-    expect(call?.availableTools.map((tool) => tool.name)).not.toContain('stop_cli_agent');
-    expect(call?.availableTools.map((tool) => tool.name)).not.toContain('fs_write');
+    const architectureContext = {
+      projectPath: 'C:\\Projekty\\TurboProject2',
+      allowArchitectureOrchestratorSubagents: true,
+    };
+    expectSlotPolicy(call, orchestrator, architectureContext);
+    expect(slotToolNames(call)).not.toContain('stop_cli_agent');
+    expect(slotToolNames(call)).not.toContain('fs_write');
     expect(call?.autoApproveTools).toEqual([
       'vfs_write',
       'spawn_cli_agent',
@@ -1000,7 +993,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'wait_for', description: 'Wait for async tool', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1019,12 +1012,10 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'fs_list',
-      'fs_read',
-    ]);
+    expectSlotPolicy(call, orchestrator, {
+      projectPath: 'C:\\Projekty\\TurboProject2',
+      availableCliAgents: ['copilot', 'codex'],
+    });
     expect(call?.autoApproveTools).toEqual(['vfs_write']);
     expect(call?.objective).toContain('CLI agents are unavailable for this run.');
     expect(call?.objective).toContain('route to the next architecture node instead');
@@ -1059,7 +1050,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'stop_cli_agent', description: 'Stop CLI agent', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1078,10 +1069,10 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-    ]);
+    expectSlotPolicy(call, orchestrator, {
+      availableCliAgents: [],
+      allowArchitectureCliStop: true,
+    });
     expect(call?.autoApproveTools).toEqual(['vfs_write']);
     expect(call?.objective).toContain('CLI agents are unavailable for this run.');
     expect(call?.objective).toContain('route to the next architecture node instead');
@@ -1114,7 +1105,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'spawn_cli_agent', description: 'Spawn CLI agent', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1130,12 +1121,7 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'vfs_write',
-      'spawn_cli_agent',
-    ]);
+    expectSlotPolicy(call, implementer, { requireGoalMasterLoopProof: true });
     expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent']);
     expect(call?.objective).toContain('Implementation proof mode: the Implementer must create or update at least one artifact with vfs_write');
   });
@@ -1164,7 +1150,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'vfs_write', description: 'Write VFS files', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1180,11 +1166,7 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'vfs_write',
-    ]);
+    expectSlotPolicy(call, implementer, { requireImplementerWriteProof: true });
     expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent']);
     expect(call?.objective).toContain('Implementation proof mode: the Implementer must create or update at least one artifact with vfs_write');
   });
@@ -1216,7 +1198,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'fs_write', description: 'Write host files', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1236,14 +1218,11 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'vfs_write',
-      'fs_list',
-      'fs_read',
-      'fs_write',
-    ]);
+    expectSlotPolicy(call, implementer, {
+      requireImplementerWriteProof: true,
+      projectPath: 'C:\\Projekty\\TurboProject2',
+      autoApproveArchitectureProjectWrites: true,
+    });
     expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent', 'fs_write']);
     expect(call?.objective).toContain('use fs_write for host project files');
   });
@@ -1296,7 +1275,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'wait_for', description: 'Wait for async tool', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     const result = await service.execute({
       schema,
@@ -1311,15 +1290,7 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'vfs_write',
-      'spawn_cli_agent',
-      'message_cli_agent',
-      'get_cli_agent_status',
-      'wait_for',
-    ]);
+    expectSlotPolicy(call, implementer, { projectPath: 'C:\\Projekty\\TurboProject2' });
     expect(call?.autoApproveTools).toEqual([
       'vfs_write',
       'spawn_cli_agent',
@@ -1388,7 +1359,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'get_cli_agent_status', description: 'Get CLI status', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     const result = await service.execute({
       schema,
@@ -1450,7 +1421,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'get_cli_agent_status', description: 'Get CLI status', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     const result = await service.execute({
       schema,
@@ -1497,7 +1468,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'stop_cli_agent', description: 'Stop CLI agent', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1516,7 +1487,7 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toContain('stop_cli_agent');
+    expect(call?.slotPolicy?.allowedToolNames).toContain('stop_cli_agent');
     expect(call?.autoApproveTools).not.toContain('stop_cli_agent');
   });
 
@@ -1545,7 +1516,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'message_subagent', description: 'Message child subagent', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
     const baseInput = {
       schema,
       slot: orchestrator,
@@ -1561,7 +1532,7 @@ describe('ArchitectureRoleExecutorService', () => {
         branchSessionIds: { orchestrator: 'branch-orchestrator' },
       },
     });
-    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].availableTools.map((tool) => tool.name)).not.toEqual(
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0]?.slotPolicy?.allowedToolNames).not.toEqual(
       expect.arrayContaining(['run_subagent', 'spawn_subagent', 'message_subagent']),
     );
     expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].objective).toContain('route_to(targetNodeId, response)');
@@ -1575,7 +1546,7 @@ describe('ArchitectureRoleExecutorService', () => {
         context: { allowArchitectureOrchestratorSubagents: true },
       },
     });
-    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[1]?.[0].availableTools.map((tool) => tool.name)).toEqual(
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[1]?.[0]?.slotPolicy?.allowedToolNames).toEqual(
       expect.arrayContaining(['run_subagent', 'spawn_subagent', 'message_subagent']),
     );
   });
@@ -1603,7 +1574,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'vfs_read', description: 'Read VFS files', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1657,7 +1628,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'fs_list', description: 'List host files', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1680,12 +1651,9 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    const spawn = call?.availableTools.find((tool) => tool.name === 'spawn_cli_agent');
-    const status = call?.availableTools.find((tool) => tool.name === 'get_cli_agent_status');
-    const fsList = call?.availableTools.find((tool) => tool.name === 'fs_list');
-    expect(spawn?.description).toContain('Architecture CLI preferences: copilot: Prefer cheap implementation');
-    expect(status?.description).toContain('codex: Use conservative verification only.');
-    expect(fsList?.description).toBe('List host files');
+    const toolNames = slotToolNames(call);
+    expect(toolNames).toEqual(expect.arrayContaining(['spawn_cli_agent', 'get_cli_agent_status', 'fs_list']));
+    expect(call?.slotPolicy?.applyCliDescriptionPreferences).toBe(true);
     expect(call?.objective).not.toContain('cliAgentToolPreferences');
   });
 
@@ -1711,7 +1679,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'spawn_cli_agent', description: 'Spawn CLI agent', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1738,9 +1706,9 @@ describe('ArchitectureRoleExecutorService', () => {
       outgoingNodeIds: ['implementer'],
     });
 
-    const toolDescription = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].availableTools[0]?.description ?? '';
-    expect(toolDescription).toContain('copilot (model gpt-4.1): Prefer cheap implementation.');
-    expect(toolDescription).toContain('gemini (model gemini-2.5-pro): Use for brainstorming.');
+    const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
+    expect(call?.slotPolicy?.applyCliDescriptionPreferences).toBe(true);
+    expect(slotToolNames(call)).toContain('spawn_cli_agent');
   });
 
   it('lets Goal Master delegate review checks without granting write-capable CLI tools', async () => {
@@ -1773,7 +1741,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'stop_cli_agent', description: 'Stop CLI agent', parameters: {}, requiresConfirmation: true },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1788,17 +1756,11 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools.map((tool) => tool.name)).toEqual([
-      'vfs_list',
-      'vfs_read',
-      'run_subagent',
-      'get_cli_agent_status',
-      'wait_for',
-    ]);
-    expect(call?.availableTools.map((tool) => tool.name)).not.toContain('spawn_subagent');
-    expect(call?.availableTools.map((tool) => tool.name)).not.toContain('message_subagent');
-    expect(call?.availableTools.map((tool) => tool.name)).not.toContain('run_cli_agent');
-    expect(call?.availableTools.map((tool) => tool.name)).not.toContain('stop_cli_agent');
+    expectSlotPolicy(call, judge);
+    expect(slotToolNames(call)).not.toContain('spawn_subagent');
+    expect(slotToolNames(call)).not.toContain('message_subagent');
+    expect(slotToolNames(call)).not.toContain('run_cli_agent');
+    expect(slotToolNames(call)).not.toContain('stop_cli_agent');
     expect(call?.objective).toContain('You may delegate focused review checks with synchronous run_subagent and inspect CLI child-session status');
     expect(call?.objective).toContain('do not spawn background review agents from this judge slot');
   });
@@ -1856,7 +1818,7 @@ describe('ArchitectureRoleExecutorService', () => {
         { name: 'fs_read', description: 'Read host files', parameters: {}, requiresConfirmation: false },
       ]),
     };
-    const service = new ArchitectureRoleExecutorService(subagentRuntime, toolDispatch as never);
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
 
     await service.execute({
       schema,
@@ -1870,7 +1832,7 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
-    expect(call?.availableTools).toEqual([]);
+    expectSlotPolicy(call, finalizer, { projectPath: 'C:\\Projekty\\bitecs-gpu---shared-memory-explorer' });
     expect(call?.objective).toContain('Do not call tools or start a new investigation.');
     expect(call?.objective).not.toContain('call fs_list or fs_read first');
     expect(call?.objective).not.toContain('Local host project path:');

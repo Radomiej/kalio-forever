@@ -32,6 +32,7 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Migration warning (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
     }
     this.ensureAgentFlowTables();
+    this.ensureSessionColumn('runtime_context', 'text');
 
     this.logger.log(`Database connected: ${dbPath}`);
   }
@@ -108,5 +109,11 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
     const columns = this.sqlite.prepare('PRAGMA table_info(agent_flow_runs)').all() as Array<{ name: string }>;
     if (columns.some((column) => column.name === name)) return;
     this.sqlite.exec(`ALTER TABLE agent_flow_runs ADD COLUMN ${name} ${definition}`);
+  }
+
+  private ensureSessionColumn(name: string, definition: string): void {
+    const columns = this.sqlite.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
+    if (columns.some((column) => column.name === name)) return;
+    this.sqlite.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${definition}`);
   }
 }

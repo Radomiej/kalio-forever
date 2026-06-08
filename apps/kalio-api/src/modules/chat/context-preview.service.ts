@@ -1,8 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import type { ContextPreviewMessage, ContextPreviewRequest, LLMContextPreview, LLMContent, ToolMeta } from '@kalio/types';
+import type {
+  ContextPreviewRequest,
+  LLMContextPreview,
+  LLMContent,
+  RuntimeProfileSource,
+  SessionRuntimeContext,
+  ToolMeta,
+} from '@kalio/types';
 import { getReasoningContent, type ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
-import { ContextAssemblyService } from './context-assembly.service';
+import { ContextAssemblyService, type RuntimeAssemblyProfile } from './context-assembly.service';
 import { SessionManagerService } from './session-manager.service';
+import { SessionsService } from './sessions.service';
+import type { ToolPolicyRequest } from './tool-policy.service';
 import {
   estimateMessageTokens,
   estimateTextTokens,
@@ -17,10 +26,14 @@ export class ContextPreviewService {
   constructor(
     private readonly contextAssembly: ContextAssemblyService,
     private readonly sessionManager: SessionManagerService,
+    private readonly sessions: SessionsService,
   ) {}
 
   async buildPreview(sessionId: string, request: ContextPreviewRequest): Promise<LLMContextPreview> {
-    const assembled = await this.contextAssembly.assemble(request.personaId);
+    const session = await this.sessions.get(sessionId);
+    const personaId = request.personaId || session.personaId;
+    const { runtimeContext, profileSource } = this.resolveRuntimeContext(session.runtimeContext, request);
+    const assembled = await this.assembleForRuntimeContext(personaId, runtimeContext);
     const prepared = await this.sessionManager.loadPreviewHistoryForLLM(sessionId, {
       systemPrompt: assembled.effectiveSystemPrompt,
       toolMetas: assembled.toolMetas,
@@ -32,7 +45,7 @@ export class ContextPreviewService {
 
     return {
       sessionId,
-      personaId: request.personaId,
+      personaId,
       model: assembled.model,
       contextLimit: prepared.contextWindowSize,
       estimatedTokens,
@@ -45,10 +58,77 @@ export class ContextPreviewService {
       effectiveSystemPrompt: assembled.effectiveSystemPrompt,
       tools: assembled.toolMetas,
       messages,
+      runtimeKind: assembled.runtimeKind,
+      runtimeProfileSource: profileSource,
+      warnings: assembled.warnings.length > 0 ? assembled.warnings : undefined,
+      toolPolicy: assembled.toolPolicy,
     };
   }
 
-  private toPreviewMessages(messages: ContextManagedLLMMessage[]): ContextPreviewMessage[] {
+  private resolveRuntimeContext(
+    sessionContext: SessionRuntimeContext | undefined,
+    request: ContextPreviewRequest,
+  ): { runtimeContext: SessionRuntimeContext; profileSource: RuntimeProfileSource } {
+    if (request.target === 'runtime') {
+      return { runtimeContext: request.runtimeContext, profileSource: 'request' };
+    }
+    if (sessionContext) {
+      return { runtimeContext: sessionContext, profileSource: 'session' };
+    }
+    return {
+      runtimeContext: { runtimeKind: 'chat', systemPromptProfile: 'default-chat' },
+      profileSource: 'persona-default',
+    };
+  }
+
+  private async assembleForRuntimeContext(personaId: string, runtimeContext: SessionRuntimeContext) {
+    if (
+      runtimeContext.runtimeKind === 'chat'
+      || runtimeContext.runtimeKind === 'agent-flow-root'
+      || runtimeContext.runtimeKind === 'cli-agent'
+    ) {
+      const profile: RuntimeAssemblyProfile = {
+        runtimeKind: 'chat',
+        personaId,
+        toolPolicyRequest: {
+          runtimeKind: runtimeContext.runtimeKind === 'chat' ? 'chat' : runtimeContext.runtimeKind,
+          personaId,
+          sessionRuntimeContext: runtimeContext,
+          architectureContext: runtimeContext.architectureContext,
+        },
+      };
+      return this.contextAssembly.assembleForRuntime(profile);
+    }
+
+    const toolPolicyRequest: ToolPolicyRequest = {
+      runtimeKind: runtimeContext.runtimeKind,
+      personaId,
+      sessionRuntimeContext: runtimeContext,
+      explicitToolNames: runtimeContext.explicitToolNames,
+      architectureContext: runtimeContext.architectureContext,
+    };
+
+    if (runtimeContext.runtimeKind === 'agent-flow-branch') {
+      toolPolicyRequest.slotPolicy = runtimeContext.architectureSlotPolicy;
+    }
+
+    if (runtimeContext.runtimeKind === 'agent-flow-branch') {
+      return this.contextAssembly.assembleForRuntime({
+        runtimeKind: 'agent-flow-branch',
+        personaId,
+        toolPolicyRequest,
+        modelOverride: runtimeContext.modelOverride,
+      });
+    }
+
+    return this.contextAssembly.assembleForRuntime({
+      runtimeKind: 'subagent',
+      personaId,
+      toolPolicyRequest,
+    });
+  }
+
+  private toPreviewMessages(messages: ContextManagedLLMMessage[]): LLMContextPreview['messages'] {
     return messages.map((message, index) => ({
       role: message.role,
       content: message.content,

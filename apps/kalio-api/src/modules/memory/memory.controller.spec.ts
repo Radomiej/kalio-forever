@@ -141,29 +141,64 @@ describe('MemoryController', () => {
       expect(memorySvc.searchWebResults).toHaveBeenCalledWith('rss', 20);
     });
 
-    it('deletes the current dev web-search DB outside production', async () => {
-      const originalNodeEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'development';
-      try {
-        const result = await controller.deleteWebSearchDb();
-        expect(memorySvc.deleteWebResultsDbFile).toHaveBeenCalled();
-        expect(result).toEqual({
-          deletedPath: 'C:\\Users\\Radomiej\\AppData\\Local\\kalio-forever-dev\\memory\\profile\\web-results.db',
-        });
-      } finally {
-        process.env.NODE_ENV = originalNodeEnv;
-      }
+    it('deletes the current dev web-search DB in test mode', async () => {
+      const config = {
+        get: vi.fn((key: string, defaultValue?: string) => {
+          if (key === 'NODE_ENV') return 'test';
+          return defaultValue ?? '';
+        }),
+      };
+      const testController = new MemoryController(
+        memorySvc as never,
+        embeddingCreds as never,
+        config as never,
+        localInstall as never,
+      );
+
+      const result = await testController.deleteWebSearchDb();
+      expect(memorySvc.deleteWebResultsDbFile).toHaveBeenCalled();
+      expect(result).toEqual({
+        deletedPath: 'C:\\Users\\Radomiej\\AppData\\Local\\kalio-forever-dev\\memory\\profile\\web-results.db',
+      });
     });
 
-    it('rejects dev DB deletion in production', async () => {
-      const originalNodeEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'production';
-      try {
-        await expect(controller.deleteWebSearchDb()).rejects.toThrow(ForbiddenException);
-        expect(memorySvc.deleteWebResultsDbFile).not.toHaveBeenCalled();
-      } finally {
-        process.env.NODE_ENV = originalNodeEnv;
-      }
+    it('rejects dev DB deletion outside test mode without the test secret', async () => {
+      const config = {
+        get: vi.fn((key: string, defaultValue?: string) => {
+          if (key === 'NODE_ENV') return 'development';
+          if (key === 'KALIO_TEST_DEV_DB_SECRET') return 'secret-123';
+          return defaultValue ?? '';
+        }),
+      };
+      const testController = new MemoryController(
+        memorySvc as never,
+        embeddingCreds as never,
+        config as never,
+        localInstall as never,
+      );
+
+      await expect(testController.deleteWebSearchDb()).rejects.toThrow(ForbiddenException);
+      expect(memorySvc.deleteWebResultsDbFile).not.toHaveBeenCalled();
+    });
+
+    it('allows dev DB deletion outside test mode with the configured test secret header', async () => {
+      const config = {
+        get: vi.fn((key: string, defaultValue?: string) => {
+          if (key === 'NODE_ENV') return 'development';
+          if (key === 'KALIO_TEST_DEV_DB_SECRET') return 'secret-123';
+          return defaultValue ?? '';
+        }),
+      };
+      const testController = new MemoryController(
+        memorySvc as never,
+        embeddingCreds as never,
+        config as never,
+        localInstall as never,
+      );
+
+      const result = await testController.deleteWebSearchDb('secret-123');
+      expect(memorySvc.deleteWebResultsDbFile).toHaveBeenCalled();
+      expect(result.deletedPath).toContain('web-results.db');
     });
   });
 

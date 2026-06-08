@@ -1,5 +1,14 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import type { ChatMessage, ChatRunSnapshot, ChatSession, ContextPreviewRequest, CreateSessionDto, LLMContextPreview } from '@kalio/types';
+import type {
+  ChatMessage,
+  ChatRunSnapshot,
+  ChatSession,
+  ContextPreviewRequest,
+  CreateSessionDto,
+  LLMContextPreview,
+} from '@kalio/types';
+
+type SessionContextPreviewBody = Omit<Extract<ContextPreviewRequest, { sessionId: string }>, 'sessionId'>;
 import { SessionsService } from './sessions.service';
 import { RunJournalService } from './run-journal.service';
 import { ContextPreviewService } from './context-preview.service';
@@ -35,9 +44,9 @@ export class SessionsController {
   @Post(':id/context-preview')
   getContextPreview(
     @Param('id') id: string,
-    @Body() body: ContextPreviewRequest,
+    @Body() body: SessionContextPreviewBody,
   ): Promise<LLMContextPreview> {
-    return this.contextPreview.buildPreview(id, body);
+    return this.contextPreview.buildPreview(id, { ...body, target: 'session', sessionId: id });
   }
 
   @Delete(':id')

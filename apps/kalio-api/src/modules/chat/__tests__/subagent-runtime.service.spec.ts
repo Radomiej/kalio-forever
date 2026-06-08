@@ -14,6 +14,9 @@ import type { PersonaService } from '../../persona/persona.service';
 import { RunCliAgentTool } from '../../tool/tools/run-cli-agent.tool';
 import type { RunCliAgentRequest } from '../../cli-agent/cli-agent.types';
 import { parseRawXmlToolCall } from '../raw-tool-call.parser';
+import { makeSubagentRuntime } from './llm-runtime-test-harness';
+import type { AuditService } from '../audit.service';
+import type { SkillsService } from '../../skills/skills.service';
 
 const tools: ToolMeta[] = [
   { name: 'run_subagent', description: 'spawn child', parameters: {}, requiresConfirmation: false },
@@ -72,6 +75,30 @@ function makeSession(id: string, parentSessionId?: string): ChatSession {
   };
 }
 
+function buildSubagentRuntime(
+  llmSource: ILLMSource,
+  streamProcessor: Pick<StreamProcessorService, 'process'>,
+  toolDispatch: ToolDispatchService,
+  sessionManager: SessionManagerService,
+  sessions: SessionsService,
+  vfs: VFSService,
+  personaService?: PersonaService,
+  audit?: AuditService,
+  skillsService?: SkillsService,
+): SubagentRuntimeService {
+  return makeSubagentRuntime({
+    llmSource,
+    streamProcessor,
+    toolDispatch,
+    sessionManager,
+    sessions,
+    vfs,
+    personaService,
+    audit,
+    skillsService,
+  });
+}
+
 describe('SubagentRuntimeService nested subagents', () => {
   it('uses streamed chunks as the final result when the turn state text accumulator is empty', async () => {
     const llmSource: ILLMSource = {
@@ -103,7 +130,7 @@ describe('SubagentRuntimeService nested subagents', () => {
         }
       }),
     };
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       processor as unknown as StreamProcessorService,
       { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -147,7 +174,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       loadHistory: vi.fn().mockResolvedValue([]),
       loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
     } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as unknown as StreamProcessorService,
       { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -197,7 +224,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       loadHistory: vi.fn().mockResolvedValue([]),
       loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
     } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as unknown as StreamProcessorService,
       { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -250,7 +277,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
       const emit = vi.fn();
       const audit = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
-      const runtime = new SubagentRuntimeService(
+      const runtime = buildSubagentRuntime(
         llmSource,
         makeProcessor(sessionManager) as StreamProcessorService,
         { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -350,7 +377,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)),
       get: vi.fn(async () => existingChild),
     };
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -402,7 +429,7 @@ describe('SubagentRuntimeService nested subagents', () => {
         unboundedHistoryCount: 3,
       }),
     };
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager as Pick<SessionManagerService, 'persistAssistantMessage'>) as StreamProcessorService,
       { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -439,7 +466,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
     } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const emit = vi.fn();
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -489,7 +516,7 @@ describe('SubagentRuntimeService nested subagents', () => {
         sizeBytes: 123,
       },
     ];
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -532,7 +559,7 @@ describe('SubagentRuntimeService nested subagents', () => {
         ])
         .mockReturnValueOnce([]),
     };
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -580,7 +607,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       loadHistory: vi.fn().mockResolvedValue([]),
       loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
     } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -662,7 +689,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       }),
       getToolMetas: vi.fn(),
     };
-    runtime = new SubagentRuntimeService(
+    runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       toolDispatch as unknown as ToolDispatchService,
@@ -786,7 +813,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       }),
       getToolMetas: vi.fn(),
     };
-    runtime = new SubagentRuntimeService(
+    runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       toolDispatch as unknown as ToolDispatchService,
@@ -868,7 +895,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       })),
       getToolMetas: vi.fn(),
     };
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       toolDispatch as unknown as ToolDispatchService,
@@ -956,7 +983,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       })),
       getToolMetas: vi.fn(),
     };
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       toolDispatch as unknown as ToolDispatchService,
@@ -1062,7 +1089,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       { resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'test' }) } as never,
       null,
     );
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       dispatch,
@@ -1153,7 +1180,7 @@ describe('SubagentRuntimeService nested subagents', () => {
         source: 'db' as const,
       })),
     };
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSourceWithConfig,
       makeProcessor(sessionManager) as StreamProcessorService,
       {
@@ -1305,7 +1332,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       })),
     } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const audit = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       {
@@ -1375,7 +1402,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
     } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
     const audit = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
@@ -1444,7 +1471,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       })),
       getToolMetas: vi.fn(),
     };
-    const runtime = new SubagentRuntimeService(
+    const runtime = buildSubagentRuntime(
       llmSource,
       makeProcessor(sessionManager) as StreamProcessorService,
       toolDispatch as unknown as ToolDispatchService,

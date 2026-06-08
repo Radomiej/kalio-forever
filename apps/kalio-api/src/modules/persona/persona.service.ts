@@ -32,7 +32,7 @@ export class PersonaService implements OnApplicationBootstrap {
           id,
           name: config.name,
           systemPrompt: config.systemPrompt,
-          model: config.model,
+          model: config.model ?? '',
           allowedTools: config.allowedTools,
           skillIds: config.skillIds ?? [],
           createdAt: now,
@@ -57,8 +57,9 @@ export class PersonaService implements OnApplicationBootstrap {
         if (this.shouldRefreshSeededSystemPrompt(id, existing.systemPrompt, config.systemPrompt)) {
           updatePayload.systemPrompt = config.systemPrompt;
         }
-        if (this.shouldRefreshSeededModel(existing.model, config.model)) {
-          updatePayload.model = config.model;
+        const seededModel = config.model ?? '';
+        if (this.shouldRefreshSeededModel(existing.model, seededModel)) {
+          updatePayload.model = seededModel;
         }
 
         await this.drizzle.db.update(personas).set(updatePayload).where(eq(personas.id, id));
@@ -152,7 +153,7 @@ export class PersonaService implements OnApplicationBootstrap {
     return false;
   }
 
-  private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model: string; allowedTools: string[]; skillIds?: string[] }> {
+  private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model?: string; allowedTools: string[]; skillIds?: string[] }> {
     try {
       const configPath = join(__dirname, '../../assets/personas.json');
       const configContent = readFileSync(configPath, 'utf-8');

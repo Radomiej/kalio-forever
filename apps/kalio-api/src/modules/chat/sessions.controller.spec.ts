@@ -135,7 +135,11 @@ describe('SessionsController', () => {
       const request = { personaId: 'persona-1', draftUserMessage: 'draft' };
       const result = await controller.getContextPreview('sess-1', request);
 
-      expect(contextPreview.buildPreview).toHaveBeenCalledWith('sess-1', request);
+      expect(contextPreview.buildPreview).toHaveBeenCalledWith('sess-1', {
+        ...request,
+        target: 'session',
+        sessionId: 'sess-1',
+      });
       expect(result.sessionId).toBe('sess-1');
     });
   });

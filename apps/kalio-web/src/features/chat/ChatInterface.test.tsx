@@ -565,6 +565,50 @@ describe('ChatInterface event wiring', () => {
     expect(setStreaming).toHaveBeenCalledWith(true);
   });
 
+  it('merges raapp:native_result into the target session even when it is not active', async () => {
+    const inactiveSessionId = 'session-2';
+    const toolCallId = 'call-raapp-1';
+    const inactiveMessage: ChatMessage = {
+      id: 'tool-result-1',
+      sessionId: inactiveSessionId,
+      role: 'tool_result',
+      content: JSON.stringify({
+        pendingApprovals: [{ id: 'approval-1', label: 'Approve' }],
+      }),
+      toolCallId,
+      createdAt: 20,
+    };
+
+    mockActiveSessionId = 'session-1';
+    getSessionMessages.mockImplementation(((sessionId: string | null) => (
+      sessionId === inactiveSessionId ? [inactiveMessage] : mockMessages
+    )) as typeof getSessionMessages);
+
+    await renderChatInterface();
+    setMessages.mockClear();
+
+    await emitEvent('raapp:native_result', {
+      sessionId: inactiveSessionId,
+      toolCallId,
+      results: [{ id: 'approval-1', system: 'test', status: 'executed' }],
+    });
+
+    expect(setMessages).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          sessionId: inactiveSessionId,
+          toolCallId,
+          role: 'tool_result',
+          content: JSON.stringify({
+            pendingApprovals: [],
+            nativeResults: [{ id: 'approval-1', system: 'test', status: 'executed' }],
+          }),
+        }),
+      ],
+      inactiveSessionId,
+    );
+  });
+
   it('shows safe resume guidance when backend replays an interrupted LLM run', async () => {
     await renderChatInterface();
 

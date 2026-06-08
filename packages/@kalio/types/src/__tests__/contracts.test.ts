@@ -13,6 +13,7 @@ import type {
   ContextCompactionStrategy,
   ContextPreviewMessage,
   ContextPreviewRequest,
+  SessionRuntimeContext,
   ChatMessage,
   ChatSession,
   CreateSessionDto,
@@ -388,10 +389,23 @@ describe('@kalio/types contract shape', () => {
 
   it('keeps LLM context preview contracts explicit', () => {
     expectTypeOf<ContextCompactionStrategy>().toEqualTypeOf<'backend-default' | 'summary' | 'evidence_only'>();
-    expectTypeOf<ContextPreviewRequest>().toEqualTypeOf<{
-      personaId: ID;
+    type SessionContextPreviewRequest = Extract<ContextPreviewRequest, { sessionId: string }>;
+    type RuntimeContextPreviewRequest = Extract<ContextPreviewRequest, { target: 'runtime' }>;
+    expectTypeOf<SessionContextPreviewRequest>().toMatchTypeOf<{
+      target?: 'session';
+      sessionId: string;
+      personaId: string;
       draftUserMessage?: string;
       attachments?: ChatMessage['attachments'];
+      runtimeContext?: never;
+    }>();
+    expectTypeOf<RuntimeContextPreviewRequest>().toMatchTypeOf<{
+      target: 'runtime';
+      personaId: string;
+      runtimeContext: SessionRuntimeContext;
+      draftUserMessage?: string;
+      attachments?: ChatMessage['attachments'];
+      sessionId?: never;
     }>();
     expectTypeOf<ContextPreviewMessage>().toEqualTypeOf<{
       role: 'system' | 'user' | 'assistant' | 'tool';

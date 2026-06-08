@@ -12,7 +12,6 @@ import {
   OpenAICompatibleEmbeddingProvider,
   OllamaEmbeddingProvider,
   buildDefaultLocalEmbeddingConfig,
-  readEmbeddingEnabled,
 } from './embedding.service';
 
 const { pipelineMock } = vi.hoisted(() => ({
@@ -64,10 +63,8 @@ function makeTestDeps(): {
   return { drizzleSvc, appSettings, embeddingCredentials };
 }
 
-function makeConfig(env: Record<string, string | boolean> = {}): ConfigService {
-  return {
-    get: <T>(key: string, def?: T) => (key in env ? env[key] as T : def as T),
-  } as unknown as ConfigService;
+function makeConfig(env: Record<string, string> = {}): ConfigService {
+  return { get: (key: string, def = '') => env[key] ?? def } as unknown as ConfigService;
 }
 
 function makeService(env: Record<string, string> = {}): {
@@ -347,20 +344,12 @@ describe('EmbeddingService', () => {
     });
   });
 
-  describe('readEmbeddingEnabled', () => {
-    it('treats boolean false from Joi config as disabled', () => {
-      const config = makeConfig({ EMBEDDING_ENABLED: false });
-      expect(readEmbeddingEnabled(config)).toBe(false);
-      expect(buildDefaultLocalEmbeddingConfig(config).enabled).toBe(false);
-    });
-
-    it('treats string "false" as disabled', () => {
-      const config = makeConfig({ EMBEDDING_ENABLED: 'false' });
-      expect(readEmbeddingEnabled(config)).toBe(false);
-    });
-  });
-
   describe('buildDefaultLocalEmbeddingConfig', () => {
+    it('treats EMBEDDING_ENABLED=false as disabled regardless of string casing', () => {
+      expect(buildDefaultLocalEmbeddingConfig(makeConfig({ EMBEDDING_ENABLED: 'false' })).enabled).toBe(false);
+      expect(buildDefaultLocalEmbeddingConfig(makeConfig({})).enabled).toBe(true);
+    });
+
     it('falls back to legacy dimensions when EMBEDDING_LOCAL_DIMENSIONS is invalid', () => {
       const config = makeConfig({
         EMBEDDING_MODEL: 'Xenova/distiluse-base-multilingual-cased-v2',

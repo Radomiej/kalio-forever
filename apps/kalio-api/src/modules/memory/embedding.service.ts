@@ -17,6 +17,7 @@ import {
   OllamaEmbeddingProvider,
   OpenAICompatibleEmbeddingProvider,
 } from './embedding.providers';
+import { readEnvBooleanFlag } from '../../common/utils/llm-provider-http.util';
 
 export {
   MockEmbeddingProvider,
@@ -69,14 +70,6 @@ function parseNumberOrDefault(value: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function readEmbeddingEnabled(config: ConfigService): boolean {
-  const value = config.get<boolean | string>('EMBEDDING_ENABLED', 'true');
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  return value !== 'false';
-}
-
 export function buildDefaultLocalEmbeddingConfig(config: ConfigService): LocalEmbeddingConfig {
   const hasRemoteEmbeddingEnv = Boolean(config.get<string>('EMBEDDING_API_KEY', '') && config.get<string>('EMBEDDING_BASE_URL', ''));
   const legacyLocalModel = hasRemoteEmbeddingEnv
@@ -90,7 +83,7 @@ export function buildDefaultLocalEmbeddingConfig(config: ConfigService): LocalEm
     );
 
   return {
-    enabled: readEmbeddingEnabled(config),
+    enabled: readEnvBooleanFlag(config.get<string>('EMBEDDING_ENABLED'), true),
     model: config.get<string>('EMBEDDING_LOCAL_MODEL', legacyLocalModel),
     dimensions: parseNumberOrDefault(
       config.get<string>('EMBEDDING_LOCAL_DIMENSIONS', String(legacyLocalDimensions)),

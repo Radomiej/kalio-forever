@@ -609,6 +609,29 @@ describe('CredentialsController', () => {
       }
     });
 
+    it('returns a local validation error for custom providers without baseUrl and does not call upstream', async () => {
+      const cred = makeCredential({
+        provider: 'custom',
+        baseUrl: undefined,
+      });
+      mockService.findAll.mockResolvedValue([cred]);
+      mockService.getApiKey.mockResolvedValue('sk-test');
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn();
+
+      try {
+        const result = await controller.testById('cred-1');
+
+        expect(result).toEqual(expect.objectContaining({
+          ok: false,
+          error: 'baseUrl is required for custom or unrecognized providers',
+        }));
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it('uses remote timeout for remote providers', async () => {
       const cred = makeCredential({
         provider: 'openai',
@@ -630,6 +653,20 @@ describe('CredentialsController', () => {
   });
 
   describe('testConnection()', () => {
+    it('returns a local validation error for custom providers without baseUrl', async () => {
+      const result = await controller.testConnection({
+        provider: 'custom',
+        apiKey: 'sk-test',
+        model: 'custom-model',
+      });
+
+      expect(result).toEqual(expect.objectContaining({
+        ok: false,
+        error: 'baseUrl is required for custom or unrecognized providers',
+      }));
+      expect(mockLLMService.streamChatWithConfig).not.toHaveBeenCalled();
+    });
+
     it('returns ok=false on LLM stream failure', async () => {
       mockLLMService.streamChatWithConfig.mockRejectedValueOnce(new Error('stream failure'));
       const result = await controller.testConnection({

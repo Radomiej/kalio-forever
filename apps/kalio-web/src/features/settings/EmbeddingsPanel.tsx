@@ -179,6 +179,17 @@ export function EmbeddingsPanel() {
     setSyncing('use-local');
     setError(null);
     try {
+      if (localDirty) {
+        const savedStatus = await apiFetch<EmbeddingStatus>('/memory/embedding-local', {
+          method: 'PUT',
+          body: JSON.stringify(localForm),
+        });
+        setStatus(savedStatus);
+        setActiveId(savedStatus.activeCredentialId ?? null);
+        setLocalDirty(false);
+        setLocalConfigWarning(null);
+        setLocalAvailability(await refreshLocalAvailability(localForm));
+      }
       const availability = await refreshLocalAvailability(localForm);
       setLocalAvailability(availability);
       if (availability.status !== 'ready') {

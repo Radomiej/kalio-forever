@@ -9,6 +9,7 @@ import type {
   ChatRunStatus,
   LLMToolCall,
   MCPPolicy,
+  SessionRuntimeContext,
   SubAgentFlowResult,
 } from '@kalio/types';
 // ─── personas ──────────────────────────────────────────────────────────────────
@@ -33,6 +34,7 @@ export const sessions = sqliteTable('sessions', {
   parentSessionId: text('parent_session_id'),
   parentTurnId: text('parent_turn_id'),
   parentToolCallId: text('parent_tool_call_id'),
+  runtimeContext: text('runtime_context', { mode: 'json' }).$type<SessionRuntimeContext | null>(),
   archivedAt:  integer('archived_at', { mode: 'timestamp_ms' }),
   createdAt:   integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt:   integer('updated_at', { mode: 'timestamp_ms' }).notNull(),

@@ -2,6 +2,7 @@ import type { ArchitectureExecutionEvent, ArchitectureSchema, ChatMessage, ChatS
 import { describe, expect, it, vi } from 'vitest';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { ChatService } from '../chat/chat.service';
+import { makeChatService } from '../chat/__tests__/llm-runtime-test-harness';
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import type { EmitFn } from '../chat/interfaces/stream-context.interface';
@@ -432,27 +433,28 @@ function createMockChatHarness(delay?: (ms: number) => Promise<void>, source?: I
       };
     }),
   };
-  const chat = new ChatService(
-    source ?? new MockLLMSource(delay),
-    {
-      process: vi.fn().mockImplementation(async (chunk: InternalLLMChunk, ctx: { state: { appendText: (delta: string) => void }; emit: EmitFn; sessionId: string; messageId: string }) => {
-        if (chunk.type !== 'text_delta') return;
-        ctx.state.appendText(chunk.delta);
-        ctx.emit('chat:chunk', {
-          sessionId: ctx.sessionId,
-          messageId: ctx.messageId,
-          delta: chunk.delta,
-          done: false,
-        });
-      }),
-    } as never,
-    sessionManager as never,
-    { getToolMetas: vi.fn().mockReturnValue([]), dispatch: vi.fn() } as never,
-    { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', availableSkills: [], kv: {} }) } as never,
-    { findByIds: vi.fn().mockResolvedValue([]) } as never,
-    { getMaxToolAttempts: vi.fn().mockResolvedValue(8), getContextWindowSize: vi.fn().mockResolvedValue(32000) } as never,
-    { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) } as never,
-  );
+  const streamProcessor = {
+    process: vi.fn().mockImplementation(async (chunk: InternalLLMChunk, ctx: { state: { appendText: (delta: string) => void }; emit: EmitFn; sessionId: string; messageId: string }) => {
+      if (chunk.type !== 'text_delta') return;
+      ctx.state.appendText(chunk.delta);
+      ctx.emit('chat:chunk', {
+        sessionId: ctx.sessionId,
+        messageId: ctx.messageId,
+        delta: chunk.delta,
+        done: false,
+      });
+    }),
+    onModuleInit: vi.fn(),
+  };
+  const chat = makeChatService({
+    llmSource: source ?? new MockLLMSource(delay),
+    streamProcessor,
+    sessionManager: sessionManager as never,
+    toolDispatch: { getToolMetas: vi.fn().mockReturnValue([]), dispatch: vi.fn() } as never,
+    personaService: { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', allowedTools: [], skillIds: [], mcpPolicy: 'allow_all', kv: {} }) },
+    credentialsService: { getMaxToolAttempts: vi.fn().mockResolvedValue(8) },
+    auditService: { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) },
+  });
 
   return {
     chat,

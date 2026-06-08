@@ -676,6 +676,46 @@ describe('PersonaService', () => {
   });
 
   describe('onApplicationBootstrap — seeded model sync', () => {
+    it('seeds default persona without a hardcoded model override', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model?: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        default: {
+          name: 'Default',
+          systemPrompt: 'You are a helpful AI assistant.',
+          allowedTools: [],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      const valuesMock = vi.fn().mockResolvedValue(undefined);
+      mockDb.insert.mockReturnValue({ values: valuesMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(valuesMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'default',
+          model: '',
+        }),
+      );
+    });
+
     it('fills an empty stored seeded model from personas config', async () => {
       vi.spyOn(
         service as unknown as {

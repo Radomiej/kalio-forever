@@ -26,11 +26,76 @@ export interface LLMMessage {
 
 export type ContextCompactionStrategy = 'backend-default' | 'summary' | 'evidence_only';
 
-export interface ContextPreviewRequest {
-  personaId: ID;
+export type SessionRuntimeKind = 'chat' | 'subagent' | 'agent-flow-branch' | 'cli-agent' | 'agent-flow-root';
+export type SystemPromptProfile = 'default-chat' | 'subagent' | 'agent-flow-branch';
+export type RuntimeProfileSource = 'session' | 'request' | 'persona-default';
+
+export type ToolPolicyProfile = 'default-chat' | 'subagent' | 'agent-flow-branch' | 'agent-flow-root' | 'cli-agent';
+
+export type ToolDenyReason =
+  | 'not_in_persona_allowlist'
+  | 'not_in_runtime_explicit_list'
+  | 'slot_policy_denied'
+  | 'missing_project_path'
+  | 'missing_execution_cwd'
+  | 'cli_unavailable'
+  | 'requires_confirmation'
+  | 'subagent_depth_limit';
+
+export type ToolPolicySource = 'persona' | 'runtime-explicit' | 'architecture-slot-policy' | 'merged';
+
+export interface ToolPolicyDeniedTool {
+  name: string;
+  reason: ToolDenyReason;
+}
+
+export interface ToolPolicyDecision {
+  tools: ToolMeta[];
+  source: ToolPolicySource;
+  allowedToolNames: string[];
+  denied: ToolPolicyDeniedTool[];
+  warnings: string[];
+}
+
+export interface ArchitectureSlotToolPolicy {
+  allowedToolNames: string[];
+  stripRequiresConfirmation?: boolean;
+  applyCliDescriptionPreferences?: boolean;
+}
+
+export interface SessionRuntimeContext {
+  runtimeKind: SessionRuntimeKind;
+  parentSessionId?: ID;
+  parentToolCallId?: ID;
+  vfsMode?: VFSMode;
+  vfsSessionId?: ID;
+  modelOverride?: string;
+  explicitToolNames?: string[];
+  systemPromptProfile?: SystemPromptProfile;
+  toolPolicyProfile?: ToolPolicyProfile;
+  architectureSlotId?: ID;
+  architectureSlotPolicy?: ArchitectureSlotToolPolicy;
+  architectureContext?: Record<string, unknown>;
+}
+
+type ContextPreviewBase = {
   draftUserMessage?: string;
   attachments?: ChatAttachment[];
-}
+};
+
+export type ContextPreviewRequest =
+  | (ContextPreviewBase & {
+      target?: 'session';
+      sessionId: ID;
+      personaId: ID;
+      runtimeContext?: never;
+    })
+  | (ContextPreviewBase & {
+      target: 'runtime';
+      personaId: ID;
+      runtimeContext: SessionRuntimeContext;
+      sessionId?: never;
+    });
 
 export interface ContextPreviewMessage {
   role: LLMRole;
@@ -64,6 +129,10 @@ export interface LLMContextPreview {
   effectiveSystemPrompt: string;
   tools: ToolMeta[];
   messages: ContextPreviewMessage[];
+  runtimeKind?: SessionRuntimeKind;
+  runtimeProfileSource?: RuntimeProfileSource;
+  warnings?: string[];
+  toolPolicy?: ToolPolicyDecision;
 }
 
 export interface LLMStreamChunk {
@@ -215,6 +284,7 @@ export interface ChatSession {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
+  runtimeContext?: SessionRuntimeContext;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -226,6 +296,7 @@ export interface CreateSessionDto {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
+  runtimeContext?: SessionRuntimeContext;
 }
 
 // ─── Tools ────────────────────────────────────────────────────────────────────

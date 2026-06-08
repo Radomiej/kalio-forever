@@ -1,7 +1,7 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import { eq, desc, isNull } from 'drizzle-orm';
-import type { ChatSession, ChatMessage, ChatSessionKind, CreateSessionDto } from '@kalio/types';
+import type { ChatSession, ChatMessage, ChatSessionKind, CreateSessionDto, SessionRuntimeContext } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { sessions } from '../../database/schema';
 import { SessionManagerService } from './session-manager.service';
@@ -47,6 +47,7 @@ export class SessionsService {
       parentSessionId: dto.parentSessionId ?? null,
       parentTurnId: dto.parentTurnId ?? null,
       parentToolCallId: dto.parentToolCallId ?? null,
+      runtimeContext: dto.runtimeContext ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -106,6 +107,14 @@ export class SessionsService {
     await this.drizzle.db.update(sessions).set(set).where(eq(sessions.id, id));
   }
 
+  async updateRuntimeContext(id: string, runtimeContext: SessionRuntimeContext): Promise<void> {
+    await this.assertExists(id);
+    await this.drizzle.db
+      .update(sessions)
+      .set({ runtimeContext, updatedAt: new Date() })
+      .where(eq(sessions.id, id));
+  }
+
   async generateTitle(id: string): Promise<{ title: string }> {
     await this.assertExists(id);
     const history = await this.repo.loadHistory(id);
@@ -128,6 +137,7 @@ export class SessionsService {
     parentSessionId?: string | null;
     parentTurnId?: string | null;
     parentToolCallId?: string | null;
+    runtimeContext?: SessionRuntimeContext | null;
     createdAt: number | Date;
     updatedAt: number | Date;
   }> {
@@ -148,6 +158,7 @@ export class SessionsService {
     parentSessionId?: string | null;
     parentTurnId?: string | null;
     parentToolCallId?: string | null;
+    runtimeContext?: SessionRuntimeContext | null;
     createdAt: number | Date;
     updatedAt: number | Date;
   }): ChatSession {
@@ -159,6 +170,7 @@ export class SessionsService {
       parentSessionId: row.parentSessionId ?? undefined,
       parentTurnId: row.parentTurnId ?? undefined,
       parentToolCallId: row.parentToolCallId ?? undefined,
+      runtimeContext: row.runtimeContext ?? undefined,
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),
     };

@@ -172,6 +172,61 @@ describe('EmbeddingsPanel', () => {
     });
   });
 
+  it('auto-saves dirty local config before activating local embeddings', async () => {
+    const user = userEvent.setup();
+    const remoteStatus: EmbeddingStatus = {
+      ...LOCAL_STATUS,
+      provider: 'openai-compatible',
+      source: 'db',
+      activeCredentialId: 'cred-1',
+      activeCredentialName: 'Remote',
+      model: 'text-embedding-3-small',
+      dimensions: 1536,
+    };
+    const updatedLocalStatus: EmbeddingStatus = {
+      ...LOCAL_STATUS,
+      model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+      dimensions: 384,
+    };
+    const fetchMock = installFetchQueue({
+      'GET /api/memory/embedding-credentials': [[{
+        id: 'cred-1',
+        name: 'Remote',
+        provider: 'openai',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'text-embedding-3-small',
+        dimensions: 1536,
+        createdAt: Date.now(),
+      }]],
+      'GET /api/memory/status/embedding': [remoteStatus],
+      'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
+      'POST /api/memory/embedding-local/availability': [
+        { status: 'ready', installed: true, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' },
+        { status: 'ready', installed: true, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' },
+        { status: 'ready', installed: true, model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' },
+      ],
+      'PUT /api/memory/embedding-local': [updatedLocalStatus],
+      'DELETE /api/memory/embedding-credentials/active': [LOCAL_STATUS],
+    });
+
+    render(<EmbeddingsPanel />);
+
+    await user.selectOptions(await screen.findByTestId('embedding-local-model'), 'Xenova/paraphrase-multilingual-MiniLM-L12-v2');
+    await user.click(screen.getByTestId('embedding-use-local-btn'));
+
+    await waitFor(() => {
+      const putCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/memory/embedding-local' && init?.method === 'PUT');
+      const deleteCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/memory/embedding-credentials/active' && init?.method === 'DELETE');
+      expect(putCall).toBeDefined();
+      expect(deleteCall).toBeDefined();
+      expect(fetchMock.mock.calls.indexOf(putCall!)).toBeLessThan(fetchMock.mock.calls.indexOf(deleteCall!));
+      expect(JSON.parse(String(putCall?.[1]?.body))).toMatchObject({
+        model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+        dimensions: 384,
+      });
+    });
+  });
+
   it('can switch from a remote provider back to local embeddings', async () => {
     const user = userEvent.setup();
     const remoteStatus: EmbeddingStatus = {

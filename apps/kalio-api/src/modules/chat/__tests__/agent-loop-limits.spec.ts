@@ -9,8 +9,8 @@ import { AuditService } from '../audit.service';
 import { PersonaService } from '../../persona/persona.service';
 import { SkillsService } from '../../skills/skills.service';
 import { CredentialsService } from '../../credentials/credentials.service';
-import { LLM_SOURCE } from '../chat.tokens';
 import type { LLMStreamChunk } from '@kalio/types';
+import { makeChatService } from './llm-runtime-test-harness';
 
 describe('ChatService - Agent Loop Limits', () => {
   let service: ChatService;
@@ -70,16 +70,16 @@ describe('ChatService - Agent Loop Limits', () => {
       getContextWindowSize: vi.fn().mockResolvedValue(32000),
     } as any;
 
-    service = new ChatService(
-      mockLLMSource as any,
-      mockStreamProcessor,
-      mockSessionManager,
-      mockToolDispatch,
-      mockPersonaService,
-      mockSkillsService,
-      mockCredentialsService,
-      mockAudit,
-    );
+    service = makeChatService({
+      llmSource: mockLLMSource,
+      streamProcessor: mockStreamProcessor,
+      sessionManager: mockSessionManager,
+      toolDispatch: mockToolDispatch,
+      personaService: mockPersonaService,
+      credentialsService: mockCredentialsService,
+      auditService: mockAudit,
+      skillsService: mockSkillsService,
+    });
   });
 
   describe('agent loop - MAX_ITERATIONS guard', () => {

@@ -4,6 +4,7 @@ import type { ChatMessage, ToolMeta } from '@kalio/types';
 import { ContextPreviewService } from '../context-preview.service';
 import { ContextAssemblyService } from '../context-assembly.service';
 import { SessionManagerService } from '../session-manager.service';
+import { SessionsService } from '../sessions.service';
 import { ImageHydratorService } from '../image-hydrator.service';
 import { MESSAGE_REPOSITORY } from '../chat.tokens';
 import type { IMessageRepository } from '../interfaces/message-repository.interface';
@@ -11,6 +12,7 @@ import { CredentialsService } from '../../credentials/credentials.service';
 import { PersonaService } from '../../persona/persona.service';
 import { SkillsService } from '../../skills/skills.service';
 import { ToolDispatchService } from '../tool-dispatch.service';
+import { makeContextAssembly } from './llm-runtime-test-harness';
 
 function makeRepo(messages: ChatMessage[] = []): IMessageRepository {
   return {
@@ -32,8 +34,14 @@ describe('ContextPreviewService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         ContextPreviewService,
-        ContextAssemblyService,
+        {
+          provide: ContextAssemblyService,
+          useFactory: (personaService: PersonaService, skillsService: SkillsService, toolDispatch: ToolDispatchService) =>
+            makeContextAssembly(personaService, toolDispatch, skillsService),
+          inject: [PersonaService, SkillsService, ToolDispatchService],
+        },
         SessionManagerService,
+        { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'sid', personaId: 'persona-1', title: 't', createdAt: 1, updatedAt: 1 }) } },
         { provide: MESSAGE_REPOSITORY, useValue: repo },
         { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
         { provide: CredentialsService, useValue: { getContextWindowSize: vi.fn().mockResolvedValue(32000) } },
@@ -64,6 +72,8 @@ describe('ContextPreviewService', () => {
 
     const service = moduleRef.get(ContextPreviewService);
     const preview = await service.buildPreview('sid', {
+      target: 'session',
+      sessionId: 'sid',
       personaId: 'persona-1',
       draftUserMessage: 'draft question',
     });
@@ -99,8 +109,14 @@ describe('ContextPreviewService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         ContextPreviewService,
-        ContextAssemblyService,
+        {
+          provide: ContextAssemblyService,
+          useFactory: (personaService: PersonaService, skillsService: SkillsService, toolDispatch: ToolDispatchService) =>
+            makeContextAssembly(personaService, toolDispatch, skillsService),
+          inject: [PersonaService, SkillsService, ToolDispatchService],
+        },
         SessionManagerService,
+        { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'sid', personaId: 'persona-1', title: 't', createdAt: 1, updatedAt: 1 }) } },
         { provide: MESSAGE_REPOSITORY, useValue: repo },
         { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
         { provide: CredentialsService, useValue: { getContextWindowSize: vi.fn().mockResolvedValue(1) } },
@@ -124,6 +140,8 @@ describe('ContextPreviewService', () => {
 
     const service = moduleRef.get(ContextPreviewService);
     const preview = await service.buildPreview('sid', {
+      target: 'session',
+      sessionId: 'sid',
       personaId: 'persona-1',
       draftUserMessage: 'draft that may be removed ' + 'z'.repeat(700),
     });
@@ -142,8 +160,14 @@ describe('ContextPreviewService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         ContextPreviewService,
-        ContextAssemblyService,
+        {
+          provide: ContextAssemblyService,
+          useFactory: (personaService: PersonaService, skillsService: SkillsService, toolDispatch: ToolDispatchService) =>
+            makeContextAssembly(personaService, toolDispatch, skillsService),
+          inject: [PersonaService, SkillsService, ToolDispatchService],
+        },
         SessionManagerService,
+        { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'sid', personaId: 'persona-1', title: 't', createdAt: 1, updatedAt: 1 }) } },
         { provide: MESSAGE_REPOSITORY, useValue: repo },
         { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
         { provide: CredentialsService, useValue: { getContextWindowSize: vi.fn().mockResolvedValue(2_000) } },
@@ -167,6 +191,8 @@ describe('ContextPreviewService', () => {
 
     const service = moduleRef.get(ContextPreviewService);
     const preview = await service.buildPreview('sid', {
+      target: 'session',
+      sessionId: 'sid',
       personaId: 'persona-1',
     });
 

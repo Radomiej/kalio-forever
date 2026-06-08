@@ -36,18 +36,38 @@ describe('AgentFlowRunsController', () => {
       parentSessionId: 'parent-1',
       startMode: 'durable',
     }));
+  });
+
+  it('passes parentToolCallId through to the runtime start args', async () => {
+    const runtime = {
+      start: vi.fn().mockResolvedValue({
+        run: {
+          id: 'run-lineage',
+          parentSessionId: 'parent-1',
+          parentToolCallId: 'call-rest-1',
+          childSessionId: 'child-1',
+          flowDefinitionId: 'goal_guard_delivery_loop',
+          status: 'running' as const,
+          startMode: 'durable' as const,
+          returnMode: 'summary' as const,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        events: [],
+      }),
+    };
+    const controller = new AgentFlowRunsController(runtime as unknown as AgentFlowRuntimeService);
 
     await controller.create({
       flowId: 'goal_guard_delivery_loop',
       goal: 'Build project',
       parentSessionId: 'parent-1',
-      parentToolCallId: 'call-parent-tool',
+      parentToolCallId: 'call-rest-1',
     });
 
     expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
-      parentToolCallId: 'call-parent-tool',
+      parentToolCallId: 'call-rest-1',
     }));
-    expect(result.run.status).toBe('running');
   });
 
   it('RED: rejects invalid create payloads before starting an orphaned run', async () => {
