@@ -50,7 +50,7 @@ test.describe('REGRESSION: mock LLM 429 recovery', () => {
       await expectComposerEnabled(page, 10_000);
       await expect(page.getByTestId('active-tab-pending-dot')).toHaveCount(0);
 
-      await page.getByRole('button', { name: 'Active' }).click();
+      await page.getByTestId('talk-tab-agents').click();
       await expect(page.getByText('No active agent runs.')).toBeVisible({ timeout: 10_000 });
     } finally {
       await deleteSessionIfExists(request, session.id);

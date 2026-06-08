@@ -13,6 +13,7 @@ function toRunArgs(dto: CreateAgentFlowRunDto): RunSubAgentFlowArgs {
     flowId: dto.flowId,
     goal: dto.goal,
     parentSessionId: dto.parentSessionId,
+    ...(dto.parentToolCallId ? { parentToolCallId: dto.parentToolCallId } : {}),
     context: dto.context,
     startMode: dto.startMode ?? 'durable',
     vfsMode: dto.vfsMode,

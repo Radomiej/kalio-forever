@@ -12,6 +12,7 @@ import {
   OpenAICompatibleEmbeddingProvider,
   OllamaEmbeddingProvider,
   buildDefaultLocalEmbeddingConfig,
+  readEmbeddingEnabled,
 } from './embedding.service';
 
 const { pipelineMock } = vi.hoisted(() => ({
@@ -63,8 +64,10 @@ function makeTestDeps(): {
   return { drizzleSvc, appSettings, embeddingCredentials };
 }
 
-function makeConfig(env: Record<string, string> = {}): ConfigService {
-  return { get: (key: string, def = '') => env[key] ?? def } as unknown as ConfigService;
+function makeConfig(env: Record<string, string | boolean> = {}): ConfigService {
+  return {
+    get: <T>(key: string, def?: T) => (key in env ? env[key] as T : def as T),
+  } as unknown as ConfigService;
 }
 
 function makeService(env: Record<string, string> = {}): {
@@ -341,6 +344,19 @@ describe('EmbeddingService', () => {
       expect(status.model).toBe('Xenova/multilingual-e5-base');
       expect(status.dimensions).toBe(768);
       expect(status.profileId).toBe('local-transformers-xenova-multilingual-e5-base-768-cpu');
+    });
+  });
+
+  describe('readEmbeddingEnabled', () => {
+    it('treats boolean false from Joi config as disabled', () => {
+      const config = makeConfig({ EMBEDDING_ENABLED: false });
+      expect(readEmbeddingEnabled(config)).toBe(false);
+      expect(buildDefaultLocalEmbeddingConfig(config).enabled).toBe(false);
+    });
+
+    it('treats string "false" as disabled', () => {
+      const config = makeConfig({ EMBEDDING_ENABLED: 'false' });
+      expect(readEmbeddingEnabled(config)).toBe(false);
     });
   });
 

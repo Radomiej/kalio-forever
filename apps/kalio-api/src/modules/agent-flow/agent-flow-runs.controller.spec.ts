@@ -36,6 +36,17 @@ describe('AgentFlowRunsController', () => {
       parentSessionId: 'parent-1',
       startMode: 'durable',
     }));
+
+    await controller.create({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Build project',
+      parentSessionId: 'parent-1',
+      parentToolCallId: 'call-parent-tool',
+    });
+
+    expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
+      parentToolCallId: 'call-parent-tool',
+    }));
     expect(result.run.status).toBe('running');
   });
 

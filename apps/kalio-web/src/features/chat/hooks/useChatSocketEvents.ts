@@ -367,10 +367,10 @@ export function useChatSocketEvents({
     });
 
     const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
-      const sid = useSessionStore.getState().activeSessionId;
+      const sid = payload.sessionId;
       if (!sid) return;
-      const { messages, setMessages } = useSessionStore.getState();
-      const updated = messages.map((message) => {
+      const { getSessionMessages, setMessages } = useSessionStore.getState();
+      const updated = getSessionMessages(sid).map((message) => {
         if (message.toolCallId !== payload.toolCallId || message.role !== 'tool_result') return message;
         try {
           const data = JSON.parse(message.content) as Record<string, unknown>;
@@ -383,7 +383,7 @@ export function useChatSocketEvents({
           return message;
         }
       });
-      setMessages(updated);
+      setMessages(updated, sid);
     });
 
     const offConnectionState = eventBus.onConnectionState((state) => {

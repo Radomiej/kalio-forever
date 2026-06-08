@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
+import path from 'node:path';
 import { WebResultsMemoryStore } from './web-results-memory.store';
 
 describe('WebResultsMemoryStore', () => {
@@ -122,7 +123,7 @@ describe('WebResultsMemoryStore', () => {
     const dbPath = store.deleteCurrentDbFile();
 
     expect(close).toHaveBeenCalledTimes(1);
-    expect(dbPath).toBe(`${dbBasePath}\\${profileId}\\web-results.db`);
+    expect(dbPath).toBe(path.join(dbBasePath, profileId, 'web-results.db'));
     expect(rmSyncSpy).toHaveBeenCalledWith(`${dbPath}`, { force: true });
     expect(rmSyncSpy).toHaveBeenCalledWith(`${dbPath}-wal`, { force: true });
     expect(rmSyncSpy).toHaveBeenCalledWith(`${dbPath}-shm`, { force: true });
