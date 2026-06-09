@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { OnModuleDestroy } from '@nestjs/common';
 import type { EmbeddingStatus } from '@kalio/types';
@@ -83,7 +83,7 @@ export function buildDefaultLocalEmbeddingConfig(config: ConfigService): LocalEm
     );
 
   return {
-    enabled: readEnvBooleanFlag(config.get<string>('EMBEDDING_ENABLED'), true),
+    enabled: readEnvBooleanFlag(config.get<boolean | string>('EMBEDDING_ENABLED'), true),
     model: config.get<string>('EMBEDDING_LOCAL_MODEL', legacyLocalModel),
     dimensions: parseNumberOrDefault(
       config.get<string>('EMBEDDING_LOCAL_DIMENSIONS', String(legacyLocalDimensions)),
