@@ -84,7 +84,7 @@ function makeBooleanEnabledConfig(enabled: boolean): ConfigService {
   } as ConfigService;
 }
 
-// â”€â”€ MockEmbeddingProvider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── MockEmbeddingProvider ─────────────────────────────────────────────────────
 
 describe('MockEmbeddingProvider', () => {
   it('returns zero-ish vectors for each input text', async () => {
