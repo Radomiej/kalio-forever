@@ -31,9 +31,13 @@ function normalizeProviderKey(provider: unknown): string {
   return typeof provider === 'string' ? provider.toLowerCase() : '';
 }
 
-export function readEnvBooleanFlag(value: string | undefined, defaultValue: boolean): boolean {
+export function readEnvBooleanFlag(value: string | boolean | undefined, defaultValue: boolean): boolean {
   if (value === undefined) {
     return defaultValue;
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
   }
 
   const normalized = value.trim().toLowerCase();
