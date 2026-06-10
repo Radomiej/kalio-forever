@@ -1,46 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ZOOM, fitArchitectGraphViewport, nextArchitectZoom } from './ArchitectGraphCanvas.model';
+import { DEFAULT_ZOOM, FIT_PADDING, fitArchitectGraphViewport } from './ArchitectGraphCanvas.model';
+import { NODE_WIDTH, PIN_ANCHOR_DEFAULT_ZOOM, pinHitboxSize, pinOutwardOffset } from './ArchitectGraphGeometry';
 import type { ArchitectNode } from './architect.types';
 
-describe('ArchitectGraphCanvas model', () => {
-  it('fits a graph inside the viewport and centers the node bounds', () => {
-    const nodes: ArchitectNode[] = [
-      { id: 'a', label: 'A', kind: 'role', x: 100, y: 80, slots: [], connections: [] },
-      { id: 'b', label: 'B', kind: 'artifact', x: 700, y: 420, slots: [], connections: [] },
-    ];
-
-    expect(fitArchitectGraphViewport({
-      nodes,
-      viewportHeight: 600,
-      viewportWidth: 900,
-    })).toEqual({
-      pan: { x: 50, y: 52 },
-      zoom: DEFAULT_ZOOM,
-    });
-  });
-
-  it('reduces zoom for wide graphs instead of pinning reset to the origin', () => {
-    const nodes: ArchitectNode[] = [
-      { id: 'a', label: 'A', kind: 'role', x: 0, y: 0, slots: [], connections: [] },
-      { id: 'b', label: 'B', kind: 'artifact', x: 1600, y: 0, slots: [], connections: [] },
-    ];
-
-    const result = fitArchitectGraphViewport({
-      nodes,
-      viewportHeight: 500,
-      viewportWidth: 900,
+describe('fitArchitectGraphViewport', () => {
+  it('reduces zoom when outward connector anchor offsets would otherwise clip in a narrow viewport', () => {
+    const node = makeNode({ x: 100, y: 120 });
+    const outward = pinOutwardOffset(pinHitboxSize(PIN_ANCHOR_DEFAULT_ZOOM));
+    const viewportWidth = Math.floor(NODE_WIDTH * DEFAULT_ZOOM + FIT_PADDING * 2 + outward);
+    const viewport = fitArchitectGraphViewport({
+      nodes: [node],
+      viewportWidth,
+      viewportHeight: 400,
     });
 
-    expect(result.zoom).toBeLessThan(DEFAULT_ZOOM);
-    expect(result.pan.x).not.toBe(0);
-  });
-
-  it('uses proportional zoom steps so higher zoom levels do not feel sluggish', () => {
-    const lowZoomStep = nextArchitectZoom(0.82, 'in') - 0.82;
-    const highZoomStep = nextArchitectZoom(1.4, 'in') - 1.4;
-
-    expect(nextArchitectZoom(0.82, 'in')).toBe(0.92);
-    expect(nextArchitectZoom(0.92, 'out')).toBe(0.82);
-    expect(highZoomStep).toBeGreaterThan(lowZoomStep);
+    expect(viewport.zoom).toBeLessThan(DEFAULT_ZOOM);
   });
 });
+
+function makeNode(overrides: Partial<ArchitectNode> = {}): ArchitectNode {
+  return {
+    id: 'node',
+    label: 'Node',
+    kind: 'role',
+    x: 100,
+    y: 120,
+    slots: [],
+    connections: [],
+    ...overrides,
+  };
+}

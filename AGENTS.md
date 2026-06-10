@@ -167,8 +167,10 @@ Boris Cherny (creator of Claude Code) keeps his team's file around 100 lines. Un
 - Dev (hot reload): `pnpm dev` / `.\start-dev.ps1` (API :3016, web :5188)
 - QA (built dist): `pnpm qa` / `pnpm qa:rebuild` (API :3316, web :5288)
 - Managed QA stack: `pnpm stack:start` / `pnpm stack:stop`
+- Prod (built dist): `pnpm prod` / `pnpm prod:rebuild` (API :4016, web :6188)
+- Windows user install: `scripts/install.ps1` → Scheduled Task autostart after reboot
 
-Full local workflow: `docs/local-dev-guide.md`.
+Full local workflow: `docs/local-dev-guide.md`. User install: `docs/quickstart-user.md`.
 
 Prefer single-file or single-test runs during iteration. Full suites are for the final verification pass.
 

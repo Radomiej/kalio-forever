@@ -5,6 +5,7 @@ import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
 import { buildTurnsFromHistory } from '../chatUtils';
 import { ExecutionGraphView } from './ExecutionGraphView';
+import { DEFAULT_TEST_PERSONA_AVATAR } from '../../../test/personaFixtures';
 
 type SessionStateShape = {
   activeSessionId: string | null;
@@ -156,6 +157,7 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
     allowedTools: [],
     skillIds: [],
     mcpPolicy: 'deny_all',
+    ...DEFAULT_TEST_PERSONA_AVATAR,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,

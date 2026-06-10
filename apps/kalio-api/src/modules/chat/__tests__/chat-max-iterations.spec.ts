@@ -14,13 +14,14 @@ import { StreamProcessorService } from '../stream-processor.service';
 import { ToolDispatchService } from '../tool-dispatch.service';
 import { SessionManagerService } from '../session-manager.service';
 import { AuditService } from '../audit.service';
-import { LLM_SOURCE, CHUNK_HANDLERS, STREAM_MIDDLEWARES, TOOL_REGISTRY } from '../chat.tokens';
 import type { ILLMSource } from '../interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../interfaces/llm-chunk.types';
 import type { EmitFn } from '../interfaces/stream-context.interface';
 import { PersonaService } from '../../persona/persona.service';
-import { SkillsService } from '../../skills/skills.service';
 import { CredentialsService } from '../../credentials/credentials.service';
+import { ContextAssemblyService } from '../context-assembly.service';
+import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
+import { makeContextAssembly, makeLLMTurnRuntime } from './llm-runtime-test-harness';
 
 async function* makeStream(chunks: InternalLLMChunk[]): AsyncIterable<InternalLLMChunk> {
   for (const chunk of chunks) yield chunk;
@@ -68,20 +69,29 @@ describe('ChatService — MAX_ITERATIONS', () => {
     const llmSource: ILLMSource = {
       stream: vi.fn().mockImplementation(() => makeStream([{ type: 'done' }])),
     };
+    const streamProcessor = makeLoopingProcessor();
+    const contextAssembly = makeContextAssembly(
+      personaService as PersonaService,
+      toolDispatch as unknown as ToolDispatchService,
+    );
+    const llmTurnRuntime = makeLLMTurnRuntime(
+      llmSource,
+      streamProcessor,
+      sessionManager as unknown as SessionManagerService,
+      toolDispatch as unknown as ToolDispatchService,
+      auditService,
+    );
     const moduleRef = await Test.createTestingModule({
       providers: [
         ChatService,
-        { provide: StreamProcessorService, useValue: makeLoopingProcessor() },
+        { provide: StreamProcessorService, useValue: streamProcessor },
         { provide: SessionManagerService, useValue: sessionManager },
         { provide: ToolDispatchService, useValue: toolDispatch },
         { provide: PersonaService, useValue: personaService },
-        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
         { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
-        { provide: LLM_SOURCE, useValue: llmSource },
-        { provide: CHUNK_HANDLERS, useValue: [] },
-        { provide: STREAM_MIDDLEWARES, useValue: [] },
-        { provide: TOOL_REGISTRY, useValue: [] },
+        { provide: ContextAssemblyService, useValue: contextAssembly },
+        { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
       ],
     }).compile();
     service = moduleRef.get(ChatService);

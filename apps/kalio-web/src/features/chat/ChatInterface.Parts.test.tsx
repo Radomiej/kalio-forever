@@ -168,6 +168,10 @@ function persona(): Persona {
     allowedTools: [],
     skillIds: [],
     mcpPolicy: 'allow_all',
+    avatarSeed: 'default',
+    avatarVariant: 'marble',
+    avatarPaletteKey: 'ocean',
+    avatarIndex: 0,
     createdAt: 1,
     updatedAt: 1,
   };

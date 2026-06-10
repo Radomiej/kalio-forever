@@ -232,20 +232,36 @@ Tools marked `requiresConfirmation: true` are paused before execution. The front
 
 ## Quick Start
 
-### Requirements
+### Run Kalio (Windows users)
+
+One-line install — production stack, autostart after reboot, mock LLM by default:
+
+```powershell
+irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.ps1 | iex
+```
+
+Open **http://localhost:6188** (API on `http://localhost:4016`).
+
+Full user guide: **[docs/quickstart-user.md](docs/quickstart-user.md)** (upgrade, uninstall, troubleshooting).
+
+---
+
+### Develop Kalio (contributors)
+
+#### Requirements
 
 - Node.js ≥ 22
 - pnpm ≥ 9
 
-### 1. Install
+#### 1. Install
 
 ```bash
-git clone https://github.com/your-org/kalio-forever.git
+git clone https://github.com/Radomiej/kalio-forever.git
 cd kalio-forever
 pnpm install
 ```
 
-### 2. Configure
+#### 2. Configure
 
 ```bash
 cp .env.example .env
@@ -278,7 +294,7 @@ cd apps/kalio-web && pnpm dev
 
 Open **http://localhost:5188** and start chatting.
 
-### 4. What success looks like
+#### 4. What success looks like
 
 After `pnpm dev` (or `./start-dev.ps1`) boots cleanly you should have:
 
@@ -287,7 +303,7 @@ After `pnpm dev` (or `./start-dev.ps1`) boots cleanly you should have:
 - a working Settings page where you can add or activate an LLM provider
 - the ability to create a session and send a first message without reloading
 
-### 5. Run Tests
+#### 5. Run Tests
 
 ```bash
 pnpm test           # local gate: preflight + Vitest + script tests
@@ -295,19 +311,14 @@ pnpm test:e2e       # Playwright E2E (starts its own stack on random ports)
 pnpm typecheck      # turbo typecheck across workspaces
 ```
 
-### 6. QA stack (stable, no hot reload)
+#### 6. QA / prod stacks (built dist, no hot reload)
 
-For manual testing on a **built** stack that behaves like production:
+| Stack | Command | UI |
+|---|---|---|
+| QA (contributor testing) | `pnpm qa` / `pnpm qa:rebuild` | http://localhost:5288 |
+| Prod profile (local test) | `pnpm prod` / `pnpm prod:rebuild` | http://localhost:6188 |
 
-```bash
-pnpm qa             # fixed ports 3316/5288, reuse existing dist
-pnpm qa:rebuild     # build first, then start QA stack
-pnpm qa:stop
-```
-
-Open **http://localhost:5288** (API on `http://localhost:3316`).
-
-See **[Local Dev & QA Guide](docs/local-dev-guide.md)** for the full command map, stack comparison, CI/release flow, and test entry points.
+See **[Local Dev & QA Guide](docs/local-dev-guide.md)** for the full command map, CI/release flow, and test entry points.
 
 ---
 
@@ -414,7 +425,8 @@ If you're contributing code or using an AI coding agent, start with [CONTRIBUTIN
 
 | Doc | What it covers |
 |---|---|
-| [docs/local-dev-guide.md](./docs/local-dev-guide.md) | Dev vs QA stacks, commands, CI/release, test entry points |
+| [docs/quickstart-user.md](./docs/quickstart-user.md) | Windows one-line install, autostart, uninstall |
+| [docs/local-dev-guide.md](./docs/local-dev-guide.md) | Dev vs QA vs prod stacks, commands, CI/release, test entry points |
 | [AGENTS.md](./AGENTS.md) | Architecture invariants enforced in every PR (AI-readable) |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Setup, TDD workflow, tool registration, PR checklist |
 | [scripts/README.md](./scripts/README.md) | Root script surface (`dev`, `qa`, `stack:*`, `test`, `preflight`) |

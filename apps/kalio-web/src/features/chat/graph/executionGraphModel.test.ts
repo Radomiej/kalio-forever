@@ -4,6 +4,7 @@ import type { ToolActivity } from '../../../store/agentStore';
 import { buildTurnsFromHistory } from '../chatUtils';
 import { buildExecutionGraphModel } from './executionGraphModel';
 import { NODE_HEIGHT, ROW_GAP } from './executionGraphModel.helpers';
+import { DEFAULT_TEST_PERSONA_AVATAR } from '../../../test/personaFixtures';
 
 function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -36,6 +37,7 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
     allowedTools: [],
     skillIds: [],
     mcpPolicy: 'deny_all',
+    ...DEFAULT_TEST_PERSONA_AVATAR,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,

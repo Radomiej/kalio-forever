@@ -175,6 +175,20 @@ export type LLMProviderType =
 /** Controls which MCP tools a persona can access. */
 export type MCPPolicy = 'allow_all' | 'deny_all' | 'allow_list';
 
+/** boring-avatars theme variant persisted on Persona records. */
+export type AvatarVariant = 'marble' | 'beam' | 'pixel' | 'sunset' | 'ring' | 'bauhaus';
+
+/** Stable palette identifier; hex colors are resolved client-side from this key. */
+export type AvatarPaletteKey = 'ocean' | 'sunset' | 'forest' | 'violet' | 'ember' | 'slate' | 'candy' | 'mono';
+
+/** Persistent boring-avatars token stored on Persona (no raw color arrays). */
+export interface PersonaAvatarToken {
+  avatarSeed: string;
+  avatarVariant: AvatarVariant;
+  avatarPaletteKey: AvatarPaletteKey;
+  avatarIndex: number;
+}
+
 export interface Persona {
   id: ID;
   name: string;
@@ -183,6 +197,10 @@ export interface Persona {
   allowedTools: string[];  // native tool names available to this persona (tool allowlist)
   skillIds: string[];      // IDs of Skill entities whose prompts are injected into system prompt
   mcpPolicy: MCPPolicy;    // how MCP tools are filtered for this persona
+  avatarSeed: string;
+  avatarVariant: AvatarVariant;
+  avatarPaletteKey: AvatarPaletteKey;
+  avatarIndex: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -211,6 +229,10 @@ export interface CreatePersonaDto {
   allowedTools: string[];
   skillIds?: string[];
   mcpPolicy?: MCPPolicy;
+  avatarSeed?: string;
+  avatarVariant?: AvatarVariant;
+  avatarPaletteKey?: AvatarPaletteKey;
+  avatarIndex?: number;
 }
 
 export interface UpdatePersonaDto {
@@ -220,6 +242,10 @@ export interface UpdatePersonaDto {
   allowedTools?: string[];
   skillIds?: string[];
   mcpPolicy?: MCPPolicy;
+  avatarSeed?: string;
+  avatarVariant?: AvatarVariant;
+  avatarPaletteKey?: AvatarPaletteKey;
+  avatarIndex?: number;
 }
 
 // ─── Session / Chat ───────────────────────────────────────────────────────────

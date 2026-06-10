@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Persona, ToolMeta } from '@kalio/types';
 import { PersonasPanel } from './PersonasPanel';
+import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
 
 type MockReply = Error | 204 | unknown;
 
@@ -58,6 +59,7 @@ const SYSTEM_PERSONA: Persona = {
   allowedTools: [],
   skillIds: [],
   mcpPolicy: 'allow_all',
+  ...DEFAULT_TEST_PERSONA_AVATAR,
   createdAt: 1,
   updatedAt: 1,
 };
@@ -70,6 +72,7 @@ const CUSTOM_PERSONA: Persona = {
   allowedTools: ['web_search'],
   skillIds: [],
   mcpPolicy: 'allow_list',
+  ...DEFAULT_TEST_PERSONA_AVATAR,
   createdAt: 2,
   updatedAt: 2,
 };
@@ -106,6 +109,7 @@ describe('PersonasPanel', () => {
       allowedTools: ['shell_exec'],
       skillIds: [],
       mcpPolicy: 'allow_all',
+      ...DEFAULT_TEST_PERSONA_AVATAR,
       createdAt: 3,
       updatedAt: 3,
     };

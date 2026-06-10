@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm';
 import type { PersonaGraphValidationResult } from './persona-graph-config';
 import { validatePersonaGraphConfig } from './persona-graph-config';
 import { buildLabPersonaSeeds } from './persona-lab-seeds';
+import { resolveCreateAvatar, resolvePersonaAvatar } from './persona-avatar.utils';
 
 @Injectable()
 export class PersonaService implements OnApplicationBootstrap {
@@ -181,7 +182,14 @@ export class PersonaService implements OnApplicationBootstrap {
   async create(dto: CreatePersonaDto): Promise<Persona> {
     const now = new Date();
     const id = nanoid();
-    await this.drizzle.db.insert(personas).values({ id, ...dto, createdAt: now, updatedAt: now });
+    const avatar = resolveCreateAvatar(dto);
+    await this.drizzle.db.insert(personas).values({
+      id,
+      ...dto,
+      ...avatar,
+      createdAt: now,
+      updatedAt: now,
+    });
     return this.findOne(id);
   }
 
@@ -241,8 +249,23 @@ export class PersonaService implements OnApplicationBootstrap {
     return { id, personaId, key, value, updatedAt: nowMs };
   }
 
-  private mapRow(row: { id: string; name: string; systemPrompt: string; model: string; allowedTools: string[] | null; skillIds?: string[] | null; mcpPolicy?: string | null; createdAt: number | Date; updatedAt: number | Date }): Persona {
+  private mapRow(row: {
+    id: string;
+    name: string;
+    systemPrompt: string;
+    model: string;
+    allowedTools: string[] | null;
+    skillIds?: string[] | null;
+    mcpPolicy?: string | null;
+    avatarSeed?: string | null;
+    avatarVariant?: string | null;
+    avatarPaletteKey?: string | null;
+    avatarIndex?: number | null;
+    createdAt: number | Date;
+    updatedAt: number | Date;
+  }): Persona {
     const toMs = (v: number | Date) => v instanceof Date ? v.getTime() : v;
+    const avatar = resolvePersonaAvatar(row);
     return {
       id: row.id,
       name: row.name,
@@ -251,6 +274,7 @@ export class PersonaService implements OnApplicationBootstrap {
       allowedTools: row.allowedTools ?? [],
       skillIds: row.skillIds ?? [],
       mcpPolicy: (row.mcpPolicy as import('@kalio/types').MCPPolicy | null | undefined) ?? 'allow_all',
+      ...avatar,
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),
     };

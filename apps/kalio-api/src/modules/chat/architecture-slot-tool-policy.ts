@@ -132,6 +132,9 @@ export function buildArchitectureSlotToolPolicy(
     return { allowedToolNames: [...allowed], applyCliDescriptionPreferences: true };
   }
 
+  // Default participant slots inherit host read tools when launch context carries a local
+  // project path. VFS-only is the fallback when no path is present or orchestrator scope
+  // explicitly restricts the run (see orchestratorScopeRestriction in architecture context).
   for (const name of ARCHITECTURE_BRANCH_TOOL_NAMES) {
     allowed.add(name);
   }

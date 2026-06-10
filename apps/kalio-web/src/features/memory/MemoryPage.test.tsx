@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Persona, MemoryScopeSummary, MemorySearchResult, MemoryIngestResult } from '@kalio/types';
 import { MemoryPage } from './MemoryPage';
+import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
 
 const { apiGet, apiPost, apiDelete } = vi.hoisted(() => ({
   apiGet: vi.fn(),
@@ -25,6 +26,7 @@ const PERSONA: Persona = {
   allowedTools: [],
   skillIds: [],
   mcpPolicy: 'allow_all',
+  ...DEFAULT_TEST_PERSONA_AVATAR,
   createdAt: 1,
   updatedAt: 1,
 };

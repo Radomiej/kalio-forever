@@ -6,8 +6,10 @@ Canonical guide for running Kalio locally, choosing the right stack, and underst
 
 | Goal | Command | UI URL |
 |---|---|---|
+| **Windows user install** | `irm .../install.ps1 \| iex` | http://localhost:6188 |
 | Code with hot reload | `pnpm dev` | http://localhost:5188 |
 | Stable manual QA (built dist) | `pnpm qa` or `pnpm qa:rebuild` | http://localhost:5288 |
+| Prod profile (built dist) | `pnpm prod` or `pnpm prod:rebuild` | http://localhost:6188 |
 | Isolated QA (random ports) | `pnpm stack:start` | see `pnpm stack:status` |
 | Local test gate before PR | `pnpm test` | — |
 | Full Playwright E2E | `pnpm test:e2e` | auto-started random ports |
@@ -132,7 +134,37 @@ node scripts/stack-manager.mjs <start|status|stop>
   [--provider ...] [--model ...] [--base-url ...]
 ```
 
-Port rule: dev uses `3016/5188`, fixed QA uses `3316/5288`. **E2E must not depend on those ports** — Playwright allocates random ports per run.
+Port rule: dev uses `3016/5188`, fixed QA uses `3316/5288`, prod client uses `4016/6188`. **E2E must not depend on those ports** — Playwright allocates random ports per run.
+
+### Prod install — Windows (`install.ps1`)
+
+End-user production path. Installs to `%LocalAppData%\kalio-forever\app`, stores data in `%LocalAppData%\kalio-forever\`, registers Scheduled Task **Kalio-Forever** for autostart after **user sign-in**.
+
+```powershell
+irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.ps1 | iex
+```
+
+| | |
+|---|---|
+| UI | http://localhost:6188 |
+| API | http://localhost:4016 |
+| Data | `%LocalAppData%\kalio-forever\kalio.db` + workspaces/memory |
+| Autostart | Scheduled Task `Kalio-Forever` → `scripts/kalio-autostart.ps1` |
+| Uninstall | `scripts/uninstall.ps1` (see [quickstart-user.md](./quickstart-user.md)) |
+
+Contributor local prod profile (same ports/data layout, no Scheduled Task):
+
+```powershell
+pnpm prod
+pnpm prod:rebuild
+```
+
+From repo root for full client simulation:
+
+```powershell
+pnpm prod:install
+pnpm prod:uninstall
+```
 
 ---
 

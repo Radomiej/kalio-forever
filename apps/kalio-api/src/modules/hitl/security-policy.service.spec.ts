@@ -31,6 +31,7 @@ function makeTestDrizzle(): DrizzleService {
       parent_turn_id TEXT,
       parent_tool_call_id TEXT,
       archived_at INTEGER,
+      runtime_context TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );

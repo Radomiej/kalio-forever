@@ -327,8 +327,8 @@ export function ArchitectGraphCanvas({
       if (!sourceNode || !targetNode) {
         return [];
       }
-      const source = outputPin(sourceNode);
-      const target = inputPin(targetNode);
+      const source = outputPin(sourceNode, zoom);
+      const target = inputPin(targetNode, zoom);
       const kind = edgeKind(sourceNode);
       return {
         id: pair.id,
@@ -337,7 +337,7 @@ export function ArchitectGraphCanvas({
         executed: executedEdgeIds.has(`${pair.sourceId}->${pair.targetId}`),
       };
     });
-  }, [executedEdgeIds, nodeById, nodes, schemaEdges]);
+  }, [executedEdgeIds, nodeById, nodes, schemaEdges, zoom]);
 
   const draggingConnector = connectorDrag.draggingConnector;
   const connectionPreviewPath = useMemo(() => {
@@ -348,8 +348,8 @@ export function ArchitectGraphCanvas({
     if (!sourceNode) {
       return null;
     }
-    return connectionPath(outputPin(sourceNode), draggingConnector.previewPoint);
-  }, [draggingConnector, nodeById]);
+    return connectionPath(outputPin(sourceNode, zoom), draggingConnector.previewPoint);
+  }, [draggingConnector, nodeById, zoom]);
 
   if (!schema) {
     return <ArchitectGraphEmptyState />;

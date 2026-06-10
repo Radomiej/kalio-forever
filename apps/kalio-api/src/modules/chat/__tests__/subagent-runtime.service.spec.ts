@@ -1192,7 +1192,7 @@ describe('SubagentRuntimeService nested subagents', () => {
             content: 'const MAX_ENTITIES = 10_000_000;',
           },
         })),
-        getToolMetas: vi.fn(),
+        getToolMetas: vi.fn().mockReturnValue(tools),
       } as unknown as ToolDispatchService,
       sessionManager as unknown as SessionManagerService,
       { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,

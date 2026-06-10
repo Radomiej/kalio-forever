@@ -5,10 +5,13 @@ import { StreamProcessorService } from '../stream-processor.service';
 import { SessionManagerService } from '../session-manager.service';
 import { ToolDispatchService } from '../tool-dispatch.service';
 import { AuditService } from '../audit.service';
-import { PersonaService } from '../../persona/persona.service';
 import { SkillsService } from '../../skills/skills.service';
 import { CredentialsService } from '../../credentials/credentials.service';
-import { LLM_SOURCE, CHUNK_HANDLERS, STREAM_MIDDLEWARES, TOOL_REGISTRY } from '../chat.tokens';
+import { ContextAssemblyService } from '../context-assembly.service';
+import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
+import { PersonaService } from '../../persona/persona.service';
+import { CHUNK_HANDLERS, STREAM_MIDDLEWARES, TOOL_REGISTRY } from '../chat.tokens';
+import { makeContextAssembly, makeLLMTurnRuntime } from './llm-runtime-test-harness';
 import { TextDeltaHandler } from '../handlers/text-delta.handler';
 import { ThinkingDeltaHandler } from '../handlers/thinking-delta.handler';
 import { ToolCallHandler } from '../handlers/tool-call.handler';
@@ -53,9 +56,16 @@ async function buildService(
   sessionManager: SessionManagerMock,
   toolDispatch: ToolDispatchMock,
 ): Promise<ChatService> {
-  const moduleRef = await Test.createTestingModule({
+  const auditService = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
+  const personaService = {
+    getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }),
+  };
+  const credentialsService = {
+    getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+    getContextWindowSize: vi.fn().mockResolvedValue(32000),
+  };
+  const processorModuleRef = await Test.createTestingModule({
     providers: [
-      ChatService,
       StreamProcessorService,
       TextDeltaHandler,
       ThinkingDeltaHandler,
@@ -68,30 +78,37 @@ async function buildService(
         inject: [TextDeltaHandler, ThinkingDeltaHandler, ToolCallHandler, DoneHandler],
       },
       { provide: STREAM_MIDDLEWARES, useValue: [] },
-      { provide: SessionManagerService, useValue: sessionManager },
-      { provide: ToolDispatchService, useValue: toolDispatch },
-      {
-        provide: PersonaService,
-        useValue: {
-          getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }),
-        },
-      },
-      { provide: AuditService, useValue: { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) } },
-      { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
-      {
-        provide: CredentialsService,
-        useValue: {
-          getMaxToolAttempts: vi.fn().mockResolvedValue(8),
-          getContextWindowSize: vi.fn().mockResolvedValue(32000),
-        },
-      },
-      { provide: LLM_SOURCE, useValue: llmSource },
       { provide: TOOL_REGISTRY, useValue: [] },
+      { provide: SessionManagerService, useValue: sessionManager },
     ],
   }).compile();
-
-  // StreamProcessorService.onModuleInit wires the chain; trigger it
-  await moduleRef.init();
+  await processorModuleRef.init();
+  const streamProcessor = processorModuleRef.get(StreamProcessorService);
+  const contextAssembly = makeContextAssembly(
+    personaService as PersonaService,
+    toolDispatch as unknown as ToolDispatchService,
+  );
+  const llmTurnRuntime = makeLLMTurnRuntime(
+    llmSource,
+    streamProcessor,
+    sessionManager as unknown as SessionManagerService,
+    toolDispatch as unknown as ToolDispatchService,
+    auditService,
+  );
+  const moduleRef = await Test.createTestingModule({
+    providers: [
+      ChatService,
+      { provide: StreamProcessorService, useValue: streamProcessor },
+      { provide: SessionManagerService, useValue: sessionManager },
+      { provide: ToolDispatchService, useValue: toolDispatch },
+      { provide: PersonaService, useValue: personaService },
+      { provide: AuditService, useValue: auditService },
+      { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
+      { provide: CredentialsService, useValue: credentialsService },
+      { provide: ContextAssemblyService, useValue: contextAssembly },
+      { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
+    ],
+  }).compile();
   return moduleRef.get(ChatService);
 }
 

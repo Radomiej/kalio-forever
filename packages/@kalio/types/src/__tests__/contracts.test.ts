@@ -102,10 +102,14 @@ describe('@kalio/types contract shape', () => {
       model: string;
       allowedTools: string[];
     }>();
-    expectTypeOf<Pick<Persona, 'id' | 'skillIds' | 'mcpPolicy' | 'createdAt' | 'updatedAt'>>().toEqualTypeOf<{
+    expectTypeOf<Pick<Persona, 'id' | 'skillIds' | 'mcpPolicy' | 'avatarSeed' | 'avatarVariant' | 'avatarPaletteKey' | 'avatarIndex' | 'createdAt' | 'updatedAt'>>().toEqualTypeOf<{
       id: ID;
       skillIds: string[];
       mcpPolicy: 'allow_all' | 'deny_all' | 'allow_list';
+      avatarSeed: string;
+      avatarVariant: 'marble' | 'beam' | 'pixel' | 'sunset' | 'ring' | 'bauhaus';
+      avatarPaletteKey: 'ocean' | 'sunset' | 'forest' | 'violet' | 'ember' | 'slate' | 'candy' | 'mono';
+      avatarIndex: number;
       createdAt: Timestamp;
       updatedAt: Timestamp;
     }>();

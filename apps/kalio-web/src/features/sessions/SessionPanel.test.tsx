@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SessionPanel } from './SessionPanel';
 import { formatRelativeTime } from './session.utils';
 import type { ChatSession, Persona } from '@kalio/types';
+import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ function chooseOriginFilter(filterId: 'all' | 'user' | 'agent' | 'archived'): vo
 }
 
 const mockPersonas: Persona[] = [
-  { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', allowedTools: [], skillIds: [], mcpPolicy: 'allow_all', createdAt: 0, updatedAt: 0 },
+  { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', allowedTools: [], skillIds: [], mcpPolicy: 'allow_all', ...DEFAULT_TEST_PERSONA_AVATAR, createdAt: 0, updatedAt: 0 },
 ];
 
 const mockState: {

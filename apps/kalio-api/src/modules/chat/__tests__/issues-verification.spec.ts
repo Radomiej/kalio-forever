@@ -11,9 +11,10 @@ import { ToolDispatchService } from '../tool-dispatch.service';
 import { SessionManagerService } from '../session-manager.service';
 import { AuditService } from '../audit.service';
 import { PersonaService } from '../../persona/persona.service';
-import { LLM_SOURCE, CHUNK_HANDLERS, STREAM_MIDDLEWARES, TOOL_REGISTRY } from '../chat.tokens';
-import { SkillsService } from '../../skills/skills.service';
 import { CredentialsService } from '../../credentials/credentials.service';
+import { ContextAssemblyService } from '../context-assembly.service';
+import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
+import { makeContextAssembly, makeLLMTurnRuntime } from './llm-runtime-test-harness';
 
 // ============================================================================
 // ISSUE 1: Race condition in interrupt handling
@@ -204,60 +205,57 @@ describe('ISSUE 2: MAX_ITERATIONS behavior', () => {
     const llmSource = makeFiniteToolStream();
 
     // Mock streamProcessor to populate state.toolCalls so loop continues
+    const sessionManager = {
+      ensureSession: vi.fn().mockResolvedValue(undefined),
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    };
+    const toolDispatch = {
+      getToolMetas: vi.fn().mockReturnValue([]),
+      dispatch: vi.fn().mockResolvedValue({ status: 'success', data: {} }),
+    };
+    const personaService = {
+      getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', allowedTools: [], skillIds: [], kv: {} }),
+    };
+    const credentialsService = {
+      getMaxToolAttempts: vi.fn().mockResolvedValue(8),
+      getContextWindowSize: vi.fn().mockResolvedValue(32000),
+    };
+    const auditService = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
     const mockStreamProcessor = {
-      process: vi.fn().mockImplementation(async (chunk: InternalLLMChunk, ctx: any) => {
+      process: vi.fn().mockImplementation(async (chunk: InternalLLMChunk, ctx: { state: { toolCalls: Array<{ id: string; name: string; args: object }> } }) => {
         if (chunk.type === 'tool_call') {
           ctx.state.toolCalls.push({ id: chunk.callId, name: chunk.name, args: chunk.args });
         }
       }),
       onModuleInit: vi.fn(),
     };
+    const contextAssembly = makeContextAssembly(
+      personaService as PersonaService,
+      toolDispatch as unknown as ToolDispatchService,
+    );
+    const llmTurnRuntime = makeLLMTurnRuntime(
+      llmSource,
+      mockStreamProcessor,
+      sessionManager as unknown as SessionManagerService,
+      toolDispatch as unknown as ToolDispatchService,
+      auditService,
+    );
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ChatService,
         { provide: StreamProcessorService, useValue: mockStreamProcessor },
-        {
-          provide: SessionManagerService,
-          useValue: {
-            ensureSession: vi.fn().mockResolvedValue(undefined),
-            persistUserMessage: vi.fn().mockResolvedValue(undefined),
-            loadHistory: vi.fn().mockResolvedValue([]),
-            loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
-            saveToolResult: vi.fn().mockResolvedValue(undefined),
-          },
-        },
-        {
-          provide: ToolDispatchService,
-          useValue: {
-            getToolMetas: vi.fn().mockReturnValue([]),
-            dispatch: vi.fn().mockResolvedValue({ status: 'success', data: {} }),
-          },
-        },
-        {
-          provide: PersonaService,
-          useValue: {
-            getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', allowedTools: [], skillIds: [], kv: {} }),
-          },
-        },
-        {
-          provide: SkillsService,
-          useValue: {
-            findByIds: vi.fn().mockResolvedValue([]),
-          },
-        },
-        {
-          provide: CredentialsService,
-          useValue: {
-            getMaxToolAttempts: vi.fn().mockResolvedValue(8),
-            getContextWindowSize: vi.fn().mockResolvedValue(32000),
-          },
-        },
-        { provide: AuditService, useValue: { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) } },
-        { provide: LLM_SOURCE, useValue: llmSource },
-        { provide: CHUNK_HANDLERS, useValue: [] },
-        { provide: STREAM_MIDDLEWARES, useValue: [] },
-        { provide: TOOL_REGISTRY, useValue: [] },
+        { provide: SessionManagerService, useValue: sessionManager },
+        { provide: ToolDispatchService, useValue: toolDispatch },
+        { provide: PersonaService, useValue: personaService },
+        { provide: CredentialsService, useValue: credentialsService },
+        { provide: AuditService, useValue: auditService },
+        { provide: ContextAssemblyService, useValue: contextAssembly },
+        { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
       ],
     }).compile();
 
