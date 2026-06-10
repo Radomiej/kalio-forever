@@ -66,23 +66,31 @@ export class ToolPolicyService {
     const slotNames = request.slotPolicy?.allowedToolNames;
     const architectureContext = request.architectureContext
       ?? request.sessionRuntimeContext?.architectureContext;
+    const launchNames = launchAllowedToolNames(architectureContext);
 
     let candidateNames: Set<string>;
     let source: ToolPolicySource;
 
     switch (request.runtimeKind) {
       case 'agent-flow-branch': {
+        // Architecture branches inherit the launch-visible toolset from the parent turn.
+        // Branch personas describe role prompting, while orchestrator slot policy performs
+        // the actual narrowing for project/folder-scoped runs.
+        const launchBaseline = launchNames !== undefined ? launchNames : [...personaNames];
+        const launchSet = new Set(
+          launchBaseline.filter((name) => toolByName.has(name)),
+        );
         const slotSet = new Set(slotNames ?? []);
         candidateNames = request.slotPolicy
-          ? intersectSets(personaNames, slotSet)
-          : new Set(personaNames);
+          ? intersectSets(launchSet, slotSet)
+          : new Set(launchSet);
         source = 'merged';
         for (const name of slotSet) {
-          if (!personaNames.has(name) && toolByName.has(name)) {
-            denied.push({ name, reason: 'not_in_persona_allowlist' });
+          if (!launchSet.has(name) && toolByName.has(name)) {
+            denied.push({ name, reason: launchNames ? 'not_in_runtime_explicit_list' : 'not_in_persona_allowlist' });
           }
         }
-        for (const name of personaNames) {
+        for (const name of launchSet) {
           if (slotNames && slotNames.length > 0 && !slotSet.has(name) && toolByName.has(name)) {
             denied.push({ name, reason: 'slot_policy_denied' });
           }
@@ -154,6 +162,16 @@ export class ToolPolicyService {
       toolByName,
     });
 
+    if (request.runtimeKind === 'agent-flow-branch') {
+      this.appendAgentFlowBranchScopeWarnings({
+        baselineNames: new Set(launchNames !== undefined ? launchNames : [...personaNames]),
+        allowedNames: new Set(allowedNames),
+        denied,
+        architectureContext,
+        warnings,
+      });
+    }
+
     return {
       tools: finalTools,
       source,
@@ -161,6 +179,52 @@ export class ToolPolicyService {
       denied,
       warnings,
     };
+  }
+
+  private appendAgentFlowBranchScopeWarnings(input: {
+    baselineNames: Set<string>;
+    allowedNames: Set<string>;
+    denied: ToolPolicyDecision['denied'];
+    architectureContext?: Record<string, unknown>;
+    warnings: string[];
+  }): void {
+    const hostFsDenied = input.denied.some((entry) => (
+      HOST_FS_TOOL_NAMES.has(entry.name) && entry.reason === 'missing_project_path'
+    ));
+    const terminalDenied = input.denied.some((entry) => (
+      TERMINAL_TOOL_NAMES.has(entry.name) && entry.reason === 'missing_execution_cwd'
+    ));
+    if (!hostFsDenied && !terminalDenied) {
+      return;
+    }
+
+    const restriction = input.architectureContext?.['orchestratorScopeRestriction'];
+    const orchestratorRestricted = restriction === true
+      || (typeof restriction === 'object' && restriction !== null && !Array.isArray(restriction));
+
+    if (orchestratorRestricted) {
+      const message = 'Host filesystem/terminal tools restricted by orchestrator scope for this run.';
+      if (!input.warnings.includes(message)) {
+        input.warnings.push(message);
+      }
+      return;
+    }
+
+    const baselineAllowsHostFs = [...input.baselineNames].some((name) => HOST_FS_TOOL_NAMES.has(name));
+    const baselineAllowsTerminal = [...input.baselineNames].some((name) => TERMINAL_TOOL_NAMES.has(name));
+    if (
+      (hostFsDenied && baselineAllowsHostFs)
+      || (terminalDenied && baselineAllowsTerminal)
+    ) {
+      const message = hostFsDenied && terminalDenied
+        ? 'Host filesystem and terminal tools require inherited projectPath/executionCwd from launch settings; child flow context is missing both scopes.'
+        : hostFsDenied
+          ? 'Host filesystem tools require inherited projectPath from launch settings; child flow context is missing project scope.'
+          : 'Terminal tools require inherited executionCwd from launch settings; child flow context is missing execution scope.';
+      if (!input.warnings.includes(message)) {
+        input.warnings.push(message);
+      }
+    }
   }
 
   private appendHostFsDenials(input: {
@@ -277,4 +341,12 @@ function canUseCliAgents(context: Record<string, unknown> | undefined): boolean 
   }
   const available = context?.['availableCliAgents'];
   return !Array.isArray(available) || available.some((value) => typeof value === 'string' && value.trim().length > 0);
+}
+
+function launchAllowedToolNames(context: Record<string, unknown> | undefined): string[] | undefined {
+  const raw = context?.['launchAllowedToolNames'];
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  return raw.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
 }

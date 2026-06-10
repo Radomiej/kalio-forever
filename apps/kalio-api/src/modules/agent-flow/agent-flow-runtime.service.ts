@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import type {
   AgentFlowRunSnapshot,
   ResumeAgentFlowRunDto,
@@ -7,8 +7,11 @@ import type {
   AgentFlowTraceItem,
 } from '@kalio/types';
 import { ArchitectureAgentFlowAdapter } from './architecture-agent-flow.adapter';
+import { resolveEffectiveAgentFlowContext } from './agent-flow-launch-context';
 import { AgentFlowRunRepository } from './agent-flow-run.repository';
 import type { AgentFlowRuntimePort } from './agent-flow-runtime.port';
+import { ArchitectureRuntimeService } from '../architecture/architecture-runtime.service';
+import { SessionsService } from '../chat/sessions.service';
 import { VFSService } from '../vfs/vfs.service';
 import {
   argsFromRun,
@@ -33,15 +36,18 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
   constructor(
     private readonly adapter: ArchitectureAgentFlowAdapter,
     private readonly repository: AgentFlowRunRepository,
-    private readonly vfs?: VFSService,
+    @Optional() private readonly vfs?: VFSService,
+    @Optional() private readonly sessions?: SessionsService,
+    @Optional() private readonly architectureRuntime?: ArchitectureRuntimeService,
   ) {}
 
   async run(args: RunSubAgentFlowArgs): Promise<SubAgentFlowResult> {
-    const result = this.withResultIdentity(await this.adapter.run(args), args);
+    const resolvedArgs = await this.withInheritedContext(args);
+    const result = this.withResultIdentity(await this.adapter.run(resolvedArgs), resolvedArgs);
     const now = Date.now();
     const snapshot = this.copyBackIfNeeded({
       run: {
-        ...createRunFromResult(args, result),
+        ...createRunFromResult(resolvedArgs, result),
         updatedAt: now,
       },
       result,
@@ -52,17 +58,20 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
   }
 
   async start(args: RunSubAgentFlowArgs): Promise<AgentFlowRunSnapshot> {
-    if (args.startMode === 'blocking') {
-      const result = await this.run(args);
+    const resolvedArgs = await this.withInheritedContext(args);
+    if (resolvedArgs.startMode === 'blocking') {
+      const result = await this.run(resolvedArgs);
       return {
-        run: createRunFromResult(args, result),
+        run: createRunFromResult(resolvedArgs, result),
         result,
         events: cloneTrace(result.tracePreview),
       };
     }
 
-    const snapshot = await this.adapter.start(args);
-    const checkpointed = this.copyBackIfNeeded(this.withSnapshotRunIdentity(withCheckpoint(snapshot, args), args));
+    const snapshot = await this.adapter.start(resolvedArgs);
+    const checkpointed = this.copyBackIfNeeded(
+      this.withSnapshotRunIdentity(withCheckpoint(snapshot, resolvedArgs), resolvedArgs),
+    );
     const normalized = this.withSnapshotResultIdentity(checkpointed);
     this.repository.saveSnapshot(normalized);
     this.scheduleDurableReconciliation(checkpointed.run.id);
@@ -338,6 +347,23 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
         startMode: args.startMode ?? snapshot.run.startMode,
         returnMode: args.returnMode ?? snapshot.run.returnMode,
       },
+    };
+  }
+
+  private async withInheritedContext(args: RunSubAgentFlowArgs): Promise<RunSubAgentFlowArgs> {
+    if (!this.sessions || !this.architectureRuntime) {
+      return args;
+    }
+    const context = await resolveEffectiveAgentFlowContext(args.parentSessionId, args.context, {
+      sessions: this.sessions,
+      architectureRuntime: this.architectureRuntime,
+    });
+    if (context === args.context) {
+      return args;
+    }
+    return {
+      ...args,
+      context,
     };
   }
 }

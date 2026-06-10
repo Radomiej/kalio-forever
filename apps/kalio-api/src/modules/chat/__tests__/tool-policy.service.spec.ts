@@ -65,6 +65,40 @@ describe('ToolPolicyService', () => {
     expect(decision.allowedToolNames).not.toContain('spawn_cli_agent');
   });
 
+  it('agent-flow-branch honors launchAllowedToolNames even when branch persona is narrower', async () => {
+    const service = makeService(['vfs_read']);
+    const decision = await service.decide({
+      runtimeKind: 'agent-flow-branch',
+      personaId: 'qa',
+      slotPolicy: { allowedToolNames: ['vfs_read', 'fs_read'] },
+      architectureContext: {
+        projectPath: 'C:\\demo',
+        launchAllowedToolNames: ['vfs_read', 'fs_read'],
+      },
+    });
+    expect(decision.allowedToolNames).toEqual(['vfs_read', 'fs_read']);
+  });
+
+  it('agent-flow-branch respects an explicit empty launchAllowedToolNames baseline', async () => {
+    const service = makeService(['vfs_read', 'fs_read']);
+    const decision = await service.decide({
+      runtimeKind: 'agent-flow-branch',
+      personaId: 'qa',
+      slotPolicy: { allowedToolNames: ['vfs_read', 'fs_read'] },
+      architectureContext: {
+        projectPath: 'C:\\demo',
+        launchAllowedToolNames: [],
+      },
+    });
+    expect(decision.allowedToolNames).toEqual([]);
+    expect(decision.denied).toEqual(
+      expect.arrayContaining([
+        { name: 'vfs_read', reason: 'not_in_runtime_explicit_list' },
+        { name: 'fs_read', reason: 'not_in_runtime_explicit_list' },
+      ]),
+    );
+  });
+
   it('denies fs_* without projectPath using missing_project_path', async () => {
     const service = makeService(['fs_read', 'fs_list', 'vfs_read']);
     const decision = await service.decide({
@@ -150,6 +184,76 @@ describe('ToolPolicyService', () => {
         { name: 'fs_read', reason: 'missing_project_path' },
         { name: 'fs_list', reason: 'missing_project_path' },
       ]),
+    );
+  });
+
+  it('agent-flow-branch with inherited projectPath allows host FS and terminal tools', async () => {
+    const service = makeService(['fs_read', 'fs_list', 'terminal_spawn', 'vfs_read']);
+    const decision = await service.decide({
+      runtimeKind: 'agent-flow-branch',
+      personaId: 'qa',
+      slotPolicy: {
+        allowedToolNames: ['vfs_read', 'fs_read', 'fs_list', 'terminal_spawn'],
+      },
+      architectureContext: {
+        projectPath: 'C:\\Projekty\\demo',
+        executionCwd: 'C:\\Projekty\\demo',
+      },
+    });
+    expect(decision.allowedToolNames).toEqual(
+      expect.arrayContaining(['fs_read', 'fs_list', 'terminal_spawn']),
+    );
+  });
+
+  it('agent-flow-branch missing inherited context adds a specific scope warning', async () => {
+    const service = makeService(['fs_read', 'fs_list', 'vfs_read']);
+    const decision = await service.decide({
+      runtimeKind: 'agent-flow-branch',
+      personaId: 'qa',
+      slotPolicy: {
+        allowedToolNames: ['vfs_read', 'vfs_list', 'fs_read', 'fs_list'],
+      },
+    });
+    expect(decision.warnings).toContain(
+      'Host filesystem tools require inherited projectPath from launch settings; child flow context is missing project scope.',
+    );
+  });
+
+  it('agent-flow-branch missing executionCwd warns specifically about terminal scope', async () => {
+    const service = makeService(['terminal_spawn', 'vfs_read']);
+    const decision = await service.decide({
+      runtimeKind: 'agent-flow-branch',
+      personaId: 'qa',
+      slotPolicy: {
+        allowedToolNames: ['vfs_read', 'terminal_spawn'],
+      },
+      architectureContext: {
+        launchAllowedToolNames: ['vfs_read', 'terminal_spawn'],
+      },
+    });
+    expect(decision.allowedToolNames).toEqual(['vfs_read']);
+    expect(decision.warnings).toContain(
+      'Terminal tools require inherited executionCwd from launch settings; child flow context is missing execution scope.',
+    );
+  });
+
+  it('agent-flow-branch with orchestratorScopeRestriction reports intentional narrowing', async () => {
+    const service = makeService(['fs_read', 'fs_list', 'vfs_read']);
+    const decision = await service.decide({
+      runtimeKind: 'agent-flow-branch',
+      personaId: 'qa',
+      slotPolicy: {
+        allowedToolNames: ['vfs_read', 'vfs_list', 'fs_read', 'fs_list'],
+      },
+      architectureContext: {
+        orchestratorScopeRestriction: { reason: 'folder scoped run' },
+      },
+    });
+    expect(decision.warnings).toContain(
+      'Host filesystem/terminal tools restricted by orchestrator scope for this run.',
+    );
+    expect(decision.warnings).not.toContain(
+      'Host filesystem tools require inherited projectPath from launch settings; child flow context is missing project scope.',
     );
   });
 });

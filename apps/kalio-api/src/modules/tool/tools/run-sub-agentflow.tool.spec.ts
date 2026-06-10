@@ -16,6 +16,15 @@ function request(args: ToolCallRequest['args']): ToolCallRequest {
   };
 }
 
+function availableTool(name: string) {
+  return {
+    name,
+    description: `${name} tool`,
+    parameters: {},
+    requiresConfirmation: false,
+  };
+}
+
 function runtime(): AgentFlowRuntimePort {
   return {
     run: vi.fn().mockResolvedValue({
@@ -74,6 +83,45 @@ describe('RunSubAgentFlowTool', () => {
       requiresConfirmation: true,
     });
     expect(metadata.parameters.required).toEqual(['flowId', 'goal']);
+  });
+
+  it('delegates allowance inheritance to AgentFlowRuntimeService.start', async () => {
+    const agentFlowRuntime = runtime();
+    const tool = new RunSubAgentFlowTool(moduleRef(agentFlowRuntime));
+
+    await tool.execute(request({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Nested flow without explicit context',
+    }));
+
+    expect(agentFlowRuntime.start).toHaveBeenCalledWith(expect.objectContaining({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Nested flow without explicit context',
+      parentSessionId: 'real-parent',
+      parentToolCallId: 'call-1',
+      context: undefined,
+    }));
+  });
+
+  it('forwards request.availableTools into child launch context as the baseline allowance', async () => {
+    const agentFlowRuntime = runtime();
+    const tool = new RunSubAgentFlowTool(moduleRef(agentFlowRuntime));
+
+    await tool.execute({
+      ...request({
+        flowId: 'goal_guard_delivery_loop',
+        goal: 'Carry launch allowance',
+        context: { projectPath: 'C:\\demo' },
+      }),
+      availableTools: [availableTool('vfs_read'), availableTool('fs_read')],
+    });
+
+    expect(agentFlowRuntime.start).toHaveBeenCalledWith(expect.objectContaining({
+      context: {
+        projectPath: 'C:\\demo',
+        launchAllowedToolNames: ['vfs_read', 'fs_read'],
+      },
+    }));
   });
 
   it('injects parentSessionId from ToolCallRequest instead of trusting args', async () => {
