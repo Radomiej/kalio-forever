@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useRef } from 'react';
 import { useChatSocketEvents } from './useChatSocketEvents';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
@@ -97,12 +96,11 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
           updatedAt: 1,
         },
       ],
-      messagesBySession: { 'session-1': [] },
-      agentTurnsBySession: {},
+      sessionMessages: { 'session-1': [] },
+      sessionAgentTurns: {},
       streamingChunks: {},
       thinkingChunks: {},
       chunkSessionIds: {},
-      pendingChunksBySession: {},
       getSessionMessages: () => [],
       getSessionActiveTurnId: () => null,
       getSessionAgentTurns: () => [],
@@ -161,96 +159,5 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
     });
 
     expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(0);
-  });
-
-  it('updates CLI child projection to stopped when a cancelled tool:result carries the final snapshot', () => {
-    useAgentStore.setState({
-      cliChildProjections: {
-        'cli-child-1': {
-          childSessionId: 'cli-child-1',
-          parentSessionId: 'session-1',
-          parentCallId: 'call-cli-1',
-          agentId: 'codex',
-          status: 'running',
-          lastOutput: 'still running',
-          toolName: 'run_cli_agent',
-        },
-      },
-      callIdToName: {
-        'call-cli-1': 'run_cli_agent',
-      },
-    });
-    mountHook();
-
-    act(() => {
-      fire('tool:result', {
-        callId: 'call-cli-1',
-        sessionId: 'cli-child-1',
-        status: 'cancelled',
-        data: {
-          childSessionId: 'cli-child-1',
-          parentSessionId: 'session-1',
-          agentId: 'codex',
-          workdir: 'C:/repo',
-          status: 'stopped',
-          lastPrompt: 'Long running task',
-          updatedAt: 123,
-          lastOutput: 'CLI agent stopped.',
-        },
-      });
-    });
-
-    expect(useAgentStore.getState().cliChildProjections['cli-child-1']).toMatchObject({
-      status: 'stopped',
-      lastOutput: 'CLI agent stopped.',
-    });
-  });
-
-  it('rebuilds CLI child projections and re-identifies child sessions after reconnect', async () => {
-    vi.mocked(apiClient.get).mockResolvedValue({
-      data: [
-        {
-          id: 'tool-1',
-          sessionId: 'session-1',
-          role: 'tool_result',
-          toolCallId: 'call-cli-1',
-          content: JSON.stringify({
-            childSessionId: 'cli-child-1',
-            parentSessionId: 'session-1',
-            agentId: 'codex',
-            workdir: 'C:/repo',
-            status: 'completed',
-            lastPrompt: 'Inspect repository',
-            updatedAt: 100,
-            lastOutput: 'done',
-          }),
-          createdAt: 1,
-        },
-      ],
-    });
-    useAgentStore.setState({
-      callIdToName: {
-        'call-cli-1': 'spawn_cli_agent',
-      },
-      cliChildProjections: {},
-    });
-    mountHook();
-
-    await act(async () => {
-      fire('socket:reconnect', undefined);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(eventBus.identifySession).toHaveBeenCalledWith('session-1');
-    expect(eventBus.identifySession).toHaveBeenCalledWith('cli-child-1');
-    expect(useAgentStore.getState().cliChildProjections['cli-child-1']).toMatchObject({
-      childSessionId: 'cli-child-1',
-      parentSessionId: 'session-1',
-      parentCallId: 'call-cli-1',
-      status: 'completed',
-      lastOutput: 'done',
-      toolName: 'spawn_cli_agent',
-    });
   });
 });

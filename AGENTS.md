@@ -159,12 +159,16 @@ Boris Cherny (creator of Claude Code) keeps his team's file around 100 lines. Un
 ### Commands
 - Install: `pnpm install` (from root)
 - Build: `pnpm turbo run build`
-- Test (all): `pnpm turbo run test`
-- Test (e2e): `pnpm turbo run test:e2e`
+- Test (all): `pnpm test` (local gate) or `pnpm turbo run test` (CI workspace tests)
+- Test (e2e): `pnpm test:e2e` (self-contained Playwright stack on random ports)
 - Lint: `pnpm turbo run lint`
 - Typecheck: `pnpm turbo run typecheck`
 - Audit report: `pnpm audit:report`
-- Run locally: `.\start-dev.ps1` (starts both API on port 3016 and web on port 5188)
+- Dev (hot reload): `pnpm dev` / `.\start-dev.ps1` (API :3016, web :5188)
+- QA (built dist): `pnpm qa` / `pnpm qa:rebuild` (API :3316, web :5288)
+- Managed QA stack: `pnpm stack:start` / `pnpm stack:stop`
+
+Full local workflow: `docs/local-dev-guide.md`.
 
 Prefer single-file or single-test runs during iteration. Full suites are for the final verification pass.
 

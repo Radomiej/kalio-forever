@@ -290,9 +290,24 @@ After `pnpm dev` (or `./start-dev.ps1`) boots cleanly you should have:
 ### 5. Run Tests
 
 ```bash
-pnpm test           # unit + integration (Vitest)
-pnpm test:e2e       # end-to-end (Playwright — servers must be running)
+pnpm test           # local gate: preflight + Vitest + script tests
+pnpm test:e2e       # Playwright E2E (starts its own stack on random ports)
+pnpm typecheck      # turbo typecheck across workspaces
 ```
+
+### 6. QA stack (stable, no hot reload)
+
+For manual testing on a **built** stack that behaves like production:
+
+```bash
+pnpm qa             # fixed ports 3316/5288, reuse existing dist
+pnpm qa:rebuild     # build first, then start QA stack
+pnpm qa:stop
+```
+
+Open **http://localhost:5288** (API on `http://localhost:3316`).
+
+See **[Local Dev & QA Guide](docs/local-dev-guide.md)** for the full command map, stack comparison, CI/release flow, and test entry points.
 
 ---
 
@@ -399,8 +414,10 @@ If you're contributing code or using an AI coding agent, start with [CONTRIBUTIN
 
 | Doc | What it covers |
 |---|---|
+| [docs/local-dev-guide.md](./docs/local-dev-guide.md) | Dev vs QA stacks, commands, CI/release, test entry points |
 | [AGENTS.md](./AGENTS.md) | Architecture invariants enforced in every PR (AI-readable) |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Setup, TDD workflow, tool registration, PR checklist |
+| [scripts/README.md](./scripts/README.md) | Root script surface (`dev`, `qa`, `stack:*`, `test`, `preflight`) |
 | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Community expectations, moderation scope, and reporting path |
 | [scripts/code-audit/README.md](./scripts/code-audit/README.md) | What the automated audit checks and how to run it |
 | [docs/sessions/](./docs/sessions/) | Chronological engineering session logs and implementation decisions |

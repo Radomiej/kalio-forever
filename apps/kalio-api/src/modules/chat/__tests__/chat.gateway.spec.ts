@@ -190,6 +190,8 @@ describe('ChatGateway', () => {
       'agent:done',
       expect.objectContaining({ sessionId: 'cli-child-1' }),
     );
+    expect(client.emit.mock.calls.filter(([event]) => event === 'tool:result').length).toBe(1);
+    expect(client.emit.mock.calls.filter(([event]) => event === 'agent:done').length).toBe(1);
   });
 
   it('delegates chat:stop on cli-agent child sessions to CLIAgentSessionRuntimeService', async () => {
@@ -344,6 +346,47 @@ describe('ChatGateway', () => {
       'agent:done',
       expect.objectContaining({ sessionId: 'cli-child-1' }),
     );
+    expect(client.emit.mock.calls.filter(([event]) => event === 'tool:result').length).toBe(1);
+    expect(client.emit.mock.calls.filter(([event]) => event === 'agent:done').length).toBe(1);
+  });
+
+  it('REGRESSION: allows subscriber-only stop on cli-agent child after child events were streamed', async () => {
+    vi.mocked(sessions.get).mockResolvedValue({
+      id: 'cli-child-1',
+      personaId: 'default',
+      title: 'codex CLI',
+      kind: 'cli-agent',
+      parentSessionId: 'session-1',
+      parentToolCallId: 'call-cli-1',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
+      emit('chat:chunk', {
+        sessionId: 'cli-child-1',
+        messageId: 'msg-cli-1',
+        delta: 'cli child output',
+        done: false,
+      });
+    });
+
+    await gateway.handleChatSend(client as never, {
+      sessionId: 'session-1',
+      content: 'spawn cli child',
+      personaId: 'default',
+    });
+
+    const socketSessions = (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions;
+    expect(socketSessions.get(client.id)?.has('cli-child-1')).toBe(false);
+
+    await gateway.handleChatStop(client as never, { sessionId: 'cli-child-1' });
+
+    expect(cliAgentSessionRuntime.stopSession).toHaveBeenCalledWith(
+      'session-1',
+      'cli-child-1',
+      expect.any(Function),
+    );
+    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('cli-child-1');
   });
 
   it('REGRESSION: stopping a parent session cascades to active AgentFlow runs', async () => {

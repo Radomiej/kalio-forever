@@ -289,6 +289,63 @@ describe('ArchitectGraphCanvas', () => {
     expect(onAddNode).toHaveBeenCalledWith({ x: 317.07317073170736, y: 256.0975609756098 }, 'router');
   });
 
+  it('continues node drag when schema nodes reference changes without schema id change', () => {
+    const onMoveNode = vi.fn();
+    const initialSchema: ArchitectSchema = {
+      ...baseSchema,
+      nodes: baseSchema.nodes.map((node) => ({ ...node })),
+    };
+    const { rerender } = render(
+      <ArchitectGraphCanvas
+        schema={initialSchema}
+        selectedNodeId={null}
+        selectedSlotId={null}
+        onSelectNode={vi.fn()}
+        onSelectSlot={vi.fn()}
+        onMoveNode={onMoveNode}
+        onAddNode={vi.fn()}
+        onToggleEdge={vi.fn()}
+        onAutoLayout={vi.fn()}
+      />,
+    );
+
+    const dragHandle = screen.getByTestId('architect-node-drag-start');
+    fireEvent(dragHandle, new MouseEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    }));
+
+    rerender(
+      <ArchitectGraphCanvas
+        schema={{
+          ...initialSchema,
+          nodes: initialSchema.nodes.map((node) => (
+            node.id === 'start' ? { ...node, x: 125, y: 125 } : { ...node }
+          )),
+        }}
+        selectedNodeId={null}
+        selectedSlotId={null}
+        onSelectNode={vi.fn()}
+        onSelectSlot={vi.fn()}
+        onMoveNode={onMoveNode}
+        onAddNode={vi.fn()}
+        onToggleEdge={vi.fn()}
+        onAutoLayout={vi.fn()}
+      />,
+    );
+
+    fireEvent(dragHandle, new MouseEvent('pointermove', {
+      bubbles: true,
+      clientX: 150,
+      clientY: 140,
+    }));
+    fireEvent(dragHandle, new MouseEvent('pointerup', { bubbles: true }));
+
+    expect(onMoveNode).toHaveBeenCalledWith('start', { x: 180.97560975609755, y: 168.78048780487805 });
+  });
+
   it('moves a node from the drag handle without panning the canvas', () => {
     const onSelectNode = vi.fn();
     const onMoveNode = vi.fn();

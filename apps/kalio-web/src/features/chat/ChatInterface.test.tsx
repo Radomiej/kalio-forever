@@ -8,7 +8,7 @@
  * because addToolActivity was only called from the confirmation handler.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, act, fireEvent, screen } from '@testing-library/react';
+import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { buildArchitectureRunContext, ChatInterface } from './ChatInterface';
 import { computeAnsweredCallIds } from './chatUtils';
 import type { ChatMessage, VFSFile } from '@kalio/types';
@@ -391,8 +391,10 @@ beforeEach(() => {
   mockChunkSessionIds = {};
   mockMessages = [];
   mockSessions = createMockSessions();
+  agentStoreState.isStreaming = false;
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
+  getSessionMessages.mockReturnValue(mockMessages);
   vi.clearAllMocks();
   mockSendMessage.mockReturnValue(true);
   mockGetArchitectureSchemas.mockResolvedValue([]);
@@ -484,10 +486,14 @@ describe('ChatInterface event wiring', () => {
         roleSlots: [],
       },
     ]);
+    mockMessages = [{ id: 'u1', role: 'user', content: 'hello', sessionId: 'session-1', createdAt: 1 }];
+    getSessionMessages.mockReturnValue(mockMessages);
     agentStoreState.isStreaming = true;
     mockStartArchitectureRun.mockClear();
 
     await renderChatInterface();
+    await screen.findByTestId('chat-architecture-select');
+    await screen.findByRole('option', { name: 'Strategic Decision Council' });
     await act(async () => {
       fireEvent.change(screen.getByTestId('chat-architecture-select'), {
         target: { value: 'strategic-decision-council' },
@@ -501,8 +507,6 @@ describe('ChatInterface event wiring', () => {
 
     expect(mockStartArchitectureRun).not.toHaveBeenCalled();
     expect((screen.getByTestId('chat-input') as HTMLTextAreaElement).value).toBe('keep this architecture draft');
-
-    agentStoreState.isStreaming = false;
   });
 
   it('routes Goal Master Delivery Loop from Talk through canonical AgentFlow with strict proof context', async () => {
@@ -519,17 +523,19 @@ describe('ChatInterface event wiring', () => {
     ]);
 
     await renderChatInterface();
+    await screen.findByRole('option', { name: 'Goal Master Delivery Loop' });
     await act(async () => {
-      const select = await screen.findByTestId('welcome-architecture-select');
-      const input = await screen.findByTestId('welcome-prompt-input');
-      const send = await screen.findByTestId('welcome-run-prompt');
+      const select = screen.getByTestId('welcome-architecture-select');
+      const input = screen.getByTestId('welcome-prompt-input');
+      const send = screen.getByTestId('welcome-run-prompt');
       fireEvent.change(select, { target: { value: 'goal-master-delivery-loop' } });
       fireEvent.change(input, { target: { value: 'Deliver with proof.' } });
       fireEvent.click(send);
       await flushReactEffects();
     });
 
-    expect(mockStartGoalGuardAgentFlowRun).toHaveBeenCalledWith(
+    await waitFor(() => {
+      expect(mockStartGoalGuardAgentFlowRun).toHaveBeenCalledWith(
       'Deliver with proof.',
       expect.objectContaining({
         parentSessionId: 'session-1',
@@ -537,7 +543,8 @@ describe('ChatInterface event wiring', () => {
         requireImplementerWriteProof: true,
       }),
       'session-1',
-    );
+      );
+    });
     expect(mockStartArchitectureRun).not.toHaveBeenCalled();
   });
 
@@ -590,9 +597,10 @@ describe('ChatInterface event wiring', () => {
 
     await emitEvent('socket:reconnect', undefined);
 
-    expect(setMessages).toHaveBeenCalledWith([localMessage]);
+    expect(setMessages).toHaveBeenCalledWith([localMessage], 'session-1');
     expect(setAgentTurns).toHaveBeenCalledWith(
       expect.any(Array),
+      'session-1',
     );
   });
 

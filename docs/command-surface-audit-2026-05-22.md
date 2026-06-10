@@ -29,3 +29,18 @@ Keep project operations centered on four commands: `dev`, `build`, `test`, `test
 - `gh` is still active and maintained (GitHub CLI repo releases continue in 2026).
 - Copilot CLI is also current and documented by GitHub.
 - Recommendation: keep repo scripts independent of either tool; use either client only for contributor workflows, not boot/build/test execution.
+
+## Follow-up (2026-06-10)
+
+The core four commands (`dev`, `build`, `test`, `test:e2e`) are unchanged. Additional **QA / stack** commands were added since this audit:
+
+| Command | Role |
+|---|---|
+| `pnpm qa` / `pnpm qa:rebuild` | Fixed-port built stack (`3316` / `5288`), AppData profile |
+| `pnpm qa:status` / `pnpm qa:stop` | Lifecycle for fixed QA stack |
+| `pnpm stack:start` / `stack:status` / `stack:stop` | Managed built stack, random ports, repo `data/kalio-qa.db` |
+| `pnpm llm:probe` | Probe running stack provider via `/api/credentials/test` |
+| `pnpm preflight` / `pnpm repair` | Workspace integrity |
+| `pnpm agentflow:paid-readiness` | Gate before paid AgentFlow runs |
+
+Canonical documentation: **[docs/local-dev-guide.md](./local-dev-guide.md)**.

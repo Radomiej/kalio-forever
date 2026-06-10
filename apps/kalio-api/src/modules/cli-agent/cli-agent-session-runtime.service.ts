@@ -440,6 +440,7 @@ export class CLIAgentSessionRuntimeService {
       status: 'error',
       errorCode: 'CLI_AGENT_ERROR',
       errorMessage: error.message,
+      data: nextSnapshot,
     });
     this.setSettledRuntimeEntry(childSessionId, nextSnapshot, callId, turnId, emit, true);
 

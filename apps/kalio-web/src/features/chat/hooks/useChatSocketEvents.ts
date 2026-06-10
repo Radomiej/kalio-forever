@@ -6,15 +6,22 @@ import { useSessionStore } from '../../../store/sessionStore';
 import { backendHealth } from '../../../services/backendHealth';
 import { eventBus } from '../../../services/eventBus';
 import { apiClient } from '../../../services/apiClient';
-import { buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
 import { shouldRefreshVfsForToolResult } from '../ChatInterface.Parts';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
-import { canReleaseComposerAfterToolResult, createToolArgProgressHandlers } from './useChatSocketEvents.helpers';
 import {
-  projectionFromSession,
-  projectionFromToolResult,
-  rebuildCLIChildProjectionsFromMessages,
-} from '../cliChildProjection.model';
+  canReleaseComposerAfterToolResult,
+  createToolArgProgressHandlers,
+  handleConnectionStateEvent,
+  handleSessionStatusEvent,
+  mergeRaAppNativeResultIntoMessages,
+} from './useChatSocketEvents.helpers';
+import {
+  handleCliChildProgress,
+  handleCliChildSessionCreated,
+  handleCliChildToolResult,
+  resolveCliToolName,
+} from './useChatSocketEvents.cliChild';
+import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
 
 interface UseChatSocketEventsOptions {
   hasPendingChunksForSession: (sessionId: string | null) => boolean;
@@ -49,6 +56,8 @@ export function useChatSocketEvents({
     removeLastAgentTurn,
     flushThinkingChunks,
     flushStreamingChunks,
+    setMessages,
+    setAgentTurns,
   } = useSessionStore();
   const {
     setPendingConfirmation,
@@ -79,6 +88,17 @@ export function useChatSocketEvents({
       setToolArgProgress,
       getActiveSessionId: () => useSessionStore.getState().activeSessionId,
     });
+
+    const cliChildDeps = {
+      upsertCLIChildProjection,
+      updateCLIChildProjection,
+      rebuildCLIChildProjections,
+      appendCLIAgentChunk,
+      registerCallId,
+      getAgentState: () => useAgentStore.getState(),
+      getSessionState: () => useSessionStore.getState(),
+      identifySession: (sessionId: string) => eventBus.identifySession(sessionId),
+    };
 
     const offChunk = eventBus.onChunk((chunk) => {
       const targetSessionId = chunk.sessionId ?? useSessionStore.getState().activeSessionId;
@@ -314,14 +334,9 @@ export function useChatSocketEvents({
         finishedAt: Date.now(),
         result,
       });
-      const toolName = useAgentStore.getState().callIdToName[result.callId]
-        ?? useAgentStore.getState().toolActivities.find((activity) => activity.callId === result.callId)?.toolName;
-      if (resultSessionId && toolName && result.data !== undefined) {
-        const projection = projectionFromToolResult(toolName, result.callId, resultSessionId, result.data);
-        if (projection) {
-          upsertCLIChildProjection(projection);
-        }
-      }
+      const agentState = useAgentStore.getState();
+      const toolName = resolveCliToolName(result, agentState.callIdToName, agentState.toolActivities);
+      handleCliChildToolResult(cliChildDeps, result, resultSessionId);
       clearCLIAgentOutput(result.callId);
       if (result.status === 'success') {
         if (shouldRefreshVfsForToolResult(toolName, result.data)) setVfsRefreshSignal((value) => value + 1);
@@ -354,72 +369,27 @@ export function useChatSocketEvents({
     });
 
     const offCLIAgentProgress = eventBus.onCLIAgentProgress((payload) => {
-      appendCLIAgentChunk(payload.callId, payload.chunk);
-      const existing = payload.sessionId
-        ? useAgentStore.getState().cliChildProjections[payload.sessionId]
-        : Object.values(useAgentStore.getState().cliChildProjections).find(
-          (item) => item.parentCallId === payload.callId,
-        );
-      if (existing) {
-        updateCLIChildProjection(existing.childSessionId, {
-          status: 'running',
-          lastOutput: (useAgentStore.getState().cliAgentOutput[payload.callId] ?? '') + payload.chunk,
-        });
-      } else if (payload.sessionId) {
-        const childSession = useSessionStore.getState().sessions.find((item) => item.id === payload.sessionId);
-        if (childSession?.parentSessionId && childSession.parentToolCallId) {
-          upsertCLIChildProjection({
-            childSessionId: payload.sessionId,
-            parentSessionId: childSession.parentSessionId,
-            parentCallId: childSession.parentToolCallId,
-            agentId: payload.agentId,
-            status: 'running',
-            lastOutput: payload.chunk,
-            childTitle: childSession.title,
-            toolName: useAgentStore.getState().callIdToName[childSession.parentToolCallId] ?? 'run_cli_agent',
-          });
-        }
-      }
+      handleCliChildProgress(cliChildDeps, payload);
     });
 
     const offSessionStatus = eventBus.onSessionStatus((payload) => {
-      if (payload.run?.status === 'interrupted_needs_retry' && payload.sessionId === useSessionStore.getState().activeSessionId) {
-        setRecoveryNotice(
-          payload.run.safeResume
-            ? 'Backend restarted during LLM work. Retry is safe from the current transcript.'
-            : 'Backend restarted during tool execution. Manual retry avoids duplicate tool execution.',
-        );
-      }
-
-      if (!payload.active || !payload.turnId) {
-        return;
-      }
-      if (!useAgentStore.getState().hasActiveLoopForSession(payload.sessionId)) {
-        addActiveAgentLoop(payload.sessionId, payload.turnId);
-      }
-      if (!useSessionStore.getState().getSessionActiveTurnId(payload.sessionId)) {
-        startAgentTurn(payload.turnId, payload.sessionId);
-      }
-      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
-        setAwaitingFirstChunk(false);
-        setStreaming(true);
-      }
+      handleSessionStatusEvent(payload, {
+        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+        hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
+        getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
+        setRecoveryNotice,
+        addActiveAgentLoop,
+        startAgentTurn,
+        setAwaitingFirstChunk,
+        setStreaming,
+      });
     });
 
     const offSessionCreated = eventBus.onSessionCreated((session) => {
       if (!useSessionStore.getState().sessions.some((item) => item.id === session.id)) {
         addSession(session);
       }
-      if (session.kind === 'cli-agent') {
-        const projection = projectionFromSession(session);
-        if (projection) {
-          upsertCLIChildProjection(projection);
-        }
-        const activeSessionId = useSessionStore.getState().activeSessionId;
-        if (session.parentSessionId === activeSessionId || activeSessionId === session.id) {
-          eventBus.identifySession(session.id);
-        }
-      }
+      handleCliChildSessionCreated(cliChildDeps, session);
     });
 
     const offQueued = eventBus.onQueued((payload) => {
@@ -429,78 +399,37 @@ export function useChatSocketEvents({
     const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
       const targetSessionId = payload.sessionId;
       if (!targetSessionId) return;
-      const { getSessionMessages, setMessages } = useSessionStore.getState();
-      const sessionMessages = getSessionMessages(targetSessionId);
-      const updated = sessionMessages.map((message) => {
-        if (message.toolCallId !== payload.toolCallId || message.role !== 'tool_result') return message;
-        try {
-          const data = JSON.parse(message.content) as Record<string, unknown>;
-          return {
-            ...message,
-            content: JSON.stringify({ ...data, nativeResults: payload.results, pendingApprovals: [] }),
-          };
-        } catch (err) {
-          console.error('[ChatInterface] failed to merge RA-App native result', err instanceof Error ? err : new Error(String(err)));
-          return message;
-        }
-      });
-      setMessages(updated, targetSessionId);
+      const { getSessionMessages, setMessages: applySessionMessages } = useSessionStore.getState();
+      applySessionMessages(
+        mergeRaAppNativeResultIntoMessages(getSessionMessages(targetSessionId), payload.toolCallId, payload.results),
+        targetSessionId,
+      );
     });
 
     const offConnectionState = eventBus.onConnectionState((state) => {
-      setConnectionState(state.status);
-      if (state.status === 'connected') {
-        if (state.recovered) {
-          setRecoveryNotice('Recovered missed stream events after reconnect.');
-        }
-        return;
-      }
-      if (state.status === 'reconnecting') {
-        setRecoveryNotice('Connection dropped. Reconnecting and preserving this session.');
-      }
+      handleConnectionStateEvent(state, { setConnectionState, setRecoveryNotice });
     });
 
     const offReconnect = eventBus.onReconnect(() => {
       backendHealth.reportSuccess();
-      setStreaming(false);
-      clearToolArgProgressTracking();
-      const { activeSessionId: sid, sessions } = useSessionStore.getState();
-      if (sid) {
-        clearToolActivities(sid);
-        removeActiveAgentLoop(sid);
-        setPendingConfirmation(sid, null);
-        eventBus.identifySession(sid);
-        const cliChildren = sessions.filter(
-          (session) => session.kind === 'cli-agent' && session.parentSessionId === sid,
-        );
-        cliChildren.forEach((child) => {
-          eventBus.identifySession(child.id);
-        });
-        apiClient
-          .get<ChatMessage[]>(`/api/sessions/${sid}/messages`)
-          .then((response) => {
-            const data = response.data;
-            if (useSessionStore.getState().activeSessionId !== sid) return;
-            const { setMessages, setAgentTurns } = useSessionStore.getState();
-            const currentMessages = useSessionStore.getState().getSessionMessages(sid);
-            const mergedMessages = mergeFetchedMessages(currentMessages, data);
-            setMessages(mergedMessages);
-            const callIdToName = useAgentStore.getState().callIdToName;
-            rebuildCLIChildProjections(
-              sid,
-              rebuildCLIChildProjectionsFromMessages(sid, mergedMessages, callIdToName),
-            );
-            if (!useAgentStore.getState().hasActiveLoopForSession(sid)) {
-              setAgentTurns(buildTurnsFromHistory(mergedMessages, sid));
-            }
-            onContextInvalidated?.();
-          })
-          .catch((err: unknown) => {
-            console.error('[ChatInterface] reconnect history reload failed', err instanceof Error ? err : new Error(String(err)));
-          });
-      } else {
-        clearToolActivities();
-      }
+      handleSocketReconnect({
+        cliChild: cliChildDeps,
+        setStreaming,
+        clearToolArgProgressTracking,
+        clearToolActivities,
+        removeActiveAgentLoop,
+        setPendingConfirmation,
+        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+        getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
+        setMessages,
+        setAgentTurns,
+        hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
+        fetchMessages: async (sessionId) => {
+          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
+          return response.data;
+        },
+        onContextInvalidated,
+      });
     });
 
     return () => {
@@ -536,6 +465,8 @@ export function useChatSocketEvents({
     finalizeChunk,
     flushStreamingChunks,
     flushThinkingChunks,
+    setMessages,
+    setAgentTurns,
     getToolActivitiesForSession,
     hasPendingChunksForSession,
     markAgentTurnError,

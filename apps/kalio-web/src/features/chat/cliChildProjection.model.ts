@@ -30,6 +30,18 @@ export function isCliChildDelegationTool(toolName: string): boolean {
   return CLI_CHILD_DELEGATION_TOOLS.has(toolName);
 }
 
+export function isCliChildToolName(toolName: string): boolean {
+  return isCliChildDelegationTool(toolName) || CLI_SESSION_TOOLS.has(toolName);
+}
+
+export function terminalProjectionStatus(
+  resultStatus: 'success' | 'error' | 'cancelled',
+): CLIChildProjectionStatus | null {
+  if (resultStatus === 'cancelled') return 'stopped';
+  if (resultStatus === 'error') return 'failed';
+  return null;
+}
+
 export function mapSnapshotStatus(status: string | undefined): CLIChildProjectionStatus {
   if (status === 'running') return 'running';
   if (status === 'completed') return 'completed';

@@ -20,6 +20,28 @@ if (-not $localAppData) {
 $devDataRoot = Join-Path $localAppData "kalio-forever-dev"
 $BE_PORT = $BackendPort
 $FE_PORT = $FrontendPort
+
+# Singleton lock — must run before port cleanup or stack startup.
+$script:devStackMutex = $null
+$script:devStackMutexOwned = $false
+$devStackMutexName = "Global\KalioForever-DevStack-$BE_PORT-$FE_PORT"
+try {
+    $script:devStackMutex = [System.Threading.Mutex]::new($false, $devStackMutexName)
+    $script:devStackMutexOwned = $script:devStackMutex.WaitOne(0, $false)
+    if (-not $script:devStackMutexOwned) {
+        Write-Host "[FAIL] Kalio dev stack already running (ports $BE_PORT/$FE_PORT)." -ForegroundColor Red
+        Write-Host "  Stop dev-servers Kalio or the other start-dev.ps1 before starting again." -ForegroundColor DarkYellow
+        exit 1
+    }
+} catch {
+    if ($script:devStackMutex) {
+        try { $script:devStackMutex.Dispose() } catch { }
+        $script:devStackMutex = $null
+    }
+    Write-Host "[FAIL] Could not acquire dev stack singleton lock: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
 $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $nodeCmd) { $nodeCmd = Get-Command node -ErrorAction SilentlyContinue }
 if (-not $nodeCmd) { Write-Host "[FAIL] node not found on PATH" -ForegroundColor Red; exit 1 }
@@ -257,6 +279,18 @@ function Clear-OccupiedPorts {
     return $true
 }
 
+function Release-DevStackMutex {
+    if ($script:devStackMutexOwned -and $script:devStackMutex) {
+        try { [void]$script:devStackMutex.ReleaseMutex() } catch { }
+        $script:devStackMutexOwned = $false
+    }
+    if ($script:devStackMutex) {
+        try { $script:devStackMutex.Dispose() } catch { }
+        $script:devStackMutex = $null
+    }
+}
+
+try {
 # --- Kill any leftover processes on our ports ---
 Write-Host "KALIO Dev Stack" -ForegroundColor Cyan
 Write-Host "  Clearing ports $BE_PORT and $FE_PORT..." -ForegroundColor DarkYellow
@@ -364,4 +398,7 @@ try {
     Stop-KalioStack -BeProcess $beProcess -FeProcess $feProcess -Ports @($BE_PORT, $FE_PORT)
     Restore-EnvVars -Values $previousEnv
     Write-Host "[OK] Stack stopped." -ForegroundColor Green
+}
+} finally {
+    Release-DevStackMutex
 }

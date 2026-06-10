@@ -169,6 +169,20 @@ export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string
   return turns;
 }
 
+export function buildCallIdToNameFromMessages(
+  messages: ChatMessage[],
+  existing: Record<string, string> = {},
+): Record<string, string> {
+  const mapping = { ...existing };
+  for (const message of messages) {
+    if (message.role !== 'assistant' || !message.toolCalls) continue;
+    for (const toolCall of message.toolCalls) {
+      mapping[toolCall.id] = toolCall.name;
+    }
+  }
+  return mapping;
+}
+
 export function buildConversationTimeline(messages: ChatMessage[], agentTurns: AgentTurn[]): ChatTimelineEntry[] {
   const userMessages = messages.filter((message) => message.role === 'user');
   const turnsByPromptMessageId = new Map<string, AgentTurn[]>();

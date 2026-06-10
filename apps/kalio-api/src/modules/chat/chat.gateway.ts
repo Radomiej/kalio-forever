@@ -372,6 +372,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const parentSessionId = session.parentSessionId;
       const emit: EmitFn = (event, data) => {
+        const eventSessionId = this.getEventSessionId(data);
+        if (eventSessionId) {
+          this.emitToInitiatorAndSessionSubscribers(initiatorSocketId, eventSessionId, event, data);
+          return;
+        }
         this.emitToInitiatorAndSessionSubscribers(initiatorSocketId, parentSessionId, event, data);
         if (sessionId !== parentSessionId) {
           this.emitToInitiatorAndSessionSubscribers(initiatorSocketId, sessionId, event, data);
