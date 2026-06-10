@@ -227,6 +227,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - For subagent acceleration, use GPT-5.4 mini for simple isolated checks and GPT-5.3 Codex or GPT-5.4 for normal implementation/review work; do not use GPT-5.5.
 - Treat `.\start-dev.ps1` ports `3016/5188` as the official manual-dev hot-reload stack; treat `node scripts/stack-manager.mjs start --backend-port 0 --frontend-port 0` as an isolated built QA stack on random ports using `NODE_ENV=production`, `data/kalio-qa.db`, and `data/workspaces-qa`.
 - For failing CI work, start with `superpowers:systematic-debugging` and finish with `superpowers:verification-before-completion` before claiming the pipeline is fixed.
+- On Windows, always use system Node (`C:\Program Files\nodejs\node.exe`) for `node`/`pnpm`/`npm` installs and rebuilds; never Cursor's bundled Node 22 — prepend that directory to PATH when the agent shell resolves the wrong `node`.
 
 ---
 

@@ -238,7 +238,7 @@ export function ChatWelcomeScreen({
 
   const submitPrompt = (content: string) => {
     const trimmed = content.trim();
-    if (!trimmed || !activeSessionId || isStreaming) return;
+    if (!trimmed || !activeSessionId) return;
     if (activeArchitecture) {
       onArchitectureRun(trimmed, activeArchitecture.id);
     } else {
@@ -315,7 +315,6 @@ export function ChatWelcomeScreen({
                 }
               }}
               placeholder={activeArchitecture ? `Run prompt through ${activeArchitecture.name}` : 'Ask Kalio...'}
-              disabled={isStreaming}
               data-testid="welcome-prompt-input"
             />
             <div className="flex items-center justify-between gap-3 border-t border-base-300/70 px-1 pt-2">
@@ -326,7 +325,7 @@ export function ChatWelcomeScreen({
                 type="button"
                 className="btn btn-primary btn-sm gap-2"
                 onClick={() => submitPrompt(prompt)}
-                disabled={isStreaming || prompt.trim().length === 0}
+                disabled={prompt.trim().length === 0}
                 data-testid="welcome-run-prompt"
               >
                 <Play size={14} />

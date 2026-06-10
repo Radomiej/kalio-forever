@@ -14,6 +14,7 @@
     "lint": "corepack pnpm -r --filter kalio-api --filter kalio-web run lint",
     "test": "node scripts/run-test-gate.mjs",
     "test:e2e": "corepack pnpm --filter @kalio/e2e run test:e2e",
+    "test:e2e:qa-ac13": "node scripts/run-ac13-qa-stack.mjs",
     "preflight": "node scripts/repo-preflight.mjs",
     "repair": "node scripts/repo-preflight.mjs --repair",
     "clean": "corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run clean",

@@ -88,7 +88,9 @@ export function ChatInterface() {
     updateLlmActivity,
     getToolActivitiesForSession,
     getContextForSession,
+    queuedDepthBySession,
   } = useAgentStore();
+  const queuedDepth = activeSessionId ? (queuedDepthBySession?.[activeSessionId] ?? 0) : 0;
   const activeToolActivities = getToolActivitiesForSession(activeSessionId);
   const activeContext = getContextForSession(activeSessionId);
   const [error, setError] = useState<string | null>(null);
@@ -275,10 +277,8 @@ export function ChatInterface() {
 
   const handleSendRef = useRef<(content: string, personaId: string) => void>(() => {});
 
-  const handleSend = (content: string, personaId: string) => {
+  const handleSend = (content: string, personaId: string, options?: { interrupt?: boolean }) => {
     if (!activeSessionId) return;
-    // Guard against double-submit: check store state synchronously before any renders
-    if (useAgentStore.getState().isStreaming) return;
     if (!eventBus.connected) {
       setError('Backend connection is offline. Reconnect and retry this message.');
       setRecoveryNotice('Connection is offline. Kalio will resync the session after reconnect.');
@@ -287,7 +287,12 @@ export function ChatInterface() {
     setError(null);
     setRetryError(null);
     lastSentContentRef.current = content;
-    clearToolActivities(activeSessionId);
+    const isActiveTurn = useAgentStore.getState().hasActiveLoopForSession(activeSessionId)
+      || useAgentStore.getState().isStreaming;
+    const shouldInterrupt = options?.interrupt === true;
+    if (!isActiveTurn || shouldInterrupt) {
+      clearToolActivities(activeSessionId);
+    }
 
     // Auto-generate title from first message if session still has default title
     const { sessions, updateSession } = useSessionStore.getState();
@@ -306,14 +311,22 @@ export function ChatInterface() {
     };
     addMessage(userMsg);
 
-    setAwaitingFirstChunk(true);
-    setStreaming(true);
-    console.debug('[ChatInterface] sendMessage', { sessionId: activeSessionId, content: content.slice(0, 60) });
+    if (!isActiveTurn || shouldInterrupt) {
+      setAwaitingFirstChunk(true);
+      setStreaming(true);
+    }
+    console.debug('[ChatInterface] sendMessage', {
+      sessionId: activeSessionId,
+      content: content.slice(0, 60),
+      interrupt: shouldInterrupt,
+      queued: isActiveTurn && !shouldInterrupt,
+    });
 
     const sent = eventBus.sendMessage({
       sessionId: activeSessionId,
       content,
       personaId,
+      interrupt: shouldInterrupt,
     });
 
     if (!sent) {
@@ -448,12 +461,12 @@ export function ChatInterface() {
     }
   };
 
-  const handleComposerSend = (content: string, personaId: string) => {
+  const handleComposerSend = (content: string, personaId: string, options?: { interrupt?: boolean }) => {
     if (selectedArchitectureId !== 'single-chat') {
       void handleArchitectureRun(content, selectedArchitectureId);
       return;
     }
-    handleSend(content, personaId);
+    handleSend(content, personaId, options);
   };
 
   handleSendRef.current = handleComposerSend;
@@ -589,8 +602,9 @@ export function ChatInterface() {
       {messages.length > 0 && (
         <ChatInput
           architectures={architectures}
-          disabled={composerStreaming || !activeSessionId}
+          disabled={!activeSessionId}
           isStreaming={composerStreaming}
+          queuedDepth={queuedDepth}
           onArchitectureChange={setSelectedArchitectureId}
           onArchitectureRun={(content, schemaId) => void handleArchitectureRun(content, schemaId)}
           onDraftChange={setDraftUserMessage}

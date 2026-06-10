@@ -17,6 +17,10 @@ import type { EmitFn } from './interfaces/stream-context.interface';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { RAAppHITLService } from '../raapp/raapp-hitl.service';
 import { AGENT_FLOW_RUNTIME, type AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port';
+import {
+  CLI_AGENT_SESSION_RUNTIME,
+  type CLIAgentSessionRuntimePort,
+} from '../cli-agent/cli-agent-session-runtime.port';
 
 @UseFilters(WsExceptionFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -34,6 +38,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly raappHITL: RAAppHITLService,
     private readonly sessionsService: SessionsService,
     @Optional() @Inject(AGENT_FLOW_RUNTIME) private readonly agentFlowRuntime?: AgentFlowRuntimePort,
+    @Optional() @Inject(CLI_AGENT_SESSION_RUNTIME) private readonly cliAgentSessionRuntime?: CLIAgentSessionRuntimePort,
     @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
@@ -108,10 +113,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    await this.stopCliAgentSessionIfNeeded(client.id, payload.sessionId);
+
     this.pipeline.stop(payload.sessionId);
 
     const descendantSessionIds = await this.collectDescendantSessionIds(payload.sessionId);
-    descendantSessionIds.forEach((sessionId) => this.pipeline.stop(sessionId));
+    for (const sessionId of descendantSessionIds) {
+      await this.stopCliAgentSessionIfNeeded(client.id, sessionId);
+      this.pipeline.stop(sessionId);
+    }
     await this.stopAgentFlowRunsForSessions([payload.sessionId, ...descendantSessionIds]);
   }
 
@@ -345,6 +355,45 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       } catch (error) {
         this.logger.warn(`Failed to stop AgentFlow run ${snapshot.run.id}: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+  }
+
+  private async stopCliAgentSessionIfNeeded(initiatorSocketId: string, sessionId: string): Promise<void> {
+    const cliRuntime = this.getCliAgentSessionRuntime();
+    if (!cliRuntime) {
+      return;
+    }
+
+    try {
+      const session = await this.sessionsService.get(sessionId);
+      if (session.kind !== 'cli-agent' || !session.parentSessionId) {
+        return;
+      }
+
+      const parentSessionId = session.parentSessionId;
+      const emit: EmitFn = (event, data) => {
+        this.emitToInitiatorAndSessionSubscribers(initiatorSocketId, parentSessionId, event, data);
+        if (sessionId !== parentSessionId) {
+          this.emitToInitiatorAndSessionSubscribers(initiatorSocketId, sessionId, event, data);
+        }
+      };
+      await cliRuntime.stopSession(parentSessionId, sessionId, emit);
+    } catch (error) {
+      this.logger.warn(
+        `CLI agent stop failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private getCliAgentSessionRuntime(): CLIAgentSessionRuntimePort | undefined {
+    if (this.cliAgentSessionRuntime) {
+      return this.cliAgentSessionRuntime;
+    }
+    try {
+      return this.moduleRef?.get<CLIAgentSessionRuntimePort>(CLI_AGENT_SESSION_RUNTIME, { strict: false });
+    } catch (error) {
+      this.logger.warn(`CLI agent runtime lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
     }
   }
 

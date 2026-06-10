@@ -10,6 +10,11 @@ import { buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
 import { shouldRefreshVfsForToolResult } from '../ChatInterface.Parts';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
 import { canReleaseComposerAfterToolResult, createToolArgProgressHandlers } from './useChatSocketEvents.helpers';
+import {
+  projectionFromSession,
+  projectionFromToolResult,
+  rebuildCLIChildProjectionsFromMessages,
+} from '../cliChildProjection.model';
 
 interface UseChatSocketEventsOptions {
   hasPendingChunksForSession: (sessionId: string | null) => boolean;
@@ -59,6 +64,10 @@ export function useChatSocketEvents({
     clearCLIAgentOutput,
     getToolActivitiesForSession,
     setStreaming,
+    upsertCLIChildProjection,
+    updateCLIChildProjection,
+    rebuildCLIChildProjections,
+    setQueuedDepth,
   } = useAgentStore();
   const { addSession } = useSessionStore();
 
@@ -269,6 +278,11 @@ export function useChatSocketEvents({
       startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun);
       clearToolActivities(payload.sessionId);
       setPendingConfirmation(payload.sessionId, null);
+      setQueuedDepth(payload.sessionId, 0);
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setAwaitingFirstChunk(true);
+        setStreaming(true);
+      }
     });
 
     const offAgentDone = eventBus.onAgentDone((payload) => {
@@ -300,9 +314,16 @@ export function useChatSocketEvents({
         finishedAt: Date.now(),
         result,
       });
+      const toolName = useAgentStore.getState().callIdToName[result.callId]
+        ?? useAgentStore.getState().toolActivities.find((activity) => activity.callId === result.callId)?.toolName;
+      if (resultSessionId && toolName && result.data !== undefined) {
+        const projection = projectionFromToolResult(toolName, result.callId, resultSessionId, result.data);
+        if (projection) {
+          upsertCLIChildProjection(projection);
+        }
+      }
       clearCLIAgentOutput(result.callId);
       if (result.status === 'success') {
-        const toolName = useAgentStore.getState().toolActivities.find((activity) => activity.callId === result.callId)?.toolName;
         if (shouldRefreshVfsForToolResult(toolName, result.data)) setVfsRefreshSignal((value) => value + 1);
       }
       if (result.status === 'success' && result.data !== undefined && resultSessionId) {
@@ -334,6 +355,31 @@ export function useChatSocketEvents({
 
     const offCLIAgentProgress = eventBus.onCLIAgentProgress((payload) => {
       appendCLIAgentChunk(payload.callId, payload.chunk);
+      const existing = payload.sessionId
+        ? useAgentStore.getState().cliChildProjections[payload.sessionId]
+        : Object.values(useAgentStore.getState().cliChildProjections).find(
+          (item) => item.parentCallId === payload.callId,
+        );
+      if (existing) {
+        updateCLIChildProjection(existing.childSessionId, {
+          status: 'running',
+          lastOutput: (useAgentStore.getState().cliAgentOutput[payload.callId] ?? '') + payload.chunk,
+        });
+      } else if (payload.sessionId) {
+        const childSession = useSessionStore.getState().sessions.find((item) => item.id === payload.sessionId);
+        if (childSession?.parentSessionId && childSession.parentToolCallId) {
+          upsertCLIChildProjection({
+            childSessionId: payload.sessionId,
+            parentSessionId: childSession.parentSessionId,
+            parentCallId: childSession.parentToolCallId,
+            agentId: payload.agentId,
+            status: 'running',
+            lastOutput: payload.chunk,
+            childTitle: childSession.title,
+            toolName: useAgentStore.getState().callIdToName[childSession.parentToolCallId] ?? 'run_cli_agent',
+          });
+        }
+      }
     });
 
     const offSessionStatus = eventBus.onSessionStatus((payload) => {
@@ -364,6 +410,20 @@ export function useChatSocketEvents({
       if (!useSessionStore.getState().sessions.some((item) => item.id === session.id)) {
         addSession(session);
       }
+      if (session.kind === 'cli-agent') {
+        const projection = projectionFromSession(session);
+        if (projection) {
+          upsertCLIChildProjection(projection);
+        }
+        const activeSessionId = useSessionStore.getState().activeSessionId;
+        if (session.parentSessionId === activeSessionId || activeSessionId === session.id) {
+          eventBus.identifySession(session.id);
+        }
+      }
+    });
+
+    const offQueued = eventBus.onQueued((payload) => {
+      setQueuedDepth(payload.sessionId, payload.queueLength);
     });
 
     const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
@@ -403,13 +463,19 @@ export function useChatSocketEvents({
     const offReconnect = eventBus.onReconnect(() => {
       backendHealth.reportSuccess();
       setStreaming(false);
-      clearToolActivities();
       clearToolArgProgressTracking();
-      const { activeSessionId: sid } = useSessionStore.getState();
+      const { activeSessionId: sid, sessions } = useSessionStore.getState();
       if (sid) {
+        clearToolActivities(sid);
         removeActiveAgentLoop(sid);
         setPendingConfirmation(sid, null);
         eventBus.identifySession(sid);
+        const cliChildren = sessions.filter(
+          (session) => session.kind === 'cli-agent' && session.parentSessionId === sid,
+        );
+        cliChildren.forEach((child) => {
+          eventBus.identifySession(child.id);
+        });
         apiClient
           .get<ChatMessage[]>(`/api/sessions/${sid}/messages`)
           .then((response) => {
@@ -419,6 +485,11 @@ export function useChatSocketEvents({
             const currentMessages = useSessionStore.getState().getSessionMessages(sid);
             const mergedMessages = mergeFetchedMessages(currentMessages, data);
             setMessages(mergedMessages);
+            const callIdToName = useAgentStore.getState().callIdToName;
+            rebuildCLIChildProjections(
+              sid,
+              rebuildCLIChildProjectionsFromMessages(sid, mergedMessages, callIdToName),
+            );
             if (!useAgentStore.getState().hasActiveLoopForSession(sid)) {
               setAgentTurns(buildTurnsFromHistory(mergedMessages, sid));
             }
@@ -427,6 +498,8 @@ export function useChatSocketEvents({
           .catch((err: unknown) => {
             console.error('[ChatInterface] reconnect history reload failed', err instanceof Error ? err : new Error(String(err)));
           });
+      } else {
+        clearToolActivities();
       }
     });
 
@@ -445,6 +518,7 @@ export function useChatSocketEvents({
       offCLIAgentProgress();
       offSessionStatus();
       offSessionCreated();
+      offQueued();
       offRaAppNative();
       offConnectionState();
       offReconnect();
@@ -466,6 +540,7 @@ export function useChatSocketEvents({
     hasPendingChunksForSession,
     markAgentTurnError,
     registerCallId,
+    rebuildCLIChildProjections,
     removeActiveAgentLoop,
     removeLastAgentTurn,
     requestGeneratedTitleIfNeeded,
@@ -475,12 +550,15 @@ export function useChatSocketEvents({
     setContext,
     setError,
     setPendingConfirmation,
+    setQueuedDepth,
     setRecoveryNotice,
     setStreaming,
     setToolArgProgress,
     setVfsRefreshSignal,
     startAgentTurn,
     toolArgProgressSeenRef,
+    updateCLIChildProjection,
     updateToolActivity,
+    upsertCLIChildProjection,
   ]);
 }

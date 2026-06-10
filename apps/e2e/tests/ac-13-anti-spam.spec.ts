@@ -9,12 +9,11 @@ import {
 
 const LONG_STREAMING_PROMPT = `Repeat this text slowly: ${'HELLO '.repeat(120).trim()}`;
 
-// AC-13: Anti-spam — input disabled during streaming, multiple clicks don't send extra messages
-test.describe('AC-13: Anti-spam protection', () => {
-  test('input disabled while streaming and multiple clicks blocked', async ({ page, request }) => {
-    const title = `AC13 Anti-Spam Test ${Date.now()}`;
+// AC-13: Queue mode — composer stays enabled during streaming; extra sends queue instead of spamming active turn
+test.describe('AC-13: Queue while streaming', () => {
+  test('composer stays enabled while streaming and queues a second message', async ({ page, request }) => {
+    const title = `AC13 Queue Test ${Date.now()}`;
 
-    // Pre-create session via API
     const res = await request.post(`${API_BASE}/sessions`, {
       data: { title, personaId: 'default' },
     });
@@ -28,36 +27,27 @@ test.describe('AC-13: Anti-spam protection', () => {
     const chatInput = await expectComposerEnabled(page, 5000);
     const sendBtn = await getComposerSendButton(page);
 
-    // Send first message
     await chatInput.fill(LONG_STREAMING_PROMPT);
     await sendBtn.click();
 
-    // Streaming should flip the composer into stop-mode immediately.
     await expect(page.getByTestId('chat-stop-btn')).toBeVisible({ timeout: 5000 });
+    await expect(chatInput).toBeEnabled({ timeout: 5000 });
 
-    // Try clicking the original send button handle again while the composer is locked.
-    // In stop-mode the button may be detached or blocked; either outcome is acceptable.
-    await sendBtn.click({ timeout: 1000 }).catch(() => { /* expected to be blocked */ });
+    await chatInput.fill('queued follow-up');
+    await sendBtn.click();
 
-    // Wait for first response to complete
-    await expectComposerEnabled(page, 30_000);
+    await expect(page.getByTestId('chat-queued-badge')).toBeVisible({ timeout: 5000 });
 
-    // Verify only one user message was sent
     const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
-    await expect(userMessages).toHaveCount(1, { timeout: 5000 });
+    await expect(userMessages).toHaveCount(2, { timeout: 10_000 });
 
-    // Verify one agent turn appeared
-    const agentTurns = page.getByTestId('agent-turn-bubble');
-    await expect(agentTurns.first()).toBeVisible({ timeout: 5000 });
-
-    // Cleanup
     await deleteSessionIfExists(request, session.id);
   });
 
-  test('rapid Enter key presses while streaming only send one message', async ({ page, request }) => {
+  test('rapid Enter key presses while streaming can queue additional user bubbles', async ({ page, request }) => {
     test.setTimeout(45_000);
 
-    const title = `AC13 Rapid Enter Test ${Date.now()}`;
+    const title = `AC13 Rapid Enter Queue ${Date.now()}`;
 
     const res = await request.post(`${API_BASE}/sessions`, {
       data: { title, personaId: 'default' },
@@ -74,20 +64,17 @@ test.describe('AC-13: Anti-spam protection', () => {
     await chatInput.fill(LONG_STREAMING_PROMPT);
     await chatInput.press('Enter');
 
-    // Spam Enter while streaming
-    for (let i = 0; i < 5; i++) {
+    await expect(page.getByTestId('chat-stop-btn')).toBeVisible({ timeout: 5000 });
+
+    for (let i = 0; i < 3; i++) {
       await page.waitForTimeout(200);
-      await page.keyboard.press('Enter').catch(() => { /* expected blocked */ });
+      await chatInput.fill(`queued ${i + 1}`);
+      await chatInput.press('Enter');
     }
 
-    // Wait for completion
-    await expectComposerEnabled(page, 30_000);
-
-    // Only one user message
     const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
-    await expect(userMessages).toHaveCount(1, { timeout: 5000 });
+    await expect(userMessages).toHaveCount(4, { timeout: 15_000 });
 
-    // Cleanup
     await deleteSessionIfExists(request, session.id);
   });
 });

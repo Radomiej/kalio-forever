@@ -302,3 +302,21 @@ describe('agentStore - Context (systemPrompt + activeToolNames)', () => {
     expect(state.activeToolNames).toEqual([]);
   });
 });
+
+describe('agentStore - queued depth', () => {
+  beforeEach(() => {
+    useAgentStore.setState({ queuedDepthBySession: {} });
+  });
+
+  it('tracks queue depth per session and allows it to decrease', () => {
+    const store = useAgentStore.getState();
+    store.setQueuedDepth('session-1', 3);
+    expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(3);
+
+    store.setQueuedDepth('session-1', 1);
+    expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(1);
+
+    store.setQueuedDepth('session-1', 0);
+    expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(0);
+  });
+});

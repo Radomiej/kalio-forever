@@ -5,6 +5,7 @@ import type { CLIAgentService } from './cli-agent.service';
 import type { CLIAgentConfigService } from './cli-agent-config.service';
 import type { CLIAgentSessionService } from './cli-agent-session.service';
 import { CLIAgentSessionRuntimeService } from './cli-agent-session-runtime.service';
+import { CLI_AGENT_STOPPED_ERROR } from './cli-agent.service';
 
 const { getWorktreeStatusSummaryMock } = vi.hoisted(() => ({
   getWorktreeStatusSummaryMock: vi.fn(),
@@ -80,6 +81,41 @@ describe('CLIAgentSessionRuntimeService', () => {
         extraArgs: [],
       }),
     } as unknown as CLIAgentConfigService;
+  });
+
+  it('spawnSession emits session:created and child turn lifecycle events when emit is provided', async () => {
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    } as unknown as AllowedPathsService;
+    vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
+    vi.mocked(cliAgent.run).mockResolvedValue({
+      agentId: 'codex',
+      output: 'build passed',
+      exitCode: 0,
+      durationMs: 42,
+    });
+    const emit = vi.fn();
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    await service.spawnSession({
+      parentSessionId: 'sess-parent',
+      parentToolCallId: 'call-cli-tools',
+      prompt: 'Inspect repository',
+      workdir: 'C:/repo',
+      agentId: 'codex',
+      emit,
+    });
+
+    await vi.waitFor(() => {
+      expect(emit).toHaveBeenCalledWith('session:created', expect.objectContaining({ id: 'cli-child-1' }));
+      expect(emit).toHaveBeenCalledWith('agent:start', expect.objectContaining({ sessionId: 'cli-child-1' }));
+      expect(emit).toHaveBeenCalledWith('tool:start', expect.objectContaining({
+        toolName: 'run_cli_agent',
+        sessionId: 'cli-child-1',
+      }));
+      expect(emit).toHaveBeenCalledWith('tool:result', expect.objectContaining({ sessionId: 'cli-child-1' }));
+      expect(emit).toHaveBeenCalledWith('agent:done', expect.objectContaining({ sessionId: 'cli-child-1' }));
+    });
   });
 
   it('rejects continueSession when the stored workdir is no longer allowed', async () => {
@@ -285,5 +321,149 @@ describe('CLIAgentSessionRuntimeService', () => {
     expect(saved.status).toBe('failed');
     expect(saved.exitCode).toBe(1);
     expect(saved.output).toContain('missing expected changed files: package.json, src/App.tsx');
+  });
+
+  it('stopSession emits tool:result and agent:done when CLI run is interrupted', async () => {
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    } as unknown as AllowedPathsService;
+    vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
+
+    let rejectRun: ((error: Error) => void) | undefined;
+    vi.mocked(cliAgent.run).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectRun = reject;
+        }),
+    );
+    vi.mocked(cliAgent.stop).mockImplementation(() => {
+      rejectRun?.(new Error(CLI_AGENT_STOPPED_ERROR));
+      return true;
+    });
+
+    const emit = vi.fn();
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    await service.spawnSession({
+      parentSessionId: 'sess-parent',
+      parentToolCallId: 'call-cli-tools',
+      prompt: 'Long running task',
+      workdir: 'C:/repo',
+      agentId: 'codex',
+      emit,
+    });
+
+    await vi.waitFor(() => expect(cliAgent.run).toHaveBeenCalled());
+
+    emit.mockClear();
+    const snapshot = await service.stopSession('sess-parent', 'cli-child-1', emit);
+
+    expect(snapshot.status).toBe('stopped');
+    expect(emit).toHaveBeenCalledWith(
+      'tool:result',
+      expect.objectContaining({
+        toolName: 'run_cli_agent',
+        sessionId: 'cli-child-1',
+        status: 'cancelled',
+      }),
+    );
+    expect(emit).toHaveBeenCalledWith(
+      'agent:done',
+      expect.objectContaining({ sessionId: 'cli-child-1' }),
+    );
+  });
+
+  it('stopSession does not persist a stopped snapshot when cliAgent.stop returns false', async () => {
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    } as unknown as AllowedPathsService;
+    vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
+    vi.mocked(cliAgent.run).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(cliAgent.stop).mockReturnValue(false);
+
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    await service.spawnSession({
+      parentSessionId: 'sess-parent',
+      parentToolCallId: 'call-cli-tools',
+      prompt: 'Long running task',
+      workdir: 'C:/repo',
+      agentId: 'codex',
+    });
+
+    await vi.waitFor(() => expect(cliAgent.run).toHaveBeenCalled());
+    vi.mocked(sessions.saveToolResult).mockClear();
+
+    await service.stopSession('sess-parent', 'cli-child-1');
+
+    expect(vi.mocked(sessions.saveToolResult)).not.toHaveBeenCalled();
+  });
+
+  it('stopSession does not emit cancelled when cliAgent.stop returns false while still running', async () => {
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    } as unknown as AllowedPathsService;
+    vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
+    vi.mocked(cliAgent.run).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(cliAgent.stop).mockReturnValue(false);
+
+    const emit = vi.fn();
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    await service.spawnSession({
+      parentSessionId: 'sess-parent',
+      parentToolCallId: 'call-cli-tools',
+      prompt: 'Long running task',
+      workdir: 'C:/repo',
+      agentId: 'codex',
+      emit,
+    });
+
+    await vi.waitFor(() => expect(cliAgent.run).toHaveBeenCalled());
+
+    emit.mockClear();
+    const snapshot = await service.stopSession('sess-parent', 'cli-child-1', emit);
+
+    expect(snapshot.status).toBe('running');
+    expect(emit).not.toHaveBeenCalledWith('tool:result', expect.anything());
+    expect(emit).not.toHaveBeenCalledWith('agent:done', expect.anything());
+  });
+
+  it('stopSession does not double-emit when completion already finalized', async () => {
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    } as unknown as AllowedPathsService;
+    vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
+    vi.mocked(cliAgent.run).mockResolvedValue({
+      agentId: 'codex',
+      output: 'done',
+      exitCode: 0,
+      durationMs: 10,
+    });
+
+    const emit = vi.fn();
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    await service.spawnSession({
+      parentSessionId: 'sess-parent',
+      parentToolCallId: 'call-cli-tools',
+      prompt: 'Quick task',
+      workdir: 'C:/repo',
+      agentId: 'codex',
+      emit,
+    });
+
+    await vi.waitFor(() => {
+      expect(emit).toHaveBeenCalledWith('agent:done', expect.objectContaining({ sessionId: 'cli-child-1' }));
+    });
+
+    const toolResultCount = emit.mock.calls.filter(([event]) => event === 'tool:result').length;
+    const agentDoneCount = emit.mock.calls.filter(([event]) => event === 'agent:done').length;
+
+    vi.mocked(cliAgent.stop).mockReturnValue(false);
+    await service.stopSession('sess-parent', 'cli-child-1', emit);
+
+    expect(emit.mock.calls.filter(([event]) => event === 'tool:result').length).toBe(toolResultCount);
+    expect(emit.mock.calls.filter(([event]) => event === 'agent:done').length).toBe(agentDoneCount);
   });
 });

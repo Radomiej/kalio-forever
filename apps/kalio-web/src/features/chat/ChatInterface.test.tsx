@@ -89,6 +89,7 @@ vi.mock('../../services/eventBus', () => ({
     onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
     onToolArgProgress: (h: (...args: unknown[]) => void) => capture('tool:arg_progress', h),
     onSessionStatus: (h: (...args: unknown[]) => void) => capture('session:status', h),
+    onQueued: (h: (...args: unknown[]) => void) => capture('chat:queued', h),
     onReconnect: (h: (...args: unknown[]) => void) => capture('socket:reconnect', h),
     onConnectionState: (h: (...args: unknown[]) => void) => capture('socket:connection_state', h),
     identifySession: mockIdentifySession,
@@ -136,6 +137,9 @@ const agentStoreState = {
   activeToolNames: [],
   callIdToName: {},
   activeAgentLoops: {} as Record<string, { sessionId: string; turnId: string; startedAt: number }>,
+  cliChildProjections: {} as Record<string, unknown>,
+  queuedDepthBySession: {} as Record<string, number>,
+  cliAgentOutput: {} as Record<string, string>,
   setStreaming,
   setPendingConfirmation,
   addToolActivity,
@@ -162,6 +166,10 @@ const agentStoreState = {
   setToolArgProgress,
   appendCLIAgentChunk,
   clearCLIAgentOutput,
+  upsertCLIChildProjection: vi.fn(),
+  updateCLIChildProjection: vi.fn(),
+  rebuildCLIChildProjections: vi.fn(),
+  setQueuedDepth: vi.fn(),
 };
 
 vi.mock('../../store/agentStore', () => ({
@@ -315,6 +323,7 @@ vi.mock('./ChatInput', () => ({
   ChatInput: (props: {
     architectures?: Array<{ id: string; name: string }>;
     disabled: boolean;
+    isStreaming?: boolean;
     onArchitectureChange?: (schemaId: string) => void;
     onArchitectureRun?: (content: string, schemaId: string) => void;
     onSend: (content: string, personaId: string) => void;
@@ -336,14 +345,18 @@ vi.mock('./ChatInput', () => ({
         data-testid="chat-send-btn"
         disabled={props.disabled}
         onClick={() => {
-          const value = (document.querySelector('[data-testid="chat-input"]') as HTMLTextAreaElement | null)?.value ?? '';
+          const input = document.querySelector('[data-testid="chat-input"]') as HTMLTextAreaElement | null;
+          const value = input?.value ?? '';
           const content = value.trim();
           if (!content) return;
           if (props.selectedArchitectureId && props.selectedArchitectureId !== 'single-chat') {
+            if (props.isStreaming) return;
             props.onArchitectureRun?.(content, props.selectedArchitectureId);
+            if (input) input.value = '';
             return;
           }
           props.onSend(content, 'default');
+          if (input) input.value = '';
         }}
       >
         Send
@@ -457,6 +470,39 @@ describe('ChatInterface event wiring', () => {
 
     expect(mockStartArchitectureRun).toHaveBeenCalled();
     expect(screen.queryByTestId('chat-recovery-notice')).toBeNull();
+  });
+
+  it('fail-first: does not start architecture run while streaming and keeps composer draft', async () => {
+    mockGetArchitectureSchemas.mockResolvedValue([
+      {
+        id: 'strategic-decision-council',
+        name: 'Strategic Decision Council',
+        version: '0.1.0',
+        description: '',
+        nodes: [],
+        edges: [],
+        roleSlots: [],
+      },
+    ]);
+    agentStoreState.isStreaming = true;
+    mockStartArchitectureRun.mockClear();
+
+    await renderChatInterface();
+    await act(async () => {
+      fireEvent.change(screen.getByTestId('chat-architecture-select'), {
+        target: { value: 'strategic-decision-council' },
+      });
+      fireEvent.change(screen.getByTestId('chat-input'), {
+        target: { value: 'keep this architecture draft' },
+      });
+      fireEvent.click(screen.getByTestId('chat-send-btn'));
+      await flushReactEffects();
+    });
+
+    expect(mockStartArchitectureRun).not.toHaveBeenCalled();
+    expect((screen.getByTestId('chat-input') as HTMLTextAreaElement).value).toBe('keep this architecture draft');
+
+    agentStoreState.isStreaming = false;
   });
 
   it('routes Goal Master Delivery Loop from Talk through canonical AgentFlow with strict proof context', async () => {

@@ -178,6 +178,8 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
                   content={toolResult?.content ?? ''}
                   isAnswered={isAnswered}
                   args={toolArgsByCallId.get(callId)}
+                  callId={callId}
+                  parentSessionId={turn.sessionId}
                 />
               );
             }

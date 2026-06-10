@@ -23,6 +23,7 @@ export type RaAppNativeResultHandler = (payload: SocketEvents['raapp:native_resu
 export type CLIAgentProgressHandler = (payload: SocketEvents['cli_agent:progress']) => void;
 export type ToolArgProgressHandler = (payload: SocketEvents['tool:arg_progress']) => void;
 export type SessionStatusHandler = (payload: SocketEvents['session:status']) => void;
+export type QueuedHandler = (payload: SocketEvents['chat:queued']) => void;
 export type ReconnectHandler = () => void;
 export type DisconnectHandler = (reason: string) => void;
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
@@ -276,6 +277,14 @@ export class KalioSDK {
     };
     this.socket.on('session:status', wrappedHandler);
     return () => this.socket.off('session:status', wrappedHandler);
+  }
+
+  onQueued(handler: QueuedHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['chat:queued']) => {
+      handler(payload);
+    };
+    this.socket.on('chat:queued', wrappedHandler);
+    return () => this.socket.off('chat:queued', wrappedHandler);
   }
 
   /**

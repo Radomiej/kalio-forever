@@ -3,86 +3,70 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { ChatInput } from './ChatInput';
 
 vi.mock('../../store/sessionStore', () => ({
-  useSessionStore: () => ({ activeSessionId: 'session-1', sessions: [] }),
+  useSessionStore: () => ({ activeSessionId: 'session-1', sessions: [{ id: 'session-1', personaId: 'default', title: 'Test', createdAt: 1, updatedAt: 1 }] }),
 }));
 
 describe('ChatInput', () => {
-  it('shows stop button when isStreaming=true and onStop is provided', () => {
-    render(<ChatInput onSend={vi.fn()} disabled={true} isStreaming={true} onStop={vi.fn()} />);
+  it('shows stop and send buttons together while streaming', () => {
+    render(<ChatInput onSend={vi.fn()} disabled={false} isStreaming={true} onStop={vi.fn()} />);
     expect(screen.getByTestId('chat-stop-btn')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-send-btn')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-send-btn')).toBeInTheDocument();
   });
 
   it('calls onStop when stop button clicked', () => {
     const onStop = vi.fn();
-    render(<ChatInput onSend={vi.fn()} disabled={true} isStreaming={true} onStop={onStop} />);
+    render(<ChatInput onSend={vi.fn()} disabled={false} isStreaming={true} onStop={onStop} />);
     fireEvent.click(screen.getByTestId('chat-stop-btn'));
     expect(onStop).toHaveBeenCalledOnce();
   });
 
-  it('shows send button when not streaming', () => {
-    render(<ChatInput onSend={vi.fn()} disabled={false} isStreaming={false} />);
-    expect(screen.getByTestId('chat-send-btn')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-stop-btn')).not.toBeInTheDocument();
-  });
-
-  it('shows send button when isStreaming but no onStop handler', () => {
-    render(<ChatInput onSend={vi.fn()} disabled={true} isStreaming={true} />);
-    expect(screen.getByTestId('chat-send-btn')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-stop-btn')).not.toBeInTheDocument();
-  });
-
-  it('REGRESSION: locks immediately after send so a second prompt cannot slip in before parent disables', () => {
+  it('allows sending while streaming for queue mode', () => {
     const onSend = vi.fn();
-    render(<ChatInput onSend={onSend} disabled={false} isStreaming={false} />);
+    render(<ChatInput onSend={onSend} disabled={false} isStreaming={true} onStop={vi.fn()} />);
 
     const input = screen.getByTestId('chat-input');
-    fireEvent.change(input, { target: { value: 'first prompt' } });
+    fireEvent.change(input, { target: { value: 'queued follow-up' } });
     fireEvent.click(screen.getByTestId('chat-send-btn'));
 
-    expect(onSend).toHaveBeenCalledOnce();
-    expect(input).toBeDisabled();
-
-    fireEvent.change(input, { target: { value: 'second prompt' } });
-    fireEvent.click(screen.getByTestId('chat-send-btn'));
-
-    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSend).toHaveBeenCalledWith('queued follow-up', 'default', { interrupt: false });
+    expect(input).toBeEnabled();
   });
 
-  it('releases the local send lock after the parent streaming cycle completes', () => {
+  it('sends interrupt flag from interrupt button', () => {
     const onSend = vi.fn();
-    const { rerender } = render(<ChatInput onSend={onSend} disabled={false} isStreaming={false} />);
+    render(<ChatInput onSend={onSend} disabled={false} isStreaming={true} onStop={vi.fn()} />);
 
-    const input = screen.getByTestId('chat-input');
-    fireEvent.change(input, { target: { value: 'first prompt' } });
-    fireEvent.click(screen.getByTestId('chat-send-btn'));
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'replace prompt' } });
+    fireEvent.click(screen.getByTestId('chat-interrupt-btn'));
 
-    expect(input).toBeDisabled();
-
-    rerender(<ChatInput onSend={onSend} disabled={true} isStreaming={true} onStop={vi.fn()} />);
-    expect(screen.getByTestId('chat-input')).toBeDisabled();
-
-    rerender(<ChatInput onSend={onSend} disabled={false} isStreaming={false} />);
-    expect(screen.getByTestId('chat-input')).toBeEnabled();
-
-    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'second prompt' } });
-    fireEvent.click(screen.getByTestId('chat-send-btn'));
-
-    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenCalledWith('replace prompt', 'default', { interrupt: true });
   });
 
-  it('REGRESSION: shows stop button while the local send lock is active before parent streaming state propagates', () => {
-    const onSend = vi.fn();
-    const onStop = vi.fn();
-    render(<ChatInput onSend={onSend} disabled={false} isStreaming={false} onStop={onStop} />);
+  it('shows queued depth badge', () => {
+    render(<ChatInput onSend={vi.fn()} disabled={false} isStreaming={true} queuedDepth={2} onStop={vi.fn()} />);
+    expect(screen.getByTestId('chat-queued-badge')).toHaveTextContent('Queued (2)');
+  });
 
-    const input = screen.getByTestId('chat-input');
-    fireEvent.change(input, { target: { value: 'first prompt' } });
+  it('keeps composer text when architecture run is blocked during streaming', () => {
+    const onArchitectureRun = vi.fn();
+    render(
+      <ChatInput
+        architectures={[{ id: 'strategic-decision-council', name: 'Strategic Decision Council' }]}
+        disabled={false}
+        isStreaming={true}
+        onArchitectureChange={vi.fn()}
+        onArchitectureRun={onArchitectureRun}
+        onSend={vi.fn()}
+        selectedArchitectureId="strategic-decision-council"
+      />,
+    );
+
+    const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'keep this draft' } });
     fireEvent.click(screen.getByTestId('chat-send-btn'));
 
-    expect(onSend).toHaveBeenCalledOnce();
-    expect(screen.getByTestId('chat-stop-btn')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-send-btn')).not.toBeInTheDocument();
+    expect(onArchitectureRun).not.toHaveBeenCalled();
+    expect(input).toHaveValue('keep this draft');
   });
 
   it('routes composer prompts through the selected architecture when one is selected', () => {
@@ -100,32 +84,10 @@ describe('ChatInput', () => {
       />,
     );
 
-    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'decide with graph' } });
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'run council' } });
     fireEvent.click(screen.getByTestId('chat-send-btn'));
 
-    expect(onArchitectureRun).toHaveBeenCalledWith('decide with graph', 'strategic-decision-council');
+    expect(onArchitectureRun).toHaveBeenCalledWith('run council', 'strategic-decision-council');
     expect(onSend).not.toHaveBeenCalled();
-  });
-
-  it('keeps direct chat composer behavior when Single Chat is selected', () => {
-    const onArchitectureRun = vi.fn();
-    const onSend = vi.fn();
-    render(
-      <ChatInput
-        architectures={[{ id: 'strategic-decision-council', name: 'Strategic Decision Council' }]}
-        disabled={false}
-        isStreaming={false}
-        onArchitectureChange={vi.fn()}
-        onArchitectureRun={onArchitectureRun}
-        onSend={onSend}
-        selectedArchitectureId="single-chat"
-      />,
-    );
-
-    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'answer normally' } });
-    fireEvent.click(screen.getByTestId('chat-send-btn'));
-
-    expect(onSend).toHaveBeenCalledWith('answer normally', 'default');
-    expect(onArchitectureRun).not.toHaveBeenCalled();
   });
 });
