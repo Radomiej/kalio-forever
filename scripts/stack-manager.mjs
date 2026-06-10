@@ -3,7 +3,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, write
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = resolve(fileURLToPath(import.meta.url), '..');
@@ -55,7 +55,43 @@ function getArgValue(argv, flag, fallback) {
 }
 
 function showUsage() {
-  console.log('Usage: node scripts/stack-manager.mjs <start|status|stop> [--backend-port <port|0>] [--frontend-port <port|0>] [--use-env-llm] [--provider xiaomimimo] [--model mimo-v2.5] [--base-url https://api.xiaomimimo.com/v1] [--database-path data/kalio-qa.db] [--workspace-root data/workspaces-qa]');
+  console.log('Usage: node scripts/stack-manager.mjs <start|status|stop> [--backend-port <port|0>] [--frontend-port <port|0>] [--skip-build] [--use-env-llm] [--data-root <path>] [--database-path <path>] [--workspace-root <path>] [--memory-db-path <path>] [--embedding-cache-dir <path>] [--provider xiaomimimo] [--model mimo-v2.5] [--base-url https://api.xiaomimimo.com/v1]');
+}
+
+function resolveConfiguredPath(pathValue) {
+  if (!pathValue) {
+    return pathValue;
+  }
+
+  return resolve(repoRoot, pathValue);
+}
+
+function resolveDataPaths() {
+  const dataRootArg = getArgValue(args, '--data-root', '');
+  if (dataRootArg) {
+    const dataRoot = resolveConfiguredPath(dataRootArg);
+    return {
+      databasePath: resolveConfiguredPath(getArgValue(args, '--database-path', resolve(dataRoot, 'kalio-qa.db'))),
+      workspaceRoot: resolveConfiguredPath(getArgValue(args, '--workspace-root', resolve(dataRoot, 'workspaces'))),
+      memoryDbPath: resolveConfiguredPath(getArgValue(args, '--memory-db-path', resolve(dataRoot, 'memory'))),
+      embeddingCacheDir: resolveConfiguredPath(getArgValue(args, '--embedding-cache-dir', resolve(dataRoot, 'embeddings-cache'))),
+    };
+  }
+
+  return {
+    databasePath: resolveConfiguredPath(getArgValue(args, '--database-path', databasePath)),
+    workspaceRoot: resolveConfiguredPath(getArgValue(args, '--workspace-root', workspaceRoot)),
+    memoryDbPath: resolveConfiguredPath(getArgValue(args, '--memory-db-path', resolve(repoRoot, 'data/memory-qa'))),
+    embeddingCacheDir: resolveConfiguredPath(getArgValue(args, '--embedding-cache-dir', resolve(repoRoot, 'data/embeddings-cache-qa'))),
+  };
+}
+
+function ensureDataDirs(paths) {
+  for (const dirPath of [dirname(paths.databasePath), paths.workspaceRoot, paths.memoryDbPath, paths.embeddingCacheDir]) {
+    if (dirPath) {
+      mkdirSync(dirPath, { recursive: true });
+    }
+  }
 }
 
 function resolveCommand(name) {
@@ -181,15 +217,17 @@ function resolveQaEnv() {
 }
 
 function commonEnv(qaEnv) {
-  const resolvedDatabasePath = resolve(repoRoot, getArgValue(args, '--database-path', databasePath));
-  const resolvedWorkspaceRoot = resolve(repoRoot, getArgValue(args, '--workspace-root', workspaceRoot));
+  const dataPaths = resolveDataPaths();
+  ensureDataDirs(dataPaths);
 
   return {
     ...qaEnv,
     NODE_ENV: 'production',
     CREDENTIALS_MASTER_KEY: qaEnv.CREDENTIALS_MASTER_KEY ?? 'playwright-test-master-key-32-chars-minimum',
-    DATABASE_PATH: resolvedDatabasePath,
-    WORKSPACE_ROOT: resolvedWorkspaceRoot,
+    DATABASE_PATH: dataPaths.databasePath,
+    WORKSPACE_ROOT: dataPaths.workspaceRoot,
+    MEMORY_DB_PATH: dataPaths.memoryDbPath,
+    EMBEDDING_CACHE_DIR: dataPaths.embeddingCacheDir,
   };
 }
 
@@ -307,6 +345,9 @@ async function startStack() {
     model: backendEnv.LLM_MODEL,
     databasePath: backendEnv.DATABASE_PATH,
     workspaceRoot: backendEnv.WORKSPACE_ROOT,
+    memoryDbPath: backendEnv.MEMORY_DB_PATH,
+    embeddingCacheDir: backendEnv.EMBEDDING_CACHE_DIR,
+    dataRoot: getArgValue(args, '--data-root', ''),
   });
 
   try {
@@ -319,6 +360,8 @@ async function startStack() {
 
   console.log(`[stack] QA stack started: ${backendUrl} + ${frontendUrl}`);
   console.log(`[stack] provider=${backendEnv.LLM_PROVIDER} model=${backendEnv.LLM_MODEL}`);
+  console.log(`[stack] database=${backendEnv.DATABASE_PATH}`);
+  console.log(`[stack] workspace=${backendEnv.WORKSPACE_ROOT}`);
   console.log(`[stack] logs: ${backendLogPath}, ${frontendLogPath}`);
 
   backend.unref();
@@ -490,6 +533,15 @@ function reportStateProcesses(state) {
   console.log(`[stack] backend pid ${state.backend?.pid ?? 'unknown'}  (${state.backend?.cwd ?? 'unknown cwd'})`);
   console.log(`[stack] frontend pid ${state.frontend?.pid ?? 'unknown'} (${state.frontend?.cwd ?? 'unknown cwd'})`);
   console.log(`[stack] ports: backend=${state.backendPort ?? 'unknown'}, frontend=${state.frontendPort ?? 'unknown'}`);
+  if (state.databasePath) {
+    console.log(`[stack] database=${state.databasePath}`);
+  }
+  if (state.workspaceRoot) {
+    console.log(`[stack] workspace=${state.workspaceRoot}`);
+  }
+  if (state.dataRoot) {
+    console.log(`[stack] data-root=${state.dataRoot}`);
+  }
 }
 
 function isProcessAlive(pid) {

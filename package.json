@@ -4,6 +4,10 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "powershell -ExecutionPolicy Bypass -File start-dev.ps1",
+    "qa": "powershell -ExecutionPolicy Bypass -File start-qa.ps1",
+    "qa:rebuild": "powershell -ExecutionPolicy Bypass -File start-qa.ps1 -Rebuild",
+    "qa:stop": "node scripts/stack-manager.mjs stop",
+    "qa:status": "node scripts/stack-manager.mjs status",
     "dev:e2e": "corepack pnpm --filter @kalio/e2e run test:e2e",
     "build": "corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run build",
     "typecheck": "corepack pnpm --filter @kalio/types run build && corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run typecheck",

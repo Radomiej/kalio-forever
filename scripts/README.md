@@ -18,6 +18,9 @@ This folder contains workspace-level helper scripts. Keep command surface small:
 - `pnpm clean` -> cross-platform dist/tsbuildinfo cleanup
 - `pnpm audit:report` -> static architecture audit + aggregated report
 - `pnpm stack:start` -> run QA stack from built backend + vite preview --strictPort on allocated ports, using isolated QA database/workspace paths and mock LLM by default
+- `pnpm qa` -> fixed-port dist-only stack on `3316/5288` with AppData profile `%LocalAppData%\\kalio-forever-qa`, skip-build by default
+- `pnpm qa:rebuild` -> same as `pnpm qa`, but rebuilds backend + frontend first
+- `pnpm qa:status` / `pnpm qa:stop` -> inspect or stop the managed QA stack
 - `pnpm stack:status` -> show running state + health checks
 - `pnpm stack:stop` -> stop QA stack and cleanup process tree on Windows
 - `pnpm llm:probe` -> test the running stack's active provider path without printing the API key; refuses non-local API URLs unless explicitly allowed
