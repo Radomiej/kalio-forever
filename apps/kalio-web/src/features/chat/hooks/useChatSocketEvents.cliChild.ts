@@ -129,7 +129,7 @@ export function rebuildCliChildProjectionsFromHistory(
   deps: CliChildSocketDeps,
   parentSessionId: string,
   messages: ChatMessage[],
-): void {
+): CLIChildProjection[] {
   const persistedCallIdToName = deps.getAgentState().callIdToName;
   const callIdToName = buildCallIdToNameFromMessages(messages, persistedCallIdToName);
   for (const [callId, name] of Object.entries(callIdToName)) {
@@ -137,10 +137,12 @@ export function rebuildCliChildProjectionsFromHistory(
       deps.registerCallId(callId, name);
     }
   }
+  const projections = rebuildCLIChildProjectionsFromMessages(parentSessionId, messages, callIdToName);
   deps.rebuildCLIChildProjections(
     parentSessionId,
-    rebuildCLIChildProjectionsFromMessages(parentSessionId, messages, callIdToName),
+    projections,
   );
+  return projections;
 }
 
 export function identifyCliChildrenOnReconnect(
@@ -151,4 +153,20 @@ export function identifyCliChildrenOnReconnect(
   deps.getSessionState().sessions
     .filter((session) => session.kind === 'cli-agent' && session.parentSessionId === parentSessionId)
     .forEach((child) => deps.identifySession(child.id));
+}
+
+export function identifyCliChildProjections(
+  deps: CliChildSocketDeps,
+  projections: CLIChildProjection[],
+  activeSessionId: string | null,
+): void {
+  const knownSessionIds = new Set(deps.getSessionState().sessions.map((session) => session.id));
+  projections.forEach((projection) => {
+    if (projection.childSessionId === activeSessionId) {
+      return;
+    }
+    if (!knownSessionIds.has(projection.childSessionId)) {
+      deps.identifySession(projection.childSessionId);
+    }
+  });
 }

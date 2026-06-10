@@ -4,6 +4,7 @@ import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
+import { eventBus } from '../../../services/eventBus';
 import { buildCallIdToNameFromMessages, buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
 import { rebuildCLIChildProjectionsFromMessages } from '../cliChildProjection.model';
 
@@ -50,10 +51,17 @@ export function useChatSessionActivation({
             registerCallId(callId, name);
           }
         }
+        const projections = rebuildCLIChildProjectionsFromMessages(activeSessionId, mergedMessages, callIdToName);
         rebuildCLIChildProjections(
           activeSessionId,
-          rebuildCLIChildProjectionsFromMessages(activeSessionId, mergedMessages, callIdToName),
+          projections,
         );
+        const knownSessionIds = new Set(useSessionStore.getState().sessions.map((session) => session.id));
+        projections.forEach((projection) => {
+          if (!knownSessionIds.has(projection.childSessionId) && projection.childSessionId !== activeSessionId) {
+            eventBus.identifySession(projection.childSessionId);
+          }
+        });
         if (!useAgentStore.getState().hasActiveLoopForSession(activeSessionId)) {
           setAgentTurns(buildTurnsFromHistory(mergedMessages, activeSessionId));
         }

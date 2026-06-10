@@ -4,6 +4,7 @@ import { useChatSessionActivation } from './useChatSessionActivation';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
+import { eventBus } from '../../../services/eventBus';
 
 vi.mock('../../../services/apiClient', () => ({
   apiClient: {
@@ -11,9 +12,16 @@ vi.mock('../../../services/apiClient', () => ({
   },
 }));
 
+vi.mock('../../../services/eventBus', () => ({
+  eventBus: {
+    identifySession: vi.fn(),
+  },
+}));
+
 describe('useChatSessionActivation', () => {
   beforeEach(() => {
     vi.mocked(apiClient.get).mockReset();
+    vi.mocked(eventBus.identifySession).mockReset();
     useAgentStore.setState({
       callIdToName: {},
       cliChildProjections: {},
@@ -78,5 +86,55 @@ describe('useChatSessionActivation', () => {
       });
     });
     expect(useAgentStore.getState().callIdToName['call-cli-1']).toBe('spawn_cli_agent');
+  });
+
+  it('identifies rebuilt CLI child sessions discovered only from loaded history', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [
+        {
+          id: 'assistant-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex' } }],
+          createdAt: 1,
+        },
+        {
+          id: 'tool-1',
+          sessionId: 'session-1',
+          role: 'tool_result',
+          toolCallId: 'call-cli-1',
+          content: JSON.stringify({
+            childSessionId: 'cli-child-history-only',
+            parentSessionId: 'session-1',
+            agentId: 'codex',
+            workdir: 'C:/repo',
+            status: 'running',
+            lastPrompt: 'Inspect repo',
+            updatedAt: 100,
+            lastOutput: 'working',
+          }),
+          createdAt: 2,
+        },
+      ],
+    });
+
+    const handleSendRef = { current: vi.fn() };
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef,
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().cliChildProjections['cli-child-history-only']).toMatchObject({
+        status: 'running',
+        toolName: 'spawn_cli_agent',
+      });
+    });
+    expect(eventBus.identifySession).toHaveBeenCalledWith('cli-child-history-only');
   });
 });

@@ -1,6 +1,10 @@
 import type { ChatMessage } from '@kalio/types';
 import type { CliChildSocketDeps } from './useChatSocketEvents.cliChild';
-import { identifyCliChildrenOnReconnect, rebuildCliChildProjectionsFromHistory } from './useChatSocketEvents.cliChild';
+import {
+  identifyCliChildProjections,
+  identifyCliChildrenOnReconnect,
+  rebuildCliChildProjectionsFromHistory,
+} from './useChatSocketEvents.cliChild';
 import { buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
 
 export interface SocketReconnectDeps {
@@ -40,7 +44,8 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
       const currentMessages = deps.getSessionMessages(sid);
       const mergedMessages = mergeFetchedMessages(currentMessages, data);
       deps.setMessages(mergedMessages, sid);
-      rebuildCliChildProjectionsFromHistory(deps.cliChild, sid, mergedMessages);
+      const projections = rebuildCliChildProjectionsFromHistory(deps.cliChild, sid, mergedMessages);
+      identifyCliChildProjections(deps.cliChild, projections, sid);
       if (!deps.hasActiveLoopForSession(sid)) {
         deps.setAgentTurns(buildTurnsFromHistory(mergedMessages, sid), sid);
       }
