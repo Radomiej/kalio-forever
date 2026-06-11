@@ -234,7 +234,7 @@ describe('ExecutionGraphBoard', () => {
     fireEvent.click(screen.getByTestId('graph-node-turn:turn-1'));
 
     expect(onSelectNode).toHaveBeenCalledWith('turn:turn-1');
-    expect(container.querySelector('path[marker-end="url(#graph-arrow)"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid^="graph-edge-"]')).not.toBeNull();
   });
 
   it('anchors tool edges from the bottom of the source node instead of the right edge', () => {
@@ -247,7 +247,7 @@ describe('ExecutionGraphBoard', () => {
       />,
     );
 
-    const edgePath = container.querySelector('path[marker-end="url(#graph-arrow)"]');
+    const edgePath = container.querySelector('[data-testid^="graph-edge-"]');
 
     expect(edgePath?.getAttribute('d')).toMatch(/^M 80 110 /);
   });

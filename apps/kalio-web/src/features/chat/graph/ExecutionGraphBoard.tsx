@@ -433,11 +433,6 @@ export function ExecutionGraphBoard({
               pointerEvents="auto"
               width={model.board.width}
             >
-              <defs>
-                <marker id="graph-arrow" viewBox="0 0 8 8" refX="6.6" refY="4" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
-                  <path d="M 0 0 L 8 4 L 0 8 z" fill="rgba(125, 211, 252, 0.78)" />
-                </marker>
-              </defs>
               {model.edges.map((edge) => {
                 const source = nodeById.get(edge.sourceId);
                 const target = nodeById.get(edge.targetId);
@@ -473,16 +468,15 @@ export function ExecutionGraphBoard({
                       }}
                     />
                     <path
-                      data-testid={`graph-edge-${edge.id}`}
-                      data-related={related ? 'true' : 'false'}
-                      d={path}
-                      fill="none"
-                      markerEnd="url(#graph-arrow)"
-                      stroke={related ? (edge.style === 'dashed' ? 'rgba(186,230,253,0.72)' : 'rgba(125,211,252,0.92)') : (edge.style === 'dashed' ? 'rgba(148,163,184,0.5)' : 'rgba(125,211,252,0.68)')}
-                      strokeDasharray={edge.style === 'dashed' ? '7 8' : undefined}
-                      strokeLinecap="round"
-                      strokeWidth={related ? 4 : edge.style === 'dashed' ? 2 : 3}
-                      className="pointer-events-none transition-[stroke-width,filter] group-hover:drop-shadow-[0_0_8px_rgba(125,211,252,0.42)]"
+                    data-testid={`graph-edge-${edge.id}`}
+                    data-related={related ? 'true' : 'false'}
+                    d={path}
+                    fill="none"
+                    stroke={related ? (edge.style === 'dashed' ? 'rgba(186,230,253,0.72)' : 'rgba(125,211,252,0.92)') : (edge.style === 'dashed' ? 'rgba(148,163,184,0.5)' : 'rgba(125,211,252,0.68)')}
+                    strokeDasharray={edge.style === 'dashed' ? '7 8' : undefined}
+                    strokeLinecap="round"
+                    strokeWidth={related ? 4 : edge.style === 'dashed' ? 2 : 3}
+                    className="pointer-events-none transition-[stroke-width,filter] group-hover:drop-shadow-[0_0_8px_rgba(125,211,252,0.42)]"
                     />
                   </g>
                 );
@@ -495,7 +489,6 @@ export function ExecutionGraphBoard({
                     draggingConnector.direction as GraphConnectorDirection,
                   )}
                   fill="none"
-                  markerEnd={draggingConnector.direction === 'output' ? 'url(#graph-arrow)' : undefined}
                   stroke="rgba(14,165,233,0.92)"
                   strokeDasharray="6 7"
                   strokeLinecap="round"

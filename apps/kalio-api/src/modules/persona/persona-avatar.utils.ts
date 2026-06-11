@@ -52,14 +52,16 @@ export function hasStoredAvatarToken(row: {
   avatarVariant?: string | null;
   avatarPaletteKey?: string | null;
   avatarIndex?: number | null;
-}): boolean {
-  return typeof row.avatarSeed === 'string'
+}): row is { avatarSeed: string; avatarVariant: string; avatarPaletteKey: string; avatarIndex: number } {
+  return (
+    typeof row.avatarSeed === 'string'
     && row.avatarSeed.trim().length > 0
     && typeof row.avatarVariant === 'string'
     && row.avatarVariant.trim().length > 0
     && typeof row.avatarPaletteKey === 'string'
     && row.avatarPaletteKey.trim().length > 0
-    && typeof row.avatarIndex === 'number';
+    && typeof row.avatarIndex === 'number'
+  );
 }
 
 export function resolvePersonaAvatar(
@@ -73,13 +75,31 @@ export function resolvePersonaAvatar(
 ): PersonaAvatarToken {
   if (hasStoredAvatarToken(row)) {
     return {
-      avatarSeed: row.avatarSeed as string,
+      avatarSeed: row.avatarSeed,
       avatarVariant: row.avatarVariant as AvatarVariant,
       avatarPaletteKey: row.avatarPaletteKey as AvatarPaletteKey,
-      avatarIndex: row.avatarIndex as number,
+      avatarIndex: row.avatarIndex,
     };
   }
   return defaultAvatarFromName(row.name);
+}
+
+type CreateAvatarInput = {
+  name: string;
+  avatarSeed?: string;
+  avatarVariant?: AvatarVariant;
+  avatarPaletteKey?: AvatarPaletteKey;
+  avatarIndex?: number;
+};
+
+function isCreateAvatarComplete(
+  dto: CreateAvatarInput
+): dto is CreateAvatarInput & Required<Pick<CreateAvatarInput, 'avatarSeed' | 'avatarVariant' | 'avatarPaletteKey' | 'avatarIndex'>> {
+  return typeof dto.avatarSeed === 'string'
+    && dto.avatarSeed.trim().length > 0
+    && dto.avatarVariant !== undefined
+    && dto.avatarPaletteKey !== undefined
+    && typeof dto.avatarIndex === 'number';
 }
 
 export function resolveCreateAvatar(dto: {
@@ -89,13 +109,7 @@ export function resolveCreateAvatar(dto: {
   avatarPaletteKey?: AvatarPaletteKey;
   avatarIndex?: number;
 }): PersonaAvatarToken {
-  const hasAllFields = typeof dto.avatarSeed === 'string'
-    && dto.avatarSeed.trim().length > 0
-    && dto.avatarVariant !== undefined
-    && dto.avatarPaletteKey !== undefined
-    && typeof dto.avatarIndex === 'number';
-
-  if (hasAllFields) {
+  if (isCreateAvatarComplete(dto)) {
     return {
       avatarSeed: dto.avatarSeed.trim(),
       avatarVariant: dto.avatarVariant,

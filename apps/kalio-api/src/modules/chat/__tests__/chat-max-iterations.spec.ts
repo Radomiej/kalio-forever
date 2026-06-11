@@ -71,7 +71,7 @@ describe('ChatService — MAX_ITERATIONS', () => {
     };
     const streamProcessor = makeLoopingProcessor();
     const contextAssembly = makeContextAssembly(
-      personaService as PersonaService,
+      personaService as unknown as PersonaService,
       toolDispatch as unknown as ToolDispatchService,
     );
     const llmTurnRuntime = makeLLMTurnRuntime(

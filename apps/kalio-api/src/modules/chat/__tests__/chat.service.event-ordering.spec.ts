@@ -85,7 +85,7 @@ async function buildService(
   await processorModuleRef.init();
   const streamProcessor = processorModuleRef.get(StreamProcessorService);
   const contextAssembly = makeContextAssembly(
-    personaService as PersonaService,
+    personaService as unknown as PersonaService,
     toolDispatch as unknown as ToolDispatchService,
   );
   const llmTurnRuntime = makeLLMTurnRuntime(

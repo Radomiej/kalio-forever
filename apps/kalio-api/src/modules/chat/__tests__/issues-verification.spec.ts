@@ -234,7 +234,7 @@ describe('ISSUE 2: MAX_ITERATIONS behavior', () => {
       onModuleInit: vi.fn(),
     };
     const contextAssembly = makeContextAssembly(
-      personaService as PersonaService,
+      personaService as unknown as PersonaService,
       toolDispatch as unknown as ToolDispatchService,
     );
     const llmTurnRuntime = makeLLMTurnRuntime(
