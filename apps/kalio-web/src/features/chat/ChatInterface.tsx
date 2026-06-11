@@ -53,8 +53,12 @@ function shouldRequestGeneratedTitle(sessionTitle: string, sessionMessages: Chat
 export function buildArchitectureRunContext(
   sessionId: string,
   files: VFSFile[],
+  activeToolNames: string[] = [],
 ): Record<string, unknown> {
   const context: Record<string, unknown> = { parentSessionId: sessionId };
+  if (activeToolNames.length > 0) {
+    context['launchAllowedToolNames'] = activeToolNames;
+  }
   if (files.length > 0) {
     context['hydrateFromSessionId'] = sessionId;
     context['hydrateTargetPrefix'] = 'project';
@@ -63,9 +67,13 @@ export function buildArchitectureRunContext(
   return context;
 }
 
-function buildGoalGuardRunContext(sessionId: string, files: VFSFile[]): Record<string, unknown> {
+function buildGoalGuardRunContext(
+  sessionId: string,
+  files: VFSFile[],
+  activeToolNames: string[] = [],
+): Record<string, unknown> {
   return {
-    ...buildArchitectureRunContext(sessionId, files),
+    ...buildArchitectureRunContext(sessionId, files, activeToolNames),
     requireGoalMasterLoopProof: true,
     requireImplementerWriteProof: true,
   };
@@ -434,7 +442,7 @@ export function ChatInterface() {
       const result = schemaId === 'goal-master-delivery-loop'
         ? await startGoalGuardAgentFlowRun(
           content,
-          buildGoalGuardRunContext(activeSessionId, sourceFiles),
+          buildGoalGuardRunContext(activeSessionId, sourceFiles, activeContext.activeToolNames),
           activeSessionId,
         )
         : await startArchitectureRun(
@@ -443,7 +451,7 @@ export function ChatInterface() {
           {},
           'subagent_execution',
           undefined,
-          buildArchitectureRunContext(activeSessionId, sourceFiles),
+          buildArchitectureRunContext(activeSessionId, sourceFiles, activeContext.activeToolNames),
           applyArchitectureProjection,
         );
       applyArchitectureProjection(result);

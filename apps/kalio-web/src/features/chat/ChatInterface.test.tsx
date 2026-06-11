@@ -431,8 +431,9 @@ describe('ChatInterface event wiring', () => {
       updatedAt: 1,
     }];
 
-    expect(buildArchitectureRunContext('session-1', files)).toEqual({
+    expect(buildArchitectureRunContext('session-1', files, ['vfs_read', 'fs_read'])).toEqual({
       parentSessionId: 'session-1',
+      launchAllowedToolNames: ['vfs_read', 'fs_read'],
       hydrateFromSessionId: 'session-1',
       hydrateTargetPrefix: 'project',
       hydrateFilePaths: ['README.md'],
@@ -440,8 +441,9 @@ describe('ChatInterface event wiring', () => {
   });
 
   it('keeps prompt-only architecture runs explicit when no VFS files are attached', () => {
-    expect(buildArchitectureRunContext('session-1', [])).toEqual({
+    expect(buildArchitectureRunContext('session-1', [], ['vfs_read'])).toEqual({
       parentSessionId: 'session-1',
+      launchAllowedToolNames: ['vfs_read'],
     });
   });
 
