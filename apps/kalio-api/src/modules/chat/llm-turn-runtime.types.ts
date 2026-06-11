@@ -36,6 +36,7 @@ export interface LLMAgentLoopResult {
   lastMessageId: string;
   finalText: string;
   iterationCount: number;
+  finalLimit: number;
   exhausted: boolean;
   aborted: boolean;
   emptyNoToolRetriesExhausted: boolean;

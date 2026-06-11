@@ -165,11 +165,11 @@ export class ChatService {
           hadContent,
         });
       } else if (loopResult.maxIterationsReached) {
-        if (runId) await this.runJournal?.fail(runId, 'MAX_ITERATIONS_REACHED', `Agent loop exceeded ${maxToolAttempts} iterations`);
+        if (runId) await this.runJournal?.fail(runId, 'MAX_ITERATIONS_REACHED', `Agent loop exceeded ${loopResult.finalLimit} iterations`);
         trackingEmit('chat:error', {
           sessionId,
           code: 'MAX_ITERATIONS_REACHED',
-          message: `Agent loop exceeded ${maxToolAttempts} iterations`,
+          message: `Agent loop exceeded ${loopResult.finalLimit} iterations`,
           hadContent,
         });
       } else if (loopResult.emptyNoToolRetriesExhausted) {

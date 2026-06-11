@@ -266,12 +266,23 @@ function schemaForPersistedRun(
     ?.content.match(/^\[Architecture:\s*([^\]]+)\]/i)?.[1]?.trim()
     ?? messages.find((message) => message.role === 'user')
       ?.content.match(/^Architecture:\s*([^\r\n]+?)(?:\s+v\d+(?:\.\d+)*|\r?\n|$)/i)?.[1]?.trim();
-  if (!userHeader) {
+  if (userHeader) {
+    return registry.findAll().find((schema) => (
+      schema.id === userHeader || schema.name.toLowerCase() === userHeader.toLowerCase()
+    )) ?? null;
+  }
+
+  const toolCallSchemaName = messages
+    .flatMap((message) => message.toolCalls ?? [])
+    .map((toolCall) => toolCall.args['schemaName'])
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    ?.trim();
+  if (!toolCallSchemaName) {
     return null;
   }
 
   return registry.findAll().find((schema) => (
-    schema.id === userHeader || schema.name.toLowerCase() === userHeader.toLowerCase()
+    schema.id === toolCallSchemaName || schema.name.toLowerCase() === toolCallSchemaName.toLowerCase()
   )) ?? null;
 }
 

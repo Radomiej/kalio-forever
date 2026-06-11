@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConversationSettingsPanel } from './ConversationSettingsPanel';
+import { useSettingsStore } from './settingsStore';
 
 const { apiGetMock, apiPutMock } = vi.hoisted(() => ({
   apiGetMock: vi.fn(),
@@ -17,6 +18,12 @@ vi.mock('../../services/apiClient', () => ({
 describe('ConversationSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useSettingsStore.setState({
+      conversationTitleSettings: {
+        autoRenameEnabled: false,
+        renameEveryReplies: 3,
+      },
+    });
     apiGetMock.mockResolvedValue({
       data: {
         autoRenameEnabled: true,
@@ -96,6 +103,47 @@ describe('ConversationSettingsPanel', () => {
       '[ConversationSettingsPanel] save failed',
       expect.any(Error),
     );
+    consoleError.mockRestore();
+  });
+
+  it('ignores a stale failed save after a newer save has already succeeded', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let rejectEarlierSave!: (error: Error) => void;
+    apiPutMock
+      .mockImplementationOnce(() => new Promise((_, reject: typeof rejectEarlierSave) => {
+        rejectEarlierSave = reject;
+      }))
+      .mockResolvedValueOnce({ data: null });
+
+    render(<ConversationSettingsPanel />);
+
+    const slider = await screen.findByTestId('conversation-title-rename-every-slider');
+    expect(slider).toHaveValue('4');
+
+    fireEvent.change(slider, { target: { value: '5' } });
+    fireEvent.change(slider, { target: { value: '6' } });
+
+    await waitFor(() => {
+      expect(apiPutMock).toHaveBeenNthCalledWith(
+        1,
+        '/api/credentials/settings/conversation-title',
+        { renameEveryReplies: 5 },
+      );
+      expect(apiPutMock).toHaveBeenNthCalledWith(
+        2,
+        '/api/credentials/settings/conversation-title',
+        { renameEveryReplies: 6 },
+      );
+    });
+
+    rejectEarlierSave(new Error('stale save failed'));
+
+    await waitFor(() => expect(consoleError).toHaveBeenCalledWith(
+      '[ConversationSettingsPanel] save failed',
+      expect.any(Error),
+    ));
+    expect(screen.getByTestId('conversation-title-rename-every-slider')).toHaveValue('6');
+    expect(screen.getByTestId('conversation-title-rename-every-value')).toHaveTextContent('6');
     consoleError.mockRestore();
   });
 });

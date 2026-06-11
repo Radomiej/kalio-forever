@@ -841,7 +841,7 @@ describe('budget approval HITL', () => {
     expect(screen.getByRole('button', { name: 'Unlimited' })).toBeInTheDocument();
   });
 
-  it('submits incremental and unlimited budget approvals without clearing local pending state', () => {
+  it('submits an incremental budget approval only once and disables repeated clicks', () => {
     mockMessages.push(makeMsg({ id: 'msg-1', content: 'Working...' }));
     mockAgentStoreState.pendingBudgetApprovals = {
       s1: {
@@ -854,20 +854,41 @@ describe('budget approval HITL', () => {
 
     render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], false)} toolActivities={[]} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '+10' }));
+    const plusTen = screen.getByRole('button', { name: '+10' });
+    fireEvent.click(plusTen);
+    fireEvent.click(plusTen);
+
     expect(eventBus.approveAgentBudget).toHaveBeenCalledWith({
       requestId: 'budget-1',
       sessionId: 's1',
       decision: 'allow_ten',
     });
+    expect(eventBus.approveAgentBudget).toHaveBeenCalledTimes(1);
+    expect(plusTen).toBeDisabled();
     expect(mockAgentStoreState.setPendingBudgetApproval).not.toHaveBeenCalled();
+  });
+
+  it('submits unlimited budget approval once and disables the remaining actions', () => {
+    mockMessages.push(makeMsg({ id: 'msg-1', content: 'Working...' }));
+    mockAgentStoreState.pendingBudgetApprovals = {
+      s1: {
+        requestId: 'budget-1',
+        sessionId: 's1',
+        currentLimit: 60,
+        usedIterations: 60,
+      },
+    };
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], false)} toolActivities={[]} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Unlimited' }));
-    expect(eventBus.approveAgentBudget).toHaveBeenLastCalledWith({
+    expect(eventBus.approveAgentBudget).toHaveBeenCalledWith({
       requestId: 'budget-1',
       sessionId: 's1',
       decision: 'allow_unlimited',
     });
+    expect(screen.getByRole('button', { name: '+1' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Unlimited' })).toBeDisabled();
     expect(mockAgentStoreState.setPendingBudgetApproval).not.toHaveBeenCalled();
   });
 

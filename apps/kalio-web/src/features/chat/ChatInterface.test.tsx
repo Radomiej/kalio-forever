@@ -276,9 +276,19 @@ vi.mock('../../store/sessionStore', () => ({
 }));
 
 // ── settingsStore mock ────────────────────────────────────────────────────────
+const settingsStoreState = {
+  conversationTitleSettings: {
+    autoRenameEnabled: false,
+    renameEveryReplies: 3,
+  },
+  getEffectiveModel: () => 'test-model',
+  setConversationTitleSettings: vi.fn((settings: { autoRenameEnabled: boolean; renameEveryReplies: number }) => {
+    settingsStoreState.conversationTitleSettings = settings;
+  }),
+};
+
 vi.mock('../settings/settingsStore', () => ({
-  useSettingsStore: (selector: (s: { getEffectiveModel: () => string }) => unknown) =>
-    selector({ getEffectiveModel: () => 'test-model' }),
+  useSettingsStore: (selector: (state: typeof settingsStoreState) => unknown) => selector(settingsStoreState),
 }));
 
 // ── context usage mock ────────────────────────────────────────────────────────
@@ -306,6 +316,7 @@ vi.mock('../../services/apiClient', () => ({
   apiClient: {
     get: vi.fn(() => Promise.resolve({ data: [] })),
     post: vi.fn(() => Promise.resolve({ data: {} })),
+    patch: vi.fn(() => Promise.resolve({ data: {} })),
   },
   getSessionVfsFiles: vi.fn(() => Promise.resolve({ files: [] })),
 }));
@@ -391,6 +402,10 @@ beforeEach(() => {
   mockChunkSessionIds = {};
   mockMessages = [];
   mockSessions = createMockSessions();
+  settingsStoreState.conversationTitleSettings = {
+    autoRenameEnabled: false,
+    renameEveryReplies: 3,
+  };
   agentStoreState.isStreaming = false;
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
@@ -411,6 +426,17 @@ beforeEach(() => {
     chat: { runId: 'goal-run-1', messages: [] },
     agentFlowRunId: 'agent-flow-1',
     agentFlowStatus: 'done',
+  });
+  vi.mocked(apiClient.get).mockImplementation((url: string) => {
+    if (url === '/api/credentials/settings/conversation-title') {
+      return Promise.resolve({
+        data: {
+          autoRenameEnabled: false,
+          renameEveryReplies: 3,
+        },
+      } as never);
+    }
+    return Promise.resolve({ data: [] } as never);
   });
 });
 
@@ -485,6 +511,61 @@ describe('ChatInterface event wiring', () => {
     expect(screen.queryByTestId('chat-recovery-notice')).toBeNull();
   });
 
+  it('passes the active project path into non-goal architecture launches from chat', async () => {
+    mockSessions = mockSessions.map((session) => (
+      session.id === 'session-1'
+        ? {
+            ...session,
+            runtimeContext: {
+              runtimeKind: 'chat',
+              architectureContext: {
+                projectPath: 'C:\\Projekty\\kalio-forever',
+              },
+            },
+          }
+        : session
+    ));
+    mockGetArchitectureSchemas.mockResolvedValue([
+      {
+        id: 'strategic-decision-council',
+        name: 'Strategic Decision Council',
+        version: '0.1.0',
+        description: '',
+        nodes: [],
+        edges: [],
+        roleSlots: [],
+      },
+    ]);
+
+    await renderChatInterface();
+    await act(async () => {
+      fireEvent.change(await screen.findByTestId('welcome-architecture-select'), {
+        target: { value: 'strategic-decision-council' },
+      });
+      fireEvent.change(await screen.findByTestId('welcome-prompt-input'), {
+        target: { value: 'Pick a stack.' },
+      });
+      fireEvent.click(await screen.findByTestId('welcome-run-prompt'));
+      await flushReactEffects();
+    });
+
+    await waitFor(() => {
+      expect(mockStartArchitectureRun).toHaveBeenCalledWith(
+        'strategic-decision-council',
+        'Pick a stack.',
+        {},
+        'subagent_execution',
+        undefined,
+        expect.objectContaining({
+          parentSessionId: 'session-1',
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        }),
+        expect.any(Function),
+      );
+    });
+  });
+
   it('fail-first: does not start architecture run while streaming and keeps composer draft', async () => {
     mockGetArchitectureSchemas.mockResolvedValue([
       {
@@ -521,6 +602,19 @@ describe('ChatInterface event wiring', () => {
   });
 
   it('routes Goal Master Delivery Loop from Talk through canonical AgentFlow with strict proof context', async () => {
+    mockSessions = mockSessions.map((session) => (
+      session.id === 'session-1'
+        ? {
+            ...session,
+            runtimeContext: {
+              runtimeKind: 'chat',
+              architectureContext: {
+                projectPath: 'C:\\Projekty\\kalio-forever',
+              },
+            },
+          }
+        : session
+    ));
     mockGetArchitectureSchemas.mockResolvedValue([
       {
         id: 'goal-master-delivery-loop',
@@ -550,6 +644,8 @@ describe('ChatInterface event wiring', () => {
       'Deliver with proof.',
       expect.objectContaining({
         parentSessionId: 'session-1',
+        projectPath: 'C:\\Projekty\\kalio-forever',
+        executionCwd: 'C:\\Projekty\\kalio-forever',
         requireGoalMasterLoopProof: true,
         requireImplementerWriteProof: true,
       }),
@@ -1216,7 +1312,13 @@ describe('ChatInterface event wiring', () => {
       { id: 'user-1', sessionId: 'session-1', role: 'user', content: 'Review this architecture', createdAt: 1 },
       { id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'First answer', createdAt: 2 },
     ];
-
+    settingsStoreState.conversationTitleSettings = {
+      autoRenameEnabled: true,
+      renameEveryReplies: 2,
+    };
+    settingsStoreState.setConversationTitleSettings.mockImplementation((settings: { autoRenameEnabled: boolean; renameEveryReplies: number }) => {
+      settingsStoreState.conversationTitleSettings = settings;
+    });
     vi.mocked(apiClient.get).mockImplementation((url: string) => {
       if (url === '/api/credentials/settings/conversation-title') {
         return Promise.resolve({

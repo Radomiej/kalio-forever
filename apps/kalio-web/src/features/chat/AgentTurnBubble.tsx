@@ -55,6 +55,7 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
 
 export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props) {
   const { messages, streamingChunks, thinkingChunks } = useSessionStore();
+  const [submittedBudgetRequestId, setSubmittedBudgetRequestId] = useState<string | null>(null);
   const {
     callIdToName: persistentCallIdToName,
     toolArgProgress,
@@ -63,6 +64,12 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     setPendingBudgetApproval,
   } = useAgentStore();
   const pendingBudgetApproval = pendingBudgetApprovals[turn.sessionId];
+
+  useEffect(() => {
+    if (!pendingBudgetApproval || pendingBudgetApproval.requestId !== submittedBudgetRequestId) {
+      setSubmittedBudgetRequestId(null);
+    }
+  }, [pendingBudgetApproval, submittedBudgetRequestId]);
 
   // Build callId → toolName from all available sources
   const toolCallIdToName = new Map<string, string>(Object.entries(persistentCallIdToName));
@@ -259,6 +266,10 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
                     key={decision}
                     className={`btn btn-xs ${decision === 'block' ? 'btn-ghost' : 'btn-warning'}`}
                     onClick={() => {
+                      if (submittedBudgetRequestId === pendingBudgetApproval.requestId) {
+                        return;
+                      }
+                      setSubmittedBudgetRequestId(pendingBudgetApproval.requestId);
                       eventBus.approveAgentBudget({
                         requestId: pendingBudgetApproval.requestId,
                         sessionId: pendingBudgetApproval.sessionId,
@@ -268,6 +279,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
                         setPendingBudgetApproval(pendingBudgetApproval.sessionId, null);
                       }
                     }}
+                    disabled={submittedBudgetRequestId === pendingBudgetApproval.requestId}
                   >
                     {label}
                   </button>

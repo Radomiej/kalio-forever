@@ -70,6 +70,8 @@ export function ChatInterface() {
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
+  const conversationTitleSettings = useSettingsStore((state) => state.conversationTitleSettings);
+  const setConversationTitleSettings = useSettingsStore((state) => state.setConversationTitleSettings);
   const {
     isStreaming,
     setPendingConfirmation,
@@ -94,10 +96,6 @@ export function ChatInterface() {
   const lastSentContentRef = useRef<string>('');
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [architectures, setArchitectures] = useState<ArchitectSchema[]>([]);
-  const [conversationTitleSettings, setConversationTitleSettings] = useState<ConversationTitleSettings>({
-    autoRenameEnabled: false,
-    renameEveryReplies: 3,
-  });
   const [selectedArchitectureId, setSelectedArchitectureId] = useState('single-chat');
   const [projectPath, setProjectPath] = useState('');
   const [draftUserMessage, setDraftUserMessage] = useState('');

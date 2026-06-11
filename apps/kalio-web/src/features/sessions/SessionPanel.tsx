@@ -157,6 +157,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       await apiClient.delete(`/api/sessions/${id}`);
       removeSession(id);
       useAgentStore.getState().setPendingConfirmation(id, null);
+      useAgentStore.getState().setPendingBudgetApproval?.(id, null);
     } catch (err) {
       console.error('[SessionPanel] delete failed', err);
     }
@@ -168,6 +169,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       await apiClient.post(`/api/sessions/${id}/archive`);
       removeSession(id);
       useAgentStore.getState().setPendingConfirmation(id, null);
+      useAgentStore.getState().setPendingBudgetApproval?.(id, null);
     } catch (err) {
       console.error('[SessionPanel] archive failed', err);
     }

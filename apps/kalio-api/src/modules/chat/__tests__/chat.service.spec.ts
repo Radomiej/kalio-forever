@@ -593,6 +593,39 @@ describe('ChatService', () => {
     expect(maxIterationErrors).toHaveLength(0);
   });
 
+  it('reports the approved iteration limit when the loop still exhausts after extra budget', async () => {
+    credentialsService.getMaxToolAttempts.mockResolvedValue(1);
+    agentBudgetApprovals.requestAdditionalBudget.mockResolvedValue(2);
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(() => makeStream([{ type: 'done' }])),
+    };
+    const processor = {
+      process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { state: { addToolCall: (tc: unknown) => void } }) => {
+        ctx.state.addToolCall({ id: `c-budget-${(processor.process as ReturnType<typeof vi.fn>).mock.calls.length}`, name: 'tool_a', args: {} });
+      }),
+      onModuleInit: vi.fn(),
+    };
+
+    await buildCustomService(llmSource, processor);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    expect(agentBudgetApprovals.requestAdditionalBudget).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        currentLimit: 1,
+        usedIterations: 1,
+      }),
+    );
+    const maxIterationErrors = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => args[0] === 'chat:error' && (args[1] as { code?: string }).code === 'MAX_ITERATIONS_REACHED',
+    );
+    expect(maxIterationErrors).toHaveLength(1);
+    expect(maxIterationErrors[0]?.[1]).toMatchObject({
+      code: 'MAX_ITERATIONS_REACHED',
+      message: 'Agent loop exceeded 2 iterations',
+    });
+  });
+
   it('MAX_ITERATIONS: always emits agent:done', async () => {
     const llmSource: ILLMSource = {
       stream: vi.fn().mockImplementation(() => makeStream([{ type: 'done' }])),

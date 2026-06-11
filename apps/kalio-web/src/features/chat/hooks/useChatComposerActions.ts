@@ -239,7 +239,7 @@ export function useChatComposerActions({
       const result = schemaId === 'goal-master-delivery-loop'
         ? await startGoalGuardAgentFlowRun(
           content,
-          buildGoalGuardRunContext(activeSessionId, sourceFiles, activeToolNames),
+          buildGoalGuardRunContext(activeSessionId, sourceFiles, activeToolNames, projectPath),
           activeSessionId,
         )
         : await startArchitectureRun(
@@ -248,7 +248,7 @@ export function useChatComposerActions({
           {},
           'subagent_execution',
           undefined,
-          buildArchitectureRunContext(activeSessionId, sourceFiles, activeToolNames),
+          buildArchitectureRunContext(activeSessionId, sourceFiles, activeToolNames, projectPath),
           applyArchitectureProjection,
         );
       applyArchitectureProjection(result);

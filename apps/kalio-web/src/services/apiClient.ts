@@ -12,8 +12,13 @@ function resolveConfiguredApiUrl(): string {
 
 export function getApiBaseUrl(): string {
   const configured = apiClient.defaults?.baseURL ?? '';
-  if (/^https?:\/\//i.test(configured)) {
-    return configured.replace(/\/+$/, '');
+  if (typeof configured === 'string' && configured.trim().length > 0) {
+    if (/^https?:\/\//i.test(configured)) {
+      return configured.replace(/\/+$/, '');
+    }
+    if (typeof globalThis !== 'undefined' && globalThis.location?.origin) {
+      return new URL(configured, globalThis.location.origin).toString().replace(/\/+$/, '');
+    }
   }
   if (typeof globalThis !== 'undefined' && globalThis.location?.origin) {
     return globalThis.location.origin;

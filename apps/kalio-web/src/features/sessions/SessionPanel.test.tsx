@@ -76,15 +76,31 @@ vi.mock('../../services/apiClient', () => ({
 // ── agentStore mock ───────────────────────────────────────────────────────────
 
 const mockSetPendingConfirmation = vi.hoisted(() => vi.fn());
+const mockSetPendingBudgetApproval = vi.hoisted(() => vi.fn());
 
 vi.mock('../../store/agentStore', () => ({
   useAgentStore: Object.assign(
-    (selector?: (s: { pendingConfirmations: Record<string, unknown>; setPendingConfirmation: typeof mockSetPendingConfirmation }) => unknown) => {
-      const state = { pendingConfirmations: {}, setPendingConfirmation: mockSetPendingConfirmation };
+    (selector?: (s: {
+      pendingConfirmations: Record<string, unknown>;
+      pendingBudgetApprovals: Record<string, unknown>;
+      setPendingConfirmation: typeof mockSetPendingConfirmation;
+      setPendingBudgetApproval: typeof mockSetPendingBudgetApproval;
+    }) => unknown) => {
+      const state = {
+        pendingConfirmations: {},
+        pendingBudgetApprovals: {},
+        setPendingConfirmation: mockSetPendingConfirmation,
+        setPendingBudgetApproval: mockSetPendingBudgetApproval,
+      };
       return selector ? selector(state) : state;
     },
     {
-      getState: () => ({ pendingConfirmations: {}, setPendingConfirmation: mockSetPendingConfirmation }),
+      getState: () => ({
+        pendingConfirmations: {},
+        pendingBudgetApprovals: {},
+        setPendingConfirmation: mockSetPendingConfirmation,
+        setPendingBudgetApproval: mockSetPendingBudgetApproval,
+      }),
     },
   ),
 }));
@@ -574,6 +590,28 @@ describe('REGRESSION: pendingConfirmations cleaned up on session delete', () => 
 
     // Wait for the async delete + cleanup chain to finish
     await waitFor(() => expect(mockSetPendingConfirmation).toHaveBeenCalledWith('s2', null));
+  });
+
+  it('deleting or archiving a session also clears pending budget approvals', async () => {
+    mockApiDelete.mockResolvedValue({});
+    mockApiPost.mockResolvedValue({});
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+
+    const deleteButtons = screen.getAllByTitle('Delete');
+    fireEvent.click(deleteButtons[0]!);
+    await waitFor(() => expect(mockSetPendingBudgetApproval).toHaveBeenCalledWith('s2', null));
+
+    chooseOriginFilter('agent');
+    const archiveButtons = screen.getAllByTitle('Archive');
+    fireEvent.click(archiveButtons[0]!);
+    await waitFor(() => expect(mockSetPendingBudgetApproval).toHaveBeenCalledWith('s2', null));
   });
 });
 

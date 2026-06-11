@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ConversationTitleSettings } from '@kalio/types';
 import { apiClient } from '../../services/apiClient';
+import { useSettingsStore } from './settingsStore';
 import { ConversationTitleSettingsCard } from './ConversationTitleSettingsCard';
 
 const DEFAULT_SETTINGS: ConversationTitleSettings = {
@@ -9,25 +10,40 @@ const DEFAULT_SETTINGS: ConversationTitleSettings = {
 };
 
 export function ConversationSettingsPanel() {
-  const [settings, setSettings] = useState<ConversationTitleSettings>(DEFAULT_SETTINGS);
+  const settings = useSettingsStore((state) => state.conversationTitleSettings);
+  const setConversationTitleSettings = useSettingsStore((state) => state.setConversationTitleSettings);
   const [loading, setLoading] = useState(true);
+  const latestRequestedSaveRef = useRef(0);
+  const latestCommittedSaveRef = useRef(0);
+  const committedSettingsRef = useRef<ConversationTitleSettings>(DEFAULT_SETTINGS);
 
   useEffect(() => {
     apiClient
       .get<ConversationTitleSettings>('/api/credentials/settings/conversation-title')
-      .then(({ data }) => setSettings(data))
+      .then(({ data }) => {
+        committedSettingsRef.current = data;
+        setConversationTitleSettings(data);
+      })
       .catch((error: unknown) => console.error('[ConversationSettingsPanel] load failed', error))
       .finally(() => setLoading(false));
-  }, []);
+  }, [setConversationTitleSettings]);
 
   const patchSettings = async (patch: Partial<ConversationTitleSettings>) => {
+    const saveId = latestRequestedSaveRef.current + 1;
+    latestRequestedSaveRef.current = saveId;
     const next = { ...settings, ...patch };
-    setSettings(next);
+    setConversationTitleSettings(next);
     try {
       await apiClient.put('/api/credentials/settings/conversation-title', patch);
+      if (saveId >= latestCommittedSaveRef.current) {
+        latestCommittedSaveRef.current = saveId;
+        committedSettingsRef.current = next;
+      }
     } catch (error: unknown) {
       console.error('[ConversationSettingsPanel] save failed', error);
-      setSettings(settings);
+      if (saveId === latestRequestedSaveRef.current) {
+        setConversationTitleSettings(committedSettingsRef.current);
+      }
     }
   };
 
