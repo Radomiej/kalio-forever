@@ -61,6 +61,7 @@ export function useChatSocketEvents({
   } = useSessionStore();
   const {
     setPendingConfirmation,
+    setPendingBudgetApproval,
     setToolArgProgress,
     addToolActivity,
     updateToolActivity,
@@ -78,7 +79,7 @@ export function useChatSocketEvents({
     rebuildCLIChildProjections,
     setQueuedDepth,
   } = useAgentStore();
-  const { addSession } = useSessionStore();
+  const { addSession, updateSession } = useSessionStore();
 
   useEffect(() => {
     if (!eventBus.connected) eventBus.connect();
@@ -164,6 +165,7 @@ export function useChatSocketEvents({
         clearToolArgProgressTracking(targetSessionId);
         removeActiveAgentLoop(targetSessionId);
         setPendingConfirmation(targetSessionId, null);
+        setPendingBudgetApproval?.(targetSessionId, null);
 
         const terminalToolStatus = payload.code === 'INTERRUPTED' ? 'cancelled' : 'error';
         const finishedAt = Date.now();
@@ -218,6 +220,10 @@ export function useChatSocketEvents({
       });
     });
 
+    const offBudgetRequired = eventBus.onAgentBudgetRequired?.((req) => {
+      setPendingBudgetApproval?.(req.sessionId, req);
+    });
+
     const offConfirmationInvalidated = eventBus.onToolConfirmationInvalidated((payload) => {
       const agentState = useAgentStore.getState();
       const pendingConfirmation = agentState.pendingConfirmations[payload.sessionId];
@@ -249,6 +255,10 @@ export function useChatSocketEvents({
           ...(payload.message ? { errorMessage: payload.message } : {}),
         },
       });
+    });
+
+    const offBudgetInvalidated = eventBus.onAgentBudgetInvalidated?.((payload) => {
+      setPendingBudgetApproval?.(payload.sessionId, null);
     });
 
     const offToolStart = eventBus.onToolStart((payload) => {
@@ -298,6 +308,7 @@ export function useChatSocketEvents({
       startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun);
       clearToolActivities(payload.sessionId);
       setPendingConfirmation(payload.sessionId, null);
+      setPendingBudgetApproval?.(payload.sessionId, null);
       setQueuedDepth(payload.sessionId, 0);
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
         setAwaitingFirstChunk(true);
@@ -318,6 +329,7 @@ export function useChatSocketEvents({
         setStreaming(false);
       }
       setPendingConfirmation(payload.sessionId, null);
+      setPendingBudgetApproval?.(payload.sessionId, null);
     });
 
     const offContext = eventBus.onContext((payload) => {
@@ -388,8 +400,15 @@ export function useChatSocketEvents({
     const offSessionCreated = eventBus.onSessionCreated((session) => {
       if (!useSessionStore.getState().sessions.some((item) => item.id === session.id)) {
         addSession(session);
+      } else {
+        updateSession(session.id, session);
       }
+      eventBus.identifySession(session.id);
       handleCliChildSessionCreated(cliChildDeps, session);
+    });
+
+    const offSessionUpdated = eventBus.onSessionUpdated?.((session) => {
+      updateSession(session.id, session);
     });
 
     const offQueued = eventBus.onQueued((payload) => {
@@ -437,7 +456,9 @@ export function useChatSocketEvents({
       offComplete();
       offError();
       offConfirmation();
+      offBudgetRequired?.();
       offConfirmationInvalidated();
+      offBudgetInvalidated?.();
       offToolStart();
       offToolArgProgress();
       offAgentStart();
@@ -447,6 +468,7 @@ export function useChatSocketEvents({
       offCLIAgentProgress();
       offSessionStatus();
       offSessionCreated();
+      offSessionUpdated?.();
       offQueued();
       offRaAppNative();
       offConnectionState();
@@ -456,6 +478,7 @@ export function useChatSocketEvents({
     addActiveAgentLoop,
     addMessage,
     addSession,
+    updateSession,
     addToolActivity,
     appendChunk,
     appendCLIAgentChunk,
@@ -481,6 +504,7 @@ export function useChatSocketEvents({
     setContext,
     setError,
     setPendingConfirmation,
+    setPendingBudgetApproval,
     setQueuedDepth,
     setRecoveryNotice,
     setStreaming,

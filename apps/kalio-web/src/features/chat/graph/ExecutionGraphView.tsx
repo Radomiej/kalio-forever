@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { nanoid } from 'nanoid';
-import type { ArchitectureGraphProjection, ChatMessage, ChatSession, Persona } from '@kalio/types';
+import type { ArchitectureGraphProjection, ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
-import { eventBus } from '../../../services/eventBus';
 import { buildTurnsFromHistory } from '../chatUtils';
 import {
   buildExecutionGraphModel,
@@ -18,6 +16,7 @@ import { ExecutionGraphNoNodesState, ExecutionGraphNoSessionState } from './Exec
 import { focusExecutionGraphMessages, type ExecutionGraphFocusMode } from './executionGraphFocus';
 import { extractArchitectureBranchSessionIds, extractExecutionGraphHydrationStatus } from './executionGraphHydration';
 import { architectureRunIdFromRootSession, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
+import { useExecutionGraphLaunch } from './useExecutionGraphLaunch';
 
 const DEFAULT_GRAPH_ZOOM = 0.82;
 const MIN_GRAPH_ZOOM = 0.58;
@@ -37,24 +36,31 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     sessions,
     sessionMessages,
     sessionAgentTurns,
-    addSession,
-    addMessage,
     setActiveSession,
     setMessages,
     setAgentTurns,
     setPendingMessage,
-    updateSession,
   } = useSessionStore();
   const {
     toolActivities,
     activeAgentLoops,
     pendingConfirmations,
-    isStreaming,
-    clearToolActivities,
     setPendingConfirmation,
-    setStreaming,
   } = useAgentStore();
-  const [personas, setPersonas] = useState<Persona[]>([]);
+  const {
+    activeSession,
+    architectures,
+    emptyPromptError,
+    isBusy,
+    personas,
+    projectPath,
+    selectedArchitectureId,
+    selectedPersonaId,
+    setProjectPath,
+    setSelectedArchitectureId,
+    handleGraphSessionPersonaChange,
+    sendEmptyGraphPrompt,
+  } = useExecutionGraphLaunch();
   const [zoom, setZoom] = useState(DEFAULT_GRAPH_ZOOM);
   const [inspectorWidth, setInspectorWidth] = useState(DEFAULT_INSPECTOR_WIDTH);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -62,16 +68,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
   const [cardDensity, setCardDensity] = useState<GraphCardDensity>('compact');
   const [resetViewportToken, setResetViewportToken] = useState(0);
   const [architectureRootGraph, setArchitectureRootGraph] = useState<ArchitectureGraphProjection | null>(null);
-  const [emptyPromptError, setEmptyPromptError] = useState<string | null>(null);
-  const [creatingGraphSession, setCreatingGraphSession] = useState(false);
   const inspectorResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
-
-  useEffect(() => {
-    apiClient
-      .get<Persona[]>('/api/personas')
-      .then((response) => setPersonas(response.data))
-      .catch((err: unknown) => console.error('[ExecutionGraphView] personas load failed', err));
-  }, []);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -155,8 +152,6 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
   const runningLoops = Object.values(activeAgentLoops);
   const runningToolActivities = toolActivities.filter((activity) => isLiveTool(activity));
   const sessionTitleById = new Map(sessions.map((session) => [session.id, session.title]));
-  const selectableSessions = sessions.filter((session) => session.kind !== 'subagent' && session.kind !== 'cli-agent');
-  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
   const activeArchitectureRunId = architectureRunIdFromRootSession(activeSessionId);
   const graphSurfaceClassName = 'flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.08),_transparent_42%),linear-gradient(rgba(56,189,248,0.06)_1px,_transparent_1px),linear-gradient(90deg,_rgba(56,189,248,0.06)_1px,_transparent_1px)] bg-[length:100%_100%,32px_32px,32px_32px] bg-[#0a1220] p-4';
   const focusedGraph = focusExecutionGraphMessages(messages, focusMode);
@@ -294,90 +289,27 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     />
   );
 
-  const sendGraphPromptToSession = (session: ChatSession, content: string, isFirstMessage: boolean) => {
-    if (isStreaming) {
-      return;
-    }
-    if (!eventBus.connected) {
-      setEmptyPromptError('Backend connection is offline. Reconnect and retry this message.');
-      return;
-    }
-
-    setEmptyPromptError(null);
-    clearToolActivities(session.id);
-    if ((session.title === 'New Chat' || session.title === '') && isFirstMessage) {
-      const preview = content.slice(0, 50).trim();
-      updateSession(session.id, { title: preview + (content.length > 50 ? '...' : '') });
-    }
-
-    addMessage({
-      id: nanoid(),
-      sessionId: session.id,
-      role: 'user',
-      content,
-      createdAt: Date.now(),
-    });
-    setStreaming(true);
-
-    const sent = eventBus.sendMessage({
-      sessionId: session.id,
-      content,
-      personaId: session.personaId,
-    });
-
-    if (!sent) {
-      setStreaming(false);
-      setEmptyPromptError('Backend connection is offline. Reconnect and retry this message.');
-    }
-  };
-
-  const sendEmptyGraphPrompt = (content: string) => {
-    if (!activeSessionId || !activeSession) {
-      return;
-    }
-    sendGraphPromptToSession(activeSession, content, messages.length === 0);
-  };
-
-  const createAndSendGraphPrompt = async (content: string) => {
-    if (isStreaming || creatingGraphSession) {
-      return;
-    }
-    if (!eventBus.connected) {
-      setEmptyPromptError('Backend connection is offline. Reconnect and retry this message.');
-      return;
-    }
-
-    setCreatingGraphSession(true);
-    setEmptyPromptError(null);
-    try {
-      const response = await apiClient.post<ChatSession>('/api/sessions', {
-        personaId: 'default',
-        title: 'New Chat',
-      });
-      addSession(response.data);
-      setActiveSession(response.data.id);
-      setMessages([], response.data.id);
-      sendGraphPromptToSession(response.data, content, true);
-    } catch (err) {
-      setEmptyPromptError(err instanceof Error ? err.message : 'Failed to create a graph chat.');
-    } finally {
-      setCreatingGraphSession(false);
-    }
-  };
-
   if (!activeSessionId) {
     return (
       <div data-testid="execution-graph-view" className="flex h-full overflow-hidden bg-base-100">
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {header}
           <ExecutionGraphNoSessionState
-            disabled={isStreaming || creatingGraphSession}
-            error={emptyPromptError}
+            activePersonaId={selectedPersonaId}
+            architectures={architectures}
             graphSurfaceClassName={graphSurfaceClassName}
+            error={emptyPromptError}
+            heading="New Chat"
+            isBusy={isBusy}
             liveActivitySidebar={liveActivitySidebar}
-            onSendPrompt={(content) => void createAndSendGraphPrompt(content)}
-            selectableSessions={selectableSessions}
-            onSelectSession={setActiveSession}
+            onArchitectureChange={setSelectedArchitectureId}
+            onDraftChange={() => undefined}
+            onPersonaChange={handleGraphSessionPersonaChange}
+            onProjectPathChange={setProjectPath}
+            onRunPrompt={sendEmptyGraphPrompt}
+            personas={personas}
+            projectPath={projectPath}
+            selectedArchitectureId={selectedArchitectureId}
           />
         </div>
       </div>
@@ -417,12 +349,21 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {header}
           <ExecutionGraphNoNodesState
-            activeSession={activeSession}
-            disabled={isStreaming}
-            error={emptyPromptError}
+            activePersonaId={selectedPersonaId}
+            architectures={architectures}
             graphSurfaceClassName={graphSurfaceClassName}
+            error={emptyPromptError}
+            heading={activeSession?.title ?? 'New Chat'}
+            isBusy={isBusy}
             liveActivitySidebar={liveActivitySidebar}
-            onSendPrompt={sendEmptyGraphPrompt}
+            onArchitectureChange={setSelectedArchitectureId}
+            onDraftChange={() => undefined}
+            onPersonaChange={handleGraphSessionPersonaChange}
+            onProjectPathChange={setProjectPath}
+            onRunPrompt={sendEmptyGraphPrompt}
+            personas={personas}
+            projectPath={projectPath}
+            selectedArchitectureId={selectedArchitectureId}
           />
         </div>
       </div>

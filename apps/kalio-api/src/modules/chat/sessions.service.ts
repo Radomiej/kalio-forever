@@ -7,19 +7,16 @@ import { sessions } from '../../database/schema';
 import { SessionManagerService } from './session-manager.service';
 import type { IMessageRepository } from './interfaces/message-repository.interface';
 import { MESSAGE_REPOSITORY } from './chat.tokens';
+import { SessionEventsService } from './session-events.service';
 
 const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
 
-/**
- * REST-facing service for chat session CRUD.
- * The streaming/turn handling lives in ChatService; this service only
- * manages session lifecycle and history retrieval.
- */
 @Injectable()
 export class SessionsService {
   constructor(
     private readonly drizzle: DrizzleService,
     private readonly sessionManager: SessionManagerService,
+    private readonly sessionEvents: SessionEventsService,
     @Inject(MESSAGE_REPOSITORY) private readonly repo: IMessageRepository,
   ) {}
 
@@ -52,7 +49,9 @@ export class SessionsService {
       updatedAt: now,
     };
     await this.drizzle.db.insert(sessions).values(row);
-    return this.toChatSession(row);
+    const session = this.toChatSession(row);
+    this.sessionEvents.emitSessionCreated(session);
+    return session;
   }
 
   async get(id: string): Promise<ChatSession> {
@@ -85,6 +84,7 @@ export class SessionsService {
       .update(sessions)
       .set({ archivedAt: now, updatedAt: now })
       .where(eq(sessions.id, id));
+    this.sessionEvents.emitSessionUpdated(await this.get(id));
   }
 
   async restore(id: string): Promise<void> {
@@ -93,18 +93,24 @@ export class SessionsService {
       .update(sessions)
       .set({ archivedAt: null, updatedAt: new Date() })
       .where(eq(sessions.id, id));
+    this.sessionEvents.emitSessionUpdated(await this.get(id));
   }
 
   async rename(id: string, title: string): Promise<void> {
     await this.update(id, { title });
   }
 
-  async update(id: string, patch: { title?: string; personaId?: string }): Promise<void> {
+  async update(id: string, patch: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext }): Promise<void> {
     await this.assertExists(id);
-    const set: Record<string, unknown> = { updatedAt: new Date() };
-    if (patch.title !== undefined) set['title'] = patch.title;
-    if (patch.personaId !== undefined) set['personaId'] = patch.personaId;
-    await this.drizzle.db.update(sessions).set(set).where(eq(sessions.id, id));
+    const hasPatch = patch.title !== undefined || patch.personaId !== undefined || patch.runtimeContext !== undefined;
+    if (hasPatch) {
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (patch.title !== undefined) set.title = patch.title;
+      if (patch.personaId !== undefined) set.personaId = patch.personaId;
+      if (patch.runtimeContext !== undefined) set.runtimeContext = patch.runtimeContext;
+      await this.drizzle.db.update(sessions).set(set).where(eq(sessions.id, id));
+      this.sessionEvents.emitSessionUpdated(await this.get(id));
+    }
   }
 
   async updateRuntimeContext(id: string, runtimeContext: SessionRuntimeContext): Promise<void> {
@@ -113,15 +119,20 @@ export class SessionsService {
       .update(sessions)
       .set({ runtimeContext, updatedAt: new Date() })
       .where(eq(sessions.id, id));
+    this.sessionEvents.emitSessionUpdated(await this.get(id));
   }
 
   async generateTitle(id: string): Promise<{ title: string }> {
     await this.assertExists(id);
     const history = await this.repo.loadHistory(id);
-    const firstUser = history.find((m) => m.role === 'user');
-    const title = firstUser
-      ? firstUser.content.slice(0, 60).trim() + (firstUser.content.length > 60 ? '…' : '')
-      : 'New Chat';
+    const firstUser = history.find((message) => message.role === 'user');
+    const normalized = firstUser?.content.replace(/\s+/g, ' ').trim() ?? '';
+    const title = normalized.length === 0
+      ? 'New Chat'
+      : normalized.length > 60
+        ? `${normalized.slice(0, 60).trimEnd()}…`
+        : normalized;
+    await this.update(id, { title });
     return { title };
   }
 

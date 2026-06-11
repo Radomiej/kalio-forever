@@ -29,8 +29,50 @@ try {
     $script:devStackMutex = [System.Threading.Mutex]::new($false, $devStackMutexName)
     $script:devStackMutexOwned = $script:devStackMutex.WaitOne(0, $false)
     if (-not $script:devStackMutexOwned) {
+        $beHealthy = $false
+        $feHealthy = $false
+        try {
+            $beResponse = Invoke-WebRequest -Uri "http://localhost:$BE_PORT/api/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            $beHealthy = $beResponse.StatusCode -eq 200
+        } catch { }
+        try {
+            $feResponse = Invoke-WebRequest -Uri "http://localhost:$FE_PORT" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            $feHealthy = $feResponse.StatusCode -eq 200
+        } catch { }
+
+        if ($beHealthy -and $feHealthy) {
+            Write-Host "[OK] Kalio dev stack already running on ports $BE_PORT/$FE_PORT." -ForegroundColor Green
+            Write-Host "  Backend  -> http://localhost:$BE_PORT" -ForegroundColor Green
+            Write-Host "  Frontend -> http://localhost:$FE_PORT" -ForegroundColor Green
+            Write-Host "  Attached to existing stack (dev-servers watchdog)." -ForegroundColor DarkGray
+            if ($script:devStackMutex) {
+                try { $script:devStackMutex.Dispose() } catch { }
+                $script:devStackMutex = $null
+            }
+            while ($true) {
+                Start-Sleep -Seconds 15
+                $stillHealthy = $true
+                try {
+                    $beCheck = Invoke-WebRequest -Uri "http://localhost:$BE_PORT/api/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                    if ($beCheck.StatusCode -ne 200) { $stillHealthy = $false }
+                } catch { $stillHealthy = $false }
+                try {
+                    $feCheck = Invoke-WebRequest -Uri "http://localhost:$FE_PORT" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                    if ($feCheck.StatusCode -ne 200) { $stillHealthy = $false }
+                } catch { $stillHealthy = $false }
+                if (-not $stillHealthy) {
+                    Write-Host "[WARN] Existing stack became unhealthy; exiting so dev-servers can restart." -ForegroundColor Yellow
+                    exit 1
+                }
+            }
+        }
+
         Write-Host "[FAIL] Kalio dev stack already running (ports $BE_PORT/$FE_PORT)." -ForegroundColor Red
         Write-Host "  Stop dev-servers Kalio or the other start-dev.ps1 before starting again." -ForegroundColor DarkYellow
+        if ($script:devStackMutex) {
+            try { $script:devStackMutex.Dispose() } catch { }
+            $script:devStackMutex = $null
+        }
         exit 1
     }
 } catch {

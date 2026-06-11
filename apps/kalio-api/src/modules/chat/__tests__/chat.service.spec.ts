@@ -16,6 +16,7 @@ import { SkillsService } from '../../skills/skills.service';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { ContextAssemblyService } from '../context-assembly.service';
 import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
+import { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 import { makeContextAssembly, makeLLMTurnRuntime } from './llm-runtime-test-harness';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 
@@ -44,6 +45,9 @@ describe('ChatService', () => {
   let credentialsService: {
     getMaxToolAttempts: ReturnType<typeof vi.fn>;
     getContextWindowSize: ReturnType<typeof vi.fn>;
+  };
+  let agentBudgetApprovals: {
+    requestAdditionalBudget: ReturnType<typeof vi.fn>;
   };
   let auditService: Partial<AuditService>;
   let emit: ReturnType<typeof vi.fn>;
@@ -76,6 +80,9 @@ describe('ChatService', () => {
     credentialsService = {
       getMaxToolAttempts: vi.fn().mockResolvedValue(8),
       getContextWindowSize: vi.fn().mockResolvedValue(32000),
+    };
+    agentBudgetApprovals = {
+      requestAdditionalBudget: vi.fn().mockResolvedValue(null),
     };
     auditService = {
       log: vi.fn().mockResolvedValue('audit-id'),
@@ -119,6 +126,7 @@ describe('ChatService', () => {
         { provide: SessionManagerService, useValue: sessionManager },
         { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
+        { provide: AgentBudgetApprovalService, useValue: agentBudgetApprovals },
         { provide: ContextAssemblyService, useValue: contextAssembly },
         { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
       ],
@@ -147,6 +155,7 @@ describe('ChatService', () => {
         { provide: SessionManagerService, useValue: sessionManager },
         { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
+        { provide: AgentBudgetApprovalService, useValue: agentBudgetApprovals },
         { provide: ContextAssemblyService, useValue: contextAssembly },
         { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
       ],
@@ -533,6 +542,55 @@ describe('ChatService', () => {
     expect(completeCalls).toHaveLength(0);
     expect(errorCalls).toHaveLength(1);
     expect(errorCalls[0][1]).toMatchObject({ code: 'MAX_ITERATIONS_REACHED' });
+  });
+
+  it('resumes the loop after budget approval instead of failing with MAX_ITERATIONS_REACHED', async () => {
+    credentialsService.getMaxToolAttempts.mockResolvedValue(1);
+    agentBudgetApprovals.requestAdditionalBudget.mockResolvedValue(2);
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(() => makeStream([{ type: 'done' }])),
+    };
+    const processor = {
+      process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { state: { addToolCall: (tc: unknown) => void; text: string } }) => {
+        if ((processor.process as ReturnType<typeof vi.fn>).mock.calls.length === 1) {
+          ctx.state.addToolCall({ id: 'c-budget-1', name: 'tool_a', args: {} });
+          return;
+        }
+
+        ctx.state.text = 'final answer after approval';
+      }),
+      onModuleInit: vi.fn(),
+    };
+
+    await buildCustomService(llmSource, processor);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    expect(agentBudgetApprovals.requestAdditionalBudget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        abortSignal: expect.any(AbortSignal),
+        emit: expect.any(Function),
+        sessionId: 'sid',
+        state: expect.any(Object),
+        vfsSessionId: undefined,
+      }),
+      expect.objectContaining({
+        currentLimit: 1,
+        usedIterations: 1,
+        personaId: 'p1',
+        runtimeKind: 'chat',
+        requestedBy: 'chat-agent',
+      }),
+    );
+    expect(llmSource.stream).toHaveBeenCalledTimes(2);
+    expect(sessionManager.saveToolResult).toHaveBeenCalledWith('sid', 'c-budget-1', expect.any(String));
+    const completeCalls = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => args[0] === 'chat:complete',
+    );
+    const maxIterationErrors = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => args[0] === 'chat:error' && (args[1] as { code?: string }).code === 'MAX_ITERATIONS_REACHED',
+    );
+    expect(completeCalls).toHaveLength(1);
+    expect(maxIterationErrors).toHaveLength(0);
   });
 
   it('MAX_ITERATIONS: always emits agent:done', async () => {

@@ -20,6 +20,7 @@ export const personas = sqliteTable('personas', {
   name:         text('name').notNull(),
   systemPrompt: text('system_prompt').notNull().default(''),
   model:        text('model').notNull(),
+  maxToolAttempts: integer('max_tool_attempts'),
   allowedTools: text('allowed_tools', { mode: 'json' }).$type<string[]>().notNull().default([]),
   skillIds:     text('skill_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
   mcpPolicy:    text('mcp_policy').$type<MCPPolicy>().notNull().default('allow_all'),

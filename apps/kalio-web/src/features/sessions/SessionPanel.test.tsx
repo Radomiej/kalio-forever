@@ -185,7 +185,7 @@ describe('SessionPanel', () => {
     expect(screen.getByTestId('subagent-session-badge-sub-1')).toBeTruthy();
   });
 
-  it('expands the full agent tree and labels New Chat roots with their architecture run', async () => {
+  it('expands the full agent tree without replacing the parent chat title', async () => {
     const now = Date.now();
     const architectureSessions: ChatSession[] = [
       { id: 'host', personaId: 'default', title: 'New Chat', createdAt: now - 5000, updatedAt: now - 5000 },
@@ -204,12 +204,13 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
 
-    expect(screen.getByText('Architecture: Runtime MVP proof')).toBeTruthy();
+    expect(screen.getByText('New Chat')).toBeTruthy();
     const toggle = screen.getByTestId('toggle-session-children-host');
     expect(toggle).toHaveTextContent('4');
 
     fireEvent.click(toggle);
 
+    expect(screen.getByText('Architecture: Runtime MVP proof')).toBeTruthy();
     expect(screen.getByText('Goal Master Delivery Loop: Orchestrator')).toBeTruthy();
     expect(screen.getByText('Goal Master Delivery Loop: Implementer')).toBeTruthy();
     expect(screen.getByText('codex CLI: Write proof file')).toBeTruthy();

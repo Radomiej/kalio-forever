@@ -8,6 +8,7 @@ export interface LLMAgentLoopCallbacks {
   onToolPending?: () => Promise<void>;
   onToolRunning?: () => Promise<void>;
   onEscalation?: (message: string) => void;
+  onIterationLimitReached?: (state: { iterationCount: number; currentLimit: number }) => Promise<number | null>;
 }
 
 export interface LLMAgentLoopRequest {

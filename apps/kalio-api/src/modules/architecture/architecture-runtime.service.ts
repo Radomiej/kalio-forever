@@ -617,6 +617,15 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
       kind: isAgentFlowRoot ? 'agent-flow' : 'chat',
       parentSessionId: this.getParentSessionId(dto.context),
       parentToolCallId: this.getParentToolCallId(dto.context),
+      runtimeContext: {
+        runtimeKind: isAgentFlowRoot ? 'agent-flow-branch' : 'chat',
+        architectureContext: {
+          architectureRunId: runId,
+          schemaId: schema.id,
+          schemaName: schema.name,
+          displayLabel: schema.name,
+        },
+      },
     });
 
     const executableSlots = schema.roleSlots.filter((slot) => this.shouldCreateBranch(slot, schema, dto.executionMode));
@@ -629,6 +638,19 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
           title: `${schema.name}: ${slot.label}`,
           kind: 'subagent',
           parentSessionId: rootSessionId,
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            parentSessionId: rootSessionId,
+            architectureSlotId: slot.id,
+            architectureContext: {
+              architectureRunId: runId,
+              schemaId: schema.id,
+              schemaName: schema.name,
+              roleSlotId: slot.id,
+              roleLabel: slot.label,
+              displayLabel: slot.label,
+            },
+          },
         });
         return [slot.id, sessionId] as const;
       }),
@@ -1166,6 +1188,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
       && this.isNonEmptyString(value.label)
       && this.isNodeKind(value.kind)
       && (value.roleSlotId === undefined || typeof value.roleSlotId === 'string')
+      && (value.maxToolAttempts === undefined || (typeof value.maxToolAttempts === 'number' && Number.isInteger(value.maxToolAttempts) && value.maxToolAttempts >= 1 && value.maxToolAttempts <= 100))
       && (value.behavior === undefined || this.isNodeBehavior(value.behavior))
       && (value.x === undefined || typeof value.x === 'number')
       && (value.y === undefined || typeof value.y === 'number');

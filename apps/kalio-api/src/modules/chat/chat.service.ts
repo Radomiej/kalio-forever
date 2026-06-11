@@ -8,6 +8,8 @@ import { RunJournalService } from './run-journal.service';
 import { ContextAssemblyService } from './context-assembly.service';
 import { CredentialsService } from '../credentials/credentials.service';
 import { LLMTurnRuntimeService } from './llm-turn-runtime.service';
+import { AgentBudgetApprovalService } from './agent-budget-approval.service';
+import { TurnState } from './turn-state';
 
 type ChatErrorCode = import('@kalio/types').SocketEvents['chat:error']['code'];
 
@@ -42,6 +44,7 @@ export class ChatService {
     private readonly credentialsService: CredentialsService,
     private readonly audit: AuditService,
     private readonly llmTurnRuntime: LLMTurnRuntimeService,
+    private readonly agentBudgetApprovals: AgentBudgetApprovalService,
     @Optional() private readonly runJournal?: RunJournalService,
     @Optional() private readonly contextAssembly?: ContextAssemblyService,
   ) {}
@@ -95,7 +98,8 @@ export class ChatService {
         toolNames: assembledContext.toolMetas.map((tool) => tool.name),
       });
 
-      const maxToolAttempts = await this.credentialsService.getMaxToolAttempts();
+      const systemMaxToolAttempts = await this.credentialsService.getMaxToolAttempts();
+      const maxToolAttempts = assembledContext.personaConfig?.maxToolAttempts ?? systemMaxToolAttempts;
       const maxEmptyNoToolRetries = Math.max(5, maxToolAttempts * 2);
 
       const loopResult = await this.llmTurnRuntime.runAgentLoop({
@@ -128,6 +132,26 @@ export class ChatService {
               label: 'Agent Escalation',
               data: { message },
             });
+          },
+          onIterationLimitReached: async ({ iterationCount, currentLimit }) => {
+            await checkpointRun('tool_pending');
+            return this.agentBudgetApprovals.requestAdditionalBudget(
+              {
+                sessionId,
+                vfsSessionId: undefined,
+                messageId: firstMessageId,
+                abortSignal: controller.signal,
+                state: new TurnState(),
+                emit: trackingEmit,
+              },
+              {
+                currentLimit,
+                usedIterations: iterationCount,
+                personaId,
+                runtimeKind: 'chat',
+                requestedBy: 'chat-agent',
+              },
+            );
           },
         },
       });

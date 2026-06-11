@@ -44,6 +44,10 @@ function persistActiveSessionId(sessionId: string | null): void {
 export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void; viewSwitcher?: ReactNode } = {}) {
   const { sessions, activeSessionId, setSessions, setActiveSession, addSession, setMessages, removeSession, updateSession } = useSessionStore();
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
+  const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
+  const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
+  const queuedDepthBySession = useAgentStore((s) => s.queuedDepthBySession);
+  const sessionAgentTurns = useSessionStore((s) => s.sessionAgentTurns);
   const [loading, setLoading] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -324,6 +328,10 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
             originFilter,
             childSessionsByParent,
             pendingConfirmations,
+            pendingBudgetApprovals,
+            activeLoopSessionIds: new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId)),
+            queuedDepthBySession: queuedDepthBySession ?? {},
+            sessionAgentTurns: sessionAgentTurns ?? {},
             renamingId,
             renameValue,
             renameRef,

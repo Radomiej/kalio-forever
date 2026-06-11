@@ -129,6 +129,22 @@ export class CredentialsController {
     this.logger.log(`Max tool attempts updated via API: ${body.size}`);
   }
 
+  @Get('settings/conversation-title')
+  async getConversationTitleSettings(): Promise<import('@kalio/types').ConversationTitleSettings> {
+    return this.credentialsService.getConversationTitleSettings();
+  }
+
+  @Put('settings/conversation-title')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async setConversationTitleSettings(
+    @Body() body: Partial<import('@kalio/types').ConversationTitleSettings>,
+  ): Promise<void> {
+    await this.credentialsService.setConversationTitleSettings(body);
+    this.logger.log(
+      `Conversation title settings updated via API: autoRename=${body.autoRenameEnabled ?? '—'} cadence=${body.renameEveryReplies ?? '—'}`,
+    );
+  }
+
   @Get('settings/tool-timeouts')
   async getToolTimeouts(): Promise<ToolTimeoutSettings> {
     return this.timeoutSettings.getTimeoutSettings();

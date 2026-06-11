@@ -113,6 +113,13 @@
       "when": 1780329600000,
       "tag": "0015_persona_avatar",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1781184000000,
+      "tag": "0016_persona_max_tool_attempts",
+      "breakpoints": true
     }
   ]
 }

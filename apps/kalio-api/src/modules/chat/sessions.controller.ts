@@ -6,6 +6,7 @@ import type {
   ContextPreviewRequest,
   CreateSessionDto,
   LLMContextPreview,
+  SessionRuntimeContext,
 } from '@kalio/types';
 
 type SessionContextPreviewBody = Omit<Extract<ContextPreviewRequest, { sessionId: string }>, 'sessionId'>;
@@ -67,7 +68,7 @@ export class SessionsController {
   @Patch(':id')
   async update(
     @Param('id') id: string,
-    @Body() body: { title?: string; personaId?: string },
+    @Body() body: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext },
   ): Promise<void> {
     await this.sessions.update(id, body);
   }

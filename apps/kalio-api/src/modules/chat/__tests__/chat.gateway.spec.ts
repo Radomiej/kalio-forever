@@ -7,6 +7,8 @@ import type { RAAppHITLService, SavedApproval } from '../../raapp/raapp-hitl.ser
 import type { AgentFlowRunSnapshot, ToolConfirmationRequest } from '@kalio/types';
 import type { AgentFlowRuntimePort } from '../../agent-flow/agent-flow-runtime.port';
 import type { CLIAgentSessionRuntimePort } from '../../cli-agent/cli-agent-session-runtime.port';
+import type { SessionEventsService } from '../session-events.service';
+import type { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
 
@@ -18,6 +20,8 @@ describe('ChatGateway', () => {
   let raappHITL: RAAppHITLService;
   let agentFlowRuntime: AgentFlowRuntimePort;
   let cliAgentSessionRuntime: CLIAgentSessionRuntimePort;
+  let sessionEvents: SessionEventsService;
+  let agentBudgetApprovals: AgentBudgetApprovalService;
   let client: { id: string; emit: ReturnType<typeof vi.fn> };
   let observer: { id: string; emit: ReturnType<typeof vi.fn> };
 
@@ -71,6 +75,17 @@ describe('ChatGateway', () => {
       }),
     } as unknown as CLIAgentSessionRuntimePort;
 
+    sessionEvents = {
+      onSessionCreated: vi.fn().mockReturnValue(() => undefined),
+      onSessionUpdated: vi.fn().mockReturnValue(() => undefined),
+      emitSessionCreated: vi.fn(),
+      emitSessionUpdated: vi.fn(),
+    } as unknown as SessionEventsService;
+    agentBudgetApprovals = {
+      getPendingApprovals: vi.fn().mockReturnValue([]),
+      resolveApproval: vi.fn().mockReturnValue('resolved'),
+    } as unknown as AgentBudgetApprovalService;
+
     client = {
       id: 'socket-1',
       emit: vi.fn(),
@@ -80,7 +95,7 @@ describe('ChatGateway', () => {
       emit: vi.fn(),
     };
 
-    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL, sessions, agentFlowRuntime, cliAgentSessionRuntime);
+    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals, agentFlowRuntime, cliAgentSessionRuntime);
     gateway.handleConnection(client as never);
     gateway.handleConnection(observer as never);
     (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions

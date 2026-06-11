@@ -70,6 +70,7 @@ describe('DrizzleService AgentFlow bootstrap repair', () => {
       'avatar_palette_key',
       'avatar_index',
       'skill_ids',
+      'max_tool_attempts',
     ]));
     sqlite.close();
   });

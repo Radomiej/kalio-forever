@@ -33,13 +33,14 @@ export class LLMTurnRuntimeService {
   async runAgentLoop(request: LLMAgentLoopRequest): Promise<LLMAgentLoopResult> {
     const maxEmptyNoToolRetries = request.maxEmptyNoToolRetries ?? 0;
     let iteration = 0;
+    let currentLimit = request.maxIterations;
     let emptyNoToolRetries = 0;
     let emptyNoToolRetriesExhausted = false;
     let latestText = '';
     let lastMessageId = request.firstMessageId ?? nanoid();
     const auditDomain = request.auditDomain ?? (request.runtimeKind === 'chat' ? 'chat' : 'subagent');
 
-    while (iteration < request.maxIterations) {
+    while (iteration < currentLimit) {
       if (request.abortSignal.aborted) {
         return {
           lastMessageId,
@@ -218,10 +219,18 @@ export class LLMTurnRuntimeService {
       }
     }
 
+    const approvedLimit = await request.callbacks?.onIterationLimitReached?.({
+      iterationCount: iteration,
+      currentLimit,
+    });
+    if (approvedLimit && approvedLimit > currentLimit) {
+      currentLimit = approvedLimit;
+      return this.runAgentLoop({ ...request, maxIterations: currentLimit });
+    }
     if (request.runtimeKind !== 'chat') {
-      this.logger.warn(`Subagent exceeded ${request.maxIterations} iterations session=${request.sessionId}`);
+      this.logger.warn(`Subagent exceeded ${currentLimit} iterations session=${request.sessionId}`);
     } else {
-      this.logger.warn(`Agent loop exceeded ${request.maxIterations} iterations for session ${request.sessionId}`);
+      this.logger.warn(`Agent loop exceeded ${currentLimit} iterations for session ${request.sessionId}`);
     }
 
     return {

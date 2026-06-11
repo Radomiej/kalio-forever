@@ -64,6 +64,7 @@ vi.mock('../../../services/apiClient', () => ({
     get: vi.fn(() => Promise.resolve({ data: [] })),
     defaults: { baseURL: '' },
   },
+  getApiBaseUrl: () => 'http://localhost:3016',
 }));
 
 describe('useChatSocketEvents queue depth (fail-first)', () => {

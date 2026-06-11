@@ -1,9 +1,10 @@
 import type { Dispatch, MouseEvent, ReactNode, RefObject, SetStateAction } from 'react';
-import { AlertTriangle, Archive, BrainCircuit, Check, ChevronRight, GitBranch, MessageSquare, Pencil, RotateCcw, TerminalSquare, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Archive, BrainCircuit, Check, CheckCircle2, ChevronRight, GitBranch, Loader2, MessageSquare, Pencil, RotateCcw, TerminalSquare, Trash2, X, XCircle } from 'lucide-react';
 import type { ChatSession } from '@kalio/types';
 import { formatRelativeTime } from './session.utils';
 import { displayTitleForSession } from './sessionTreeDisplay';
 import type { SessionOriginFilter } from './sessionListModel';
+import type { AgentTurn } from '../../store/sessionStore';
 
 const formatChildCount = (count: number): string => count > 99 ? '99+' : String(count);
 
@@ -44,6 +45,19 @@ function sessionKindPresentation(session: ChatSession) {
   };
 }
 
+function architectureBadgeLabel(session: ChatSession): string | null {
+  const architectureContext = session.runtimeContext?.architectureContext;
+  if (!architectureContext || typeof architectureContext !== 'object') {
+    return null;
+  }
+  const displayLabel = architectureContext['displayLabel'];
+  if (typeof displayLabel === 'string' && displayLabel.trim().length > 0) {
+    return displayLabel.trim();
+  }
+  const schemaName = architectureContext['schemaName'];
+  return typeof schemaName === 'string' && schemaName.trim().length > 0 ? schemaName.trim() : null;
+}
+
 type ChildToggle = {
   count: number;
   expanded: boolean;
@@ -56,6 +70,10 @@ type SessionPanelSessionItemProps = {
   originFilter: SessionOriginFilter;
   childSessionsByParent: Map<string, ChatSession[]>;
   pendingConfirmations: Record<string, unknown>;
+  pendingBudgetApprovals: Record<string, unknown>;
+  activeLoopSessionIds: Set<string>;
+  queuedDepthBySession: Record<string, number>;
+  sessionAgentTurns: Record<string, AgentTurn[]>;
   renamingId: string | null;
   renameValue: string;
   renameRef: RefObject<HTMLInputElement | null>;
@@ -73,6 +91,72 @@ type SessionPanelSessionItemProps = {
   onToggleRootExpansion: (event: MouseEvent, id: string) => void;
 };
 
+type SessionRuntimeState = 'waiting' | 'running' | 'error' | 'done';
+
+function sessionRuntimeState(
+  sessionId: string,
+  pendingConfirmations: Record<string, unknown>,
+  pendingBudgetApprovals: Record<string, unknown>,
+  activeLoopSessionIds: Set<string>,
+  queuedDepthBySession: Record<string, number>,
+  sessionAgentTurns: Record<string, AgentTurn[]>,
+): SessionRuntimeState | null {
+  const safePendingConfirmations = pendingConfirmations ?? {};
+  const safePendingBudgetApprovals = pendingBudgetApprovals ?? {};
+  const safeActiveLoopSessionIds = activeLoopSessionIds ?? new Set<string>();
+  const safeQueuedDepthBySession = queuedDepthBySession ?? {};
+  const safeSessionAgentTurns = sessionAgentTurns ?? {};
+  if (safePendingConfirmations[sessionId] || safePendingBudgetApprovals[sessionId]) {
+    return 'waiting';
+  }
+  if (safeActiveLoopSessionIds.has(sessionId) || (safeQueuedDepthBySession[sessionId] ?? 0) > 0) {
+    return 'running';
+  }
+  const lastTurn = safeSessionAgentTurns[sessionId]?.at(-1);
+  if (lastTurn?.error) {
+    return 'error';
+  }
+  if (lastTurn?.done) {
+    return 'done';
+  }
+  return null;
+}
+
+function countDescendantRuntimeStates(
+  sessionId: string,
+  childSessionsByParent: Map<string, ChatSession[]>,
+  pendingConfirmations: Record<string, unknown>,
+  pendingBudgetApprovals: Record<string, unknown>,
+  activeLoopSessionIds: Set<string>,
+  queuedDepthBySession: Record<string, number>,
+  sessionAgentTurns: Record<string, AgentTurn[]>,
+): { running: number; waiting: number } {
+  const safeChildSessionsByParent = childSessionsByParent ?? new Map<string, ChatSession[]>();
+  const counts = { running: 0, waiting: 0 };
+  const pending = [...(safeChildSessionsByParent.get(sessionId) ?? [])];
+
+  while (pending.length > 0) {
+    const child = pending.shift();
+    if (!child) break;
+    const state = sessionRuntimeState(
+      child.id,
+      pendingConfirmations,
+      pendingBudgetApprovals,
+      activeLoopSessionIds,
+      queuedDepthBySession,
+      sessionAgentTurns,
+    );
+    if (state === 'waiting') {
+      counts.waiting += 1;
+    } else if (state === 'running') {
+      counts.running += 1;
+    }
+    pending.push(...(safeChildSessionsByParent.get(child.id) ?? []));
+  }
+
+  return counts;
+}
+
 export function SessionPanelSessionItem({
   session,
   depth,
@@ -80,6 +164,10 @@ export function SessionPanelSessionItem({
   originFilter,
   childSessionsByParent,
   pendingConfirmations,
+  pendingBudgetApprovals,
+  activeLoopSessionIds,
+  queuedDepthBySession,
+  sessionAgentTurns,
   renamingId,
   renameValue,
   renameRef,
@@ -101,6 +189,29 @@ export function SessionPanelSessionItem({
   const displayTitle = displayTitleForSession(session, childSessionsByParent);
   const sessionKind = sessionKindPresentation(session);
   const SessionKindIcon = sessionKind.icon;
+  const architectureLabel = architectureBadgeLabel(session);
+  const runtimeState = sessionRuntimeState(
+    session.id,
+    pendingConfirmations,
+    pendingBudgetApprovals,
+    activeLoopSessionIds,
+    queuedDepthBySession,
+    sessionAgentTurns,
+  );
+  const descendantStates = countDescendantRuntimeStates(
+    session.id,
+    childSessionsByParent,
+    pendingConfirmations,
+    pendingBudgetApprovals,
+    activeLoopSessionIds,
+    queuedDepthBySession,
+    sessionAgentTurns,
+  );
+  const activeDescendantLabel = descendantStates.waiting > 0
+    ? `${descendantStates.waiting} waiting`
+    : descendantStates.running > 0
+      ? `${descendantStates.running} active`
+      : null;
 
   return (
     <div
@@ -153,12 +264,36 @@ export function SessionPanelSessionItem({
               <span className="min-w-0 flex-1 break-words text-xs font-medium leading-snug">
                 {displayTitle}
               </span>
-              {Boolean(pendingConfirmations[session.id]) && (
+              {runtimeState === 'waiting' && (
                 <AlertTriangle
                   size={10}
                   className="text-warning shrink-0"
                   aria-label="Awaiting confirmation"
                   data-testid={`session-pending-confirmation-${session.id}`}
+                />
+              )}
+              {runtimeState === 'running' && (
+                <Loader2
+                  size={10}
+                  className="shrink-0 animate-spin text-sky-300"
+                  aria-label="Session running"
+                  data-testid={`session-running-${session.id}`}
+                />
+              )}
+              {runtimeState === 'done' && (
+                <CheckCircle2
+                  size={10}
+                  className="shrink-0 text-emerald-300"
+                  aria-label="Session completed"
+                  data-testid={`session-done-${session.id}`}
+                />
+              )}
+              {runtimeState === 'error' && (
+                <XCircle
+                  size={10}
+                  className="shrink-0 text-rose-300"
+                  aria-label="Session failed"
+                  data-testid={`session-error-${session.id}`}
                 />
               )}
             </div>
@@ -174,6 +309,23 @@ export function SessionPanelSessionItem({
               {personaName && (
                 <span className="text-[10px] text-base-content/65 bg-base-300/50 rounded px-1 py-0.5 leading-none truncate max-w-[7rem]">
                   {personaName}
+                </span>
+              )}
+              {architectureLabel && (
+                <span className="text-[9px] rounded border border-sky-500/20 bg-sky-500/10 px-1 py-0.5 leading-none text-sky-200 truncate max-w-[8rem]">
+                  {architectureLabel}
+                </span>
+              )}
+              {activeDescendantLabel && (
+                <span
+                  className={`text-[9px] rounded border px-1 py-0.5 leading-none truncate max-w-[7rem] ${
+                    descendantStates.waiting > 0
+                      ? 'border-warning/30 bg-warning/10 text-warning'
+                      : 'border-sky-500/20 bg-sky-500/10 text-sky-200'
+                  }`}
+                  data-testid={`session-descendant-activity-${session.id}`}
+                >
+                  {activeDescendantLabel}
                 </span>
               )}
               <span className="text-[10px] text-base-content/60 leading-none ml-auto shrink-0">

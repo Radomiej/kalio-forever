@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AgentRunContext, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
+import type { AgentBudgetApprovalRequest, AgentRunContext, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
 import type { CLIChildProjection } from '../features/chat/cliChildProjection.model';
 
 export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled' | 'expired';
@@ -37,6 +37,7 @@ interface AgentState {
   streamingMessageId: string | undefined;
   /** Pending tool confirmations keyed by sessionId — one per session at most */
   pendingConfirmations: Record<string, ToolConfirmationRequest>;
+  pendingBudgetApprovals: Record<string, AgentBudgetApprovalRequest>;
   availableTools: ToolMeta[];
   tools: ToolMeta[];
   /** Tool calls active in the current turn, in order */
@@ -68,6 +69,7 @@ interface AgentState {
 
   setStreaming: (streaming: boolean, messageId?: string) => void;
   setPendingConfirmation: (sessionId: string, req: ToolConfirmationRequest | null) => void;
+  setPendingBudgetApproval: (sessionId: string, req: AgentBudgetApprovalRequest | null) => void;
   setAvailableTools: (tools: ToolMeta[]) => void;
   setTools: (tools: ToolMeta[]) => void;
   getToolActivitiesForSession: (sessionId: string | null) => ToolActivity[];
@@ -117,6 +119,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   isStreaming: false,
   streamingMessageId: undefined,
   pendingConfirmations: {},
+  pendingBudgetApprovals: {},
   availableTools: [],
   tools: [],
   toolActivities: [],
@@ -148,6 +151,19 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
         return { pendingConfirmations: next };
       }
       return { pendingConfirmations: { ...s.pendingConfirmations, [sessionId]: req } };
+    }),
+  setPendingBudgetApproval: (sessionId, req) =>
+    set((s) => {
+      if (!sessionId.trim()) {
+        return s;
+      }
+
+      if (req === null) {
+        const next = { ...s.pendingBudgetApprovals };
+        delete next[sessionId];
+        return { pendingBudgetApprovals: next };
+      }
+      return { pendingBudgetApprovals: { ...s.pendingBudgetApprovals, [sessionId]: req } };
     }),
   setAvailableTools: (tools) => set({ availableTools: tools }),
   setTools: (tools) => set({ tools }),

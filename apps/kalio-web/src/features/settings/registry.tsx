@@ -1,5 +1,5 @@
 import type { ReactNode, ComponentType } from 'react';
-import { Bot, Plug, Folder, Database, Search, Wrench, Image, Send, ShieldAlert, DatabaseZap } from 'lucide-react';
+import { Bot, MessageSquareText, Plug, Folder, Database, Search, Wrench, Image, Send, ShieldAlert, DatabaseZap } from 'lucide-react';
 import { LLMPanel } from './LLMPanel';
 import { MCPSettingsPanel } from './MCPSettingsPanel';
 import { AllowedPathsPanel } from './AllowedPathsPanel';
@@ -10,6 +10,7 @@ import { ImageSettingsPanel } from './ImageSettingsPanel';
 import { TelegramSettings } from './TelegramSettings';
 import { HITLSettingsPanel } from './HITLSettingsPanel';
 import { AuditRetentionSettingsPanel } from './AuditRetentionSettingsPanel';
+import { ConversationSettingsPanel } from './ConversationSettingsPanel';
 
 export interface SettingsBlock {
   id: string;
@@ -20,6 +21,7 @@ export interface SettingsBlock {
 
 export const SETTINGS_BLOCKS: SettingsBlock[] = [
   { id: 'llm',          label: 'LLM Settings',     icon: <Bot size={16} />,      component: LLMPanel },
+  { id: 'conversation', label: 'Conversation',     icon: <MessageSquareText size={16} />, component: ConversationSettingsPanel },
   { id: 'hitl',         label: 'HITL Approvals',   icon: <ShieldAlert size={16} />, component: HITLSettingsPanel },
   { id: 'audit-retention', label: 'Audit Retention', icon: <DatabaseZap size={16} />, component: AuditRetentionSettingsPanel },
   { id: 'embeddings',   label: 'Embeddings',        icon: <Database size={16} />, component: EmbeddingsPanel },

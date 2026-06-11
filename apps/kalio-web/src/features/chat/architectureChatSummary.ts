@@ -82,10 +82,12 @@ export function findArchitectureRunInMessages(messages: ChatMessage[]): Architec
   }
 
   const runId = toolCalls[0].args['architectureRunId'] as string;
-  const schemaLabel = messages
-    .find((message) => message.role === 'user')
-    ?.content.match(/\[Architecture:\s*([^\]]+)\]/)?.[1]
-    ?? 'architecture-run';
+  const schemaLabel = typeof toolCalls[0].args['schemaName'] === 'string'
+    ? toolCalls[0].args['schemaName']
+    : messages
+      .find((message) => message.role === 'user')
+      ?.content.match(/\[Architecture:\s*([^\]]+)\]/)?.[1]
+      ?? 'architecture-run';
   const resultByCallId = new Map<string, SubagentToolResult>();
   messages
     .filter((message) => message.role === 'tool_result' && message.toolCallId)

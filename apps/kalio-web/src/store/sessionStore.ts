@@ -81,7 +81,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   setSessions: (sessions) => set({ sessions }),
   addSession: (session) =>
-    set((s) => ({ sessions: [...s.sessions, session] })),
+    set((s) => ({
+      sessions: s.sessions.some((item) => item.id === session.id)
+        ? s.sessions.map((item) => item.id === session.id ? { ...item, ...session } : item)
+        : [...s.sessions, session],
+    })),
   createSession: (title) => {
     const id = crypto.randomUUID();
     const newSession: ChatSession = {

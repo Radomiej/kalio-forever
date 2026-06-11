@@ -502,6 +502,7 @@ describe('@kalio/types contract shape', () => {
         label: string;
         kind: 'parallel' | 'role' | 'router' | 'artifact';
         roleSlotId?: string;
+        maxToolAttempts?: number;
         behavior?: {
           mode: ArchitectureNodeBehaviorMode;
           fanOut?: ArchitectureNodeFanOutMode;
@@ -568,6 +569,7 @@ describe('@kalio/types contract shape', () => {
         label: string;
         kind: 'parallel' | 'role' | 'router' | 'artifact';
         roleSlotId?: string;
+        maxToolAttempts?: number;
         behavior?: {
           mode: ArchitectureNodeBehaviorMode;
           fanOut?: ArchitectureNodeFanOutMode;

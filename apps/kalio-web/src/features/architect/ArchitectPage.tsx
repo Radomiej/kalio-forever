@@ -211,6 +211,19 @@ export function ArchitectPage() {
     });
   };
 
+  const setNodeMaxToolAttemptsOverride = (nodeId: string, maxToolAttempts?: number) => {
+    const originalValue = selectedSchema?.nodes.find((node) => node.id === nodeId)?.maxToolAttempts;
+    setGraphDraft((current) => {
+      const next = { ...current.nodeMaxToolAttempts };
+      if ((originalValue ?? undefined) === maxToolAttempts) {
+        delete next[nodeId];
+      } else {
+        next[nodeId] = maxToolAttempts;
+      }
+      return { ...current, nodeMaxToolAttempts: next };
+    });
+  };
+
   const setContextPolicyOverride = (slotId: string, override: ArchitectureContextPolicyOverride) => {
     setContextPolicyOverrides((current) => {
       const next = { ...current };
@@ -610,6 +623,7 @@ export function ArchitectPage() {
           onPersonaOverride={setPersonaOverride}
           onNodeKindOverride={setNodeKindOverride}
           onNodeBehaviorOverride={setNodeBehaviorOverride}
+          onNodeMaxToolAttemptsOverride={setNodeMaxToolAttemptsOverride}
           onCollapsedChange={setInspectorCollapsed}
           onContextPolicyOverride={setContextPolicyOverride}
         />

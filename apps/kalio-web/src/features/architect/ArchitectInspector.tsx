@@ -15,6 +15,7 @@ interface ArchitectInspectorProps {
   onPersonaOverride: (nodeId: string, personaId: string) => void;
   onNodeKindOverride: (nodeId: string, kind: ArchitectureNodeKind) => void;
   onNodeBehaviorOverride: (nodeId: string, behavior: NonNullable<ArchitectureSchemaNode['behavior']>) => void;
+  onNodeMaxToolAttemptsOverride: (nodeId: string, maxToolAttempts?: number) => void;
   onContextPolicyOverride: (slotId: string, override: ArchitectureContextPolicyOverride) => void;
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
@@ -51,6 +52,7 @@ export function ArchitectInspector({
   onPersonaOverride,
   onNodeKindOverride,
   onNodeBehaviorOverride,
+  onNodeMaxToolAttemptsOverride,
   onContextPolicyOverride,
   collapsed = false,
   onCollapsedChange,
@@ -240,6 +242,26 @@ export function ArchitectInspector({
                   onChange={onNodeBehaviorOverride}
                 />
               )}
+
+              <div className="mt-4 form-control gap-1">
+                <label className="label-text text-xs font-semibold text-base-content/70">Node tool loop override</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  className="input input-bordered input-sm h-9 min-h-9 w-full font-mono"
+                  placeholder="Use persona/system default"
+                  value={node.maxToolAttempts ?? ''}
+                  onChange={(event) => {
+                    const value = event.target.value.trim();
+                    onNodeMaxToolAttemptsOverride(
+                      node.id,
+                      value.length === 0 ? undefined : Math.max(1, Math.min(100, parseInt(value, 10) || 1)),
+                    );
+                  }}
+                  data-testid="architect-node-max-tool-attempts"
+                />
+              </div>
 
               {roleSlotId && (
                 <section className="mt-4 rounded-md border border-base-300/80 bg-base-200/50 p-2.5">

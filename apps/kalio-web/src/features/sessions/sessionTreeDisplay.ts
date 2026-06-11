@@ -25,14 +25,8 @@ export function displayTitleForSession(
   session: ChatSession,
   childSessionsByParent: Map<string, ChatSession[]>,
 ): string {
-  if (session.title !== 'New Chat') {
-    return session.title || `Session ${session.id.slice(0, 6)}`;
-  }
-
-  const architectureChild = (childSessionsByParent.get(session.id) ?? [])
-    .find((child) => child.kind === 'agent-flow' || child.title.startsWith('Architecture:'));
-
-  return architectureChild?.title ?? session.title;
+  void childSessionsByParent;
+  return session.title || `Session ${session.id.slice(0, 6)}`;
 }
 
 export function hasExpandedAncestor(

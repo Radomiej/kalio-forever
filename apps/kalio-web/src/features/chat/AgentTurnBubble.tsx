@@ -8,6 +8,7 @@ import type { ToolActivity } from '../../store/agentStore';
 import { findArchitectureRunInMessages } from './architectureChatSummary';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
 import { LiveToolCallBubble, HistoryToolCallBubble } from './ToolCallBubble';
+import { eventBus } from '../../services/eventBus';
 
 interface Props {
   turn: AgentTurn;
@@ -54,7 +55,14 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
 
 export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props) {
   const { messages, streamingChunks, thinkingChunks } = useSessionStore();
-  const { callIdToName: persistentCallIdToName, toolArgProgress, setCanvasFocus } = useAgentStore();
+  const {
+    callIdToName: persistentCallIdToName,
+    toolArgProgress,
+    setCanvasFocus,
+    pendingBudgetApprovals,
+    setPendingBudgetApproval,
+  } = useAgentStore();
+  const pendingBudgetApproval = pendingBudgetApprovals[turn.sessionId];
 
   // Build callId → toolName from all available sources
   const toolCallIdToName = new Map<string, string>(Object.entries(persistentCallIdToName));
@@ -230,6 +238,41 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
                     ? 'Reached iteration limit'
                     : turn.error.message}
               </span>
+            </div>
+          )}
+          {pendingBudgetApproval && !turn.done && (
+            <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning/85" data-testid="turn-budget-approval">
+              <div className="font-medium">
+                Agent reached tool loop limit {pendingBudgetApproval.usedIterations}/{pendingBudgetApproval.currentLimit}
+              </div>
+              <div className="mt-1 text-warning/70">
+                Continue with more tool requests for this run.
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {[
+                  ['block', 'Block'],
+                  ['allow_one', '+1'],
+                  ['allow_ten', '+10'],
+                  ['allow_unlimited', 'Unlimited'],
+                ].map(([decision, label]) => (
+                  <button
+                    key={decision}
+                    className={`btn btn-xs ${decision === 'block' ? 'btn-ghost' : 'btn-warning'}`}
+                    onClick={() => {
+                      eventBus.approveAgentBudget({
+                        requestId: pendingBudgetApproval.requestId,
+                        sessionId: pendingBudgetApproval.sessionId,
+                        decision: decision as 'block' | 'allow_one' | 'allow_ten' | 'allow_unlimited',
+                      });
+                      if (decision === 'block') {
+                        setPendingBudgetApproval(pendingBudgetApproval.sessionId, null);
+                      }
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

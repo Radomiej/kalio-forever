@@ -12,6 +12,8 @@ import { buildArchitectureSlotToolPolicy } from '../chat/architecture-slot-tool-
 import { SUBAGENT_RUNTIME, type SubagentEmit, type SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { FINAL_ARTIFACT_CONTRACT_INSTRUCTION, parseFinalArtifactContract } from './architecture-final-artifact-contract';
 import { createArchitectureBranchStreamHook, type ArchitectureBranchStreamSnapshot } from './architecture-stream-hooks';
+import { PersonaService } from '../persona/persona.service';
+import { CredentialsService } from '../credentials/credentials.service';
 
 export const ARCHITECTURE_ROLE_EXECUTOR = Symbol('ARCHITECTURE_ROLE_EXECUTOR');
 
@@ -74,6 +76,8 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     @Optional()
     @Inject(SUBAGENT_RUNTIME)
     private readonly subagentRuntime?: SubagentRuntimePort,
+    @Optional() private readonly personaService?: PersonaService,
+    @Optional() private readonly credentialsService?: CredentialsService,
   ) {}
 
   async execute(input: ArchitectureRoleExecutionInput): Promise<ArchitectureRoleExecutionResult> {
@@ -131,7 +135,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         slotPolicy: slotPolicy ?? undefined,
         architectureContext: input.run.context,
         timeoutMs: this.timeoutMsForSlot(input),
-        maxIterations: this.maxIterationsForSlot(input),
+        maxIterations: await this.maxIterationsForSlot(input),
         vfsMode: 'shared',
         copyOutputs: false,
         autoApproveTools: this.autoApproveToolsForSlot(input),
@@ -234,10 +238,21 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       && value <= 1_200_000;
   }
 
-  private maxIterationsForSlot(input: ArchitectureRoleExecutionInput): number {
+  private async maxIterationsForSlot(input: ArchitectureRoleExecutionInput): Promise<number> {
+    if (typeof input.node?.maxToolAttempts === 'number') {
+      return Math.max(1, Math.min(100, Math.round(input.node.maxToolAttempts)));
+    }
+    const personaOverride = await this.personaService?.getSessionConfig(input.personaId).then((config) => config?.maxToolAttempts ?? null);
+    if (typeof personaOverride === 'number') {
+      return Math.max(1, Math.min(100, Math.round(personaOverride)));
+    }
     const configured = this.maxIterationsFromContext(input.run.context, input.slot.id);
     if (configured !== undefined) {
       return configured;
+    }
+    const global = await this.credentialsService?.getMaxToolAttempts();
+    if (typeof global === 'number' && Number.isFinite(global)) {
+      return Math.max(1, Math.min(100, Math.round(global)));
     }
     return input.slot.slotType === 'tool_executor' ? 2 : 4;
   }

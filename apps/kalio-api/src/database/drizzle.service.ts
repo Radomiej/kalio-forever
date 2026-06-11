@@ -119,6 +119,7 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
     this.ensurePersonaColumn('avatar_palette_key', 'text');
     this.ensurePersonaColumn('avatar_index', 'integer DEFAULT 0');
     this.ensurePersonaColumn('skill_ids', `text NOT NULL DEFAULT '[]'`);
+    this.ensurePersonaColumn('max_tool_attempts', 'integer');
   }
 
   private ensurePersonaColumn(name: string, definition: string): void {

@@ -23,8 +23,11 @@ import {
   approveRAAppDraft,
   deleteRAAppGroup,
   discardRAAppDraft,
+  getApiBaseUrl,
   getRAAppGroups,
   getRAApps,
+  getRAAppGroupDownloadUrl,
+  getSessionVfsServeUrl,
   rollbackRAApp,
   uploadRAApp,
 } from './apiClient';
@@ -144,5 +147,15 @@ describe('apiClient helpers', () => {
 
   it('exports the configured shared client instance', () => {
     expect(apiClient).toBeDefined();
+  });
+
+  it('resolves absolute helper urls against the current browser origin for relative api base urls', () => {
+    expect(getApiBaseUrl()).toBe(window.location.origin);
+    expect(getSessionVfsServeUrl('session-1', 'drafts/index.html')).toBe(
+      `${window.location.origin}/api/sessions/session-1/vfs/serve-path/drafts/index.html`,
+    );
+    expect(getRAAppGroupDownloadUrl('cats-suite', '1.0.0')).toBe(
+      `${window.location.origin}/api/ra-apps/groups/cats-suite/download/1.0.0`,
+    );
   });
 });

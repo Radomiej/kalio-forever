@@ -3,6 +3,7 @@ import type { PersonaService } from '../../persona/persona.service';
 import type { SkillsService } from '../../skills/skills.service';
 import { ContextAssemblyService } from '../context-assembly.service';
 import { ToolPolicyService } from '../tool-policy.service';
+import { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
 import { SubagentRuntimeService } from '../subagent-runtime.service';
 import { ChatService } from '../chat.service';
@@ -76,6 +77,9 @@ export function makeChatService(params: {
     params.credentialsService as CredentialsService,
     params.auditService as AuditService,
     llmTurnRuntime,
+    {
+      requestAdditionalBudget: vi.fn().mockResolvedValue(null),
+    } as unknown as AgentBudgetApprovalService,
     undefined,
     contextAssembly,
   );
@@ -119,6 +123,9 @@ export function makeSubagentRuntime(params: {
     params.vfs,
     contextAssembly,
     toolPolicy,
+    {
+      requestAdditionalBudget: vi.fn().mockResolvedValue(null),
+    } as unknown as AgentBudgetApprovalService,
     params.audit as AuditService,
   );
 }

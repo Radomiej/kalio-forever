@@ -12,8 +12,10 @@ import { ContextAssemblyService } from './context-assembly.service';
 import { LLMTurnRuntimeService } from './llm-turn-runtime.service';
 import { ToolPolicyService } from './tool-policy.service';
 import { buildSubagentLLMAuditData } from './subagent-llm-audit.helpers';
+import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
+import { TurnState } from './turn-state';
 
 const DEFAULT_MAX_ITERATIONS = 8;
 
@@ -52,6 +54,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     private readonly vfs: VFSService,
     private readonly contextAssembly: ContextAssemblyService,
     private readonly toolPolicy: ToolPolicyService,
+    private readonly agentBudgetApprovals: AgentBudgetApprovalService,
     @Optional() private readonly audit?: AuditService,
   ) {}
 
@@ -171,9 +174,6 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
 
     const controller = new AbortController();
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const maxIterations = Number.isFinite(request.maxIterations)
-      ? Math.max(1, Math.min(100, Math.round(request.maxIterations as number)))
-      : DEFAULT_MAX_ITERATIONS;
 
     try {
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -213,6 +213,9 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       const llmAuditData = buildSubagentLLMAuditData(runtimeConfig, assembledContext.model, request.model);
       const requestModel = request.model?.trim();
       const effectiveModel = requestModel || assembledContext.model || undefined;
+      const maxIterations = Number.isFinite(request.maxIterations)
+        ? Math.max(1, Math.min(100, Math.round(request.maxIterations as number)))
+        : Math.max(1, Math.min(100, Math.round(assembledContext.personaConfig?.maxToolAttempts ?? DEFAULT_MAX_ITERATIONS)));
 
       const loopResult = await Promise.race([
         this.llmTurnRuntime.runAgentLoop({
@@ -232,6 +235,30 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           auditMetadata: { ...llmAuditData, ...(request.auditContext ?? {}) },
           firstMessageId: `subagent-${agentRun.agentRunId}`,
           messageIdPrefix: `subagent-${agentRun.agentRunId}`,
+          callbacks: {
+            onIterationLimitReached: async ({ iterationCount, currentLimit }) => (
+              this.agentBudgetApprovals.requestAdditionalBudget(
+                {
+                  sessionId: childSessionId,
+                  vfsSessionId,
+                  messageId: `subagent-${agentRun.agentRunId}`,
+                  abortSignal: controller.signal,
+                  state: new TurnState(),
+                  emit: trackingEmit ?? (() => undefined),
+                  agentRun,
+                },
+                {
+                  currentLimit,
+                  usedIterations: iterationCount,
+                  personaId,
+                  runtimeKind,
+                  nodeId: typeof request.auditContext?.nodeId === 'string' ? request.auditContext.nodeId : undefined,
+                  roleSlotId: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : undefined,
+                  requestedBy: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : 'subagent',
+                },
+              )
+            ),
+          },
         }),
         timeoutPromise,
       ]);

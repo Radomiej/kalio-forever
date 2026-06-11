@@ -102,11 +102,16 @@ describe('ChatWelcomeScreen', () => {
         onArchitectureRun={onArchitectureRun}
         onDraftChange={vi.fn()}
         onPersonaChange={vi.fn()}
+        onProjectPathChange={vi.fn()}
         onSend={onSend}
         personas={[persona()]}
+        projectPath=""
         selectedArchitectureId="strategic-decision-council"
       />,
     );
+
+    expect(screen.getByTestId('welcome-persona-select')).toBeDisabled();
+    expect(screen.getByTestId('welcome-project-path-input')).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId('welcome-prompt-input'), {
       target: { value: 'Decide with the council.' },
@@ -131,8 +136,10 @@ describe('ChatWelcomeScreen', () => {
         onArchitectureRun={onArchitectureRun}
         onDraftChange={vi.fn()}
         onPersonaChange={vi.fn()}
+        onProjectPathChange={vi.fn()}
         onSend={onSend}
         personas={[persona()]}
+        projectPath=""
         selectedArchitectureId="single-chat"
       />,
     );
@@ -145,6 +152,34 @@ describe('ChatWelcomeScreen', () => {
     expect(onSend).toHaveBeenCalledWith('Answer normally.', 'default');
     expect(onArchitectureRun).not.toHaveBeenCalled();
     expect(screen.getByTestId('welcome-routing-summary')).toHaveTextContent('Direct chat runtime');
+  });
+
+  it('keeps the project path editable for launch scope', () => {
+    const onProjectPathChange = vi.fn();
+
+    render(
+      <ChatWelcomeScreen
+        activeSession={session()}
+        activeSessionId="sess-1"
+        architectures={[schema()]}
+        isStreaming={false}
+        onArchitectureChange={vi.fn()}
+        onArchitectureRun={vi.fn()}
+        onDraftChange={vi.fn()}
+        onPersonaChange={vi.fn()}
+        onProjectPathChange={onProjectPathChange}
+        onSend={vi.fn()}
+        personas={[persona()]}
+        projectPath="C:\\Projekty\\kalio-forever"
+        selectedArchitectureId="single-chat"
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('welcome-project-path-input'), {
+      target: { value: 'C:\\Projekty\\family-quest' },
+    });
+
+    expect(onProjectPathChange).toHaveBeenCalledWith('C:\\Projekty\\family-quest');
   });
 });
 

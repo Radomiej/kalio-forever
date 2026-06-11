@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { FolderOpen, File, Download, Archive, RefreshCw, X, Loader, Eye, FileText, FileJson, FileCode, FileImage, Upload } from 'lucide-react';
-import { apiClient } from '../../services/apiClient';
+import { apiClient, getApiBaseUrl } from '../../services/apiClient';
 import type { VFSFile, VFSListResult, VFSReadResult } from '@kalio/types';
 
 interface ConversationFilesBarProps {
@@ -30,7 +30,7 @@ function fileIcon(mimeType: string | undefined) {
   return <File size={16} className="text-base-content/50" />;
 }
 
-const API_BASE = apiClient.defaults.baseURL ?? '';
+const API_BASE = getApiBaseUrl();
 
 export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationFilesBarProps) {
   const [files, setFiles] = useState<VFSFile[]>([]);

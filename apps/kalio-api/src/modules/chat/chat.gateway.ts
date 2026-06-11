@@ -13,6 +13,8 @@ import type { AgentFlowRunSnapshot, SocketEvents } from '@kalio/types';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
+import { SessionEventsService } from './session-events.service';
+import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { RAAppHITLService } from '../raapp/raapp-hitl.service';
@@ -37,10 +39,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly pipeline: SessionPipelineService,
     private readonly raappHITL: RAAppHITLService,
     private readonly sessionsService: SessionsService,
+    private readonly sessionEvents: SessionEventsService,
+    private readonly agentBudgetApprovals: AgentBudgetApprovalService,
     @Optional() @Inject(AGENT_FLOW_RUNTIME) private readonly agentFlowRuntime?: AgentFlowRuntimePort,
     @Optional() @Inject(CLI_AGENT_SESSION_RUNTIME) private readonly cliAgentSessionRuntime?: CLIAgentSessionRuntimePort,
     @Optional() private readonly moduleRef?: ModuleRef,
-  ) {}
+  ) {
+    this.sessionEvents.onSessionCreated(({ session }) => {
+      this.emitSessionLifecycleEvent('session:created', session);
+    });
+    this.sessionEvents.onSessionUpdated(({ session }) => {
+      this.emitSessionLifecycleEvent('session:updated', session);
+    });
+  }
 
   handleConnection(client: Socket): void {
     this.logger.log(`Client connected: ${client.id}`);
@@ -73,6 +84,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
         replayedRequestIds.add(request.requestId);
         client.emit('tool:confirmation_required', request);
+      });
+      this.agentBudgetApprovals.getPendingApprovals(sessionId).forEach((request) => {
+        replayedRequestIds.add(request.requestId);
+        client.emit('agent:budget_required', request);
       });
     };
 
@@ -327,6 +342,45 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return descendantSessionIds;
+  }
+
+  private emitSessionLifecycleEvent<K extends 'session:created' | 'session:updated'>(
+    event: K,
+    payload: SocketEvents[K],
+  ): void {
+    const sessionId = event === 'session:created' ? payload.id : payload.id;
+    const sessionSubscribers = this.sessionSubscribers.get(sessionId);
+    sessionSubscribers?.forEach((socketId) => {
+      this.clients.get(socketId)?.emit(event, payload);
+    });
+
+    const parentSessionId = payload.parentSessionId;
+    if (parentSessionId) {
+      const parentSubscribers = this.sessionSubscribers.get(parentSessionId);
+      parentSubscribers?.forEach((socketId) => {
+        this.clients.get(socketId)?.emit(event, payload);
+      });
+    }
+  }
+
+  @SubscribeMessage('agent:budget_approve')
+  handleAgentBudgetApprove(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: SocketEvents['agent:budget_approve'],
+  ): void {
+    const socketSessions = this.socketSessions.get(client.id);
+    if (!socketSessions?.has(payload.sessionId)) {
+      this.logger.warn(`agent:budget_approve rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
+      return;
+    }
+    const status = this.agentBudgetApprovals.resolveApproval(payload.requestId, payload.sessionId, payload.decision);
+    if (status === 'not_found') {
+      client.emit('agent:budget_invalidated', {
+        requestId: payload.requestId,
+        sessionId: payload.sessionId,
+        reason: 'not_found',
+      } satisfies SocketEvents['agent:budget_invalidated']);
+    }
   }
 
   private async stopAgentFlowRunsForSessions(sessionIds: string[]): Promise<void> {

@@ -175,6 +175,20 @@ describe('SessionsController', () => {
       await controller.update('sess-1', { personaId: 'builder' });
       expect(svc.update).toHaveBeenCalledWith('sess-1', { personaId: 'builder' });
     });
+
+    it('updates a session runtimeContext', async () => {
+      const runtimeContext = {
+        runtimeKind: 'chat' as const,
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      };
+
+      await controller.update('sess-1', { runtimeContext });
+
+      expect(svc.update).toHaveBeenCalledWith('sess-1', { runtimeContext });
+    });
   });
 
   describe('generateTitle()', () => {

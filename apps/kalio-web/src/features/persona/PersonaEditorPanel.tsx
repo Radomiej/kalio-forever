@@ -29,6 +29,7 @@ export function PersonaEditorPanel(props: Props) {
   const [name, setName] = useState('');
   const [model, setModel] = useState('gpt-4o-mini');
   const [systemPrompt, setSystemPrompt] = useState('You are a helpful assistant.');
+  const [maxToolAttempts, setMaxToolAttempts] = useState<number | ''>('');
   const [allowedTools, setAllowedTools] = useState<string[]>([]);
   const [mcpPolicy, setMcpPolicy] = useState<MCPPolicy>('allow_all');
   const [avatar, setAvatar] = useState<PersonaAvatarToken>(() => defaultAvatarFromName(''));
@@ -41,6 +42,7 @@ export function PersonaEditorPanel(props: Props) {
       setName('');
       setModel('gpt-4o-mini');
       setSystemPrompt('You are a helpful assistant.');
+      setMaxToolAttempts('');
       setAllowedTools([]);
       setMcpPolicy('allow_all');
       setAvatar(defaultAvatarFromName(''));
@@ -53,6 +55,7 @@ export function PersonaEditorPanel(props: Props) {
     setName(persona.name);
     setModel(persona.model);
     setSystemPrompt(persona.systemPrompt);
+    setMaxToolAttempts(persona.maxToolAttempts ?? '');
     setAllowedTools(persona.allowedTools ?? []);
     setMcpPolicy(persona.mcpPolicy ?? 'allow_all');
     setAvatar({
@@ -77,6 +80,7 @@ export function PersonaEditorPanel(props: Props) {
         name: name.trim(),
         model: model.trim(),
         systemPrompt: systemPrompt.trim(),
+        maxToolAttempts: maxToolAttempts === '' ? undefined : maxToolAttempts,
         allowedTools,
         mcpPolicy,
         avatarSeed: avatar.avatarSeed,
@@ -167,6 +171,30 @@ export function PersonaEditorPanel(props: Props) {
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
           />
+        </div>
+
+        <div className="rounded-lg border border-base-300 bg-base-100/70 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-base-content/45">Tool loop override</p>
+              <p className="mt-1 text-xs text-base-content/45">
+                Leave empty to use the system default. Persona override applies to direct chats and workflow slots without node override.
+              </p>
+            </div>
+            <input
+              data-testid="persona-max-tool-attempts-input"
+              type="number"
+              min={1}
+              max={100}
+              className="input input-bordered input-sm w-28 font-mono"
+              placeholder="default"
+              value={maxToolAttempts}
+              onChange={(event) => {
+                const value = event.target.value;
+                setMaxToolAttempts(value === '' ? '' : Math.max(1, Math.min(100, parseInt(value, 10) || 1)));
+              }}
+            />
+          </div>
         </div>
 
         <div className="rounded-lg border border-base-300 bg-base-100/70 p-4">

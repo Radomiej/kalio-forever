@@ -369,6 +369,119 @@ describe('ArchitectureRoleExecutorService', () => {
     expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].maxIterations).toBe(5);
   });
 
+  it('prefers node maxToolAttempts over persona, context, and global tool budgets', async () => {
+    const schema = getSchema();
+    const slot = schema.roleSlots[0];
+    const node = schema.nodes.find((candidate) => candidate.roleSlotId === slot?.id);
+    if (!slot || !node) throw new Error('Expected slot and node');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'Subagent result',
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 42,
+      })),
+    };
+    const personaService = {
+      getSessionConfig: vi.fn().mockResolvedValue({ maxToolAttempts: 60 }),
+    } as unknown as import('../persona/persona.service').PersonaService;
+    const credentialsService = {
+      getMaxToolAttempts: vi.fn().mockResolvedValue(40),
+    } as unknown as import('../credentials/credentials.service').CredentialsService;
+    const service = new ArchitectureRoleExecutorService(subagentRuntime, personaService, credentialsService);
+
+    await service.execute({
+      schema,
+      run: {
+        ...createRun('subagent_execution'),
+        context: { maxArchitectureSubagentIterations: 20 },
+      },
+      slot,
+      node: { ...node, maxToolAttempts: 100 },
+      branchSessionId: 'branch-1',
+      personaId: slot.defaultPersonaId,
+    });
+
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].maxIterations).toBe(100);
+  });
+
+  it('prefers persona maxToolAttempts over context and global tool budgets when node override is absent', async () => {
+    const schema = getSchema();
+    const slot = schema.roleSlots[0];
+    if (!slot) throw new Error('Expected slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'Subagent result',
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 42,
+      })),
+    };
+    const personaService = {
+      getSessionConfig: vi.fn().mockResolvedValue({ maxToolAttempts: 60 }),
+    } as unknown as import('../persona/persona.service').PersonaService;
+    const credentialsService = {
+      getMaxToolAttempts: vi.fn().mockResolvedValue(40),
+    } as unknown as import('../credentials/credentials.service').CredentialsService;
+    const service = new ArchitectureRoleExecutorService(subagentRuntime, personaService, credentialsService);
+
+    await service.execute({
+      schema,
+      run: {
+        ...createRun('subagent_execution'),
+        context: { maxArchitectureSubagentIterations: 20 },
+      },
+      slot,
+      branchSessionId: 'branch-1',
+      personaId: slot.defaultPersonaId,
+    });
+
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].maxIterations).toBe(60);
+  });
+
+  it('falls back to global maxToolAttempts when node, persona, and context overrides are absent', async () => {
+    const schema = getSchema();
+    const slot = schema.roleSlots[0];
+    if (!slot) throw new Error('Expected slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'Subagent result',
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 42,
+      })),
+    };
+    const personaService = {
+      getSessionConfig: vi.fn().mockResolvedValue({ maxToolAttempts: null }),
+    } as unknown as import('../persona/persona.service').PersonaService;
+    const credentialsService = {
+      getMaxToolAttempts: vi.fn().mockResolvedValue(40),
+    } as unknown as import('../credentials/credentials.service').CredentialsService;
+    const service = new ArchitectureRoleExecutorService(subagentRuntime, personaService, credentialsService);
+
+    await service.execute({
+      schema,
+      run: createRun('subagent_execution'),
+      slot,
+      branchSessionId: 'branch-1',
+      personaId: slot.defaultPersonaId,
+    });
+
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].maxIterations).toBe(40);
+  });
+
   it('allows architecture graph runs to use high subagent iteration budgets when explicitly configured', async () => {
     const schema = getSchema();
     const slot = schema.roleSlots[0];

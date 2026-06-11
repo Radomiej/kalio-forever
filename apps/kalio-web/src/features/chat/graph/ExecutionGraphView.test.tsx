@@ -49,6 +49,9 @@ const {
   agentState,
   apiGetMock,
   apiPostMock,
+  apiPatchMock,
+  startArchitectureRunMock,
+  startGoalGuardAgentFlowRunMock,
   confirmToolMock,
   cancelToolMock,
   stopTurnMock,
@@ -80,6 +83,9 @@ const {
   },
   apiGetMock: vi.fn(),
   apiPostMock: vi.fn(),
+  apiPatchMock: vi.fn(),
+  startArchitectureRunMock: vi.fn(),
+  startGoalGuardAgentFlowRunMock: vi.fn(),
   confirmToolMock: vi.fn(),
   cancelToolMock: vi.fn(),
   stopTurnMock: vi.fn(),
@@ -98,8 +104,18 @@ vi.mock('../../../services/apiClient', () => ({
   apiClient: {
     get: apiGetMock,
     post: apiPostMock,
+    patch: apiPatchMock,
   },
 }));
+
+vi.mock('../../architect/architect.api', async () => {
+  const actual = await vi.importActual<typeof import('../../architect/architect.api')>('../../architect/architect.api');
+  return {
+    ...actual,
+    startArchitectureRun: startArchitectureRunMock,
+    startGoalGuardAgentFlowRun: startGoalGuardAgentFlowRunMock,
+  };
+});
 
 vi.mock('../../../services/eventBus', () => ({
   eventBus: {
@@ -197,6 +213,23 @@ describe('ExecutionGraphView empty-session state', () => {
     sessionState.updateSession.mockReset();
     apiGetMock.mockResolvedValue({ data: [makePersona(), makePersona({ id: 'persona-child', name: 'UX Designer', model: 'claude-sonnet-4.6' })] });
     apiPostMock.mockReset();
+    apiPatchMock.mockReset();
+    startArchitectureRunMock.mockReset();
+    startGoalGuardAgentFlowRunMock.mockReset();
+    startArchitectureRunMock.mockResolvedValue({
+      run: { id: 'workflow-run-1', schemaId: 'strategic-decision-council', prompt: 'Run the workflow', executionMode: 'subagent_execution', status: 'completed', createdAt: 1, updatedAt: 2 },
+      events: [],
+      graph: { runId: 'workflow-run-1', nodes: [], edges: [] },
+      chat: { runId: 'workflow-run-1', messages: [] },
+    });
+    startGoalGuardAgentFlowRunMock.mockResolvedValue({
+      run: { id: 'goal-run-1', schemaId: 'goal-master-delivery-loop', prompt: 'Run the workflow', executionMode: 'session_branches', status: 'completed', createdAt: 1, updatedAt: 2 },
+      events: [],
+      graph: { runId: 'goal-run-1', nodes: [], edges: [] },
+      chat: { runId: 'goal-run-1', messages: [] },
+      agentFlowRunId: 'agent-flow-1',
+      agentFlowStatus: 'done',
+    });
     apiPostMock.mockResolvedValue({
       data: {
         id: 'new-graph-session',
@@ -241,22 +274,16 @@ describe('ExecutionGraphView empty-session state', () => {
     sendMessageMock.mockReturnValue(true);
   });
 
-  it('shows session suggestions and live agent activity when no session is selected', async () => {
+  it('shows the shared launch screen when no session is selected', async () => {
     await renderExecutionGraphView();
 
-    expect(screen.getByText('Pick a session')).toBeInTheDocument();
-    expect(screen.getByLabelText('Graph overview help')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open session Main UI task from graph overview' })).toBeInTheDocument();
+    expect(screen.getByTestId('graph-empty-screen')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-empty-persona-select')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-empty-architecture-select')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-empty-project-path-input')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Direct chat runtime');
     expect(screen.getAllByText('UX Designer').length).toBeGreaterThan(0);
     expect(screen.getAllByText('run_subagent').length).toBeGreaterThan(0);
-  });
-
-  it('opens a suggested session from the empty graph state', async () => {
-    await renderExecutionGraphView();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open session Main UI task from graph overview' }));
-
-    expect(sessionState.setActiveSession).toHaveBeenCalledWith('session-1');
   });
 
   it('creates a new chat and sends the first prompt when graph view has no active session', async () => {
@@ -268,7 +295,7 @@ describe('ExecutionGraphView empty-session state', () => {
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Start from graph' },
     });
-    fireEvent.click(screen.getByTestId('graph-empty-send-prompt'));
+    fireEvent.click(screen.getByTestId('graph-empty-run-prompt'));
 
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
       personaId: 'default',
@@ -288,6 +315,33 @@ describe('ExecutionGraphView empty-session state', () => {
     });
   });
 
+  it('persists the project path on graph launch and sends it with the created session', async () => {
+    sessionState.activeSessionId = null;
+    sessionState.sessions = [];
+
+    await renderExecutionGraphView();
+
+    fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
+      target: { value: 'C:\\Projekty\\kalio-forever' },
+    });
+    fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
+      target: { value: 'Start scoped graph' },
+    });
+    fireEvent.click(screen.getByTestId('graph-empty-run-prompt'));
+
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
+      personaId: 'default',
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      },
+      title: 'New Chat',
+    }));
+  });
+
   it('keeps the graph shell visible when the active session has no execution nodes yet', async () => {
     sessionState.activeSessionId = 'session-1';
     sessionState.sessionMessages = { 'session-1': [] };
@@ -296,11 +350,9 @@ describe('ExecutionGraphView empty-session state', () => {
 
     expect(screen.getByRole('heading', { name: 'Execution Graph' })).toBeInTheDocument();
     expect(screen.getByText('Main UI task')).toBeInTheDocument();
-    expect(screen.getByLabelText('Empty graph help')).toBeInTheDocument();
-    expect(screen.getByLabelText('Empty graph help').tagName).toBe('BUTTON');
+    expect(screen.getByTestId('graph-empty-screen')).toBeInTheDocument();
     expect(screen.queryByText('No execution nodes yet for this session.')).toBeNull();
-    expect(screen.getByTestId('graph-empty-composer')).toBeInTheDocument();
-    expect(screen.getByTestId('graph-empty-send-prompt')).toHaveClass('min-h-10');
+    expect(screen.getByTestId('graph-empty-run-prompt')).toBeInTheDocument();
   });
 
   it('starts the first chat message directly from the empty graph state', async () => {
@@ -315,7 +367,7 @@ describe('ExecutionGraphView empty-session state', () => {
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Start this graph session' },
     });
-    fireEvent.click(screen.getByTestId('graph-empty-send-prompt'));
+    fireEvent.click(screen.getByTestId('graph-empty-run-prompt'));
 
     expect(sessionState.updateSession).toHaveBeenCalledWith('session-1', { title: 'Start this graph session' });
     expect(sessionState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -330,6 +382,169 @@ describe('ExecutionGraphView empty-session state', () => {
       content: 'Start this graph session',
       personaId: 'default',
     });
+  });
+
+  it('runs the selected workflow when the launch screen switches to workflow mode', async () => {
+    sessionState.activeSessionId = null;
+    sessionState.sessions = [];
+
+    apiGetMock.mockImplementation((url: string) => {
+      if (url === '/api/personas') {
+        return Promise.resolve({ data: [makePersona()] });
+      }
+      if (url === '/api/architecture-registry/schemas') {
+        return Promise.resolve({
+          data: [
+            {
+              id: 'goal-master-delivery-loop',
+              name: 'Goal Master Delivery Loop',
+              version: '1.0.0',
+              description: 'workflow',
+              nodes: [],
+              edges: [],
+              roleSlots: [],
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    apiPostMock.mockResolvedValueOnce({
+      data: {
+        id: 'new-graph-session',
+        personaId: 'default',
+        title: 'New Chat',
+        runtimeContext: {
+          runtimeKind: 'chat',
+          architectureContext: {
+            projectPath: 'C:\\Projekty\\kalio-forever',
+            executionCwd: 'C:\\Projekty\\kalio-forever',
+          },
+        },
+        createdAt: 20,
+        updatedAt: 20,
+      },
+    });
+
+    await renderExecutionGraphView();
+
+    fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
+      target: { value: 'C:\\Projekty\\kalio-forever' },
+    });
+    fireEvent.change(screen.getByTestId('graph-empty-architecture-select'), {
+      target: { value: 'goal-master-delivery-loop' },
+    });
+    fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
+      target: { value: 'Run the workflow' },
+    });
+    fireEvent.click(screen.getByTestId('graph-empty-run-prompt'));
+
+    await waitFor(() => expect(screen.getByTestId('graph-empty-persona-select')).toBeDisabled());
+    expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
+      personaId: 'default',
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      },
+      title: 'New Chat',
+    });
+    expect(apiPatchMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(startGoalGuardAgentFlowRunMock).toHaveBeenCalledWith(
+      'Run the workflow',
+      expect.objectContaining({
+        parentSessionId: 'new-graph-session',
+        projectPath: 'C:\\Projekty\\kalio-forever',
+        executionCwd: 'C:\\Projekty\\kalio-forever',
+      }),
+      'new-graph-session',
+    );
+    expect(sessionState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'new-graph-session',
+      role: 'user',
+      content: expect.stringContaining('[Architecture: Goal Master Delivery Loop]'),
+    }));
+    expect(sessionState.updateSession).not.toHaveBeenCalledWith(
+      'new-graph-session',
+      expect.objectContaining({ title: expect.stringMatching(/^Architecture:/) }),
+    );
+  });
+
+  it('runs non-goal workflows through startArchitectureRun with scoped launch context', async () => {
+    sessionState.activeSessionId = null;
+    sessionState.sessions = [];
+
+    apiGetMock.mockImplementation((url: string) => {
+      if (url === '/api/personas') {
+        return Promise.resolve({ data: [makePersona()] });
+      }
+      if (url === '/api/architecture-registry/schemas') {
+        return Promise.resolve({
+          data: [
+            {
+              id: 'strategic-decision-council',
+              name: 'Strategic Decision Council',
+              version: '1.0.0',
+              description: 'workflow',
+              nodes: [],
+              edges: [],
+              roleSlots: [],
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    apiPostMock.mockResolvedValueOnce({
+      data: {
+        id: 'new-graph-session',
+        personaId: 'default',
+        title: 'New Chat',
+        runtimeContext: {
+          runtimeKind: 'chat',
+          architectureContext: {
+            projectPath: 'C:\\Projekty\\kalio-forever',
+            executionCwd: 'C:\\Projekty\\kalio-forever',
+          },
+        },
+        createdAt: 20,
+        updatedAt: 20,
+      },
+    });
+
+    await renderExecutionGraphView();
+
+    fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
+      target: { value: 'C:\\Projekty\\kalio-forever' },
+    });
+    fireEvent.change(screen.getByTestId('graph-empty-architecture-select'), {
+      target: { value: 'strategic-decision-council' },
+    });
+    fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
+      target: { value: 'Run the standard workflow' },
+    });
+    fireEvent.click(screen.getByTestId('graph-empty-run-prompt'));
+
+    await waitFor(() => expect(startArchitectureRunMock).toHaveBeenCalledWith(
+      'strategic-decision-council',
+      'Run the standard workflow',
+      {},
+      'subagent_execution',
+      undefined,
+      expect.objectContaining({
+        parentSessionId: 'new-graph-session',
+        projectPath: 'C:\\Projekty\\kalio-forever',
+        executionCwd: 'C:\\Projekty\\kalio-forever',
+      }),
+      expect.any(Function),
+    ));
+    expect(startGoalGuardAgentFlowRunMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('renders durable architecture graph nodes for architecture root sessions without chat messages', async () => {

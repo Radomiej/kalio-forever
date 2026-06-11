@@ -447,6 +447,15 @@ describe('ChatInterface event wiring', () => {
     });
   });
 
+  it('includes the selected project path in architecture launch context', () => {
+    expect(buildArchitectureRunContext('session-1', [], ['vfs_read'], 'C:\\Projekty\\kalio-forever')).toEqual({
+      parentSessionId: 'session-1',
+      projectPath: 'C:\\Projekty\\kalio-forever',
+      executionCwd: 'C:\\Projekty\\kalio-forever',
+      launchAllowedToolNames: ['vfs_read'],
+    });
+  });
+
   it('does not show a warning banner for prompt-only architecture runs without VFS files', async () => {
     mockGetArchitectureSchemas.mockResolvedValue([
       {
@@ -1121,6 +1130,7 @@ describe('ChatInterface event wiring', () => {
       });
 
     expect(addSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'child-session', kind: 'subagent' }));
+    expect(mockIdentifySession).toHaveBeenCalledWith('child-session');
   });
 
   it('ignores tool:result streaming state changes from a different session', async () => {
@@ -1194,6 +1204,66 @@ describe('ChatInterface event wiring', () => {
       'title-gen',
       expect.objectContaining({ status: 'done' }),
     );
+  });
+
+  it('auto-rename cadence triggers only on every configured Nth assistant reply', async () => {
+    mockSessions = mockSessions.map((session) =>
+      session.id === 'session-1'
+        ? { ...session, title: 'Architecture Review' }
+        : session,
+    );
+    mockMessages = [
+      { id: 'user-1', sessionId: 'session-1', role: 'user', content: 'Review this architecture', createdAt: 1 },
+      { id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'First answer', createdAt: 2 },
+    ];
+
+    vi.mocked(apiClient.get).mockImplementation((url: string) => {
+      if (url === '/api/credentials/settings/conversation-title') {
+        return Promise.resolve({
+          data: {
+            autoRenameEnabled: true,
+            renameEveryReplies: 2,
+          },
+        } as never);
+      }
+      return Promise.resolve({ data: [] } as never);
+    });
+    vi.mocked(apiClient.post).mockImplementation((url: string) => {
+      if (url === '/api/sessions/session-1/generate-title') {
+        return Promise.resolve({ data: { title: 'Updated Conversation Title' } } as never);
+      }
+      return Promise.reject(new Error(`unexpected apiClient.post call: ${url}`));
+    });
+
+    await renderChatInterface();
+    addLlmActivity.mockClear();
+    updateLlmActivity.mockClear();
+    updateSession.mockClear();
+    vi.mocked(apiClient.post).mockClear();
+
+    await emitEvent('chat:complete', {
+      sessionId: 'session-1',
+      messageId: 'assistant-1',
+    });
+
+    expect(apiClient.post).not.toHaveBeenCalled();
+    expect(addLlmActivity).not.toHaveBeenCalled();
+
+    mockMessages = [
+      ...mockMessages,
+      { id: 'assistant-2', sessionId: 'session-1', role: 'assistant', content: 'Second answer', createdAt: 3 },
+    ];
+
+    await emitEvent('chat:complete', {
+      sessionId: 'session-1',
+      messageId: 'assistant-2',
+    });
+
+    expect(apiClient.post).toHaveBeenCalledWith('/api/sessions/session-1/generate-title');
+    expect(addLlmActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'title-gen', status: 'running' }),
+    );
+    expect(updateSession).toHaveBeenCalledWith('session-1', { title: 'Updated Conversation Title' });
   });
 });
 

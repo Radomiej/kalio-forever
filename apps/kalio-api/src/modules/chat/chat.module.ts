@@ -31,6 +31,8 @@ import { SubagentRuntimeService } from './subagent-runtime.service';
 import { ToolPolicyService } from './tool-policy.service';
 import { ChatTestSupportService } from './chat-test-support.service';
 import { RunJournalService } from './run-journal.service';
+import { SessionEventsService } from './session-events.service';
+import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
@@ -84,6 +86,8 @@ import {
     ContextPreviewService,
     ToolPolicyService,
     LLMTurnRuntimeService,
+    SessionEventsService,
+    AgentBudgetApprovalService,
     SessionsService,
     ChatTestSupportService,
     RunJournalService,

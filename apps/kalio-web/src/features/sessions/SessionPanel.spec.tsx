@@ -9,15 +9,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { SessionPanel } from './SessionPanel';
-import type { ToolConfirmationRequest } from '@kalio/types';
+import type { AgentBudgetApprovalRequest, ToolConfirmationRequest } from '@kalio/types';
 
 // ── mocks ─────────────────────────────────────────────────────────────────────
 
 let mockPendingConfirmations: Record<string, ToolConfirmationRequest> = {};
+let mockPendingBudgetApprovals: Record<string, AgentBudgetApprovalRequest> = {};
+let mockActiveAgentLoops: Record<string, { sessionId: string; turnId: string; startedAt: number }> = {};
+let mockQueuedDepthBySession: Record<string, number> = {};
+type MockSessionRow = {
+  id: string;
+  title: string;
+  personaId: string;
+  createdAt: number;
+  updatedAt: number;
+  parentSessionId?: string;
+  kind?: string;
+};
 
 vi.mock('../../store/agentStore', () => ({
   useAgentStore: (selector: (s: unknown) => unknown) =>
-    selector({ pendingConfirmations: mockPendingConfirmations }),
+    selector({
+      pendingConfirmations: mockPendingConfirmations,
+      pendingBudgetApprovals: mockPendingBudgetApprovals,
+      activeAgentLoops: mockActiveAgentLoops,
+      queuedDepthBySession: mockQueuedDepthBySession,
+    }),
 }));
 
 const mockSetActiveSession = vi.fn();
@@ -25,7 +42,7 @@ const mockSessionStoreState = {
   sessions: [
     { id: 'session-1', title: 'Chat One', personaId: 'default', createdAt: 0, updatedAt: 0 },
     { id: 'session-2', title: 'Chat Two', personaId: 'default', createdAt: 0, updatedAt: 0 },
-  ],
+  ] as MockSessionRow[],
   activeSessionId: 'session-1',
   setSessions: vi.fn(),
   setActiveSession: mockSetActiveSession,
@@ -33,11 +50,13 @@ const mockSessionStoreState = {
   setMessages: vi.fn(),
   removeSession: vi.fn(),
   updateSession: vi.fn(),
+  sessionAgentTurns: {} as Record<string, unknown>,
 };
 
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: Object.assign(
-    () => mockSessionStoreState,
+    (selector?: (state: typeof mockSessionStoreState) => unknown) =>
+      selector ? selector(mockSessionStoreState) : mockSessionStoreState,
     { getState: () => mockSessionStoreState },
   ),
 }));
@@ -57,6 +76,14 @@ vi.mock('./session.utils', () => ({
 
 beforeEach(() => {
   mockPendingConfirmations = {};
+  mockPendingBudgetApprovals = {};
+  mockActiveAgentLoops = {};
+  mockQueuedDepthBySession = {};
+  mockSessionStoreState.sessions = [
+    { id: 'session-1', title: 'Chat One', personaId: 'default', createdAt: 0, updatedAt: 0 },
+    { id: 'session-2', title: 'Chat Two', personaId: 'default', createdAt: 0, updatedAt: 0 },
+  ];
+  mockSessionStoreState.sessionAgentTurns = {};
   vi.clearAllMocks();
 });
 
@@ -113,5 +140,40 @@ describe('SessionPanel — pending confirmation indicator', () => {
 
     expect(screen.queryByTestId('session-pending-confirmation-session-1')).toBeNull();
     expect(screen.getByTestId('session-pending-confirmation-session-2')).toBeDefined();
+  });
+
+  it('shows running icon for an active session loop', async () => {
+    mockActiveAgentLoops = {
+      loop1: {
+        sessionId: 'session-2',
+        turnId: 'turn-1',
+        startedAt: 1,
+      },
+    };
+
+    await renderSessionPanel();
+
+    expect(screen.getByTestId('session-running-session-2')).toBeDefined();
+  });
+
+  it('shows waiting descendant badge on parent rows when child session is pending approval', async () => {
+    mockSessionStoreState.sessions = [
+      { id: 'session-1', title: 'Chat One', personaId: 'default', createdAt: 0, updatedAt: 0 },
+      { id: 'child-1', title: 'Child One', personaId: 'default', parentSessionId: 'session-1', kind: 'subagent', createdAt: 0, updatedAt: 0 },
+    ];
+    mockPendingBudgetApprovals = {
+      'child-1': {
+        requestId: 'budget-1',
+        sessionId: 'child-1',
+        scope: 'subagent',
+        usedIterations: 8,
+        currentLimit: 8,
+        agentRun: { agentRunId: 'run-1', agentType: 'subagent' },
+      },
+    };
+
+    await renderSessionPanel();
+
+    expect(screen.getByTestId('session-descendant-activity-session-1')).toHaveTextContent('1 waiting');
   });
 });

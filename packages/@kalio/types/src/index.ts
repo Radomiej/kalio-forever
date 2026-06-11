@@ -194,6 +194,7 @@ export interface Persona {
   name: string;
   systemPrompt: string;
   model: string;           // e.g. "claude-sonnet-4-6", "gpt-4o", "qwen3:8b"
+  maxToolAttempts?: number | null;
   allowedTools: string[];  // native tool names available to this persona (tool allowlist)
   skillIds: string[];      // IDs of Skill entities whose prompts are injected into system prompt
   mcpPolicy: MCPPolicy;    // how MCP tools are filtered for this persona
@@ -216,6 +217,7 @@ export interface PersonaKV {
 export interface PersonaSessionConfig {
   systemPrompt: string;
   model: string;
+  maxToolAttempts?: number | null;
   allowedTools: string[];  // filtered tool list for this session
   skillIds: string[];      // Skill entity IDs whose prompts get injected
   mcpPolicy: MCPPolicy;    // how MCP tools are filtered for this session
@@ -226,6 +228,7 @@ export interface CreatePersonaDto {
   name: string;
   systemPrompt: string;
   model: string;
+  maxToolAttempts?: number;
   allowedTools: string[];
   skillIds?: string[];
   mcpPolicy?: MCPPolicy;
@@ -239,6 +242,7 @@ export interface UpdatePersonaDto {
   name?: string;
   systemPrompt?: string;
   model?: string;
+  maxToolAttempts?: number | null;
   allowedTools?: string[];
   skillIds?: string[];
   mcpPolicy?: MCPPolicy;
@@ -597,6 +601,36 @@ export interface ToolConfirmationInvalidated {
   agentRun?: AgentRunContext;
 }
 
+export type AgentBudgetApprovalDecision = 'block' | 'allow_one' | 'allow_ten' | 'allow_unlimited';
+
+export interface AgentBudgetApprovalRequest {
+  requestId: string;
+  sessionId: ID;
+  scope: Extract<SessionRuntimeKind, 'chat' | 'subagent' | 'agent-flow-branch'>;
+  usedIterations: number;
+  currentLimit: number;
+  requestedBy?: string;
+  suggestedNextLimit?: number;
+  personaId?: ID;
+  nodeId?: string;
+  roleSlotId?: string;
+  agentRun?: AgentRunContext;
+}
+
+export interface AgentBudgetApprovalInvalidated {
+  requestId: string;
+  sessionId: ID;
+  reason: 'approved' | 'cancelled' | 'not_found' | 'aborted';
+  decision?: AgentBudgetApprovalDecision;
+  approvedLimit?: number;
+  agentRun?: AgentRunContext;
+}
+
+export interface ConversationTitleSettings {
+  autoRenameEnabled: boolean;
+  renameEveryReplies: number;
+}
+
 // ─── VFS ──────────────────────────────────────────────────────────────────────
 export interface VFSFile {
   sessionId: ID;
@@ -904,6 +938,7 @@ export interface SocketEvents {
   // Tool HITL — client → server
   'tool:confirm': { requestId: string; sessionId: ID; message?: string };
   'tool:cancel': { requestId: string; sessionId: ID; message?: string };
+  'agent:budget_approve': { requestId: string; sessionId: ID; decision: AgentBudgetApprovalDecision };
 
   // Tool execution lifecycle — server → client
   'tool:start': { callId: ID; toolName: string; args: Record<string, unknown>; sessionId?: ID; agentRun?: AgentRunContext };
@@ -921,6 +956,8 @@ export interface SocketEvents {
   // Agent loop lifecycle — server → client
   'agent:start': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
   'agent:done': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
+  'agent:budget_required': AgentBudgetApprovalRequest;
+  'agent:budget_invalidated': AgentBudgetApprovalInvalidated;
 
   // MCP — server → client
   'mcp:server:status': { serverId: ID; serverName: string; status: string; toolCount: number; lastError?: string };
@@ -930,7 +967,7 @@ export interface SocketEvents {
 
   // Sessions — server → client
   'session:created': ChatSession;
-  'session:updated': Pick<ChatSession, 'id' | 'title' | 'updatedAt'>;
+  'session:updated': ChatSession;
   'session:status': { sessionId: ID; active: boolean; turnId?: ID; queueLength: number; run?: ChatRunSnapshot };
 
   // Session re-registration — client → server (sent after reconnect)
@@ -1348,6 +1385,7 @@ export interface ArchitectureSchemaNode {
   label: string;
   kind: ArchitectureNodeKind;
   roleSlotId?: string;
+  maxToolAttempts?: number;
   behavior?: {
     mode: ArchitectureNodeBehaviorMode;
     fanOut?: ArchitectureNodeFanOutMode;

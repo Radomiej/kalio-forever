@@ -5,6 +5,7 @@ import type { IMessageRepository } from '../interfaces/message-repository.interf
 import type { DrizzleService } from '../../../database/drizzle.service';
 import type { SessionManagerService } from '../session-manager.service';
 import type { ChatSessionKind } from '@kalio/types';
+import type { SessionEventsService } from '../session-events.service';
 
 interface FakeRow {
   id: string;
@@ -14,6 +15,7 @@ interface FakeRow {
   parentSessionId?: string | null;
   parentTurnId?: string | null;
   parentToolCallId?: string | null;
+  runtimeContext?: unknown;
   archivedAt?: number | Date | null;
   createdAt: number | Date;
   updatedAt: number | Date;
@@ -64,6 +66,7 @@ function makeDrizzle(rows: FakeRow[]): { drizzle: DrizzleService; rows: FakeRow[
 describe('SessionsService', () => {
   let service: SessionsService;
   let repo: IMessageRepository;
+  let sessionEvents: SessionEventsService;
   let rows: FakeRow[];
   let ops: string[];
 
@@ -77,7 +80,13 @@ describe('SessionsService', () => {
     const fixture = makeDrizzle(rows);
     ops = fixture.ops;
     const sessionManager = {} as unknown as SessionManagerService;
-    service = new SessionsService(fixture.drizzle, sessionManager, repo);
+    sessionEvents = {
+      onSessionCreated: vi.fn().mockReturnValue(() => undefined),
+      onSessionUpdated: vi.fn().mockReturnValue(() => undefined),
+      emitSessionCreated: vi.fn(),
+      emitSessionUpdated: vi.fn(),
+    } as unknown as SessionEventsService;
+    service = new SessionsService(fixture.drizzle, sessionManager, sessionEvents, repo);
   });
 
   describe('create', () => {
@@ -205,6 +214,46 @@ describe('SessionsService', () => {
       await service.rename('s1', 'New');
       expect(ops).toContain('update');
       expect(rows[0].title).toBe('New');
+    });
+  });
+
+  describe('update', () => {
+    it('updates runtimeContext on an existing session', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: 'Old', createdAt: 0, updatedAt: 0 });
+      const runtimeContext = {
+        runtimeKind: 'chat' as const,
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      };
+
+      await service.update('s1', { runtimeContext });
+
+      expect(ops).toContain('update');
+      expect(rows[0].runtimeContext).toEqual(runtimeContext);
+    });
+
+    it('updates metadata and runtimeContext in the same call', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: 'Old', createdAt: 0, updatedAt: 0 });
+      const runtimeContext = {
+        runtimeKind: 'chat' as const,
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      };
+
+      await service.update('s1', {
+        title: 'New Title',
+        personaId: 'builder',
+        runtimeContext,
+      });
+
+      expect(rows[0].title).toBe('New Title');
+      expect(rows[0].personaId).toBe('builder');
+      expect(rows[0].runtimeContext).toEqual(runtimeContext);
+      expect(sessionEvents.emitSessionUpdated).toHaveBeenCalledTimes(1);
     });
   });
 

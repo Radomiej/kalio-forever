@@ -108,6 +108,7 @@ function InspectorHarness({
       }}
       onNodeKindOverride={vi.fn()}
       onNodeBehaviorOverride={vi.fn()}
+      onNodeMaxToolAttemptsOverride={vi.fn()}
       onCollapsedChange={onCollapsedChange}
       onContextPolicyOverride={(slotId, override) => {
         setSchema((current) => ({
