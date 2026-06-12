@@ -25,12 +25,17 @@ describe('useChatSessionActivation', () => {
     useAgentStore.setState({
       callIdToName: {},
       cliChildProjections: {},
+      activeAgentLoops: {},
     });
     useSessionStore.setState({
       activeSessionId: 'session-1',
       sessions: [{ id: 'session-1', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 1 }],
       messages: [],
       sessionMessages: { 'session-1': [] },
+      agentTurns: [],
+      sessionAgentTurns: { 'session-1': [] },
+      activeTurnId: null,
+      sessionActiveTurnIds: { 'session-1': null },
       getSessionMessages: () => [],
       pendingMessage: null,
       pendingRAAppId: null,
@@ -76,6 +81,7 @@ describe('useChatSessionActivation', () => {
       setAgentTurns: vi.fn(),
       setMessages: vi.fn(),
       setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
     }));
 
     await waitFor(() => {
@@ -127,6 +133,7 @@ describe('useChatSessionActivation', () => {
       setAgentTurns: vi.fn(),
       setMessages: vi.fn(),
       setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
     }));
 
     await waitFor(() => {
@@ -136,5 +143,64 @@ describe('useChatSessionActivation', () => {
       });
     });
     expect(eventBus.identifySession).toHaveBeenCalledWith('cli-child-history-only');
+  });
+
+  it('backfills promptMessageId for an active recovered turn after history load', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [
+        {
+          id: 'user-1',
+          sessionId: 'session-1',
+          role: 'user',
+          content: 'Need more tool calls.',
+          createdAt: 1,
+        },
+      ],
+    });
+    useAgentStore.setState({
+      activeAgentLoops: {
+        'session-1': {
+          sessionId: 'session-1',
+          turnId: 'turn-live',
+          startedAt: 1,
+        },
+      },
+    });
+    useSessionStore.setState({
+      sessionAgentTurns: {
+        'session-1': [{
+          id: 'turn-live',
+          sessionId: 'session-1',
+          items: [],
+          done: false,
+        }],
+      },
+      sessionActiveTurnIds: {
+        'session-1': 'turn-live',
+      },
+      agentTurns: [{
+        id: 'turn-live',
+        sessionId: 'session-1',
+        items: [],
+        done: false,
+      }],
+      activeTurnId: 'turn-live',
+    });
+
+    const updateAgentTurn = vi.fn();
+    const handleSendRef = { current: vi.fn() };
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef,
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn,
+    }));
+
+    await waitFor(() => {
+      expect(updateAgentTurn).toHaveBeenCalledWith('turn-live', { promptMessageId: 'user-1' }, 'session-1');
+    });
   });
 });

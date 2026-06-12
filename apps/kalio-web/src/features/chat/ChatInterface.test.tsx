@@ -180,6 +180,7 @@ vi.mock('../../store/agentStore', () => ({
 
 // ── sessionStore mock ─────────────────────────────────────────────────────────
 const setAgentTurns = vi.fn();
+const updateAgentTurn = vi.fn();
 const setMessages = vi.fn();
 const markAgentTurnError = vi.fn();
 const removeLastAgentTurn = vi.fn();
@@ -231,6 +232,7 @@ vi.mock('../../store/sessionStore', () => ({
       setMessages,
       updateSession,
       setAgentTurns,
+      updateAgentTurn,
       startAgentTurn,
       addTurnItem,
       finalizeAgentTurn,
@@ -258,6 +260,7 @@ vi.mock('../../store/sessionStore', () => ({
         setPendingRAAppId: mockSetPendingRAAppId,
         setMessages,
         setAgentTurns,
+        updateAgentTurn,
         updateSession,
         streamingChunks: mockStreamingChunks,
         thinkingChunks: mockThinkingChunks,
@@ -497,6 +500,7 @@ describe('ChatInterface event wiring', () => {
 
     await renderChatInterface();
     await act(async () => {
+      fireEvent.click(await screen.findByTestId('welcome-mode-workflow'));
       fireEvent.change(await screen.findByTestId('welcome-architecture-select'), {
         target: { value: 'strategic-decision-council' },
       });
@@ -539,6 +543,7 @@ describe('ChatInterface event wiring', () => {
 
     await renderChatInterface();
     await act(async () => {
+      fireEvent.click(await screen.findByTestId('welcome-mode-workflow'));
       fireEvent.change(await screen.findByTestId('welcome-architecture-select'), {
         target: { value: 'strategic-decision-council' },
       });
@@ -628,6 +633,10 @@ describe('ChatInterface event wiring', () => {
     ]);
 
     await renderChatInterface();
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('welcome-mode-workflow'));
+      await flushReactEffects();
+    });
     await screen.findByRole('option', { name: 'Goal Master Delivery Loop' });
     await act(async () => {
       const select = screen.getByTestId('welcome-architecture-select');

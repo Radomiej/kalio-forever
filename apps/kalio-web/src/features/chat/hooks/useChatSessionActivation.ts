@@ -15,6 +15,7 @@ interface UseChatSessionActivationParams {
   setAgentTurns: (turns: ReturnType<typeof buildTurnsFromHistory>, sessionId?: string | null) => void;
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
   setPendingConfirmation: (sessionId: string, req: null) => void;
+  updateAgentTurn: (turnId: string, patch: Partial<{ promptMessageId: string }>, sessionId?: string | null) => void;
 }
 
 export function useChatSessionActivation({
@@ -24,6 +25,7 @@ export function useChatSessionActivation({
   setAgentTurns,
   setMessages,
   setPendingConfirmation,
+  updateAgentTurn,
 }: UseChatSessionActivationParams) {
   useEffect(() => {
     if (!activeSessionId) return;
@@ -64,6 +66,22 @@ export function useChatSessionActivation({
         });
         if (!useAgentStore.getState().hasActiveLoopForSession(activeSessionId)) {
           setAgentTurns(buildTurnsFromHistory(mergedMessages, activeSessionId));
+          return;
+        }
+
+        const latestUserMessageId = [...mergedMessages]
+          .reverse()
+          .find((message) => message.role === 'user')
+          ?.id;
+        if (!latestUserMessageId) {
+          return;
+        }
+        const activeTurnId = useSessionStore.getState().getSessionActiveTurnId(activeSessionId);
+        const activeTurn = activeTurnId
+          ? useSessionStore.getState().getSessionAgentTurns(activeSessionId).find((turn) => turn.id === activeTurnId)
+          : null;
+        if (activeTurn && !activeTurn.promptMessageId) {
+          updateAgentTurn(activeTurn.id, { promptMessageId: latestUserMessageId }, activeSessionId);
         }
       })
       .catch((err: unknown) => {
@@ -85,5 +103,5 @@ export function useChatSessionActivation({
     setPendingRAAppId(null);
     const pendingSession = sessions.find((session) => session.id === activeSessionId);
     handleSendRef.current(toSend, pendingSession?.personaId ?? 'default');
-  }, [activeSessionId, clearToolActivities, handleSendRef, setAgentTurns, setMessages, setPendingConfirmation]);
+  }, [activeSessionId, clearToolActivities, handleSendRef, setAgentTurns, setMessages, setPendingConfirmation, updateAgentTurn]);
 }

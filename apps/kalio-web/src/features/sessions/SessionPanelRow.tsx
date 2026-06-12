@@ -261,7 +261,10 @@ export function SessionPanelSessionItem({
               >
                 <SessionKindIcon size={11} />
               </span>
-              <span className="min-w-0 flex-1 break-words text-xs font-medium leading-snug">
+              <span
+                className="min-w-0 flex-1 break-words text-xs font-medium leading-snug"
+                data-testid={`session-title-${session.id}`}
+              >
                 {displayTitle}
               </span>
               {runtimeState === 'waiting' && (
@@ -312,7 +315,10 @@ export function SessionPanelSessionItem({
                 </span>
               )}
               {architectureLabel && (
-                <span className="text-[9px] rounded border border-sky-500/20 bg-sky-500/10 px-1 py-0.5 leading-none text-sky-200 truncate max-w-[8rem]">
+                <span
+                  className="text-[9px] rounded border border-sky-500/20 bg-sky-500/10 px-1 py-0.5 leading-none text-sky-200 truncate max-w-[8rem]"
+                  data-testid={`session-architecture-label-${session.id}`}
+                >
                   {architectureLabel}
                 </span>
               )}

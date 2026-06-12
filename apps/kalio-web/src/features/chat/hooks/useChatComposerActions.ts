@@ -11,6 +11,7 @@ import type { ArchitectSchema } from '../../architect/architect.types';
 import {
   buildArchitectureRunContext,
   buildGoalGuardRunContext,
+  persistArchitectureSessionRuntimeContext,
   persistSessionLaunchRuntimeContext,
 } from '../launch/launchContext';
 
@@ -150,10 +151,15 @@ export function useChatComposerActions({
     const session = sessions.find((item) => item.id === activeSessionId);
 
     try {
-      await persistSessionLaunchRuntimeContext(
+      await persistArchitectureSessionRuntimeContext(
         activeSessionId,
         projectPath,
         session?.runtimeContext,
+        {
+          schemaId: schema.id,
+          schemaName: schema.name,
+          displayLabel: schema.name,
+        },
         updateSession,
       );
     } catch (err: unknown) {

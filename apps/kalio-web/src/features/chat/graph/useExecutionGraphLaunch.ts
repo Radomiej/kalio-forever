@@ -9,12 +9,16 @@ import { buildArchitectureRunTurnProjection } from '../architectureChatSummary';
 import { getArchitectureSchemas, startArchitectureRun, startGoalGuardAgentFlowRun } from '../../architect/architect.api';
 import type { ArchitectSchema } from '../../architect/architect.types';
 import {
+  buildArchitectureSessionRuntimeContext,
   buildArchitectureRunContext,
   buildGoalGuardRunContext,
   buildSessionLaunchRuntimeContext,
   getLaunchProjectPath,
+  persistArchitectureSessionRuntimeContext,
+  persistSessionLaunchPersona,
   persistSessionLaunchRuntimeContext,
 } from '../launch/launchContext';
+import { useLaunchPersonas } from '../launch/useLaunchPersonas';
 
 export interface ExecutionGraphLaunchState {
   activeSession: ChatSession | null;
@@ -24,13 +28,12 @@ export interface ExecutionGraphLaunchState {
   isBusy: boolean;
   personas: Persona[];
   projectPath: string;
-  selectedArchitectureId: string;
   selectedPersonaId: string;
+  selectedArchitectureId: string;
   setProjectPath: Dispatch<SetStateAction<string>>;
-  setSelectedArchitectureId: Dispatch<SetStateAction<string>>;
   setSelectedPersonaId: Dispatch<SetStateAction<string>>;
+  setSelectedArchitectureId: Dispatch<SetStateAction<string>>;
   sendEmptyGraphPrompt: (content: string) => void;
-  handleGraphSessionPersonaChange: (personaId: string) => void;
 }
 
 export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
@@ -54,14 +57,17 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
     getContextForSession,
     setStreaming,
   } = useAgentStore();
-  const [personas, setPersonas] = useState<Persona[]>([]);
   const [architectures, setArchitectures] = useState<ArchitectSchema[]>([]);
-  const [selectedPersonaId, setSelectedPersonaId] = useState('default');
   const [selectedArchitectureId, setSelectedArchitectureId] = useState('single-chat');
   const [projectPath, setProjectPath] = useState('');
   const [emptyPromptError, setEmptyPromptError] = useState<string | null>(null);
   const [creatingGraphSession, setCreatingGraphSession] = useState(false);
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  const {
+    personas,
+    selectedPersonaId,
+    setSelectedPersonaId,
+  } = useLaunchPersonas(activeSession?.personaId);
   const activeContext = typeof getContextForSession === 'function'
     ? getContextForSession(activeSessionId)
     : null;
@@ -78,24 +84,16 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
   );
 
   useEffect(() => {
-    apiClient
-      .get<Persona[]>('/api/personas')
-      .then((response) => setPersonas(response.data))
-      .catch((err: unknown) => console.error('[ExecutionGraphView] personas load failed', err));
-  }, []);
-
-  useEffect(() => {
     getArchitectureSchemas()
       .then((schemas) => setArchitectures(schemas))
       .catch((err: unknown) => console.error('[ExecutionGraphView] architecture registry load failed', err));
   }, []);
 
   useEffect(() => {
-    setSelectedPersonaId(activeSession?.personaId ?? 'default');
     setProjectPath(getLaunchProjectPath(activeSession?.runtimeContext));
-  }, [activeSession?.personaId, activeSession?.runtimeContext, activeSessionId]);
+  }, [activeSession?.runtimeContext, activeSessionId]);
 
-  const sendGraphPromptToSession = async (session: ChatSession, content: string, isFirstMessage: boolean) => {
+  const sendGraphPromptToSession = async (session: ChatSession, content: string, isFirstMessage: boolean, personaId: string) => {
     if (isStreaming) {
       return;
     }
@@ -135,7 +133,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
     const sent = eventBus.sendMessage({
       sessionId: sessionWithScope.id,
       content,
-      personaId: sessionWithScope.personaId,
+      personaId,
     });
 
     if (!sent) {
@@ -156,18 +154,27 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
 
     setEmptyPromptError(null);
     clearToolActivities(session.id);
-    if ((session.title === 'New Chat' || session.title === '') && isFirstMessage) {
-      const preview = content.slice(0, 50).trim();
-      updateSession(session.id, { title: preview + (content.length > 50 ? '...' : '') });
-    }
-
-    const nextRuntimeContext = buildSessionLaunchRuntimeContext(session.runtimeContext, projectPath);
+    const nextRuntimeContext = buildArchitectureSessionRuntimeContext(session.runtimeContext, projectPath, {
+      schemaId: schema.id,
+      schemaName: schema.name,
+      displayLabel: schema.name,
+    });
     const sessionWithScope = nextRuntimeContext
       ? { ...session, runtimeContext: nextRuntimeContext }
       : session;
     if (nextRuntimeContext && JSON.stringify(session.runtimeContext ?? null) !== JSON.stringify(nextRuntimeContext)) {
       try {
-        await persistSessionLaunchRuntimeContext(session.id, projectPath, session.runtimeContext, updateSession);
+        await persistArchitectureSessionRuntimeContext(
+          session.id,
+          projectPath,
+          session.runtimeContext,
+          {
+            schemaId: schema.id,
+            schemaName: schema.name,
+            displayLabel: schema.name,
+          },
+          updateSession,
+        );
       } catch {
         return;
       }
@@ -177,7 +184,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
       id: userMessageId,
       sessionId: sessionWithScope.id,
       role: 'user',
-      content: `[Architecture: ${schema.name}]\n${content}`,
+      content,
       createdAt: Date.now(),
     });
     const pendingAssistantMessageId = `architecture:${userMessageId}:pending`;
@@ -196,6 +203,8 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
       createdAt: Date.now(),
     });
     setStreaming(true);
+    const shouldGenerateTitle = isFirstMessage || session.title === 'New Chat' || session.title === '';
+    let requestedGeneratedTitle = false;
 
     const addArchitectureAssistantMessage = (assistantContent: string) => {
       const assistantMessageId = nanoid();
@@ -215,6 +224,19 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
         done: true,
       };
       setAgentTurns([...currentTurns, turn], sessionWithScope.id);
+    };
+    const requestWorkflowTitle = () => {
+      if (!shouldGenerateTitle || requestedGeneratedTitle) {
+        return;
+      }
+      requestedGeneratedTitle = true;
+      void apiClient.post<{ title: string }>(`/api/sessions/${sessionWithScope.id}/generate-title`)
+        .then((response) => {
+          updateSession(sessionWithScope.id, { title: response.data.title });
+        })
+        .catch((err: unknown) => {
+          console.error('[ExecutionGraphView] workflow title generation failed', err instanceof Error ? err : new Error(String(err)));
+        });
     };
 
     try {
@@ -239,6 +261,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
           items: projection.turnItems,
           done: result.run.status !== 'queued' && result.run.status !== 'running',
         }], sessionWithScope.id);
+        requestWorkflowTitle();
       };
       const result = schemaId === 'goal-master-delivery-loop'
         ? await startGoalGuardAgentFlowRun(
@@ -256,6 +279,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
           applyArchitectureProjection,
         );
       applyArchitectureProjection(result);
+      requestWorkflowTitle();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to run selected workflow';
       setEmptyPromptError(message);
@@ -268,7 +292,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
     }
   };
 
-  const ensureGraphSession = async (): Promise<ChatSession | null> => {
+  const ensureGraphSession = async (personaId: string): Promise<ChatSession | null> => {
     if (activeSession) {
       return activeSession;
     }
@@ -286,7 +310,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
     try {
       const runtimeContext = buildSessionLaunchRuntimeContext(undefined, projectPath);
       const dto: { personaId: string; title: string; runtimeContext?: ReturnType<typeof buildSessionLaunchRuntimeContext> } = {
-        personaId: selectedPersonaId,
+        personaId,
         title: 'New Chat',
       };
       if (runtimeContext) {
@@ -308,42 +332,37 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
   };
 
   const handleGraphLaunchPrompt = async (content: string) => {
+    const isWorkflowMode = selectedArchitectureId !== 'single-chat';
+    const chatPersonaId = selectedPersonaId;
     if (activeSession) {
       const isFirstMessage = (sessionMessages[activeSession.id]?.length ?? 0) === 0;
-      if (selectedArchitectureId !== 'single-chat') {
+      if (isWorkflowMode) {
         await runGraphArchitecturePrompt(activeSession, content, selectedArchitectureId, isFirstMessage);
         return;
       }
-      await sendGraphPromptToSession(activeSession, content, isFirstMessage);
+      let sessionWithPersona = activeSession;
+      try {
+        sessionWithPersona = await persistSessionLaunchPersona(activeSession, chatPersonaId, updateSession);
+      } catch (err: unknown) {
+        console.error('[ExecutionGraphView] launch persona update failed', err instanceof Error ? err : new Error(String(err)));
+        setEmptyPromptError('Failed to save selected persona for this chat.');
+        return;
+      }
+      await sendGraphPromptToSession(sessionWithPersona, content, isFirstMessage, chatPersonaId);
       return;
     }
 
-    const session = await ensureGraphSession();
+    const session = await ensureGraphSession(isWorkflowMode ? 'default' : chatPersonaId);
     if (!session) {
       return;
     }
 
     const isFirstMessage = (sessionMessages[session.id]?.length ?? 0) === 0;
-    if (selectedArchitectureId !== 'single-chat') {
+    if (isWorkflowMode) {
       await runGraphArchitecturePrompt(session, content, selectedArchitectureId, isFirstMessage);
       return;
     }
-    await sendGraphPromptToSession(session, content, isFirstMessage);
-  };
-
-  const handleGraphSessionPersonaChange = (personaId: string) => {
-    if (!activeSessionId) {
-      setSelectedPersonaId(personaId);
-      return;
-    }
-    void apiClient.patch(`/api/sessions/${activeSessionId}`, { personaId })
-      .then(() => {
-        updateSession(activeSessionId, { personaId });
-        setSelectedPersonaId(personaId);
-      })
-      .catch((err: unknown) => {
-        console.error('[ExecutionGraphView] persona change failed', err instanceof Error ? err : new Error(String(err)));
-      });
+    await sendGraphPromptToSession(session, content, isFirstMessage, chatPersonaId);
   };
 
   const sendEmptyGraphPrompt = (content: string) => {
@@ -358,12 +377,11 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
     isBusy: isStreaming || creatingGraphSession,
     personas,
     projectPath,
-    selectedArchitectureId,
     selectedPersonaId,
+    selectedArchitectureId,
     setProjectPath,
-    setSelectedArchitectureId,
     setSelectedPersonaId,
+    setSelectedArchitectureId,
     sendEmptyGraphPrompt,
-    handleGraphSessionPersonaChange,
   };
 }

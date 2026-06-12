@@ -11,7 +11,7 @@ import { ExecutionGraphBoard } from './ExecutionGraphBoard';
 import type { GraphCardDensity } from './ExecutionGraphBoard.types';
 import { ExecutionGraphHeader } from './ExecutionGraphHeader';
 import { ExecutionGraphInspector } from './ExecutionGraphInspector';
-import { ExecutionGraphLiveSidebar, isLiveTool } from './ExecutionGraphLiveSidebar';
+import { isLiveTool } from './ExecutionGraphLiveSidebar';
 import { ExecutionGraphNoNodesState, ExecutionGraphNoSessionState } from './ExecutionGraphEmptyStates';
 import { focusExecutionGraphMessages, type ExecutionGraphFocusMode } from './executionGraphFocus';
 import { extractArchitectureBranchSessionIds, extractExecutionGraphHydrationStatus } from './executionGraphHydration';
@@ -54,11 +54,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     isBusy,
     personas,
     projectPath,
-    selectedArchitectureId,
     selectedPersonaId,
+    selectedArchitectureId,
     setProjectPath,
+    setSelectedPersonaId,
     setSelectedArchitectureId,
-    handleGraphSessionPersonaChange,
     sendEmptyGraphPrompt,
   } = useExecutionGraphLaunch();
   const [zoom, setZoom] = useState(DEFAULT_GRAPH_ZOOM);
@@ -278,37 +278,26 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     />
   );
 
-  const liveActivitySidebar = (
-    <ExecutionGraphLiveSidebar
-      defaultCollapsed={runningLoops.length === 0 && runningToolActivities.length === 0}
-      runningLoops={runningLoops}
-      runningToolActivities={runningToolActivities}
-      sessions={sessions}
-      sessionTitleById={sessionTitleById}
-      onSelectSession={setActiveSession}
-    />
-  );
-
   if (!activeSessionId) {
     return (
       <div data-testid="execution-graph-view" className="flex h-full overflow-hidden bg-base-100">
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {header}
           <ExecutionGraphNoSessionState
-            activePersonaId={selectedPersonaId}
             architectures={architectures}
             graphSurfaceClassName={graphSurfaceClassName}
             error={emptyPromptError}
             heading="New Chat"
             isBusy={isBusy}
-            liveActivitySidebar={liveActivitySidebar}
             onArchitectureChange={setSelectedArchitectureId}
             onDraftChange={() => undefined}
-            onPersonaChange={handleGraphSessionPersonaChange}
+            onPersonaChange={setSelectedPersonaId}
             onProjectPathChange={setProjectPath}
             onRunPrompt={sendEmptyGraphPrompt}
             personas={personas}
             projectPath={projectPath}
+            screenKey="graph-empty-root"
+            selectedPersonaId={selectedPersonaId}
             selectedArchitectureId={selectedArchitectureId}
           />
         </div>
@@ -349,20 +338,20 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {header}
           <ExecutionGraphNoNodesState
-            activePersonaId={selectedPersonaId}
             architectures={architectures}
             graphSurfaceClassName={graphSurfaceClassName}
             error={emptyPromptError}
             heading={activeSession?.title ?? 'New Chat'}
             isBusy={isBusy}
-            liveActivitySidebar={liveActivitySidebar}
             onArchitectureChange={setSelectedArchitectureId}
             onDraftChange={() => undefined}
-            onPersonaChange={handleGraphSessionPersonaChange}
+            onPersonaChange={setSelectedPersonaId}
             onProjectPathChange={setProjectPath}
             onRunPrompt={sendEmptyGraphPrompt}
             personas={personas}
             projectPath={projectPath}
+            screenKey={activeSession?.id ?? 'graph-empty-session'}
+            selectedPersonaId={selectedPersonaId}
             selectedArchitectureId={selectedArchitectureId}
           />
         </div>

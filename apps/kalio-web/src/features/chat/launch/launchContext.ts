@@ -1,6 +1,12 @@
 import type { ChatSession, SessionRuntimeContext, VFSFile } from '@kalio/types';
 import { apiClient } from '../../../services/apiClient';
 
+type ArchitectureSessionLabel = {
+  schemaId: string;
+  schemaName: string;
+  displayLabel?: string;
+};
+
 function normalizedProjectPath(projectPath: string): string {
   return projectPath.trim();
 }
@@ -60,13 +66,32 @@ export function buildSessionLaunchRuntimeContext(
   };
 }
 
-export async function persistSessionLaunchRuntimeContext(
-  sessionId: string,
-  projectPath: string,
+export function buildArchitectureSessionRuntimeContext(
   runtimeContext: SessionRuntimeContext | undefined,
+  projectPath: string,
+  architecture: ArchitectureSessionLabel,
+): SessionRuntimeContext {
+  const nextRuntimeContext = buildSessionLaunchRuntimeContext(runtimeContext, projectPath)
+    ?? runtimeContext
+    ?? { runtimeKind: 'chat' as const };
+
+  return {
+    ...nextRuntimeContext,
+    architectureContext: {
+      ...(nextRuntimeContext.architectureContext ?? {}),
+      schemaId: architecture.schemaId,
+      schemaName: architecture.schemaName,
+      displayLabel: architecture.displayLabel ?? architecture.schemaName,
+    },
+  };
+}
+
+async function persistSessionRuntimeContext(
+  sessionId: string,
+  runtimeContext: SessionRuntimeContext | undefined,
+  nextRuntimeContext: SessionRuntimeContext | undefined,
   updateSession: (sessionId: string, patch: Partial<ChatSession>) => void,
 ): Promise<SessionRuntimeContext | undefined> {
-  const nextRuntimeContext = buildSessionLaunchRuntimeContext(runtimeContext, projectPath);
   if (!nextRuntimeContext) {
     return runtimeContext;
   }
@@ -78,6 +103,44 @@ export async function persistSessionLaunchRuntimeContext(
   await apiClient.patch(`/api/sessions/${sessionId}`, { runtimeContext: nextRuntimeContext });
   updateSession(sessionId, { runtimeContext: nextRuntimeContext });
   return nextRuntimeContext;
+}
+
+export async function persistSessionLaunchRuntimeContext(
+  sessionId: string,
+  projectPath: string,
+  runtimeContext: SessionRuntimeContext | undefined,
+  updateSession: (sessionId: string, patch: Partial<ChatSession>) => void,
+): Promise<SessionRuntimeContext | undefined> {
+  const nextRuntimeContext = buildSessionLaunchRuntimeContext(runtimeContext, projectPath);
+  return persistSessionRuntimeContext(sessionId, runtimeContext, nextRuntimeContext, updateSession);
+}
+
+export async function persistArchitectureSessionRuntimeContext(
+  sessionId: string,
+  projectPath: string,
+  runtimeContext: SessionRuntimeContext | undefined,
+  architecture: ArchitectureSessionLabel,
+  updateSession: (sessionId: string, patch: Partial<ChatSession>) => void,
+): Promise<SessionRuntimeContext | undefined> {
+  const nextRuntimeContext = buildArchitectureSessionRuntimeContext(runtimeContext, projectPath, architecture);
+  return persistSessionRuntimeContext(sessionId, runtimeContext, nextRuntimeContext, updateSession);
+}
+
+export async function persistSessionLaunchPersona(
+  session: ChatSession,
+  personaId: string,
+  updateSession: (sessionId: string, patch: Partial<ChatSession>) => void,
+): Promise<ChatSession> {
+  if (session.personaId === personaId) {
+    return session;
+  }
+
+  await apiClient.patch(`/api/sessions/${session.id}`, { personaId });
+  updateSession(session.id, { personaId });
+  return {
+    ...session,
+    personaId,
+  };
 }
 
 export function buildArchitectureRunContext(

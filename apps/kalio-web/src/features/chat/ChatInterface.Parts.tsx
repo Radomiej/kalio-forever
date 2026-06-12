@@ -5,7 +5,8 @@ import { ConversationFilesBar } from '../vfs/ConversationFilesBar';
 import { ContextStats, type ContextPreviewStatus } from './ContextStats';
 import { TokenBadge } from './TokenBadge';
 import type { ArchitectSchema } from '../architect/architect.types';
-import { ConversationLaunchScreen } from './launch/ConversationLaunchScreen';
+import { NewChatScreen } from './launch/NewChatScreen';
+import { findArchitectureRunInMessages } from './architectureChatSummary';
 
 export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -75,6 +76,46 @@ function architectureSessionLabel(session: ChatSession): string | null {
   }
   const schemaName = architectureContext['schemaName'];
   return typeof schemaName === 'string' && schemaName.trim().length > 0 ? schemaName.trim() : null;
+}
+
+function humanizeArchitectureSchemaId(schemaId: string): string {
+  return schemaId
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
+    .join(' ');
+}
+
+function architectureMessageLabel(messages: ChatMessage[]): string | null {
+  const summary = findArchitectureRunInMessages(messages);
+  if (!summary) {
+    return null;
+  }
+
+  for (const message of [...messages].reverse()) {
+    if (message.role !== 'assistant' || !message.toolCalls?.length) {
+      continue;
+    }
+
+    const matchingCall = message.toolCalls.find((toolCall) => (
+      toolCall.name === 'run_subagent'
+      && toolCall.args['architectureRunId'] === summary.runId
+      && typeof toolCall.args['schemaName'] === 'string'
+      && toolCall.args['schemaName'].trim().length > 0
+    ));
+
+    if (matchingCall && typeof matchingCall.args['schemaName'] === 'string') {
+      return matchingCall.args['schemaName'].trim();
+    }
+  }
+
+  return summary.schemaId.trim().length > 0
+    ? humanizeArchitectureSchemaId(summary.schemaId)
+    : null;
+}
+
+function resolveArchitectureLabel(session: ChatSession, messages: ChatMessage[]): string | null {
+  return architectureSessionLabel(session) ?? architectureMessageLabel(messages);
 }
 
 interface ChatStatusBannersProps {
@@ -174,19 +215,21 @@ export function ChatSessionHeader({
   contextPreviewStatus,
   vfsRefreshSignal,
 }: ChatSessionHeaderProps) {
-  const architectureLabel = architectureSessionLabel(activeSession);
+  const architectureLabel = resolveArchitectureLabel(activeSession, messages);
 
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
-      <span className="text-sm font-medium truncate flex-1">{activeSession.title}</span>
-      {architectureLabel && (
-        <span
-          className="shrink-0 rounded border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-200"
-          data-testid="chat-session-architecture-label"
-        >
-          {architectureLabel}
-        </span>
-      )}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="min-w-0 truncate text-sm font-medium" data-testid="chat-session-title">{activeSession.title}</span>
+        {architectureLabel && (
+          <span
+            className="shrink-0 rounded border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-200"
+            data-testid="chat-session-architecture-label"
+          >
+            {architectureLabel}
+          </span>
+        )}
+      </div>
       <ConversationFilesBar sessionId={activeSessionId} refreshSignal={vfsRefreshSignal} />
       {messages.length > 0 && (
         <button
@@ -233,6 +276,7 @@ interface ChatWelcomeScreenProps {
   onSend: (content: string, personaId: string) => void;
   personas: Persona[];
   projectPath: string;
+  selectedPersonaId: string;
   selectedArchitectureId: string;
 }
 
@@ -249,13 +293,14 @@ export function ChatWelcomeScreen({
   onSend,
   personas,
   projectPath,
+  selectedPersonaId,
   selectedArchitectureId,
 }: ChatWelcomeScreenProps) {
   return (
     <>
       {activeSessionId && (
-        <ConversationLaunchScreen
-          activePersonaId={activeSession?.personaId ?? 'default'}
+        <NewChatScreen
+          key={activeSessionId}
           architectures={architectures}
           heading={activeSession?.title ?? 'New Chat'}
           isBusy={isStreaming}
@@ -266,13 +311,14 @@ export function ChatWelcomeScreen({
           onRunPrompt={(content) => {
             onDraftChange('');
             if (selectedArchitectureId === 'single-chat') {
-              onSend(content, activeSession?.personaId ?? 'default');
+              onSend(content, selectedPersonaId);
               return;
             }
             onArchitectureRun(content, selectedArchitectureId);
           }}
           personas={personas}
           projectPath={projectPath}
+          selectedPersonaId={selectedPersonaId}
           selectedArchitectureId={selectedArchitectureId}
           subtitle="AI assistant - build apps, query data, generate images, run tools"
           testIdPrefix="welcome"

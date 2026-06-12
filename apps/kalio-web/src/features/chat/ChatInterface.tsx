@@ -14,12 +14,14 @@ import { useChatSocketEvents } from './hooks/useChatSocketEvents';
 import { useChatComposerActions } from './hooks/useChatComposerActions';
 import { computeAnsweredCallIds, buildConversationTimeline } from './chatUtils';
 import { apiClient } from '../../services/apiClient';
-import type { ChatMessage, ConversationTitleSettings, Persona } from '@kalio/types';
+import type { ChatMessage, ConversationTitleSettings } from '@kalio/types';
 import { getArchitectureSchemas } from '../architect/architect.api';
 import type { ArchitectSchema } from '../architect/architect.types';
 import {
   getLaunchProjectPath,
+  persistSessionLaunchPersona,
 } from './launch/launchContext';
+import { useLaunchPersonas } from './launch/useLaunchPersonas';
 import {
   buildCopiedChatText,
   type ChatConnectionState,
@@ -66,7 +68,7 @@ function shouldRequestGeneratedTitle(
 export function ChatInterface() {
   const {
     messages, activeSessionId, sessions, addMessage, setMessages,
-    agentTurns, setAgentTurns,
+    agentTurns, setAgentTurns, updateAgentTurn, updateSession,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
@@ -94,25 +96,16 @@ export function ChatInterface() {
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [awaitingFirstChunk, setAwaitingFirstChunk] = useState(false);
   const lastSentContentRef = useRef<string>('');
-  const [personas, setPersonas] = useState<Persona[]>([]);
   const [architectures, setArchitectures] = useState<ArchitectSchema[]>([]);
   const [selectedArchitectureId, setSelectedArchitectureId] = useState('single-chat');
   const [projectPath, setProjectPath] = useState('');
   const [draftUserMessage, setDraftUserMessage] = useState('');
   const [contextPreviewRefreshKey, setContextPreviewRefreshKey] = useState(0);
   const toolArgProgressSeenRef = useRef<Record<string, Set<string>>>({});
-  const { updateSession } = useSessionStore();
 
   useEffect(() => {
     setProjectPath(getLaunchProjectPath(activeSession?.runtimeContext));
   }, [activeSession?.runtimeContext, activeSessionId]);
-
-  useEffect(() => {
-    apiClient
-      .get<Persona[]>('/api/personas')
-      .then((r) => setPersonas(r.data))
-      .catch((err: unknown) => console.error('[ChatInterface] personas load failed', err));
-  }, []);
 
   useEffect(() => {
     getArchitectureSchemas()
@@ -127,20 +120,16 @@ export function ChatInterface() {
       .catch((err: unknown) => console.error('[ChatInterface] conversation title settings load failed', err));
   }, []);
 
-  const handlePersonaChange = async (personaId: string) => {
-    if (!activeSessionId) return;
-    try {
-      await apiClient.patch(`/api/sessions/${activeSessionId}`, { personaId });
-      updateSession(activeSessionId, { personaId });
-    } catch (err: unknown) {
-      console.error('[ChatInterface] persona change failed', err instanceof Error ? err : new Error(String(err)));
-    }
-  };
   const [showContextStats, setShowContextStats] = useState(false);
   const [vfsRefreshSignal, setVfsRefreshSignal] = useState(0);
   const messageListRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const {
+    personas,
+    selectedPersonaId,
+    setSelectedPersonaId,
+  } = useLaunchPersonas(activeSession?.personaId);
 
   const answeredCallIds = computeAnsweredCallIds(messages);
 
@@ -150,7 +139,9 @@ export function ChatInterface() {
   }, []);
   const contextPreview = useContextPreview({
     sessionId: activeSessionId,
-    personaId: activeSession?.personaId ?? null,
+    personaId: messages.length === 0
+      ? selectedPersonaId
+      : activeSession?.personaId ?? null,
     draftUserMessage,
     refreshKey: contextPreviewRefreshKey,
   });
@@ -301,6 +292,7 @@ export function ChatInterface() {
     setAgentTurns,
     setMessages,
     setPendingConfirmation,
+    updateAgentTurn,
   });
 
   const composerStreaming = isStreaming || awaitingFirstChunk || hasPendingChunksForSession(activeSessionId);
@@ -328,6 +320,22 @@ export function ChatInterface() {
       setTimeout(() => setCopied(false), 2000);
     });
   };
+
+  const handleLaunchSend = useCallback(async (content: string, personaId: string) => {
+    if (!activeSession) {
+      return;
+    }
+
+    try {
+      await persistSessionLaunchPersona(activeSession, personaId, updateSession);
+    } catch (err: unknown) {
+      console.error('[ChatInterface] launch persona update failed', err instanceof Error ? err : new Error(String(err)));
+      setError('Failed to save selected persona for this chat.');
+      return;
+    }
+
+    handleComposerSend(content, personaId);
+  }, [activeSession, handleComposerSend, updateSession]);
 
   return (
     <div data-testid="chat-interface" className="flex h-full flex-col bg-base-200 overflow-hidden">
@@ -384,19 +392,22 @@ export function ChatInterface() {
           {messages.length === 0 && (
             <ChatWelcomeScreen
               activeSession={activeSession}
-            activeSessionId={activeSessionId}
-            architectures={architectures}
-            isStreaming={composerStreaming}
-            onArchitectureChange={setSelectedArchitectureId}
-            onArchitectureRun={(content) => void handleComposerSend(content, activeSession?.personaId ?? 'default')}
-            onDraftChange={setDraftUserMessage}
-            onPersonaChange={(personaId) => void handlePersonaChange(personaId)}
-            onProjectPathChange={setProjectPath}
-            onSend={handleComposerSend}
-            personas={personas}
-            projectPath={projectPath}
-            selectedArchitectureId={selectedArchitectureId}
-          />
+              activeSessionId={activeSessionId}
+              architectures={architectures}
+              isStreaming={composerStreaming}
+              onArchitectureChange={setSelectedArchitectureId}
+              onArchitectureRun={(content) => void handleComposerSend(content, selectedPersonaId)}
+              onDraftChange={setDraftUserMessage}
+              onPersonaChange={setSelectedPersonaId}
+              onProjectPathChange={setProjectPath}
+              onSend={(content, personaId) => {
+                void handleLaunchSend(content, personaId);
+              }}
+              personas={personas}
+              projectPath={projectPath}
+              selectedPersonaId={selectedPersonaId}
+              selectedArchitectureId={selectedArchitectureId}
+            />
           )}
 
           {buildConversationTimeline(messages, agentTurns).map((entry) => (

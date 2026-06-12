@@ -14,6 +14,10 @@ type ToolEvidence = {
   toolNames: string[];
   successfulToolNames: string[];
 };
+type ArchitectureGraphProjectionWithSchema = ArchitectureGraphProjection & {
+  schemaId?: string;
+  schemaName?: string;
+};
 type ArchitectureGraphProjectionNodeWithEvidence = ArchitectureGraphProjectionNode & {
   toolEvidence?: Record<string, unknown>;
   incompleteReason?: string;
@@ -68,13 +72,14 @@ function toExecutionNode(input: {
   branchMessages: ChatMessage[];
 }): ExecutionGraphNode {
   const { node, graph, branchSessionId, branchMessages } = input;
+  const graphWithSchema = graph as ArchitectureGraphProjectionWithSchema;
   const toolEvidence = extractToolEvidence(node);
   const incompleteReason = extractIncompleteReason(node);
   const routeHops = graph.routeHops ?? [];
   const matchingHops = routeHops.filter((hop) => hop.fromNodeId === node.id || hop.toNodeId === node.id);
   const summary = {
     runId: graph.runId,
-    schemaId: 'architecture-run',
+    schemaId: graphWithSchema.schemaName ?? graphWithSchema.schemaId ?? 'architecture-run',
     status: graph.status ?? graphStatus(graph.nodes),
     trace: node.eventIds.map((eventId) => ({
       speaker: node.kind === 'artifact' ? 'finalizer' as const : node.kind === 'router' ? 'router' as const : 'participant' as const,

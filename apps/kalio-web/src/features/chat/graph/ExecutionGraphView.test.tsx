@@ -48,6 +48,7 @@ const {
   sessionState,
   agentState,
   apiGetMock,
+  getSessionVfsFilesMock,
   apiPostMock,
   apiPatchMock,
   startArchitectureRunMock,
@@ -82,6 +83,7 @@ const {
     setStreaming: vi.fn(),
   },
   apiGetMock: vi.fn(),
+  getSessionVfsFilesMock: vi.fn().mockResolvedValue({ files: [] }),
   apiPostMock: vi.fn(),
   apiPatchMock: vi.fn(),
   startArchitectureRunMock: vi.fn(),
@@ -106,6 +108,7 @@ vi.mock('../../../services/apiClient', () => ({
     post: apiPostMock,
     patch: apiPatchMock,
   },
+  getSessionVfsFiles: getSessionVfsFilesMock,
 }));
 
 vi.mock('../../architect/architect.api', async () => {
@@ -279,11 +282,10 @@ describe('ExecutionGraphView empty-session state', () => {
 
     expect(screen.getByTestId('graph-empty-screen')).toBeInTheDocument();
     expect(screen.getByTestId('graph-empty-persona-select')).toBeInTheDocument();
-    expect(screen.getByTestId('graph-empty-architecture-select')).toBeInTheDocument();
+    expect(screen.queryByTestId('graph-empty-architecture-select')).not.toBeInTheDocument();
     expect(screen.getByTestId('graph-empty-project-path-input')).toBeInTheDocument();
-    expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Direct chat runtime');
-    expect(screen.getAllByText('UX Designer').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('run_subagent').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Chat runtime: RaBuilder');
+    expect(screen.queryByTestId('execution-graph-live-sidebar')).not.toBeInTheDocument();
   });
 
   it('creates a new chat and sends the first prompt when graph view has no active session', async () => {
@@ -312,6 +314,31 @@ describe('ExecutionGraphView empty-session state', () => {
       sessionId: 'new-graph-session',
       content: 'Start from graph',
       personaId: 'default',
+    });
+  });
+
+  it('creates a new chat with the selected persona in chat mode', async () => {
+    sessionState.activeSessionId = null;
+    sessionState.sessions = [];
+
+    await renderExecutionGraphView();
+
+    fireEvent.change(screen.getByTestId('graph-empty-persona-select'), {
+      target: { value: 'persona-child' },
+    });
+    fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
+      target: { value: 'Start with the specialist' },
+    });
+    fireEvent.click(screen.getByTestId('graph-empty-run-prompt'));
+
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
+      personaId: 'persona-child',
+      title: 'New Chat',
+    }));
+    expect(sendMessageMock).toHaveBeenCalledWith({
+      sessionId: 'new-graph-session',
+      content: 'Start with the specialist',
+      personaId: 'persona-child',
     });
   });
 
@@ -369,7 +396,7 @@ describe('ExecutionGraphView empty-session state', () => {
     });
     fireEvent.click(screen.getByTestId('graph-empty-run-prompt'));
 
-    expect(sessionState.updateSession).toHaveBeenCalledWith('session-1', { title: 'Start this graph session' });
+    await waitFor(() => expect(sessionState.updateSession).toHaveBeenCalledWith('session-1', { title: 'Start this graph session' }));
     expect(sessionState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       role: 'user',
@@ -410,37 +437,46 @@ describe('ExecutionGraphView empty-session state', () => {
       return Promise.resolve({ data: [] });
     });
 
-    apiPostMock.mockResolvedValueOnce({
-      data: {
-        id: 'new-graph-session',
-        personaId: 'default',
-        title: 'New Chat',
-        runtimeContext: {
-          runtimeKind: 'chat',
-          architectureContext: {
-            projectPath: 'C:\\Projekty\\kalio-forever',
-            executionCwd: 'C:\\Projekty\\kalio-forever',
+    apiPostMock
+      .mockResolvedValueOnce({
+        data: {
+          id: 'new-graph-session',
+          personaId: 'default',
+          title: 'New Chat',
+          runtimeContext: {
+            runtimeKind: 'chat',
+            architectureContext: {
+              projectPath: 'C:\\Projekty\\kalio-forever',
+              executionCwd: 'C:\\Projekty\\kalio-forever',
+            },
           },
+          createdAt: 20,
+          updatedAt: 20,
         },
-        createdAt: 20,
-        updatedAt: 20,
-      },
-    });
+      })
+      .mockResolvedValueOnce({
+        data: {
+          title: 'Goal Workflow Summary',
+        },
+      });
 
     await renderExecutionGraphView();
 
     fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
       target: { value: 'C:\\Projekty\\kalio-forever' },
     });
+    fireEvent.click(screen.getByTestId('graph-empty-mode-workflow'));
+    await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toBeInTheDocument());
     fireEvent.change(screen.getByTestId('graph-empty-architecture-select'), {
       target: { value: 'goal-master-delivery-loop' },
     });
+    await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toHaveValue('goal-master-delivery-loop'));
+    await waitFor(() => expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Workflow runtime: Goal Master Delivery Loop'));
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Run the workflow' },
     });
     fireEvent.click(screen.getByTestId('graph-empty-run-prompt'));
 
-    await waitFor(() => expect(screen.getByTestId('graph-empty-persona-select')).toBeDisabled());
     expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
       personaId: 'default',
       runtimeContext: {
@@ -452,9 +488,8 @@ describe('ExecutionGraphView empty-session state', () => {
       },
       title: 'New Chat',
     });
-    expect(apiPatchMock).not.toHaveBeenCalled();
     expect(sendMessageMock).not.toHaveBeenCalled();
-    expect(startGoalGuardAgentFlowRunMock).toHaveBeenCalledWith(
+    await waitFor(() => expect(startGoalGuardAgentFlowRunMock).toHaveBeenCalledWith(
       'Run the workflow',
       expect.objectContaining({
         parentSessionId: 'new-graph-session',
@@ -462,16 +497,29 @@ describe('ExecutionGraphView empty-session state', () => {
         executionCwd: 'C:\\Projekty\\kalio-forever',
       }),
       'new-graph-session',
-    );
+    ));
     expect(sessionState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'new-graph-session',
       role: 'user',
-      content: expect.stringContaining('[Architecture: Goal Master Delivery Loop]'),
+      content: 'Run the workflow',
+    }));
+    await waitFor(() => expect(apiPatchMock).toHaveBeenCalledWith('/api/sessions/new-graph-session', {
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+          schemaId: 'goal-master-delivery-loop',
+          schemaName: 'Goal Master Delivery Loop',
+          displayLabel: 'Goal Master Delivery Loop',
+        },
+      },
     }));
     expect(sessionState.updateSession).not.toHaveBeenCalledWith(
       'new-graph-session',
       expect.objectContaining({ title: expect.stringMatching(/^Architecture:/) }),
     );
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions/new-graph-session/generate-title'));
   });
 
   it('runs non-goal workflows through startArchitectureRun with scoped launch context', async () => {
@@ -500,31 +548,41 @@ describe('ExecutionGraphView empty-session state', () => {
       return Promise.resolve({ data: [] });
     });
 
-    apiPostMock.mockResolvedValueOnce({
-      data: {
-        id: 'new-graph-session',
-        personaId: 'default',
-        title: 'New Chat',
-        runtimeContext: {
-          runtimeKind: 'chat',
-          architectureContext: {
-            projectPath: 'C:\\Projekty\\kalio-forever',
-            executionCwd: 'C:\\Projekty\\kalio-forever',
+    apiPostMock
+      .mockResolvedValueOnce({
+        data: {
+          id: 'new-graph-session',
+          personaId: 'default',
+          title: 'New Chat',
+          runtimeContext: {
+            runtimeKind: 'chat',
+            architectureContext: {
+              projectPath: 'C:\\Projekty\\kalio-forever',
+              executionCwd: 'C:\\Projekty\\kalio-forever',
+            },
           },
+          createdAt: 20,
+          updatedAt: 20,
         },
-        createdAt: 20,
-        updatedAt: 20,
-      },
-    });
+      })
+      .mockResolvedValueOnce({
+        data: {
+          title: 'Workflow Summary',
+        },
+      });
 
     await renderExecutionGraphView();
 
     fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
       target: { value: 'C:\\Projekty\\kalio-forever' },
     });
+    fireEvent.click(screen.getByTestId('graph-empty-mode-workflow'));
+    await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toBeInTheDocument());
     fireEvent.change(screen.getByTestId('graph-empty-architecture-select'), {
       target: { value: 'strategic-decision-council' },
     });
+    await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toHaveValue('strategic-decision-council'));
+    await waitFor(() => expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Workflow runtime: Strategic Decision Council'));
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Run the standard workflow' },
     });
@@ -545,6 +603,27 @@ describe('ExecutionGraphView empty-session state', () => {
     ));
     expect(startGoalGuardAgentFlowRunMock).not.toHaveBeenCalled();
     expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(apiPatchMock).toHaveBeenCalledWith('/api/sessions/new-graph-session', {
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+          schemaId: 'strategic-decision-council',
+          schemaName: 'Strategic Decision Council',
+          displayLabel: 'Strategic Decision Council',
+        },
+      },
+    });
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions/new-graph-session/generate-title'));
+    expect(sessionState.updateSession).toHaveBeenCalledWith('new-graph-session', expect.objectContaining({
+      runtimeContext: expect.objectContaining({
+        architectureContext: expect.objectContaining({
+          displayLabel: 'Strategic Decision Council',
+        }),
+      }),
+    }));
+    expect(sessionState.updateSession).toHaveBeenCalledWith('new-graph-session', { title: 'Workflow Summary' });
   });
 
   it('renders durable architecture graph nodes for architecture root sessions without chat messages', async () => {

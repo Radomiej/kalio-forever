@@ -156,6 +156,37 @@ describe('SessionPanel — pending confirmation indicator', () => {
     expect(screen.getByTestId('session-running-session-2')).toBeDefined();
   });
 
+  it('shows completed icon when the latest turn finished successfully', async () => {
+    mockSessionStoreState.sessionAgentTurns = {
+      'session-2': [{
+        id: 'turn-1',
+        sessionId: 'session-2',
+        items: [],
+        done: true,
+      }],
+    };
+
+    await renderSessionPanel();
+
+    expect(screen.getByTestId('session-done-session-2')).toBeDefined();
+  });
+
+  it('shows error icon when the latest turn failed', async () => {
+    mockSessionStoreState.sessionAgentTurns = {
+      'session-2': [{
+        id: 'turn-1',
+        sessionId: 'session-2',
+        items: [],
+        done: false,
+        error: { code: 'tool_failed', message: 'Tool execution failed' },
+      }],
+    };
+
+    await renderSessionPanel();
+
+    expect(screen.getByTestId('session-error-session-2')).toBeDefined();
+  });
+
   it('shows waiting descendant badge on parent rows when child session is pending approval', async () => {
     mockSessionStoreState.sessions = [
       { id: 'session-1', title: 'Chat One', personaId: 'default', createdAt: 0, updatedAt: 0 },
