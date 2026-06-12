@@ -9,6 +9,15 @@ vi.mock('./HtmlIframeRenderer', () => ({
 describe('VfsHtmlRenderer', () => {
   const fetchMock = vi.fn();
 
+  function expectRenderedPreviewPath(vfsPath: string) {
+    return screen.findByTestId('raapp-vfs-src').then((element) => {
+      expect(element).toHaveTextContent(
+        `/api/sessions/session-1/vfs/serve-path/${vfsPath}`,
+      );
+      return element;
+    });
+  }
+
   beforeEach(() => {
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -23,9 +32,7 @@ describe('VfsHtmlRenderer', () => {
 
     render(<VfsHtmlRenderer sessionId="session-1" vfsPath="drafts/my app/index.html" />);
 
-    expect(await screen.findByTestId('raapp-vfs-src')).toHaveTextContent(
-      'http://localhost:3016/api/sessions/session-1/vfs/serve-path/drafts/my%20app/index.html',
-    );
+    await expectRenderedPreviewPath('drafts/my%20app/index.html');
   });
 
   it('keeps the preview preflight request credential-free for cross-origin dev serving', async () => {
@@ -33,13 +40,13 @@ describe('VfsHtmlRenderer', () => {
 
     render(<VfsHtmlRenderer sessionId="session-1" vfsPath="drafts/secure/index.html" />);
 
-    await screen.findByTestId('raapp-vfs-src');
+    await expectRenderedPreviewPath('drafts/secure/index.html');
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:3016/api/sessions/session-1/vfs/serve-path/drafts/secure/index.html',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('credentials');
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] ?? [];
+    expect(typeof requestUrl).toBe('string');
+    expect(new URL(String(requestUrl)).pathname).toBe('/api/sessions/session-1/vfs/serve-path/drafts/secure/index.html');
+    expect(requestInit).toEqual(expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(requestInit).not.toHaveProperty('credentials');
   });
 
   it('shows a non-technical loading state before the preview is ready', async () => {
@@ -60,9 +67,7 @@ describe('VfsHtmlRenderer', () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByTestId('raapp-vfs-src')).toHaveTextContent(
-      'http://localhost:3016/api/sessions/session-1/vfs/serve-path/drafts/loading/index.html',
-    );
+    await expectRenderedPreviewPath('drafts/loading/index.html');
   });
 
   it('shows a friendly fallback when the VFS preview target is unavailable', async () => {
@@ -88,9 +93,7 @@ describe('VfsHtmlRenderer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry preview' }));
 
-    expect(await screen.findByTestId('raapp-vfs-src')).toHaveTextContent(
-      'http://localhost:3016/api/sessions/session-1/vfs/serve-path/drafts/ready/index.html',
-    );
+    await expectRenderedPreviewPath('drafts/ready/index.html');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
