@@ -132,7 +132,8 @@ export function EmbeddingsPanel() {
         .then((availability) => {
           setLocalAvailability(availability);
         })
-        .catch(() => {
+        .catch((err) => {
+          console.error('[EmbeddingsPanel] Failed to refresh local embedding availability during install polling', err);
           // keep current installing state until the next explicit action
         });
     }, 1200);

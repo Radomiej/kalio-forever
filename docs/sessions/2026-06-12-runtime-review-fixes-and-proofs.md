@@ -36,6 +36,9 @@
   - [`chat-max-iterations.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/__tests__/chat-max-iterations.spec.ts), [`chat.service.event-ordering.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/__tests__/chat.service.event-ordering.spec.ts), and [`issues-verification.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/__tests__/issues-verification.spec.ts) now provide the required `AgentBudgetApprovalService` and `SessionsService` stubs expected by the current `ChatService` constructor.
   - [`ModelSettingsSection.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/ModelSettingsSection.tsx) no longer clears the monotonic runtime-model focus signal on consumption, which avoids losing focus when `SettingsModal` switches from `llm` to `runtime`.
   - [`executionGraphModel.test.ts`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/chat/graph/executionGraphModel.test.ts) and [`subagent.tool.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/tool/tools/subagent.tool.spec.ts) now assert the current runtime/UI contract rather than a stale pre-refactor behavior.
+- Audit follow-up:
+  - [`EmbeddingsPanel.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/EmbeddingsPanel.tsx) now logs install-polling availability failures instead of swallowing them silently while still preserving the visible `installing` state.
+  - [`EmbeddingsPanel.test.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/EmbeddingsPanel.test.tsx) now proves that a failed install poll reports the error and keeps the progress UI intact.
 
 ## Verification
 
@@ -57,6 +60,10 @@
   - `corepack pnpm test`
   - `corepack pnpm audit:report`
   - `corepack pnpm --filter kalio-web run dev -- --host 127.0.0.1 --port 5188 --strictPort` with a successful `GET http://127.0.0.1:5188` (`HTTP 200`)
+- Post-audit follow-up:
+  - `corepack pnpm --filter kalio-web exec vitest run src/features/settings/EmbeddingsPanel.test.tsx`
+  - `corepack pnpm test`
+  - `corepack pnpm audit:report` (remaining highs reduced from `3` to `2`)
 - Prior manual/dev proof already held in the earlier slice:
   - [`2026-06-12-dev-loopback-and-review-gap-fixes.md`](/C:/Projekty/kalio-forever/docs/sessions/2026-06-12-dev-loopback-and-review-gap-fixes.md)
 
@@ -68,10 +75,11 @@
 - Session-title autogeneration and budget-approval replay now have direct runtime proofs instead of only unit coverage.
 - Runtime settings focus survives the `LLM Settings -> Runtime Settings` modal handoff without dropping the model-input focus request.
 - The repo-wide automated test gate is green again after refreshing stale test fixtures and constructor harnesses.
+- The last direct silent-error finding from the audit is closed; remaining high-severity audit items are structural cycles rather than swallowed runtime failures.
 
 ## Remaining risks
 
 - [`docs/technical-documentation-kalio.md`](/C:/Projekty/kalio-forever/docs/technical-documentation-kalio.md) still disagrees with the repo on launcher matrix, storage topology, runtime kinds, and self-hosted claims; it needs explicit system-truth answers before it can become the canonical project document.
 - [`docs/ux-workstation-page-redesign.md`](/C:/Projekty/kalio-forever/docs/ux-workstation-page-redesign.md) is currently deleted in the worktree but was not part of this verified slice.
 - `apps/kalio-web` production build still warns about a large JS chunk (`assets/index-*.js` above 2 MB before gzip). This slice did not introduce that debt, but it remains open.
-- Static audit still reports material architecture debt: `docs/audit/2026-06-12-report.md` lists 25 critical oversize files, 2 circular dependencies, and a real silent-error lead in [`EmbeddingsPanel.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/EmbeddingsPanel.tsx).
+- Static audit still reports material architecture debt: `docs/audit/2026-06-12-report.md` lists 25 critical oversize files and 2 circular dependencies. The direct silent-error lead in [`EmbeddingsPanel.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/EmbeddingsPanel.tsx) is now closed.
