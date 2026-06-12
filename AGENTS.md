@@ -182,6 +182,7 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 ### Conventions specific to this repo
 - Naming: PascalCase for classes, camelCase for variables/methods, kebab-case for files
 - Import style: Only import from `@kalio/types` across module boundaries. Zero cross-module imports.
+- Native tool classes should stay thin; domain logic belongs in services, not in tool handlers.
 - Error handling pattern: Never use empty catch. Always log errors with context and rethrow or handle explicitly.
 - Testing pattern and framework: Vitest for unit/integration, Playwright for E2E. Mock LLM with `MockLLMProvider` in tests.
 - For critical architecture/runtime work, keep bug-hunter agents running by default: two backend-focused hunters, one frontend-focused hunter, plus one coverage guardian tracking meaningful 80%+ FE/BE coverage. Scope them to disjoint files, require real regression evidence, and do not accept coverage-only or mock-only tests that miss user-visible behavior.
@@ -197,7 +198,7 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - LLM calls from frontend (all LLM traffic goes through Socket.IO gateway)
 - Direct filesystem access outside VFSModule (all file I/O through `VFSService`)
 - Type duplication (all shared types live in `@kalio/types/src/index.ts`)
-- Destructive tools without `requiresConfirmation: true` (VFS delete, terminal exec, etc.)
+- Destructive tools without `requiresConfirmation: true`, or overrides that disable confirmation for destructive tools (VFS delete, terminal exec, etc.)
 
 ---
 
@@ -234,6 +235,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Treat `.\start-dev.ps1` ports `3016/5188` as the official manual-dev hot-reload stack; treat `node scripts/stack-manager.mjs start --backend-port 0 --frontend-port 0` as an isolated built QA stack on random ports using `NODE_ENV=production`, `data/kalio-qa.db`, and `data/workspaces-qa`.
 - For failing CI work, start with `superpowers:systematic-debugging` and finish with `superpowers:verification-before-completion` before claiming the pipeline is fixed.
 - On Windows, always use system Node (`C:\Program Files\nodejs\node.exe`) for `node`/`pnpm`/`npm` installs and rebuilds; never Cursor's bundled Node 22 — prepend that directory to PATH when the agent shell resolves the wrong `node`.
+- Keep `docs/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/post-mvp-plans.md`.
 
 ---
 

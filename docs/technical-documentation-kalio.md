@@ -7,7 +7,7 @@
 |---|---|
 | Zakres dokumentu | Architektura, komponenty, moduły, workflow agentów, narzędzia, VFS, MCP, RA-App, pamięć, baza danych, bezpieczeństwo, eksploatacja, backup, aktualizacje, generacja kodu wynikowego, monitoring i ryzyka techniczne. |
 | Podstawa opracowania | Aktualny README projektu, dokumentacja architektury narzędzi, logi sesji implementacyjnych Kalio oraz struktura referencyjnej dokumentacji technicznej portalu MK. |
-| Charakter dokumentu | Dokumentacja referencyjna/as-built na poziomie technicznym. Elementy zależne od finalnego deploymentu lub przyszłych decyzji produktowych oznaczono jako **konfigurowalne**, **post-MVP** albo **zalecane**. |
+| Charakter dokumentu | Dokumentacja referencyjna/as-built na poziomie technicznym. Zalecenia implementacyjne dla agentów kodujących są utrzymywane w `AGENTS.md`, a kierunki post-MVP w `docs/post-mvp-plans.md`. |
 | Status | Wersja robocza gotowa do umieszczenia w repozytorium GitHub jako `docs/technical-documentation.md` lub `docs/kalio-technical-documentation.md`. |
 | Odbiorcy | Autor projektu, contributorzy, agenci kodujący, reviewerzy architektury, przyszli administratorzy lokalnych/self-hosted wdrożeń. |
 
@@ -35,7 +35,7 @@
 
 ## 1. Cel i zakres dokumentu
 
-Niniejszy dokument opisuje techniczną koncepcję, aktualny model działania oraz zalecany sposób eksploatacji systemu **Kalio**. Kalio jest lokalnym lub self-hosted workspace'em AI, który łączy interfejs czatu z backendem zdolnym do wykonywania realnych narzędzi: pracy na plikach, uruchamiania procesów, wywoływania API, korzystania z pamięci semantycznej, obsługi MCP, renderowania mini-aplikacji RA-App oraz delegowania zadań do sub-agentów i zewnętrznych agentów CLI.
+Niniejszy dokument opisuje techniczną koncepcję, aktualny model działania oraz sposób eksploatacji systemu **Kalio**. Kalio jest lokalnym lub self-hosted workspace'em AI, który łączy interfejs czatu z backendem zdolnym do wykonywania realnych narzędzi: pracy na plikach, uruchamiania procesów, wywoływania API, korzystania z pamięci semantycznej, obsługi MCP, renderowania mini-aplikacji RA-App oraz delegowania zadań do sub-agentów i zewnętrznych agentów CLI.
 
 Dokument obejmuje:
 
@@ -236,7 +236,7 @@ Skills są wielokrotnego użytku i mogą wzbogacać prompt persony o konkretne r
 
 ### 3.4. Natywne narzędzia
 
-Narzędzia natywne są klasami NestJS dekorowanymi przez `@Tool()` albo `@ConfirmedTool()`. Tool powinien być cienką bramką do usługi domenowej, a nie miejscem ciężkiej logiki biznesowej.
+Narzędzia natywne są klasami NestJS dekorowanymi przez `@Tool()` albo `@ConfirmedTool()`.
 
 | Rodzina | Przykładowe narzędzia | Główna odpowiedzialność |
 |---|---|---|
@@ -316,8 +316,6 @@ CLI Agent Runner uruchamia zewnętrzne narzędzia typu GitHub Copilot CLI, Gemin
 - kompresję outputu,
 - zwrot `exitCode`, `durationMs`, `agentId` i outputu.
 
-CLI agent powinien być używany głównie do zadań kodowych, testów, analizy repozytorium i delegacji do narzędzi zewnętrznych.
-
 ### 3.10. Obrazy i multimodalność
 
 ImageModule obsługuje:
@@ -346,6 +344,11 @@ Settings UI zarządza m.in.:
 
 Konfiguracja runtime zapisywana jest w SQLite (`app_settings`, `credentials`, tabele domenowe) albo plikach użytkownika, zależnie od modułu.
 
+Precedence `maxToolAttempts` jest zależna od trybu runtime:
+
+- zwykły chat: `persona.maxToolAttempts` -> globalne ustawienie runtime,
+- wykonanie slotu workflow/architecture: `node.maxToolAttempts` -> `persona.maxToolAttempts` -> `run.context.maxArchitectureSubagentIterationsBySlot[slotId]` / `run.context.maxArchitectureSubagentIterations` -> globalne ustawienie runtime -> domyślny limit wykonawczy (`2` dla `tool_executor`, `4` dla pozostałych slotów).
+
 ### 3.12. Observability i audyt
 
 Kalio rejestruje istotne zdarzenia runtime:
@@ -358,7 +361,7 @@ Kalio rejestruje istotne zdarzenia runtime:
 - operacje administracyjne,
 - clearing logów w trybie lokalnym.
 
-Observability UI służy do diagnostyki lokalnej. W produkcji/self-hosted zalecane jest dodatkowe logowanie do plików, Loki/Grafana albo innego systemu obserwowalności.
+Observability UI służy do diagnostyki lokalnej.
 
 ---
 
@@ -732,7 +735,7 @@ W self-hosted/firmowym deploymentcie logi audytowe powinny być wysyłane do app
 
 ## 8. Dostępność, UX i wielojęzyczność
 
-Kalio nie jest publicznym portalem instytucjonalnym, ale interfejs powinien być wygodny i dostępny, ponieważ użytkownik pracuje z długimi sesjami, tool callami i kodem.
+Interfejs powinien pozostać czytelny przy długich sesjach, tool callach i pracy z kodem.
 
 ### 8.1. Minimalne wymagania UX
 
@@ -939,7 +942,6 @@ Dla deploymentu firmowego zaleca się klasyfikację CVE:
 
 - Przed zmianą sprawdzić architekturę, moduł i testy.
 - Nie zwiększać god objects ani plików powyżej limitów LOC.
-- Nową logikę trzymać w core service, tool jako cienki adapter.
 - Nie dodawać `any` w core runtime.
 - Nie commitować wygenerowanych śmieci, sekretów, lokalnych DB ani build artifacts.
 - Po UI/render zmianie wykonać screenshot/dev-server proof, jeśli możliwe.
@@ -979,7 +981,7 @@ Dla deploymentu firmowego zaleca się klasyfikację CVE:
 
 ### 12.3. Proces generacji kodu wynikowego
 
-Generacja kodu wynikowego nie powinna wymagać narzędzi komercyjnych. Dopuszczalne są komercyjne lub płatne providery LLM na etapie runtime, ale sam build aplikacji powinien być możliwy lokalnie i open-source'owo.
+Proces generacji kodu wynikowego opiera się na standardowym toolchainie repozytorium opisanym w sekcjach 12.2 i 13.2.
 
 ---
 
@@ -1200,7 +1202,6 @@ Plan DR powinien definiować:
 
 - [ ] Zidentyfikowano moduł i właściciela logiki.
 - [ ] Nie dodano cross-module importów poza `@kalio/types`/infra.
-- [ ] Tool jest cienkim adapterem do serwisu.
 - [ ] Dodano lub zaktualizowano test fail-first, jeśli to bugfix.
 - [ ] Dla UI dodano screenshot/dev proof, jeśli ma sens.
 - [ ] Dla narzędzia modyfikującego stan ustawiono confirmation.
@@ -1226,6 +1227,7 @@ Plan DR powinien definiować:
 | `docs/mcp-architecture.md` | MCP lifecycle, discovery i policy. |
 | `docs/raapp-design-current.md` | RA-App inline/catalog/sandbox/approvals. |
 | `docs/cli-agent-module-architecture.md` | Adaptery CLI, config, streaming outputu. |
+| `docs/post-mvp-plans.md` | Kierunki post-MVP wyjęte z dokumentacji MVP/as-built. |
 | `docs/database-schema-diagram.md` | ERD i aktualny schemat. |
 | `docs/sessions/` | Chronologiczne logi implementacyjne i decyzje. |
 
