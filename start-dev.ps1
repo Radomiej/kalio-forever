@@ -413,7 +413,17 @@ if ($useDedicatedPorts) {
 # crashes with exit code -1 (4294967295) on Windows when stdout is redirected
 # to a file or pipe. The process MUST inherit the real console handles.
 # We therefore run Vite directly via node without any output redirect.
-$feProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList $viteJs `
+# Bind Vite to all local interfaces so the dev stack is reachable through both
+# localhost and 127.0.0.1 during manual QA and Playwright external-server reuse.
+$feArgs = @(
+    $viteJs
+    '--host'
+    '0.0.0.0'
+    '--port'
+    "$FE_PORT"
+    '--strictPort'
+)
+$feProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList $feArgs `
     -WorkingDirectory $web -NoNewWindow -PassThru
 
 Write-Host "  Frontend -> http://localhost:$FE_PORT  (PID $($feProcess.Id))" -ForegroundColor Green
