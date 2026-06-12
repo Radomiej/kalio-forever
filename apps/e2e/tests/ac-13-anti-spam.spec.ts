@@ -31,10 +31,11 @@ test.describe('AC-13: Queue while streaming', () => {
     await sendBtn.click();
 
     await expect(page.getByTestId('chat-stop-btn')).toBeVisible({ timeout: 5000 });
-    await expect(chatInput).toBeEnabled({ timeout: 5000 });
+    const streamingInput = await expectComposerEnabled(page, 5000);
+    const streamingSendBtn = await getComposerSendButton(page);
 
-    await chatInput.fill('queued follow-up');
-    await sendBtn.click();
+    await streamingInput.fill('queued follow-up');
+    await streamingSendBtn.click();
 
     await expect(page.getByTestId('chat-queued-badge')).toBeVisible({ timeout: 5000 });
 
@@ -65,11 +66,12 @@ test.describe('AC-13: Queue while streaming', () => {
     await chatInput.press('Enter');
 
     await expect(page.getByTestId('chat-stop-btn')).toBeVisible({ timeout: 5000 });
+    const streamingInput = await expectComposerEnabled(page, 5000);
 
     for (let i = 0; i < 3; i++) {
       await page.waitForTimeout(200);
-      await chatInput.fill(`queued ${i + 1}`);
-      await chatInput.press('Enter');
+      await streamingInput.fill(`queued ${i + 1}`);
+      await streamingInput.press('Enter');
     }
 
     const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
