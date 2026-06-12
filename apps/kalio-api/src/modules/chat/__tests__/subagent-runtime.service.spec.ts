@@ -376,6 +376,7 @@ describe('SubagentRuntimeService nested subagents', () => {
     const sessions = {
       createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)),
       get: vi.fn(async () => existingChild),
+      updateRuntimeContext: vi.fn().mockResolvedValue(undefined),
     };
     const runtime = buildSubagentRuntime(
       llmSource,
@@ -399,6 +400,14 @@ describe('SubagentRuntimeService nested subagents', () => {
     } as Parameters<SubagentRuntimeService['runSubagent']>[0]);
 
     expect(sessions.get).toHaveBeenCalledWith('sub-existing');
+    expect(sessions.updateRuntimeContext).toHaveBeenCalledWith(
+      'sub-existing',
+      expect.objectContaining({
+        runtimeKind: 'subagent',
+        parentSessionId: 'master',
+        parentToolCallId: 'call-follow-up',
+      }),
+    );
     expect(sessions.createWithId).not.toHaveBeenCalled();
     expect(sessionManager.persistUserMessage).toHaveBeenCalledWith('sub-existing', 'Refine the existing page');
     expect(result.childSessionId).toBe('sub-existing');
