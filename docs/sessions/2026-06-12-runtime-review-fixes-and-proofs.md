@@ -8,6 +8,7 @@
 - Fixed frontend turn restoration for persisted architecture/workflow conversations so history rebuilds only defer to a truly live turn, not a stale loop marker.
 - Fixed architecture run projection replacement so late async callbacks do not leave duplicate agent-turn bubbles after session reload or child-session navigation.
 - Added test-support plumbing and proofs for session-title summarization and agent-budget HITL replay.
+- Closed the remaining CI review regressions in the current branch: a stale frontend settings import that broke `kalio-web` typecheck/build, plus a clean-build mismatch where `@kalio/sdk` package metadata pointed at `dist/index.js` even though a fresh build only emitted `dist/sdk/src/index.js`.
 
 ## What changed
 
@@ -39,6 +40,10 @@
 - Audit follow-up:
   - [`EmbeddingsPanel.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/EmbeddingsPanel.tsx) now logs install-polling availability failures instead of swallowing them silently while still preserving the visible `installing` state.
   - [`EmbeddingsPanel.test.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/EmbeddingsPanel.test.tsx) now proves that a failed install poll reports the error and keeps the progress UI intact.
+- CI gate follow-up:
+  - [`ModelSettingsSection.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/ModelSettingsSection.tsx) no longer carries an unused `useSettingsStore` import, which restores the frontend typecheck/build path used by both the `frontend` and `e2e` CI jobs.
+  - [`packages/@kalio/sdk/tsconfig.json`](/C:/Projekty/kalio-forever/packages/@kalio/sdk/tsconfig.json) now builds from `rootDir=src` without pulling `@kalio/types/src` into the emitted tree, so a clean workspace build produces the package entrypoints declared in `package.json`.
+  - [`monorepo-package-compatibility.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/monorepo-package-compatibility.spec.ts) now asserts that the `main` and `types` files declared by `@kalio/types` and `@kalio/sdk` actually exist after build, so stale local `dist/` output can no longer hide a broken package contract.
 
 ## Verification
 
@@ -64,6 +69,19 @@
   - `corepack pnpm --filter kalio-web exec vitest run src/features/settings/EmbeddingsPanel.test.tsx`
   - `corepack pnpm test`
   - `corepack pnpm audit:report` (remaining highs reduced from `3` to `2`)
+- Post-CI-fix follow-up:
+  - `corepack pnpm --filter @kalio/types run build`
+  - `corepack pnpm --filter @kalio/sdk run clean`
+  - `corepack pnpm --filter @kalio/sdk run build`
+  - `corepack pnpm --filter kalio-api exec node -e "console.log(require.resolve('@kalio/sdk')); console.log(Boolean(require('@kalio/sdk').KalioSDK));"`
+  - `corepack pnpm --filter kalio-api exec vitest run src/modules/monorepo-package-compatibility.spec.ts`
+  - `corepack pnpm --filter kalio-api run typecheck`
+  - `corepack pnpm --filter kalio-api test:cov`
+  - `corepack pnpm --filter kalio-web run typecheck`
+  - `corepack pnpm --filter kalio-web run build`
+  - `corepack pnpm --filter kalio-web test:cov`
+  - `corepack pnpm test`
+  - `corepack pnpm audit:report`
 - Prior manual/dev proof already held in the earlier slice:
   - [`2026-06-12-dev-loopback-and-review-gap-fixes.md`](/C:/Projekty/kalio-forever/docs/sessions/2026-06-12-dev-loopback-and-review-gap-fixes.md)
 
@@ -76,6 +94,7 @@
 - Runtime settings focus survives the `LLM Settings -> Runtime Settings` modal handoff without dropping the model-input focus request.
 - The repo-wide automated test gate is green again after refreshing stale test fixtures and constructor harnesses.
 - The last direct silent-error finding from the audit is closed; remaining high-severity audit items are structural cycles rather than swallowed runtime failures.
+- Clean `@kalio/sdk` builds now match the published workspace package contract instead of relying on stale local `dist/` files that CI never had.
 
 ## Remaining risks
 

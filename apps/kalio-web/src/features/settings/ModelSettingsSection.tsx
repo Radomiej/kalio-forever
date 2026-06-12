@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, RefreshCw, Check, AlertCircle } from 'lucide-react';
 import { ModelCombobox } from './ModelCombobox';
-import { useSettingsStore } from './settingsStore';
 import type { ActiveRuntimeConfig, LLMConfigWithSource } from './llm-panel.types';
 import { formatLargeTokenCount } from './settings-format';
 
