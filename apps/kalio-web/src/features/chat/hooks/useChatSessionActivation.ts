@@ -64,7 +64,9 @@ export function useChatSessionActivation({
             eventBus.identifySession(projection.childSessionId);
           }
         });
-        if (!useAgentStore.getState().hasActiveLoopForSession(activeSessionId)) {
+        const hasActiveLoop = useAgentStore.getState().hasActiveLoopForSession(activeSessionId);
+        const hasActiveTurn = Boolean(useSessionStore.getState().getSessionActiveTurnId(activeSessionId));
+        if (!hasActiveLoop || !hasActiveTurn) {
           setAgentTurns(buildTurnsFromHistory(mergedMessages, activeSessionId));
           return;
         }

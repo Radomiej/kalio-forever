@@ -4,6 +4,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 import type { ChatSession, ChatMessage, Persona } from '@kalio/types';
+import { buildTurnsFromHistory } from '../chat/chatUtils';
 import {
   SESSION_ORIGIN_FILTERS,
   buildSessionListEntries,
@@ -42,7 +43,18 @@ function persistActiveSessionId(sessionId: string | null): void {
 }
 
 export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void; viewSwitcher?: ReactNode } = {}) {
-  const { sessions, activeSessionId, setSessions, setActiveSession, addSession, setMessages, removeSession, updateSession } = useSessionStore();
+  const {
+    sessions,
+    activeSessionId,
+    setSessions,
+    setActiveSession,
+    addSession,
+    setMessages,
+    setAgentTurns,
+    getSessionActiveTurnId,
+    removeSession,
+    updateSession,
+  } = useSessionStore();
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
   const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
@@ -131,6 +143,11 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       // Discard stale result if user switched to another session while this fetch was in-flight
       if (useSessionStore.getState().activeSessionId !== id) return;
       setMessages(data);
+      const hasActiveLoop = useAgentStore.getState().hasActiveLoopForSession?.(id) ?? false;
+      const hasActiveTurn = Boolean(getSessionActiveTurnId(id));
+      if (!hasActiveLoop || !hasActiveTurn) {
+        setAgentTurns(buildTurnsFromHistory(data, id), id);
+      }
     } catch (err) {
       console.error('[SessionPanel] load messages failed', err);
     }

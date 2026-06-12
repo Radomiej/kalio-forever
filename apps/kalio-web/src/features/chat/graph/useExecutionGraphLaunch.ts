@@ -6,6 +6,7 @@ import { useSessionStore, type AgentTurn } from '../../../store/sessionStore';
 import { apiClient, getSessionVfsFiles } from '../../../services/apiClient';
 import { eventBus } from '../../../services/eventBus';
 import { buildArchitectureRunTurnProjection } from '../architectureChatSummary';
+import { replaceArchitectureRunTurn } from '../architectureTurnProjection';
 import { getArchitectureSchemas, startArchitectureRun, startGoalGuardAgentFlowRun } from '../../architect/architect.api';
 import type { ArchitectSchema } from '../../architect/architect.types';
 import {
@@ -252,15 +253,19 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
           .filter((message) => message.id !== pendingAssistantMessageId)
           .filter((message) => !message.id.startsWith(`architecture:${result.run.id}:`));
         setMessages([...currentMessages, ...projection.messages], sessionWithScope.id);
-        const currentTurns = getAgentTurnsForSession(sessionWithScope.id)
-          .filter((turn) => turn.id !== `architecture-turn-${result.run.id}`);
-        setAgentTurns([...currentTurns, {
+        const nextTurn: AgentTurn = {
           id: `architecture-turn-${result.run.id}`,
           sessionId: sessionWithScope.id,
           promptMessageId: userMessageId,
           items: projection.turnItems,
           done: result.run.status !== 'queued' && result.run.status !== 'running',
-        }], sessionWithScope.id);
+        };
+        setAgentTurns(replaceArchitectureRunTurn({
+          currentTurns: getAgentTurnsForSession(sessionWithScope.id),
+          promptMessageId: userMessageId,
+          runId: result.run.id,
+          nextTurn,
+        }), sessionWithScope.id);
         requestWorkflowTitle();
       };
       const result = schemaId === 'goal-master-delivery-loop'

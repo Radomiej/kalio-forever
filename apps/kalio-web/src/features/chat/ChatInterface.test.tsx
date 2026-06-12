@@ -1944,7 +1944,7 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     // (The real assertion is in the next test.)
   });
 
-  it('REGRESSION: setAgentTurns is NOT called when activeAgentLoops has an entry for the session', async () => {
+  it('REGRESSION: setAgentTurns is NOT called when an active loop still owns the session turn', async () => {
     // Arrange: fetch returns a deferred promise so we control timing
     let resolveMessages!: (d: unknown) => void;
     const deferred = new Promise((res) => {
@@ -1964,6 +1964,7 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     agentStoreState.activeAgentLoops = {
       'session-1': { sessionId: 'session-1', turnId: 'turn-live', startedAt: Date.now() },
     };
+    mockActiveTurnId = 'turn-live';
 
     await renderChatInterface();
     // useEffect fired during render; fetch is pending. Clear any setup-time calls.
@@ -1975,7 +1976,7 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
       await deferred;
     });
 
-    // Assert: because activeAgentLoops['session-1'] is populated, setAgentTurns
+    // Assert: because an active loop still owns the live turn id, setAgentTurns
     // must NOT be called. Calling it would set activeTurnId = null, making all
     // subsequent addTurnItem / finalizeAgentTurn calls no-ops.
     expect(setAgentTurns).not.toHaveBeenCalled();
@@ -2023,6 +2024,47 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
       vi.mocked(apiClient.get).mockReset();
       vi.mocked(apiClient.get).mockResolvedValue({ data: [] } as never);
     });
+
+  it('rebuilds history turns when a stale active loop exists without an active turn id', async () => {
+    const historyMsg = {
+      id: 'a2',
+      sessionId: 'session-1',
+      role: 'assistant' as const,
+      content: 'Persisted architecture summary',
+      createdAt: 0,
+    };
+    let resolveMessages!: (messages: unknown) => void;
+    const deferredMessages = new Promise((resolve) => {
+      resolveMessages = resolve;
+    });
+    vi.mocked(apiClient.get).mockImplementation((url: string) => {
+      if (url === '/api/sessions/session-1/messages') {
+        return deferredMessages.then((messages) => ({ data: messages } as never));
+      }
+      return Promise.resolve({ data: [] } as never);
+    });
+
+    agentStoreState.activeAgentLoops = {
+      'stale-loop': { sessionId: 'session-1', turnId: 'turn-stale', startedAt: Date.now() },
+    };
+    mockActiveTurnId = null;
+
+    await renderChatInterface();
+    setAgentTurns.mockClear();
+
+    await act(async () => {
+      resolveMessages([historyMsg]);
+      await deferredMessages;
+      await flushReactEffects();
+    });
+
+    expect(setAgentTurns).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ done: true })]),
+    );
+
+    vi.mocked(apiClient.get).mockReset();
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] } as never);
+  });
   });
 
 // ─────────────────────────────────────────────────────────────────────────────
