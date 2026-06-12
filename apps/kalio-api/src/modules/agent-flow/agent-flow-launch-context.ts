@@ -103,6 +103,10 @@ function isOrchestratorRestricted(context: Record<string, unknown> | undefined):
     || (isRecord(restriction) && Object.keys(restriction).length > 0);
 }
 
+function hasOwnContextKey(context: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(context, key);
+}
+
 export function mergeAgentFlowLaunchContext(input: {
   baseline: Record<string, unknown>;
   launchContext?: RunSubAgentFlowArgs['context'];
@@ -119,6 +123,9 @@ export function mergeAgentFlowLaunchContext(input: {
   }
 
   if (explicit && isOrchestratorRestricted(explicit)) {
+    if (!hasOwnContextKey(explicit, 'launchAllowedToolNames')) {
+      delete merged['launchAllowedToolNames'];
+    }
     if ('projectPath' in explicit) {
       merged['projectPath'] = explicit['projectPath'];
     }

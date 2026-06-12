@@ -138,6 +138,27 @@ describe('agent-flow-launch-context', () => {
     });
   });
 
+  it('clears inherited launchAllowedToolNames when orchestrator scope narrows without an explicit tool list', () => {
+    const merged = mergeAgentFlowLaunchContext({
+      baseline: {
+        projectPath: 'C:\\Projekty\\wide',
+        executionCwd: 'C:\\Projekty\\wide',
+        launchAllowedToolNames: ['fs_read', 'fs_list', 'terminal_spawn'],
+      },
+      launchContext: {
+        orchestratorScopeRestriction: { reason: 'folder scoped run' },
+        projectPath: 'C:\\Projekty\\wide\\sub',
+        executionCwd: 'C:\\Projekty\\wide\\sub',
+      },
+    });
+
+    expect(merged).toEqual({
+      projectPath: 'C:\\Projekty\\wide\\sub',
+      executionCwd: 'C:\\Projekty\\wide\\sub',
+      orchestratorScopeRestriction: { reason: 'folder scoped run' },
+    });
+  });
+
   it('does not reuse stale AgentFlow checkpoint allowance when session has no runtime context', async () => {
     const deps = makeDeps({
       sessions: {
