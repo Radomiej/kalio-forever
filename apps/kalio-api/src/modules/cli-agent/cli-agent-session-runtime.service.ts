@@ -179,6 +179,12 @@ export class CLIAgentSessionRuntimeService {
     }
 
     const activeEmit = emit ?? liveEntry.emit;
+    if (activeEmit && activeEmit !== liveEntry.emit) {
+      this.runtimeEntries.set(childSessionId, {
+        ...liveEntry,
+        emit: activeEmit,
+      });
+    }
     const stopped = this.cliAgent.stop(childSessionId);
     if (stopped) {
       try {
@@ -408,7 +414,8 @@ export class CLIAgentSessionRuntimeService {
     const error = err instanceof Error ? err : new Error(String(err));
     const stopped = error.message === CLI_AGENT_STOPPED_ERROR;
     if (stopped) {
-      return this.finalizeStopped(childSessionId, callId, turnId, emit);
+      const activeEmit = this.runtimeEntries.get(childSessionId)?.emit ?? emit;
+      return this.finalizeStopped(childSessionId, callId, turnId, activeEmit);
     }
 
     const nextSnapshot: CLIAgentSessionSnapshot = {

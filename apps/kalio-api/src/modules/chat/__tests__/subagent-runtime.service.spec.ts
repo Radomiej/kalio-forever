@@ -405,6 +405,83 @@ describe('SubagentRuntimeService nested subagents', () => {
     expect(result.result).toBe('follow-up done');
   });
 
+  it('persists runtimeContext for a pre-created child session that has none yet', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([{ type: 'text_delta', delta: 'branch done' }, { type: 'done' }])),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const existingChild = {
+      id: 'branch-implementer',
+      personaId: 'implementer',
+      title: 'Sub-agent: implementer',
+      kind: 'subagent' as const,
+      parentSessionId: 'arch-root',
+      runtimeContext: undefined,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const sessions = {
+      createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)),
+      get: vi.fn(async () => existingChild),
+      updateRuntimeContext: vi.fn().mockResolvedValue(undefined),
+    };
+    const runtime = buildSubagentRuntime(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      sessions as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    await runtime.runSubagent({
+      parentSessionId: 'arch-root',
+      parentToolCallId: 'architecture:run-1:implementer',
+      childSessionId: 'branch-implementer',
+      personaId: 'implementer',
+      objective: 'Implement the branch task',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'shared',
+      copyOutputs: false,
+      auditContext: {
+        architectureRunId: 'run-1',
+        roleSlotId: 'implementer',
+        nodeId: 'node-1',
+      },
+      slotPolicy: {
+        allowedToolNames: ['vfs_read'],
+      },
+      architectureContext: {
+        architectureRunId: 'run-1',
+        roleSlotId: 'implementer',
+        projectPath: 'C:\\Projekty\\kalio-forever',
+      },
+    });
+
+    expect(sessions.updateRuntimeContext).toHaveBeenCalledWith(
+      'branch-implementer',
+      expect.objectContaining({
+        runtimeKind: 'agent-flow-branch',
+        parentSessionId: 'arch-root',
+        parentToolCallId: 'architecture:run-1:implementer',
+        architectureSlotId: 'implementer',
+        architectureContext: expect.objectContaining({
+          architectureRunId: 'run-1',
+          roleSlotId: 'implementer',
+          projectPath: 'C:\\Projekty\\kalio-forever',
+        }),
+      }),
+    );
+  });
+
   it('REGRESSION: routes subagent history through the shared managed-history path before streaming', async () => {
     const managedHistory = [
       { role: 'system', content: 'managed system prompt' },

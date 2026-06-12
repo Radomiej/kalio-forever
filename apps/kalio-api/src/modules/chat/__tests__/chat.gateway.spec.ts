@@ -6,9 +6,11 @@ import type { SessionsService } from '../sessions.service';
 import type { RAAppHITLService, SavedApproval } from '../../raapp/raapp-hitl.service';
 import type { AgentFlowRunSnapshot, ToolConfirmationRequest } from '@kalio/types';
 import type { AgentFlowRuntimePort } from '../../agent-flow/agent-flow-runtime.port';
+import { CLI_AGENT_SESSION_RUNTIME } from '../../cli-agent/cli-agent-session-runtime.port';
 import type { CLIAgentSessionRuntimePort } from '../../cli-agent/cli-agent-session-runtime.port';
 import type { SessionEventsService } from '../session-events.service';
 import type { AgentBudgetApprovalService } from '../agent-budget-approval.service';
+import type { ModuleRef } from '@nestjs/core';
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
 
@@ -233,6 +235,54 @@ describe('ChatGateway', () => {
       expect.any(Function),
     );
     expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('cli-child-1');
+  });
+
+  it('falls back to ModuleRef for CLI runtime lookup when the constructor token is absent', async () => {
+    const moduleRef = {
+      get: vi.fn().mockImplementation((token: unknown) => {
+        if (token === CLI_AGENT_SESSION_RUNTIME) {
+          return cliAgentSessionRuntime;
+        }
+        return undefined;
+      }),
+    } as unknown as ModuleRef;
+    gateway = new ChatGateway(
+      toolDispatch,
+      pipeline,
+      raappHITL,
+      sessions,
+      sessionEvents,
+      agentBudgetApprovals,
+      agentFlowRuntime,
+      undefined,
+      moduleRef,
+    );
+    gateway.handleConnection(client as never);
+    (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+      .get(client.id)
+      ?.add('session-1');
+      (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+      .get(client.id)
+      ?.add('cli-child-1');
+    vi.mocked(sessions.get).mockResolvedValue({
+      id: 'cli-child-1',
+      personaId: 'default',
+      title: 'codex CLI',
+      kind: 'cli-agent',
+      parentSessionId: 'session-1',
+      parentToolCallId: 'call-cli-1',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    await gateway.handleChatStop(client as never, { sessionId: 'cli-child-1' });
+
+    expect(moduleRef.get).toHaveBeenCalledWith(CLI_AGENT_SESSION_RUNTIME, { strict: false });
+    expect(cliAgentSessionRuntime.stopSession).toHaveBeenCalledWith(
+      'session-1',
+      'cli-child-1',
+      expect.any(Function),
+    );
   });
 
   it('REGRESSION: child-session stream events do not grant tool confirmation rights to the initiator', async () => {

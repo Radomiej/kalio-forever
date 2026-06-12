@@ -132,7 +132,10 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     if (childSession.parentSessionId !== request.parentSessionId) {
       throw new Error(`Sub-agent session ${childSession.id} does not belong to parent session ${request.parentSessionId}`);
     }
-    if (requestedChildSessionId && childSession.runtimeContext && !runtimeContextsEqual(childSession.runtimeContext, runtimeContext)) {
+    if (
+      requestedChildSessionId
+      && (!childSession.runtimeContext || !runtimeContextsEqual(childSession.runtimeContext, runtimeContext))
+    ) {
       await this.sessions.updateRuntimeContext(childSession.id, runtimeContext);
     }
 

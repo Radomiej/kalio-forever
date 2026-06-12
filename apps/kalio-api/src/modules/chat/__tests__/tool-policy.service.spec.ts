@@ -79,6 +79,24 @@ describe('ToolPolicyService', () => {
     expect(decision.allowedToolNames).toEqual(['vfs_read', 'fs_read']);
   });
 
+  it('agent-flow-branch without launchAllowedToolNames keeps slot-granted repo tools even when persona is narrower', async () => {
+    const service = makeService(['vfs_read']);
+    const decision = await service.decide({
+      runtimeKind: 'agent-flow-branch',
+      personaId: 'qa',
+      slotPolicy: { allowedToolNames: ['vfs_read', 'fs_read'] },
+      architectureContext: {
+        projectPath: 'C:\\demo',
+      },
+    });
+    expect(decision.allowedToolNames).toEqual(['vfs_read', 'fs_read']);
+    expect(decision.denied).not.toEqual(
+      expect.arrayContaining([
+        { name: 'fs_read', reason: 'not_in_persona_allowlist' },
+      ]),
+    );
+  });
+
   it('agent-flow-branch respects an explicit empty launchAllowedToolNames baseline', async () => {
     const service = makeService(['vfs_read', 'fs_read']);
     const decision = await service.decide({
@@ -99,17 +117,18 @@ describe('ToolPolicyService', () => {
     );
   });
 
-  it('denies fs_* without projectPath using missing_project_path', async () => {
-    const service = makeService(['fs_read', 'fs_list', 'vfs_read']);
+  it('chat keeps persona-allowed host FS and terminal tools even without architecture launch scope', async () => {
+    const service = makeService(['fs_read', 'fs_list', 'terminal_spawn', 'vfs_read']);
     const decision = await service.decide({
       runtimeKind: 'chat',
       personaId: 'qa',
     });
-    expect(decision.allowedToolNames).toEqual(['vfs_read']);
-    expect(decision.denied).toEqual(
+    expect(decision.allowedToolNames).toEqual(['vfs_read', 'fs_read', 'fs_list', 'terminal_spawn']);
+    expect(decision.denied).not.toEqual(
       expect.arrayContaining([
         { name: 'fs_read', reason: 'missing_project_path' },
         { name: 'fs_list', reason: 'missing_project_path' },
+        { name: 'terminal_spawn', reason: 'missing_execution_cwd' },
       ]),
     );
   });
@@ -178,7 +197,7 @@ describe('ToolPolicyService', () => {
         allowedToolNames: ['vfs_read', 'vfs_list', 'fs_read', 'fs_list'],
       },
     });
-    expect(decision.allowedToolNames).toEqual(['vfs_read']);
+    expect(decision.allowedToolNames).toEqual(['vfs_read', 'vfs_list']);
     expect(decision.denied).toEqual(
       expect.arrayContaining([
         { name: 'fs_read', reason: 'missing_project_path' },

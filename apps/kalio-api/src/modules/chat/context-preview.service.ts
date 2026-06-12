@@ -29,9 +29,11 @@ export class ContextPreviewService {
   ) {}
 
   async buildPreview(sessionId: string, request: ContextPreviewRequest): Promise<LLMContextPreview> {
-    const session = await this.sessions.get(sessionId);
-    const personaId = request.personaId || session.personaId;
-    const { runtimeContext, profileSource } = this.resolveRuntimeContext(session.runtimeContext, request);
+    const session = request.target === 'runtime'
+      ? null
+      : await this.sessions.get(sessionId);
+    const personaId = request.personaId || session?.personaId;
+    const { runtimeContext, profileSource } = this.resolveRuntimeContext(session?.runtimeContext, request);
     const assembled = await this.assembleForRuntimeContext(personaId, runtimeContext);
     const prepared = await this.sessionManager.loadPreviewHistoryForLLM(sessionId, {
       systemPrompt: assembled.effectiveSystemPrompt,

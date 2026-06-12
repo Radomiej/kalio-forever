@@ -373,6 +373,58 @@ describe('CLIAgentSessionRuntimeService', () => {
     );
   });
 
+  it('stopSession routes cancelled terminal events through the latest emit function', async () => {
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    } as unknown as AllowedPathsService;
+    vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
+
+    let rejectRun: ((error: Error) => void) | undefined;
+    vi.mocked(cliAgent.run).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectRun = reject;
+        }),
+    );
+    vi.mocked(cliAgent.stop).mockImplementation(() => {
+      rejectRun?.(new Error(CLI_AGENT_STOPPED_ERROR));
+      return true;
+    });
+
+    const initialEmit = vi.fn();
+    const latestEmit = vi.fn();
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    await service.spawnSession({
+      parentSessionId: 'sess-parent',
+      parentToolCallId: 'call-cli-tools',
+      prompt: 'Long running task',
+      workdir: 'C:/repo',
+      agentId: 'codex',
+      emit: initialEmit,
+    });
+
+    await vi.waitFor(() => expect(cliAgent.run).toHaveBeenCalled());
+
+    initialEmit.mockClear();
+    await service.stopSession('sess-parent', 'cli-child-1', latestEmit);
+
+    expect(latestEmit).toHaveBeenCalledWith(
+      'tool:result',
+      expect.objectContaining({
+        toolName: 'run_cli_agent',
+        sessionId: 'cli-child-1',
+        status: 'cancelled',
+      }),
+    );
+    expect(latestEmit).toHaveBeenCalledWith(
+      'agent:done',
+      expect.objectContaining({ sessionId: 'cli-child-1' }),
+    );
+    expect(initialEmit).not.toHaveBeenCalledWith('tool:result', expect.anything());
+    expect(initialEmit).not.toHaveBeenCalledWith('agent:done', expect.anything());
+  });
+
   it('stopSession does not persist a stopped snapshot when cliAgent.stop returns false', async () => {
     allowedPaths = {
       isAllowed: vi.fn().mockResolvedValue(true),

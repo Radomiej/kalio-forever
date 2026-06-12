@@ -1376,6 +1376,58 @@ describe('ChatInterface event wiring', () => {
     );
     expect(updateSession).toHaveBeenCalledWith('session-1', { title: 'Updated Conversation Title' });
   });
+
+  it('auto-rename cadence still runs after a later user reply', async () => {
+    mockSessions = mockSessions.map((session) =>
+      session.id === 'session-1'
+        ? { ...session, title: 'Architecture Review' }
+        : session,
+    );
+    mockMessages = [
+      { id: 'user-1', sessionId: 'session-1', role: 'user', content: 'Review this architecture', createdAt: 1 },
+      { id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'First answer', createdAt: 2 },
+      { id: 'user-2', sessionId: 'session-1', role: 'user', content: 'Now compare two options', createdAt: 3 },
+      { id: 'assistant-2', sessionId: 'session-1', role: 'assistant', content: 'Second answer', createdAt: 4 },
+    ];
+    settingsStoreState.conversationTitleSettings = {
+      autoRenameEnabled: true,
+      renameEveryReplies: 2,
+    };
+    settingsStoreState.setConversationTitleSettings.mockImplementation((settings: { autoRenameEnabled: boolean; renameEveryReplies: number }) => {
+      settingsStoreState.conversationTitleSettings = settings;
+    });
+    vi.mocked(apiClient.get).mockImplementation((url: string) => {
+      if (url === '/api/credentials/settings/conversation-title') {
+        return Promise.resolve({
+          data: {
+            autoRenameEnabled: true,
+            renameEveryReplies: 2,
+          },
+        } as never);
+      }
+      return Promise.resolve({ data: [] } as never);
+    });
+    vi.mocked(apiClient.post).mockImplementation((url: string) => {
+      if (url === '/api/sessions/session-1/generate-title') {
+        return Promise.resolve({ data: { title: 'Renamed After Follow-up' } } as never);
+      }
+      return Promise.reject(new Error(`unexpected apiClient.post call: ${url}`));
+    });
+
+    await renderChatInterface();
+    addLlmActivity.mockClear();
+    updateLlmActivity.mockClear();
+    updateSession.mockClear();
+    vi.mocked(apiClient.post).mockClear();
+
+    await emitEvent('chat:complete', {
+      sessionId: 'session-1',
+      messageId: 'assistant-2',
+    });
+
+    expect(apiClient.post).toHaveBeenCalledWith('/api/sessions/session-1/generate-title');
+    expect(updateSession).toHaveBeenCalledWith('session-1', { title: 'Renamed After Follow-up' });
+  });
 });
 
 describe('REGRESSION: tool name resolution persists across turns', () => {

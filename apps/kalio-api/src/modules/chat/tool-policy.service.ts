@@ -76,21 +76,24 @@ export class ToolPolicyService {
         // Architecture branches inherit the launch-visible toolset from the parent turn.
         // Branch personas describe role prompting, while orchestrator slot policy performs
         // the actual narrowing for project/folder-scoped runs.
-        const launchBaseline = launchNames !== undefined ? launchNames : [...personaNames];
-        const launchSet = new Set(
-          launchBaseline.filter((name) => toolByName.has(name)),
-        );
         const slotSet = new Set(slotNames ?? []);
+        const launchSet = launchNames !== undefined
+          ? new Set(launchNames.filter((name) => toolByName.has(name)))
+          : null;
         candidateNames = request.slotPolicy
-          ? intersectSets(launchSet, slotSet)
-          : new Set(launchSet);
+          ? launchSet
+            ? intersectSets(launchSet, slotSet)
+            : new Set([...slotSet].filter((name) => toolByName.has(name)))
+          : new Set(launchSet ?? personaNames);
         source = 'merged';
-        for (const name of slotSet) {
-          if (!launchSet.has(name) && toolByName.has(name)) {
-            denied.push({ name, reason: launchNames ? 'not_in_runtime_explicit_list' : 'not_in_persona_allowlist' });
+        if (launchSet) {
+          for (const name of slotSet) {
+            if (!launchSet.has(name) && toolByName.has(name)) {
+              denied.push({ name, reason: 'not_in_runtime_explicit_list' });
+            }
           }
         }
-        for (const name of launchSet) {
+        for (const name of launchSet ?? candidateNames) {
           if (slotNames && slotNames.length > 0 && !slotSet.has(name) && toolByName.has(name)) {
             denied.push({ name, reason: 'slot_policy_denied' });
           }
@@ -135,6 +138,7 @@ export class ToolPolicyService {
         continue;
       }
       const denyReason = this.runtimeDenyReason(tool, {
+        runtimeKind: request.runtimeKind,
         architectureContext,
         subagentDepth: request.subagentDepth ?? 0,
         stripRequiresConfirmation: request.slotPolicy?.stripRequiresConfirmation === true,
@@ -155,6 +159,7 @@ export class ToolPolicyService {
       : allowedTools;
 
     this.appendHostFsDenials({
+      runtimeKind: request.runtimeKind,
       personaNames,
       allowedNames: new Set(allowedNames),
       denied,
@@ -164,7 +169,7 @@ export class ToolPolicyService {
 
     if (request.runtimeKind === 'agent-flow-branch') {
       this.appendAgentFlowBranchScopeWarnings({
-        baselineNames: new Set(launchNames !== undefined ? launchNames : [...personaNames]),
+        baselineNames: new Set(launchNames ?? slotNames ?? [...personaNames]),
         allowedNames: new Set(allowedNames),
         denied,
         architectureContext,
@@ -228,12 +233,16 @@ export class ToolPolicyService {
   }
 
   private appendHostFsDenials(input: {
+    runtimeKind: SessionRuntimeKind;
     personaNames: Set<string>;
     allowedNames: Set<string>;
     denied: ToolPolicyDecision['denied'];
     architectureContext?: Record<string, unknown>;
     toolByName: Map<string, ToolMeta>;
   }): void {
+    if (input.runtimeKind === 'chat') {
+      return;
+    }
     if (hasLocalProjectPath(input.architectureContext)) {
       return;
     }
@@ -283,6 +292,7 @@ export class ToolPolicyService {
   private runtimeDenyReason(
     tool: ToolMeta,
     options: {
+      runtimeKind: SessionRuntimeKind;
       architectureContext?: Record<string, unknown>;
       subagentDepth: number;
       stripRequiresConfirmation: boolean;
@@ -292,10 +302,18 @@ export class ToolPolicyService {
     if (SUBAGENT_TOOL_NAMES.has(tool.name) && options.subagentDepth > 1) {
       return 'subagent_depth_limit';
     }
-    if (HOST_FS_TOOL_NAMES.has(tool.name) && !hasLocalProjectPath(options.architectureContext)) {
+    if (
+      options.runtimeKind !== 'chat'
+      && HOST_FS_TOOL_NAMES.has(tool.name)
+      && !hasLocalProjectPath(options.architectureContext)
+    ) {
       return 'missing_project_path';
     }
-    if (TERMINAL_TOOL_NAMES.has(tool.name) && !hasExecutionCwd(options.architectureContext)) {
+    if (
+      options.runtimeKind !== 'chat'
+      && TERMINAL_TOOL_NAMES.has(tool.name)
+      && !hasExecutionCwd(options.architectureContext)
+    ) {
       return 'missing_execution_cwd';
     }
     if (CLI_AGENT_TOOL_NAMES.has(tool.name) && !canUseCliAgents(options.architectureContext)) {

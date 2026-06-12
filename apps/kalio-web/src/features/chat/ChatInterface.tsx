@@ -48,6 +48,14 @@ function shouldRequestGeneratedTitle(
   const userMessages = sessionMessages.filter((message) => message.role === 'user');
   const assistantMessages = sessionMessages.filter((message) => message.role === 'assistant');
 
+  if (
+    settings.autoRenameEnabled
+    && assistantMessages.length >= settings.renameEveryReplies
+    && assistantMessages.length % settings.renameEveryReplies === 0
+  ) {
+    return true;
+  }
+
   if (userMessages.length !== 1 || assistantMessages.length < 1) {
     return false;
   }
@@ -60,9 +68,7 @@ function shouldRequestGeneratedTitle(
     return true;
   }
 
-  return settings.autoRenameEnabled
-    && assistantMessages.length >= settings.renameEveryReplies
-    && assistantMessages.length % settings.renameEveryReplies === 0;
+  return false;
 }
 
 export function ChatInterface() {
