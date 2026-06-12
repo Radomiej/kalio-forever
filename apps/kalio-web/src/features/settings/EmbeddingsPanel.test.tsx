@@ -516,4 +516,42 @@ describe('EmbeddingsPanel', () => {
     expect(screen.getByTestId('embedding-local-install-progress')).toBeInTheDocument();
     expect(screen.getByTestId('embedding-local-availability-message')).toHaveTextContent('Installing local model...');
   }, 10000);
+
+  it('recovers from a transient install polling failure and eventually marks the local model ready', async () => {
+    const user = userEvent.setup();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    installFetchQueue({
+      'GET /api/memory/embedding-credentials': [[]],
+      'GET /api/memory/status/embedding': [LOCAL_STATUS],
+      'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
+      'POST /api/memory/embedding-local/availability': [
+        { status: 'missing', installed: false, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model not installed yet.' },
+        new Error('poll failed'),
+        { status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' },
+      ],
+      'POST /api/memory/embedding-local/install': [
+        { status: 'installing', installed: false, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Installing local model...' },
+      ],
+    });
+
+    render(<EmbeddingsPanel />);
+
+    await user.click(await screen.findByTestId('embedding-local-install-btn'));
+    expect(await screen.findByTestId('embedding-local-install-progress')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith(
+        '[EmbeddingsPanel] Failed to refresh local embedding availability during install polling',
+        expect.any(Error),
+      );
+    }, { timeout: 3000 });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('embedding-local-install-progress')).not.toBeInTheDocument();
+      expect(screen.getByTestId('embedding-local-availability-message')).toHaveTextContent('Model installed and ready.');
+      expect(screen.getByTestId('embedding-local-install-btn')).toHaveTextContent('Reinstall model');
+      expect(screen.getByTestId('embedding-local-test-btn')).toBeEnabled();
+    }, { timeout: 5000 });
+  }, 10000);
 });

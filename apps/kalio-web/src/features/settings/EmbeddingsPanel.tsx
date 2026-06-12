@@ -76,6 +76,7 @@ export function EmbeddingsPanel() {
   const [localTestMessage, setLocalTestMessage] = useState<string | null>(null);
   const [localConfigWarning, setLocalConfigWarning] = useState<string | null>(null);
   const [localAvailability, setLocalAvailability] = useState<LocalEmbeddingAvailability | null>(null);
+  const [localAvailabilityPollAttempt, setLocalAvailabilityPollAttempt] = useState(0);
   const [localForm, setLocalForm] = useState<UpdateLocalEmbeddingConfigDto>({
     enabled: true,
     model: 'Xenova/multilingual-e5-small',
@@ -134,11 +135,12 @@ export function EmbeddingsPanel() {
         })
         .catch((err) => {
           console.error('[EmbeddingsPanel] Failed to refresh local embedding availability during install polling', err);
-          // keep current installing state until the next explicit action
+          // keep the current installing state visible, but retry polling on the next cycle
+          setLocalAvailabilityPollAttempt((attempt) => attempt + 1);
         });
     }, 1200);
     return () => window.clearTimeout(handle);
-  }, [localAvailability, localForm, refreshLocalAvailability]);
+  }, [localAvailability, localAvailabilityPollAttempt, localForm, refreshLocalAvailability]);
 
   const handleProviderChange = (provider: string) => {
     const label = PROVIDER_LABELS[provider] ?? provider;

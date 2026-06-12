@@ -212,9 +212,12 @@ Sesja jest izolowanym kontekstem pracy. Zawiera:
 - KV store sesji,
 - pending confirmations,
 - parent/child linkage dla sub-agentów,
+- trwały `runtimeContext` sesji, m.in. `runtimeKind`, powiązania parent session/tool call, scope VFS oraz kontekst uruchomienia architektury,
 - identyfikację subskrybentów Socket.IO.
 
 Wymaganie projektowe: przełączenie sesji nie może mieszać streamingu, tool activities ani chunków między sesjami. Runtime musi używać `sessionId` jako klucza izolacji w gatewayu, kolejce, VFS i UI store.
+
+`runtimeContext` jest aktualizowany także przy launchu rozmowy lub workflow z UI. Przechowuje on stan potrzebny do odtworzenia właściwego profilu promptu i polityki narzędzi po reconnect, reloadzie lub wznowieniu child session.
 
 ### 3.3. Persony i skills
 
@@ -222,9 +225,11 @@ Persony definiują sposób działania agenta:
 
 - system prompt,
 - domyślny model i ustawienia,
+- opcjonalny limit `maxToolAttempts` dla pętli narzędzi,
 - dozwolone narzędzia natywne,
 - politykę MCP (`allow_all`, `deny_all`, `allow_list`),
 - podpięte skills jako prompt injections,
+- trwały token avatara (`avatarSeed`, `avatarVariant`, `avatarPaletteKey`, `avatarIndex`),
 - osobną pamięć semantyczną.
 
 Skills są wielokrotnego użytku i mogą wzbogacać prompt persony o konkretne reguły, style pracy albo ograniczenia.
@@ -336,6 +341,7 @@ Settings UI zarządza m.in.:
 - allowed paths,
 - image generation,
 - CLI agents,
+- globalnym limitem `maxToolAttempts` dla turnu,
 - timeoutami i ustawieniami generacji.
 
 Konfiguracja runtime zapisywana jest w SQLite (`app_settings`, `credentials`, tabele domenowe) albo plikach użytkownika, zależnie od modułu.
@@ -415,6 +421,7 @@ sequenceDiagram
 | Socket rooms | Klient musi identyfikować sesję, do której subskrybuje eventy. |
 | Chunk isolation | Chunks streamingu muszą być przypisane do `sessionId`; przełączenie aktywnej rozmowy nie może mieszać wiadomości. |
 | ToolActivity | Stan live narzędzi jest ephemeral i może być odbudowany z historii, ale wynik trwały to `tool_result`. |
+| Budget approval | Po osiągnięciu limitu iteracji turn może wejść w stan oczekiwania `agent:budget_required`; decyzja jest wiązana z `sessionId` i `requestId` i może zostać unieważniona przy zmianie stanu sesji. |
 
 ### 4.3. Dispatch narzędzia
 
@@ -464,6 +471,8 @@ Tryby VFS:
 | `isolated` | Sub-agent pracuje na własnym VFS, ewentualnie z copy-back. | Bezpieczna analiza, alternatywne rozwiązania, arena mode. |
 | `shared` | Sub-agent pracuje na VFS rodzica. | Szybkie, zaufane zadania z mniejszą separacją. |
 
+Sesje podrzędne uruchamiane przez sub-agent, CLI agent albo runtime graph są prezentowane w UI jako zwykłe child sessions oraz jako preview/karty w czacie i canvasie. Frontend subskrybuje ich standardowe eventy przez `session:identify`, dzięki czemu child conversation zachowuje się jak normalna sesja, a nie osobny kanał protokołu.
+
 ### 4.6. CLI agent
 
 CLI agent jest delegacją do procesu zewnętrznego. Działa jako narzędzie, ale jego wykonanie może długo streamować output.
@@ -512,15 +521,17 @@ Nazwy tabel mają charakter referencyjny i powinny być weryfikowane z aktualnym
 
 | Tabela / grupa | Cel | Kluczowe pola / uwagi |
 |---|---|---|
-| `sessions` | Rejestr sesji czatu. | `id`, `title`, `personaId`, `createdAt`, `updatedAt`, parent linkage. |
+| `sessions` | Rejestr sesji czatu i sesji podrzędnych. | `id`, `kind`, `title`, `personaId`, `runtimeContext`, `createdAt`, `updatedAt`, parent linkage. |
 | `messages` | Historia rozmów. | `sessionId`, `role`, `content`, `toolCalls`, `reasoningContent`, timestamp. |
-| `personas` | Konfiguracja person. | prompt, model, allowed tools, `mcpPolicy`, metadata. |
+| `personas` | Konfiguracja person. | prompt, model, `maxToolAttempts`, allowed tools, `mcpPolicy`, token avatara i metadata. |
 | `skills` | Reużywalne prompt injections. | nazwa, opis, prompt, aktywność. |
-| `credentials` | Konfiguracje providerów LLM. | provider, baseUrl, model, encrypted secret reference/value. |
+| `credentials` | Konfiguracje providerów LLM. | provider, baseUrl, model, timeout settings, `maxToolAttempts`, encrypted secret reference/value. |
 | `app_settings` | Ustawienia modułów. | key/value JSON, np. embeddings, search, image config. |
 | `embedding_credentials` | Dane providerów embeddingów. | provider, model, baseUrl, active flag. |
 | `mcp_servers` | Konfiguracja serwerów MCP. | server id, transport, command/url, status. |
 | `tool_overrides` | Nadpisania polityki narzędzi. | `toolName`, `requiresConfirmation`. |
+| `agent_flow_runs` | Trwały snapshot uruchomionych workflow/Execution Graph. | `flowDefinitionId`, `status`, `parentSessionId`, sesje root/child, checkpoint, context, timestamps. |
+| `agent_flow_events` | Trwały, sekwencyjny strumień zdarzeń workflow. | `runId`, `sequence`, typ/lifecycle zdarzenia, payload, timestamps. |
 | `audit_log` | Audyt runtime. | typ zdarzenia, sessionId, duration, chunkCount, payload. |
 | `raapp` metadata | Metadane katalogu RA-App. | Częściowo w plikach `.manifest.json`, częściowo przez API. |
 
@@ -572,6 +583,9 @@ Aktualny model lokalny nie wymusza pełnej polityki retencji. Zalecane reguły:
 | `tool:confirmation_required` | BE -> FE | Narzędzie czeka na potwierdzenie. |
 | `tool:confirm` | FE -> BE | Potwierdzenie wykonania narzędzia. |
 | `tool:cancel` | FE -> BE | Anulowanie wykonania narzędzia. |
+| `agent:budget_required` | BE -> FE | Turn osiągnął limit iteracji narzędzi i czeka na decyzję użytkownika. |
+| `agent:budget_approve` | FE -> BE | Zgoda na zwiększenie albo zniesienie limitu iteracji dla aktywnego turnu. |
+| `agent:budget_invalidated` | BE -> FE | Wcześniejsza prośba o dodatkowy budżet stała się nieaktualna. |
 | `tool:result` | BE -> FE | Wynik narzędzia: success/error/cancelled. |
 | `chat:complete` | BE -> FE | Finalna odpowiedź asystenta gotowa. |
 | `agent:done` | BE -> FE | Zamknięcie live bracketu turnu. |
@@ -588,6 +602,8 @@ Adresy mają charakter referencyjny. Dokładny kontrakt powinien być weryfikowa
 | `/api/sessions/{id}/messages` | GET | Pobranie historii sesji. |
 | `/api/personas` | GET/POST/PUT/DELETE | Zarządzanie personami i ich politykami. |
 | `/api/skills` | GET/POST/PUT/DELETE | Zarządzanie skills. |
+| `/api/architecture-runs/*` | GET/POST | Tworzenie uruchomień architektury oraz pobieranie ich run/chat/graph/events. |
+| `/api/agent-flows/runs/*` | GET/POST | Start, lista, snapshot, events, resume i stop dla trwałych AgentFlow runów. |
 | `/api/tools` | GET | Lista natywnych narzędzi. |
 | `/api/tools/{name}` | PATCH | Nadpisanie `requiresConfirmation`. |
 | `/api/mcp/*` | GET/POST/PUT/DELETE | Konfiguracja i status serwerów MCP. |
@@ -1200,7 +1216,11 @@ Plan DR powinien definiować:
 | `README.md` | Publiczny opis, quick start, features, roadmap. |
 | `AGENTS.md` | Reguły dla agentów kodujących. |
 | `CONTRIBUTING.md` | Setup, workflow, PR checklist. |
+| `docs/quickstart-user.md` | Instalacja i uruchomienie lokalnego stacku użytkownika końcowego. |
+| `docs/local-dev-guide.md` | Pełny workflow developerski, stack DEV/QA/PROD local i komendy operacyjne. |
 | `docs/application-architecture-current.md` | Top-level runtime i encje. |
+| `docs/agentflow-architecture-and-workflow.md` | Produktowy widok runtime AgentFlow, delegacji i przepływu FE -> run -> child sessions. |
+| `docs/sub-agentflow-target-architecture.md` | Docelowy model `sub_agentflow`, checkpointów i projekcji runów. |
 | `docs/chat-streaming-tools-architecture.md` | Hot path czatu, streamingu i narzędzi. |
 | `docs/tool-architecture.md` | Rejestracja, filtracja, HITL, dispatch i persystencja tooli. |
 | `docs/mcp-architecture.md` | MCP lifecycle, discovery i policy. |
