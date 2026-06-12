@@ -1,5 +1,6 @@
 import type {
   ArchitectureBranchStreamSummary,
+  ArchitectureGraphProjection,
   ArchitectureChatRunSummary,
   ArchitectureRouterInsight,
   ArchitectureRouterOutput,
@@ -13,9 +14,6 @@ import type { ArchitectRunResult } from '../architect/architect.types';
 
 type TraceSpeaker = ArchitectureChatRunSummary['trace'][number]['speaker'];
 type ArchitectureRunChatMessage = ArchitectRunResult['chat']['messages'][number] & { speaker: TraceSpeaker };
-type ArchitectureGraphProjectionWithSchema = ArchitectRunResult['graph'] & {
-  schemaName?: string;
-};
 
 export type ArchitectureChatTurnDraft = {
   content: string;
@@ -273,9 +271,9 @@ function compactRouterField(value: string): string {
 }
 
 function resolveArchitectureSchemaLabel(result: ArchitectRunResult): string {
-  const graphWithSchema = result.graph as ArchitectureGraphProjectionWithSchema;
-  if (typeof graphWithSchema.schemaName === 'string' && graphWithSchema.schemaName.trim().length > 0) {
-    return graphWithSchema.schemaName.trim();
+  const graph: ArchitectureGraphProjection = result.graph;
+  if (typeof graph.schemaName === 'string' && graph.schemaName.trim().length > 0) {
+    return graph.schemaName.trim();
   }
   return result.run.schemaId;
 }

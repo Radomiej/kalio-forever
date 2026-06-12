@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { PersonaSessionConfig, SessionRuntimeKind, Skill, ToolMeta, ToolPolicyDecision } from '@kalio/types';
+import type { PersonaSessionConfig, SessionRuntimeContext, SessionRuntimeKind, Skill, ToolMeta, ToolPolicyDecision } from '@kalio/types';
 import { PersonaService } from '../persona/persona.service';
 import { SkillsService } from '../skills/skills.service';
 import { buildSkillsSection, buildToolsSection } from './context-prompt-sections';
@@ -45,6 +45,52 @@ export class ContextAssemblyService {
     return this.assembleForRuntime({ runtimeKind: 'chat', personaId });
   }
 
+  async assembleForSessionRuntime(
+    personaId: string,
+    runtimeContext: SessionRuntimeContext,
+  ): Promise<AssembledContext> {
+    if (
+      runtimeContext.runtimeKind === 'chat'
+      || runtimeContext.runtimeKind === 'agent-flow-root'
+      || runtimeContext.runtimeKind === 'cli-agent'
+    ) {
+      return this.assembleForRuntime({
+        runtimeKind: 'chat',
+        personaId,
+        toolPolicyRequest: {
+          runtimeKind: runtimeContext.runtimeKind === 'chat' ? 'chat' : runtimeContext.runtimeKind,
+          personaId,
+          sessionRuntimeContext: runtimeContext,
+          architectureContext: runtimeContext.architectureContext,
+        },
+      });
+    }
+
+    const toolPolicyRequest: ToolPolicyRequest = {
+      runtimeKind: runtimeContext.runtimeKind,
+      personaId,
+      sessionRuntimeContext: runtimeContext,
+      explicitToolNames: runtimeContext.explicitToolNames,
+      architectureContext: runtimeContext.architectureContext,
+    };
+
+    if (runtimeContext.runtimeKind === 'agent-flow-branch') {
+      toolPolicyRequest.slotPolicy = runtimeContext.architectureSlotPolicy;
+      return this.assembleForRuntime({
+        runtimeKind: 'agent-flow-branch',
+        personaId,
+        toolPolicyRequest,
+        modelOverride: runtimeContext.modelOverride,
+      });
+    }
+
+    return this.assembleForRuntime({
+      runtimeKind: 'subagent',
+      personaId,
+      toolPolicyRequest,
+    });
+  }
+
   async assembleForRuntime(profile: RuntimeAssemblyProfile): Promise<AssembledContext> {
     const personaConfig = await this.personaService.getSessionConfig(profile.personaId);
     const systemPrompt = personaConfig?.systemPrompt ?? '';
@@ -62,11 +108,17 @@ export class ContextAssemblyService {
 
     const toolPolicy = await this.toolPolicy.decide(toolPolicyRequest);
     const warnings = [...toolPolicy.warnings];
+    const launchScopePrompt = buildLaunchScopePrompt(
+      toolPolicyRequest.architectureContext ?? toolPolicyRequest.sessionRuntimeContext?.architectureContext,
+    );
 
     if (profile.runtimeKind === 'chat') {
-      const effectiveSystemPrompt = systemPrompt
-        + buildSkillsSection(activeSkills)
-        + buildToolsSection(toolPolicy.tools, { includeCount: true });
+      const effectiveSystemPrompt = joinPromptSections([
+        systemPrompt,
+        launchScopePrompt,
+        buildSkillsSection(activeSkills),
+        buildToolsSection(toolPolicy.tools, { includeCount: true }),
+      ]);
 
       return {
         personaConfig,
@@ -106,4 +158,45 @@ export class ContextAssemblyService {
       warnings,
     };
   }
+}
+
+function joinPromptSections(sections: string[]): string {
+  return sections
+    .map((section) => section.trim())
+    .filter((section) => section.length > 0)
+    .join('\n\n');
+}
+
+function buildLaunchScopePrompt(architectureContext: Record<string, unknown> | undefined): string {
+  const projectPath = normalizeLaunchScopePath(architectureContext);
+  if (!projectPath) {
+    return '';
+  }
+
+  const executionCwd = typeof architectureContext?.['executionCwd'] === 'string'
+    ? architectureContext['executionCwd'].trim()
+    : '';
+
+  const scopeLines = [
+    '## Launch scope',
+    `Local project path: ${projectPath}`,
+    'Treat this path as the default host project root for file inspection, edits, and terminal checks in this chat.',
+    'If you need project evidence, start from this path before assuming another repo or working directory.',
+  ];
+  if (executionCwd && executionCwd !== projectPath) {
+    scopeLines.push(`Execution working directory: ${executionCwd}`);
+  }
+  return scopeLines.join('\n');
+}
+
+function normalizeLaunchScopePath(architectureContext: Record<string, unknown> | undefined): string {
+  const projectPath = architectureContext?.['projectPath'];
+  if (typeof projectPath === 'string' && projectPath.trim().length > 0) {
+    return projectPath.trim();
+  }
+  const executionCwd = architectureContext?.['executionCwd'];
+  if (typeof executionCwd === 'string' && executionCwd.trim().length > 0) {
+    return executionCwd.trim();
+  }
+  return '';
 }

@@ -14,6 +14,8 @@ export function buildArchitectureGraphProjection(
 ): ArchitectureGraphProjection {
   return {
     runId,
+    schemaId: schema.id,
+    schemaName: schema.name,
     status,
     nodes: schema.nodes.map((node) => toGraphNode(node, events)),
     edges: schema.edges,

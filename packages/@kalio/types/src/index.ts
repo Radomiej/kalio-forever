@@ -1548,6 +1548,8 @@ export interface ArchitectureExecutionEvent {
 
 export interface ArchitectureGraphProjection {
   runId: ID;
+  schemaId?: ID;
+  schemaName?: string;
   status?: ArchitectureRunStatus;
   nodes: Array<{
     id: string;

@@ -8,10 +8,9 @@ import type {
   ToolMeta,
 } from '@kalio/types';
 import { getReasoningContent, type ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
-import { ContextAssemblyService, type RuntimeAssemblyProfile } from './context-assembly.service';
+import { ContextAssemblyService } from './context-assembly.service';
 import { SessionManagerService } from './session-manager.service';
 import { SessionsService } from './sessions.service';
-import type { ToolPolicyRequest } from './tool-policy.service';
 import {
   estimateMessageTokens,
   estimateTextTokens,
@@ -82,50 +81,7 @@ export class ContextPreviewService {
   }
 
   private async assembleForRuntimeContext(personaId: string, runtimeContext: SessionRuntimeContext) {
-    if (
-      runtimeContext.runtimeKind === 'chat'
-      || runtimeContext.runtimeKind === 'agent-flow-root'
-      || runtimeContext.runtimeKind === 'cli-agent'
-    ) {
-      const profile: RuntimeAssemblyProfile = {
-        runtimeKind: 'chat',
-        personaId,
-        toolPolicyRequest: {
-          runtimeKind: runtimeContext.runtimeKind === 'chat' ? 'chat' : runtimeContext.runtimeKind,
-          personaId,
-          sessionRuntimeContext: runtimeContext,
-          architectureContext: runtimeContext.architectureContext,
-        },
-      };
-      return this.contextAssembly.assembleForRuntime(profile);
-    }
-
-    const toolPolicyRequest: ToolPolicyRequest = {
-      runtimeKind: runtimeContext.runtimeKind,
-      personaId,
-      sessionRuntimeContext: runtimeContext,
-      explicitToolNames: runtimeContext.explicitToolNames,
-      architectureContext: runtimeContext.architectureContext,
-    };
-
-    if (runtimeContext.runtimeKind === 'agent-flow-branch') {
-      toolPolicyRequest.slotPolicy = runtimeContext.architectureSlotPolicy;
-    }
-
-    if (runtimeContext.runtimeKind === 'agent-flow-branch') {
-      return this.contextAssembly.assembleForRuntime({
-        runtimeKind: 'agent-flow-branch',
-        personaId,
-        toolPolicyRequest,
-        modelOverride: runtimeContext.modelOverride,
-      });
-    }
-
-    return this.contextAssembly.assembleForRuntime({
-      runtimeKind: 'subagent',
-      personaId,
-      toolPolicyRequest,
-    });
+    return this.contextAssembly.assembleForSessionRuntime(personaId, runtimeContext);
   }
 
   private toPreviewMessages(messages: ContextManagedLLMMessage[]): LLMContextPreview['messages'] {

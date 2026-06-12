@@ -17,8 +17,10 @@ import { CredentialsService } from '../../credentials/credentials.service';
 import { ContextAssemblyService } from '../context-assembly.service';
 import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
 import { AgentBudgetApprovalService } from '../agent-budget-approval.service';
+import { SessionsService } from '../sessions.service';
 import { makeContextAssembly, makeLLMTurnRuntime } from './llm-runtime-test-harness';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
+import { SUBAGENT_SYSTEM_PROMPT } from '../subagent-system-prompt';
 
 async function* makeStream(chunks: InternalLLMChunk[]): AsyncIterable<InternalLLMChunk> {
   for (const chunk of chunks) {
@@ -48,6 +50,9 @@ describe('ChatService', () => {
   };
   let agentBudgetApprovals: {
     requestAdditionalBudget: ReturnType<typeof vi.fn>;
+  };
+  let sessionsService: {
+    get: ReturnType<typeof vi.fn>;
   };
   let auditService: Partial<AuditService>;
   let emit: ReturnType<typeof vi.fn>;
@@ -83,6 +88,16 @@ describe('ChatService', () => {
     };
     agentBudgetApprovals = {
       requestAdditionalBudget: vi.fn().mockResolvedValue(null),
+    };
+    sessionsService = {
+      get: vi.fn().mockResolvedValue({
+        id: 'sid',
+        personaId: 'p1',
+        title: 'New Chat',
+        kind: 'chat',
+        createdAt: 1,
+        updatedAt: 1,
+      }),
     };
     auditService = {
       log: vi.fn().mockResolvedValue('audit-id'),
@@ -127,6 +142,7 @@ describe('ChatService', () => {
         { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
         { provide: AgentBudgetApprovalService, useValue: agentBudgetApprovals },
+        { provide: SessionsService, useValue: sessionsService },
         { provide: ContextAssemblyService, useValue: contextAssembly },
         { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
       ],
@@ -156,6 +172,7 @@ describe('ChatService', () => {
         { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
         { provide: AgentBudgetApprovalService, useValue: agentBudgetApprovals },
+        { provide: SessionsService, useValue: sessionsService },
         { provide: ContextAssemblyService, useValue: contextAssembly },
         { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
       ],
@@ -225,6 +242,98 @@ describe('ChatService', () => {
     expect(systemMessage?.content).toContain(skillPrompt);
     expect(systemMessage?.content).toContain('## Available tools (1)');
     expect(systemMessage?.content).toContain('- tool_a: Reads the project state.');
+  });
+
+  it('injects launch project scope into the effective prompt and unlocks host project tools for direct chat', async () => {
+    toolDispatch.getToolMetas.mockReturnValue([
+      { name: 'fs_read', description: 'Read host project files.', parameters: {}, requiresConfirmation: false },
+      { name: 'terminal_spawn', description: 'Run a terminal command.', parameters: {}, requiresConfirmation: true },
+    ]);
+    personaService.getSessionConfig = vi.fn().mockResolvedValue({
+      systemPrompt: 'Inspect the selected repository carefully.',
+      model: 'mimo-test',
+      allowedTools: ['fs_read', 'terminal_spawn'],
+      mcpPolicy: 'deny_all',
+      kv: {},
+    });
+    sessionsService.get.mockResolvedValue({
+      id: 'sid',
+      personaId: 'p1',
+      title: 'New Chat',
+      kind: 'chat',
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const llmSource = makeLLMSource([]);
+    await buildService(llmSource);
+    await service.handleTurn('sid', 'Inspect the launch scope.', 'p1', emit as EmitFn);
+
+    expect(emit).toHaveBeenCalledWith('chat:context', expect.objectContaining({
+      toolNames: ['fs_read', 'terminal_spawn'],
+      systemPrompt: expect.stringContaining('Local project path: C:\\Projekty\\kalio-forever'),
+    }));
+
+    const params = (llmSource.stream as ReturnType<typeof vi.fn>).mock.calls[0][0] as LLMSourceParams;
+    const systemMessage = params.messages.find((message) => message.role === 'system');
+    expect(systemMessage?.content).toContain('Local project path: C:\\Projekty\\kalio-forever');
+    expect(systemMessage?.content).toContain('default host project root');
+  });
+
+  it('resumes agent-flow-branch sessions with slot policy narrowing and branch prompt assembly', async () => {
+    toolDispatch.getToolMetas.mockReturnValue([
+      { name: 'vfs_read', description: 'Read VFS files.', parameters: {}, requiresConfirmation: false },
+      { name: 'fs_read', description: 'Read host project files.', parameters: {}, requiresConfirmation: false },
+    ]);
+    personaService.getSessionConfig = vi.fn().mockResolvedValue({
+      systemPrompt: 'Work the assigned branch only.',
+      model: 'persona-model',
+      allowedTools: ['vfs_read', 'fs_read'],
+      mcpPolicy: 'deny_all',
+      kv: {},
+    });
+    sessionsService.get.mockResolvedValue({
+      id: 'sid',
+      personaId: 'p1',
+      title: 'Branch Session',
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        modelOverride: 'branch-model',
+        explicitToolNames: ['vfs_read', 'fs_read'],
+        architectureSlotPolicy: {
+          allowedToolNames: ['vfs_read'],
+        },
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+          launchAllowedToolNames: ['vfs_read', 'fs_read'],
+        },
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const llmSource = makeLLMSource([]);
+    await buildService(llmSource);
+    await service.handleTurn('sid', 'Resume the saved branch.', 'p1', emit as EmitFn);
+
+    expect(emit).toHaveBeenCalledWith('chat:context', expect.objectContaining({
+      toolNames: ['vfs_read'],
+    }));
+
+    const params = (llmSource.stream as ReturnType<typeof vi.fn>).mock.calls[0][0] as LLMSourceParams;
+    expect(params.model).toBe('branch-model');
+    const systemMessage = params.messages.find((message) => message.role === 'system');
+    expect(systemMessage?.content).toContain('Work the assigned branch only.');
+    expect(systemMessage?.content).toContain(SUBAGENT_SYSTEM_PROMPT);
   });
 
   it('calls llmSource.stream with messages and tools', async () => {

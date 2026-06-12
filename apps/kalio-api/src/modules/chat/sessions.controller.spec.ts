@@ -189,6 +189,37 @@ describe('SessionsController', () => {
 
       expect(svc.update).toHaveBeenCalledWith('sess-1', { runtimeContext });
     });
+
+    it('strips unsafe runtimeContext fields from public updates', async () => {
+      await controller.update('sess-1', {
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          explicitToolNames: ['fs_read', 'terminal_spawn'],
+          architectureSlotPolicy: { allowedToolNames: ['fs_read'] },
+          architectureContext: {
+            projectPath: 'C:\\Projekty\\kalio-forever',
+            executionCwd: 'C:\\Projekty\\kalio-forever',
+            schemaId: 'strategic-decision-council',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+            launchAllowedToolNames: ['fs_read'],
+          },
+        },
+      });
+
+      expect(svc.update).toHaveBeenCalledWith('sess-1', {
+        runtimeContext: {
+          runtimeKind: 'chat',
+          architectureContext: {
+            projectPath: 'C:\\Projekty\\kalio-forever',
+            executionCwd: 'C:\\Projekty\\kalio-forever',
+            schemaId: 'strategic-decision-council',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+          },
+        },
+      });
+    });
   });
 
   describe('generateTitle()', () => {

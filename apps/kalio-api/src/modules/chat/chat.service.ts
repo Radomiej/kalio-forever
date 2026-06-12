@@ -10,6 +10,7 @@ import { CredentialsService } from '../credentials/credentials.service';
 import { LLMTurnRuntimeService } from './llm-turn-runtime.service';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { TurnState } from './turn-state';
+import { SessionsService } from './sessions.service';
 
 type ChatErrorCode = import('@kalio/types').SocketEvents['chat:error']['code'];
 
@@ -45,6 +46,7 @@ export class ChatService {
     private readonly audit: AuditService,
     private readonly llmTurnRuntime: LLMTurnRuntimeService,
     private readonly agentBudgetApprovals: AgentBudgetApprovalService,
+    private readonly sessions: SessionsService,
     @Optional() private readonly runJournal?: RunJournalService,
     @Optional() private readonly contextAssembly?: ContextAssemblyService,
   ) {}
@@ -81,14 +83,16 @@ export class ChatService {
       await checkpointRun('started');
 
       await this.sessionManager.ensureSession(sessionId, personaId);
+      const session = await this.sessions.get(sessionId);
+      const runtimeContext = session.runtimeContext ?? {
+        runtimeKind: 'chat' as const,
+        systemPromptProfile: 'default-chat' as const,
+      };
 
       if (!this.contextAssembly) {
         throw new Error('ContextAssemblyService is required for chat turns');
       }
-      const assembledContext = await this.contextAssembly.assembleForRuntime({
-        runtimeKind: 'chat',
-        personaId,
-      });
+      const assembledContext = await this.contextAssembly.assembleForSessionRuntime(personaId, runtimeContext);
 
       await this.sessionManager.persistUserMessage(sessionId, content, attachments);
 
