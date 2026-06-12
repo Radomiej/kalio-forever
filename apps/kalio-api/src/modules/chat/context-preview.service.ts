@@ -32,7 +32,7 @@ export class ContextPreviewService {
     const session = request.target === 'runtime'
       ? null
       : await this.sessions.get(sessionId);
-    const personaId = request.personaId || session?.personaId;
+    const personaId = request.personaId;
     const { runtimeContext, profileSource } = this.resolveRuntimeContext(session?.runtimeContext, request);
     const assembled = await this.assembleForRuntimeContext(personaId, runtimeContext);
     const prepared = await this.sessionManager.loadPreviewHistoryForLLM(sessionId, {

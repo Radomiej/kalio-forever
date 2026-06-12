@@ -78,9 +78,9 @@ describe('ContextController', () => {
     const contextPreview = makeContextPreviewService();
     const controller = new ContextController(contextPreview as never);
 
-    await expect(controller.preview({
+    expect(() => controller.preview({
       target: 'session',
       personaId: 'persona-1',
-    } as never)).rejects.toBeInstanceOf(BadRequestException);
+    } as never)).toThrow(BadRequestException);
   });
 });
