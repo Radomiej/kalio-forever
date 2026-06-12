@@ -548,7 +548,7 @@ describe('ArchitectureRuntimeService', () => {
       id: `architecture:${run.id}:user`,
       sessionId: 'parent-chat-start',
       role: 'user',
-      content: '[Architecture: Strategic Decision Council]\nShow this architecture run in parent chat immediately.',
+      content: 'Show this architecture run in parent chat immediately.',
     }));
     expect(service.findRun(run.id)?.status).toBe('running');
 
@@ -1884,7 +1884,7 @@ describe('ArchitectureRuntimeService', () => {
       id: `architecture:${run.id}:user`,
       sessionId: 'parent-chat-1',
       role: 'user',
-      content: '[Architecture: Strategic Decision Council]\nWhat can you do?',
+      content: 'What can you do?',
     });
     const toolHost = persisted.find((message) => message.id === `architecture:${run.id}:tool-calls`);
     const toolCalls = toolHost?.toolCalls ?? [];

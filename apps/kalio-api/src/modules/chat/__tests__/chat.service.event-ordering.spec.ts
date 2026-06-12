@@ -7,6 +7,7 @@ import { ToolDispatchService } from '../tool-dispatch.service';
 import { AuditService } from '../audit.service';
 import { SkillsService } from '../../skills/skills.service';
 import { CredentialsService } from '../../credentials/credentials.service';
+import { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 import { ContextAssemblyService } from '../context-assembly.service';
 import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
 import { PersonaService } from '../../persona/persona.service';
@@ -20,6 +21,7 @@ import type { ILLMSource } from '../interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../interfaces/llm-chunk.types';
 import type { EmitFn } from '../interfaces/stream-context.interface';
 import type { ChatMessage } from '@kalio/types';
+import { SessionsService } from '../sessions.service';
 
 /**
  * Integration-level ordering tests.
@@ -64,6 +66,20 @@ async function buildService(
     getMaxToolAttempts: vi.fn().mockResolvedValue(8),
     getContextWindowSize: vi.fn().mockResolvedValue(32000),
   };
+  const agentBudgetApprovals = {
+    requestAdditionalBudget: vi.fn().mockResolvedValue(null),
+  };
+  const sessionsService = {
+    get: vi.fn().mockResolvedValue({
+      id: 'sid',
+      personaId: 'default',
+      title: 'Event ordering test',
+      kind: 'chat',
+      createdAt: 1,
+      updatedAt: 1,
+      runtimeContext: null,
+    }),
+  };
   const processorModuleRef = await Test.createTestingModule({
     providers: [
       StreamProcessorService,
@@ -105,6 +121,8 @@ async function buildService(
       { provide: AuditService, useValue: auditService },
       { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
       { provide: CredentialsService, useValue: credentialsService },
+      { provide: AgentBudgetApprovalService, useValue: agentBudgetApprovals },
+      { provide: SessionsService, useValue: sessionsService },
       { provide: ContextAssemblyService, useValue: contextAssembly },
       { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
     ],

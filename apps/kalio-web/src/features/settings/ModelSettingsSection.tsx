@@ -70,7 +70,6 @@ export function ModelSettingsSection({
   const [genError, setGenError] = useState<string | null>(null);
   const committedGenSettingsRef = useRef<GenSettings>(DEFAULT_GEN_SETTINGS);
   const genSaveInFlightRef = useRef(false);
-  const clearRuntimeModelFocusRequest = useSettingsStore((state) => state.clearRuntimeModelFocusRequest);
 
   // Keep the combobox in sync with the active runtime provider.
   useEffect(() => {
@@ -250,7 +249,6 @@ export function ModelSettingsSection({
                   loading={modelsLoading}
                   placeholder="e.g. gpt-4o-mini"
                   focusRequestId={focusModelInputSignal}
-                  onFocusRequestConsumed={clearRuntimeModelFocusRequest}
                   aria-label="Active model"
                   data-testid="model-selector"
                 />

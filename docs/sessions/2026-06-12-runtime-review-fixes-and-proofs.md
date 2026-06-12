@@ -30,6 +30,12 @@
   - [`chat-test-support-agent-budget.controller.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/chat-test-support-agent-budget.controller.ts) exposes the budget replay test hooks in test mode.
 - Settings/runtime handoff:
   - [`settingsStore.ts`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/settingsStore.ts) now persists the requested settings tab and runtime-model focus signal needed by the existing runtime-settings UI path.
+- Full-gate stabilization:
+  - [`kv-store.service.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/tool/kv-store.service.spec.ts) and [`security-policy.service.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/hitl/security-policy.service.spec.ts) now keep their in-memory SQLite persona schema aligned with the live Drizzle contract (`max_tool_attempts` plus avatar fields), so repo-wide tests do not fail on stale fixture tables.
+  - [`architecture-runtime.service.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/architecture/architecture-runtime.service.spec.ts) now matches the current parent-chat projection contract, which persists the raw user prompt instead of re-prefixing it with schema scaffolding.
+  - [`chat-max-iterations.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/__tests__/chat-max-iterations.spec.ts), [`chat.service.event-ordering.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/__tests__/chat.service.event-ordering.spec.ts), and [`issues-verification.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/__tests__/issues-verification.spec.ts) now provide the required `AgentBudgetApprovalService` and `SessionsService` stubs expected by the current `ChatService` constructor.
+  - [`ModelSettingsSection.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/ModelSettingsSection.tsx) no longer clears the monotonic runtime-model focus signal on consumption, which avoids losing focus when `SettingsModal` switches from `llm` to `runtime`.
+  - [`executionGraphModel.test.ts`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/chat/graph/executionGraphModel.test.ts) and [`subagent.tool.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/tool/tools/subagent.tool.spec.ts) now assert the current runtime/UI contract rather than a stale pre-refactor behavior.
 
 ## Verification
 
@@ -47,6 +53,10 @@
   - `corepack pnpm --filter kalio-web run build`
 - E2E proofs:
   - `npm.cmd run test:e2e -- apps/e2e/tests/ac-21-session-title.spec.ts apps/e2e/tests/architecture-chat-subagent-turn.spec.ts apps/e2e/tests/mock-tool-intent-fallback.spec.ts apps/e2e/tests/proof-workflow-architecture-label.spec.ts apps/e2e/tests/regression-agent-budget-hitl.spec.ts`
+- Repo gate / audit / dev smoke:
+  - `corepack pnpm test`
+  - `corepack pnpm audit:report`
+  - `corepack pnpm --filter kalio-web run dev -- --host 127.0.0.1 --port 5188 --strictPort` with a successful `GET http://127.0.0.1:5188` (`HTTP 200`)
 - Prior manual/dev proof already held in the earlier slice:
   - [`2026-06-12-dev-loopback-and-review-gap-fixes.md`](/C:/Projekty/kalio-forever/docs/sessions/2026-06-12-dev-loopback-and-review-gap-fixes.md)
 
@@ -56,9 +66,12 @@
 - Public chat-session metadata no longer acts as an authority for unlocking branch/subagent runtime privileges.
 - Workflow/architecture conversations now survive reloads and child-session navigation without duplicate synthetic turns.
 - Session-title autogeneration and budget-approval replay now have direct runtime proofs instead of only unit coverage.
+- Runtime settings focus survives the `LLM Settings -> Runtime Settings` modal handoff without dropping the model-input focus request.
+- The repo-wide automated test gate is green again after refreshing stale test fixtures and constructor harnesses.
 
 ## Remaining risks
 
 - [`docs/technical-documentation-kalio.md`](/C:/Projekty/kalio-forever/docs/technical-documentation-kalio.md) still disagrees with the repo on launcher matrix, storage topology, runtime kinds, and self-hosted claims; it needs explicit system-truth answers before it can become the canonical project document.
 - [`docs/ux-workstation-page-redesign.md`](/C:/Projekty/kalio-forever/docs/ux-workstation-page-redesign.md) is currently deleted in the worktree but was not part of this verified slice.
 - `apps/kalio-web` production build still warns about a large JS chunk (`assets/index-*.js` above 2 MB before gzip). This slice did not introduce that debt, but it remains open.
+- Static audit still reports material architecture debt: `docs/audit/2026-06-12-report.md` lists 25 critical oversize files, 2 circular dependencies, and a real silent-error lead in [`EmbeddingsPanel.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/EmbeddingsPanel.tsx).

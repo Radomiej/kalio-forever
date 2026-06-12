@@ -19,8 +19,10 @@ import type { InternalLLMChunk } from '../interfaces/llm-chunk.types';
 import type { EmitFn } from '../interfaces/stream-context.interface';
 import { PersonaService } from '../../persona/persona.service';
 import { CredentialsService } from '../../credentials/credentials.service';
+import { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 import { ContextAssemblyService } from '../context-assembly.service';
 import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
+import { SessionsService } from '../sessions.service';
 import { makeContextAssembly, makeLLMTurnRuntime } from './llm-runtime-test-harness';
 
 async function* makeStream(chunks: InternalLLMChunk[]): AsyncIterable<InternalLLMChunk> {
@@ -62,6 +64,20 @@ describe('ChatService — MAX_ITERATIONS', () => {
     getMaxToolAttempts: vi.fn().mockResolvedValue(8),
     getContextWindowSize: vi.fn().mockResolvedValue(32000),
   };
+  const agentBudgetApprovals = {
+    requestAdditionalBudget: vi.fn().mockResolvedValue(null),
+  };
+  const sessionsService = {
+    get: vi.fn().mockResolvedValue({
+      id: 'sid',
+      personaId: 'p1',
+      title: 'Test chat',
+      kind: 'chat',
+      createdAt: 1,
+      updatedAt: 1,
+      runtimeContext: null,
+    }),
+  };
   const auditService = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
 
   beforeEach(async () => {
@@ -89,6 +105,8 @@ describe('ChatService — MAX_ITERATIONS', () => {
         { provide: ToolDispatchService, useValue: toolDispatch },
         { provide: PersonaService, useValue: personaService },
         { provide: CredentialsService, useValue: credentialsService },
+        { provide: AgentBudgetApprovalService, useValue: agentBudgetApprovals },
+        { provide: SessionsService, useValue: sessionsService },
         { provide: AuditService, useValue: auditService },
         { provide: ContextAssemblyService, useValue: contextAssembly },
         { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
