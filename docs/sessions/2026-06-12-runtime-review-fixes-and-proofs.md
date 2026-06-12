@@ -9,6 +9,7 @@
 - Fixed architecture run projection replacement so late async callbacks do not leave duplicate agent-turn bubbles after session reload or child-session navigation.
 - Added test-support plumbing and proofs for session-title summarization and agent-budget HITL replay.
 - Closed the remaining CI review regressions in the current branch: a stale frontend settings import that broke `kalio-web` typecheck/build, plus a clean-build mismatch where `@kalio/sdk` package metadata pointed at `dist/index.js` even though a fresh build only emitted `dist/sdk/src/index.js`.
+- Fixed session-deletion lifecycle so deleting a chat while a turn is still streaming drains the session pipeline before the DB row is removed, instead of racing message persistence against the `sessions` foreign key.
 
 ## What changed
 
@@ -29,6 +30,10 @@
   - [`sessions.service.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/sessions.service.ts) now asks the LLM for concise session-title summaries and falls back deterministically when the provider is unavailable or echoes the prompt.
   - [`agent-budget-approval.service.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/agent-budget-approval.service.ts), [`session-pipeline.service.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/session-pipeline.service.ts), [`chat.gateway.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/chat.gateway.ts), and [`chat-test-support.service.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/chat-test-support.service.ts) now support synthetic pending-budget replay for verification and recovery proofs.
   - [`chat-test-support-agent-budget.controller.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/chat-test-support-agent-budget.controller.ts) exposes the budget replay test hooks in test mode.
+- Session delete lifecycle:
+  - [`session-pipeline.service.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/session-pipeline.service.ts) now reserves a real per-turn completion promise at slot-claim time and exposes `stopAndDrain(sessionId)` so destructive lifecycle actions can abort the active turn, drop queued work, and wait for the turn to settle.
+  - [`sessions.controller.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/sessions.controller.ts) now drains the active session pipeline before deleting the backing session row.
+  - [`session-pipeline.service.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/__tests__/session-pipeline.service.spec.ts) and [`sessions.controller.spec.ts`](/C:/Projekty/kalio-forever/apps/kalio-api/src/modules/chat/sessions.controller.spec.ts) now prove the drain-before-delete ordering and seeded-turn edge case.
 - Settings/runtime handoff:
   - [`settingsStore.ts`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/settingsStore.ts) now persists the requested settings tab and runtime-model focus signal needed by the existing runtime-settings UI path.
 - Full-gate stabilization:
@@ -50,6 +55,7 @@
 - Backend focused tests:
   - `corepack pnpm --filter kalio-api exec vitest run src/modules/architecture/architecture-graph-projection.spec.ts src/modules/chat/__tests__/chat.service.spec.ts src/modules/chat/sessions.controller.spec.ts src/modules/chat/__tests__/sessions.service.spec.ts`
   - `corepack pnpm --filter kalio-api exec vitest run src/modules/chat/__tests__/chat-test-support.service.spec.ts src/modules/chat/__tests__/chat.gateway.spec.ts src/modules/chat/chat-test-support-agent-budget.controller.spec.ts`
+  - `corepack pnpm --filter kalio-api exec vitest run src/modules/chat/sessions.controller.spec.ts src/modules/chat/__tests__/session-pipeline.service.spec.ts`
 - Frontend focused tests:
   - `corepack pnpm --filter kalio-web exec vitest run src/features/chat/architectureTurnProjection.test.ts src/features/chat/ChatInterface.test.tsx src/features/sessions/SessionPanel.test.tsx src/features/chat/architectureChatSummary.test.ts src/features/chat/graph/executionGraphArchitectureRoot.test.ts`
   - `corepack pnpm --filter kalio-web exec vitest run src/features/settings/LLMPanel.test.tsx src/features/settings/SettingsModal.test.tsx`
@@ -61,6 +67,7 @@
   - `corepack pnpm --filter kalio-web run build`
 - E2E proofs:
   - `npm.cmd run test:e2e -- apps/e2e/tests/ac-21-session-title.spec.ts apps/e2e/tests/architecture-chat-subagent-turn.spec.ts apps/e2e/tests/mock-tool-intent-fallback.spec.ts apps/e2e/tests/proof-workflow-architecture-label.spec.ts apps/e2e/tests/regression-agent-budget-hitl.spec.ts`
+  - `corepack pnpm --filter @kalio/e2e test:e2e -- --project=chromium tests/ac-13-anti-spam.spec.ts` with a clean backend log scan for `FOREIGN KEY constraint failed` / `Session .* not found`
 - Repo gate / audit / dev smoke:
   - `corepack pnpm test`
   - `corepack pnpm audit:report`
@@ -91,6 +98,7 @@
 - Public chat-session metadata no longer acts as an authority for unlocking branch/subagent runtime privileges.
 - Workflow/architecture conversations now survive reloads and child-session navigation without duplicate synthetic turns.
 - Session-title autogeneration and budget-approval replay now have direct runtime proofs instead of only unit coverage.
+- Session deletion no longer removes the database row underneath an in-flight turn, so E2E cleanup does not leave spurious foreign-key or `SESSION_NOT_FOUND` noise in the backend log.
 - Runtime settings focus survives the `LLM Settings -> Runtime Settings` modal handoff without dropping the model-input focus request.
 - The repo-wide automated test gate is green again after refreshing stale test fixtures and constructor harnesses.
 - The last direct silent-error finding from the audit is closed; remaining high-severity audit items are structural cycles rather than swallowed runtime failures.

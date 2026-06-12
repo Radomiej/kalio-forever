@@ -210,6 +210,38 @@ describe('SessionPipelineService', () => {
     expect(chatHarness.callsReceived[0].content).toBe('first');
   });
 
+  it('stopAndDrain aborts the active turn, waits for completion, and drops queued work', async () => {
+    const { emit } = makeEmit();
+    const first = svc.submit(basePayload('s1', 'first'), emit);
+    await flush();
+    const second = svc.submit(basePayload('s1', 'second'), emit);
+    await flush();
+
+    let drained = false;
+    const stopPromise = svc.stopAndDrain('s1').then(() => {
+      drained = true;
+    });
+
+    await flush();
+    expect(chatHarness.chat.abort).toHaveBeenCalledWith('s1');
+    expect(drained).toBe(false);
+
+    chatHarness.release('s1');
+    await stopPromise;
+    await first;
+    await second;
+
+    expect(drained).toBe(true);
+    expect(chatHarness.callsReceived.map((c) => c.content)).toEqual(['first']);
+  });
+
+  it('stopAndDrain clears seeded active turns without waiting indefinitely', async () => {
+    svc.seedActiveTurn('seeded-session', 'seeded-turn');
+
+    await expect(svc.stopAndDrain('seeded-session')).resolves.toBeUndefined();
+    expect(svc.getSessionStatus('seeded-session').active).toBe(false);
+  });
+
   it('serialises concurrent submits to an idle session (race condition guard)', async () => {
     // Fire 5 submits in the same microtask without any awaits between them.
     // Without per-session atomicity, several would observe `isActive=false`

@@ -65,17 +65,25 @@ function makeContextPreviewService() {
   };
 }
 
+function makeSessionPipeline() {
+  return {
+    stopAndDrain: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe('SessionsController', () => {
   let controller: SessionsController;
   let svc: ReturnType<typeof makeService>;
   let runJournal: ReturnType<typeof makeRunJournal>;
   let contextPreview: ReturnType<typeof makeContextPreviewService>;
+  let sessionPipeline: ReturnType<typeof makeSessionPipeline>;
 
   beforeEach(() => {
     svc = makeService();
     runJournal = makeRunJournal();
     contextPreview = makeContextPreviewService();
-    controller = new SessionsController(svc as never, runJournal as never, contextPreview as never);
+    sessionPipeline = makeSessionPipeline();
+    controller = new SessionsController(svc as never, runJournal as never, contextPreview as never, sessionPipeline as never);
   });
 
   describe('list()', () => {
@@ -145,9 +153,14 @@ describe('SessionsController', () => {
   });
 
   describe('delete()', () => {
-    it('deletes a session', async () => {
+    it('drains the session pipeline before deleting a session', async () => {
       await controller.delete('sess-1');
+
+      expect(sessionPipeline.stopAndDrain).toHaveBeenCalledWith('sess-1');
       expect(svc.delete).toHaveBeenCalledWith('sess-1');
+      expect(sessionPipeline.stopAndDrain.mock.invocationCallOrder[0]).toBeLessThan(
+        svc.delete.mock.invocationCallOrder[0],
+      );
     });
   });
 

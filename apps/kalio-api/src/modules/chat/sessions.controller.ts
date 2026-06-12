@@ -13,6 +13,7 @@ type SessionContextPreviewBody = Omit<Extract<ContextPreviewRequest, { sessionId
 import { SessionsService } from './sessions.service';
 import { RunJournalService } from './run-journal.service';
 import { ContextPreviewService } from './context-preview.service';
+import { SessionPipelineService } from './session-pipeline.service';
 
 const PUBLIC_ARCHITECTURE_CONTEXT_KEYS = new Set([
   'projectPath',
@@ -28,6 +29,7 @@ export class SessionsController {
     private readonly sessions: SessionsService,
     private readonly runJournal: RunJournalService,
     private readonly contextPreview: ContextPreviewService,
+    private readonly sessionPipeline: SessionPipelineService,
   ) {}
 
   @Get()
@@ -63,6 +65,7 @@ export class SessionsController {
 
   @Delete(':id')
   async delete(@Param('id') id: string): Promise<void> {
+    await this.sessionPipeline.stopAndDrain(id);
     await this.sessions.delete(id);
   }
 
