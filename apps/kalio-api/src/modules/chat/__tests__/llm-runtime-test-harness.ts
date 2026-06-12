@@ -58,6 +58,7 @@ export function makeChatService(params: {
   llmSource: ILLMSource;
   streamProcessor: Pick<StreamProcessorService, 'process'>;
   sessionManager: SessionManagerService;
+  sessions?: SessionsService;
   toolDispatch: ToolDispatchService;
   personaService: Partial<PersonaService>;
   credentialsService: Pick<CredentialsService, 'getMaxToolAttempts'>;
@@ -80,6 +81,16 @@ export function makeChatService(params: {
     {
       requestAdditionalBudget: vi.fn().mockResolvedValue(null),
     } as unknown as AgentBudgetApprovalService,
+    (params.sessions ?? {
+      get: vi.fn().mockResolvedValue({
+        id: 'sid',
+        personaId: 'default',
+        title: 'New Chat',
+        kind: 'chat',
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    }) as SessionsService,
     undefined,
     contextAssembly,
   );

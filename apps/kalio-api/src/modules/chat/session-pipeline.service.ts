@@ -180,6 +180,19 @@ export class SessionPipelineService {
     };
   }
 
+  seedActiveTurn(sessionId: string, turnId: string): void {
+    this.active.set(sessionId, {
+      donePromise: new Promise<void>(() => undefined),
+      turnId,
+      startedAt: Date.now(),
+    });
+  }
+
+  clearSeededActiveTurn(sessionId: string): void {
+    this.active.delete(sessionId);
+    this.queues.delete(sessionId);
+  }
+
   /**
    * Cancel the in-flight turn (if any) and drop any queued items for the
    * given session. Used on socket disconnect.

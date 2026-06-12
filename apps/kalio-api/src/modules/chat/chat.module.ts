@@ -20,6 +20,7 @@ import { ChatGateway } from './chat.gateway';
 import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import { SessionsController } from './sessions.controller';
+import { ChatTestSupportAgentBudgetController } from './chat-test-support-agent-budget.controller';
 import { ChatTestSupportController } from './chat-test-support.controller';
 import { ChatTestSupportRaAppController } from './chat-test-support-raapp.controller';
 import { AuditModule } from './audit.module';
@@ -68,7 +69,14 @@ import {
  */
 @Module({
   imports: [AuditModule, LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, HitlModule, RelayModule],
-  controllers: [SessionsController, ContextController, AuditLogController, ChatTestSupportController, ChatTestSupportRaAppController],
+  controllers: [
+    SessionsController,
+    ContextController,
+    AuditLogController,
+    ChatTestSupportController,
+    ChatTestSupportAgentBudgetController,
+    ChatTestSupportRaAppController,
+  ],
   providers: [
     // Handlers
     TextDeltaHandler,

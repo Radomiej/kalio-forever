@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import { eq, desc, isNull } from 'drizzle-orm';
 import type { ChatSession, ChatMessage, ChatSessionKind, CreateSessionDto, SessionRuntimeContext } from '@kalio/types';
@@ -8,16 +8,37 @@ import { SessionManagerService } from './session-manager.service';
 import type { IMessageRepository } from './interfaces/message-repository.interface';
 import { MESSAGE_REPOSITORY } from './chat.tokens';
 import { SessionEventsService } from './session-events.service';
+import { LLMService } from '../llm/llm.service';
+import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 
 const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
+const DEFAULT_SESSION_TITLE = 'New Chat';
+const MAX_TITLE_LENGTH = 60;
+const TITLE_SYSTEM_PROMPT = [
+  'Generate a concise conversation title.',
+  'Summarize the real user goal instead of copying the prompt.',
+  'Return plain title text only.',
+  'Use 2 to 6 words when possible.',
+  `Never exceed ${MAX_TITLE_LENGTH} characters.`,
+  'No quotes, markdown, or trailing punctuation.',
+].join(' ');
+const TITLE_STOPWORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'be', 'by', 'do', 'for', 'from', 'if', 'in', 'into', 'is', 'it', 'its', 'of', 'ok',
+  'on', 'or', 'out', 'reply', 'that', 'the', 'this', 'to', 'use', 'with', 'without', 'you',
+  'ale', 'bo', 'by', 'co', 'czy', 'dla', 'do', 'i', 'jak', 'na', 'nie', 'oraz', 'po', 'to', 'użyj', 'uzyj', 'w',
+  'we', 'z',
+]);
 
 @Injectable()
 export class SessionsService {
+  private readonly logger = new Logger(SessionsService.name);
+
   constructor(
     private readonly drizzle: DrizzleService,
     private readonly sessionManager: SessionManagerService,
     private readonly sessionEvents: SessionEventsService,
     @Inject(MESSAGE_REPOSITORY) private readonly repo: IMessageRepository,
+    private readonly llm: LLMService,
   ) {}
 
   async list(options: { includeArchived?: boolean } = {}): Promise<ChatSession[]> {
@@ -39,7 +60,7 @@ export class SessionsService {
     const row = {
       id,
       personaId: dto.personaId ?? 'default',
-      title: dto.title ?? 'New Chat',
+      title: dto.title ?? DEFAULT_SESSION_TITLE,
       kind: dto.kind ?? 'chat',
       parentSessionId: dto.parentSessionId ?? null,
       parentTurnId: dto.parentTurnId ?? null,
@@ -126,14 +147,49 @@ export class SessionsService {
     await this.assertExists(id);
     const history = await this.repo.loadHistory(id);
     const firstUser = history.find((message) => message.role === 'user');
-    const normalized = firstUser?.content.replace(/\s+/g, ' ').trim() ?? '';
-    const title = normalized.length === 0
-      ? 'New Chat'
-      : normalized.length > 60
-        ? `${normalized.slice(0, 60).trimEnd()}…`
-        : normalized;
+    if (!firstUser) {
+      await this.update(id, { title: DEFAULT_SESSION_TITLE });
+      return { title: DEFAULT_SESSION_TITLE };
+    }
+
+    const generated = await this.tryGenerateConversationTitle(id, history);
+    const title = normalizeGeneratedTitle(generated) ?? deriveFallbackTitle(history);
     await this.update(id, { title });
     return { title };
+  }
+
+  private async tryGenerateConversationTitle(id: string, history: ChatMessage[]): Promise<string | null> {
+    const messages = buildTitlePrompt(history);
+    let rawResponse = '';
+
+    try {
+      await this.llm.streamChat(messages, [], {
+        sessionId: `session-title:${id}`,
+        messageId: nanoid(),
+        onChunk: (chunk) => {
+          if (!chunk.thinking) {
+            rawResponse += chunk.delta;
+          }
+        },
+      });
+    } catch (error) {
+      this.logger.warn(`Conversation title generation failed for ${id}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+
+    const normalized = normalizeGeneratedTitle(rawResponse);
+    if (!normalized) {
+      return null;
+    }
+
+    const promptText = normalizedUserPrompt(history);
+    if (normalized.startsWith('[MockLLM] Echo:')) {
+      return null;
+    }
+    if (promptText && normalized.toLowerCase() === (normalizeGeneratedTitle(promptText)?.toLowerCase() ?? '')) {
+      return null;
+    }
+    return normalized;
   }
 
   private async assertExists(id: string): Promise<void> {
@@ -186,4 +242,102 @@ export class SessionsService {
       updatedAt: toMs(row.updatedAt),
     };
   }
+}
+
+function buildTitlePrompt(history: ChatMessage[]): ContextManagedLLMMessage[] {
+  const userPrompt = normalizedUserPrompt(history);
+  const latestAssistant = [...history]
+    .reverse()
+    .find((message) => message.role === 'assistant' && normalizeConversationLine(message.content).length > 0);
+
+  return [
+    {
+      role: 'system',
+      content: TITLE_SYSTEM_PROMPT,
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        firstUserMessage: userPrompt,
+        latestAssistantMessage: latestAssistant ? normalizeConversationLine(latestAssistant.content).slice(0, 600) : null,
+      }),
+    },
+  ];
+}
+
+function normalizedUserPrompt(history: ChatMessage[]): string {
+  const firstUser = history.find((message) => message.role === 'user');
+  return firstUser ? stripArchitecturePrefix(normalizeConversationLine(firstUser.content)) : '';
+}
+
+function normalizeConversationLine(content: string): string {
+  return content.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeGeneratedTitle(raw: string | null | undefined): string | null {
+  if (!raw) {
+    return null;
+  }
+
+  const normalized = raw
+    .replace(/^```[\w-]*\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.?!,:;\-–—]+$/u, '')
+    .trim();
+
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  const bounded = normalized.length > MAX_TITLE_LENGTH
+    ? normalized.slice(0, MAX_TITLE_LENGTH).trimEnd()
+    : normalized;
+  return bounded.length > 0 ? bounded : null;
+}
+
+function deriveFallbackTitle(history: ChatMessage[]): string {
+  const firstUser = normalizedUserPrompt(history);
+  if (!firstUser) {
+    return DEFAULT_SESSION_TITLE;
+  }
+
+  const projectName = projectNameFromPrompt(firstUser);
+  if (/(architektur|architecture)/iu.test(firstUser) && projectName) {
+    return normalizeGeneratedTitle(`Architecture Review ${projectName}`) ?? DEFAULT_SESSION_TITLE;
+  }
+
+  const firstSentence = firstUser.split(/[.!?]/u).find((segment) => segment.trim().length > 0)?.trim() ?? firstUser;
+  const titleTokens = (firstSentence.match(/[\p{L}\p{N}][\p{L}\p{N}_-]*/gu) ?? [])
+    .filter((token) => token.length > 1)
+    .filter((token) => !TITLE_STOPWORDS.has(token.toLowerCase()))
+    .slice(0, 4);
+
+  if (titleTokens.length > 0) {
+    const candidate = titleTokens.map(titleTokenCase).join(' ');
+    return normalizeGeneratedTitle(candidate) ?? DEFAULT_SESSION_TITLE;
+  }
+
+  return normalizeGeneratedTitle(firstSentence) ?? DEFAULT_SESSION_TITLE;
+}
+
+function stripArchitecturePrefix(content: string): string {
+  return content.replace(/^\[Architecture:\s*[^\]]+\]\s*/i, '').trim();
+}
+
+function projectNameFromPrompt(content: string): string | null {
+  const windowsPathMatch = content.match(/[A-Za-z]:\\(?:[^\\\s]+\\)*([^\\\s]+)/u);
+  if (windowsPathMatch?.[1]) {
+    return windowsPathMatch[1];
+  }
+  return null;
+}
+
+function titleTokenCase(token: string): string {
+  if (token.toUpperCase() === token) {
+    return token;
+  }
+  return `${token[0]?.toUpperCase() ?? ''}${token.slice(1).toLowerCase()}`;
 }

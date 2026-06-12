@@ -13,6 +13,7 @@ interface PendingBudgetApproval {
   payload: AgentBudgetApprovalRequest;
   emit: StreamContext['emit'];
   resolve: (limit: number | null) => void;
+  synthetic?: boolean;
 }
 
 @Injectable()
@@ -68,6 +69,7 @@ export class AgentBudgetApprovalService {
           ctx.abortSignal?.removeEventListener('abort', handleAbort);
           resolve(limit);
         },
+        synthetic: false,
       });
 
       if (ctx.abortSignal?.aborted) {
@@ -103,6 +105,40 @@ export class AgentBudgetApprovalService {
     return [...this.pending.values()]
       .filter((pending) => pending.sessionId === sessionId)
       .map((pending) => pending.payload);
+  }
+
+  isSyntheticPendingApproval(requestId: string, sessionId?: string): boolean {
+    const pending = this.pending.get(requestId);
+    if (!pending) {
+      return false;
+    }
+    if (sessionId && pending.sessionId !== sessionId) {
+      return false;
+    }
+    return pending.synthetic === true;
+  }
+
+  seedPendingApproval(payload: AgentBudgetApprovalRequest): void {
+    this.pending.set(payload.requestId, {
+      sessionId: payload.sessionId,
+      payload,
+      emit: () => undefined,
+      resolve: () => undefined,
+      synthetic: true,
+    });
+  }
+
+  dropPendingApproval(requestId: string, sessionId?: string): 'removed' | 'not_found' | 'session_mismatch' {
+    const pending = this.pending.get(requestId);
+    if (!pending) {
+      return 'not_found';
+    }
+    if (sessionId && pending.sessionId !== sessionId) {
+      return 'session_mismatch';
+    }
+
+    this.pending.delete(requestId);
+    return 'removed';
   }
 
   private emitInvalidated(

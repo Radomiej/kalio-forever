@@ -83,6 +83,7 @@ describe('ChatGateway', () => {
     } as unknown as SessionEventsService;
     agentBudgetApprovals = {
       getPendingApprovals: vi.fn().mockReturnValue([]),
+      isSyntheticPendingApproval: vi.fn().mockReturnValue(false),
       resolveApproval: vi.fn().mockReturnValue('resolved'),
     } as unknown as AgentBudgetApprovalService;
 
@@ -639,6 +640,39 @@ describe('ChatGateway', () => {
         'session-1',
         'Do not write files; explain the plan instead.',
       );
+    });
+  });
+
+  describe('budget approvals', () => {
+    it('replays invalidation to the approving socket for synthetic seeded approvals', () => {
+      vi.mocked(agentBudgetApprovals.getPendingApprovals).mockReturnValue([
+        {
+          requestId: 'budget-1',
+          sessionId: 'session-1',
+          scope: 'chat',
+          usedIterations: 60,
+          currentLimit: 60,
+          suggestedNextLimit: 70,
+          requestedBy: 'chat-agent',
+        },
+      ]);
+      vi.mocked(agentBudgetApprovals.isSyntheticPendingApproval).mockReturnValue(true);
+
+      gateway.handleAgentBudgetApprove(client as never, {
+        requestId: 'budget-1',
+        sessionId: 'session-1',
+        decision: 'allow_ten',
+      });
+
+      expect(agentBudgetApprovals.resolveApproval).toHaveBeenCalledWith('budget-1', 'session-1', 'allow_ten');
+      expect(client.emit).toHaveBeenCalledWith('agent:budget_invalidated', {
+        requestId: 'budget-1',
+        sessionId: 'session-1',
+        agentRun: undefined,
+        reason: 'approved',
+        decision: 'allow_ten',
+        approvedLimit: 70,
+      });
     });
   });
 });

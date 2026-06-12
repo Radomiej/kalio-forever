@@ -1,11 +1,20 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { AgentRunContext, ChatMessage, RaAppNativeResult, RaAppPendingApproval, ToolConfirmationRequest } from '@kalio/types';
+import type {
+  AgentBudgetApprovalRequest,
+  AgentRunContext,
+  ChatMessage,
+  RaAppNativeResult,
+  RaAppPendingApproval,
+  ToolConfirmationRequest,
+} from '@kalio/types';
 import { nanoid } from 'nanoid';
 import type { PendingApproval } from '../raapp/effects-processor.service';
 import { RAAppHITLService } from '../raapp/raapp-hitl.service';
+import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { MESSAGE_REPOSITORY } from './chat.tokens';
 import type { IMessageRepository } from './interfaces/message-repository.interface';
+import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import { ToolDispatchService } from './tool-dispatch.service';
 
@@ -22,6 +31,26 @@ interface SeedReplayFixtureInput {
 }
 
 interface DropPendingConfirmationInput {
+  requestId: string;
+  sessionId?: string;
+}
+
+interface SeedBudgetReplayFixtureInput {
+  sessionId: string;
+  requestId: string;
+  promptMessage: string;
+  currentLimit: number;
+  usedIterations: number;
+  turnId?: string;
+  scope?: 'chat' | 'subagent' | 'agent-flow-branch';
+  requestedBy?: string;
+  personaId?: string;
+  nodeId?: string;
+  roleSlotId?: string;
+  agentRun?: AgentRunContext;
+}
+
+interface DropPendingBudgetApprovalInput {
   requestId: string;
   sessionId?: string;
 }
@@ -54,6 +83,8 @@ export class ChatTestSupportService {
     private readonly sessions: SessionsService,
     private readonly toolDispatch: ToolDispatchService,
     private readonly raappHitl: RAAppHITLService,
+    private readonly agentBudgetApprovals: AgentBudgetApprovalService,
+    private readonly sessionPipeline: SessionPipelineService,
     @Inject(MESSAGE_REPOSITORY) private readonly repo: IMessageRepository,
   ) {}
 
@@ -103,6 +134,50 @@ export class ChatTestSupportService {
     this.assertTestMode();
     return {
       status: this.toolDispatch.dropPendingConfirmation(input.requestId, input.sessionId),
+    };
+  }
+
+  async seedBudgetReplayFixture(input: SeedBudgetReplayFixtureInput): Promise<AgentBudgetApprovalRequest> {
+    this.assertTestMode();
+    await this.sessions.get(input.sessionId);
+
+    const now = Date.now();
+    const promptMessage: ChatMessage = {
+      id: nanoid(),
+      sessionId: input.sessionId,
+      role: 'user',
+      content: input.promptMessage,
+      createdAt: now,
+    };
+    await this.repo.saveMessage(promptMessage);
+
+    const payload: AgentBudgetApprovalRequest = {
+      requestId: input.requestId,
+      sessionId: input.sessionId,
+      scope: input.scope ?? 'chat',
+      usedIterations: input.usedIterations,
+      currentLimit: input.currentLimit,
+      suggestedNextLimit: Math.min(1000, input.currentLimit + 10),
+      requestedBy: input.requestedBy,
+      personaId: input.personaId,
+      nodeId: input.nodeId,
+      roleSlotId: input.roleSlotId,
+      agentRun: input.agentRun,
+    };
+
+    this.agentBudgetApprovals.seedPendingApproval(payload);
+    this.sessionPipeline.seedActiveTurn(input.sessionId, input.turnId ?? `seeded-budget-turn-${nanoid()}`);
+    return payload;
+  }
+
+  dropPendingBudgetApproval(input: DropPendingBudgetApprovalInput): { status: 'removed' | 'not_found' | 'session_mismatch' } {
+    this.assertTestMode();
+    const status = this.agentBudgetApprovals.dropPendingApproval(input.requestId, input.sessionId);
+    if (status === 'removed' && input.sessionId) {
+      this.sessionPipeline.clearSeededActiveTurn(input.sessionId);
+    }
+    return {
+      status,
     };
   }
 

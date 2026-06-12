@@ -373,12 +373,27 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.warn(`agent:budget_approve rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
+    const pending = this.agentBudgetApprovals
+      .getPendingApprovals(payload.sessionId)
+      .find((request) => request.requestId === payload.requestId);
+    const isSynthetic = this.agentBudgetApprovals.isSyntheticPendingApproval(payload.requestId, payload.sessionId);
     const status = this.agentBudgetApprovals.resolveApproval(payload.requestId, payload.sessionId, payload.decision);
     if (status === 'not_found') {
       client.emit('agent:budget_invalidated', {
         requestId: payload.requestId,
         sessionId: payload.sessionId,
         reason: 'not_found',
+      } satisfies SocketEvents['agent:budget_invalidated']);
+      return;
+    }
+    if (status === 'resolved' && isSynthetic && pending) {
+      client.emit('agent:budget_invalidated', {
+        requestId: pending.requestId,
+        sessionId: pending.sessionId,
+        agentRun: pending.agentRun,
+        reason: payload.decision === 'block' ? 'cancelled' : 'approved',
+        decision: payload.decision,
+        approvedLimit: nextApprovedBudgetLimit(pending.currentLimit, payload.decision) ?? undefined,
       } satisfies SocketEvents['agent:budget_invalidated']);
     }
   }
@@ -483,5 +498,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return snapshot.run.status === 'running'
       || snapshot.run.status === 'queued'
       || snapshot.run.status === 'waiting_on_orchestrator';
+  }
+}
+
+function nextApprovedBudgetLimit(
+  currentLimit: number,
+  decision: SocketEvents['agent:budget_approve']['decision'],
+): number | null {
+  switch (decision) {
+    case 'allow_one':
+      return currentLimit + 1;
+    case 'allow_ten':
+      return currentLimit + 10;
+    case 'allow_unlimited':
+      return 1000;
+    case 'block':
+    default:
+      return null;
   }
 }
