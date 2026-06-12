@@ -38,18 +38,10 @@ const TOOL_TIMEOUT_CONTROLS: Array<{
     max: 120000,
     step: 5000,
   },
-  {
-    key: 'providerMaxConcurrentStreams',
-    label: 'Max provider streams',
-    testId: 'provider-max-streams',
-    min: 1,
-    max: 20,
-    step: 1,
-  },
 ];
 
-function formatControlValue(key: ToolTimeoutKey, value: number): string {
-  return key === 'providerMaxConcurrentStreams' ? String(value) : `${Math.round(value / 1000)}s`;
+function formatControlValue(value: number): string {
+  return `${Math.round(value / 1000)}s`;
 }
 
 export function ToolTimeoutsSection({ values, onInputChange, onCommit }: ToolTimeoutsSectionProps) {
@@ -58,7 +50,6 @@ export function ToolTimeoutsSection({ values, onInputChange, onCommit }: ToolTim
       <h3 className="text-sm font-semibold mb-1">Tool Timeouts</h3>
       <p className="text-xs text-base-content/60 mb-3">
         Shared backend timeouts for web search and provider probes. Raise them when external services are slow.
-        Lower max provider streams when a provider returns rate limits during parallel agent runs.
       </p>
 
       <div className="space-y-4">
@@ -67,7 +58,7 @@ export function ToolTimeoutsSection({ values, onInputChange, onCommit }: ToolTim
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs text-base-content/60">{control.label}</span>
               <span className="badge badge-neutral font-mono text-xs" data-testid={`${control.testId}-value`}>
-                {formatControlValue(control.key, values[control.key])}
+                {formatControlValue(values[control.key])}
               </span>
             </div>
             <input

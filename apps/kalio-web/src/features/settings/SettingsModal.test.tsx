@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useSettingsStore } from './settingsStore';
 
 vi.mock('./registry', () => ({
   SETTINGS_BLOCKS: [
@@ -8,6 +9,12 @@ vi.mock('./registry', () => ({
       label: 'LLM Settings',
       icon: <span>llm</span>,
       component: () => <div>LLM panel</div>,
+    },
+    {
+      id: 'runtime',
+      label: 'Runtime Settings',
+      icon: <span>runtime</span>,
+      component: () => <div>Runtime panel</div>,
     },
     {
       id: 'tools',
@@ -21,6 +28,13 @@ vi.mock('./registry', () => ({
 import { SettingsModal } from './SettingsModal';
 
 describe('SettingsModal', () => {
+  beforeEach(() => {
+    useSettingsStore.setState({
+      requestedSettingsTab: null,
+      runtimeModelFocusRequest: 0,
+    });
+  });
+
   it('renders the requested initial tab and switches panels when another tab is clicked', () => {
     render(<SettingsModal onClose={() => undefined} initialTab="tools" />);
 
@@ -34,6 +48,15 @@ describe('SettingsModal', () => {
     render(<SettingsModal onClose={() => undefined} initialTab="missing" />);
 
     expect(screen.getByText('LLM panel')).toBeInTheDocument();
+  });
+
+  it('consumes runtime tab requests from the settings store', async () => {
+    useSettingsStore.getState().requestSettingsTab('runtime');
+
+    render(<SettingsModal onClose={() => undefined} initialTab="tools" />);
+
+    expect(await screen.findByText('Runtime panel')).toBeInTheDocument();
+    expect(useSettingsStore.getState().requestedSettingsTab).toBeNull();
   });
 
   it('closes from the close button and the Escape key', () => {

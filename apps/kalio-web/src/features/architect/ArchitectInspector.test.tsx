@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ArchitectInspector } from './ArchitectInspector';
@@ -54,6 +54,20 @@ describe('ArchitectInspector', () => {
     expect(screen.getByTestId('architect-persona-select')).toHaveValue('dev');
   });
 
+  it('emits node tool loop overrides from the properties modal', async () => {
+    const user = userEvent.setup();
+    const onNodeMaxToolAttemptsOverride = vi.fn();
+    render(<InspectorHarness onNodeMaxToolAttemptsOverride={onNodeMaxToolAttemptsOverride} />);
+
+    await user.click(screen.getByTestId('architect-node-properties-open'));
+
+    fireEvent.change(screen.getByTestId('architect-node-max-tool-attempts'), { target: { value: '1000' } });
+    expect(onNodeMaxToolAttemptsOverride).toHaveBeenLastCalledWith('pragmatist', 100);
+
+    fireEvent.change(screen.getByTestId('architect-node-max-tool-attempts'), { target: { value: '' } });
+    expect(onNodeMaxToolAttemptsOverride).toHaveBeenLastCalledWith('pragmatist', undefined);
+  });
+
   it('collapses the inspector to a narrow restore control', () => {
     const onCollapsedChange = vi.fn();
     render(<InspectorHarness collapsed onCollapsedChange={onCollapsedChange} />);
@@ -79,16 +93,19 @@ describe('ArchitectInspector', () => {
 function InspectorHarness({
   collapsed = false,
   onCollapsedChange,
+  onNodeMaxToolAttemptsOverride = vi.fn(),
 }: {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
+  onNodeMaxToolAttemptsOverride?: (nodeId: string, maxToolAttempts?: number) => void;
 }) {
+  const [nodeState, setNodeState] = useState<ArchitectNode>(baseNode);
   const [personaOverrides, setPersonaOverrides] = useState<PersonaOverrideMap>({});
   const [schema, setSchema] = useState<ArchitectSchema>(baseSchema);
 
   return (
     <ArchitectInspector
-      node={baseNode}
+      node={nodeState}
       slot={baseSlot}
       schema={schema}
       personas={personas}
@@ -108,7 +125,14 @@ function InspectorHarness({
       }}
       onNodeKindOverride={vi.fn()}
       onNodeBehaviorOverride={vi.fn()}
-      onNodeMaxToolAttemptsOverride={vi.fn()}
+      onNodeMaxToolAttemptsOverride={(nodeId, maxToolAttempts) => {
+        setNodeState((current) => (
+          current.id === nodeId
+            ? { ...current, maxToolAttempts }
+            : current
+        ));
+        onNodeMaxToolAttemptsOverride(nodeId, maxToolAttempts);
+      }}
       onCollapsedChange={onCollapsedChange}
       onContextPolicyOverride={(slotId, override) => {
         setSchema((current) => ({

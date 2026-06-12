@@ -17,6 +17,7 @@ function mockFetch(map: FetchMap) {
 
       if (value === null) return Promise.resolve(new Response(null, { status: 404 }));
       if (value === 204) return Promise.resolve(new Response(null, { status: 204 }));
+      if (value instanceof Response) return Promise.resolve(value);
       return Promise.resolve(
         new Response(JSON.stringify(value), {
           status: 200,
@@ -64,6 +65,17 @@ describe('ModelSettingsSection', () => {
     });
     render(<ModelSettingsSection activeRuntimeConfig={ACTIVE_RUNTIME_CONFIG} onRuntimeConfigChange={vi.fn()} />);
     await waitFor(() => expect(screen.getByTestId('gen-temperature-value')).toHaveTextContent('1.20'));
+  });
+
+  it('formats large max output tokens with compact notation', async () => {
+    mockFetch({
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 262144 },
+      'GET /api/llm/active/models': { models: ['gpt-4o-mini'] },
+    });
+
+    render(<ModelSettingsSection activeRuntimeConfig={ACTIVE_RUNTIME_CONFIG} onRuntimeConfigChange={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('256k')).toBeInTheDocument());
   });
 
   it('shows the active provider, model, and base URL when runtime config is available', async () => {
@@ -147,6 +159,31 @@ describe('ModelSettingsSection', () => {
     });
   });
 
+  it('commits max output tokens only after the slider is released', async () => {
+    mockFetch({
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+      'PUT /api/credentials/settings/generation': 204,
+      'GET /api/llm/active/models': { models: [] },
+    });
+
+    render(<ModelSettingsSection activeRuntimeConfig={ACTIVE_RUNTIME_CONFIG} onRuntimeConfigChange={vi.fn()} />);
+
+    const slider = (await screen.findByTestId('gen-max-tokens')) as HTMLInputElement;
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+
+    slider.value = '8192';
+    fireEvent.input(slider);
+    expect(fetchMock.mock.calls.some(([url, opts]) => url === '/api/credentials/settings/generation' && opts?.method === 'PUT')).toBe(false);
+
+    fireEvent.mouseUp(slider);
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url, opts]) => url === '/api/credentials/settings/generation' && opts?.method === 'PUT'),
+      ).toBe(true),
+    );
+  });
+
   it('clears a stale model-save error before a successful retry (REGRESSION)', async () => {
     const onRuntimeConfigChange = vi.fn();
     let saveAttempts = 0;
@@ -222,71 +259,23 @@ describe('ModelSettingsSection', () => {
     await waitFor(() => expect(screen.getByTestId('gen-temperature-value')).toHaveTextContent('0.70'));
   });
 
-  it('keeps the last valid temperature when slider emits an empty value (REGRESSION)', async () => {
+  it('restores the previous max output tokens value when auto-save fails', async () => {
     mockFetch({
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+      'PUT /api/credentials/settings/generation': new Response('generation failed', { status: 500 }),
+      'GET /api/llm/active/models': { models: [] },
     });
 
-    render(<ModelSettingsSection activeRuntimeConfig={null} onRuntimeConfigChange={vi.fn()} />);
+    render(<ModelSettingsSection activeRuntimeConfig={ACTIVE_RUNTIME_CONFIG} onRuntimeConfigChange={vi.fn()} />);
 
-    const slider = await screen.findByTestId('gen-temperature');
-    fireEvent.change(slider, { target: { value: '' } });
+    const slider = (await screen.findByTestId('gen-max-tokens')) as HTMLInputElement;
 
-    expect(screen.getByTestId('gen-temperature-value')).toHaveTextContent('0.70');
-  });
+    slider.value = '8192';
+    fireEvent.input(slider);
+    fireEvent.mouseUp(slider);
 
-  it('keeps the last valid maxTokens when slider emits an empty value (REGRESSION)', async () => {
-    mockFetch({
-      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
-    });
-
-    render(<ModelSettingsSection activeRuntimeConfig={null} onRuntimeConfigChange={vi.fn()} />);
-
-    const slider = await screen.findByTestId('gen-max-tokens');
-    fireEvent.change(slider, { target: { value: '' } });
-
-    expect(screen.getByText('4,096')).toBeInTheDocument();
-  });
-
-  it('does not serialize empty temperature slider input as null (REGRESSION)', async () => {
-    mockFetch({
-      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
-      'PUT /api/credentials/settings/generation': 204,
-    });
-    const user = userEvent.setup();
-
-    render(<ModelSettingsSection activeRuntimeConfig={null} onRuntimeConfigChange={vi.fn()} />);
-
-    fireEvent.change(await screen.findByTestId('gen-temperature'), { target: { value: '' } });
-    await user.click(screen.getByTestId('gen-save'));
-
-    await waitFor(() => {
-      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
-      const putCall = calls.find(([url, opts]) => url === '/api/credentials/settings/generation' && opts?.method === 'PUT');
-      expect(putCall).toBeDefined();
-      const body = JSON.parse((putCall![1]?.body as string) ?? '{}') as { temperature: number };
-      expect(body.temperature).toBe(0.7);
-    });
-  });
-
-  it('does not serialize empty maxTokens slider input as null (REGRESSION)', async () => {
-    mockFetch({
-      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
-      'PUT /api/credentials/settings/generation': 204,
-    });
-    const user = userEvent.setup();
-
-    render(<ModelSettingsSection activeRuntimeConfig={null} onRuntimeConfigChange={vi.fn()} />);
-
-    fireEvent.change(await screen.findByTestId('gen-max-tokens'), { target: { value: '' } });
-    await user.click(screen.getByTestId('gen-save'));
-
-    await waitFor(() => {
-      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
-      const putCall = calls.find(([url, opts]) => url === '/api/credentials/settings/generation' && opts?.method === 'PUT');
-      expect(putCall).toBeDefined();
-      const body = JSON.parse((putCall![1]?.body as string) ?? '{}') as { maxTokens: number };
-      expect(body.maxTokens).toBe(4096);
-    });
+    await waitFor(() => expect(screen.getByText(/generation failed/i)).toBeInTheDocument());
+    expect(screen.getByTestId('gen-max-tokens')).toHaveValue('4096');
+    expect(screen.getByTestId('gen-max-tokens-value')).toHaveTextContent('4k');
   });
 });

@@ -27,6 +27,7 @@ const EXISTING_PERSONA: Persona = {
   name: 'Existing Persona',
   systemPrompt: 'Stay focused on the current plan.',
   model: 'gpt-4o-mini',
+  maxToolAttempts: 60,
   allowedTools: ['vfs_read_file'],
   skillIds: [],
   mcpPolicy: 'allow_all',
@@ -43,6 +44,7 @@ const UPDATED_PERSONA: Persona = {
   name: 'Updated Persona',
   model: 'gpt-4.1-mini',
   systemPrompt: 'Trimmed prompt.',
+  maxToolAttempts: 75,
   updatedAt: 2,
 };
 
@@ -51,6 +53,7 @@ const CREATED_PERSONA: Persona = {
   name: 'New Planner',
   systemPrompt: 'Plan the next step before acting.',
   model: 'gpt-4o-mini',
+  maxToolAttempts: 60,
   allowedTools: [],
   skillIds: [],
   mcpPolicy: 'deny_all',
@@ -89,6 +92,7 @@ describe('PersonaPanel', () => {
     fireEvent.change(screen.getByTestId('persona-name-input'), { target: { value: 'New Planner' } });
     fireEvent.change(screen.getByTestId('persona-model-input'), { target: { value: 'gpt-4o-mini' } });
     fireEvent.change(screen.getByTestId('persona-prompt-textarea'), { target: { value: 'Plan the next step before acting.' } });
+    fireEvent.change(screen.getByTestId('persona-max-tool-attempts-input'), { target: { value: '60' } });
 
     expect(saveButton).toBeEnabled();
     await user.click(saveButton);
@@ -98,6 +102,7 @@ describe('PersonaPanel', () => {
         name: 'New Planner',
         model: 'gpt-4o-mini',
         systemPrompt: 'Plan the next step before acting.',
+        maxToolAttempts: 60,
         allowedTools: [],
         mcpPolicy: 'allow_all',
         avatarSeed: 'new planner',
@@ -119,9 +124,11 @@ describe('PersonaPanel', () => {
     render(<PersonaPanel />);
 
     await screen.findByDisplayValue('Existing Persona');
+    expect(screen.getByTestId('persona-max-tool-attempts-input')).toHaveValue(60);
     fireEvent.change(screen.getByTestId('persona-name-input'), { target: { value: 'Updated Persona' } });
     fireEvent.change(screen.getByTestId('persona-model-input'), { target: { value: 'gpt-4.1-mini' } });
     fireEvent.change(screen.getByTestId('persona-prompt-textarea'), { target: { value: 'Trimmed prompt.' } });
+    fireEvent.change(screen.getByTestId('persona-max-tool-attempts-input'), { target: { value: '75' } });
 
     await user.click(screen.getByTestId('persona-save-btn'));
 
@@ -130,6 +137,7 @@ describe('PersonaPanel', () => {
         name: 'Updated Persona',
         model: 'gpt-4.1-mini',
         systemPrompt: 'Trimmed prompt.',
+        maxToolAttempts: 75,
         allowedTools: ['vfs_read_file'],
         mcpPolicy: 'allow_all',
         avatarSeed: 'existing persona',

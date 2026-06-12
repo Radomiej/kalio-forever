@@ -1,16 +1,21 @@
 import type { ActiveRuntimeConfig, LLMConfigWithSource } from './llm-panel.types';
 import { ModelSettingsSection } from './ModelSettingsSection';
+import { ProviderStreamsSection } from './ProviderStreamsSection';
 import { ToolTimeoutsSection } from './ToolTimeoutsSection';
 import type { ToolTimeoutKey, ToolTimeoutSettings } from './tool-timeout-settings';
+import { formatLargeTokenCount } from './settings-format';
 
 export function LLMRuntimeSettingsSection({
   activeRuntimeConfig,
   contextWindow,
   maxToolAttempts,
   toolTimeouts,
+  focusModelInputSignal,
   onRuntimeConfigChange,
-  onContextWindowChange,
-  onMaxToolAttemptsChange,
+  onContextWindowInputChange,
+  onContextWindowCommit,
+  onMaxToolAttemptsInputChange,
+  onMaxToolAttemptsCommit,
   onToolTimeoutInputChange,
   onToolTimeoutCommit,
 }: {
@@ -18,9 +23,12 @@ export function LLMRuntimeSettingsSection({
   contextWindow: number;
   maxToolAttempts: number;
   toolTimeouts: ToolTimeoutSettings;
+  focusModelInputSignal: number;
   onRuntimeConfigChange: (updated: LLMConfigWithSource) => void;
-  onContextWindowChange: (size: number) => void;
-  onMaxToolAttemptsChange: (size: number) => void;
+  onContextWindowInputChange: (size: number) => void;
+  onContextWindowCommit: (size: number) => void;
+  onMaxToolAttemptsInputChange: (size: number) => void;
+  onMaxToolAttemptsCommit: (size: number) => void;
   onToolTimeoutInputChange: (key: ToolTimeoutKey, value: number) => void;
   onToolTimeoutCommit: (key: ToolTimeoutKey, value: number) => void;
 }) {
@@ -35,6 +43,7 @@ export function LLMRuntimeSettingsSection({
 
       <ModelSettingsSection
         activeRuntimeConfig={activeRuntimeConfig}
+        focusModelInputSignal={focusModelInputSignal}
         onRuntimeConfigChange={onRuntimeConfigChange}
       />
 
@@ -47,24 +56,34 @@ export function LLMRuntimeSettingsSection({
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-base-content/60">Max tokens</span>
           <span className="badge badge-neutral font-mono text-xs" data-testid="context-window-value">
-            {(contextWindow / 1000).toFixed(0)}k
+            {formatLargeTokenCount(contextWindow)}
           </span>
         </div>
         <input
           type="range"
           className="range range-sm range-primary w-full"
           min={4000}
-          max={200000}
+          max={1_000_000}
           step={4000}
           value={contextWindow}
-          onChange={(event) => void onContextWindowChange(parseInt(event.target.value, 10))}
+          onChange={() => undefined}
+          onInput={(event) => void onContextWindowInputChange(parseInt((event.target as HTMLInputElement).value, 10))}
+          onMouseUp={(event) => void onContextWindowCommit(parseInt((event.target as HTMLInputElement).value, 10))}
+          onTouchEnd={(event) => void onContextWindowCommit(parseInt((event.target as HTMLInputElement).value, 10))}
+          onBlur={(event) => void onContextWindowCommit(parseInt((event.target as HTMLInputElement).value, 10))}
           aria-label="Context window"
           data-testid="context-window-slider"
         />
         <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
-          <span>4k</span><span>32k</span><span>128k</span><span>200k</span>
+          <span>4k</span><span>32k</span><span>128k</span><span>1M</span>
         </div>
       </div>
+
+      <ProviderStreamsSection
+        value={toolTimeouts.providerMaxConcurrentStreams}
+        onInputChange={(value) => onToolTimeoutInputChange('providerMaxConcurrentStreams', value)}
+        onCommit={(value) => onToolTimeoutCommit('providerMaxConcurrentStreams', value)}
+      />
 
       <div className="border-t border-base-300 pt-4">
         <h3 className="text-sm font-semibold mb-1">Agent Loop Limit</h3>
@@ -85,7 +104,11 @@ export function LLMRuntimeSettingsSection({
           max={100}
           step={1}
           value={maxToolAttempts}
-          onChange={(event) => void onMaxToolAttemptsChange(parseInt(event.target.value, 10))}
+          onChange={() => undefined}
+          onInput={(event) => void onMaxToolAttemptsInputChange(parseInt((event.target as HTMLInputElement).value, 10))}
+          onMouseUp={(event) => void onMaxToolAttemptsCommit(parseInt((event.target as HTMLInputElement).value, 10))}
+          onTouchEnd={(event) => void onMaxToolAttemptsCommit(parseInt((event.target as HTMLInputElement).value, 10))}
+          onBlur={(event) => void onMaxToolAttemptsCommit(parseInt((event.target as HTMLInputElement).value, 10))}
           aria-label="Max tool attempts"
           data-testid="max-tool-attempts-slider"
         />

@@ -52,7 +52,7 @@ describe('ProviderSettingsSection', () => {
     expect(screen.getByTestId('provider-row-env')).toHaveTextContent('Environment fallback');
     expect(screen.getByTestId('provider-row-env')).toHaveTextContent('env');
     expect(screen.getByTestId('provider-row-env')).toHaveTextContent('OpenAI');
-    expect(screen.getByTestId('provider-row-env')).toHaveTextContent('Default model: gpt-4o-mini');
+    expect(screen.getByTestId('provider-row-env')).toHaveTextContent(/Default model:\s*gpt-4o-mini/);
     expect(screen.getByText(/Runtime falls back to the backend environment/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('provider-activate-env'));

@@ -30,7 +30,7 @@ import {
   type ToolTimeoutKey,
   type ToolTimeoutSettings,
 } from './tool-timeout-settings';
-export function LLMPanel() {
+export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [contextWindow, setContextWindow] = useState(32000);
@@ -46,10 +46,16 @@ export function LLMPanel() {
   const [testState, setTestState] = useState<ProviderTestState>('idle');
   const [testError, setTestError] = useState<string | null>(null);
   const persistedContextWindow = useRef(32000);
+  const contextWindowSaveInFlight = useRef(false);
   const persistedMaxToolAttempts = useRef(8);
+  const maxToolAttemptsSaveInFlight = useRef(false);
   const persistedToolTimeouts = useRef<ToolTimeoutSettings>({ ...DEFAULT_TOOL_TIMEOUT_SETTINGS });
+  const pendingToolTimeoutCommits = useRef<Partial<Record<ToolTimeoutKey, boolean>>>({});
 
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
+  const requestSettingsTab = useSettingsStore((s) => s.requestSettingsTab);
+  const requestRuntimeModelFocus = useSettingsStore((s) => s.requestRuntimeModelFocus);
+  const runtimeModelFocusRequest = useSettingsStore((s) => s.runtimeModelFocusRequest);
   const normalizedApiKey = normalizeOptionalText(form.apiKey);
   const normalizedBaseUrl = normalizeOptionalText(form.baseUrl);
   const normalizedModel = normalizeOptionalText(form.model);
@@ -111,12 +117,13 @@ export function LLMPanel() {
         apiFetch<ToolTimeoutSettings>('/credentials/settings/tool-timeouts'),
         apiFetch<LLMConfigWithSource>('/llm/config'),
       ]);
+      const normalizedToolTimeouts = { ...DEFAULT_TOOL_TIMEOUT_SETTINGS, ...toolTimeouts };
       setCredentials(creds);
       setActiveId(active.credentialId);
       setContextWindow(cw.size);
       persistedContextWindow.current = cw.size;
-      setToolTimeouts(toolTimeouts);
-      persistedToolTimeouts.current = toolTimeouts;
+      setToolTimeouts(normalizedToolTimeouts);
+      persistedToolTimeouts.current = normalizedToolTimeouts;
       applyRuntimeConfig(llmCfg);
       persistedMaxToolAttempts.current = llmCfg.maxToolAttempts ?? 8;
     } catch (err) {
@@ -212,6 +219,11 @@ export function LLMPanel() {
     setTestError(null);
   }, []);
 
+  const handleEditActiveModel = useCallback(() => {
+    requestSettingsTab('runtime');
+    requestRuntimeModelFocus();
+  }, [requestRuntimeModelFocus, requestSettingsTab]);
+
   const handleActivate = async (credentialId: string) => {
     setSyncing(credentialId);
     try {
@@ -260,26 +272,48 @@ export function LLMPanel() {
     }
   };
 
-  const handleContextWindowChange = async (size: number) => {
+  const handleContextWindowInputChange = (size: number) => {
+    if (!Number.isFinite(size)) return;
+    setContextWindow(Math.max(4000, Math.min(1_000_000, Math.round(size))));
+  };
+
+  const handleContextWindowCommit = async (size: number) => {
+    if (!Number.isFinite(size) || contextWindowSaveInFlight.current) return;
+
+    const normalized = Math.max(4000, Math.min(1_000_000, Math.round(size)));
     const previousValue = persistedContextWindow.current;
-    setContextWindow(size);
+    if (normalized === previousValue) return;
+
+    contextWindowSaveInFlight.current = true;
     try {
       await apiFetch('/credentials/settings/context-window', {
         method: 'PUT',
-        body: JSON.stringify({ size }),
+        body: JSON.stringify({ size: normalized }),
       });
-      persistedContextWindow.current = size;
+      persistedContextWindow.current = normalized;
       await refreshBackendConfig();
     } catch (err) {
       reportUpdateError('Failed to update context window', err);
+      persistedContextWindow.current = previousValue;
       setContextWindow(previousValue);
+    } finally {
+      contextWindowSaveInFlight.current = false;
     }
   };
 
-  const handleMaxToolAttemptsChange = async (size: number) => {
+  const handleMaxToolAttemptsInputChange = (size: number) => {
+    if (!Number.isFinite(size)) return;
+    setMaxToolAttempts(Math.max(1, Math.min(100, Math.round(size))));
+  };
+
+  const handleMaxToolAttemptsCommit = async (size: number) => {
+    if (!Number.isFinite(size) || maxToolAttemptsSaveInFlight.current) return;
+
     const normalized = Math.max(1, Math.min(100, Math.round(size)));
     const previousValue = persistedMaxToolAttempts.current;
-    setMaxToolAttempts(normalized);
+    if (normalized === previousValue) return;
+
+    maxToolAttemptsSaveInFlight.current = true;
     try {
       await apiFetch('/credentials/settings/max-tool-attempts', {
         method: 'PUT',
@@ -289,7 +323,10 @@ export function LLMPanel() {
       await refreshBackendConfig();
     } catch (err) {
       reportUpdateError('Failed to update max tool attempts', err);
+      persistedMaxToolAttempts.current = previousValue;
       setMaxToolAttempts(previousValue);
+    } finally {
+      maxToolAttemptsSaveInFlight.current = false;
     }
   };
 
@@ -301,8 +338,9 @@ export function LLMPanel() {
   const commitToolTimeoutChange = async (key: ToolTimeoutKey, value: number) => {
     const normalized = normalizeToolTimeout(key, value);
     const previousValue = persistedToolTimeouts.current[key];
-    if (normalized === previousValue) return;
+    if (normalized === previousValue || pendingToolTimeoutCommits.current[key]) return;
 
+    pendingToolTimeoutCommits.current[key] = true;
     try {
       await apiFetch('/credentials/settings/tool-timeouts', {
         method: 'PUT',
@@ -312,12 +350,21 @@ export function LLMPanel() {
     } catch (err) {
       reportUpdateError('Failed to update tool timeout', err);
       setToolTimeouts((current) => ({ ...current, [key]: previousValue }));
+    } finally {
+      delete pendingToolTimeoutCommits.current[key];
     }
   };
 
   return (
     <div className="flex flex-col gap-5" data-testid="llm-panel">
-      <LLMPanelHeader />
+      <LLMPanelHeader
+        title={mode === 'runtime' ? 'Runtime Settings' : 'LLM Settings'}
+        description={
+          mode === 'runtime'
+            ? 'Adjust the active provider model and turn-level limits.'
+            : 'Configure model behavior, runtime limits, and provider credentials. Active provider selection is stored in the database, and API keys remain write-only.'
+        }
+      />
       {error && <LLMPanelErrorAlert error={error} onClear={() => setError(null)} />}
 
       <LLMProviderHealthCard
@@ -329,45 +376,51 @@ export function LLMPanel() {
         showWindowsLocalHint={derived.showWindowsLocalHint}
       />
 
-      <ProviderSettingsSection
-        credentials={credentials}
-        activeId={activeId}
-        syncing={syncing}
-        loading={loading}
-        showEnvFallback={runtimeConfig !== null}
-        envFallbackActive={!activeId && runtimeConfig?.source === 'env'}
-        envFallbackProviderId={derived.envFallbackProviderId}
-        envFallbackProviderLabel={derived.envFallbackProviderLabel}
-        envFallbackModel={derived.envFallbackModel}
-        showForm={showForm}
-        form={form}
-        allowsKeylessAuth={allowsKeylessAuth}
-        normalizedApiKey={normalizedApiKey}
-        testState={testState}
-        testError={testError}
-        emptyStateMessage={derived.providerEmptyStateMessage}
-        onActivate={(credentialId) => void handleActivate(credentialId)}
-        onRemove={(credentialId) => void handleRemove(credentialId)}
-        onUseEnvFallback={() => void handleUseEnvFallback()}
-        onShowAdd={() => setShowForm(true)}
-        onCancelAdd={handleCancelAdd}
-        onSubmit={(event) => void handleAdd(event)}
-        onProviderTypeChange={handleProviderChange}
-        onNameChange={(value) => setForm((current) => ({ ...current, name: value, nameEdited: true }))}
-        onApiKeyChange={(value) => setForm((current) => ({ ...current, apiKey: value }))}
-        onBaseUrlChange={(value) => setForm((current) => ({ ...current, baseUrl: value }))}
-        onModelChange={(value) => setForm((current) => ({ ...current, model: value }))}
-        onTest={() => void handleTest()}
-      />
+      {mode === 'full' ? (
+        <ProviderSettingsSection
+          credentials={credentials}
+          activeId={activeId}
+          syncing={syncing}
+          loading={loading}
+          showEnvFallback={runtimeConfig !== null}
+          envFallbackActive={!activeId && runtimeConfig?.source === 'env'}
+          envFallbackProviderId={derived.envFallbackProviderId}
+          envFallbackProviderLabel={derived.envFallbackProviderLabel}
+          envFallbackModel={derived.envFallbackModel}
+          showForm={showForm}
+          form={form}
+          allowsKeylessAuth={allowsKeylessAuth}
+          normalizedApiKey={normalizedApiKey}
+          testState={testState}
+          testError={testError}
+          emptyStateMessage={derived.providerEmptyStateMessage}
+          onActivate={(credentialId) => void handleActivate(credentialId)}
+          onRemove={(credentialId) => void handleRemove(credentialId)}
+          onEdit={() => void handleEditActiveModel()}
+          onUseEnvFallback={() => void handleUseEnvFallback()}
+          onShowAdd={() => setShowForm(true)}
+          onCancelAdd={handleCancelAdd}
+          onSubmit={(event) => void handleAdd(event)}
+          onProviderTypeChange={handleProviderChange}
+          onNameChange={(value) => setForm((current) => ({ ...current, name: value, nameEdited: true }))}
+          onApiKeyChange={(value) => setForm((current) => ({ ...current, apiKey: value }))}
+          onBaseUrlChange={(value) => setForm((current) => ({ ...current, baseUrl: value }))}
+          onModelChange={(value) => setForm((current) => ({ ...current, model: value }))}
+          onTest={() => void handleTest()}
+        />
+      ) : null}
 
       <LLMRuntimeSettingsSection
         activeRuntimeConfig={activeRuntimeConfig}
         contextWindow={contextWindow}
         maxToolAttempts={maxToolAttempts}
         toolTimeouts={toolTimeouts}
+        focusModelInputSignal={runtimeModelFocusRequest}
         onRuntimeConfigChange={handleRuntimeConfigChange}
-        onContextWindowChange={handleContextWindowChange}
-        onMaxToolAttemptsChange={handleMaxToolAttemptsChange}
+        onContextWindowInputChange={handleContextWindowInputChange}
+        onContextWindowCommit={(size) => void handleContextWindowCommit(size)}
+        onMaxToolAttemptsInputChange={handleMaxToolAttemptsInputChange}
+        onMaxToolAttemptsCommit={(size) => void handleMaxToolAttemptsCommit(size)}
         onToolTimeoutInputChange={handleToolTimeoutInputChange}
         onToolTimeoutCommit={(key, value) => void commitToolTimeoutChange(key, value)}
       />

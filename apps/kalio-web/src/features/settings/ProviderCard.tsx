@@ -11,15 +11,17 @@ interface ProviderCardProps {
   isSyncing: boolean;
   onActivate: (id: string) => void;
   onRemove: (id: string) => void;
+  onEdit?: () => void;
 }
 
-export function ProviderCard({ credential, isActive, isSyncing, onActivate, onRemove }: ProviderCardProps) {
+export function ProviderCard({ credential, isActive, isSyncing, onActivate, onRemove, onEdit }: ProviderCardProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testSuccess, setTestSuccess] = useState<boolean | null>(null);
   const [modelCount, setModelCount] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const canEditModel = isActive && typeof onEdit === 'function';
 
   const testConnection = useCallback(async () => {
     setTesting(true);
@@ -107,10 +109,24 @@ export function ProviderCard({ credential, isActive, isSyncing, onActivate, onRe
               <span className="font-medium">Provider:</span>{' '}
               <span className="font-mono">{credential.provider}</span>
             </div>
-            {credential.model && (
-              <div className="text-xs text-base-content/50">
-                <span className="font-medium">Default model:</span>{' '}
-                <span className="font-mono">{credential.model}</span>
+            {(credential.model || canEditModel) && (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-base-content/50">
+                <span className="font-medium">Default model:</span>
+                <span className="font-mono">{credential.model || 'not set'}</span>
+                {canEditModel ? (
+                  <button
+                    type="button"
+                    className="link link-primary link-hover inline-flex min-h-8 items-center px-1.5 text-xs font-medium"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onEdit?.();
+                    }}
+                    aria-label={`Edit model for ${credential.name}`}
+                    data-testid={`provider-edit-${credential.id}`}
+                  >
+                    Edit
+                  </button>
+                ) : null}
               </div>
             )}
             {showBaseUrl && (

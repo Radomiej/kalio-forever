@@ -1,13 +1,16 @@
 import { AlertCircle } from 'lucide-react';
 
-export function LLMPanelHeader() {
+export function LLMPanelHeader({
+  title = 'LLM Settings',
+  description = 'Configure model behavior, runtime limits, and provider credentials. Active provider selection is stored in the database, and API keys remain write-only.',
+}: {
+  title?: string;
+  description?: string;
+}) {
   return (
     <div>
-      <h2 className="text-base font-semibold mb-1">LLM Settings</h2>
-      <p className="text-xs text-base-content/60">
-        Configure model behavior, runtime limits, and provider credentials.
-        Active provider selection is stored in the database, and API keys remain write-only.
-      </p>
+      <h2 className="text-base font-semibold mb-1">{title}</h2>
+      <p className="text-xs text-base-content/60">{description}</p>
     </div>
   );
 }
