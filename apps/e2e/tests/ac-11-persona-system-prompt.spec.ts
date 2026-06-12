@@ -69,7 +69,6 @@ test.describe('AC-11: Persona system prompt & tool access', () => {
   });
 
   test('Persona edit in Mind shows tool toggles and saves tool list', async ({ page, request }) => {
-    // Create a fresh persona so we can safely edit and delete it
     const res = await request.post(`${API_BASE}/personas`, {
       data: { name: 'AC11 Test Persona', systemPrompt: 'Test prompt', model: '', allowedTools: [] },
     });
@@ -82,13 +81,17 @@ test.describe('AC-11: Persona system prompt & tool access', () => {
 
     const row = page.locator('[data-testid="persona-item"]', { hasText: 'AC11 Test Persona' }).first();
     await expect(row).toBeVisible({ timeout: 5000 });
-    await row.locator('button[title="Edit"]').click();
-    await row.getByTestId('persona-tools-toggle').click();
-    await expect(row.getByTestId('tool-toggle-run_raapp')).toBeVisible();
-    await row.getByTestId('tool-toggle-run_raapp').locator('input[type="checkbox"]').check();
-    await row.getByRole('button', { name: 'Save' }).click();
+    await row.click();
+    await expect(page.getByTestId('persona-name-input')).toHaveValue('AC11 Test Persona');
+    await expect(page.getByTestId('persona-tool-picker')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('tool-toggle-run_raapp')).toBeVisible();
+    await page.getByTestId('tool-toggle-run_raapp').locator('input[type="checkbox"]').check();
+    await page.getByTestId('persona-save-btn').click();
 
-    await expect(row).toBeVisible();
+    const saved = await request.get(`${API_BASE}/personas/${persona.id}`);
+    expect(saved.ok()).toBeTruthy();
+    const updated = await saved.json() as { allowedTools: string[] };
+    expect(updated.allowedTools).toContain('run_raapp');
 
     // Cleanup
     await request.delete(`${API_BASE}/personas/${persona.id}`);
