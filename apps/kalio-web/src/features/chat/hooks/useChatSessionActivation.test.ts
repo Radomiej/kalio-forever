@@ -145,6 +145,57 @@ describe('useChatSessionActivation', () => {
     expect(eventBus.identifySession).toHaveBeenCalledWith('cli-child-history-only');
   });
 
+  it('rebuilds a terminal CLI child projection from persisted tool-result status metadata after reload', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [
+        {
+          id: 'assistant-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex' } }],
+          createdAt: 1,
+        },
+        {
+          id: 'tool-1',
+          sessionId: 'session-1',
+          role: 'tool_result',
+          toolCallId: 'call-cli-1',
+          content: JSON.stringify({
+            childSessionId: 'cli-child-1',
+            parentSessionId: 'session-1',
+            agentId: 'codex',
+            workdir: 'C:/repo',
+            status: 'running',
+            toolResultStatus: 'error',
+            lastPrompt: 'Inspect repo',
+            updatedAt: 100,
+            lastOutput: 'Authentication required.',
+          }),
+          createdAt: 2,
+        },
+      ],
+    });
+
+    const handleSendRef = { current: vi.fn() };
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef,
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().cliChildProjections['cli-child-1']).toMatchObject({
+        status: 'failed',
+        lastOutput: 'Authentication required.',
+      });
+    });
+  });
+
   it('backfills promptMessageId for an active recovered turn after history load', async () => {
     vi.mocked(apiClient.get).mockResolvedValue({
       data: [
@@ -193,6 +244,84 @@ describe('useChatSessionActivation', () => {
       activeSessionId: 'session-1',
       clearToolActivities: vi.fn(),
       handleSendRef,
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn,
+    }));
+
+    await waitFor(() => {
+      expect(updateAgentTurn).toHaveBeenCalledWith('turn-live', { promptMessageId: 'user-1' }, 'session-1');
+    });
+  });
+
+  it('prefers persisted turn linkage over latest-user fallback when recovering an active turn', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [
+        {
+          id: 'user-1',
+          sessionId: 'session-1',
+          role: 'user',
+          content: 'Original prompt.',
+          turnId: 'turn-live',
+          promptMessageId: 'user-1',
+          createdAt: 1,
+        },
+        {
+          id: 'user-2',
+          sessionId: 'session-1',
+          role: 'user',
+          content: 'Queued follow-up.',
+          turnId: 'turn-next',
+          promptMessageId: 'user-2',
+          createdAt: 2,
+        },
+        {
+          id: 'assistant-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: 'Answer for the original prompt.',
+          turnId: 'turn-live',
+          promptMessageId: 'user-1',
+          createdAt: 3,
+        },
+      ],
+    });
+    useAgentStore.setState({
+      activeAgentLoops: {
+        'session-1': {
+          sessionId: 'session-1',
+          turnId: 'turn-live',
+          startedAt: 1,
+        },
+      },
+    });
+    useSessionStore.setState({
+      sessionAgentTurns: {
+        'session-1': [{
+          id: 'turn-live',
+          sessionId: 'session-1',
+          items: [],
+          done: false,
+        }],
+      },
+      sessionActiveTurnIds: {
+        'session-1': 'turn-live',
+      },
+      agentTurns: [{
+        id: 'turn-live',
+        sessionId: 'session-1',
+        items: [],
+        done: false,
+      }],
+      activeTurnId: 'turn-live',
+    });
+
+    const updateAgentTurn = vi.fn();
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
       setAgentTurns: vi.fn(),
       setMessages: vi.fn(),
       setPendingConfirmation: vi.fn(),

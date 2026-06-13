@@ -110,6 +110,86 @@ describe('CLIAgentService', () => {
     expect(result.agentId).toBe('copilot');
   });
 
+  it('treats auth-required CLI output as failed even when the process exits 0', async () => {
+    const fakeProc = makeFakeProc();
+    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
+
+    const runPromise = service.run({
+      agentId: 'claude',
+      prompt: 'task',
+      workdir: '/w',
+      callId: 'c',
+      sessionId: 's',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fakeProc.stdout.emit('data', Buffer.from('Authentication required. Please run /login to authenticate Claude Code.\n'));
+    fakeProc.emit('close', 0);
+
+    await expect(runPromise).resolves.toMatchObject({
+      agentId: 'claude',
+      exitCode: 1,
+      rawExitCode: 0,
+      outcome: 'failed',
+      failureCode: 'auth_required',
+      output: expect.stringContaining('Authentication required'),
+    });
+  });
+
+  it('classifies non-zero auth-required CLI output as an auth failure', async () => {
+    const fakeProc = makeFakeProc();
+    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
+
+    const runPromise = service.run({
+      agentId: 'claude',
+      prompt: 'task',
+      workdir: '/w',
+      callId: 'c',
+      sessionId: 's',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fakeProc.stderr.emit('data', Buffer.from('Authentication required. Please run /login to authenticate Claude Code.\n'));
+    fakeProc.emit('close', 1);
+
+    await expect(runPromise).resolves.toMatchObject({
+      agentId: 'claude',
+      exitCode: 1,
+      rawExitCode: 1,
+      outcome: 'failed',
+      failureCode: 'auth_required',
+      output: expect.stringContaining('Authentication required'),
+    });
+  });
+
+  it('does not classify successful output as auth-required just because it mentions login in a summary', async () => {
+    const fakeProc = makeFakeProc();
+    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
+
+    const runPromise = service.run({
+      agentId: 'copilot',
+      prompt: 'task',
+      workdir: '/w',
+      callId: 'c',
+      sessionId: 's',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fakeProc.stdout.emit('data', Buffer.from([
+      'Implemented the fix successfully.',
+      'Added docs that mention `gh auth login` for local setup.',
+      'All checks passed.',
+    ].join('\n')));
+    fakeProc.emit('close', 0);
+
+    await expect(runPromise).resolves.toMatchObject({
+      agentId: 'copilot',
+      exitCode: 0,
+      rawExitCode: 0,
+      outcome: 'completed',
+    });
+  });
+
   it('removes stdout/stderr data listeners on timeout', async () => {
     vi.useFakeTimers();
     const fakeProc = makeFakeProc();

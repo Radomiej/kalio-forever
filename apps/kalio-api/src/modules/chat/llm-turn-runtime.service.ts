@@ -7,7 +7,7 @@ import { SessionManagerService } from './session-manager.service';
 import { AuditService } from './audit.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
-import type { SocketEvents } from '@kalio/types';
+import type { SocketEvents, ToolResult } from '@kalio/types';
 import type { EmitFn, StreamContext } from './interfaces/stream-context.interface';
 import { toAuditToolCallData, toAuditToolResultData } from './audit-tool-data';
 import {
@@ -17,6 +17,14 @@ import {
   type LLMAgentLoopResult,
   type LLMUsage,
 } from './llm-turn-runtime.types';
+
+const CLI_CHILD_TOOL_NAMES = new Set([
+  'run_cli_agent',
+  'spawn_cli_agent',
+  'message_cli_agent',
+  'get_cli_agent_status',
+  'stop_cli_agent',
+]);
 
 @Injectable()
 export class LLMTurnRuntimeService {
@@ -64,6 +72,8 @@ export class LLMTurnRuntimeService {
       const state = new TurnState();
       const ctx: StreamContext = {
         sessionId: request.sessionId,
+        turnId: request.turnId,
+        promptMessageId: request.promptMessageId,
         vfsSessionId: request.vfsSessionId,
         messageId,
         abortSignal: request.abortSignal,
@@ -181,16 +191,11 @@ export class LLMTurnRuntimeService {
               request.callbacks?.onEscalation?.(message);
             }
           }
-          const content = result.status === 'success'
-            ? JSON.stringify(result.data ?? '')
-            : JSON.stringify({
-                status: result.status,
-                errorCode: result.errorCode,
-                errorMessage: result.errorMessage ?? (
-                  result.status === 'cancelled' ? `Tool ${toolCall.name} was cancelled or not approved.` : ''
-                ),
-              });
-          await this.sessionManager.saveToolResult(request.sessionId, toolCall.id, content);
+          const content = serializeToolResultContent(toolCall.name, result);
+          await this.sessionManager.saveToolResult(request.sessionId, toolCall.id, content, {
+            turnId: request.turnId,
+            promptMessageId: request.promptMessageId,
+          });
         }
       }
 
@@ -363,4 +368,32 @@ export class LLMTurnRuntimeService {
     if (!auditResponseId || !this.audit?.update) return;
     await this.audit.update(auditResponseId, patch);
   }
+}
+
+function serializeToolResultContent(toolName: string, result: ToolResult): string {
+  const fallbackErrorMessage = result.errorMessage ?? (
+    result.status === 'cancelled' ? `Tool ${toolName} was cancelled or not approved.` : ''
+  );
+
+  if (
+    CLI_CHILD_TOOL_NAMES.has(toolName)
+    && result.data
+    && typeof result.data === 'object'
+    && !Array.isArray(result.data)
+  ) {
+    return JSON.stringify({
+      ...(result.data as Record<string, unknown>),
+      toolResultStatus: result.status,
+      ...(result.errorCode ? { toolResultErrorCode: result.errorCode } : {}),
+      ...(fallbackErrorMessage ? { toolResultErrorMessage: fallbackErrorMessage } : {}),
+    });
+  }
+
+  return result.status === 'success'
+    ? JSON.stringify(result.data ?? '')
+    : JSON.stringify({
+        status: result.status,
+        errorCode: result.errorCode,
+        errorMessage: fallbackErrorMessage,
+      });
 }

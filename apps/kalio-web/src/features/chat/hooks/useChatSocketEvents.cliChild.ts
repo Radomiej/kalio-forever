@@ -9,6 +9,8 @@ import {
 } from '../cliChildProjection.model';
 import { buildCallIdToNameFromMessages } from '../chatUtils';
 
+export { isCliChildToolName } from '../cliChildProjection.model';
+
 export interface CliChildSocketDeps {
   upsertCLIChildProjection: (projection: CLIChildProjection) => void;
   updateCLIChildProjection: (childSessionId: string, patch: Partial<CLIChildProjection>) => void;
@@ -49,7 +51,7 @@ export function handleCliChildToolResult(
   const toolName = resolveCliToolName(result, callIdToName, toolActivities);
 
   if (toolName && result.data !== undefined) {
-    const projection = projectionFromToolResult(toolName, result.callId, resultSessionId, result.data);
+    const projection = projectionFromToolResult(toolName, result.callId, resultSessionId, result.data, result.status);
     if (projection) {
       deps.upsertCLIChildProjection(projection);
     }

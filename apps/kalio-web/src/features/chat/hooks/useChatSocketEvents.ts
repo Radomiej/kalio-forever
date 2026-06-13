@@ -19,6 +19,7 @@ import {
   handleCliChildProgress,
   handleCliChildSessionCreated,
   handleCliChildToolResult,
+  isCliChildToolName,
   resolveCliToolName,
 } from './useChatSocketEvents.cliChild';
 import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
@@ -353,12 +354,20 @@ export function useChatSocketEvents({
       if (result.status === 'success') {
         if (shouldRefreshVfsForToolResult(toolName, result.data)) setVfsRefreshSignal((value) => value + 1);
       }
-      if (result.status === 'success' && result.data !== undefined && resultSessionId) {
+      if (result.data !== undefined && resultSessionId && toolName && (result.status === 'success' || isCliChildToolName(toolName))) {
+        const content = toolName && isCliChildToolName(toolName) && result.data && typeof result.data === 'object' && !Array.isArray(result.data)
+          ? JSON.stringify({
+              ...(result.data as Record<string, unknown>),
+              toolResultStatus: result.status,
+              ...(result.errorCode ? { toolResultErrorCode: result.errorCode } : {}),
+              ...(result.errorMessage ? { toolResultErrorMessage: result.errorMessage } : {}),
+            })
+          : JSON.stringify(result.data);
         const toolResultMsg: ChatMessage = {
           id: nanoid(),
           sessionId: resultSessionId,
           role: 'tool_result',
-          content: JSON.stringify(result.data),
+          content,
           toolCallId: result.callId,
           createdAt: Date.now(),
         };

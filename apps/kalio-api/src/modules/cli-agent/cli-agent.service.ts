@@ -3,7 +3,7 @@ import { spawn, execFile } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CLIAgentAdapterInfo, CLIAgentResult } from '@kalio/types';
+import type { CLIAgentAdapterInfo } from '@kalio/types';
 import { CopilotAdapter } from './adapters/copilot.adapter';
 import { GeminiAdapter } from './adapters/gemini.adapter';
 import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
@@ -21,19 +21,18 @@ import {
 } from './cli-agent-utils';
 import type { CLIAgentRunLimits, RunCliAgentRequest } from './cli-agent.types';
 import { CLIAgentPtyService } from './cli-agent-pty.service';
-
+import { applySemanticCliOutcome, type CLIAgentRunResult } from './cli-agent-outcome';
 export type { ProgressEmitFn } from './cli-agent.types';
+export { applySemanticCliOutcome, type CLIAgentRunResult, type CLIAgentSemanticFailureCode } from './cli-agent-outcome';
 
 export const CLI_AGENT_STOPPED_ERROR = 'CLI_AGENT_STOPPED';
 const WINDOWS_TEMP_PROMPT_THRESHOLD = 7_000;
-
 interface ActiveRunState {
   sessionId: string;
   agentId: string;
   proc: KillableProcess;
   stopRequested: boolean;
-  requestStop?: () => void;
-  terminatePromise?: Promise<void>;
+  requestStop?: () => void; terminatePromise?: Promise<void>;
 }
 
 @Injectable()
@@ -135,7 +134,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
    * Execute a CLI agent headlessly.
    * @param request  See {@link RunCliAgentRequest} for field docs.
    */
-  async run(request: RunCliAgentRequest): Promise<CLIAgentResult> {
+  async run(request: RunCliAgentRequest): Promise<CLIAgentRunResult> {
     const { agentId, prompt, workdir, callId, sessionId, emitFn } = request;
     const adapter = this.adapters.get(agentId);
     if (!adapter) {
@@ -186,7 +185,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
     const startedAt = Date.now();
 
     try {
-      return await new Promise<CLIAgentResult>((resolve, reject) => {
+      return await new Promise<CLIAgentRunResult>((resolve, reject) => {
       const proc = spawn(executable, allArgs, {
         cwd: workdir,
         // pipe stdin so the process doesn't hang waiting for input
@@ -297,12 +296,20 @@ export class CLIAgentService implements OnApplicationBootstrap {
         }
 
         const durationMs = Date.now() - startedAt;
-        const exitCode = code ?? 1;
+        const rawExitCode = code ?? 1;
         const output = compressOutput(rawOutput.trim(), agentConfig.maxOutputChars);
+        const normalizedResult = applySemanticCliOutcome({
+          output,
+          exitCode: rawExitCode,
+          durationMs,
+          agentId,
+        });
 
-        this.logger.log(`[${agentId}] Done in ${durationMs}ms, exitCode=${exitCode}, outputLen=${output.length}`);
+        this.logger.log(
+          `[${agentId}] Done in ${durationMs}ms, exitCode=${normalizedResult.exitCode}, rawExitCode=${normalizedResult.rawExitCode}, outputLen=${output.length}`,
+        );
 
-        resolve({ output, exitCode, durationMs, agentId });
+        resolve(normalizedResult);
       };
 
       proc.stdout.on('data', onData);
@@ -438,7 +445,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
     allArgs: string[];
     limits: CLIAgentRunLimits;
     maxOutputChars: number;
-  }): Promise<CLIAgentResult> {
+  }): Promise<CLIAgentRunResult> {
     const { request, executable, allArgs, limits, maxOutputChars } = params;
     let activeRunState: ActiveRunState | null = null;
     let stopReject: ((reason?: unknown) => void) | null = null;
@@ -500,7 +507,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
         throw new Error(CLI_AGENT_STOPPED_ERROR);
       }
 
-      return codexAgentMessage ? { ...result, output: codexAgentMessage } : result;
+      return applySemanticCliOutcome(codexAgentMessage ? { ...result, output: codexAgentMessage } : result);
     } finally {
       request.abortSignal?.removeEventListener('abort', abortHandler);
       if (activeRunState && this.activeRuns.get(request.sessionId) === activeRunState) {

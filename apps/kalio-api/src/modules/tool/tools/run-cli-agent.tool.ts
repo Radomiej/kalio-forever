@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { ToolCallRequest, CLIAgentResult } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
-import { CLIAgentService } from '../../cli-agent/cli-agent.service';
+import { CLIAgentService, type CLIAgentRunResult } from '../../cli-agent/cli-agent.service';
 import { CLIAgentSessionService } from '../../cli-agent/cli-agent-session.service';
 import {
   appendAcceptanceInstructions,
@@ -215,7 +215,7 @@ export class RunCliAgentTool {
       ...(acceptanceHints ? { acceptanceHints } : {}),
     });
 
-    let result: CLIAgentResult;
+    let result: CLIAgentRunResult;
     try {
       result = await this.cliAgent.run({
         agentId,
@@ -249,10 +249,29 @@ export class RunCliAgentTool {
     }
 
     const worktreeStatus = await getWorktreeStatusSummary(workdir, acceptanceHints);
-    const persistedResult: CLIAgentResult = {
-      ...result,
+    const completed = result.outcome === 'completed' && result.exitCode === 0;
+    const persistedExitCode = completed ? result.exitCode : 1;
+    const persistedResult: CLIAgentResult & {
+      rawExitCode?: number;
+      failureCode?: string;
+      toolResultStatus?: 'success' | 'error';
+      toolResultErrorCode?: string;
+      toolResultErrorMessage?: string;
+    } = {
       output: appendWorktreeStatus(result.output, worktreeStatus),
+      exitCode: persistedExitCode,
+      durationMs: result.durationMs,
+      agentId: result.agentId,
       childSessionId: childSession.id,
+      rawExitCode: result.rawExitCode,
+      ...(result.failureCode ? { failureCode: result.failureCode } : {}),
+      toolResultStatus: completed ? 'success' : 'error',
+      ...(result.failureCode === 'auth_required'
+        ? {
+            toolResultErrorCode: 'CLI_AGENT_AUTH_REQUIRED',
+            toolResultErrorMessage: appendWorktreeStatus(result.output, worktreeStatus),
+          }
+        : {}),
     };
 
     await this.cliAgentSessions.saveToolResult(
@@ -267,12 +286,15 @@ export class RunCliAgentTool {
         : `CLI agent completed with exit code ${persistedResult.exitCode}.`,
     );
 
-    if (persistedResult.exitCode !== 0) {
+    if (!completed) {
       const outputPreview = persistedResult.output.trim();
-      throw new Error(
-        `CLI_AGENT_FAILED: ${agentId} exited with code ${persistedResult.exitCode}` +
+      const errorCode = result.failureCode === 'auth_required' ? 'CLI_AGENT_AUTH_REQUIRED' : 'CLI_AGENT_FAILED';
+      const error = new Error(
+        `${errorCode}: ${agentId} exited with code ${persistedResult.exitCode}` +
           (outputPreview.length > 0 ? `: ${outputPreview}` : '.'),
       );
+      (error as Error & { code?: string }).code = errorCode;
+      throw error;
     }
 
     return persistedResult;

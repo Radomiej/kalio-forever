@@ -1,6 +1,8 @@
 import type { ChatMessage, ChatSession, CLIAgentSessionSnapshot, Persona, SubagentCopiedFile, SubagentToolResult } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
+import { extractCLIAgentResult, extractPersistedToolResultMeta } from '../ToolCallBubble.parsers';
+import { isCliChildToolName, resolveCLIChildProjectionStatus, shouldRenderLiveCliChildStatus } from '../cliChildProjection.model';
 export { extractSubAgentFlowResult } from '../subAgentFlowResult.parser';
 
 export const NODE_WIDTH = 220;
@@ -174,7 +176,46 @@ export function extractArtifactFromData(callId: string, data: unknown): Executio
   return null;
 }
 
-export function statusFromActivity(activity: ToolActivity | null, hasResult: boolean): ExecutionGraphNodeStatus {
+function statusFromCliChild(
+  activity: ToolActivity | null,
+  resultData: unknown,
+  toolName: string | undefined,
+): ExecutionGraphNodeStatus | null {
+  if (!toolName || !isCliChildToolName(toolName)) {
+    return null;
+  }
+
+  const cliSnapshot = extractCLIAgentSessionResult(resultData);
+  const cliResult = extractCLIAgentResult(resultData);
+  const cliStatus = resolveCLIChildProjectionStatus({
+    snapshotStatus: cliSnapshot?.status,
+    activityStatus: activity?.status,
+    resultStatus: extractPersistedToolResultMeta(resultData)?.status,
+    cliResult,
+  });
+
+  if (shouldRenderLiveCliChildStatus(cliStatus)) {
+    return 'running';
+  }
+  if (cliStatus === 'completed') {
+    return 'success';
+  }
+  if (cliStatus === 'failed' || cliStatus === 'stopped') {
+    return 'error';
+  }
+  return 'idle';
+}
+
+export function statusFromActivity(
+  activity: ToolActivity | null,
+  hasResult: boolean,
+  resultData?: unknown,
+  toolName?: string,
+): ExecutionGraphNodeStatus {
+  const cliStatus = resultData !== undefined ? statusFromCliChild(activity, resultData, toolName) : null;
+  if (cliStatus) {
+    return cliStatus;
+  }
   if (activity?.status === 'error' || activity?.status === 'cancelled' || activity?.status === 'expired') {
     return 'error';
   }
@@ -218,12 +259,43 @@ export function buildToolSnapshots(messages: ChatMessage[], toolActivities: Tool
   messages.forEach((message) => {
     if (message.role !== 'tool_result' || !message.toolCallId) return;
     const existing = snapshots.get(message.toolCallId);
+    const result = safeParse(message.content);
+    const cliAgentResult = extractCLIAgentSessionResult(result);
+    const normalizedActivity = cliAgentResult
+      ? existing?.activity
+        ? {
+            ...existing.activity,
+            status: cliAgentResult.status === 'running'
+              ? 'running'
+              : cliAgentResult.status === 'failed'
+                ? 'error'
+                : cliAgentResult.status === 'stopped'
+                  ? 'cancelled'
+                  : cliAgentResult.status === 'completed'
+                    ? 'success'
+                    : existing.activity.status,
+          }
+        : cliAgentResult.status === 'running' || cliAgentResult.status === 'failed' || cliAgentResult.status === 'stopped'
+          ? {
+              callId: message.toolCallId,
+              toolName: existing?.toolName ?? 'tool',
+              args: existing?.args ?? {},
+              sessionId: message.sessionId,
+              status: cliAgentResult.status === 'running'
+                ? 'running' as const
+                : cliAgentResult.status === 'failed'
+                  ? 'error' as const
+                  : 'cancelled' as const,
+              startedAt: cliAgentResult.startedAt ?? message.createdAt,
+            }
+          : null
+      : existing?.activity ?? null;
     snapshots.set(message.toolCallId, {
       callId: message.toolCallId,
       toolName: existing?.toolName ?? 'tool',
       args: existing?.args ?? {},
-      activity: existing?.activity ?? null,
-      result: safeParse(message.content),
+      activity: normalizedActivity,
+      result,
     });
   });
 
@@ -250,7 +322,12 @@ export function getTurnStatus(turn: AgentTurn, toolSnapshots: Map<string, ToolSn
     .filter((item): item is Extract<AgentTurn['items'][number], { kind: 'tool' }> => item.kind === 'tool')
     .map((item) => {
       const snapshot = toolSnapshots.get(item.callId);
-      return statusFromActivity(snapshot?.activity ?? null, snapshot?.result != null);
+      return statusFromActivity(
+        snapshot?.activity ?? null,
+        snapshot?.result != null,
+        snapshot?.result,
+        snapshot?.toolName,
+      );
     });
 
   if (toolStatuses.includes('error')) return 'error';

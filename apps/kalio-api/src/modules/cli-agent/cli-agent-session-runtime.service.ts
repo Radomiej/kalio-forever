@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { CLIAgentResult, CLIAgentSessionSnapshot, ChatMessage, ToolCallRequest, ToolResult } from '@kalio/types';
 import { nanoid } from 'nanoid';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
-import { CLIAgentService, CLI_AGENT_STOPPED_ERROR } from './cli-agent.service';
+import { CLIAgentService, CLI_AGENT_STOPPED_ERROR, type CLIAgentRunResult } from './cli-agent.service';
 import { CLIAgentConfigService } from './cli-agent-config.service';
 import { CLIAgentSessionService } from './cli-agent-session.service';
 import {
@@ -345,13 +345,38 @@ export class CLIAgentSessionRuntimeService {
     callId: string,
     turnId: string,
     emit: ToolCallRequest['_emit'] | undefined,
-    result: CLIAgentResult,
+    result: CLIAgentRunResult,
     acceptanceHints: CLIAgentAcceptanceHints | undefined,
   ): Promise<CLIAgentSessionSnapshot> {
     const current = this.runtimeEntries.get(childSessionId)?.snapshot;
     const worktreeStatus = await getWorktreeStatusSummary(current?.workdir ?? '', acceptanceHints);
     const outputWithStatus = appendWorktreeStatus(result.output, worktreeStatus);
-    const accepted = result.exitCode === 0 && !hasMissingAcceptanceEvidence(worktreeStatus);
+    const accepted = result.outcome === 'completed'
+      && result.exitCode === 0
+      && !hasMissingAcceptanceEvidence(worktreeStatus);
+    const persistedExitCode = accepted ? result.exitCode : 1;
+    const persistedResult: CLIAgentResult & {
+      rawExitCode?: number;
+      failureCode?: string;
+      toolResultStatus?: 'success' | 'error';
+      toolResultErrorCode?: string;
+      toolResultErrorMessage?: string;
+    } = {
+      output: outputWithStatus,
+      exitCode: persistedExitCode,
+      durationMs: result.durationMs,
+      agentId: result.agentId,
+      childSessionId,
+      rawExitCode: result.rawExitCode,
+      ...(result.failureCode ? { failureCode: result.failureCode } : {}),
+      toolResultStatus: accepted ? 'success' : 'error',
+      ...(result.failureCode === 'auth_required'
+        ? {
+            toolResultErrorCode: 'CLI_AGENT_AUTH_REQUIRED',
+            toolResultErrorMessage: outputWithStatus,
+          }
+        : {}),
+    };
     const completedSnapshot: CLIAgentSessionSnapshot = {
       childSessionId,
       parentSessionId: current?.parentSessionId ?? '',
@@ -363,7 +388,7 @@ export class CLIAgentSessionRuntimeService {
       startedAt: current?.startedAt,
       completedAt: Date.now(),
       lastOutput: outputWithStatus,
-      lastExitCode: accepted ? result.exitCode : 1,
+      lastExitCode: persistedExitCode,
       recoveryAttempts: current?.recoveryAttempts,
     };
 
@@ -372,30 +397,37 @@ export class CLIAgentSessionRuntimeService {
       callId,
       JSON.stringify({
         ...completedSnapshot,
-        output: outputWithStatus,
-        exitCode: accepted ? result.exitCode : 1,
-        durationMs: result.durationMs,
+        ...persistedResult,
       }),
     );
     await this.sessions.persistAssistantMessage(
       childSessionId,
       outputWithStatus.trim().length > 0
         ? outputWithStatus
-        : `CLI agent completed with exit code ${result.exitCode}.`,
+        : `CLI agent completed with exit code ${persistedExitCode}.`,
     );
 
-    const toolResult: ToolResult = {
-      callId,
-      toolName: 'run_cli_agent',
-      sessionId: childSessionId,
-      status: accepted ? 'success' : 'error',
-      data: {
-        ...result,
-        output: outputWithStatus,
-        exitCode: accepted ? result.exitCode : 1,
-        childSessionId,
-      },
-    };
+    const toolResult: ToolResult = accepted
+      ? {
+          callId,
+          toolName: 'run_cli_agent',
+          sessionId: childSessionId,
+          status: 'success',
+          data: persistedResult,
+        }
+      : {
+          callId,
+          toolName: 'run_cli_agent',
+          sessionId: childSessionId,
+          status: 'error',
+          ...(result.failureCode === 'auth_required'
+            ? {
+                errorCode: 'CLI_AGENT_AUTH_REQUIRED',
+                errorMessage: outputWithStatus,
+              }
+            : {}),
+          data: persistedResult,
+        };
 
     this.emitTerminalEvents(emit, childSessionId, turnId, toolResult);
     this.setSettledRuntimeEntry(childSessionId, completedSnapshot, callId, turnId, emit, true);
@@ -436,7 +468,12 @@ export class CLIAgentSessionRuntimeService {
     await this.sessions.saveToolResult(
       childSessionId,
       callId,
-      JSON.stringify(nextSnapshot),
+      JSON.stringify({
+        ...nextSnapshot,
+        toolResultStatus: 'error',
+        toolResultErrorCode: 'CLI_AGENT_ERROR',
+        toolResultErrorMessage: error.message,
+      }),
     );
     await this.sessions.persistAssistantMessage(childSessionId, nextSnapshot.lastOutput ?? '');
 
@@ -483,7 +520,10 @@ export class CLIAgentSessionRuntimeService {
     await this.sessions.saveToolResult(
       childSessionId,
       callId,
-      JSON.stringify(nextSnapshot),
+      JSON.stringify({
+        ...nextSnapshot,
+        toolResultStatus: 'cancelled',
+      }),
     );
     await this.sessions.persistAssistantMessage(childSessionId, nextSnapshot.lastOutput ?? '');
 
