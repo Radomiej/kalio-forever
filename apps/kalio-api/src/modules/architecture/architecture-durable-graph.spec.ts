@@ -244,6 +244,57 @@ describe('reconstructDurableArchitectureGraph', () => {
 
     await expect(reconstructDurableArchitectureGraph(runId, sessions, registry)).resolves.toBeNull();
   });
+
+  it('recovers the schema from persisted subagent tool-call args when the parent prompt no longer carries an architecture header', async () => {
+    const runId = 'schema-name-fallback-run';
+    const registry = new ArchitectureRegistryService();
+    const sessions = createPersistedSessions({
+      [`arch-${runId}-root`]: [
+        {
+          id: `architecture:${runId}:user`,
+          sessionId: `arch-${runId}-root`,
+          role: 'user',
+          content: 'Deliver the proof run.',
+          createdAt: 100,
+        },
+        {
+          id: `architecture:${runId}:tool-calls`,
+          sessionId: `arch-${runId}-root`,
+          role: 'assistant',
+          content: '',
+          toolCalls: [{
+            id: `architecture:${runId}:tool-call:1`,
+            name: 'run_subagent',
+            args: {
+              architectureRunId: runId,
+              schemaName: 'Goal Master Delivery Loop',
+              nodeId: 'implementer',
+              roleSlotId: 'implementer',
+              childSessionId: `arch-${runId}-implementer`,
+            },
+          }],
+          createdAt: 101,
+        },
+        {
+          id: `architecture:${runId}:finalizer`,
+          sessionId: `arch-${runId}-root`,
+          role: 'assistant',
+          content: '### Finalizer\nVerified completion report.',
+          createdAt: 102,
+        },
+      ],
+    });
+
+    const graph = await reconstructDurableArchitectureGraph(runId, sessions, registry);
+
+    expect(graph).toMatchObject({
+      runId,
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ id: 'implementer' }),
+        expect.objectContaining({ id: 'final-artifact' }),
+      ]),
+    });
+  });
 });
 
 function createPersistedSessions(messagesBySession: Record<string, ChatMessage[]>): SessionsService {

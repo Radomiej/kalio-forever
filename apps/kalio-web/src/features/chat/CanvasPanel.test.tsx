@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CanvasPanel } from './CanvasPanel';
 import type { ChatMessage, ChatSession, ToolResult } from '@kalio/types';
+import type { CLIChildProjection } from './cliChildProjection.model';
 
 interface MockAgentState {
   toolActivities: Array<{
@@ -35,6 +36,7 @@ interface MockAgentState {
     };
   }>;
   cliAgentOutput: Record<string, string>;
+  cliChildProjections: Record<string, CLIChildProjection>;
 }
 
 interface MockSessionState {
@@ -100,6 +102,7 @@ const agentState: MockAgentState = {
     },
   },
   cliAgentOutput: {},
+  cliChildProjections: {},
 };
 
 const sessionState: MockSessionState = {
@@ -877,5 +880,45 @@ describe('CanvasPanel subagent grouping', () => {
       await Promise.resolve();
     });
     expect(mockApiGet).not.toHaveBeenCalled();
+  });
+});
+
+describe('CanvasPanel CLI children section', () => {
+  beforeEach(() => {
+    agentState.cliChildProjections = {
+      'cli-child-1': {
+        childSessionId: 'cli-child-1',
+        parentSessionId: 'session-1',
+        parentCallId: 'call-cli-1',
+        agentId: 'codex',
+        status: 'stopped',
+        lastOutput: 'done',
+        toolName: 'spawn_cli_agent',
+        childTitle: 'codex CLI',
+      },
+    };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'cli-child-1',
+        personaId: 'default',
+        title: 'codex CLI',
+        kind: 'cli-agent',
+        parentSessionId: 'session-1',
+        parentToolCallId: 'call-cli-1',
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ];
+    agentState.canvasOpen = true;
+  });
+
+  it('renders CLI child cards from projections in the canvas section', () => {
+    render(<CanvasPanel />);
+
+    expect(screen.getByTestId('canvas-cli-children-section')).toBeInTheDocument();
+    expect(screen.getByTestId('cli-child-card-cli-child-1')).toBeInTheDocument();
+    expect(screen.getByTestId('cli-child-status-cli-child-1')).toHaveTextContent('stopped');
+    expect(screen.getByTestId('cli-child-output-cli-child-1')).toHaveTextContent('done');
   });
 });

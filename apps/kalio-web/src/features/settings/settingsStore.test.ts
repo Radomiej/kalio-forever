@@ -5,6 +5,10 @@ describe('settingsStore', () => {
   beforeEach(() => {
     useSettingsStore.setState({
       backendConfig: null,
+      conversationTitleSettings: {
+        autoRenameEnabled: false,
+        renameEveryReplies: 3,
+      },
     });
   });
 
@@ -13,6 +17,10 @@ describe('settingsStore', () => {
 
     expect(state.getEffectiveModel()).toBe('');
     expect(state.getEffectiveContextWindow()).toBe(32000);
+    expect(state.conversationTitleSettings).toEqual({
+      autoRenameEnabled: false,
+      renameEveryReplies: 3,
+    });
   });
 
   it('stores backend config and derives effective values from it', () => {
@@ -34,5 +42,17 @@ describe('settingsStore', () => {
     });
     expect(state.getEffectiveModel()).toBe('gpt-4.1');
     expect(state.getEffectiveContextWindow()).toBe(128000);
+  });
+
+  it('stores conversation title settings for cross-panel sync', () => {
+    useSettingsStore.getState().setConversationTitleSettings({
+      autoRenameEnabled: true,
+      renameEveryReplies: 5,
+    });
+
+    expect(useSettingsStore.getState().conversationTitleSettings).toEqual({
+      autoRenameEnabled: true,
+      renameEveryReplies: 5,
+    });
   });
 });

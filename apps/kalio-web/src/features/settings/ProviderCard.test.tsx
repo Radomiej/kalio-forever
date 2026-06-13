@@ -29,6 +29,7 @@ describe('ProviderCard', () => {
 
   it('renders provider details and calls onActivate from the header control', () => {
     const onActivate = vi.fn();
+    const onEdit = vi.fn();
 
     render(
       <ProviderCard
@@ -37,14 +38,19 @@ describe('ProviderCard', () => {
         isSyncing={false}
         onActivate={onActivate}
         onRemove={() => undefined}
+        onEdit={onEdit}
       />,
     );
 
     expect(screen.getByText('active')).toBeInTheDocument();
     expect(screen.getByText('http://localhost:11434')).toBeInTheDocument();
+    expect(screen.getByTestId('provider-edit-cred-1')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('provider-activate-cred-1'));
     expect(onActivate).toHaveBeenCalledWith('cred-1');
+
+    fireEvent.click(screen.getByTestId('provider-edit-cred-1'));
+    expect(onEdit).toHaveBeenCalledTimes(1);
   });
 
   it('shows success details when connection test succeeds', async () => {
@@ -132,5 +138,20 @@ describe('ProviderCard', () => {
     fireEvent.click(screen.getByText('Yes'));
 
     await waitFor(() => expect(onRemove).toHaveBeenCalledWith('cred-1'));
+  });
+
+  it('does not expose edit on inactive providers', () => {
+    render(
+      <ProviderCard
+        credential={makeCredential()}
+        isActive={false}
+        isSyncing={false}
+        onActivate={() => undefined}
+        onRemove={() => undefined}
+        onEdit={() => undefined}
+      />,
+    );
+
+    expect(screen.queryByTestId('provider-edit-cred-1')).not.toBeInTheDocument();
   });
 });

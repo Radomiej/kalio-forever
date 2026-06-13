@@ -1,7 +1,7 @@
-import type { CSSProperties, MouseEvent, PointerEvent } from 'react';
+import type { MouseEvent, PointerEvent } from 'react';
 import { Box, Bot, GitBranch, Route } from 'lucide-react';
 import type { ArchitectNode, ArchitectSlot } from './architect.types';
-import { getNodeDimensions } from './ArchitectGraphGeometry';
+import { getNodeDimensions, pinHitboxSize } from './ArchitectGraphGeometry';
 
 interface ArchitectGraphNodeCardProps {
   node: ArchitectNode;
@@ -88,7 +88,7 @@ export function ArchitectGraphNodeCard({
     : 'border-emerald-100/75 shadow-[0_0_12px_rgba(16,185,129,0.38)]';
   const outputPinDotClass = node.kind === 'router' ? 'bg-amber-200' : 'bg-emerald-200';
   const dimensions = getNodeDimensions(node);
-  const connectorHitboxSize = Math.max(48, Math.round(56 / Math.max(zoom, 0.2)));
+  const connectorHitboxSize = pinHitboxSize(zoom);
   const handleCardPointerDown = (event: PointerEvent<HTMLElement>) => {
     if (event.altKey) {
       return;
@@ -124,13 +124,12 @@ export function ArchitectGraphNodeCard({
         top: node.y,
         width: dimensions.width,
         minHeight: dimensions.height,
-        '--architect-node-pin-y': `${dimensions.pinY}px`,
-      } as CSSProperties}
+      }}
       data-testid={`architect-node-card-${node.id}`}
     >
       <button
         type="button"
-        className={`group absolute left-0 top-[var(--architect-node-pin-y)] z-10 flex h-14 w-14 -translate-x-[70%] -translate-y-1/2 items-center justify-center rounded-full bg-transparent transition-transform hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300 ${connectionDropTarget ? 'scale-110 ring-2 ring-sky-200/80 ring-offset-2 ring-offset-[#07111d]' : ''}`}
+        className={`group absolute left-0 top-1/2 z-10 flex h-14 w-14 -translate-x-[70%] -translate-y-1/2 items-center justify-center rounded-full bg-transparent transition-transform hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300 ${connectionDropTarget ? 'scale-110 ring-2 ring-sky-200/80 ring-offset-2 ring-offset-[#07111d]' : ''}`}
         style={{ height: connectorHitboxSize, width: connectorHitboxSize }}
         data-testid={node.kind === 'router' ? `architect-router-input-pin-${node.id}` : `architect-node-input-pin-${node.id}`}
         title={`${node.label} input`}
@@ -151,7 +150,7 @@ export function ArchitectGraphNodeCard({
       </button>
       <button
         type="button"
-        className="group absolute right-0 top-[var(--architect-node-pin-y)] z-10 flex h-14 w-14 translate-x-[70%] -translate-y-1/2 items-center justify-center rounded-full bg-transparent transition-transform hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
+        className="group absolute right-0 top-1/2 z-10 flex h-14 w-14 translate-x-[70%] -translate-y-1/2 items-center justify-center rounded-full bg-transparent transition-transform hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
         style={{ height: connectorHitboxSize, width: connectorHitboxSize }}
         data-testid={node.kind === 'router' ? `architect-router-output-pin-${node.id}` : `architect-node-output-pin-${node.id}`}
         title={`${node.label} output`}

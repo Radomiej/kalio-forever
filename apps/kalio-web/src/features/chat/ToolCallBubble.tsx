@@ -36,6 +36,9 @@ import {
 import { Chip, ConfirmationInlineBubble, formatArgValue } from './ToolCallBubble.Chrome';
 import { SubagentResultBlock, CLIAgentSessionStatusBlock, SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
 import { getToolTargetLabel } from './toolTargetLabel';
+import { CLIChildConversationCard } from './CLIChildConversationCard';
+import { isCliChildDelegationTool } from './cliChildProjection.model';
+import { useSessionStore } from '../../store/sessionStore';
 
 export { extractRAAppBlock } from './ToolCallBubble.parsers';
 
@@ -73,6 +76,10 @@ function subAgentFlowResultFromSnapshot(snapshot: AgentFlowRunSnapshot): SubAgen
 export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const elapsed = activity.finishedAt != null ? activity.finishedAt - activity.startedAt : null;
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const cliProjection = useAgentStore((s) => (
+    Object.values(s.cliChildProjections).find((item) => item.parentCallId === activity.callId)
+  ));
   const toolActivities = useAgentStore((s) => s.toolActivities);
   const descendantActivities = useMemo(
     () =>
@@ -121,31 +128,55 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
   const cliSessionSnapshot = DURABLE_CLI_AGENT_TOOLS.has(activity.toolName) && activity.result?.data != null
     ? extractCLIAgentSessionSnapshot(activity.result.data)
     : null;
+  const showCliChildCard = isCliChildDelegationTool(activity.toolName)
+    || (cliSessionSnapshot != null && activity.toolName === 'spawn_cli_agent');
+  const parentSessionId = activity.sessionId
+    ?? cliSessionSnapshot?.parentSessionId
+    ?? activeSessionId
+    ?? '';
+  const childSessionId = cliSessionSnapshot?.childSessionId
+    ?? cliProjection?.childSessionId
+    ?? (activity.result?.data != null ? extractCLIAgentResult(activity.result.data)?.childSessionId : undefined);
   const hasNonRaappResult = activity.result?.data != null
     && extractRAAppBlock(activity.result.data) == null
     && extractImageResult(activity.result.data) == null
     && cliSessionSnapshot == null;
-  const defaultOpen = descendantActivities.length > 0
-    || isRunningCliAgent
-    || cliSessionSnapshot != null
-    || activity.status === 'cancelled'
-    || activity.status === 'expired'
-    || activity.status === 'error';
+  const defaultOpen = showCliChildCard
+    ? false
+    : descendantActivities.length > 0
+      || isRunningCliAgent
+      || cliSessionSnapshot != null
+      || activity.status === 'cancelled'
+      || activity.status === 'expired'
+      || activity.status === 'error';
   const open = manualOpen ?? defaultOpen;
   const expandable = hasArgs || hasNonRaappResult || isRunningCliAgent || descendantActivities.length > 0 || cliSessionSnapshot != null;
   const imageResult = activity.result?.data != null ? extractImageResult(activity.result.data) : null;
 
   return (
-    <Chip
-      icon={icon}
-      toolName={activity.toolName}
-      targetLabel={getToolTargetLabel(activity.toolName, activity.args)}
-      badge={badge}
-      elapsed={elapsed}
-      expandable={expandable}
-      open={open}
-      onToggle={() => setManualOpen((value) => !(value ?? defaultOpen))}
-    >
+    <div className="space-y-2">
+      {showCliChildCard && parentSessionId && (
+        <CLIChildConversationCard
+          toolName={activity.toolName}
+          parentSessionId={parentSessionId}
+          parentCallId={activity.callId}
+          activity={activity}
+          resultData={activity.result?.data}
+          childSessionId={childSessionId}
+          onInspect={() => setManualOpen(true)}
+        />
+      )}
+      {(!showCliChildCard || manualOpen) && (
+      <Chip
+        icon={icon}
+        toolName={activity.toolName}
+        targetLabel={getToolTargetLabel(activity.toolName, activity.args)}
+        badge={badge}
+        elapsed={elapsed}
+        expandable={expandable}
+        open={open}
+        onToggle={() => setManualOpen((value) => !(value ?? defaultOpen))}
+      >
       {descendantActivities.length > 0 && (
         <div className="space-y-2 rounded border border-base-300/60 bg-base-200/50 px-2 py-2">
           <div className="text-[10px] font-mono uppercase tracking-[0.14em] text-base-content/45">
@@ -158,13 +189,13 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
           ))}
         </div>
       )}
-      {isRunningCliAgent && (
+      {!showCliChildCard && isRunningCliAgent && (
         <LiveCLIAgentBlock
           callId={activity.callId}
           agentId={(activity.args['agentId'] as string | undefined) ?? 'copilot'}
         />
       )}
-      {cliSessionSnapshot && <CLIAgentSessionStatusBlock snapshot={cliSessionSnapshot} />}
+      {!showCliChildCard && cliSessionSnapshot && <CLIAgentSessionStatusBlock snapshot={cliSessionSnapshot} />}
       {imageResult && <ImageResultRenderer data={imageResult} />}
       {hasArgs && (
         <div className="font-mono bg-base-200/60 rounded px-2 py-1 text-xs text-base-content/50">
@@ -189,7 +220,9 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
       {activity.status === 'expired' && !activity.result?.errorMessage && (
         <div className="text-xs text-warning/80">Confirmation timed out before the tool could run.</div>
       )}
-    </Chip>
+      </Chip>
+      )}
+    </div>
   );
 }
 
@@ -202,12 +235,16 @@ export function HistoryToolCallBubble({
   content,
   isAnswered,
   args,
+  callId = '',
+  parentSessionId: parentSessionIdProp,
   defaultOpenOverride,
 }: {
   toolName: string;
   content: string;
   isAnswered?: boolean;
   args?: Record<string, unknown>;
+  callId?: string;
+  parentSessionId?: string;
   defaultOpenOverride?: boolean;
 }) {
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
@@ -216,6 +253,8 @@ export function HistoryToolCallBubble({
   const isCliAgent = toolName === 'run_cli_agent';
   const isSubAgentFlow = toolName === 'run_sub_agentflow';
   const isDurableCliAgent = DURABLE_CLI_AGENT_TOOLS.has(toolName);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const showCliChildCard = isCliChildDelegationTool(toolName);
 
   let parsed: unknown;
   try {
@@ -227,6 +266,9 @@ export function HistoryToolCallBubble({
   const raapp = extractRAAppBlock(parsed);
   const cliResult = isCliAgent ? extractCLIAgentResult(parsed) : null;
   const cliSessionSnapshot = isDurableCliAgent ? extractCLIAgentSessionSnapshot(parsed) : null;
+  const historyChildSessionId = cliSessionSnapshot?.childSessionId ?? cliResult?.childSessionId;
+  const historyParentSessionId = parentSessionIdProp ?? cliSessionSnapshot?.parentSessionId ?? activeSessionId ?? '';
+  const showsCliChildCard = showCliChildCard && Boolean(historyParentSessionId && (callId || historyChildSessionId));
   const imageResult = extractImageResult(parsed);
   const webSearchResult = toolName === 'web_search' ? extractWebSearchResult(parsed) : null;
   const subagentResult = isSubagent ? extractSubagentResult(parsed) : null;
@@ -234,7 +276,9 @@ export function HistoryToolCallBubble({
   const [refreshedSubAgentFlowResult, setRefreshedSubAgentFlowResult] = useState<SubAgentFlowResult | null>(null);
   const displayedSubAgentFlowResult = refreshedSubAgentFlowResult ?? subAgentFlowResult;
   const hasArgs = args != null && Object.keys(args).length > 0;
-  const inferredDefaultOpen = (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || webSearchResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
+  const inferredDefaultOpen = showCliChildCard
+    ? false
+    : (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || webSearchResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
   const defaultOpen = defaultOpenOverride ?? inferredDefaultOpen;
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const open = isAnswered ? false : (manualOpen ?? defaultOpen);
@@ -273,6 +317,17 @@ export function HistoryToolCallBubble({
 
   return (
     <>
+      {showsCliChildCard && (
+        <CLIChildConversationCard
+          toolName={toolName}
+          parentSessionId={historyParentSessionId}
+          parentCallId={callId || `history-${historyChildSessionId ?? toolName}`}
+          resultData={parsed}
+          childSessionId={historyChildSessionId}
+          onInspect={() => setManualOpen(true)}
+        />
+      )}
+      {(!showsCliChildCard || manualOpen) && (
       <Chip
         icon={<CheckCircle2 size={12} className="text-success shrink-0" />}
         toolName={toolName}
@@ -314,7 +369,7 @@ export function HistoryToolCallBubble({
             {typeof parsed === 'object' ? JSON.stringify(parsed, null, 2) : String(parsed)}
           </div>
         )}
-        {cliResult && (
+        {!showsCliChildCard && cliResult && (
           <TerminalOutputBlock
             result={cliResult}
             isExpanded={open}
@@ -322,13 +377,14 @@ export function HistoryToolCallBubble({
             agentId={args?.['agentId'] as string | undefined}
           />
         )}
-        {cliSessionSnapshot && <CLIAgentSessionStatusBlock snapshot={cliSessionSnapshot} />}
+        {!showsCliChildCard && cliSessionSnapshot && <CLIAgentSessionStatusBlock snapshot={cliSessionSnapshot} />}
         {displayedSubAgentFlowResult && <SubAgentFlowResultBlock result={displayedSubAgentFlowResult} />}
         {subagentResult && <SubagentResultBlock key={subagentResult.childSessionId} result={subagentResult} />}
         {imageResult && <ImageResultRenderer data={imageResult} />}
         {webSearchResult && <WebSearchResultRenderer data={webSearchResult} />}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}
       </Chip>
+      )}
       {raapp && isAnswered && (
         <div className="border-l-[3px] border-l-emerald-500/20 pl-3 py-1 my-0.5 text-xs text-base-content/40 italic">
           Interactive app â€” answer submitted

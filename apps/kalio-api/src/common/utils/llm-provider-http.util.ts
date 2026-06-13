@@ -31,9 +31,13 @@ function normalizeProviderKey(provider: unknown): string {
   return typeof provider === 'string' ? provider.toLowerCase() : '';
 }
 
-export function readEnvBooleanFlag(value: string | undefined, defaultValue: boolean): boolean {
+export function readEnvBooleanFlag(value: string | boolean | undefined, defaultValue: boolean): boolean {
   if (value === undefined) {
     return defaultValue;
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
   }
 
   const normalized = value.trim().toLowerCase();
@@ -57,6 +61,10 @@ function xiaomiCompatHeaders(apiKey?: string): Record<string, string> {
     ...XIAOMI_COMPAT_HEADERS,
     ...(allowCrossBorderAccess ? { [XIAOMI_CROSS_BORDER_HEADER]: 'true' } : {}),
   };
+}
+
+export function isBuiltInLlmProvider(provider: string): boolean {
+  return normalizeProviderKey(provider) in DEFAULT_LLM_PROVIDER_BASE_URLS;
 }
 
 export function resolveLlmProviderBaseUrl(provider: string, baseUrl?: string): string {

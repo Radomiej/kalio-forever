@@ -19,7 +19,7 @@ export function buildArchitectureParentChatMessages(
     id: `architecture:${run.id}:user`,
     sessionId: parentSessionId,
     role: 'user',
-    content: `[Architecture: ${schema.name}]\n${run.prompt}`,
+    content: run.prompt,
     createdAt: now,
   }];
   const branchEvents = events.filter((event) => (
@@ -27,7 +27,7 @@ export function buildArchitectureParentChatMessages(
     && typeof event.roleSlotId === 'string'
     && !isSyntheticParallelMessage(event.message)
   ));
-  const toolCalls = branchEvents.map((event) => toSubagentToolCall(run, event));
+  const toolCalls = branchEvents.map((event) => toSubagentToolCall(schema, run, event));
   if (toolCalls.length > 0) {
     messages.push({
       id: `architecture:${run.id}:tool-calls`,
@@ -61,13 +61,14 @@ export function buildArchitectureParentChatMessages(
   return messages;
 }
 
-function toSubagentToolCall(run: ArchitectureRun, event: ArchitectureExecutionEvent): LLMToolCall {
+function toSubagentToolCall(schema: ArchitectureSchema, run: ArchitectureRun, event: ArchitectureExecutionEvent): LLMToolCall {
   return {
     id: `architecture:${run.id}:${event.id}`,
     name: 'run_subagent',
     args: {
       objective: `${speakerLabel(event.roleSlotId)} branch for: ${run.prompt}`,
       architectureRunId: run.id,
+      schemaName: schema.name,
       nodeId: event.nodeId,
       roleSlotId: event.roleSlotId,
       childSessionId: branchSessionId(run, event),

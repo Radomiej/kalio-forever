@@ -13,21 +13,27 @@ import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionManagerService } from './session-manager.service';
 import { ContextAssemblyService } from './context-assembly.service';
 import { ContextPreviewService } from './context-preview.service';
+import { ContextController } from './context.controller';
+import { LLMTurnRuntimeService } from './llm-turn-runtime.service';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
 import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import { SessionsController } from './sessions.controller';
+import { ChatTestSupportAgentBudgetController } from './chat-test-support-agent-budget.controller';
 import { ChatTestSupportController } from './chat-test-support.controller';
 import { ChatTestSupportRaAppController } from './chat-test-support-raapp.controller';
-import { AuditService } from './audit.service';
+import { AuditModule } from './audit.module';
 import { AuditLogController } from './audit-log.controller';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
 import { LLMServiceAdapter } from './llm-service.adapter';
 import { ImageHydratorService } from './image-hydrator.service';
 import { SubagentRuntimeService } from './subagent-runtime.service';
+import { ToolPolicyService } from './tool-policy.service';
 import { ChatTestSupportService } from './chat-test-support.service';
 import { RunJournalService } from './run-journal.service';
+import { SessionEventsService } from './session-events.service';
+import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
@@ -62,8 +68,15 @@ import {
  *   TOOL_REGISTRY     → Tool dispatch registry port exported by ToolModule
  */
 @Module({
-  imports: [LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, HitlModule, RelayModule],
-  controllers: [SessionsController, AuditLogController, ChatTestSupportController, ChatTestSupportRaAppController],
+  imports: [AuditModule, LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, HitlModule, RelayModule],
+  controllers: [
+    SessionsController,
+    ContextController,
+    AuditLogController,
+    ChatTestSupportController,
+    ChatTestSupportAgentBudgetController,
+    ChatTestSupportRaAppController,
+  ],
   providers: [
     // Handlers
     TextDeltaHandler,
@@ -79,13 +92,16 @@ import {
     SessionManagerService,
     ContextAssemblyService,
     ContextPreviewService,
+    ToolPolicyService,
+    LLMTurnRuntimeService,
+    SessionEventsService,
+    AgentBudgetApprovalService,
     SessionsService,
     ChatTestSupportService,
     RunJournalService,
     ChatService,
     SessionPipelineService,
     ChatGateway,
-    AuditService,
     DrizzleMessageRepository,
     LLMServiceAdapter,
     ImageHydratorService,
@@ -134,7 +150,7 @@ import {
       useExisting: DrizzleMessageRepository,
     },
   ],
-  exports: [ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, SessionsService, RunJournalService, SubagentRuntimeService, AuditService, SUBAGENT_RUNTIME],
+  exports: [AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, RunJournalService, SubagentRuntimeService, SUBAGENT_RUNTIME],
 })
 export class ChatModule implements OnModuleInit {
   constructor(

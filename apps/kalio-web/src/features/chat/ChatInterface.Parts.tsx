@@ -1,22 +1,16 @@
-import { useState } from 'react';
-import { Check, Copy, Play } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
 import type { ChatMessage, ChatSession, LLMContextPreview, Persona } from '@kalio/types';
 import type { TokenCount } from '../../services/tokenCounter';
 import { ConversationFilesBar } from '../vfs/ConversationFilesBar';
 import { ContextStats, type ContextPreviewStatus } from './ContextStats';
 import { TokenBadge } from './TokenBadge';
 import type { ArchitectSchema } from '../architect/architect.types';
+import { NewChatScreen } from './launch/NewChatScreen';
+import { findArchitectureRunInMessages } from './architectureChatSummary';
 
 export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 const VFS_REFRESH_TOOL_NAMES = new Set(['vfs_write', 'image_generate', 'image_edit']);
-const WELCOME_PROMPTS = [
-  'What can you do?',
-  'Build a calculator app',
-  'Create a todo list',
-  'Generate an image of a fox',
-];
-
 export function shouldRefreshVfsForToolResult(toolName: string | undefined, data: unknown): boolean {
   if (!toolName) {
     return false;
@@ -69,6 +63,59 @@ export function buildCopiedChatText(messages: ChatMessage[]): string {
   }
 
   return entries.join('\n\n---\n\n');
+}
+
+function architectureSessionLabel(session: ChatSession): string | null {
+  const architectureContext = session.runtimeContext?.architectureContext;
+  if (!architectureContext || typeof architectureContext !== 'object') {
+    return null;
+  }
+  const displayLabel = architectureContext['displayLabel'];
+  if (typeof displayLabel === 'string' && displayLabel.trim().length > 0) {
+    return displayLabel.trim();
+  }
+  const schemaName = architectureContext['schemaName'];
+  return typeof schemaName === 'string' && schemaName.trim().length > 0 ? schemaName.trim() : null;
+}
+
+function humanizeArchitectureSchemaId(schemaId: string): string {
+  return schemaId
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
+    .join(' ');
+}
+
+function architectureMessageLabel(messages: ChatMessage[]): string | null {
+  const summary = findArchitectureRunInMessages(messages);
+  if (!summary) {
+    return null;
+  }
+
+  for (const message of [...messages].reverse()) {
+    if (message.role !== 'assistant' || !message.toolCalls?.length) {
+      continue;
+    }
+
+    const matchingCall = message.toolCalls.find((toolCall) => (
+      toolCall.name === 'run_subagent'
+      && toolCall.args['architectureRunId'] === summary.runId
+      && typeof toolCall.args['schemaName'] === 'string'
+      && toolCall.args['schemaName'].trim().length > 0
+    ));
+
+    if (matchingCall && typeof matchingCall.args['schemaName'] === 'string') {
+      return matchingCall.args['schemaName'].trim();
+    }
+  }
+
+  return summary.schemaId.trim().length > 0
+    ? humanizeArchitectureSchemaId(summary.schemaId)
+    : null;
+}
+
+function resolveArchitectureLabel(session: ChatSession, messages: ChatMessage[]): string | null {
+  return architectureSessionLabel(session) ?? architectureMessageLabel(messages);
 }
 
 interface ChatStatusBannersProps {
@@ -168,9 +215,21 @@ export function ChatSessionHeader({
   contextPreviewStatus,
   vfsRefreshSignal,
 }: ChatSessionHeaderProps) {
+  const architectureLabel = resolveArchitectureLabel(activeSession, messages);
+
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
-      <span className="text-sm font-medium truncate flex-1">{activeSession.title}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="min-w-0 truncate text-sm font-medium" data-testid="chat-session-title">{activeSession.title}</span>
+        {architectureLabel && (
+          <span
+            className="shrink-0 rounded border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-200"
+            data-testid="chat-session-architecture-label"
+          >
+            {architectureLabel}
+          </span>
+        )}
+      </div>
       <ConversationFilesBar sessionId={activeSessionId} refreshSignal={vfsRefreshSignal} />
       {messages.length > 0 && (
         <button
@@ -213,8 +272,11 @@ interface ChatWelcomeScreenProps {
   onArchitectureRun: (content: string, schemaId: string) => void;
   onDraftChange: (content: string) => void;
   onPersonaChange: (personaId: string) => void;
+  onProjectPathChange: (projectPath: string) => void;
   onSend: (content: string, personaId: string) => void;
   personas: Persona[];
+  projectPath: string;
+  selectedPersonaId: string;
   selectedArchitectureId: string;
 }
 
@@ -227,130 +289,41 @@ export function ChatWelcomeScreen({
   onArchitectureRun,
   onDraftChange,
   onPersonaChange,
+  onProjectPathChange,
   onSend,
   personas,
+  projectPath,
+  selectedPersonaId,
   selectedArchitectureId,
 }: ChatWelcomeScreenProps) {
-  const [prompt, setPrompt] = useState('');
-  const activeArchitecture = selectedArchitectureId === 'single-chat'
-    ? null
-    : architectures.find((schema) => schema.id === selectedArchitectureId) ?? null;
-
-  const submitPrompt = (content: string) => {
-    const trimmed = content.trim();
-    if (!trimmed || !activeSessionId || isStreaming) return;
-    if (activeArchitecture) {
-      onArchitectureRun(trimmed, activeArchitecture.id);
-    } else {
-      onSend(trimmed, activeSession?.personaId ?? 'default');
-    }
-    onDraftChange('');
-    setPrompt('');
-  };
-
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-5 w-full max-w-xl mx-auto px-4" data-testid="welcome-screen">
-      <div className="text-center select-none">
-        <div className="text-primary font-black text-4xl drop-shadow-[0_0_12px_oklch(0.60_0.176_232.6/0.6)] mb-2">K</div>
-        <h2 className="text-base font-semibold text-base-content/80">KALIO</h2>
-        <p className="text-base-content/65 text-xs mt-1 leading-relaxed max-w-60">
-          AI assistant - build apps, query data, generate images, run tools
-        </p>
-      </div>
+    <>
       {activeSessionId && (
-        <div className="w-full space-y-3">
-          <div className="grid gap-3 md:grid-cols-2">
-            {personas.length > 1 && (
-              <div>
-                <label htmlFor="welcome-persona-select" className="text-[10px] uppercase tracking-wider text-base-content/65 mb-1 block pl-1">
-                  Persona
-                </label>
-                <select
-                  id="welcome-persona-select"
-                  aria-label="Persona"
-                  className="select select-bordered select-sm w-full text-sm"
-                  value={activeSession?.personaId ?? 'default'}
-                  onChange={(event) => onPersonaChange(event.target.value)}
-                  disabled={isStreaming}
-                  data-testid="welcome-persona-select"
-                >
-                  {personas.map((persona) => (
-                    <option key={persona.id} value={persona.id}>{persona.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div className={personas.length > 1 ? '' : 'md:col-span-2'}>
-              <label htmlFor="welcome-architecture-select" className="text-[10px] uppercase tracking-wider text-base-content/65 mb-1 block pl-1">
-                Architecture
-              </label>
-              <select
-                id="welcome-architecture-select"
-                aria-label="Architecture"
-                className="select select-bordered select-sm w-full text-sm"
-                value={selectedArchitectureId}
-                onChange={(event) => onArchitectureChange(event.target.value)}
-                disabled={isStreaming}
-                data-testid="welcome-architecture-select"
-              >
-                <option value="single-chat">Single Chat</option>
-                {architectures.map((schema) => (
-                  <option key={schema.id} value={schema.id}>{schema.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="rounded-lg border border-base-300 bg-base-100/80 p-2">
-            <textarea
-              className="textarea textarea-ghost min-h-24 w-full resize-none text-sm leading-6 focus:outline-none"
-              value={prompt}
-              onChange={(event) => {
-                setPrompt(event.target.value);
-                onDraftChange(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  submitPrompt(prompt);
-                }
-              }}
-              placeholder={activeArchitecture ? `Run prompt through ${activeArchitecture.name}` : 'Ask Kalio...'}
-              disabled={isStreaming}
-              data-testid="welcome-prompt-input"
-            />
-            <div className="flex items-center justify-between gap-3 border-t border-base-300/70 px-1 pt-2">
-              <span className="truncate text-[11px] text-base-content/65" data-testid="welcome-routing-summary">
-                {activeArchitecture ? `Graph runtime: ${activeArchitecture.name}` : 'Direct chat runtime'}
-              </span>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm gap-2"
-                onClick={() => submitPrompt(prompt)}
-                disabled={isStreaming || prompt.trim().length === 0}
-                data-testid="welcome-run-prompt"
-              >
-                <Play size={14} />
-                Run
-              </button>
-            </div>
-          </div>
-        </div>
+        <NewChatScreen
+          key={activeSessionId}
+          architectures={architectures}
+          heading={activeSession?.title ?? 'New Chat'}
+          isBusy={isStreaming}
+          onArchitectureChange={onArchitectureChange}
+          onDraftChange={onDraftChange}
+          onPersonaChange={onPersonaChange}
+          onProjectPathChange={onProjectPathChange}
+          onRunPrompt={(content) => {
+            onDraftChange('');
+            if (selectedArchitectureId === 'single-chat') {
+              onSend(content, selectedPersonaId);
+              return;
+            }
+            onArchitectureRun(content, selectedArchitectureId);
+          }}
+          personas={personas}
+          projectPath={projectPath}
+          selectedPersonaId={selectedPersonaId}
+          selectedArchitectureId={selectedArchitectureId}
+          subtitle="AI assistant - build apps, query data, generate images, run tools"
+          testIdPrefix="welcome"
+        />
       )}
-      {activeSessionId && (
-        <div className="flex flex-wrap justify-center gap-2 mt-1">
-          {WELCOME_PROMPTS.map((prompt) => (
-            <button
-              key={prompt}
-              type="button"
-              className="btn btn-sm btn-ghost border border-base-300/70 text-xs text-base-content/70 hover:text-primary hover:border-primary/40"
-              onClick={() => submitPrompt(prompt)}
-              disabled={isStreaming}
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    </>
   );
 }

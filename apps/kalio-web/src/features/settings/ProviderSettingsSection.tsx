@@ -12,6 +12,7 @@ interface EnvProviderCardProps {
   providerLabel?: string;
   model?: string;
   onActivate: () => void;
+  onEdit?: () => void;
 }
 
 function EnvProviderCard({
@@ -21,8 +22,10 @@ function EnvProviderCard({
   providerLabel,
   model,
   onActivate,
+  onEdit,
 }: EnvProviderCardProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const canEditModel = isActive && typeof onEdit === 'function';
 
   return (
     <div
@@ -72,10 +75,24 @@ function EnvProviderCard({
               <span className="font-medium">Provider:</span>{' '}
               <span className="font-mono">{providerLabel ?? 'Resolved from backend env configuration'}</span>
             </div>
-            {model ? (
-              <div className="text-xs text-base-content/50">
-                <span className="font-medium">Default model:</span>{' '}
-                <span className="font-mono">{model}</span>
+            {(model || canEditModel) ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-base-content/50">
+                <span className="font-medium">Default model:</span>
+                <span className="font-mono">{model || 'not set'}</span>
+                {canEditModel ? (
+                  <button
+                    type="button"
+                    className="link link-primary link-hover text-xs font-medium"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onEdit?.();
+                    }}
+                    aria-label="Edit environment fallback model"
+                    data-testid="provider-edit-env"
+                  >
+                    Edit
+                  </button>
+                ) : null}
               </div>
             ) : null}
             <div className="text-xs text-base-content/60 italic">
@@ -107,6 +124,7 @@ interface ProviderSettingsSectionProps {
   emptyStateMessage: string;
   onActivate: (credentialId: string) => void;
   onRemove: (credentialId: string) => void;
+  onEdit?: () => void;
   onUseEnvFallback: () => void;
   onShowAdd: () => void;
   onCancelAdd: () => void;
@@ -138,6 +156,7 @@ export function ProviderSettingsSection({
   emptyStateMessage,
   onActivate,
   onRemove,
+  onEdit,
   onUseEnvFallback,
   onShowAdd,
   onCancelAdd,
@@ -149,6 +168,8 @@ export function ProviderSettingsSection({
   onModelChange,
   onTest,
 }: ProviderSettingsSectionProps) {
+  const handleEdit = onEdit ?? (() => undefined);
+
   return (
     <section className="flex flex-col gap-4 border border-base-300 rounded-xl p-4 bg-base-200/10">
       <div>
@@ -172,6 +193,7 @@ export function ProviderSettingsSection({
               providerLabel={envFallbackProviderLabel}
               model={envFallbackModel}
               onActivate={onUseEnvFallback}
+              onEdit={handleEdit}
             />
           ) : null}
 
@@ -185,6 +207,7 @@ export function ProviderSettingsSection({
                   isSyncing={syncing === credential.id}
                   onActivate={onActivate}
                   onRemove={onRemove}
+                  onEdit={handleEdit}
                 />
               ))}
             </div>

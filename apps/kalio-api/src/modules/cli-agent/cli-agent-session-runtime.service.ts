@@ -41,6 +41,10 @@ interface ContinueSessionParams {
 interface RuntimeEntry {
   snapshot: CLIAgentSessionSnapshot;
   completion: Promise<CLIAgentSessionSnapshot>;
+  callId: string;
+  turnId: string;
+  emit?: ToolCallRequest['_emit'];
+  terminalEmitted: boolean;
 }
 
 @Injectable()
@@ -164,7 +168,6 @@ export class CLIAgentSessionRuntimeService {
     childSessionId: string,
     emit?: ToolCallRequest['_emit'],
   ): Promise<CLIAgentSessionSnapshot> {
-    void emit;
     const childSession = await this.sessions.getAccessibleChildSession(parentSessionId, childSessionId);
     if (!childSession || childSession.kind !== 'cli-agent') {
       throw new Error(`CLI_AGENT_SESSION_NOT_FOUND: ${childSessionId}`);
@@ -175,12 +178,24 @@ export class CLIAgentSessionRuntimeService {
       return this.getStatus(parentSessionId, childSessionId);
     }
 
+    const activeEmit = emit ?? liveEntry.emit;
+    if (activeEmit && activeEmit !== liveEntry.emit) {
+      this.runtimeEntries.set(childSessionId, {
+        ...liveEntry,
+        emit: activeEmit,
+      });
+    }
     const stopped = this.cliAgent.stop(childSessionId);
-    if (!stopped) {
-      return liveEntry.snapshot;
+    if (stopped) {
+      try {
+        return await liveEntry.completion;
+      } catch {
+        const settled = this.runtimeEntries.get(childSessionId);
+        return settled?.snapshot ?? liveEntry.snapshot;
+      }
     }
 
-    return liveEntry.completion;
+    return liveEntry.snapshot;
   }
 
   private async startSessionTurn(params: {
@@ -236,6 +251,10 @@ export class CLIAgentSessionRuntimeService {
     this.runtimeEntries.set(params.childSessionId, {
       snapshot: runningSnapshot,
       completion,
+      callId,
+      turnId,
+      emit: params.emit,
+      terminalEmitted: false,
     });
 
     return runningSnapshot;
@@ -378,13 +397,8 @@ export class CLIAgentSessionRuntimeService {
       },
     };
 
-    emit?.('tool:result', toolResult);
-    emit?.('agent:done', { sessionId: childSessionId, turnId });
-
-    this.runtimeEntries.set(childSessionId, {
-      snapshot: completedSnapshot,
-      completion: Promise.resolve(completedSnapshot),
-    });
+    this.emitTerminalEvents(emit, childSessionId, turnId, toolResult);
+    this.setSettledRuntimeEntry(childSessionId, completedSnapshot, callId, turnId, emit, true);
 
     return completedSnapshot;
   }
@@ -399,18 +413,23 @@ export class CLIAgentSessionRuntimeService {
     const current = this.runtimeEntries.get(childSessionId)?.snapshot;
     const error = err instanceof Error ? err : new Error(String(err));
     const stopped = error.message === CLI_AGENT_STOPPED_ERROR;
+    if (stopped) {
+      const activeEmit = this.runtimeEntries.get(childSessionId)?.emit ?? emit;
+      return this.finalizeStopped(childSessionId, callId, turnId, activeEmit);
+    }
+
     const nextSnapshot: CLIAgentSessionSnapshot = {
       childSessionId,
       parentSessionId: current?.parentSessionId ?? '',
       agentId: current?.agentId ?? 'copilot',
       workdir: current?.workdir ?? '',
-      status: stopped ? 'stopped' : 'failed',
+      status: 'failed',
       lastPrompt: current?.lastPrompt ?? '',
       updatedAt: Date.now(),
       startedAt: current?.startedAt,
       completedAt: Date.now(),
-      lastOutput: stopped ? current?.lastOutput ?? 'CLI agent stopped.' : error.message,
-      lastExitCode: stopped ? 130 : 1,
+      lastOutput: error.message,
+      lastExitCode: 1,
       recoveryAttempts: current?.recoveryAttempts,
     };
 
@@ -421,23 +440,91 @@ export class CLIAgentSessionRuntimeService {
     );
     await this.sessions.persistAssistantMessage(childSessionId, nextSnapshot.lastOutput ?? '');
 
-    emit?.('tool:result', {
+    this.emitTerminalEvents(emit, childSessionId, turnId, {
       callId,
       toolName: 'run_cli_agent',
       sessionId: childSessionId,
-      status: stopped ? 'cancelled' : 'error',
-      ...(stopped
-        ? { data: nextSnapshot }
-        : { errorCode: 'CLI_AGENT_ERROR', errorMessage: error.message }),
+      status: 'error',
+      errorCode: 'CLI_AGENT_ERROR',
+      errorMessage: error.message,
+      data: nextSnapshot,
     });
-    emit?.('agent:done', { sessionId: childSessionId, turnId });
-
-    this.runtimeEntries.set(childSessionId, {
-      snapshot: nextSnapshot,
-      completion: Promise.resolve(nextSnapshot),
-    });
+    this.setSettledRuntimeEntry(childSessionId, nextSnapshot, callId, turnId, emit, true);
 
     return nextSnapshot;
+  }
+
+  private async finalizeStopped(
+    childSessionId: string,
+    callId: string,
+    turnId: string,
+    emit: ToolCallRequest['_emit'] | undefined,
+  ): Promise<CLIAgentSessionSnapshot> {
+    const current = this.runtimeEntries.get(childSessionId);
+    if (current?.terminalEmitted) {
+      return current.snapshot;
+    }
+
+    const nextSnapshot: CLIAgentSessionSnapshot = {
+      childSessionId,
+      parentSessionId: current?.snapshot.parentSessionId ?? '',
+      agentId: current?.snapshot.agentId ?? 'copilot',
+      workdir: current?.snapshot.workdir ?? '',
+      status: 'stopped',
+      lastPrompt: current?.snapshot.lastPrompt ?? '',
+      updatedAt: Date.now(),
+      startedAt: current?.snapshot.startedAt,
+      completedAt: Date.now(),
+      lastOutput: current?.snapshot.lastOutput ?? 'CLI agent stopped.',
+      lastExitCode: 130,
+      recoveryAttempts: current?.snapshot.recoveryAttempts,
+    };
+
+    await this.sessions.saveToolResult(
+      childSessionId,
+      callId,
+      JSON.stringify(nextSnapshot),
+    );
+    await this.sessions.persistAssistantMessage(childSessionId, nextSnapshot.lastOutput ?? '');
+
+    this.emitTerminalEvents(emit, childSessionId, turnId, {
+      callId,
+      toolName: 'run_cli_agent',
+      sessionId: childSessionId,
+      status: 'cancelled',
+      data: nextSnapshot,
+    });
+    this.setSettledRuntimeEntry(childSessionId, nextSnapshot, callId, turnId, emit ?? current?.emit, true);
+
+    return nextSnapshot;
+  }
+
+  private emitTerminalEvents(
+    emit: ToolCallRequest['_emit'] | undefined,
+    childSessionId: string,
+    turnId: string,
+    toolResult: ToolResult,
+  ): void {
+    emit?.('tool:result', toolResult);
+    emit?.('agent:done', { sessionId: childSessionId, turnId });
+  }
+
+  private setSettledRuntimeEntry(
+    childSessionId: string,
+    snapshot: CLIAgentSessionSnapshot,
+    callId: string,
+    turnId: string,
+    emit: ToolCallRequest['_emit'] | undefined,
+    terminalEmitted: boolean,
+  ): void {
+    this.runtimeEntries.set(childSessionId, {
+      snapshot,
+      completion: Promise.resolve(snapshot),
+      callId,
+      turnId,
+      emit,
+      terminalEmitted,
+    });
   }
 
   private updateRuntimeOutput(childSessionId: string, chunk: string): void {
@@ -578,9 +665,14 @@ export class CLIAgentSessionRuntimeService {
       }),
     );
 
+    const existing = this.runtimeEntries.get(childSessionId);
     this.runtimeEntries.set(childSessionId, {
       snapshot: recoveringSnapshot,
-      completion: Promise.resolve(recoveringSnapshot),
+      completion: existing?.completion ?? Promise.resolve(recoveringSnapshot),
+      callId: existing?.callId ?? callId,
+      turnId: existing?.turnId ?? `cli-turn-${callId}`,
+      emit: existing?.emit,
+      terminalEmitted: existing?.terminalEmitted ?? false,
     });
   }
 

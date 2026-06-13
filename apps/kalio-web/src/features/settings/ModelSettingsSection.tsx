@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, RefreshCw, Check, AlertCircle } from 'lucide-react';
 import { ModelCombobox } from './ModelCombobox';
 import type { ActiveRuntimeConfig, LLMConfigWithSource } from './llm-panel.types';
+import { formatLargeTokenCount } from './settings-format';
 
 interface Props {
   activeRuntimeConfig: ActiveRuntimeConfig | null;
   onRuntimeConfigChange: (updated: LLMConfigWithSource) => void;
+  focusModelInputSignal?: number;
 }
 
 interface GenSettings {
@@ -14,6 +16,8 @@ interface GenSettings {
 }
 
 const DEFAULT_GEN_SETTINGS: GenSettings = { temperature: 0.7, maxTokens: 4096 };
+const MAX_OUTPUT_TOKENS_LIMIT = 262_144;
+const MAX_OUTPUT_TOKENS_MIN = 256;
 
 function parseFiniteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
@@ -46,7 +50,11 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChange }: Props) {
+export function ModelSettingsSection({
+  activeRuntimeConfig,
+  onRuntimeConfigChange,
+  focusModelInputSignal = 0,
+}: Props) {
   const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -59,6 +67,8 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
   const [genSaving, setGenSaving] = useState(false);
   const [genSaved, setGenSaved] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+  const committedGenSettingsRef = useRef<GenSettings>(DEFAULT_GEN_SETTINGS);
+  const genSaveInFlightRef = useRef(false);
 
   // Keep the combobox in sync with the active runtime provider.
   useEffect(() => {
@@ -73,12 +83,17 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
   useEffect(() => {
     setGenLoading(true);
     apiFetch<GenSettings>('/credentials/settings/generation')
-      .then((s) => { setGenSettings(sanitizeGenSettings(s)); })
+      .then((s) => {
+        const next = sanitizeGenSettings(s);
+        committedGenSettingsRef.current = next;
+        setGenSettings(next);
+      })
       .catch((err: unknown) => {
         console.error(
           '[ModelSettingsSection] Failed to load generation settings',
           err instanceof Error ? err : new Error(String(err)),
         );
+        committedGenSettingsRef.current = DEFAULT_GEN_SETTINGS;
         setGenSettings(DEFAULT_GEN_SETTINGS);
       })
       .finally(() => setGenLoading(false));
@@ -96,7 +111,7 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
     } finally {
       setModelsLoading(false);
     }
-  }, [activeRuntimeConfig?.credentialId, activeRuntimeConfig?.source]);
+  }, [activeRuntimeConfig]);
 
   useEffect(() => {
     void fetchModels();
@@ -121,37 +136,68 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
     }
   };
 
-  const handleGenSave = async () => {
+  const persistGenerationSettings = async (patch: Partial<GenSettings>, rollbackMaxTokens?: number) => {
+    if (genSaveInFlightRef.current) {
+      return;
+    }
+
+    genSaveInFlightRef.current = true;
     setGenSaving(true);
     setGenError(null);
+
     try {
       await apiFetch('/credentials/settings/generation', {
         method: 'PUT',
-        body: JSON.stringify(genSettings),
+        body: JSON.stringify(patch),
       });
+      committedGenSettingsRef.current = { ...committedGenSettingsRef.current, ...patch };
       setGenSaved(true);
       setTimeout(() => setGenSaved(false), 2000);
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Failed to save');
+      if (rollbackMaxTokens !== undefined) {
+        setGenSettings((current) => ({ ...current, maxTokens: rollbackMaxTokens }));
+      }
     } finally {
+      genSaveInFlightRef.current = false;
       setGenSaving(false);
     }
   };
 
+  const handleGenSave = async () => {
+    await persistGenerationSettings(genSettings);
+  };
+
   const handleTemperatureInput = (event: React.FormEvent<HTMLInputElement>) => {
-    const next = Number.parseFloat(event.currentTarget.value);
+    const next = Number.parseFloat((event.target as HTMLInputElement).value);
     if (!Number.isFinite(next)) {
       return;
     }
     setGenSettings((g) => ({ ...g, temperature: next }));
+    setGenSaved(false);
   };
 
   const handleMaxTokensInput = (event: React.FormEvent<HTMLInputElement>) => {
-    const next = Number.parseInt(event.currentTarget.value, 10);
+    const next = Number.parseInt((event.target as HTMLInputElement).value, 10);
     if (!Number.isFinite(next)) {
       return;
     }
     setGenSettings((g) => ({ ...g, maxTokens: next }));
+    setGenSaved(false);
+  };
+
+  const handleMaxTokensCommit = async (value: number) => {
+    if (!Number.isFinite(value)) {
+      return;
+    }
+
+    const normalized = Math.max(MAX_OUTPUT_TOKENS_MIN, Math.min(MAX_OUTPUT_TOKENS_LIMIT, Math.round(value)));
+    const previousValue = committedGenSettingsRef.current.maxTokens;
+    if (normalized === previousValue) {
+      return;
+    }
+
+    await persistGenerationSettings({ maxTokens: normalized }, previousValue);
   };
 
   return (
@@ -201,6 +247,7 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
                   onChange={(v) => { setSelectedModel(v); setModelSaved(false); }}
                   loading={modelsLoading}
                   placeholder="e.g. gpt-4o-mini"
+                  focusRequestId={focusModelInputSignal}
                   aria-label="Active model"
                   data-testid="model-selector"
                 />
@@ -278,22 +325,30 @@ export function ModelSettingsSection({ activeRuntimeConfig, onRuntimeConfigChang
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs text-base-content/60">Max Output Tokens</span>
-                <span className="badge badge-neutral font-mono text-xs">{genSettings.maxTokens.toLocaleString('en-US')}</span>
+                <span
+                  className="badge badge-neutral font-mono text-xs"
+                  data-testid="gen-max-tokens-value"
+                >
+                  {formatLargeTokenCount(genSettings.maxTokens)}
+                </span>
               </div>
               <input
                 type="range"
                 className="range range-sm range-secondary w-full"
-                min={256}
-                max={16384}
+                min={MAX_OUTPUT_TOKENS_MIN}
+                max={MAX_OUTPUT_TOKENS_LIMIT}
                 step={256}
                 value={genSettings.maxTokens}
                 onChange={() => undefined}
                 onInput={handleMaxTokensInput}
+                onMouseUp={(event) => void handleMaxTokensCommit(parseInt((event.target as HTMLInputElement).value, 10))}
+                onTouchEnd={(event) => void handleMaxTokensCommit(parseInt((event.target as HTMLInputElement).value, 10))}
+                onBlur={(event) => void handleMaxTokensCommit(parseInt((event.target as HTMLInputElement).value, 10))}
                 aria-label="Max output tokens"
                 data-testid="gen-max-tokens"
               />
               <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
-                <span>256</span><span>4k</span><span>8k</span><span>16k</span>
+                <span>256</span><span>4k</span><span>64k</span><span>256k</span>
               </div>
             </div>
 

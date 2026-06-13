@@ -1,0 +1,37 @@
+---
+description: Use system Node.js on Windows, not Cursor's bundled Node 22
+alwaysApply: true
+---
+
+# Windows: system Node.js only
+
+On Windows, Cursor may prepend its bundled Node 22 (`...\cursor\resources\app\resources\helpers\node.exe`) ahead of the system install. Kalio dev (`start-dev.ps1`) and native addons (`better-sqlite3`) must use the same Node ABI.
+
+## Required runtime
+
+- System Node: `C:\Program Files\nodejs\node.exe`
+- Do **not** use Cursor's bundled Node for `node`, `pnpm`, `npm`, `corepack`, installs, rebuilds, or running the API.
+
+## Before any `node` / `pnpm` / `npm` shell command
+
+If `node -v` is not the system version, prepend system Node to PATH for that command:
+
+```powershell
+$env:PATH = "C:\Program Files\nodejs;" + $env:PATH
+```
+
+Verify:
+
+```powershell
+node -p "process.execPath"
+# must be C:\Program Files\nodejs\node.exe
+```
+
+## Native modules
+
+- Run `pnpm install` and `pnpm rebuild better-sqlite3` only with system Node on PATH.
+- If `ERR_DLOPEN_FAILED` / `NODE_MODULE_VERSION` mismatch appears, rebuild with system Node; do not patch the `.node` binary by hand.
+
+## Workspace default
+
+`.vscode/settings.json` prepends system Node for integrated terminals. Agent sandbox shells may still need the explicit `$env:PATH` prepend above.

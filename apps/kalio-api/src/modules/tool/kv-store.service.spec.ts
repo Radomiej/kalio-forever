@@ -16,9 +16,14 @@ function makeTestDrizzle(): DrizzleService {
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
       model TEXT NOT NULL,
+      max_tool_attempts INTEGER,
       allowed_tools TEXT NOT NULL DEFAULT '[]',
       skill_ids TEXT NOT NULL DEFAULT '[]',
       mcp_policy TEXT NOT NULL DEFAULT 'allow_all',
+      avatar_seed TEXT,
+      avatar_variant TEXT,
+      avatar_palette_key TEXT,
+      avatar_index INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -32,6 +37,7 @@ function makeTestDrizzle(): DrizzleService {
       parent_tool_call_id TEXT,
       interlocutor_label TEXT,
       archived_at INTEGER,
+      runtime_context TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );

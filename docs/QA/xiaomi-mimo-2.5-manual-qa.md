@@ -1,6 +1,8 @@
 # Xiaomi MiMo 2.5 Manual QA Flow (Chat + Graph + Persona/Subagent + RAApp + Native Tools)
 
-Use this with the dedicated E2E lane (non-dev ports). Before UI checks, confirm both URLs come from the current E2E run.
+Stack setup and port rules: **[docs/local-dev-guide.md](../local-dev-guide.md)**.
+
+Use this with the dedicated E2E lane (non-dev ports) or `pnpm stack:start` with `--use-env-llm`. Before UI checks, confirm both URLs come from the current run (`pnpm stack:status` or E2E env vars).
 
 ## Baseline port guard
 

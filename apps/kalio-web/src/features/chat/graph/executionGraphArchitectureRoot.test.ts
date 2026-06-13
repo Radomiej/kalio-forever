@@ -59,8 +59,10 @@ describe('buildArchitectureRootGraphModel', () => {
   });
 
   it('normalizes branch session ids and marks in-progress architecture graphs as running', () => {
-    const graph: ArchitectureGraphProjection = {
+    const graph = {
       runId: 'run-42',
+      schemaId: 'strategic-decision-council',
+      schemaName: 'Strategic Decision Council',
       nodes: [
         { id: 'goal_master', label: 'Goal Master', kind: 'router', status: 'pending', eventIds: ['event-1'] },
         { id: 'materializer', label: 'Materializer', kind: 'role', status: 'completed', eventIds: ['event-2'] },
@@ -71,7 +73,7 @@ describe('buildArchitectureRootGraphModel', () => {
       routeHops: [
         { eventId: 'event-1', source: 'router', fromNodeId: 'goal_master', toNodeId: 'materializer' },
       ],
-    };
+    } as ArchitectureGraphProjection & { schemaId?: string; schemaName?: string };
 
     const model = buildArchitectureRootGraphModel({
       graph,
@@ -109,6 +111,7 @@ describe('buildArchitectureRootGraphModel', () => {
       payload: expect.objectContaining({
         kind: 'architecture-run',
         summary: expect.objectContaining({
+          schemaId: 'Strategic Decision Council',
           status: 'running',
         }),
         route: expect.objectContaining({

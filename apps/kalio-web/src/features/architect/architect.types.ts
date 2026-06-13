@@ -31,6 +31,7 @@ export interface ArchitectNode {
   kind: ArchitectureNodeKind;
   role?: string;
   roleSlotId?: string;
+  maxToolAttempts?: number;
   behavior?: ArchitectureSchemaNode['behavior'];
   personaId?: string;
   description?: string;

@@ -213,6 +213,7 @@ function normalizeNode(raw: unknown, index: number): ArchitectNode {
     kind: readNodeKind(readString(raw, ['kind', 'role', 'type'], undefined)),
     role: readString(raw, ['role', 'type'], undefined),
     roleSlotId,
+    maxToolAttempts: hasFiniteNumber(raw, 'maxToolAttempts') ? readNumber(raw, 'maxToolAttempts', 0) : undefined,
     behavior: readNodeBehavior(raw),
     personaId: readString(raw, ['personaId', 'persona', 'defaultPersonaId'], undefined),
     description: readString(raw, ['description', 'summary'], undefined),

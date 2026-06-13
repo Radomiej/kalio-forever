@@ -19,7 +19,7 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "paths": {
-      "@kalio/types": ["../../packages/@kalio/types/dist/index.d.ts"]
+      "@kalio/types": ["../../packages/@kalio/types/src"]
     }
   },
   "include": ["src/**/*"],

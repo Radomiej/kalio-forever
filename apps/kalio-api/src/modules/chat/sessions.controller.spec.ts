@@ -65,17 +65,25 @@ function makeContextPreviewService() {
   };
 }
 
+function makeSessionPipeline() {
+  return {
+    stopAndDrain: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe('SessionsController', () => {
   let controller: SessionsController;
   let svc: ReturnType<typeof makeService>;
   let runJournal: ReturnType<typeof makeRunJournal>;
   let contextPreview: ReturnType<typeof makeContextPreviewService>;
+  let sessionPipeline: ReturnType<typeof makeSessionPipeline>;
 
   beforeEach(() => {
     svc = makeService();
     runJournal = makeRunJournal();
     contextPreview = makeContextPreviewService();
-    controller = new SessionsController(svc as never, runJournal as never, contextPreview as never);
+    sessionPipeline = makeSessionPipeline();
+    controller = new SessionsController(svc as never, runJournal as never, contextPreview as never, sessionPipeline as never);
   });
 
   describe('list()', () => {
@@ -135,15 +143,24 @@ describe('SessionsController', () => {
       const request = { personaId: 'persona-1', draftUserMessage: 'draft' };
       const result = await controller.getContextPreview('sess-1', request);
 
-      expect(contextPreview.buildPreview).toHaveBeenCalledWith('sess-1', request);
+      expect(contextPreview.buildPreview).toHaveBeenCalledWith('sess-1', {
+        ...request,
+        target: 'session',
+        sessionId: 'sess-1',
+      });
       expect(result.sessionId).toBe('sess-1');
     });
   });
 
   describe('delete()', () => {
-    it('deletes a session', async () => {
+    it('drains the session pipeline before deleting a session', async () => {
       await controller.delete('sess-1');
+
+      expect(sessionPipeline.stopAndDrain).toHaveBeenCalledWith('sess-1');
       expect(svc.delete).toHaveBeenCalledWith('sess-1');
+      expect(sessionPipeline.stopAndDrain.mock.invocationCallOrder[0]).toBeLessThan(
+        svc.delete.mock.invocationCallOrder[0],
+      );
     });
   });
 
@@ -170,6 +187,51 @@ describe('SessionsController', () => {
     it('updates a session personaId', async () => {
       await controller.update('sess-1', { personaId: 'builder' });
       expect(svc.update).toHaveBeenCalledWith('sess-1', { personaId: 'builder' });
+    });
+
+    it('updates a session runtimeContext', async () => {
+      const runtimeContext = {
+        runtimeKind: 'chat' as const,
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      };
+
+      await controller.update('sess-1', { runtimeContext });
+
+      expect(svc.update).toHaveBeenCalledWith('sess-1', { runtimeContext });
+    });
+
+    it('strips unsafe runtimeContext fields from public updates', async () => {
+      await controller.update('sess-1', {
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          explicitToolNames: ['fs_read', 'terminal_spawn'],
+          architectureSlotPolicy: { allowedToolNames: ['fs_read'] },
+          architectureContext: {
+            projectPath: 'C:\\Projekty\\kalio-forever',
+            executionCwd: 'C:\\Projekty\\kalio-forever',
+            schemaId: 'strategic-decision-council',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+            launchAllowedToolNames: ['fs_read'],
+          },
+        },
+      });
+
+      expect(svc.update).toHaveBeenCalledWith('sess-1', {
+        runtimeContext: {
+          runtimeKind: 'chat',
+          architectureContext: {
+            projectPath: 'C:\\Projekty\\kalio-forever',
+            executionCwd: 'C:\\Projekty\\kalio-forever',
+            schemaId: 'strategic-decision-council',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+          },
+        },
+      });
     });
   });
 

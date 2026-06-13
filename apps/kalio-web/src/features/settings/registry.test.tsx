@@ -12,6 +12,11 @@ describe('settings registry', () => {
     expect(hitlBlock?.label).toBe('HITL Approvals');
   });
 
+  it('registers the runtime settings block', () => {
+    const runtimeBlock = SETTINGS_BLOCKS.find((block) => block.id === 'runtime');
+    expect(runtimeBlock?.label).toBe('Runtime Settings');
+  });
+
   it('registers the audit retention policy block', () => {
     const auditRetentionBlock = SETTINGS_BLOCKS.find((block) => block.id === 'audit-retention');
     expect(auditRetentionBlock?.label).toBe('Audit Retention');

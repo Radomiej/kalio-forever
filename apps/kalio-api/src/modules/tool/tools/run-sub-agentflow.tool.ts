@@ -39,6 +39,28 @@ function getContext(args: ToolCallRequest['args']): RunSubAgentFlowArgs['context
   throw new Error('INVALID_CONTEXT: context must be a string or object');
 }
 
+function withLaunchAllowedToolNames(
+  context: RunSubAgentFlowArgs['context'],
+  request: ToolCallRequest,
+): RunSubAgentFlowArgs['context'] {
+  const launchAllowedToolNames = request.availableTools
+    ?.map((tool) => tool?.name)
+    .filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
+  if (!launchAllowedToolNames || launchAllowedToolNames.length === 0) {
+    return context;
+  }
+  if (typeof context === 'string') {
+    return {
+      subAgentFlowContext: context,
+      launchAllowedToolNames,
+    };
+  }
+  return {
+    ...(context ?? {}),
+    launchAllowedToolNames,
+  };
+}
+
 function getVfsMode(args: ToolCallRequest['args']): VFSMode {
   const value = args['vfsMode'];
   if (value === undefined) return 'isolated';
@@ -187,7 +209,7 @@ export class RunSubAgentFlowTool {
       goal: getRequiredString(request.args, 'goal'),
       parentSessionId,
       parentToolCallId: request.callId,
-      context: getContext(request.args),
+      context: withLaunchAllowedToolNames(getContext(request.args), request),
       startMode: getStartMode(request.args),
       vfsMode: getVfsMode(request.args),
       copyBack: getCopyBack(request.args),

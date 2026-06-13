@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import type { RaAppNativeResult, RaAppPendingApproval } from '@kalio/types';
+import type { AgentBudgetApprovalRequest, RaAppNativeResult, RaAppPendingApproval } from '@kalio/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingApproval } from '../../raapp/effects-processor.service';
 import { ChatTestSupportService } from '../chat-test-support.service';
@@ -29,6 +29,20 @@ function makeRaappHitl() {
   };
 }
 
+function makeAgentBudgetApprovals() {
+  return {
+    seedPendingApproval: vi.fn(),
+    dropPendingApproval: vi.fn().mockReturnValue('removed'),
+  };
+}
+
+function makeSessionPipeline() {
+  return {
+    seedActiveTurn: vi.fn(),
+    clearSeededActiveTurn: vi.fn(),
+  };
+}
+
 function makeRepo() {
   return {
     saveMessage: vi.fn().mockResolvedValue(undefined),
@@ -55,6 +69,8 @@ describe('ChatTestSupportService', () => {
   let sessions: ReturnType<typeof makeSessions>;
   let toolDispatch: ReturnType<typeof makeToolDispatch>;
   let raappHitl: ReturnType<typeof makeRaappHitl>;
+  let agentBudgetApprovals: ReturnType<typeof makeAgentBudgetApprovals>;
+  let sessionPipeline: ReturnType<typeof makeSessionPipeline>;
   let repo: ReturnType<typeof makeRepo>;
   let service: ChatTestSupportService;
 
@@ -63,14 +79,120 @@ describe('ChatTestSupportService', () => {
     sessions = makeSessions();
     toolDispatch = makeToolDispatch();
     raappHitl = makeRaappHitl();
+    agentBudgetApprovals = makeAgentBudgetApprovals();
+    sessionPipeline = makeSessionPipeline();
     repo = makeRepo();
     service = new ChatTestSupportService(
       config as never,
       sessions as never,
       toolDispatch as never,
       raappHitl as never,
+      agentBudgetApprovals as never,
+      sessionPipeline as never,
       repo as never,
     );
+  });
+
+  describe('seedBudgetReplayFixture()', () => {
+    it('seeds a pending budget approval and active turn replay for E2E/runtime proof', async () => {
+      const result = await service.seedBudgetReplayFixture({
+        sessionId: 'sess-budget',
+        requestId: 'budget-1',
+        promptMessage: 'Continue until you need more tool calls.',
+        currentLimit: 60,
+        usedIterations: 60,
+        turnId: 'turn-budget-1',
+        requestedBy: 'chat-agent',
+        personaId: 'researcher',
+      });
+
+      expect(sessions.get).toHaveBeenCalledWith('sess-budget');
+      expect(repo.saveMessage).toHaveBeenCalledTimes(1);
+      expect(repo.saveMessage.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+        sessionId: 'sess-budget',
+        role: 'user',
+        content: 'Continue until you need more tool calls.',
+      }));
+      expect(agentBudgetApprovals.seedPendingApproval).toHaveBeenCalledWith({
+        requestId: 'budget-1',
+        sessionId: 'sess-budget',
+        scope: 'chat',
+        usedIterations: 60,
+        currentLimit: 60,
+        suggestedNextLimit: 70,
+        requestedBy: 'chat-agent',
+        personaId: 'researcher',
+        nodeId: undefined,
+        roleSlotId: undefined,
+        agentRun: undefined,
+      } satisfies AgentBudgetApprovalRequest);
+      expect(sessionPipeline.seedActiveTurn).toHaveBeenCalledWith('sess-budget', 'turn-budget-1');
+      expect(result).toEqual({
+        requestId: 'budget-1',
+        sessionId: 'sess-budget',
+        scope: 'chat',
+        usedIterations: 60,
+        currentLimit: 60,
+        suggestedNextLimit: 70,
+        requestedBy: 'chat-agent',
+        personaId: 'researcher',
+        nodeId: undefined,
+        roleSlotId: undefined,
+        agentRun: undefined,
+      });
+    });
+
+    it('rejects budget replay seeding outside test mode before mutating runtime state', async () => {
+      config = makeConfig('development');
+      service = new ChatTestSupportService(
+        config as never,
+        sessions as never,
+        toolDispatch as never,
+        raappHitl as never,
+        agentBudgetApprovals as never,
+        sessionPipeline as never,
+        repo as never,
+      );
+
+      await expect(service.seedBudgetReplayFixture({
+        sessionId: 'sess-dev',
+        requestId: 'budget-dev',
+        promptMessage: 'Prompt',
+        currentLimit: 40,
+        usedIterations: 40,
+      })).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(sessions.get).not.toHaveBeenCalled();
+      expect(agentBudgetApprovals.seedPendingApproval).not.toHaveBeenCalled();
+      expect(sessionPipeline.seedActiveTurn).not.toHaveBeenCalled();
+      expect(repo.saveMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('dropPendingBudgetApproval()', () => {
+    it('drops the pending budget approval and clears seeded runtime state', () => {
+      const result = service.dropPendingBudgetApproval({
+        requestId: 'budget-1',
+        sessionId: 'sess-budget',
+      });
+
+      expect(agentBudgetApprovals.dropPendingApproval).toHaveBeenCalledWith('budget-1', 'sess-budget');
+      expect(sessionPipeline.clearSeededActiveTurn).toHaveBeenCalledWith('sess-budget');
+      expect(result).toEqual({ status: 'removed' });
+    });
+
+    it('does not clear seeded runtime state when the approval is not removed', () => {
+      agentBudgetApprovals.dropPendingApproval.mockReturnValue('session_mismatch');
+
+      const result = service.dropPendingBudgetApproval({
+        requestId: 'budget-1',
+        sessionId: 'sess-budget',
+      });
+
+      expect(agentBudgetApprovals.dropPendingApproval).toHaveBeenCalledWith('budget-1', 'sess-budget');
+      expect(sessionPipeline.clearSeededActiveTurn).not.toHaveBeenCalled();
+      expect(result).toEqual({ status: 'session_mismatch' });
+    });
   });
 
   describe('seedRaAppHitlFixture()', () => {
@@ -214,6 +336,8 @@ describe('ChatTestSupportService', () => {
         sessions as never,
         toolDispatch as never,
         raappHitl as never,
+        agentBudgetApprovals as never,
+        sessionPipeline as never,
         repo as never,
       );
 

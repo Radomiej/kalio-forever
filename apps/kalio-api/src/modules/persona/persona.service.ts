@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm';
 import type { PersonaGraphValidationResult } from './persona-graph-config';
 import { validatePersonaGraphConfig } from './persona-graph-config';
 import { buildLabPersonaSeeds } from './persona-lab-seeds';
+import { resolveCreateAvatar, resolvePersonaAvatar } from './persona-avatar.utils';
 
 @Injectable()
 export class PersonaService implements OnApplicationBootstrap {
@@ -32,7 +33,8 @@ export class PersonaService implements OnApplicationBootstrap {
           id,
           name: config.name,
           systemPrompt: config.systemPrompt,
-          model: config.model,
+          model: config.model ?? '',
+          maxToolAttempts: null,
           allowedTools: config.allowedTools,
           skillIds: config.skillIds ?? [],
           createdAt: now,
@@ -57,8 +59,9 @@ export class PersonaService implements OnApplicationBootstrap {
         if (this.shouldRefreshSeededSystemPrompt(id, existing.systemPrompt, config.systemPrompt)) {
           updatePayload.systemPrompt = config.systemPrompt;
         }
-        if (this.shouldRefreshSeededModel(existing.model, config.model)) {
-          updatePayload.model = config.model;
+        const seededModel = config.model ?? '';
+        if (this.shouldRefreshSeededModel(existing.model, seededModel)) {
+          updatePayload.model = seededModel;
         }
 
         await this.drizzle.db.update(personas).set(updatePayload).where(eq(personas.id, id));
@@ -152,7 +155,7 @@ export class PersonaService implements OnApplicationBootstrap {
     return false;
   }
 
-  private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model: string; allowedTools: string[]; skillIds?: string[] }> {
+  private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model?: string; allowedTools: string[]; skillIds?: string[] }> {
     try {
       const configPath = join(__dirname, '../../assets/personas.json');
       const configContent = readFileSync(configPath, 'utf-8');
@@ -180,15 +183,30 @@ export class PersonaService implements OnApplicationBootstrap {
   async create(dto: CreatePersonaDto): Promise<Persona> {
     const now = new Date();
     const id = nanoid();
-    await this.drizzle.db.insert(personas).values({ id, ...dto, createdAt: now, updatedAt: now });
+    const avatar = resolveCreateAvatar(dto);
+    const maxToolAttempts = this.normalizeMaxToolAttempts(dto.maxToolAttempts);
+    await this.drizzle.db.insert(personas).values({
+      id,
+      ...dto,
+      maxToolAttempts,
+      ...avatar,
+      createdAt: now,
+      updatedAt: now,
+    });
     return this.findOne(id);
   }
 
   async update(id: string, dto: UpdatePersonaDto): Promise<Persona> {
     await this.findOne(id);
+    const updateDto = {
+      ...dto,
+      ...(Object.prototype.hasOwnProperty.call(dto, 'maxToolAttempts')
+        ? { maxToolAttempts: this.normalizeMaxToolAttempts(dto.maxToolAttempts ?? null) }
+        : {}),
+    };
     await this.drizzle.db
       .update(personas)
-      .set({ ...dto, updatedAt: new Date() })
+      .set({ ...updateDto, updatedAt: new Date() })
       .where(eq(personas.id, id));
     return this.findOne(id);
   }
@@ -214,6 +232,7 @@ export class PersonaService implements OnApplicationBootstrap {
     return {
       systemPrompt: persona.systemPrompt,
       model: persona.model,
+      maxToolAttempts: persona.maxToolAttempts ?? null,
       allowedTools: persona.allowedTools ?? [],
       skillIds: persona.skillIds ?? [],
       mcpPolicy: persona.mcpPolicy ?? 'allow_all',
@@ -240,18 +259,47 @@ export class PersonaService implements OnApplicationBootstrap {
     return { id, personaId, key, value, updatedAt: nowMs };
   }
 
-  private mapRow(row: { id: string; name: string; systemPrompt: string; model: string; allowedTools: string[] | null; skillIds?: string[] | null; mcpPolicy?: string | null; createdAt: number | Date; updatedAt: number | Date }): Persona {
+  private mapRow(row: {
+    id: string;
+    name: string;
+    systemPrompt: string;
+    model: string;
+    maxToolAttempts?: number | null;
+    allowedTools: string[] | null;
+    skillIds?: string[] | null;
+    mcpPolicy?: string | null;
+    avatarSeed?: string | null;
+    avatarVariant?: string | null;
+    avatarPaletteKey?: string | null;
+    avatarIndex?: number | null;
+    createdAt: number | Date;
+    updatedAt: number | Date;
+  }): Persona {
     const toMs = (v: number | Date) => v instanceof Date ? v.getTime() : v;
+    const avatar = resolvePersonaAvatar(row);
     return {
       id: row.id,
       name: row.name,
       systemPrompt: row.systemPrompt,
       model: row.model,
+      maxToolAttempts: row.maxToolAttempts ?? null,
       allowedTools: row.allowedTools ?? [],
       skillIds: row.skillIds ?? [],
       mcpPolicy: (row.mcpPolicy as import('@kalio/types').MCPPolicy | null | undefined) ?? 'allow_all',
+      ...avatar,
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),
     };
+  }
+
+  private normalizeMaxToolAttempts(value: number | null | undefined): number | null {
+    if (value == null) {
+      return null;
+    }
+    const rounded = Math.round(value);
+    if (!Number.isFinite(rounded)) {
+      return null;
+    }
+    return Math.max(1, Math.min(100, rounded));
   }
 }

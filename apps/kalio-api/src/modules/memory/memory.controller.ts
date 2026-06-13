@@ -7,6 +7,7 @@
   Body,
   Param,
   Query,
+  Headers,
   HttpCode,
   HttpStatus,
   Logger,
@@ -103,9 +104,14 @@ export class MemoryController {
   }
 
   @Delete('web-search/dev-db')
-  async deleteWebSearchDb(): Promise<{ deletedPath: string }> {
-    if (process.env.NODE_ENV === 'production') {
-      throw new ForbiddenException('Deleting the web-search DB is disabled in production.');
+  async deleteWebSearchDb(
+    @Headers('x-kalio-test-dev-db-secret') testSecret?: string,
+  ): Promise<{ deletedPath: string }> {
+    const nodeEnv = this.config.get<string>('NODE_ENV', 'development');
+    const configuredSecret = this.config.get<string>('KALIO_TEST_DEV_DB_SECRET', '');
+    const secretAllowed = configuredSecret.length > 0 && testSecret === configuredSecret;
+    if (nodeEnv !== 'test' && !secretAllowed) {
+      throw new ForbiddenException('Deleting the web-search DB is only allowed in test environments.');
     }
     return { deletedPath: this.memoryService.deleteWebResultsDbFile() };
   }

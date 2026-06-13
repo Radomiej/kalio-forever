@@ -1,11 +1,14 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   type ExecutionGraphModel,
   type ExecutionGraphNode,
 } from './executionGraphModel';
 import { GraphSvgLayer } from '../../graph/GraphSvgLayer';
 import { GraphWorldLayer } from '../../graph/GraphWorldLayer';
-import { graphViewportCenter, graphViewportClassName, graphViewportPointFromClient, graphWorldDeltaFromClientDelta, hasGraphDragStarted, nextGraphPan, nextGraphPanForAutoPan, nextGraphPanForZoom, releasePointerCaptureIfHeld, shouldStartGraphPan, useGraphViewport, useGraphWheelListener, useSpacePanning } from '../../graph/useGraphInteraction';
+import { graphViewportCenter, graphViewportClassName, graphViewportPointFromClient, nextGraphPanForAutoPan, nextGraphPanForZoom, useGraphViewport, useGraphWheelListener, useSpacePanning } from '../../graph/useGraphInteraction';
+import { useGraphConnectorDragController } from '../../graph/controllers/useGraphConnectorDragController';
+import { useGraphNodeDragController } from '../../graph/controllers/useGraphNodeDragController';
+import { useGraphPanController } from '../../graph/controllers/useGraphPanController';
 import type { GraphCardDensity } from './ExecutionGraphBoard.types';
 import { ExecutionGraphNodeCard } from './ExecutionGraphNodeCard';
 import { ExecutionGraphOverview } from './ExecutionGraphOverview';
@@ -31,6 +34,15 @@ interface ExecutionGraphBoardProps {
 
 const READABLE_AUTO_FIT_MIN_ZOOM = 0.58;
 
+type ExecutionConnectorDragState = {
+  sourceNodeId: string;
+  direction: GraphConnectorDirection;
+  moved: boolean;
+  pointerId: number;
+  startX: number;
+  startY: number;
+};
+
 export function ExecutionGraphBoard({
   cardDensity = 'compact',
   model,
@@ -41,43 +53,9 @@ export function ExecutionGraphBoard({
   onFitZoom,
   onWheelZoom,
 }: ExecutionGraphBoardProps) {
-  const dragStateRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    panX: number;
-    panY: number;
-  } | null>(null);
-  const nodeDragRef = useRef<{
-    pointerId: number;
-    nodeId: string;
-    startClientX: number;
-    startClientY: number;
-    startNodeX: number;
-    startNodeY: number;
-    moved: boolean;
-  } | null>(null);
-  const connectorDragRef = useRef<{
-    direction: GraphConnectorDirection;
-    moved: boolean;
-    nodeId: string;
-    pointerId: number;
-    startClientX: number;
-    startClientY: number;
-  } | null>(null);
-  const suppressNodeClickRef = useRef(false);
   const fittedModelRef = useRef<string | null>(null);
   const previousZoomRef = useRef(zoom);
   const anchoredWheelZoomRef = useRef<number | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
-  const [draggingConnector, setDraggingConnector] = useState<{
-    direction: GraphConnectorDirection;
-    nodeId: string;
-    targetNodeId: string | null;
-    x: number;
-    y: number;
-  } | null>(null);
   const spacePanning = useSpacePanning();
   const {
     clientToWorld,
@@ -121,7 +99,7 @@ export function ExecutionGraphBoard({
   const scaledBoardWidth = model.board.width * zoom;
   const scaledBoardHeight = model.board.height * zoom;
 
-  const clampPanToViewport = (nextPan: { x: number; y: number }, nextZoom = zoom) => {
+  const clampPanToViewport = useCallback((nextPan: { x: number; y: number }, nextZoom = zoom) => {
     const viewport = viewportRef.current;
     if (!viewport) {
       return nextPan;
@@ -134,33 +112,52 @@ export function ExecutionGraphBoard({
       viewportWidth: bounds.width,
       zoom: nextZoom,
     });
-  };
+  }, [effectiveNodes, zoom]);
 
-  const graphPointFromClient = (clientX: number, clientY: number) => {
+  const panController = useGraphPanController({
+    pan,
+    setPan: (next) => {
+      if (typeof next === 'function') {
+        setPan((current) => clampPanToViewport(next(current)));
+        return;
+      }
+      setPan(clampPanToViewport(next));
+    },
+    spacePanning,
+    blockedSelector: '[data-graph-node-card="true"], [data-graph-edge-hitbox="true"]',
+    useMouseFallback: true,
+  });
+
+  const graphPointFromClient = useCallback((clientX: number, clientY: number) => {
     const viewport = viewportRef.current;
     if (!viewport) {
       return null;
     }
     const bounds = viewport.getBoundingClientRect();
     return clientToWorld(bounds, clientX, clientY);
-  };
+  }, [clientToWorld]);
 
-  const centerViewportOnWorldPoint = (worldPoint: { x: number; y: number }) => {
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-    const bounds = viewport.getBoundingClientRect();
-    setPan(clampPanToViewport({
-      x: Math.round(bounds.width / 2 - worldPoint.x * zoom),
-      y: Math.round(bounds.height / 2 - worldPoint.y * zoom),
-    }));
-  };
+  const nodeDrag = useGraphNodeDragController<ExecutionGraphNode>({
+    zoom,
+    spacePanning,
+    adapter: {
+      getNodeOrigin: (node) => ({ x: node.x, y: node.y }),
+      commitPosition: (nodeId, position) => {
+        setNodePositionOverrides((current) => ({
+          ...current,
+          [nodeId]: {
+            x: Math.round(position.x),
+            y: Math.round(position.y),
+          },
+        }));
+      },
+    },
+  });
 
-  const connectorTargetFromClient = (
+  const connectorTargetFromClient = useCallback((
     clientX: number,
     clientY: number,
-    dragState: { direction: GraphConnectorDirection; nodeId: string },
+    dragState: { direction: GraphConnectorDirection; sourceNodeId: string },
   ) => {
     if (typeof document.elementFromPoint !== 'function') {
       return null;
@@ -174,177 +171,77 @@ export function ExecutionGraphBoard({
     const targetDirection = pin?.dataset.graphConnectorDirection;
     const requiredDirection = dragState.direction === 'output' ? 'input' : 'output';
 
-    if (!targetNodeId || targetNodeId === dragState.nodeId || targetDirection !== requiredDirection) {
+    if (!targetNodeId || targetNodeId === dragState.sourceNodeId || targetDirection !== requiredDirection) {
       return null;
     }
 
     return targetNodeId;
-  };
+  }, []);
 
-  const updatePan = (clientX: number, clientY: number) => {
-    const dragState = dragStateRef.current;
-    if (!dragState) {
-      return;
-    }
-
-    setPan(clampPanToViewport(nextGraphPan({
-      pointerId: dragState.pointerId,
-      startX: dragState.startX,
-      startY: dragState.startY,
-      originX: dragState.panX,
-      originY: dragState.panY,
-    }, clientX, clientY)));
-  };
-
-  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 && event.button !== 1) {
-      return;
-    }
-
-    if (!shouldStartGraphPan({
-      blockedSelector: '[data-graph-node-card="true"], [data-graph-edge-hitbox="true"]',
-      button: event.button,
-      forcePan: spacePanning || event.altKey || event.button === 1,
-      target: event.target,
-    })) {
-      return;
-    }
-
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragStateRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      panX: pan.x,
-      panY: pan.y,
-    };
-    setDragging(true);
-  };
-
-  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    updatePan(event.clientX, event.clientY);
-  };
-
-  const stopDragging = (event: PointerEvent<HTMLDivElement>) => {
-    if (dragStateRef.current) {
-      releasePointerCaptureIfHeld(event.currentTarget, dragStateRef.current.pointerId);
-    }
-    dragStateRef.current = null;
-    setDragging(false);
-  };
-
-  const handleMouseDown = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.button !== 0 && event.button !== 1) {
-      return;
-    }
-
-    if (!shouldStartGraphPan({
-      blockedSelector: '[data-graph-node-card="true"], [data-graph-edge-hitbox="true"]',
-      button: event.button,
-      forcePan: spacePanning || event.altKey || event.button === 1,
-      target: event.target,
-    })) {
-      return;
-    }
-
-    event.preventDefault();
-    dragStateRef.current = {
-      pointerId: -1,
-      startX: event.clientX,
-      startY: event.clientY,
-      panX: pan.x,
-      panY: pan.y,
-    };
-    setDragging(true);
-  };
-
-  const handleMouseMove = (event: MouseEvent<HTMLDivElement>) => {
-    updatePan(event.clientX, event.clientY);
-  };
-
-  const stopMouseDragging = () => {
-    dragStateRef.current = null;
-    setDragging(false);
-  };
-
-  const handleNodePointerDown = (event: PointerEvent<HTMLElement>, node: ExecutionGraphNode) => {
-    if (event.button !== 0 && event.button !== undefined) {
-      return;
-    }
-    if (spacePanning || event.altKey) {
-      return;
-    }
-
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    nodeDragRef.current = {
-      pointerId: event.pointerId,
-      nodeId: node.id,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startNodeX: node.x,
-      startNodeY: node.y,
+  const connectorDrag = useGraphConnectorDragController<ExecutionConnectorDragState>({
+    createDragState: (event, meta) => ({
+      ...meta,
       moved: false,
-    };
-    setDraggingNodeId(node.id);
-  };
-
-  const handleNodePointerMove = (event: PointerEvent<HTMLElement>) => {
-    const dragState = nodeDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    event.stopPropagation();
-    if (!dragState.moved && !hasGraphDragStarted({
-      startX: dragState.startClientX,
-      startY: dragState.startClientY,
-      clientX: event.clientX,
-      clientY: event.clientY,
-    })) {
-      return;
-    }
-
-    const delta = graphWorldDeltaFromClientDelta({
-      startX: dragState.startClientX,
-      startY: dragState.startClientY,
-      clientX: event.clientX,
-      clientY: event.clientY,
-      zoom,
-    });
-    dragState.moved = true;
-    setNodePositionOverrides((current) => ({
-      ...current,
-      [dragState.nodeId]: {
-        x: Math.round(dragState.startNodeX + delta.x),
-        y: Math.round(dragState.startNodeY + delta.y),
+      pointerId: event.pointerId ?? 0,
+      startX: event.clientX,
+      startY: event.clientY,
+    }),
+    adapter: {
+      resolveDropTarget: (clientX, clientY, state) => connectorTargetFromClient(clientX, clientY, state),
+      onCommit: (_sourceNodeId, targetNodeId, moved) => {
+        if (moved && targetNodeId) {
+          onSelectNode(targetNodeId);
+        }
       },
+      applyAutoPan: (clientX, clientY) => {
+        const bounds = viewportRef.current?.getBoundingClientRect();
+        if (bounds) {
+          setPan((currentPan) => clampPanToViewport(nextGraphPanForAutoPan({
+            bounds,
+            clientX,
+            clientY,
+            pan: currentPan,
+          })));
+        }
+      },
+      clientToPreviewPoint: graphPointFromClient,
+      getAutoPanBounds: () => viewportRef.current?.getBoundingClientRect() ?? null,
+      canStart: (event) => !spacePanning && !event.altKey,
+    },
+  });
+
+  const { resetPan, resetDrag, resetConnector } = {
+    resetPan: panController.resetPan,
+    resetDrag: nodeDrag.resetDrag,
+    resetConnector: connectorDrag.resetConnector,
+  };
+  const resetInteraction = useCallback(() => {
+    resetPan();
+    resetDrag();
+    resetConnector();
+  }, [resetConnector, resetDrag, resetPan]);
+
+  const centerViewportOnWorldPoint = (worldPoint: { x: number; y: number }) => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const bounds = viewport.getBoundingClientRect();
+    setPan(clampPanToViewport({
+      x: Math.round(bounds.width / 2 - worldPoint.x * zoom),
+      y: Math.round(bounds.height / 2 - worldPoint.y * zoom),
     }));
   };
 
-  const stopNodeDragging = (event: PointerEvent<HTMLElement>) => {
-    const dragState = nodeDragRef.current;
-    if (dragState) {
-      releasePointerCaptureIfHeld(event.currentTarget, dragState.pointerId);
-    }
-    if (dragState?.moved) {
-      suppressNodeClickRef.current = true;
-    }
-    nodeDragRef.current = null;
-    setDraggingNodeId(null);
-  };
-
   const handleNodeClick = (nodeId: string) => {
-    if (suppressNodeClickRef.current) {
-      suppressNodeClickRef.current = false;
+    if (nodeDrag.consumeSuppressNextClick()) {
       return;
     }
     onSelectNode(nodeId);
   };
 
   const handleConnectorPointerDown = (
-    event: PointerEvent<HTMLButtonElement>,
+    event: Parameters<typeof connectorDrag.handlers.onPointerDown>[0],
     node: ExecutionGraphNode,
     direction: GraphConnectorDirection,
   ) => {
@@ -354,72 +251,14 @@ export function ExecutionGraphBoard({
     if (spacePanning || event.altKey) {
       return;
     }
-    event.preventDefault();
-    event.stopPropagation();
-    if (typeof event.currentTarget.setPointerCapture === 'function') {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }
-    connectorDragRef.current = {
-      direction,
-      moved: false,
-      nodeId: node.id,
-      pointerId: event.pointerId,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-    };
     onSelectNode(node.id);
-  };
-
-  const handleConnectorPointerMove = (event: PointerEvent<HTMLButtonElement>) => {
-    const dragState = connectorDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return;
-    }
-    if (!dragState.moved && !hasGraphDragStarted({
-      startX: dragState.startClientX,
-      startY: dragState.startClientY,
-      clientX: event.clientX,
-      clientY: event.clientY,
-    })) {
-      return;
-    }
-    const point = graphPointFromClient(event.clientX, event.clientY);
-    if (!point) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    dragState.moved = true;
-    setDraggingConnector({
-      direction: dragState.direction,
-      nodeId: dragState.nodeId,
-      targetNodeId: connectorTargetFromClient(event.clientX, event.clientY, dragState),
-      x: point.x,
-      y: point.y,
+    connectorDrag.handlers.onPointerDown(event, {
+      sourceNodeId: node.id,
+      direction,
     });
-    const bounds = viewportRef.current?.getBoundingClientRect();
-    if (bounds) {
-      setPan((currentPan) => clampPanToViewport(nextGraphPanForAutoPan({
-        bounds,
-        clientX: event.clientX,
-        clientY: event.clientY,
-        pan: currentPan,
-      })));
-    }
   };
 
-  const stopConnectorDragging = (event: PointerEvent<HTMLButtonElement>) => {
-    const dragState = connectorDragRef.current;
-    const targetNodeId = dragState?.moved ? connectorTargetFromClient(event.clientX, event.clientY, dragState) : null;
-    if (dragState) {
-      releasePointerCaptureIfHeld(event.currentTarget, dragState.pointerId);
-    }
-    connectorDragRef.current = null;
-    setDraggingConnector(null);
-    if (targetNodeId) {
-      onSelectNode(targetNodeId);
-    }
-  };
+  const draggingConnector = connectorDrag.draggingConnector;
 
   useGraphWheelListener(viewportRef, (event, viewport) => {
     if (!onWheelZoom) {
@@ -464,7 +303,7 @@ export function ExecutionGraphBoard({
       camera: { pan: currentPan, zoom: previousZoom },
       nextZoom: zoom,
     }), zoom));
-  }, [zoom]);
+  }, [clampPanToViewport, zoom]);
 
   useEffect(() => {
     setZoom(zoom);
@@ -560,24 +399,23 @@ export function ExecutionGraphBoard({
     } else {
       setPan({ x: 0, y: 0 });
     }
-    dragStateRef.current = null;
-    setDragging(false);
-  }, [effectiveNodes, onFitZoom, resetViewportToken, zoom]);
+    resetInteraction();
+  }, [effectiveNodes, onFitZoom, resetInteraction, resetViewportToken, zoom]);
 
   return (
     <div
       ref={viewportRef}
       data-testid="execution-graph-viewport"
-      className={graphViewportClassName({ dragging, extraClassName: 'relative min-h-[320px] flex-1 xl:min-h-0' })}
+      className={graphViewportClassName({ dragging: panController.dragging, extraClassName: 'relative min-h-[320px] flex-1 xl:min-h-0' })}
       data-space-panning={spacePanning ? 'true' : 'false'}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={stopDragging}
-      onPointerCancel={stopDragging}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={stopMouseDragging}
-      onMouseLeave={stopMouseDragging}
+      onPointerDown={panController.handlers.onPointerDown}
+      onPointerMove={panController.handlers.onPointerMove}
+      onPointerUp={panController.handlers.onPointerUp}
+      onPointerCancel={panController.handlers.onPointerCancel}
+      onMouseDown={panController.handlers.onMouseDown}
+      onMouseMove={panController.handlers.onMouseMove}
+      onMouseUp={panController.handlers.onMouseUp}
+      onMouseLeave={panController.handlers.onMouseLeave}
     >
       <GraphWorldLayer
         camera={{ pan, zoom }}
@@ -595,11 +433,6 @@ export function ExecutionGraphBoard({
               pointerEvents="auto"
               width={model.board.width}
             >
-              <defs>
-                <marker id="graph-arrow" viewBox="0 0 8 8" refX="6.6" refY="4" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
-                  <path d="M 0 0 L 8 4 L 0 8 z" fill="rgba(125, 211, 252, 0.78)" />
-                </marker>
-              </defs>
               {model.edges.map((edge) => {
                 const source = nodeById.get(edge.sourceId);
                 const target = nodeById.get(edge.targetId);
@@ -635,25 +468,27 @@ export function ExecutionGraphBoard({
                       }}
                     />
                     <path
-                      data-testid={`graph-edge-${edge.id}`}
-                      data-related={related ? 'true' : 'false'}
-                      d={path}
-                      fill="none"
-                      markerEnd="url(#graph-arrow)"
-                      stroke={related ? (edge.style === 'dashed' ? 'rgba(186,230,253,0.72)' : 'rgba(125,211,252,0.92)') : (edge.style === 'dashed' ? 'rgba(148,163,184,0.5)' : 'rgba(125,211,252,0.68)')}
-                      strokeDasharray={edge.style === 'dashed' ? '7 8' : undefined}
-                      strokeLinecap="round"
-                      strokeWidth={related ? 4 : edge.style === 'dashed' ? 2 : 3}
-                      className="pointer-events-none transition-[stroke-width,filter] group-hover:drop-shadow-[0_0_8px_rgba(125,211,252,0.42)]"
+                    data-testid={`graph-edge-${edge.id}`}
+                    data-related={related ? 'true' : 'false'}
+                    d={path}
+                    fill="none"
+                    stroke={related ? (edge.style === 'dashed' ? 'rgba(186,230,253,0.72)' : 'rgba(125,211,252,0.92)') : (edge.style === 'dashed' ? 'rgba(148,163,184,0.5)' : 'rgba(125,211,252,0.68)')}
+                    strokeDasharray={edge.style === 'dashed' ? '7 8' : undefined}
+                    strokeLinecap="round"
+                    strokeWidth={related ? 4 : edge.style === 'dashed' ? 2 : 3}
+                    className="pointer-events-none transition-[stroke-width,filter] group-hover:drop-shadow-[0_0_8px_rgba(125,211,252,0.42)]"
                     />
                   </g>
                 );
               })}
-              {draggingConnector && nodeById.has(draggingConnector.nodeId) ? (
+              {draggingConnector && nodeById.has(draggingConnector.sourceNodeId) ? (
                 <path
-                  d={buildConnectorPreviewPath(nodeById.get(draggingConnector.nodeId)!, draggingConnector, draggingConnector.direction)}
+                  d={buildConnectorPreviewPath(
+                    nodeById.get(draggingConnector.sourceNodeId)!,
+                    draggingConnector.previewPoint,
+                    draggingConnector.direction as GraphConnectorDirection,
+                  )}
                   fill="none"
-                  markerEnd={draggingConnector.direction === 'output' ? 'url(#graph-arrow)' : undefined}
                   stroke="rgba(14,165,233,0.92)"
                   strokeDasharray="6 7"
                   strokeLinecap="round"
@@ -684,16 +519,16 @@ export function ExecutionGraphBoard({
                 key={node.id}
                 node={node}
                 related={(relatedNodeIds?.has(node.id) ?? true) || node.id === draggingConnector?.targetNodeId}
-                selected={node.id === selectedNodeId || node.id === draggingNodeId || node.id === draggingConnector?.targetNodeId}
+                selected={node.id === selectedNodeId || node.id === nodeDrag.draggingNodeId || node.id === draggingConnector?.targetNodeId}
                 onSelect={() => handleNodeClick(node.id)}
-                onPointerDown={handleNodePointerDown}
-                onPointerMove={handleNodePointerMove}
-                onPointerUp={stopNodeDragging}
-                onPointerCancel={stopNodeDragging}
+                onPointerDown={nodeDrag.handlers.onPointerDown}
+                onPointerMove={nodeDrag.handlers.onPointerMove}
+                onPointerUp={nodeDrag.handlers.onPointerUp}
+                onPointerCancel={nodeDrag.handlers.onPointerCancel}
                 onConnectorPointerDown={handleConnectorPointerDown}
-                onConnectorPointerMove={handleConnectorPointerMove}
-                onConnectorPointerUp={stopConnectorDragging}
-                onConnectorPointerCancel={stopConnectorDragging}
+                onConnectorPointerMove={connectorDrag.handlers.onPointerMove}
+                onConnectorPointerUp={connectorDrag.handlers.onPointerUp}
+                onConnectorPointerCancel={connectorDrag.handlers.onPointerCancel}
                 spacePanning={spacePanning}
                 zoom={zoom}
               />

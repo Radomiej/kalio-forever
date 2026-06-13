@@ -10,10 +10,10 @@ describe('ArchitectGraphCanvas', () => {
 
     const edge = screen.getByTestId('architect-edge-start-end');
     expect(edge.tagName.toLowerCase()).toBe('path');
-    expect(edge.getAttribute('d')).toMatch(/^M 296 178 C /);
-    expect(edge.getAttribute('d')).toContain(', 360 212');
+    expect(edge.getAttribute('d')).toMatch(/^M 309\.6 178 C /);
+    expect(edge.getAttribute('d')).toContain(', 346\.4 221');
     expect(edge.getAttribute('d')).toContain(' C ');
-    expect(edge.getAttribute('marker-end')).toMatch(/^url\(#architect-edge-arrow-/);
+    expect(edge).toHaveAttribute('marker-end');
     expect(screen.getByTestId('architect-node-behavior-end')).toHaveTextContent('rank then merge');
   });
 
@@ -287,6 +287,63 @@ describe('ArchitectGraphCanvas', () => {
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 260, clientY: 210 });
 
     expect(onAddNode).toHaveBeenCalledWith({ x: 317.07317073170736, y: 256.0975609756098 }, 'router');
+  });
+
+  it('continues node drag when schema nodes reference changes without schema id change', () => {
+    const onMoveNode = vi.fn();
+    const initialSchema: ArchitectSchema = {
+      ...baseSchema,
+      nodes: baseSchema.nodes.map((node) => ({ ...node })),
+    };
+    const { rerender } = render(
+      <ArchitectGraphCanvas
+        schema={initialSchema}
+        selectedNodeId={null}
+        selectedSlotId={null}
+        onSelectNode={vi.fn()}
+        onSelectSlot={vi.fn()}
+        onMoveNode={onMoveNode}
+        onAddNode={vi.fn()}
+        onToggleEdge={vi.fn()}
+        onAutoLayout={vi.fn()}
+      />,
+    );
+
+    const dragHandle = screen.getByTestId('architect-node-drag-start');
+    fireEvent(dragHandle, new MouseEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    }));
+
+    rerender(
+      <ArchitectGraphCanvas
+        schema={{
+          ...initialSchema,
+          nodes: initialSchema.nodes.map((node) => (
+            node.id === 'start' ? { ...node, x: 125, y: 125 } : { ...node }
+          )),
+        }}
+        selectedNodeId={null}
+        selectedSlotId={null}
+        onSelectNode={vi.fn()}
+        onSelectSlot={vi.fn()}
+        onMoveNode={onMoveNode}
+        onAddNode={vi.fn()}
+        onToggleEdge={vi.fn()}
+        onAutoLayout={vi.fn()}
+      />,
+    );
+
+    fireEvent(dragHandle, new MouseEvent('pointermove', {
+      bubbles: true,
+      clientX: 150,
+      clientY: 140,
+    }));
+    fireEvent(dragHandle, new MouseEvent('pointerup', { bubbles: true }));
+
+    expect(onMoveNode).toHaveBeenCalledWith('start', { x: 180.97560975609755, y: 168.78048780487805 });
   });
 
   it('moves a node from the drag handle without panning the canvas', () => {

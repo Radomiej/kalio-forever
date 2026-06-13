@@ -36,14 +36,6 @@ function installFetchQueue(routes: Record<string, MockReply[]>): ReturnType<type
   return fetchMock;
 }
 
-function setDirectoryPicker(impl?: () => Promise<{ name: string }>): void {
-  Object.defineProperty(window, 'showDirectoryPicker', {
-    value: impl,
-    configurable: true,
-    writable: true,
-  });
-}
-
 const EXISTING_PATH: AllowedPath = {
   id: 'path-1',
   path: '/workspace/project',
@@ -53,7 +45,6 @@ const EXISTING_PATH: AllowedPath = {
 describe('AllowedPathsPanel', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    setDirectoryPicker(undefined);
   });
 
   it('renders loaded paths and empty state', async () => {
@@ -107,75 +98,14 @@ describe('AllowedPathsPanel', () => {
     });
   });
 
-  it('shows a manual-entry error when the native directory picker is unavailable', async () => {
-    const user = userEvent.setup();
+  it('keeps allowed paths as manual absolute-path entry only', async () => {
     installFetchQueue({
       'GET /api/allowed-paths': [[]],
     });
 
     render(<AllowedPathsPanel />);
 
-    const input = await screen.findByTestId('allowed-path-input');
-    await user.click(screen.getByTitle('Pick folder (if browser supports it)'));
-
-    expect(await screen.findByText(/Native folder picker is not available/i)).toBeInTheDocument();
-    expect(input).toHaveFocus();
-  });
-
-  it('uses the native picker result as a hint and surfaces unexpected picker errors', async () => {
-    const user = userEvent.setup();
-    installFetchQueue({
-      'GET /api/allowed-paths': [[], []],
-    });
-
-    const { rerender } = render(<AllowedPathsPanel />);
-
-    const successPicker = vi.fn(async () => ({ name: 'picked-folder' }));
-    setDirectoryPicker(successPicker);
-
-    const input = await screen.findByTestId('allowed-path-input');
-    await user.click(screen.getByTitle('Pick folder (if browser supports it)'));
-
-    await waitFor(() => {
-      expect(successPicker).toHaveBeenCalled();
-      expect(input).toHaveValue('picked-folder');
-      expect(input).toHaveFocus();
-    });
-
-    const failingPicker = vi.fn(async () => {
-      throw new Error('Picker crashed');
-    });
-    setDirectoryPicker(failingPicker);
-
-    rerender(<AllowedPathsPanel />);
     await screen.findByTestId('allowed-path-input');
-    await user.click(screen.getByTitle('Pick folder (if browser supports it)'));
-
-    expect(await screen.findByText('Picker crashed')).toBeInTheDocument();
-  });
-
-  it('ignores AbortError from the native directory picker', async () => {
-    const user = userEvent.setup();
-    installFetchQueue({
-      'GET /api/allowed-paths': [[]],
-    });
-
-    const abortError = new Error('User cancelled');
-    abortError.name = 'AbortError';
-    const picker = vi.fn(async () => {
-      throw abortError;
-    });
-    setDirectoryPicker(picker);
-
-    render(<AllowedPathsPanel />);
-
-    await screen.findByTestId('allowed-path-input');
-    await user.click(screen.getByTitle('Pick folder (if browser supports it)'));
-
-    await waitFor(() => {
-      expect(picker).toHaveBeenCalled();
-    });
-    expect(screen.queryByText('User cancelled')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Failed to open directory picker/i)).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Pick folder (if browser supports it)')).not.toBeInTheDocument();
   });
 });

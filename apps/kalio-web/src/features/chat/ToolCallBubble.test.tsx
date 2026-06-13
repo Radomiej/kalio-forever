@@ -10,6 +10,7 @@ import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
 import { HistoryToolCallBubble, LiveToolCallBubble } from './ToolCallBubble';
 import type { ToolActivity } from '../../store/agentStore';
+import { useAgentStore } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -121,6 +122,33 @@ describe('LiveToolCallBubble — status indicator only (no widget)', () => {
     expect(screen.getByText('run_subagent')).toBeInTheDocument();
   });
 
+  it('hides the spawn_cli_agent tool chip while the CLI child card is the primary view', () => {
+    const activity = makeActivity({
+      toolName: 'spawn_cli_agent',
+      status: 'running',
+      args: { prompt: 'Inspect the repository', agentId: 'codex', workdir: 'C:/repo' },
+      result: {
+        callId: 'call-cli-session',
+        status: 'success',
+        data: {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'running',
+          lastPrompt: 'Inspect the repository',
+          updatedAt: Date.now(),
+          lastOutput: 'Scanning files...',
+        },
+      },
+    });
+
+    render(<LiveToolCallBubble activity={activity} />);
+
+    expect(screen.getByTestId('cli-child-card-cli-child-1')).toBeInTheDocument();
+    expect(screen.queryByText('spawn_cli_agent')).not.toBeInTheDocument();
+  });
+
   it('renders durable CLI session snapshots instead of raw JSON blobs', () => {
     const activity = makeActivity({
       toolName: 'spawn_cli_agent',
@@ -145,10 +173,11 @@ describe('LiveToolCallBubble — status indicator only (no widget)', () => {
 
     render(<LiveToolCallBubble activity={activity} />);
 
-    expect(screen.getByText('running')).toBeInTheDocument();
-    expect(screen.getAllByText('cli-child-1').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('cli-child-card-cli-child-1')).toBeInTheDocument();
+    expect(screen.getByTestId('cli-child-status-cli-child-1')).toHaveTextContent('running');
     expect(screen.getByText('Scanning files...')).toBeInTheDocument();
     expect(screen.queryByText(/"childSessionId": "cli-child-1"/)).not.toBeInTheDocument();
+    expect(screen.queryByText('spawn_cli_agent')).not.toBeInTheDocument();
   });
 });
 
@@ -258,27 +287,39 @@ describe('HistoryToolCallBubble — tool input args display', () => {
 });
 
 describe('HistoryToolCallBubble - CLI terminal output', () => {
-  it('renders run_cli_agent results through the terminal output block and collapses on toggle', () => {
+  it('renders run_cli_agent results through the CLI child conversation card', () => {
+    useAgentStore.setState({
+      cliChildProjections: {
+        'cli-child-1': {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          parentCallId: 'call-cli-1',
+          agentId: 'codex',
+          status: 'failed',
+          lastOutput: 'Focused test run complete',
+          toolName: 'run_cli_agent',
+        },
+      },
+    });
+
     render(
       <HistoryToolCallBubble
         toolName="run_cli_agent"
+        callId="call-cli-1"
+        parentSessionId="session-1"
         content={JSON.stringify({
           output: 'Focused test run complete',
           exitCode: 1,
           durationMs: 1_250,
           agentId: 'codex',
+          childSessionId: 'cli-child-1',
         })}
       />,
     );
 
-    expect(screen.getByText('Codex CLI')).toBeInTheDocument();
+    expect(screen.getByTestId('cli-child-card-cli-child-1')).toBeInTheDocument();
     expect(screen.getByText('Focused test run complete')).toBeInTheDocument();
-    expect(screen.getByText('exit=1')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /toggle details/i }));
-
-    expect(screen.queryByText('Focused test run complete')).not.toBeInTheDocument();
-    expect(screen.queryByText('exit=1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cli-child-status-cli-child-1')).toHaveTextContent('failed');
   });
 });
 
@@ -582,6 +623,48 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
 
     expect(screen.getByText('Verbose implementation summary')).toBeInTheDocument();
     expect(screen.getByText('sub-agents/sub-1/design/preview.html')).toBeInTheDocument();
+  });
+
+  it('hides history spawn_cli_agent chip until inspect is requested', () => {
+    useAgentStore.setState({
+      cliChildProjections: {
+        'cli-child-1': {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          parentCallId: 'call-cli-1',
+          agentId: 'codex',
+          status: 'completed',
+          lastOutput: 'Done',
+          toolName: 'spawn_cli_agent',
+          childTitle: 'codex CLI',
+        },
+      },
+    });
+
+    render(
+      <HistoryToolCallBubble
+        toolName="spawn_cli_agent"
+        callId="call-cli-1"
+        parentSessionId="session-1"
+        content={JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'completed',
+          lastPrompt: 'Inspect the repository',
+          updatedAt: Date.now(),
+          lastOutput: 'Done',
+        })}
+        args={{ prompt: 'Inspect the repository', agentId: 'codex', workdir: 'C:/repo' }}
+      />,
+    );
+
+    expect(screen.getByTestId('cli-child-card-cli-child-1')).toBeInTheDocument();
+    expect(screen.queryByText('spawn_cli_agent')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('cli-child-inspect-cli-child-1'));
+    expect(screen.getByText('spawn_cli_agent')).toBeInTheDocument();
   });
 
   it('renders durable CLI session status for message_cli_agent history results without requiring an exit code', () => {

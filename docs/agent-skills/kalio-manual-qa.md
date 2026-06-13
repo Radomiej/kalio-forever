@@ -14,13 +14,17 @@ Test Kalio like a user, then support the conclusion with API/terminal evidence. 
 
 ## Required Setup
 
-1. Read `kalio-forever` and `C:\Projekty\kalio-forever\AGENTS.md`.
+1. Read `kalio-forever`, `C:\Projekty\kalio-forever\AGENTS.md`, and `docs/local-dev-guide.md`.
 2. Use dev-servers MCP for Kalio lifecycle; managed service id is `kalio-955d95b1`.
-3. Use `http://localhost:5188` for Kalio UI and Playwright Orchestrator for UI flows/screenshots.
-4. Use API calls only as supporting evidence: health, run status, sessions, graph, chat.
-5. Before a mock/local AgentFlow run, verify `/api/llm/config` shows the intended provider. Do not proceed if `.env` or a saved DB credential silently switches the stack to a live provider.
-6. Manual QA must work from `http://localhost:5188`; the stack must allow both `localhost` and `127.0.0.1` origins so browser evidence is not invalidated by CORS.
-7. If the QA MCP tools are missing in Kalio, import `.vscode/mcp.json` from Settings -> MCP Servers -> Import Existing MCP Configs, or copy `docs/examples/kalio-agent-qa-mcp.config.toml` into a real `.kalio/config.toml`.
+3. Pick the right stack:
+   - **Dev (hot reload):** `pnpm dev` → UI http://localhost:5188, API http://localhost:3016
+   - **QA (stable dist):** `pnpm qa` or `pnpm qa:rebuild` → UI http://localhost:5288, API http://localhost:3316
+   - **Managed QA (random ports):** `pnpm stack:start` → URLs from `pnpm stack:status`
+4. Use Playwright Orchestrator for UI flows/screenshots.
+5. Use API calls only as supporting evidence: health, run status, sessions, graph, chat.
+6. Before a mock/local AgentFlow run, verify `/api/llm/config` shows the intended provider. Do not proceed if `.env` or a saved DB credential silently switches the stack to a live provider.
+7. Manual QA must allow both `localhost` and `127.0.0.1` origins so browser evidence is not invalidated by CORS.
+8. If the QA MCP tools are missing in Kalio, import `.vscode/mcp.json` from Settings -> MCP Servers -> Import Existing MCP Configs, or copy `docs/examples/kalio-agent-qa-mcp.config.toml` into a real `.kalio/config.toml`.
 
 ## Architecture QA
 

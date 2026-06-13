@@ -2,7 +2,20 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import type { ChatMessage, ChatSession, Persona } from '@kalio/types';
 import type { ArchitectSchema } from '../architect/architect.types';
-import { buildCopiedChatText, ChatWelcomeScreen } from './ChatInterface.Parts';
+import { buildCopiedChatText, ChatSessionHeader, ChatWelcomeScreen } from './ChatInterface.Parts';
+import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
+
+vi.mock('../vfs/ConversationFilesBar', () => ({
+  ConversationFilesBar: () => <div data-testid="conversation-files-bar" />,
+}));
+
+vi.mock('./TokenBadge', () => ({
+  TokenBadge: () => <div data-testid="token-badge" />,
+}));
+
+vi.mock('./ContextStats', () => ({
+  ContextStats: () => <div data-testid="context-stats" />,
+}));
 
 function msg(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -92,21 +105,35 @@ describe('ChatWelcomeScreen', () => {
   it('runs the prompt through the selected architecture instead of direct chat', () => {
     const onArchitectureRun = vi.fn();
     const onSend = vi.fn();
+    const onArchitectureChange = vi.fn();
     render(
       <ChatWelcomeScreen
         activeSession={session()}
         activeSessionId="sess-1"
         architectures={[schema()]}
         isStreaming={false}
-        onArchitectureChange={vi.fn()}
+        onArchitectureChange={onArchitectureChange}
         onArchitectureRun={onArchitectureRun}
         onDraftChange={vi.fn()}
         onPersonaChange={vi.fn()}
+        onProjectPathChange={vi.fn()}
         onSend={onSend}
         personas={[persona()]}
+        projectPath=""
+        selectedPersonaId="default"
         selectedArchitectureId="strategic-decision-council"
       />,
     );
+
+    expect(onArchitectureChange).toHaveBeenCalledWith('single-chat');
+    expect(screen.getByTestId('welcome-persona-select')).toBeInTheDocument();
+    expect(screen.queryByTestId('welcome-architecture-select')).not.toBeInTheDocument();
+    expect(screen.getByTestId('welcome-routing-summary')).toHaveTextContent('Chat runtime: Default');
+
+    fireEvent.click(screen.getByTestId('welcome-mode-workflow'));
+    expect(screen.queryByTestId('welcome-persona-select')).not.toBeInTheDocument();
+    expect(screen.getByTestId('welcome-architecture-select')).toBeInTheDocument();
+    expect(screen.getByTestId('welcome-routing-summary')).toHaveTextContent('Workflow runtime: Strategic Decision Council');
 
     fireEvent.change(screen.getByTestId('welcome-prompt-input'), {
       target: { value: 'Decide with the council.' },
@@ -115,7 +142,6 @@ describe('ChatWelcomeScreen', () => {
 
     expect(onArchitectureRun).toHaveBeenCalledWith('Decide with the council.', 'strategic-decision-council');
     expect(onSend).not.toHaveBeenCalled();
-    expect(screen.getByTestId('welcome-routing-summary')).toHaveTextContent('Graph runtime: Strategic Decision Council');
   });
 
   it('keeps direct chat available when Single Chat is selected', () => {
@@ -131,11 +157,17 @@ describe('ChatWelcomeScreen', () => {
         onArchitectureRun={onArchitectureRun}
         onDraftChange={vi.fn()}
         onPersonaChange={vi.fn()}
+        onProjectPathChange={vi.fn()}
         onSend={onSend}
         personas={[persona()]}
+        projectPath=""
+        selectedPersonaId="default"
         selectedArchitectureId="single-chat"
       />,
     );
+
+    expect(screen.getByTestId('welcome-persona-select')).toBeInTheDocument();
+    expect(screen.queryByTestId('welcome-architecture-select')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId('welcome-prompt-input'), {
       target: { value: 'Answer normally.' },
@@ -144,7 +176,177 @@ describe('ChatWelcomeScreen', () => {
 
     expect(onSend).toHaveBeenCalledWith('Answer normally.', 'default');
     expect(onArchitectureRun).not.toHaveBeenCalled();
-    expect(screen.getByTestId('welcome-routing-summary')).toHaveTextContent('Direct chat runtime');
+    expect(screen.getByTestId('welcome-routing-summary')).toHaveTextContent('Chat runtime: Default');
+  });
+
+  it('swaps persona and workflow controls when the launch mode changes', () => {
+    const onArchitectureChange = vi.fn();
+    const onPersonaChange = vi.fn();
+
+    render(
+      <ChatWelcomeScreen
+        activeSession={session()}
+        activeSessionId="sess-1"
+        architectures={[schema()]}
+        isStreaming={false}
+        onArchitectureChange={onArchitectureChange}
+        onArchitectureRun={vi.fn()}
+        onDraftChange={vi.fn()}
+        onPersonaChange={onPersonaChange}
+        onProjectPathChange={vi.fn()}
+        onSend={vi.fn()}
+        personas={[persona(), persona({ id: 'qa', name: 'QA' })]}
+        projectPath=""
+        selectedPersonaId="default"
+        selectedArchitectureId="single-chat"
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('welcome-persona-select'), {
+      target: { value: 'qa' },
+    });
+    expect(onPersonaChange).toHaveBeenCalledWith('qa');
+
+    fireEvent.click(screen.getByTestId('welcome-mode-workflow'));
+    expect(screen.queryByTestId('welcome-persona-select')).not.toBeInTheDocument();
+    expect(screen.getByTestId('welcome-architecture-select')).toHaveValue('strategic-decision-council');
+    expect(onArchitectureChange).toHaveBeenCalledWith('strategic-decision-council');
+
+    fireEvent.click(screen.getByTestId('welcome-mode-chat'));
+    expect(screen.getByTestId('welcome-persona-select')).toBeInTheDocument();
+    expect(screen.queryByTestId('welcome-architecture-select')).not.toBeInTheDocument();
+  });
+
+  it('keeps the project path editable for launch scope', () => {
+    const onProjectPathChange = vi.fn();
+
+    render(
+      <ChatWelcomeScreen
+        activeSession={session()}
+        activeSessionId="sess-1"
+        architectures={[schema()]}
+        isStreaming={false}
+        onArchitectureChange={vi.fn()}
+        onArchitectureRun={vi.fn()}
+        onDraftChange={vi.fn()}
+        onPersonaChange={vi.fn()}
+        onProjectPathChange={onProjectPathChange}
+        onSend={vi.fn()}
+        personas={[persona()]}
+        projectPath="C:\\Projekty\\kalio-forever"
+        selectedPersonaId="default"
+        selectedArchitectureId="single-chat"
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('welcome-project-path-input'), {
+      target: { value: 'C:\\Projekty\\family-quest' },
+    });
+
+    expect(onProjectPathChange).toHaveBeenCalledWith('C:\\Projekty\\family-quest');
+  });
+
+});
+
+describe('ChatSessionHeader', () => {
+  it('shows architecture label from runtimeContext when the active session is an architecture session', () => {
+    render(
+      <ChatSessionHeader
+        activeContext={{ systemPrompt: null, activeToolNames: [] }}
+        activeModel="mimo-v2.5"
+        activeSession={{
+          ...session(),
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureContext: {
+              displayLabel: 'Strategic Decision Council',
+            },
+          },
+        }}
+        activeSessionId="sess-1"
+        copied={false}
+        messages={[]}
+        needsCompact={false}
+        onCloseContextStats={vi.fn()}
+        onCompactNow={vi.fn()}
+        onCopyChat={vi.fn()}
+        onToggleContextStats={vi.fn()}
+        showContextStats={false}
+        tokenCount={{
+          total: 0,
+          breakdown: { systemPrompt: 0, skills: 0, tools: 0, history: 0, images: 0 },
+          cacheable: 0,
+          contextLimit: 32000,
+          usagePercent: 0,
+        }}
+        contextPreview={null}
+        contextPreviewStatus={{ loading: false, stale: false, error: null }}
+        vfsRefreshSignal={0}
+      />,
+    );
+
+    expect(screen.getByTestId('chat-session-architecture-label')).toHaveTextContent('Strategic Decision Council');
+  });
+
+  it('shows architecture label for a parent chat from architecture run messages', () => {
+    const messages = [
+      msg({ id: 'user-1', role: 'user', content: 'Review this architecture' }),
+      msg({
+        id: 'assistant-tools',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{
+          id: 'architecture:run-1:event-1',
+          name: 'run_subagent',
+          args: {
+            architectureRunId: 'run-1',
+            schemaName: 'Strategic Decision Council',
+            nodeId: 'pragmatist',
+          },
+        }],
+      }),
+      msg({
+        id: 'assistant-final',
+        role: 'assistant',
+        content: '### Finalizer\n\nDecision made',
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'completed',
+          trace: [],
+          routeHops: [],
+        },
+      }),
+    ];
+
+    render(
+      <ChatSessionHeader
+        activeContext={{ systemPrompt: null, activeToolNames: [] }}
+        activeModel="mimo-v2.5"
+        activeSession={session()}
+        activeSessionId="sess-1"
+        copied={false}
+        messages={messages}
+        needsCompact={false}
+        onCloseContextStats={vi.fn()}
+        onCompactNow={vi.fn()}
+        onCopyChat={vi.fn()}
+        onToggleContextStats={vi.fn()}
+        showContextStats={false}
+        tokenCount={{
+          total: 0,
+          breakdown: { systemPrompt: 0, skills: 0, tools: 0, history: 0, images: 0 },
+          cacheable: 0,
+          contextLimit: 32000,
+          usagePercent: 0,
+        }}
+        contextPreview={null}
+        contextPreviewStatus={{ loading: false, stale: false, error: null }}
+        vfsRefreshSignal={0}
+      />,
+    );
+
+    expect(screen.getByTestId('chat-session-architecture-label')).toHaveTextContent('Strategic Decision Council');
   });
 });
 
@@ -154,20 +356,6 @@ function session(): ChatSession {
     personaId: 'default',
     title: 'New Chat',
     kind: 'chat',
-    createdAt: 1,
-    updatedAt: 1,
-  };
-}
-
-function persona(): Persona {
-  return {
-    id: 'default',
-    name: 'Default',
-    systemPrompt: '',
-    model: 'mock',
-    allowedTools: [],
-    skillIds: [],
-    mcpPolicy: 'allow_all',
     createdAt: 1,
     updatedAt: 1,
   };
@@ -198,5 +386,21 @@ function schema(): ArchitectSchema {
       persistRouterDecision: true,
     },
     outputArtifactSchema: 'decision',
+  };
+}
+
+function persona(overrides: Partial<Persona> = {}): Persona {
+  return {
+    id: 'default',
+    name: 'Default',
+    systemPrompt: 'You are helpful.',
+    model: 'mimo-v2.5',
+    allowedTools: [],
+    skillIds: [],
+    mcpPolicy: 'deny_all',
+    ...DEFAULT_TEST_PERSONA_AVATAR,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
   };
 }

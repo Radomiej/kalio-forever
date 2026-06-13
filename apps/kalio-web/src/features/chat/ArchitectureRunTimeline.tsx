@@ -1,4 +1,4 @@
-import { GitBranch, Route, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, GitBranch, Loader2, Route, ShieldCheck, XCircle } from 'lucide-react';
 import type { ArchitectureChatRunSummary } from '@kalio/types';
 import { compactArchitectureTraceContent } from './architectureChatSummary';
 
@@ -188,8 +188,9 @@ function AgentStep({
         <GitBranch size={12} className="text-sky-300" />
         <span className="truncate text-xs font-medium text-base-content">{nodeLabel(step)}</span>
         {step.stream && (
-          <span className="ml-auto shrink-0 rounded bg-base-100/80 px-1 text-[9px] font-mono text-base-content/80">
-            {step.stream.status}
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded bg-base-100/80 px-1 text-[9px] font-mono text-base-content/80">
+            <StreamStatusIcon status={step.stream.status} warning={Boolean(step.incompleteReason)} />
+            {step.incompleteReason ? 'waiting' : step.stream.status}
           </span>
         )}
       </div>
@@ -239,8 +240,9 @@ function ParallelBranches({
             <div className="flex min-w-0 items-center gap-1.5">
               <span className="truncate text-[11px] font-medium text-base-content">{nodeLabel(step)}</span>
               {step.stream && (
-                <span className="ml-auto shrink-0 rounded bg-base-100/80 px-1 text-[9px] font-mono text-base-content/80">
-                  {step.stream.status}
+                <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded bg-base-100/80 px-1 text-[9px] font-mono text-base-content/80">
+                  <StreamStatusIcon status={step.stream.status} warning={Boolean(step.incompleteReason)} />
+                  {step.incompleteReason ? 'waiting' : step.stream.status}
                 </span>
               )}
             </div>
@@ -253,6 +255,25 @@ function ParallelBranches({
       </div>
     </div>
   );
+}
+
+function StreamStatusIcon({
+  status,
+  warning,
+}: {
+  status: NonNullable<ArchitectureChatRunSummary['trace'][number]['stream']>['status'];
+  warning: boolean;
+}) {
+  if (warning) {
+    return <AlertTriangle size={10} className="text-warning" />;
+  }
+  if (status === 'started' || status === 'streaming') {
+    return <Loader2 size={10} className="animate-spin text-sky-300" />;
+  }
+  if (status === 'completed') {
+    return <CheckCircle2 size={10} className="text-emerald-300" />;
+  }
+  return <XCircle size={10} className="text-rose-300" />;
 }
 
 function FinalizerStep({

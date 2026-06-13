@@ -41,6 +41,7 @@ vi.mock('../../store/agentStore', () => ({
       setCanvasOpen: mockSetCanvasOpen,
       setCanvasFocus: mockSetCanvasFocus,
       cliAgentOutput: {},
+      cliChildProjections: {},
     }),
 }));
 

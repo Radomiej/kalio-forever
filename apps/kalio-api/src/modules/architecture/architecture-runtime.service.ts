@@ -35,6 +35,7 @@ import { buildArchitectureGraphProjection } from './architecture-graph-projectio
 import { reconstructDurableArchitectureGraph } from './architecture-durable-graph';
 import { buildArchitectureParentChatMessages } from './architecture-parent-chat-projection';
 import { hydrateArchitectureRootVfs, type ArchitectureVfsHydrationResult } from './architecture-vfs-hydration';
+import { extractAllowanceContext } from '../agent-flow/agent-flow-launch-context';
 
 const ARCHITECTURE_PERSONA_ALIASES: Record<string, string> = {
   'persona.pragmatist': 'dev',
@@ -122,7 +123,7 @@ export class ArchitectureRuntimeService {
     dto: CreateArchitectureRunDto,
     status: ArchitectureRun['status'],
   ): Promise<{ schema: ArchitectureSchema; run: ArchitectureRun; hydration: ArchitectureVfsHydrationResult | null }> {
-    const normalizedDto = this.validateCreateRunDto(dto);
+    const normalizedDto = await this.normalizeCreateRunDto(dto);
     const baseSchema = this.registry.findOne(normalizedDto.schemaId);
     if (!baseSchema) throw new NotFoundException(`Architecture schema ${normalizedDto.schemaId} not found`);
     const schema = normalizedDto.schema ?? baseSchema;
@@ -182,6 +183,88 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
       architectureCliAgentsEnabled: availableCliAgents.length > 0,
       ...(Object.keys(preferences).length > 0 ? { cliAgentToolPreferences: preferences } : {}),
     };
+  }
+
+  private async normalizeCreateRunDto(dto: CreateArchitectureRunDto): Promise<CreateArchitectureRunDto> {
+    const validated = this.validateCreateRunDto(dto);
+    const inheritedContext = await this.inheritAllowanceContext(validated.context);
+    const contextWithPromptScope = this.addPromptProjectScope(inheritedContext, validated.prompt);
+    return {
+      ...validated,
+      ...(contextWithPromptScope ? { context: contextWithPromptScope } : {}),
+    };
+  }
+
+  private async inheritAllowanceContext(
+    context: Record<string, unknown> | undefined,
+  ): Promise<Record<string, unknown> | undefined> {
+    if (!context) {
+      return context;
+    }
+    const parentSessionId = this.getParentSessionId(context);
+    if (!parentSessionId) {
+      return context;
+    }
+
+    const inherited = await this.resolveParentAllowanceBaseline(parentSessionId);
+    if (Object.keys(inherited).length === 0) {
+      return context;
+    }
+    return {
+      ...inherited,
+      ...context,
+    };
+  }
+
+  private async resolveParentAllowanceBaseline(parentSessionId: string): Promise<Record<string, unknown>> {
+    const baseline: Record<string, unknown> = {};
+    const visited = new Set<string>();
+    let currentSessionId: string | undefined = parentSessionId;
+
+    while (currentSessionId && !visited.has(currentSessionId)) {
+      visited.add(currentSessionId);
+      try {
+        const session = await this.sessions.get(currentSessionId);
+        const allowanceContext = extractAllowanceContext(session.runtimeContext?.architectureContext);
+        for (const [key, value] of Object.entries(allowanceContext)) {
+          if (!(key in baseline)) {
+            baseline[key] = value;
+          }
+        }
+        currentSessionId = session.parentSessionId;
+      } catch {
+        break;
+      }
+    }
+
+    return baseline;
+  }
+
+  private addPromptProjectScope(
+    context: Record<string, unknown> | undefined,
+    prompt: string,
+  ): Record<string, unknown> | undefined {
+    if (this.hasProjectScope(context)) {
+      return context;
+    }
+    const inferredProjectPath = inferLocalProjectPathFromPrompt(prompt);
+    if (!inferredProjectPath) {
+      return context;
+    }
+    return {
+      ...(context ?? {}),
+      projectPath: inferredProjectPath,
+      executionCwd: inferredProjectPath,
+    };
+  }
+
+  private hasProjectScope(context: Record<string, unknown> | undefined): boolean {
+    const projectPath = context?.['projectPath'];
+    if (typeof projectPath === 'string' && projectPath.trim().length > 0) {
+      return true;
+    }
+    const executionCwd = context?.['executionCwd'];
+    return typeof executionCwd === 'string' && executionCwd.trim().length > 0;
   }
 
   private addVfsEvidenceToContext(
@@ -534,6 +617,15 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
       kind: isAgentFlowRoot ? 'agent-flow' : 'chat',
       parentSessionId: this.getParentSessionId(dto.context),
       parentToolCallId: this.getParentToolCallId(dto.context),
+      runtimeContext: {
+        runtimeKind: isAgentFlowRoot ? 'agent-flow-branch' : 'chat',
+        architectureContext: {
+          architectureRunId: runId,
+          schemaId: schema.id,
+          schemaName: schema.name,
+          displayLabel: schema.name,
+        },
+      },
     });
 
     const executableSlots = schema.roleSlots.filter((slot) => this.shouldCreateBranch(slot, schema, dto.executionMode));
@@ -546,6 +638,19 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
           title: `${schema.name}: ${slot.label}`,
           kind: 'subagent',
           parentSessionId: rootSessionId,
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            parentSessionId: rootSessionId,
+            architectureSlotId: slot.id,
+            architectureContext: {
+              architectureRunId: runId,
+              schemaId: schema.id,
+              schemaName: schema.name,
+              roleSlotId: slot.id,
+              roleLabel: slot.label,
+              displayLabel: slot.label,
+            },
+          },
         });
         return [slot.id, sessionId] as const;
       }),
@@ -1083,6 +1188,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
       && this.isNonEmptyString(value.label)
       && this.isNodeKind(value.kind)
       && (value.roleSlotId === undefined || typeof value.roleSlotId === 'string')
+      && (value.maxToolAttempts === undefined || (typeof value.maxToolAttempts === 'number' && Number.isInteger(value.maxToolAttempts) && value.maxToolAttempts >= 1 && value.maxToolAttempts <= 100))
       && (value.behavior === undefined || this.isNodeBehavior(value.behavior))
       && (value.x === undefined || typeof value.x === 'number')
       && (value.y === undefined || typeof value.y === 'number');
@@ -1263,4 +1369,13 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
       || event.type === 'final_artifact';
   }
 
+}
+
+function inferLocalProjectPathFromPrompt(prompt: string): string | undefined {
+  const quotedMatch = prompt.match(/["']([A-Za-z]:\\[^"'\r\n]+)["']/);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1].trim();
+  }
+  const plainMatch = prompt.match(/\b([A-Za-z]:\\[^\s"'`]+)\b/);
+  return plainMatch?.[1]?.trim();
 }

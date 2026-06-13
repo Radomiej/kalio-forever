@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Persona } from '@kalio/types';
 import { HITLSettingsPanel } from './HITLSettingsPanel';
+import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
 
 const PERSONAS: Persona[] = [
   {
@@ -13,6 +14,7 @@ const PERSONAS: Persona[] = [
     allowedTools: [],
     skillIds: [],
     mcpPolicy: 'allow_all',
+    ...DEFAULT_TEST_PERSONA_AVATAR,
     createdAt: 1,
     updatedAt: 1,
   },
@@ -24,6 +26,7 @@ const PERSONAS: Persona[] = [
     allowedTools: [],
     skillIds: [],
     mcpPolicy: 'allow_all',
+    ...DEFAULT_TEST_PERSONA_AVATAR,
     createdAt: 2,
     updatedAt: 2,
   },

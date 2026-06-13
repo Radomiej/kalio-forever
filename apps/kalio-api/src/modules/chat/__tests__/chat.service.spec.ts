@@ -14,7 +14,13 @@ import type { LLMMessage } from '@kalio/types';
 import { PersonaService } from '../../persona/persona.service';
 import { SkillsService } from '../../skills/skills.service';
 import { CredentialsService } from '../../credentials/credentials.service';
+import { ContextAssemblyService } from '../context-assembly.service';
+import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
+import { AgentBudgetApprovalService } from '../agent-budget-approval.service';
+import { SessionsService } from '../sessions.service';
+import { makeContextAssembly, makeLLMTurnRuntime } from './llm-runtime-test-harness';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
+import { SUBAGENT_SYSTEM_PROMPT } from '../subagent-system-prompt';
 
 async function* makeStream(chunks: InternalLLMChunk[]): AsyncIterable<InternalLLMChunk> {
   for (const chunk of chunks) {
@@ -41,6 +47,12 @@ describe('ChatService', () => {
   let credentialsService: {
     getMaxToolAttempts: ReturnType<typeof vi.fn>;
     getContextWindowSize: ReturnType<typeof vi.fn>;
+  };
+  let agentBudgetApprovals: {
+    requestAdditionalBudget: ReturnType<typeof vi.fn>;
+  };
+  let sessionsService: {
+    get: ReturnType<typeof vi.fn>;
   };
   let auditService: Partial<AuditService>;
   let emit: ReturnType<typeof vi.fn>;
@@ -74,52 +86,97 @@ describe('ChatService', () => {
       getMaxToolAttempts: vi.fn().mockResolvedValue(8),
       getContextWindowSize: vi.fn().mockResolvedValue(32000),
     };
+    agentBudgetApprovals = {
+      requestAdditionalBudget: vi.fn().mockResolvedValue(null),
+    };
+    sessionsService = {
+      get: vi.fn().mockResolvedValue({
+        id: 'sid',
+        personaId: 'p1',
+        title: 'New Chat',
+        kind: 'chat',
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    };
     auditService = {
       log: vi.fn().mockResolvedValue('audit-id'),
       update: vi.fn().mockResolvedValue(undefined),
     };
   });
 
+  const streamProcessor = {
+    process: vi.fn().mockImplementation(async (chunk: InternalLLMChunk, ctx: { state: { appendText: (delta: string) => void; addToolCall: (toolCall: { id: string; name: string; args: object }) => void }; emit: EmitFn; sessionId: string; messageId: string }) => {
+      if (chunk.type === 'text_delta') {
+        ctx.state.appendText(chunk.delta);
+        ctx.emit('chat:chunk', {
+          sessionId: ctx.sessionId,
+          messageId: ctx.messageId,
+          delta: chunk.delta,
+          done: false,
+        });
+        return;
+      }
+
+      if (chunk.type === 'tool_call') {
+        ctx.state.addToolCall({ id: chunk.callId, name: chunk.name, args: chunk.args });
+      }
+    }),
+    onModuleInit: vi.fn(),
+  };
+
   async function buildService(llmSource: ILLMSource): Promise<void> {
+    const contextAssembly = makeContextAssembly(personaService as PersonaService, toolDispatch as unknown as ToolDispatchService);
+    const llmTurnRuntime = makeLLMTurnRuntime(
+      llmSource,
+      streamProcessor,
+      sessionManager as unknown as SessionManagerService,
+      toolDispatch as unknown as ToolDispatchService,
+      auditService,
+    );
     const moduleRef = await Test.createTestingModule({
       providers: [
         ChatService,
-        {
-          provide: StreamProcessorService,
-          useValue: {
-            process: vi.fn().mockImplementation(async (chunk: InternalLLMChunk, ctx: { state: { appendText: (delta: string) => void; addToolCall: (toolCall: { id: string; name: string; args: object }) => void }; emit: EmitFn; sessionId: string; messageId: string }) => {
-              if (chunk.type === 'text_delta') {
-                ctx.state.appendText(chunk.delta);
-                ctx.emit('chat:chunk', {
-                  sessionId: ctx.sessionId,
-                  messageId: ctx.messageId,
-                  delta: chunk.delta,
-                  done: false,
-                });
-                return;
-              }
-
-              if (chunk.type === 'tool_call') {
-                ctx.state.addToolCall({ id: chunk.callId, name: chunk.name, args: chunk.args });
-              }
-            }),
-            onModuleInit: vi.fn(),
-          },
-        },
+        { provide: StreamProcessorService, useValue: streamProcessor },
         { provide: SessionManagerService, useValue: sessionManager },
-        { provide: ToolDispatchService, useValue: toolDispatch },
-        { provide: PersonaService, useValue: personaService },
-        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
         { provide: CredentialsService, useValue: credentialsService },
         { provide: AuditService, useValue: auditService },
-        { provide: LLM_SOURCE, useValue: llmSource },
-        // Unused in this test but required by processors
-        { provide: CHUNK_HANDLERS, useValue: [] },
-        { provide: STREAM_MIDDLEWARES, useValue: [] },
-        { provide: TOOL_REGISTRY, useValue: [] },
+        { provide: AgentBudgetApprovalService, useValue: agentBudgetApprovals },
+        { provide: SessionsService, useValue: sessionsService },
+        { provide: ContextAssemblyService, useValue: contextAssembly },
+        { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
       ],
     }).compile();
 
+    service = moduleRef.get(ChatService);
+  }
+
+  async function buildCustomService(
+    llmSource: ILLMSource,
+    processor: Pick<StreamProcessorService, 'process' | 'onModuleInit'>,
+    skillsService: SkillsService = { findByIds: vi.fn().mockResolvedValue([]) } as unknown as SkillsService,
+  ): Promise<void> {
+    const contextAssembly = makeContextAssembly(personaService as PersonaService, toolDispatch as unknown as ToolDispatchService, skillsService);
+    const llmTurnRuntime = makeLLMTurnRuntime(
+      llmSource,
+      processor,
+      sessionManager as unknown as SessionManagerService,
+      toolDispatch as unknown as ToolDispatchService,
+      auditService,
+    );
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ChatService,
+        { provide: StreamProcessorService, useValue: processor },
+        { provide: SessionManagerService, useValue: sessionManager },
+        { provide: CredentialsService, useValue: credentialsService },
+        { provide: AuditService, useValue: auditService },
+        { provide: AgentBudgetApprovalService, useValue: agentBudgetApprovals },
+        { provide: SessionsService, useValue: sessionsService },
+        { provide: ContextAssemblyService, useValue: contextAssembly },
+        { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
+      ],
+    }).compile();
     service = moduleRef.get(ChatService);
   }
 
@@ -163,29 +220,11 @@ describe('ChatService', () => {
 
     const skillPrompt = 'Always apply the architecture checklist.';
     const llmSource = makeLLMSource([]);
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        ChatService,
-        {
-          provide: StreamProcessorService,
-          useValue: {
-            process: vi.fn().mockResolvedValue(undefined),
-            onModuleInit: vi.fn(),
-          },
-        },
-        { provide: SessionManagerService, useValue: sessionManager },
-        { provide: ToolDispatchService, useValue: toolDispatch },
-        { provide: PersonaService, useValue: personaService },
-        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([{ id: 'skill-1', name: 'Architecture Discipline', description: 'Keep the runtime aligned.', prompt: skillPrompt }]) } },
-        { provide: CredentialsService, useValue: credentialsService },
-        { provide: AuditService, useValue: auditService },
-        { provide: LLM_SOURCE, useValue: llmSource },
-        { provide: CHUNK_HANDLERS, useValue: [] },
-        { provide: STREAM_MIDDLEWARES, useValue: [] },
-        { provide: TOOL_REGISTRY, useValue: [] },
-      ],
-    }).compile();
-    service = moduleRef.get(ChatService);
+    await buildCustomService(
+      llmSource,
+      { process: vi.fn().mockResolvedValue(undefined), onModuleInit: vi.fn() },
+      { findByIds: vi.fn().mockResolvedValue([{ id: 'skill-1', name: 'Architecture Discipline', description: 'Keep the runtime aligned.', prompt: skillPrompt }]) } as unknown as SkillsService,
+    );
 
     await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
 
@@ -203,6 +242,98 @@ describe('ChatService', () => {
     expect(systemMessage?.content).toContain(skillPrompt);
     expect(systemMessage?.content).toContain('## Available tools (1)');
     expect(systemMessage?.content).toContain('- tool_a: Reads the project state.');
+  });
+
+  it('injects launch project scope into the effective prompt and unlocks host project tools for direct chat', async () => {
+    toolDispatch.getToolMetas.mockReturnValue([
+      { name: 'fs_read', description: 'Read host project files.', parameters: {}, requiresConfirmation: false },
+      { name: 'terminal_spawn', description: 'Run a terminal command.', parameters: {}, requiresConfirmation: true },
+    ]);
+    personaService.getSessionConfig = vi.fn().mockResolvedValue({
+      systemPrompt: 'Inspect the selected repository carefully.',
+      model: 'mimo-test',
+      allowedTools: ['fs_read', 'terminal_spawn'],
+      mcpPolicy: 'deny_all',
+      kv: {},
+    });
+    sessionsService.get.mockResolvedValue({
+      id: 'sid',
+      personaId: 'p1',
+      title: 'New Chat',
+      kind: 'chat',
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const llmSource = makeLLMSource([]);
+    await buildService(llmSource);
+    await service.handleTurn('sid', 'Inspect the launch scope.', 'p1', emit as EmitFn);
+
+    expect(emit).toHaveBeenCalledWith('chat:context', expect.objectContaining({
+      toolNames: ['fs_read', 'terminal_spawn'],
+      systemPrompt: expect.stringContaining('Local project path: C:\\Projekty\\kalio-forever'),
+    }));
+
+    const params = (llmSource.stream as ReturnType<typeof vi.fn>).mock.calls[0][0] as LLMSourceParams;
+    const systemMessage = params.messages.find((message) => message.role === 'system');
+    expect(systemMessage?.content).toContain('Local project path: C:\\Projekty\\kalio-forever');
+    expect(systemMessage?.content).toContain('default host project root');
+  });
+
+  it('resumes agent-flow-branch sessions with slot policy narrowing and branch prompt assembly', async () => {
+    toolDispatch.getToolMetas.mockReturnValue([
+      { name: 'vfs_read', description: 'Read VFS files.', parameters: {}, requiresConfirmation: false },
+      { name: 'fs_read', description: 'Read host project files.', parameters: {}, requiresConfirmation: false },
+    ]);
+    personaService.getSessionConfig = vi.fn().mockResolvedValue({
+      systemPrompt: 'Work the assigned branch only.',
+      model: 'persona-model',
+      allowedTools: ['vfs_read', 'fs_read'],
+      mcpPolicy: 'deny_all',
+      kv: {},
+    });
+    sessionsService.get.mockResolvedValue({
+      id: 'sid',
+      personaId: 'p1',
+      title: 'Branch Session',
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        modelOverride: 'branch-model',
+        explicitToolNames: ['vfs_read', 'fs_read'],
+        architectureSlotPolicy: {
+          allowedToolNames: ['vfs_read'],
+        },
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+          launchAllowedToolNames: ['vfs_read', 'fs_read'],
+        },
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const llmSource = makeLLMSource([]);
+    await buildService(llmSource);
+    await service.handleTurn('sid', 'Resume the saved branch.', 'p1', emit as EmitFn);
+
+    expect(emit).toHaveBeenCalledWith('chat:context', expect.objectContaining({
+      toolNames: ['vfs_read'],
+    }));
+
+    const params = (llmSource.stream as ReturnType<typeof vi.fn>).mock.calls[0][0] as LLMSourceParams;
+    expect(params.model).toBe('branch-model');
+    const systemMessage = params.messages.find((message) => message.role === 'system');
+    expect(systemMessage?.content).toContain('Work the assigned branch only.');
+    expect(systemMessage?.content).toContain(SUBAGENT_SYSTEM_PROMPT);
   });
 
   it('calls llmSource.stream with messages and tools', async () => {
@@ -357,24 +488,7 @@ describe('ChatService', () => {
       onModuleInit: vi.fn(),
     };
 
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        ChatService,
-        { provide: StreamProcessorService, useValue: processor },
-        { provide: SessionManagerService, useValue: sessionManager },
-        { provide: ToolDispatchService, useValue: toolDispatch },
-        { provide: PersonaService, useValue: personaService },
-        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
-        { provide: CredentialsService, useValue: credentialsService },
-        { provide: AuditService, useValue: auditService },
-        { provide: LLM_SOURCE, useValue: llmSource },
-        { provide: CHUNK_HANDLERS, useValue: [] },
-        { provide: STREAM_MIDDLEWARES, useValue: [] },
-        { provide: TOOL_REGISTRY, useValue: [] },
-      ],
-    }).compile();
-    service = moduleRef.get(ChatService);
-
+    await buildCustomService(llmSource, processor);
     await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
 
     expect(llmSource.stream).toHaveBeenCalledTimes(2);
@@ -493,33 +607,15 @@ describe('ChatService', () => {
     let capturedService: typeof service;
     const chunks: InternalLLMChunk[] = [{ type: 'text_delta', delta: 'hello' }, { type: 'done' }];
     const llmSource = makeLLMSource(chunks);
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        ChatService,
-        {
-          provide: StreamProcessorService,
-          useValue: {
-            process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { emit: EmitFn; sessionId: string; messageId: string }) => {
-              // Emit chat:chunk first (sets hadContent=true), then abort
-              ctx.emit('chat:chunk', { sessionId: ctx.sessionId, messageId: ctx.messageId, delta: 'hi', done: false });
-              capturedService.abort(ctx.sessionId);
-            }),
-            onModuleInit: vi.fn(),
-          },
-        },
-        { provide: SessionManagerService, useValue: sessionManager },
-        { provide: ToolDispatchService, useValue: toolDispatch },
-        { provide: PersonaService, useValue: personaService },
-        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
-        { provide: CredentialsService, useValue: credentialsService },
-        { provide: AuditService, useValue: auditService },
-        { provide: LLM_SOURCE, useValue: llmSource },
-        { provide: CHUNK_HANDLERS, useValue: [] },
-        { provide: STREAM_MIDDLEWARES, useValue: [] },
-        { provide: TOOL_REGISTRY, useValue: [] },
-      ],
-    }).compile();
-    capturedService = moduleRef.get(ChatService);
+    const abortProcessor = {
+      process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { emit: EmitFn; sessionId: string; messageId: string }) => {
+        ctx.emit('chat:chunk', { sessionId: ctx.sessionId, messageId: ctx.messageId, delta: 'hi', done: false });
+        capturedService.abort(ctx.sessionId);
+      }),
+      onModuleInit: vi.fn(),
+    };
+    await buildCustomService(llmSource, abortProcessor);
+    capturedService = service;
 
     await capturedService.handleTurn('sid', 'q', 'p1', emit as EmitFn);
 
@@ -543,23 +639,7 @@ describe('ChatService', () => {
       }),
       onModuleInit: vi.fn(),
     };
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        ChatService,
-        { provide: StreamProcessorService, useValue: processor },
-        { provide: SessionManagerService, useValue: sessionManager },
-        { provide: ToolDispatchService, useValue: toolDispatch },
-        { provide: PersonaService, useValue: personaService },
-        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
-        { provide: CredentialsService, useValue: credentialsService },
-        { provide: AuditService, useValue: auditService },
-        { provide: LLM_SOURCE, useValue: llmSource },
-        { provide: CHUNK_HANDLERS, useValue: [] },
-        { provide: STREAM_MIDDLEWARES, useValue: [] },
-        { provide: TOOL_REGISTRY, useValue: [] },
-      ],
-    }).compile();
-    service = moduleRef.get(ChatService);
+    await buildCustomService(llmSource, processor);
     await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
 
     const completeCalls = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -573,6 +653,88 @@ describe('ChatService', () => {
     expect(errorCalls[0][1]).toMatchObject({ code: 'MAX_ITERATIONS_REACHED' });
   });
 
+  it('resumes the loop after budget approval instead of failing with MAX_ITERATIONS_REACHED', async () => {
+    credentialsService.getMaxToolAttempts.mockResolvedValue(1);
+    agentBudgetApprovals.requestAdditionalBudget.mockResolvedValue(2);
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(() => makeStream([{ type: 'done' }])),
+    };
+    const processor = {
+      process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { state: { addToolCall: (tc: unknown) => void; text: string } }) => {
+        if ((processor.process as ReturnType<typeof vi.fn>).mock.calls.length === 1) {
+          ctx.state.addToolCall({ id: 'c-budget-1', name: 'tool_a', args: {} });
+          return;
+        }
+
+        ctx.state.text = 'final answer after approval';
+      }),
+      onModuleInit: vi.fn(),
+    };
+
+    await buildCustomService(llmSource, processor);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    expect(agentBudgetApprovals.requestAdditionalBudget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        abortSignal: expect.any(AbortSignal),
+        emit: expect.any(Function),
+        sessionId: 'sid',
+        state: expect.any(Object),
+        vfsSessionId: undefined,
+      }),
+      expect.objectContaining({
+        currentLimit: 1,
+        usedIterations: 1,
+        personaId: 'p1',
+        runtimeKind: 'chat',
+        requestedBy: 'chat-agent',
+      }),
+    );
+    expect(llmSource.stream).toHaveBeenCalledTimes(2);
+    expect(sessionManager.saveToolResult).toHaveBeenCalledWith('sid', 'c-budget-1', expect.any(String));
+    const completeCalls = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => args[0] === 'chat:complete',
+    );
+    const maxIterationErrors = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => args[0] === 'chat:error' && (args[1] as { code?: string }).code === 'MAX_ITERATIONS_REACHED',
+    );
+    expect(completeCalls).toHaveLength(1);
+    expect(maxIterationErrors).toHaveLength(0);
+  });
+
+  it('reports the approved iteration limit when the loop still exhausts after extra budget', async () => {
+    credentialsService.getMaxToolAttempts.mockResolvedValue(1);
+    agentBudgetApprovals.requestAdditionalBudget.mockResolvedValue(2);
+    const llmSource: ILLMSource = {
+      stream: vi.fn().mockImplementation(() => makeStream([{ type: 'done' }])),
+    };
+    const processor = {
+      process: vi.fn().mockImplementation(async (_chunk: unknown, ctx: { state: { addToolCall: (tc: unknown) => void } }) => {
+        ctx.state.addToolCall({ id: `c-budget-${(processor.process as ReturnType<typeof vi.fn>).mock.calls.length}`, name: 'tool_a', args: {} });
+      }),
+      onModuleInit: vi.fn(),
+    };
+
+    await buildCustomService(llmSource, processor);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+
+    expect(agentBudgetApprovals.requestAdditionalBudget).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        currentLimit: 1,
+        usedIterations: 1,
+      }),
+    );
+    const maxIterationErrors = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => args[0] === 'chat:error' && (args[1] as { code?: string }).code === 'MAX_ITERATIONS_REACHED',
+    );
+    expect(maxIterationErrors).toHaveLength(1);
+    expect(maxIterationErrors[0]?.[1]).toMatchObject({
+      code: 'MAX_ITERATIONS_REACHED',
+      message: 'Agent loop exceeded 2 iterations',
+    });
+  });
+
   it('MAX_ITERATIONS: always emits agent:done', async () => {
     const llmSource: ILLMSource = {
       stream: vi.fn().mockImplementation(() => makeStream([{ type: 'done' }])),
@@ -583,23 +745,7 @@ describe('ChatService', () => {
       }),
       onModuleInit: vi.fn(),
     };
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        ChatService,
-        { provide: StreamProcessorService, useValue: processor },
-        { provide: SessionManagerService, useValue: sessionManager },
-        { provide: ToolDispatchService, useValue: toolDispatch },
-        { provide: PersonaService, useValue: personaService },
-        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
-        { provide: CredentialsService, useValue: credentialsService },
-        { provide: AuditService, useValue: auditService },
-        { provide: LLM_SOURCE, useValue: llmSource },
-        { provide: CHUNK_HANDLERS, useValue: [] },
-        { provide: STREAM_MIDDLEWARES, useValue: [] },
-        { provide: TOOL_REGISTRY, useValue: [] },
-      ],
-    }).compile();
-    service = moduleRef.get(ChatService);
+    await buildCustomService(llmSource, processor);
     await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
 
     const doneCalls = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -623,24 +769,7 @@ describe('ChatService', () => {
       }),
       onModuleInit: vi.fn(),
     };
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        ChatService,
-        { provide: StreamProcessorService, useValue: processor },
-        { provide: SessionManagerService, useValue: sessionManager },
-        { provide: ToolDispatchService, useValue: toolDispatch },
-        { provide: PersonaService, useValue: personaService },
-        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
-        { provide: CredentialsService, useValue: credentialsService },
-        { provide: AuditService, useValue: auditService },
-        { provide: LLM_SOURCE, useValue: llmSource },
-        { provide: CHUNK_HANDLERS, useValue: [] },
-        { provide: STREAM_MIDDLEWARES, useValue: [] },
-        { provide: TOOL_REGISTRY, useValue: [] },
-      ],
-    }).compile();
-    service = moduleRef.get(ChatService);
-
+    await buildCustomService(llmSource, processor);
     await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
 
     const logCalls = (auditService.log as ReturnType<typeof vi.fn>).mock.calls as Array<[unknown]>;

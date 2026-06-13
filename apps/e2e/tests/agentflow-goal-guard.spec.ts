@@ -959,3 +959,111 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(page.getByTestId('execution-graph-view')).not.toContainText(/Five Minds/i);
   });
 });
+
+test.describe('AgentFlow allowance inheritance API', () => {
+  test('inherits parent session projectPath when child AgentFlow starts without explicit context', async ({ request }) => {
+    const stamp = Date.now();
+    const parentTitle = `Allowance parent ${stamp}`;
+    const parentResponse = await request.post(`${API_BASE}/sessions`, {
+      data: {
+        title: parentTitle,
+        personaId: 'default',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureContext: {
+            projectPath: 'C:\\Projekty\\kalio-forever',
+            executionCwd: 'C:\\Projekty\\kalio-forever',
+          },
+        },
+      },
+    });
+    expect(parentResponse.ok()).toBeTruthy();
+    const parent = await parentResponse.json() as { id: string };
+
+    try {
+      const startResponse = await request.post(`${API_BASE}/agent-flows/runs`, {
+        data: {
+          flowId: 'goal_guard_delivery_loop',
+          goal: `Inherit allowance ${stamp}`,
+          parentSessionId: parent.id,
+        },
+      });
+      expect(startResponse.ok()).toBeTruthy();
+      const started = await startResponse.json() as {
+        run: {
+          id: string;
+          checkpoint?: { context?: Record<string, unknown> };
+        };
+      };
+
+      expect(started.run.checkpoint?.context).toMatchObject({
+        projectPath: 'C:\\Projekty\\kalio-forever',
+        executionCwd: 'C:\\Projekty\\kalio-forever',
+      });
+
+      const refreshResponse = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);
+      expect(refreshResponse.ok()).toBeTruthy();
+      const refreshed = await refreshResponse.json() as {
+        run: { checkpoint?: { context?: Record<string, unknown> } };
+      };
+      expect(refreshed.run.checkpoint?.context).toMatchObject({
+        projectPath: 'C:\\Projekty\\kalio-forever',
+        executionCwd: 'C:\\Projekty\\kalio-forever',
+      });
+    } finally {
+      await deleteSessionIfExists(request, parent.id);
+    }
+  });
+
+  test('keeps orchestrator scope restriction marker in checkpoint after refresh', async ({ request }) => {
+    const stamp = Date.now();
+    const parentResponse = await request.post(`${API_BASE}/sessions`, {
+      data: {
+        title: `Restricted parent ${stamp}`,
+        personaId: 'default',
+      },
+    });
+    expect(parentResponse.ok()).toBeTruthy();
+    const parent = await parentResponse.json() as { id: string };
+
+    try {
+      const startResponse = await request.post(`${API_BASE}/agent-flows/runs`, {
+        data: {
+          flowId: 'goal_guard_delivery_loop',
+          goal: `Restricted allowance ${stamp}`,
+          parentSessionId: parent.id,
+          context: {
+            orchestratorScopeRestriction: { reason: 'folder scoped run' },
+            projectPath: 'C:\\Projekty\\kalio-forever\\sub',
+            executionCwd: 'C:\\Projekty\\kalio-forever\\sub',
+          },
+        },
+      });
+      expect(startResponse.ok()).toBeTruthy();
+      const started = await startResponse.json() as {
+        run: {
+          id: string;
+          checkpoint?: { context?: Record<string, unknown> };
+        };
+      };
+
+      expect(started.run.checkpoint?.context).toMatchObject({
+        orchestratorScopeRestriction: { reason: 'folder scoped run' },
+        projectPath: 'C:\\Projekty\\kalio-forever\\sub',
+        executionCwd: 'C:\\Projekty\\kalio-forever\\sub',
+      });
+
+      const refreshResponse = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);
+      expect(refreshResponse.ok()).toBeTruthy();
+      const refreshed = await refreshResponse.json() as {
+        run: { checkpoint?: { context?: Record<string, unknown> } };
+      };
+      expect(refreshed.run.checkpoint?.context).toMatchObject({
+        orchestratorScopeRestriction: { reason: 'folder scoped run' },
+        projectPath: 'C:\\Projekty\\kalio-forever\\sub',
+      });
+    } finally {
+      await deleteSessionIfExists(request, parent.id);
+    }
+  });
+});

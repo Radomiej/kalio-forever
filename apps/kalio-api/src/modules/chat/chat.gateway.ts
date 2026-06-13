@@ -13,10 +13,16 @@ import type { AgentFlowRunSnapshot, SocketEvents } from '@kalio/types';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
+import { SessionEventsService } from './session-events.service';
+import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { RAAppHITLService } from '../raapp/raapp-hitl.service';
 import { AGENT_FLOW_RUNTIME, type AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port';
+import {
+  CLI_AGENT_SESSION_RUNTIME,
+  type CLIAgentSessionRuntimePort,
+} from '../cli-agent/cli-agent-session-runtime.port';
 
 @UseFilters(WsExceptionFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -33,9 +39,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly pipeline: SessionPipelineService,
     private readonly raappHITL: RAAppHITLService,
     private readonly sessionsService: SessionsService,
+    private readonly sessionEvents: SessionEventsService,
+    private readonly agentBudgetApprovals: AgentBudgetApprovalService,
     @Optional() @Inject(AGENT_FLOW_RUNTIME) private readonly agentFlowRuntime?: AgentFlowRuntimePort,
+    @Optional() @Inject(CLI_AGENT_SESSION_RUNTIME) private readonly cliAgentSessionRuntime?: CLIAgentSessionRuntimePort,
     @Optional() private readonly moduleRef?: ModuleRef,
-  ) {}
+  ) {
+    this.sessionEvents.onSessionCreated(({ session }) => {
+      this.emitSessionLifecycleEvent('session:created', session);
+    });
+    this.sessionEvents.onSessionUpdated(({ session }) => {
+      this.emitSessionLifecycleEvent('session:updated', session);
+    });
+  }
 
   handleConnection(client: Socket): void {
     this.logger.log(`Client connected: ${client.id}`);
@@ -68,6 +84,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
         replayedRequestIds.add(request.requestId);
         client.emit('tool:confirmation_required', request);
+      });
+      this.agentBudgetApprovals.getPendingApprovals(sessionId).forEach((request) => {
+        replayedRequestIds.add(request.requestId);
+        client.emit('agent:budget_required', request);
       });
     };
 
@@ -108,10 +128,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    await this.stopCliAgentSessionIfNeeded(client.id, payload.sessionId);
+
     this.pipeline.stop(payload.sessionId);
 
     const descendantSessionIds = await this.collectDescendantSessionIds(payload.sessionId);
-    descendantSessionIds.forEach((sessionId) => this.pipeline.stop(sessionId));
+    for (const sessionId of descendantSessionIds) {
+      await this.stopCliAgentSessionIfNeeded(client.id, sessionId);
+      this.pipeline.stop(sessionId);
+    }
     await this.stopAgentFlowRunsForSessions([payload.sessionId, ...descendantSessionIds]);
   }
 
@@ -319,6 +344,60 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return descendantSessionIds;
   }
 
+  private emitSessionLifecycleEvent<K extends 'session:created' | 'session:updated'>(
+    event: K,
+    payload: SocketEvents[K],
+  ): void {
+    const sessionId = event === 'session:created' ? payload.id : payload.id;
+    const sessionSubscribers = this.sessionSubscribers.get(sessionId);
+    sessionSubscribers?.forEach((socketId) => {
+      this.clients.get(socketId)?.emit(event, payload);
+    });
+
+    const parentSessionId = payload.parentSessionId;
+    if (parentSessionId) {
+      const parentSubscribers = this.sessionSubscribers.get(parentSessionId);
+      parentSubscribers?.forEach((socketId) => {
+        this.clients.get(socketId)?.emit(event, payload);
+      });
+    }
+  }
+
+  @SubscribeMessage('agent:budget_approve')
+  handleAgentBudgetApprove(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: SocketEvents['agent:budget_approve'],
+  ): void {
+    const socketSessions = this.socketSessions.get(client.id);
+    if (!socketSessions?.has(payload.sessionId)) {
+      this.logger.warn(`agent:budget_approve rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
+      return;
+    }
+    const pending = this.agentBudgetApprovals
+      .getPendingApprovals(payload.sessionId)
+      .find((request) => request.requestId === payload.requestId);
+    const isSynthetic = this.agentBudgetApprovals.isSyntheticPendingApproval(payload.requestId, payload.sessionId);
+    const status = this.agentBudgetApprovals.resolveApproval(payload.requestId, payload.sessionId, payload.decision);
+    if (status === 'not_found') {
+      client.emit('agent:budget_invalidated', {
+        requestId: payload.requestId,
+        sessionId: payload.sessionId,
+        reason: 'not_found',
+      } satisfies SocketEvents['agent:budget_invalidated']);
+      return;
+    }
+    if (status === 'resolved' && isSynthetic && pending) {
+      client.emit('agent:budget_invalidated', {
+        requestId: pending.requestId,
+        sessionId: pending.sessionId,
+        agentRun: pending.agentRun,
+        reason: payload.decision === 'block' ? 'cancelled' : 'approved',
+        decision: payload.decision,
+        approvedLimit: nextApprovedBudgetLimit(pending.currentLimit, payload.decision) ?? undefined,
+      } satisfies SocketEvents['agent:budget_invalidated']);
+    }
+  }
+
   private async stopAgentFlowRunsForSessions(sessionIds: string[]): Promise<void> {
     const agentFlowRuntime = this.getAgentFlowRuntime();
     if (!agentFlowRuntime?.stop) {
@@ -345,6 +424,50 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       } catch (error) {
         this.logger.warn(`Failed to stop AgentFlow run ${snapshot.run.id}: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+  }
+
+  private async stopCliAgentSessionIfNeeded(initiatorSocketId: string, sessionId: string): Promise<void> {
+    const cliRuntime = this.getCliAgentSessionRuntime();
+    if (!cliRuntime) {
+      return;
+    }
+
+    try {
+      const session = await this.sessionsService.get(sessionId);
+      if (session.kind !== 'cli-agent' || !session.parentSessionId) {
+        return;
+      }
+
+      const parentSessionId = session.parentSessionId;
+      const emit: EmitFn = (event, data) => {
+        const eventSessionId = this.getEventSessionId(data);
+        if (eventSessionId) {
+          this.emitToInitiatorAndSessionSubscribers(initiatorSocketId, eventSessionId, event, data);
+          return;
+        }
+        this.emitToInitiatorAndSessionSubscribers(initiatorSocketId, parentSessionId, event, data);
+        if (sessionId !== parentSessionId) {
+          this.emitToInitiatorAndSessionSubscribers(initiatorSocketId, sessionId, event, data);
+        }
+      };
+      await cliRuntime.stopSession(parentSessionId, sessionId, emit);
+    } catch (error) {
+      this.logger.warn(
+        `CLI agent stop failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private getCliAgentSessionRuntime(): CLIAgentSessionRuntimePort | undefined {
+    if (this.cliAgentSessionRuntime) {
+      return this.cliAgentSessionRuntime;
+    }
+    try {
+      return this.moduleRef?.get<CLIAgentSessionRuntimePort>(CLI_AGENT_SESSION_RUNTIME, { strict: false });
+    } catch (error) {
+      this.logger.warn(`CLI agent runtime lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
     }
   }
 
@@ -375,5 +498,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return snapshot.run.status === 'running'
       || snapshot.run.status === 'queued'
       || snapshot.run.status === 'waiting_on_orchestrator';
+  }
+}
+
+function nextApprovedBudgetLimit(
+  currentLimit: number,
+  decision: SocketEvents['agent:budget_approve']['decision'],
+): number | null {
+  switch (decision) {
+    case 'allow_one':
+      return currentLimit + 1;
+    case 'allow_ten':
+      return currentLimit + 10;
+    case 'allow_unlimited':
+      return 1000;
+    case 'block':
+    default:
+      return null;
   }
 }

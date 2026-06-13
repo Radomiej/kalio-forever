@@ -1,8 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import type { ContextPreviewMessage, ContextPreviewRequest, LLMContextPreview, LLMContent, ToolMeta } from '@kalio/types';
+import type {
+  ContextPreviewRequest,
+  LLMContextPreview,
+  LLMContent,
+  RuntimeProfileSource,
+  SessionRuntimeContext,
+  ToolMeta,
+} from '@kalio/types';
 import { getReasoningContent, type ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { ContextAssemblyService } from './context-assembly.service';
 import { SessionManagerService } from './session-manager.service';
+import { SessionsService } from './sessions.service';
 import {
   estimateMessageTokens,
   estimateTextTokens,
@@ -17,10 +25,16 @@ export class ContextPreviewService {
   constructor(
     private readonly contextAssembly: ContextAssemblyService,
     private readonly sessionManager: SessionManagerService,
+    private readonly sessions: SessionsService,
   ) {}
 
   async buildPreview(sessionId: string, request: ContextPreviewRequest): Promise<LLMContextPreview> {
-    const assembled = await this.contextAssembly.assemble(request.personaId);
+    const session = request.target === 'runtime'
+      ? null
+      : await this.sessions.get(sessionId);
+    const personaId = request.personaId;
+    const { runtimeContext, profileSource } = this.resolveRuntimeContext(session?.runtimeContext, request);
+    const assembled = await this.assembleForRuntimeContext(personaId, runtimeContext);
     const prepared = await this.sessionManager.loadPreviewHistoryForLLM(sessionId, {
       systemPrompt: assembled.effectiveSystemPrompt,
       toolMetas: assembled.toolMetas,
@@ -32,7 +46,7 @@ export class ContextPreviewService {
 
     return {
       sessionId,
-      personaId: request.personaId,
+      personaId,
       model: assembled.model,
       contextLimit: prepared.contextWindowSize,
       estimatedTokens,
@@ -45,10 +59,34 @@ export class ContextPreviewService {
       effectiveSystemPrompt: assembled.effectiveSystemPrompt,
       tools: assembled.toolMetas,
       messages,
+      runtimeKind: assembled.runtimeKind,
+      runtimeProfileSource: profileSource,
+      warnings: assembled.warnings.length > 0 ? assembled.warnings : undefined,
+      toolPolicy: assembled.toolPolicy,
     };
   }
 
-  private toPreviewMessages(messages: ContextManagedLLMMessage[]): ContextPreviewMessage[] {
+  private resolveRuntimeContext(
+    sessionContext: SessionRuntimeContext | undefined,
+    request: ContextPreviewRequest,
+  ): { runtimeContext: SessionRuntimeContext; profileSource: RuntimeProfileSource } {
+    if (request.target === 'runtime') {
+      return { runtimeContext: request.runtimeContext, profileSource: 'request' };
+    }
+    if (sessionContext) {
+      return { runtimeContext: sessionContext, profileSource: 'session' };
+    }
+    return {
+      runtimeContext: { runtimeKind: 'chat', systemPromptProfile: 'default-chat' },
+      profileSource: 'persona-default',
+    };
+  }
+
+  private async assembleForRuntimeContext(personaId: string, runtimeContext: SessionRuntimeContext) {
+    return this.contextAssembly.assembleForSessionRuntime(personaId, runtimeContext);
+  }
+
+  private toPreviewMessages(messages: ContextManagedLLMMessage[]): LLMContextPreview['messages'] {
     return messages.map((message, index) => ({
       role: message.role,
       content: message.content,

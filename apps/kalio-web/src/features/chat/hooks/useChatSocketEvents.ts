@@ -6,10 +6,22 @@ import { useSessionStore } from '../../../store/sessionStore';
 import { backendHealth } from '../../../services/backendHealth';
 import { eventBus } from '../../../services/eventBus';
 import { apiClient } from '../../../services/apiClient';
-import { buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
 import { shouldRefreshVfsForToolResult } from '../ChatInterface.Parts';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
-import { canReleaseComposerAfterToolResult, createToolArgProgressHandlers } from './useChatSocketEvents.helpers';
+import {
+  canReleaseComposerAfterToolResult,
+  createToolArgProgressHandlers,
+  handleConnectionStateEvent,
+  handleSessionStatusEvent,
+  mergeRaAppNativeResultIntoMessages,
+} from './useChatSocketEvents.helpers';
+import {
+  handleCliChildProgress,
+  handleCliChildSessionCreated,
+  handleCliChildToolResult,
+  resolveCliToolName,
+} from './useChatSocketEvents.cliChild';
+import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
 
 interface UseChatSocketEventsOptions {
   hasPendingChunksForSession: (sessionId: string | null) => boolean;
@@ -44,9 +56,12 @@ export function useChatSocketEvents({
     removeLastAgentTurn,
     flushThinkingChunks,
     flushStreamingChunks,
+    setMessages,
+    setAgentTurns,
   } = useSessionStore();
   const {
     setPendingConfirmation,
+    setPendingBudgetApproval,
     setToolArgProgress,
     addToolActivity,
     updateToolActivity,
@@ -59,8 +74,12 @@ export function useChatSocketEvents({
     clearCLIAgentOutput,
     getToolActivitiesForSession,
     setStreaming,
+    upsertCLIChildProjection,
+    updateCLIChildProjection,
+    rebuildCLIChildProjections,
+    setQueuedDepth,
   } = useAgentStore();
-  const { addSession } = useSessionStore();
+  const { addSession, updateSession } = useSessionStore();
 
   useEffect(() => {
     if (!eventBus.connected) eventBus.connect();
@@ -70,6 +89,17 @@ export function useChatSocketEvents({
       setToolArgProgress,
       getActiveSessionId: () => useSessionStore.getState().activeSessionId,
     });
+
+    const cliChildDeps = {
+      upsertCLIChildProjection,
+      updateCLIChildProjection,
+      rebuildCLIChildProjections,
+      appendCLIAgentChunk,
+      registerCallId,
+      getAgentState: () => useAgentStore.getState(),
+      getSessionState: () => useSessionStore.getState(),
+      identifySession: (sessionId: string) => eventBus.identifySession(sessionId),
+    };
 
     const offChunk = eventBus.onChunk((chunk) => {
       const targetSessionId = chunk.sessionId ?? useSessionStore.getState().activeSessionId;
@@ -135,6 +165,7 @@ export function useChatSocketEvents({
         clearToolArgProgressTracking(targetSessionId);
         removeActiveAgentLoop(targetSessionId);
         setPendingConfirmation(targetSessionId, null);
+        setPendingBudgetApproval?.(targetSessionId, null);
 
         const terminalToolStatus = payload.code === 'INTERRUPTED' ? 'cancelled' : 'error';
         const finishedAt = Date.now();
@@ -189,6 +220,10 @@ export function useChatSocketEvents({
       });
     });
 
+    const offBudgetRequired = eventBus.onAgentBudgetRequired?.((req) => {
+      setPendingBudgetApproval?.(req.sessionId, req);
+    });
+
     const offConfirmationInvalidated = eventBus.onToolConfirmationInvalidated((payload) => {
       const agentState = useAgentStore.getState();
       const pendingConfirmation = agentState.pendingConfirmations[payload.sessionId];
@@ -220,6 +255,10 @@ export function useChatSocketEvents({
           ...(payload.message ? { errorMessage: payload.message } : {}),
         },
       });
+    });
+
+    const offBudgetInvalidated = eventBus.onAgentBudgetInvalidated?.((payload) => {
+      setPendingBudgetApproval?.(payload.sessionId, null);
     });
 
     const offToolStart = eventBus.onToolStart((payload) => {
@@ -269,6 +308,12 @@ export function useChatSocketEvents({
       startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun);
       clearToolActivities(payload.sessionId);
       setPendingConfirmation(payload.sessionId, null);
+      setPendingBudgetApproval?.(payload.sessionId, null);
+      setQueuedDepth(payload.sessionId, 0);
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setAwaitingFirstChunk(true);
+        setStreaming(true);
+      }
     });
 
     const offAgentDone = eventBus.onAgentDone((payload) => {
@@ -284,6 +329,7 @@ export function useChatSocketEvents({
         setStreaming(false);
       }
       setPendingConfirmation(payload.sessionId, null);
+      setPendingBudgetApproval?.(payload.sessionId, null);
     });
 
     const offContext = eventBus.onContext((payload) => {
@@ -300,9 +346,11 @@ export function useChatSocketEvents({
         finishedAt: Date.now(),
         result,
       });
+      const agentState = useAgentStore.getState();
+      const toolName = resolveCliToolName(result, agentState.callIdToName, agentState.toolActivities);
+      handleCliChildToolResult(cliChildDeps, result, resultSessionId);
       clearCLIAgentOutput(result.callId);
       if (result.status === 'success') {
-        const toolName = useAgentStore.getState().toolActivities.find((activity) => activity.callId === result.callId)?.toolName;
         if (shouldRefreshVfsForToolResult(toolName, result.data)) setVfsRefreshSignal((value) => value + 1);
       }
       if (result.status === 'success' && result.data !== undefined && resultSessionId) {
@@ -333,100 +381,74 @@ export function useChatSocketEvents({
     });
 
     const offCLIAgentProgress = eventBus.onCLIAgentProgress((payload) => {
-      appendCLIAgentChunk(payload.callId, payload.chunk);
+      handleCliChildProgress(cliChildDeps, payload);
     });
 
     const offSessionStatus = eventBus.onSessionStatus((payload) => {
-      if (payload.run?.status === 'interrupted_needs_retry' && payload.sessionId === useSessionStore.getState().activeSessionId) {
-        setRecoveryNotice(
-          payload.run.safeResume
-            ? 'Backend restarted during LLM work. Retry is safe from the current transcript.'
-            : 'Backend restarted during tool execution. Manual retry avoids duplicate tool execution.',
-        );
-      }
-
-      if (!payload.active || !payload.turnId) {
-        return;
-      }
-      if (!useAgentStore.getState().hasActiveLoopForSession(payload.sessionId)) {
-        addActiveAgentLoop(payload.sessionId, payload.turnId);
-      }
-      if (!useSessionStore.getState().getSessionActiveTurnId(payload.sessionId)) {
-        startAgentTurn(payload.turnId, payload.sessionId);
-      }
-      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
-        setAwaitingFirstChunk(false);
-        setStreaming(true);
-      }
+      handleSessionStatusEvent(payload, {
+        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+        hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
+        getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
+        setRecoveryNotice,
+        addActiveAgentLoop,
+        startAgentTurn,
+        setAwaitingFirstChunk,
+        setStreaming,
+      });
     });
 
     const offSessionCreated = eventBus.onSessionCreated((session) => {
       if (!useSessionStore.getState().sessions.some((item) => item.id === session.id)) {
         addSession(session);
+      } else {
+        updateSession(session.id, session);
       }
+      eventBus.identifySession(session.id);
+      handleCliChildSessionCreated(cliChildDeps, session);
+    });
+
+    const offSessionUpdated = eventBus.onSessionUpdated?.((session) => {
+      updateSession(session.id, session);
+    });
+
+    const offQueued = eventBus.onQueued((payload) => {
+      setQueuedDepth(payload.sessionId, payload.queueLength);
     });
 
     const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
-      const sid = payload.sessionId;
-      if (!sid) return;
-      const { getSessionMessages, setMessages } = useSessionStore.getState();
-      const updated = getSessionMessages(sid).map((message) => {
-        if (message.toolCallId !== payload.toolCallId || message.role !== 'tool_result') return message;
-        try {
-          const data = JSON.parse(message.content) as Record<string, unknown>;
-          return {
-            ...message,
-            content: JSON.stringify({ ...data, nativeResults: payload.results, pendingApprovals: [] }),
-          };
-        } catch (err) {
-          console.error('[ChatInterface] failed to merge RA-App native result', err instanceof Error ? err : new Error(String(err)));
-          return message;
-        }
-      });
-      setMessages(updated, sid);
+      const targetSessionId = payload.sessionId;
+      if (!targetSessionId) return;
+      const { getSessionMessages, setMessages: applySessionMessages } = useSessionStore.getState();
+      applySessionMessages(
+        mergeRaAppNativeResultIntoMessages(getSessionMessages(targetSessionId), payload.toolCallId, payload.results),
+        targetSessionId,
+      );
     });
 
     const offConnectionState = eventBus.onConnectionState((state) => {
-      setConnectionState(state.status);
-      if (state.status === 'connected') {
-        if (state.recovered) {
-          setRecoveryNotice('Recovered missed stream events after reconnect.');
-        }
-        return;
-      }
-      if (state.status === 'reconnecting') {
-        setRecoveryNotice('Connection dropped. Reconnecting and preserving this session.');
-      }
+      handleConnectionStateEvent(state, { setConnectionState, setRecoveryNotice });
     });
 
     const offReconnect = eventBus.onReconnect(() => {
       backendHealth.reportSuccess();
-      setStreaming(false);
-      clearToolActivities();
-      clearToolArgProgressTracking();
-      const { activeSessionId: sid } = useSessionStore.getState();
-      if (sid) {
-        removeActiveAgentLoop(sid);
-        setPendingConfirmation(sid, null);
-        eventBus.identifySession(sid);
-        apiClient
-          .get<ChatMessage[]>(`/api/sessions/${sid}/messages`)
-          .then((response) => {
-            const data = response.data;
-            if (useSessionStore.getState().activeSessionId !== sid) return;
-            const { setMessages, setAgentTurns } = useSessionStore.getState();
-            const currentMessages = useSessionStore.getState().getSessionMessages(sid);
-            const mergedMessages = mergeFetchedMessages(currentMessages, data);
-            setMessages(mergedMessages);
-            if (!useAgentStore.getState().hasActiveLoopForSession(sid)) {
-              setAgentTurns(buildTurnsFromHistory(mergedMessages, sid));
-            }
-            onContextInvalidated?.();
-          })
-          .catch((err: unknown) => {
-            console.error('[ChatInterface] reconnect history reload failed', err instanceof Error ? err : new Error(String(err)));
-          });
-      }
+      handleSocketReconnect({
+        cliChild: cliChildDeps,
+        setStreaming,
+        clearToolArgProgressTracking,
+        clearToolActivities,
+        removeActiveAgentLoop,
+        setPendingConfirmation,
+        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+        getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
+        setMessages,
+        setAgentTurns,
+        hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
+        fetchMessages: async (sessionId) => {
+          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
+          return response.data;
+        },
+        onContextInvalidated,
+      });
     });
 
     return () => {
@@ -434,7 +456,9 @@ export function useChatSocketEvents({
       offComplete();
       offError();
       offConfirmation();
+      offBudgetRequired?.();
       offConfirmationInvalidated();
+      offBudgetInvalidated?.();
       offToolStart();
       offToolArgProgress();
       offAgentStart();
@@ -444,6 +468,8 @@ export function useChatSocketEvents({
       offCLIAgentProgress();
       offSessionStatus();
       offSessionCreated();
+      offSessionUpdated?.();
+      offQueued();
       offRaAppNative();
       offConnectionState();
       offReconnect();
@@ -452,6 +478,7 @@ export function useChatSocketEvents({
     addActiveAgentLoop,
     addMessage,
     addSession,
+    updateSession,
     addToolActivity,
     appendChunk,
     appendCLIAgentChunk,
@@ -461,10 +488,13 @@ export function useChatSocketEvents({
     finalizeChunk,
     flushStreamingChunks,
     flushThinkingChunks,
+    setMessages,
+    setAgentTurns,
     getToolActivitiesForSession,
     hasPendingChunksForSession,
     markAgentTurnError,
     registerCallId,
+    rebuildCLIChildProjections,
     removeActiveAgentLoop,
     removeLastAgentTurn,
     requestGeneratedTitleIfNeeded,
@@ -474,12 +504,16 @@ export function useChatSocketEvents({
     setContext,
     setError,
     setPendingConfirmation,
+    setPendingBudgetApproval,
+    setQueuedDepth,
     setRecoveryNotice,
     setStreaming,
     setToolArgProgress,
     setVfsRefreshSignal,
     startAgentTurn,
     toolArgProgressSeenRef,
+    updateCLIChildProjection,
     updateToolActivity,
+    upsertCLIChildProjection,
   ]);
 }

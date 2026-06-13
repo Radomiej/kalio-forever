@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { nanoid } from 'nanoid';
 import { useSessionStore } from '../../store/sessionStore';
-import type { AgentTurn } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { useSettingsStore } from '../settings/settingsStore';
 import { eventBus } from '../../services/eventBus';
@@ -12,12 +11,17 @@ import { useContextUsage } from './hooks/useContextUsage';
 import { useContextPreview } from './hooks/useContextPreview';
 import { useChatSessionActivation } from './hooks/useChatSessionActivation';
 import { useChatSocketEvents } from './hooks/useChatSocketEvents';
+import { useChatComposerActions } from './hooks/useChatComposerActions';
 import { computeAnsweredCallIds, buildConversationTimeline } from './chatUtils';
-import { apiClient, getSessionVfsFiles } from '../../services/apiClient';
-import type { ChatMessage, Persona, VFSFile } from '@kalio/types';
-import { getArchitectureSchemas, startArchitectureRun, startGoalGuardAgentFlowRun } from '../architect/architect.api';
+import { apiClient } from '../../services/apiClient';
+import type { ChatMessage, ConversationTitleSettings } from '@kalio/types';
+import { getArchitectureSchemas } from '../architect/architect.api';
 import type { ArchitectSchema } from '../architect/architect.types';
-import { buildArchitectureRunTurnProjection } from './architectureChatSummary';
+import {
+  getLaunchProjectPath,
+  persistSessionLaunchPersona,
+} from './launch/launchContext';
+import { useLaunchPersonas } from './launch/useLaunchPersonas';
 import {
   buildCopiedChatText,
   type ChatConnectionState,
@@ -27,6 +31,7 @@ import {
 } from './ChatInterface.Parts';
 
 export { computeAnsweredCallIds } from './chatUtils';
+export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
 
 const DEFAULT_SESSION_TITLE = 'New Chat';
 
@@ -35,9 +40,21 @@ function buildOptimisticSessionTitle(content: string): string {
   return preview + (content.length > 50 ? '...' : '');
 }
 
-function shouldRequestGeneratedTitle(sessionTitle: string, sessionMessages: ChatMessage[]): boolean {
+function shouldRequestGeneratedTitle(
+  sessionTitle: string,
+  sessionMessages: ChatMessage[],
+  settings: ConversationTitleSettings,
+): boolean {
   const userMessages = sessionMessages.filter((message) => message.role === 'user');
   const assistantMessages = sessionMessages.filter((message) => message.role === 'assistant');
+
+  if (
+    settings.autoRenameEnabled
+    && assistantMessages.length >= settings.renameEveryReplies
+    && assistantMessages.length % settings.renameEveryReplies === 0
+  ) {
+    return true;
+  }
 
   if (userMessages.length !== 1 || assistantMessages.length < 1) {
     return false;
@@ -47,40 +64,24 @@ function shouldRequestGeneratedTitle(sessionTitle: string, sessionMessages: Chat
     return true;
   }
 
-  return sessionTitle === buildOptimisticSessionTitle(userMessages[0].content);
-}
-
-export function buildArchitectureRunContext(
-  sessionId: string,
-  files: VFSFile[],
-): Record<string, unknown> {
-  const context: Record<string, unknown> = { parentSessionId: sessionId };
-  if (files.length > 0) {
-    context['hydrateFromSessionId'] = sessionId;
-    context['hydrateTargetPrefix'] = 'project';
-    context['hydrateFilePaths'] = files.map((file) => file.path);
+  if (sessionTitle === buildOptimisticSessionTitle(userMessages[0].content)) {
+    return true;
   }
-  return context;
-}
 
-function buildGoalGuardRunContext(sessionId: string, files: VFSFile[]): Record<string, unknown> {
-  return {
-    ...buildArchitectureRunContext(sessionId, files),
-    requireGoalMasterLoopProof: true,
-    requireImplementerWriteProof: true,
-  };
+  return false;
 }
 
 export function ChatInterface() {
   const {
     messages, activeSessionId, sessions, addMessage, setMessages,
-    agentTurns, setAgentTurns,
+    agentTurns, setAgentTurns, updateAgentTurn, updateSession,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
+  const conversationTitleSettings = useSettingsStore((state) => state.conversationTitleSettings);
+  const setConversationTitleSettings = useSettingsStore((state) => state.setConversationTitleSettings);
   const {
     isStreaming,
-    setStreaming,
     setPendingConfirmation,
     setToolArgProgress,
     clearToolActivities,
@@ -88,7 +89,9 @@ export function ChatInterface() {
     updateLlmActivity,
     getToolActivitiesForSession,
     getContextForSession,
+    queuedDepthBySession,
   } = useAgentStore();
+  const queuedDepth = activeSessionId ? (queuedDepthBySession?.[activeSessionId] ?? 0) : 0;
   const activeToolActivities = getToolActivitiesForSession(activeSessionId);
   const activeContext = getContextForSession(activeSessionId);
   const [error, setError] = useState<string | null>(null);
@@ -99,20 +102,16 @@ export function ChatInterface() {
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [awaitingFirstChunk, setAwaitingFirstChunk] = useState(false);
   const lastSentContentRef = useRef<string>('');
-  const [personas, setPersonas] = useState<Persona[]>([]);
   const [architectures, setArchitectures] = useState<ArchitectSchema[]>([]);
   const [selectedArchitectureId, setSelectedArchitectureId] = useState('single-chat');
+  const [projectPath, setProjectPath] = useState('');
   const [draftUserMessage, setDraftUserMessage] = useState('');
   const [contextPreviewRefreshKey, setContextPreviewRefreshKey] = useState(0);
   const toolArgProgressSeenRef = useRef<Record<string, Set<string>>>({});
-  const { updateSession } = useSessionStore();
 
   useEffect(() => {
-    apiClient
-      .get<Persona[]>('/api/personas')
-      .then((r) => setPersonas(r.data))
-      .catch((err: unknown) => console.error('[ChatInterface] personas load failed', err));
-  }, []);
+    setProjectPath(getLaunchProjectPath(activeSession?.runtimeContext));
+  }, [activeSession?.runtimeContext, activeSessionId]);
 
   useEffect(() => {
     getArchitectureSchemas()
@@ -120,20 +119,23 @@ export function ChatInterface() {
       .catch((err: unknown) => console.error('[ChatInterface] architecture registry load failed', err));
   }, []);
 
-  const handlePersonaChange = async (personaId: string) => {
-    if (!activeSessionId) return;
-    try {
-      await apiClient.patch(`/api/sessions/${activeSessionId}`, { personaId });
-      updateSession(activeSessionId, { personaId });
-    } catch (err: unknown) {
-      console.error('[ChatInterface] persona change failed', err instanceof Error ? err : new Error(String(err)));
-    }
-  };
+  useEffect(() => {
+    apiClient
+      .get<ConversationTitleSettings>('/api/credentials/settings/conversation-title')
+      .then((response) => setConversationTitleSettings(response.data))
+      .catch((err: unknown) => console.error('[ChatInterface] conversation title settings load failed', err));
+  }, []);
+
   const [showContextStats, setShowContextStats] = useState(false);
   const [vfsRefreshSignal, setVfsRefreshSignal] = useState(0);
   const messageListRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const {
+    personas,
+    selectedPersonaId,
+    setSelectedPersonaId,
+  } = useLaunchPersonas(activeSession?.personaId);
 
   const answeredCallIds = computeAnsweredCallIds(messages);
 
@@ -143,7 +145,9 @@ export function ChatInterface() {
   }, []);
   const contextPreview = useContextPreview({
     sessionId: activeSessionId,
-    personaId: activeSession?.personaId ?? null,
+    personaId: messages.length === 0
+      ? selectedPersonaId
+      : activeSession?.personaId ?? null,
     draftUserMessage,
     refreshKey: contextPreviewRefreshKey,
   });
@@ -180,7 +184,7 @@ export function ChatInterface() {
     }
 
     const session = sessions.find((item) => item.id === sessionId);
-    if (!session || !shouldRequestGeneratedTitle(session.title, sessionMessages)) {
+    if (!session || !shouldRequestGeneratedTitle(session.title, sessionMessages, conversationTitleSettings)) {
       return;
     }
 
@@ -195,7 +199,7 @@ export function ChatInterface() {
         console.error('[ChatInterface] title generation failed', err instanceof Error ? err : new Error(String(err)));
         updateLlmActivity('title-gen', { status: 'error', finishedAt: Date.now() });
       });
-  }, [addLlmActivity, updateLlmActivity]);
+  }, [addLlmActivity, conversationTitleSettings, updateLlmActivity]);
 
   useChatSocketEvents({
     hasPendingChunksForSession,
@@ -208,7 +212,6 @@ export function ChatInterface() {
     toolArgProgressSeenRef,
     onContextInvalidated: invalidateContextPreview,
   });
-
 
   useEffect(() => {
     lastSentContentRef.current = '';
@@ -273,190 +276,20 @@ export function ChatInterface() {
     prevStreamingRef.current = isStreaming;
   }, [isStreaming, addMessage]);
 
-  const handleSendRef = useRef<(content: string, personaId: string) => void>(() => {});
-
-  const handleSend = (content: string, personaId: string) => {
-    if (!activeSessionId) return;
-    // Guard against double-submit: check store state synchronously before any renders
-    if (useAgentStore.getState().isStreaming) return;
-    if (!eventBus.connected) {
-      setError('Backend connection is offline. Reconnect and retry this message.');
-      setRecoveryNotice('Connection is offline. Kalio will resync the session after reconnect.');
-      return;
-    }
-    setError(null);
-    setRetryError(null);
-    lastSentContentRef.current = content;
-    clearToolActivities(activeSessionId);
-
-    // Auto-generate title from first message if session still has default title
-    const { sessions, updateSession } = useSessionStore.getState();
-    const session = sessions.find((s) => s.id === activeSessionId);
-    if (session && session.title === DEFAULT_SESSION_TITLE && messages.length === 0) {
-      const generatedTitle = buildOptimisticSessionTitle(content);
-      void updateSession(activeSessionId, { title: generatedTitle });
-    }
-
-    const userMsg: ChatMessage = {
-      id: nanoid(),
-      sessionId: activeSessionId,
-      role: 'user',
-      content,
-      createdAt: Date.now(),
-    };
-    addMessage(userMsg);
-
-    setAwaitingFirstChunk(true);
-    setStreaming(true);
-    console.debug('[ChatInterface] sendMessage', { sessionId: activeSessionId, content: content.slice(0, 60) });
-
-    const sent = eventBus.sendMessage({
-      sessionId: activeSessionId,
-      content,
-      personaId,
-    });
-
-    if (!sent) {
-      setAwaitingFirstChunk(false);
-      setStreaming(false);
-      setError('Backend connection is offline. Reconnect and retry this message.');
-    }
-  };
-
-  const handleArchitectureRun = async (content: string, schemaId: string) => {
-    if (!activeSessionId) return;
-    if (useAgentStore.getState().isStreaming) return;
-    const schema = architectures.find((item) => item.id === schemaId);
-    if (!schema) {
-      setError('Selected architecture is no longer available. Refresh the registry and retry.');
-      return;
-    }
-
-    setError(null);
-    setRetryError(null);
-    lastSentContentRef.current = content;
-    setDraftUserMessage('');
-    clearToolActivities(activeSessionId);
-
-    const { sessions, updateSession } = useSessionStore.getState();
-    const session = sessions.find((item) => item.id === activeSessionId);
-    if (session && session.title === DEFAULT_SESSION_TITLE && messages.length === 0) {
-      void updateSession(activeSessionId, { title: `Architecture: ${buildOptimisticSessionTitle(content)}` });
-    }
-
-    const userMessageId = nanoid();
-    addMessage({
-      id: userMessageId,
-      sessionId: activeSessionId,
-      role: 'user',
-      content: `[Architecture: ${schema.name}]\n${content}`,
-      createdAt: Date.now(),
-    });
-    const pendingAssistantMessageId = `architecture:${userMessageId}:pending`;
-    addMessage({
-      id: pendingAssistantMessageId,
-      sessionId: activeSessionId,
-      role: 'assistant',
-      content: 'Architecture run is starting.',
-      architectureRun: {
-        runId: pendingAssistantMessageId,
-        schemaId,
-        status: 'running',
-        trace: [],
-        routeHops: [],
-      },
-      createdAt: Date.now(),
-    });
-    setStreaming(true);
-    setAwaitingFirstChunk(true);
-
-    const addArchitectureAssistantMessage = (assistantContent: string) => {
-      const assistantMessageId = nanoid();
-      addMessage({
-        id: assistantMessageId,
-        sessionId: activeSessionId,
-        role: 'assistant',
-        content: assistantContent,
-        createdAt: Date.now(),
-      });
-      const currentTurns = useSessionStore.getState().getSessionAgentTurns(activeSessionId);
-      const turn: AgentTurn = {
-        id: `architecture-turn-${assistantMessageId}`,
-        sessionId: activeSessionId,
-        promptMessageId: userMessageId,
-        items: [{ kind: 'text', messageId: assistantMessageId }],
-        done: true,
-      };
-      setAgentTurns([...currentTurns, turn], activeSessionId);
-    };
-
-    try {
-      let sourceFiles: VFSFile[] = [];
-      try {
-        sourceFiles = (await getSessionVfsFiles(activeSessionId)).files;
-      } catch (err: unknown) {
-        console.error('[ChatInterface] architecture VFS context check failed', err);
-      }
-      if (sourceFiles.length === 0) {
-        console.debug('[ChatInterface] architecture run has no attached session files');
-      }
-      const applyArchitectureProjection = (result: Awaited<ReturnType<typeof startArchitectureRun>>) => {
-        const projection = buildArchitectureRunTurnProjection(result, activeSessionId);
-        const currentMessages = useSessionStore.getState()
-          .getSessionMessages(activeSessionId)
-          .filter((message) => message.id !== pendingAssistantMessageId)
-          .filter((message) => !message.id.startsWith(`architecture:${result.run.id}:`));
-        setMessages([...currentMessages, ...projection.messages], activeSessionId);
-        const currentTurns = useSessionStore.getState()
-          .getSessionAgentTurns(activeSessionId)
-          .filter((turn) => turn.id !== `architecture-turn-${result.run.id}`);
-        setAgentTurns([...currentTurns, {
-          id: `architecture-turn-${result.run.id}`,
-          sessionId: activeSessionId,
-          promptMessageId: userMessageId,
-          items: projection.turnItems,
-          done: result.run.status !== 'queued' && result.run.status !== 'running',
-        }], activeSessionId);
-      };
-      const result = schemaId === 'goal-master-delivery-loop'
-        ? await startGoalGuardAgentFlowRun(
-          content,
-          buildGoalGuardRunContext(activeSessionId, sourceFiles),
-          activeSessionId,
-        )
-        : await startArchitectureRun(
-          schemaId,
-          content,
-          {},
-          'subagent_execution',
-          undefined,
-          buildArchitectureRunContext(activeSessionId, sourceFiles),
-          applyArchitectureProjection,
-        );
-      applyArchitectureProjection(result);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to run selected architecture';
-      setError(message);
-      const currentMessages = useSessionStore.getState()
-        .getSessionMessages(activeSessionId)
-        .filter((item) => item.id !== pendingAssistantMessageId);
-      setMessages(currentMessages, activeSessionId);
-      addArchitectureAssistantMessage(`Architecture run failed: ${message}`);
-    } finally {
-      setAwaitingFirstChunk(false);
-      setStreaming(false);
-    }
-  };
-
-  const handleComposerSend = (content: string, personaId: string) => {
-    if (selectedArchitectureId !== 'single-chat') {
-      void handleArchitectureRun(content, selectedArchitectureId);
-      return;
-    }
-    handleSend(content, personaId);
-  };
-
-  handleSendRef.current = handleComposerSend;
+  const {
+    handleComposerSend,
+    handleSendRef,
+  } = useChatComposerActions({
+    architectures,
+    lastSentContentRef,
+    projectPath,
+    requestGeneratedTitleIfNeeded,
+    selectedArchitectureId,
+    setAwaitingFirstChunk,
+    setDraftUserMessage,
+    setError,
+    setRetryError,
+  });
 
   useChatSessionActivation({
     activeSessionId,
@@ -465,6 +298,7 @@ export function ChatInterface() {
     setAgentTurns,
     setMessages,
     setPendingConfirmation,
+    updateAgentTurn,
   });
 
   const composerStreaming = isStreaming || awaitingFirstChunk || hasPendingChunksForSession(activeSessionId);
@@ -493,6 +327,22 @@ export function ChatInterface() {
     });
   };
 
+  const handleLaunchSend = useCallback(async (content: string, personaId: string) => {
+    if (!activeSession) {
+      return;
+    }
+
+    try {
+      await persistSessionLaunchPersona(activeSession, personaId, updateSession);
+    } catch (err: unknown) {
+      console.error('[ChatInterface] launch persona update failed', err instanceof Error ? err : new Error(String(err)));
+      setError('Failed to save selected persona for this chat.');
+      return;
+    }
+
+    handleComposerSend(content, personaId);
+  }, [activeSession, handleComposerSend, updateSession]);
+
   return (
     <div data-testid="chat-interface" className="flex h-full flex-col bg-base-200 overflow-hidden">
       <ChatStatusBanners
@@ -506,7 +356,7 @@ export function ChatInterface() {
           const session = sessions.find((item) => item.id === activeSessionId);
           if (content && session) {
             setRetryError(null);
-            handleSend(content, session.personaId);
+            handleComposerSend(content, session.personaId);
           }
         }}
         recoveryNotice={recoveryNotice}
@@ -552,11 +402,16 @@ export function ChatInterface() {
               architectures={architectures}
               isStreaming={composerStreaming}
               onArchitectureChange={setSelectedArchitectureId}
-              onArchitectureRun={(content, schemaId) => void handleArchitectureRun(content, schemaId)}
+              onArchitectureRun={(content) => void handleComposerSend(content, selectedPersonaId)}
               onDraftChange={setDraftUserMessage}
-              onPersonaChange={(personaId) => void handlePersonaChange(personaId)}
-              onSend={handleSend}
+              onPersonaChange={setSelectedPersonaId}
+              onProjectPathChange={setProjectPath}
+              onSend={(content, personaId) => {
+                void handleLaunchSend(content, personaId);
+              }}
               personas={personas}
+              projectPath={projectPath}
+              selectedPersonaId={selectedPersonaId}
               selectedArchitectureId={selectedArchitectureId}
             />
           )}
@@ -589,10 +444,11 @@ export function ChatInterface() {
       {messages.length > 0 && (
         <ChatInput
           architectures={architectures}
-          disabled={composerStreaming || !activeSessionId}
+          disabled={!activeSessionId}
           isStreaming={composerStreaming}
+          queuedDepth={queuedDepth}
           onArchitectureChange={setSelectedArchitectureId}
-          onArchitectureRun={(content, schemaId) => void handleArchitectureRun(content, schemaId)}
+          onArchitectureRun={(content) => void handleComposerSend(content, activeSession?.personaId ?? 'default')}
           onDraftChange={setDraftUserMessage}
           onSend={handleComposerSend}
           onStop={handleStop}

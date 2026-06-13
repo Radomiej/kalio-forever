@@ -3,13 +3,10 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LLMPanel } from './LLMPanel';
 import type { Credential } from '@kalio/types';
+import { SettingsModal } from './SettingsModal';
+import { useSettingsStore } from './settingsStore';
 
 // ── Store mock ─────────────────────────────────────────────────────────────────
-const mockSetBackendConfig = vi.hoisted(() => vi.fn());
-vi.mock('./settingsStore', () => ({
-  useSettingsStore: (selector: (s: { setBackendConfig: typeof mockSetBackendConfig }) => unknown) =>
-    selector({ setBackendConfig: mockSetBackendConfig }),
-}));
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const CRED: Credential = {
@@ -64,6 +61,7 @@ function defaultMap(opts: {
   webSearchTimeoutMs?: number;
   providerLocalTimeoutMs?: number;
   providerRemoteTimeoutMs?: number;
+  providerMaxConcurrentStreams?: number;
   llmProvider?: string;
   llmModel?: string;
   llmBaseUrl?: string;
@@ -80,6 +78,7 @@ function defaultMap(opts: {
       webSearchTimeoutMs: opts.webSearchTimeoutMs ?? 120000,
       providerLocalTimeoutMs: opts.providerLocalTimeoutMs ?? 3000,
       providerRemoteTimeoutMs: opts.providerRemoteTimeoutMs ?? 15000,
+      providerMaxConcurrentStreams: opts.providerMaxConcurrentStreams ?? 2,
     },
     'GET /api/llm/active/models': { models: [] },
     'GET /api/llm/config': {
@@ -102,6 +101,10 @@ function getRequestBody<T>(method: string, url: string): T {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  useSettingsStore.setState({
+    requestedSettingsTab: null,
+    runtimeModelFocusRequest: 0,
+  });
 });
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -150,6 +153,7 @@ describe('LLMPanel', () => {
     expect(screen.getByLabelText('Max output tokens')).toBeInTheDocument();
     expect(screen.getByLabelText('Context window')).toBeInTheDocument();
     expect(screen.getByLabelText('Max tool attempts')).toBeInTheDocument();
+    expect(screen.getByLabelText('Max provider streams')).toBeInTheDocument();
     expect(screen.getByLabelText('Web search timeout')).toBeInTheDocument();
     expect(screen.getByLabelText('Local provider probe timeout')).toBeInTheDocument();
     expect(screen.getByLabelText('Remote provider probe timeout')).toBeInTheDocument();
@@ -202,6 +206,30 @@ describe('LLMPanel', () => {
     await waitFor(() => expect(screen.getByText('active')).toBeInTheDocument());
   });
 
+  it('requests the runtime settings tab and model focus when edit is clicked on the active provider', async () => {
+    mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
+    const user = userEvent.setup();
+    render(<LLMPanel />);
+
+    const editButton = await screen.findByTestId(`provider-edit-${CRED.id}`);
+    await user.click(editButton);
+
+    expect(useSettingsStore.getState().requestedSettingsTab).toBe('runtime');
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveFocus());
+  });
+
+  it('switches SettingsModal to runtime mode and focuses the model selector from provider edit', async () => {
+    mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
+    const user = userEvent.setup();
+    render(<SettingsModal onClose={() => undefined} initialTab="llm" />);
+
+    const editButton = await screen.findByTestId(`provider-edit-${CRED.id}`);
+    await user.click(editButton);
+
+    expect(await screen.findByRole('heading', { name: 'Runtime Settings', level: 2 })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveFocus());
+  });
+
   it('renders a dedicated runtime settings panel for an env-backed active provider', async () => {
     mockFetch({
       ...defaultMap({
@@ -224,6 +252,19 @@ describe('LLMPanel', () => {
     expect(screen.getByTestId('provider-row-env')).toHaveTextContent(/xiaomi mimo/i);
     expect(screen.queryByText(/activate a provider above to select its model/i)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('mimo-v2.5-pro'));
+  });
+
+  it('renders runtime mode without the provider management list', async () => {
+    mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
+    render(<LLMPanel mode="runtime" />);
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Runtime Settings', level: 2 })).toBeInTheDocument(),
+    );
+
+    expect(screen.queryByTestId('add-provider-btn')).not.toBeInTheDocument();
+    expect(screen.queryByTestId(`provider-row-${CRED.id}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId('provider-health-card')).toBeInTheDocument();
   });
 
   it('saves the active model through the runtime endpoint when the env provider is active', async () => {
@@ -983,8 +1024,10 @@ describe('LLMPanel', () => {
     mockFetch(map);
     render(<LLMPanel />);
     await waitFor(() => screen.getByTestId('context-window-slider'));
-    const slider = screen.getByTestId('context-window-slider');
-    fireEvent.change(slider, { target: { value: '128000' } });
+    const slider = screen.getByTestId('context-window-slider') as HTMLInputElement;
+    slider.value = '128000';
+    fireEvent.input(slider);
+    fireEvent.mouseUp(slider);
     await waitFor(() =>
       expect(screen.getByTestId('context-window-value')).toHaveTextContent('128k'),
     );
@@ -998,8 +1041,10 @@ describe('LLMPanel', () => {
     mockFetch(map);
     render(<LLMPanel />);
     await waitFor(() => screen.getByTestId('max-tool-attempts-slider'));
-    const slider = screen.getByTestId('max-tool-attempts-slider');
-    fireEvent.change(slider, { target: { value: '25' } });
+    const slider = screen.getByTestId('max-tool-attempts-slider') as HTMLInputElement;
+    slider.value = '25';
+    fireEvent.input(slider);
+    fireEvent.mouseUp(slider);
     await waitFor(() =>
       expect(screen.getByTestId('max-tool-attempts-value')).toHaveTextContent('25'),
     );
@@ -1010,14 +1055,21 @@ describe('LLMPanel', () => {
       webSearchTimeoutMs: 180000,
       providerLocalTimeoutMs: 5000,
       providerRemoteTimeoutMs: 45000,
+      providerMaxConcurrentStreams: 4,
     }));
     render(<LLMPanel />);
 
+    await waitFor(() => expect(screen.getByTestId('provider-max-streams-slider')).toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId('web-search-timeout-slider')).toBeInTheDocument());
 
+    expect(screen.getByTestId('provider-max-streams-value')).toHaveTextContent('4');
     expect((screen.getByTestId('web-search-timeout-slider') as HTMLInputElement).value).toBe('180000');
     expect((screen.getByTestId('provider-local-timeout-slider') as HTMLInputElement).value).toBe('5000');
     expect((screen.getByTestId('provider-remote-timeout-slider') as HTMLInputElement).value).toBe('45000');
+    expect(
+      screen.getByTestId('provider-max-streams-slider').compareDocumentPosition(screen.getByTestId('web-search-timeout-slider')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('updates web search timeout badge on slider change', async () => {

@@ -250,6 +250,67 @@ describe('ArchitectureRuntimeService', () => {
     });
   });
 
+  it('inherits parent allowance context into nested architecture runs', async () => {
+    const { service, sessions } = createService({
+      sessionById: {
+        'parent-chat': {
+          id: 'parent-chat',
+          personaId: 'orchestrator',
+          title: 'Parent chat',
+          kind: 'chat',
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureContext: {
+              projectPath: 'C:\\Projekty\\FamilyQuest',
+              executionCwd: 'C:\\Projekty\\FamilyQuest',
+              launchAllowedToolNames: ['vfs_read', 'fs_read', 'fs_list'],
+              allowArchitectureOrchestratorSubagents: true,
+            },
+          },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      },
+    });
+
+    const run = await service.createRun({
+      schemaId: 'architecture_debate',
+      prompt: 'Review the project.',
+      executionMode: 'subagent_execution',
+      context: {
+        parentSessionId: 'parent-chat',
+      },
+    });
+
+    expect(run.context).toMatchObject({
+      parentSessionId: 'parent-chat',
+      projectPath: 'C:\\Projekty\\FamilyQuest',
+      executionCwd: 'C:\\Projekty\\FamilyQuest',
+      launchAllowedToolNames: ['vfs_read', 'fs_read', 'fs_list'],
+      allowArchitectureOrchestratorSubagents: true,
+    });
+    expect(sessions.get).toHaveBeenCalledWith('parent-chat');
+  });
+
+  it('infers local project scope from a Windows path in the prompt when explicit scope is absent', async () => {
+    const { service } = createService();
+
+    const run = await service.createRun({
+      schemaId: 'architecture_debate',
+      prompt: 'C:\\Projekty\\FamilyQuest oceń architekturę i użyj FS.',
+      executionMode: 'subagent_execution',
+      context: {
+        parentSessionId: 'parent-chat',
+      },
+    });
+
+    expect(run.context).toMatchObject({
+      parentSessionId: 'parent-chat',
+      projectPath: 'C:\\Projekty\\FamilyQuest',
+      executionCwd: 'C:\\Projekty\\FamilyQuest',
+    });
+  });
+
   it('adds only enabled CLI agents to architecture runtime context', async () => {
     const { service, executor } = createService({
       cliConfigs: {
@@ -487,7 +548,7 @@ describe('ArchitectureRuntimeService', () => {
       id: `architecture:${run.id}:user`,
       sessionId: 'parent-chat-start',
       role: 'user',
-      content: '[Architecture: Strategic Decision Council]\nShow this architecture run in parent chat immediately.',
+      content: 'Show this architecture run in parent chat immediately.',
     }));
     expect(service.findRun(run.id)?.status).toBe('running');
 
@@ -1823,7 +1884,7 @@ describe('ArchitectureRuntimeService', () => {
       id: `architecture:${run.id}:user`,
       sessionId: 'parent-chat-1',
       role: 'user',
-      content: '[Architecture: Strategic Decision Council]\nWhat can you do?',
+      content: 'What can you do?',
     });
     const toolHost = persisted.find((message) => message.id === `architecture:${run.id}:tool-calls`);
     const toolCalls = toolHost?.toolCalls ?? [];
@@ -4425,13 +4486,15 @@ function auditRow(params: {
 
 function createService(options: {
   cliConfigs?: Record<string, { enabled: boolean; model?: string; architecturePreference?: string }>;
+  sessionById?: Record<string, ChatSession>;
 } = {}): {
   service: ArchitectureRuntimeService;
   executor: ArchitectureRoleExecutor;
-  sessions: Pick<SessionsService, 'createWithId' | 'list' | 'getMessages'> & {
+  sessions: Pick<SessionsService, 'createWithId' | 'list' | 'getMessages' | 'get'> & {
     created: Array<{ id: string; dto: CreateSessionDto }>;
     list: ReturnType<typeof vi.fn>;
     getMessages: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
   };
   sessionManager: Pick<SessionManagerService, 'persistMessage'> & {
     persistMessage: ReturnType<typeof vi.fn>;
@@ -4467,6 +4530,29 @@ function createService(options: {
     }),
     list: vi.fn().mockResolvedValue([]),
     getMessages: vi.fn().mockResolvedValue([]),
+    get: vi.fn(async (id: string): Promise<ChatSession> => {
+      const explicit = options.sessionById?.[id];
+      if (explicit) {
+        return explicit;
+      }
+      const createdSession = created.find((entry) => entry.id === id);
+      if (createdSession) {
+        const now = Date.now();
+        return {
+          id,
+          personaId: createdSession.dto.personaId ?? 'default',
+          title: createdSession.dto.title ?? 'New Chat',
+          kind: createdSession.dto.kind ?? 'chat',
+          parentSessionId: createdSession.dto.parentSessionId,
+          parentTurnId: createdSession.dto.parentTurnId,
+          parentToolCallId: createdSession.dto.parentToolCallId,
+          runtimeContext: createdSession.dto.runtimeContext,
+          createdAt: now,
+          updatedAt: now,
+        };
+      }
+      throw new Error(`Session not found: ${id}`);
+    }),
   };
   const executor: ArchitectureRoleExecutor = {
     execute: vi.fn(async ({ branchSessionId, personaId, run, slot }) => ({

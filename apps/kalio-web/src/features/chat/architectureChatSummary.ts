@@ -1,5 +1,6 @@
 import type {
   ArchitectureBranchStreamSummary,
+  ArchitectureGraphProjection,
   ArchitectureChatRunSummary,
   ArchitectureRouterInsight,
   ArchitectureRouterOutput,
@@ -33,6 +34,7 @@ function formatRouteLabel(source: string, fromNodeId: string, toNodeId: string):
 }
 
 export function buildArchitectureRunMetadata(result: ArchitectRunResult): ArchitectureChatRunSummary {
+  const schemaLabel = resolveArchitectureSchemaLabel(result);
   const visitIndexByEventId = buildVisitIndexByEventId(result);
   const streamByEventId = buildStreamByEventId(result);
   const routerOutputByEventId = buildRouterOutputByEventId(result);
@@ -52,7 +54,7 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
     }));
   return {
     runId: result.run.id,
-    schemaId: result.run.schemaId,
+    schemaId: schemaLabel,
     status: result.run.status,
     finalArtifact: [...result.chat.messages]
       .reverse()
@@ -82,10 +84,12 @@ export function findArchitectureRunInMessages(messages: ChatMessage[]): Architec
   }
 
   const runId = toolCalls[0].args['architectureRunId'] as string;
-  const schemaLabel = messages
-    .find((message) => message.role === 'user')
-    ?.content.match(/\[Architecture:\s*([^\]]+)\]/)?.[1]
-    ?? 'architecture-run';
+  const schemaLabel = typeof toolCalls[0].args['schemaName'] === 'string'
+    ? toolCalls[0].args['schemaName']
+    : messages
+      .find((message) => message.role === 'user')
+      ?.content.match(/\[Architecture:\s*([^\]]+)\]/)?.[1]
+      ?? 'architecture-run';
   const resultByCallId = new Map<string, SubagentToolResult>();
   messages
     .filter((message) => message.role === 'tool_result' && message.toolCallId)
@@ -266,6 +270,14 @@ function compactRouterField(value: string): string {
   return compactArchitectureTraceContent(value, 'router');
 }
 
+function resolveArchitectureSchemaLabel(result: ArchitectRunResult): string {
+  const graph: ArchitectureGraphProjection = result.graph;
+  if (typeof graph.schemaName === 'string' && graph.schemaName.trim().length > 0) {
+    return graph.schemaName.trim();
+  }
+  return result.run.schemaId;
+}
+
 function buildVisitIndexByEventId(result: ArchitectRunResult): Map<string, number> {
   const visitsByNodeId = new Map<string, number>();
   const visitIndexByEventId = new Map<string, number>();
@@ -282,6 +294,7 @@ function buildVisitIndexByEventId(result: ArchitectRunResult): Map<string, numbe
 
 export function buildArchitectureRunSummary(result: ArchitectRunResult): string {
   const metadata = buildArchitectureRunMetadata(result);
+  const schemaLabel = resolveArchitectureSchemaLabel(result);
   const statusLabel = result.run.status === 'completed'
     ? 'completed'
     : result.run.status === 'failed'
@@ -303,7 +316,7 @@ export function buildArchitectureRunSummary(result: ArchitectRunResult): string 
   ));
 
   return [
-    `Architecture run ${statusLabel}: ${result.run.schemaId}`,
+    `Architecture run ${statusLabel}: ${schemaLabel}`,
     metadata.finalArtifact ? `Final artifact:\n${metadata.finalArtifact}` : null,
     trace.length > 0 ? `Execution trace:\n${trace.join('\n')}` : null,
     route.length > 0 ? `Executed route:\n${route.join('\n')}` : null,
@@ -417,12 +430,14 @@ function toSubagentToolCall(
   message: ArchitectureRunChatMessage,
   stream: ArchitectureBranchStreamSummary | undefined,
 ): LLMToolCall {
+  const schemaLabel = resolveArchitectureSchemaLabel(result);
   return {
     id: `architecture:${result.run.id}:${message.eventId}`,
     name: 'run_subagent',
     args: {
       objective: `${speakerLabel(message.speaker, message.roleSlotId)} branch for: ${result.run.prompt}`,
       architectureRunId: result.run.id,
+      schemaName: schemaLabel,
       nodeId: message.route?.fromNodeId,
       roleSlotId: message.roleSlotId,
       childSessionId: stream?.branchSessionId ?? fallbackChildSessionId(result, message),

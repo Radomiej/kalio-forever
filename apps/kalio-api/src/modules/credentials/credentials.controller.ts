@@ -5,7 +5,15 @@ import { LLMService } from '../llm/llm.service';
 import type { LLMToolDef } from '../llm/llm.types';
 import { TimeoutSettingsService } from './timeout-settings.service';
 import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
-import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../common/utils/llm-provider-http.util';
+import { buildProviderCompatHeaders, isBuiltInLlmProvider, resolveLlmProviderBaseUrl } from '../../common/utils/llm-provider-http.util';
+
+function requiresExplicitBaseUrl(provider: string): boolean {
+  const normalized = provider.trim().toLowerCase();
+  if (normalized === 'mock') {
+    return false;
+  }
+  return !isBuiltInLlmProvider(provider);
+}
 
 @Controller('credentials')
 export class CredentialsController {
@@ -121,6 +129,22 @@ export class CredentialsController {
     this.logger.log(`Max tool attempts updated via API: ${body.size}`);
   }
 
+  @Get('settings/conversation-title')
+  async getConversationTitleSettings(): Promise<import('@kalio/types').ConversationTitleSettings> {
+    return this.credentialsService.getConversationTitleSettings();
+  }
+
+  @Put('settings/conversation-title')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async setConversationTitleSettings(
+    @Body() body: Partial<import('@kalio/types').ConversationTitleSettings>,
+  ): Promise<void> {
+    await this.credentialsService.setConversationTitleSettings(body);
+    this.logger.log(
+      `Conversation title settings updated via API: autoRename=${body.autoRenameEnabled ?? '—'} cadence=${body.renameEveryReplies ?? '—'}`,
+    );
+  }
+
   @Get('settings/tool-timeouts')
   async getToolTimeouts(): Promise<ToolTimeoutSettings> {
     return this.timeoutSettings.getTimeoutSettings();
@@ -195,11 +219,20 @@ export class CredentialsController {
         return { ok: false, latencyMs: Date.now() - start, error: 'API key not available' };
       }
 
+      const explicitBaseUrl = cred.baseUrl?.trim();
+      if (requiresExplicitBaseUrl(cred.provider) && !explicitBaseUrl) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          error: 'baseUrl is required for custom or unrecognized providers',
+        };
+      }
+
       const providerConfig = {
         provider: cred.provider,
         apiKey: apiKey || '',
         model: cred.model ?? '',
-        ...(cred.baseUrl ? { baseUrl: cred.baseUrl } : {}),
+        ...(explicitBaseUrl ? { baseUrl: explicitBaseUrl } : {}),
       };
       const resolvedBase = resolveLlmProviderBaseUrl(providerConfig.provider, providerConfig.baseUrl);
       const endpoint = `${resolvedBase}/models`;
@@ -241,6 +274,14 @@ export class CredentialsController {
     @Body() body: { provider: string; apiKey: string; model: string; baseUrl?: string },
   ): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
     const start = Date.now();
+    const explicitBaseUrl = body.baseUrl?.trim();
+    if (requiresExplicitBaseUrl(body.provider) && !explicitBaseUrl) {
+      return {
+        ok: false,
+        latencyMs: Date.now() - start,
+        error: 'baseUrl is required for custom or unrecognized providers',
+      };
+    }
     try {
       await this.llm.streamChatWithConfig(
         {

@@ -70,6 +70,8 @@ describe('llm-provider-http.util', () => {
   it('parses explicit boolean env flags without changing the default fallback', () => {
     expect(readEnvBooleanFlag(undefined, true)).toBe(true);
     expect(readEnvBooleanFlag(undefined, false)).toBe(false);
+    expect(readEnvBooleanFlag(true, false)).toBe(true);
+    expect(readEnvBooleanFlag(false, true)).toBe(false);
     expect(readEnvBooleanFlag('true', false)).toBe(true);
     expect(readEnvBooleanFlag('false', true)).toBe(false);
     expect(readEnvBooleanFlag('  false  ', true)).toBe(false);
