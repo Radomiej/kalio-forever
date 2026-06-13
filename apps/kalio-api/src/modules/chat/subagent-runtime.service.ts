@@ -173,7 +173,13 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       trackingEmit?.('session:created', childSession);
     }
 
-    await this.sessionManager.persistUserMessage(childSessionId, objectiveWithAttachmentHint);
+    const promptMessage = await this.sessionManager.persistUserMessage(
+      childSessionId,
+      objectiveWithAttachmentHint,
+      undefined,
+      { turnId },
+    );
+    const promptMessageId = promptMessage?.id;
 
     const controller = new AbortController();
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -224,6 +230,8 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         this.llmTurnRuntime.runAgentLoop({
           runtimeKind,
           sessionId: childSessionId,
+          turnId,
+          promptMessageId,
           personaId,
           effectiveSystemPrompt: assembledContext.effectiveSystemPrompt,
           toolMetas: assembledContext.toolMetas,
@@ -243,6 +251,8 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
               this.agentBudgetApprovals.requestAdditionalBudget(
                 {
                   sessionId: childSessionId,
+                  turnId,
+                  promptMessageId,
                   vfsSessionId,
                   messageId: `subagent-${agentRun.agentRunId}`,
                   abortSignal: controller.signal,

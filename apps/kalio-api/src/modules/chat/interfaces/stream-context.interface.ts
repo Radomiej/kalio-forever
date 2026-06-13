@@ -13,6 +13,8 @@ export type EmitFn = <K extends keyof SocketEvents>(event: K, data: SocketEvents
  */
 export interface StreamContext {
   readonly sessionId: string;
+  readonly turnId?: string;
+  readonly promptMessageId?: string;
   readonly vfsSessionId?: string;
   readonly messageId: string;
   readonly abortSignal: AbortSignal;

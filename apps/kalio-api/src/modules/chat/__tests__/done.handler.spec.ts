@@ -8,6 +8,8 @@ function makeCtx(state?: TurnState): StreamContext & { emit: ReturnType<typeof v
   const emit = vi.fn();
   return {
     sessionId: 'sid-04',
+    turnId: 'turn-04',
+    promptMessageId: 'user-04',
     messageId: 'mid-04',
     abortSignal: new AbortController().signal,
     state: state ?? new TurnState(),
@@ -45,6 +47,7 @@ describe('DoneHandler', () => {
       'sid-04',
       'mid-04',
       state,
+      { turnId: 'turn-04', promptMessageId: 'user-04' },
     );
   });
 
@@ -83,6 +86,7 @@ describe('DoneHandler', () => {
       'sid-04',
       'mid-04',
       state,
+      { turnId: 'turn-04', promptMessageId: 'user-04' },
     );
   });
 
@@ -118,6 +122,7 @@ describe('DoneHandler', () => {
       'sid-04',
       'mid-04',
       state,
+      { turnId: 'turn-04', promptMessageId: 'user-04' },
     );
   });
 });

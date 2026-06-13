@@ -5,6 +5,15 @@ export type ChatTimelineEntry =
   | { kind: 'user_message'; message: ChatMessage }
   | { kind: 'agent_turn'; turn: AgentTurn };
 
+type DurableTurnMessage = ChatMessage & {
+  promptMessageId?: string;
+};
+
+function getDurablePromptMessageId(message: ChatMessage): string | undefined {
+  const promptMessageId = (message as DurableTurnMessage).promptMessageId;
+  return typeof promptMessageId === 'string' && promptMessageId.trim().length > 0 ? promptMessageId : undefined;
+}
+
 /**
  * Returns a Set of toolCallIds for which a user message appears AFTER
  * the corresponding tool_result — i.e., the user already submitted an answer.
@@ -43,6 +52,8 @@ function mergeMessageCopies(currentMessage: ChatMessage, loadedMessage: ChatMess
     ...loadedMessage,
     ...currentMessage,
     content: currentMessage.content || loadedMessage.content,
+    turnId: currentMessage.turnId ?? loadedMessage.turnId,
+    promptMessageId: currentMessage.promptMessageId ?? loadedMessage.promptMessageId,
     thinking: currentMessage.thinking ?? loadedMessage.thinking,
     toolCalls: currentMessage.toolCalls ?? loadedMessage.toolCalls,
     toolCallId: currentMessage.toolCallId ?? loadedMessage.toolCallId,
@@ -127,6 +138,43 @@ export function mergeFetchedMessages(currentMessages: ChatMessage[], loadedMessa
  * turns for 1 user message would pull unrelated user messages out of position.
  */
 export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string): AgentTurn[] {
+  const assistantMessages = messages.filter((message) => message.role === 'assistant');
+  const canUseDurableLinkage = assistantMessages.length > 0
+    && assistantMessages.every((message) => Boolean(message.turnId && message.promptMessageId));
+
+  if (canUseDurableLinkage) {
+    const turnsById = new Map<string, AgentTurn>();
+    const orderedTurns: AgentTurn[] = [];
+
+    for (const msg of messages) {
+      if (msg.role !== 'assistant' || !msg.turnId || !msg.promptMessageId) continue;
+
+      let turn = turnsById.get(msg.turnId);
+      if (!turn) {
+        turn = {
+          id: msg.turnId,
+          sessionId,
+          promptMessageId: msg.promptMessageId,
+          items: [],
+          done: true,
+        };
+        turnsById.set(msg.turnId, turn);
+        orderedTurns.push(turn);
+      }
+
+      if (msg.thinking) turn.items.push({ kind: 'thinking', messageId: msg.id });
+      turn.items.push({ kind: 'text', messageId: msg.id });
+      if (msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          turn.items.push({ kind: 'tool', callId: tc.id });
+        }
+      }
+    }
+
+    return orderedTurns.filter((turn) => turn.items.length > 0);
+  }
+
+  // TODO: legacy fallback - old persisted messages predate turn linkage, so replay still uses chronological reconstruction here.
   const turns: AgentTurn[] = [];
   let turnIndex = 0;
   let currentItems: AgentTurn['items'] = [];
@@ -154,6 +202,12 @@ export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string
       continue;
     }
     if (msg.role !== 'assistant') continue;
+
+    const durablePromptMessageId = getDurablePromptMessageId(msg);
+    if (durablePromptMessageId && durablePromptMessageId !== currentPromptMessageId) {
+      flushTurn();
+      currentPromptMessageId = durablePromptMessageId;
+    }
 
     if (firstMsgId === null) firstMsgId = msg.id;
     if (msg.thinking) currentItems.push({ kind: 'thinking', messageId: msg.id });

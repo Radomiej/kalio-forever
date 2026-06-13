@@ -94,7 +94,8 @@ export class ChatService {
       }
       const assembledContext = await this.contextAssembly.assembleForSessionRuntime(personaId, runtimeContext);
 
-      await this.sessionManager.persistUserMessage(sessionId, content, attachments);
+      const promptMessage = await this.sessionManager.persistUserMessage(sessionId, content, attachments, { turnId });
+      const promptMessageId = promptMessage?.id;
 
       trackingEmit('chat:context', {
         sessionId,
@@ -109,6 +110,8 @@ export class ChatService {
       const loopResult = await this.llmTurnRuntime.runAgentLoop({
         runtimeKind: 'chat',
         sessionId,
+        turnId,
+        promptMessageId,
         personaId,
         effectiveSystemPrompt: assembledContext.effectiveSystemPrompt,
         toolMetas: assembledContext.toolMetas,
@@ -142,6 +145,8 @@ export class ChatService {
             return this.agentBudgetApprovals.requestAdditionalBudget(
               {
                 sessionId,
+                turnId,
+                promptMessageId,
                 vfsSessionId: undefined,
                 messageId: firstMessageId,
                 abortSignal: controller.signal,

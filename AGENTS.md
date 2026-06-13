@@ -236,6 +236,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - For failing CI work, start with `superpowers:systematic-debugging` and finish with `superpowers:verification-before-completion` before claiming the pipeline is fixed.
 - On Windows, always use system Node (`C:\Program Files\nodejs\node.exe`) for `node`/`pnpm`/`npm` installs and rebuilds; never Cursor's bundled Node 22 — prepend that directory to PATH when the agent shell resolves the wrong `node`.
 - Keep `docs/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/post-mvp-plans.md`.
+- Whenever a compatibility fallback is added, include a `TODO: legacy fallback` code comment with the reason.
 
 ---
 

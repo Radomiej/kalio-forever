@@ -19,6 +19,8 @@ function makeCtx(aborted = false): StreamContext & { emit: ReturnType<typeof vi.
   const emit = vi.fn();
   return {
     sessionId: 'sid',
+    turnId: 'turn-1',
+    promptMessageId: 'user-1',
     messageId: 'mid',
     abortSignal: controller.signal,
     state: new TurnState(),
@@ -139,7 +141,12 @@ describe('StreamProcessorService', () => {
         },
       }),
     ]);
-    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledWith('sid', 'mid', ctx.state);
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledWith(
+      'sid',
+      'mid',
+      ctx.state,
+      { turnId: 'turn-1', promptMessageId: 'user-1' },
+    );
   });
 
   it('skips handler when abort signal is set (abortCheckMiddleware)', async () => {

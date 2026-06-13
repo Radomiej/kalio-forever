@@ -45,6 +45,8 @@ function makeTestDrizzle(): DrizzleService {
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      turn_id TEXT,
+      prompt_message_id TEXT,
       thinking TEXT,
       tool_calls TEXT,
       tool_call_id TEXT,

@@ -184,7 +184,12 @@ describe('ChatService', () => {
     const llmSource = makeLLMSource([]);
     await buildService(llmSource);
     await service.handleTurn('sid', 'hello', 'persona-1', emit as EmitFn);
-    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith('sid', 'hello', undefined);
+    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith(
+      'sid',
+      'hello',
+      undefined,
+      expect.objectContaining({ turnId: expect.any(String) }),
+    );
   });
 
   it('forwards attachments to persistUserMessage', async () => {
@@ -192,7 +197,12 @@ describe('ChatService', () => {
     await buildService(llmSource);
     const attachments = [{ path: 'uploads/a.png', mimeType: 'image/png' }];
     await service.handleTurn('sid', 'see', 'p1', emit as EmitFn, attachments);
-    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith('sid', 'see', attachments);
+    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith(
+      'sid',
+      'see',
+      attachments,
+      expect.objectContaining({ turnId: expect.any(String) }),
+    );
   });
 
   it('emits chat:context with tool names before streaming', async () => {
@@ -691,7 +701,12 @@ describe('ChatService', () => {
       }),
     );
     expect(llmSource.stream).toHaveBeenCalledTimes(2);
-    expect(sessionManager.saveToolResult).toHaveBeenCalledWith('sid', 'c-budget-1', expect.any(String));
+    expect(sessionManager.saveToolResult).toHaveBeenCalledWith(
+      'sid',
+      'c-budget-1',
+      expect.any(String),
+      expect.objectContaining({ turnId: expect.any(String), promptMessageId: 'u1' }),
+    );
     const completeCalls = (emit as ReturnType<typeof vi.fn>).mock.calls.filter(
       (args: unknown[]) => args[0] === 'chat:complete',
     );
@@ -806,11 +821,13 @@ describe('ChatService', () => {
       'sid',
       'tc-cancelled',
       expect.stringContaining('"status":"cancelled"'),
+      expect.objectContaining({ turnId: expect.any(String), promptMessageId: 'u1' }),
     );
     expect(sessionManager.saveToolResult).toHaveBeenCalledWith(
       'sid',
       'tc-cancelled',
       expect.stringContaining('Tool fs_write was not approved.'),
+      expect.objectContaining({ turnId: expect.any(String), promptMessageId: 'u1' }),
     );
   });
 

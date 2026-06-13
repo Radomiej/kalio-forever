@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { EmitFn } from '../interfaces/stream-context.interface';
+import type { EmitFn, StreamContext } from '../interfaces/stream-context.interface';
 import type { ILLMSource } from '../interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../interfaces/llm-chunk.types';
 import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
@@ -42,6 +42,8 @@ describe('LLMTurnRuntimeService', () => {
     const result = await runtime.runAgentLoop({
       runtimeKind: 'chat',
       sessionId: 'sid',
+      turnId: 'turn-1',
+      promptMessageId: 'user-1',
       personaId: 'persona-1',
       effectiveSystemPrompt: 'prompt',
       toolMetas: [],
@@ -56,5 +58,57 @@ describe('LLMTurnRuntimeService', () => {
       systemPrompt: 'prompt',
       toolMetas: [],
     });
+  });
+
+  it('persists tool results with the opening prompt linkage for the turn', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([
+        { type: 'tool_call', callId: 'call-1', name: 'memory_search', args: { q: 'x' } },
+        { type: 'done' },
+      ])),
+    };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }],
+        unboundedHistoryCount: 1,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const processor = {
+      process: vi.fn(async (chunk: InternalLLMChunk, ctx: StreamContext) => {
+        if (chunk.type === 'tool_call') {
+          ctx.state.addToolCall({ id: chunk.callId, name: chunk.name, args: chunk.args });
+        }
+      }),
+    } satisfies Pick<StreamProcessorService, 'process'>;
+    const toolDispatch = {
+      dispatch: vi.fn().mockResolvedValue({ callId: 'call-1', status: 'success', data: { hits: [] } }),
+    } satisfies Pick<ToolDispatchService, 'dispatch'>;
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      processor as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      toolDispatch as unknown as ToolDispatchService,
+    );
+
+    await runtime.runAgentLoop({
+      runtimeKind: 'chat',
+      sessionId: 'sid',
+      turnId: 'turn-1',
+      promptMessageId: 'user-1',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [],
+      abortSignal: new AbortController().signal,
+      emit: vi.fn() as EmitFn,
+      maxIterations: 1,
+    });
+
+    expect(sessionManager.saveToolResult).toHaveBeenCalledWith(
+      'sid',
+      'call-1',
+      JSON.stringify({ hits: [] }),
+      { turnId: 'turn-1', promptMessageId: 'user-1' },
+    );
   });
 });
