@@ -22,17 +22,20 @@ function resultFromMessage(message: ChatMessage): SubAgentFlowResult | null {
   }
 }
 
-function previewFromResult(result: SubAgentFlowResult, sessions: ChatSession[]): AgentFlowCanvasPreview {
+function previewFromResult(result: SubAgentFlowResult, sessions: ChatSession[]): AgentFlowCanvasPreview | null {
   const sessionId = result.openChatSessionId ?? result.childSessionId;
   const graphRunId = result.openGraphRunId ?? result.flowRunId;
   const session = sessions.find((item) => item.id === sessionId);
+  if (!session) {
+    return null;
+  }
   return {
     flowRunId: result.flowRunId,
     sessionId,
     graphRunId,
-    title: session?.title ?? `AgentFlow ${result.flowRunId}`,
+    title: session.title,
     result,
-    updatedAt: session?.updatedAt ?? 0,
+    updatedAt: session.updatedAt,
   };
 }
 
@@ -47,7 +50,9 @@ export function buildAgentFlowPreviews(
     .map(resultFromMessage)
     .filter((result): result is SubAgentFlowResult => result !== null)
     .forEach((result) => {
-      previews.set(result.flowRunId, previewFromResult(result, sessions));
+      const preview = previewFromResult(result, sessions);
+      if (!preview) return;
+      previews.set(result.flowRunId, preview);
     });
 
   toolActivities
@@ -55,7 +60,9 @@ export function buildAgentFlowPreviews(
     .map((activity) => extractSubAgentFlowResult(activity.result?.data))
     .filter((result): result is SubAgentFlowResult => result !== null)
     .forEach((result) => {
-      previews.set(result.flowRunId, previewFromResult(result, sessions));
+      const preview = previewFromResult(result, sessions);
+      if (!preview) return;
+      previews.set(result.flowRunId, preview);
     });
 
   return [...previews.values()].sort((left, right) => right.updatedAt - left.updatedAt);

@@ -14,6 +14,10 @@ function getDurablePromptMessageId(message: ChatMessage): string | undefined {
   return typeof promptMessageId === 'string' && promptMessageId.trim().length > 0 ? promptMessageId : undefined;
 }
 
+function isWorkflowEnvelopeMessage(message: ChatMessage): boolean {
+  return message.architectureRun?.hostProjectionKind === 'workflow-envelope';
+}
+
 /**
  * Returns a Set of toolCallIds for which a user message appears AFTER
  * the corresponding tool_result — i.e., the user already submitted an answer.
@@ -155,11 +159,14 @@ export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string
           id: msg.turnId,
           sessionId,
           promptMessageId: msg.promptMessageId,
+          ...(isWorkflowEnvelopeMessage(msg) ? { turnKind: 'workflow-envelope' as const } : {}),
           items: [],
           done: true,
         };
         turnsById.set(msg.turnId, turn);
         orderedTurns.push(turn);
+      } else if (isWorkflowEnvelopeMessage(msg)) {
+        turn.turnKind = 'workflow-envelope';
       }
 
       if (msg.thinking) turn.items.push({ kind: 'thinking', messageId: msg.id });
@@ -180,6 +187,7 @@ export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string
   let currentItems: AgentTurn['items'] = [];
   let firstMsgId: string | null = null;
   let currentPromptMessageId: string | undefined;
+  let currentTurnKind: AgentTurn['turnKind'];
 
   const flushTurn = () => {
     if (currentItems.length === 0 || firstMsgId === null) return;
@@ -187,11 +195,13 @@ export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string
       id: `history-turn-${turnIndex++}-${firstMsgId}`,
       sessionId,
       promptMessageId: currentPromptMessageId,
+      ...(currentTurnKind ? { turnKind: currentTurnKind } : {}),
       items: currentItems,
       done: true,
     });
     currentItems = [];
     firstMsgId = null;
+    currentTurnKind = undefined;
   };
 
   for (const msg of messages) {
@@ -210,6 +220,9 @@ export function buildTurnsFromHistory(messages: ChatMessage[], sessionId: string
     }
 
     if (firstMsgId === null) firstMsgId = msg.id;
+    if (isWorkflowEnvelopeMessage(msg)) {
+      currentTurnKind = 'workflow-envelope';
+    }
     if (msg.thinking) currentItems.push({ kind: 'thinking', messageId: msg.id });
     currentItems.push({ kind: 'text', messageId: msg.id });
     if (msg.toolCalls) {

@@ -178,6 +178,33 @@ router: Router completed.`,
 });
 
 describe('buildArchitectureRunMetadata', () => {
+  it('marks architecture summaries as workflow envelope projections', () => {
+    const metadata = buildArchitectureRunMetadata({
+      run: {
+        id: 'run-envelope',
+        schemaId: 'strategic-decision-council',
+        prompt: 'Decide.',
+        status: 'running',
+        executionMode: 'subagent_execution',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+      graph: {
+        runId: 'run-envelope',
+        nodes: [],
+        edges: [],
+        routeHops: [],
+      },
+      chat: {
+        runId: 'run-envelope',
+        messages: [],
+      },
+    });
+
+    expect(metadata.hostProjectionKind).toBe('workflow-envelope');
+  });
+
   it('adds visit indices for repeated architecture node events', () => {
     const metadata = buildArchitectureRunMetadata({
       run: {
@@ -404,7 +431,7 @@ describe('buildArchitectureRunMetadata', () => {
     );
   });
 
-  it('adds deterministic branch session metadata when events do not include stream snapshots', () => {
+  it('does not synthesize branch session metadata when events do not include stream snapshots', () => {
     const metadata = buildArchitectureRunMetadata({
       run: {
         id: 'run-1',
@@ -443,13 +470,7 @@ describe('buildArchitectureRunMetadata', () => {
       },
     });
 
-    expect(metadata.trace[0]?.stream).toEqual({
-      streamGroupId: 'architecture:run-1:pragmatist',
-      branchSessionId: 'arch-run-1-pragmatist',
-      status: 'completed',
-      chunkCount: 0,
-      text: 'Pragmatist answer',
-    });
+    expect(metadata.trace[0]?.stream).toBeUndefined();
   });
 
   it('sanitizes router output fields before timeline rendering', () => {
@@ -872,6 +893,34 @@ describe('buildArchitectureRunChatTurnDrafts', () => {
 });
 
 describe('buildArchitectureRunTurnProjection', () => {
+  it('marks generated architecture turns as workflow envelopes', () => {
+    const projection = buildArchitectureRunTurnProjection({
+      run: {
+        id: 'run-envelope',
+        schemaId: 'strategic-decision-council',
+        prompt: 'Decide.',
+        status: 'running',
+        executionMode: 'subagent_execution',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+      graph: {
+        runId: 'run-envelope',
+        nodes: [],
+        edges: [],
+        routeHops: [],
+      },
+      chat: {
+        runId: 'run-envelope',
+        messages: [],
+      },
+    }, 'session-1');
+
+    expect(projection.turnKind).toBe('workflow-envelope');
+    expect(projection.messages[0]?.architectureRun?.hostProjectionKind).toBe('workflow-envelope');
+  });
+
   it('projects parallel participant branches as run_subagent calls in one chat turn', () => {
     const projection = buildArchitectureRunTurnProjection({
       run: {
@@ -1044,10 +1093,10 @@ describe('buildArchitectureRunTurnProjection', () => {
         ],
       },
     }, 'parent-session');
-    const toolCallMessage = projection.messages.find((message) => message.id === 'architecture:run-live:tool-calls');
+    const summaryMessage = projection.messages.find((message) => message.architectureRun?.runId === 'run-live');
 
-    expect(toolCallMessage?.architectureRun?.trace.map((step) => step.nodeId)).toEqual(['pragmatist']);
-    expect((toolCallMessage?.architectureRun as ArchitectureMetadataWithGraph | undefined)?.graphNodes?.map((node) => node.id)).toEqual([
+    expect(summaryMessage?.architectureRun?.trace.map((step) => step.nodeId)).toEqual(['pragmatist']);
+    expect((summaryMessage?.architectureRun as ArchitectureMetadataWithGraph | undefined)?.graphNodes?.map((node) => node.id)).toEqual([
       'parallel-deliberation',
       'pragmatist',
       'innovator',
@@ -1058,6 +1107,67 @@ describe('buildArchitectureRunTurnProjection', () => {
     const reloaded = findArchitectureRunInMessages(projection.messages) as ArchitectureMetadataWithGraph | null;
     expect(reloaded?.runId).toBe('run-live');
     expect(reloaded?.graphNodes?.find((node) => node.id === 'final-artifact')?.status).toBe('pending');
+  });
+
+  it('does not project fake run_subagent tool results when a branch has no real session stream', () => {
+    const projection = buildArchitectureRunTurnProjection({
+      run: {
+        id: 'run-streamless',
+        schemaId: 'strategic-decision-council',
+        prompt: 'Decide.',
+        status: 'running',
+        executionMode: 'subagent_execution',
+        rootSessionId: 'root-1',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+      graph: {
+        runId: 'run-streamless',
+        nodes: [
+          { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'completed', eventIds: ['event-pragmatist'] },
+          { id: 'router', label: 'Router', kind: 'router', status: 'pending', eventIds: [] },
+        ],
+        edges: [
+          { id: 'edge-1', fromNodeId: 'pragmatist', toNodeId: 'router' },
+        ],
+        routeHops: [],
+      },
+      chat: {
+        runId: 'run-streamless',
+        messages: [
+          {
+            id: 'm1',
+            eventId: 'event-pragmatist',
+            speaker: 'participant',
+            roleSlotId: 'pragmatist',
+            content: 'Pragmatist answer',
+            createdAt: 3,
+            route: {
+              source: 'runtime_fallback',
+              fromNodeId: 'pragmatist',
+              selectedNodeIds: ['router'],
+              nextNodeId: 'router',
+            },
+          },
+        ],
+      },
+    }, 'parent-session');
+
+    expect(projection.messages.some((message) => message.role === 'tool_result')).toBe(false);
+    expect(projection.messages.some((message) => (
+      message.role === 'assistant'
+      && (message.toolCalls?.some((toolCall) => toolCall.name === 'run_subagent') ?? false)
+    ))).toBe(false);
+    expect(projection.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'assistant',
+        architectureRun: expect.objectContaining({
+          runId: 'run-streamless',
+          trace: [expect.objectContaining({ nodeId: 'pragmatist', stream: undefined })],
+        }),
+      }),
+    ]));
   });
 });
 

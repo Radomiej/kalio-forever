@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CheckCircle2, ExternalLink, PauseCircle, Send, XCircle } from 'lucide-react';
 import type { ToolConfirmationRequest } from '@kalio/types';
 import { eventBus } from '../../../services/eventBus';
+import { useSessionStore } from '../../../store/sessionStore';
 import type { ExecutionGraphNode } from './executionGraphModel';
 
 interface GraphInspectorActionsProps {
@@ -26,6 +27,9 @@ export function GraphInspectorActions({
   setPendingConfirmation,
 }: GraphInspectorActionsProps) {
   const [cliActionNotice, setCliActionNotice] = useState<string | null>(null);
+  const childSessionExists = useSessionStore((state) => (
+    node.sessionId != null && state.sessions.some((session) => session.id === node.sessionId)
+  ));
   const isChildSessionNode = (
     node.payload.kind === 'subagent'
     || node.payload.kind === 'cli-agent'
@@ -33,6 +37,7 @@ export function GraphInspectorActions({
     || (node.payload.kind === 'architecture-run' && node.payload.route?.branchSessionId)
   )
     && node.sessionId
+    && childSessionExists
     && node.sessionId !== activeSessionId;
   const isCliChildNode = node.payload.kind === 'cli-agent' && isChildSessionNode;
   const isAgentFlowChildNode = node.payload.kind === 'agent-flow' && isChildSessionNode;

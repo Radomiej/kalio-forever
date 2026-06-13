@@ -10,6 +10,8 @@ import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
 import { LiveToolCallBubble, HistoryToolCallBubble } from './ToolCallBubble';
 import { extractCLIAgentResult, extractCLIAgentSessionSnapshot, extractPersistedToolResultMeta } from './ToolCallBubble.parsers';
 import { isCliChildToolName, resolveCLIChildProjectionStatus, shouldRenderLiveCliChildStatus } from './cliChildProjection.model';
+import { deriveVisibleTurnItems } from './agentTurnVisibleItems';
+import { isMessageLiveStreaming } from './agentTurnStreaming';
 import { eventBus } from '../../services/eventBus';
 
 interface Props {
@@ -56,7 +58,7 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
 // ─── AgentTurnBubble ──────────────────────────────────────────────────────────
 
 export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props) {
-  const { messages, streamingChunks, thinkingChunks } = useSessionStore();
+  const { messages, sessions, streamingChunks, thinkingChunks } = useSessionStore();
   const [submittedBudgetRequestId, setSubmittedBudgetRequestId] = useState<string | null>(null);
   const {
     callIdToName: persistentCallIdToName,
@@ -130,6 +132,8 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
   const architectureFinalAnswer = turnArchitectureRun
     ? finalAnswerForArchitectureRun(turnArchitectureRun)
     : null;
+  const visibleItems = deriveVisibleTurnItems(turn.items, messages, streamingChunks, turn.done);
+  const knownBranchSessionIds = new Set(sessions.map((session) => session.id));
 
   return (
     <div data-testid="agent-turn-bubble" className="flex justify-start mb-2 w-full">
@@ -143,6 +147,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
             <>
               <ArchitectureRunTimeline
                 run={turnArchitectureRun}
+                knownBranchSessionIds={knownBranchSessionIds}
                 onOpenCanvas={() => {
                   setCanvasFocus({ kind: 'architecture-run', runId: turnArchitectureRun.runId });
                 }}
@@ -180,7 +185,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
               <span data-testid="turn-loading-indicator" className="loading loading-dots loading-xs" />
             )
           )}
-          {turn.items.map((item, idx) => {
+          {visibleItems.map((item, idx) => {
             if (item.kind === 'tool') {
               const callId = item.callId;
               const toolName = toolCallIdToName.get(callId) ?? callId;
@@ -264,7 +269,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
             
             // Use per-message streaming state: cursor blinks only while this message's
             // chunk is still live (disappears as soon as agent calls a tool / thinking / raapp).
-            const isStreaming = streamingChunks[messageId] !== undefined || (!turn.done && msg.streaming === true);
+            const isStreaming = isMessageLiveStreaming(messageId, msg, streamingChunks, turn.done);
             const displayContent = isStreaming ? (streamingChunks[messageId] ?? '') : msg.content;
 
             return (

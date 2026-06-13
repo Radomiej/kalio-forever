@@ -285,6 +285,7 @@ export interface ArchitectureChatRunSummary {
   runId: ID;
   schemaId: ID;
   status: ArchitectureRunStatus;
+  hostProjectionKind?: 'workflow-envelope';
   finalArtifact?: string;
   trace: ArchitectureChatTraceStep[];
   routeHops: ArchitectureRouteHop[];

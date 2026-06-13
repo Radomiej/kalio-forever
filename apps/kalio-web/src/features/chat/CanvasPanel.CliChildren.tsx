@@ -12,7 +12,10 @@ export function buildCliChildPreviews(
 ): CliChildCanvasPreview[] {
   if (!parentSessionId) return [];
   return Object.values(projections)
-    .filter((projection) => projection.parentSessionId === parentSessionId)
+    .filter((projection) => (
+      projection.parentSessionId === parentSessionId
+      && sessionTitles.has(projection.childSessionId)
+    ))
     .map((projection) => ({
       ...projection,
       childTitle: sessionTitles.get(projection.childSessionId) ?? projection.childTitle ?? `${projection.agentId} CLI`,

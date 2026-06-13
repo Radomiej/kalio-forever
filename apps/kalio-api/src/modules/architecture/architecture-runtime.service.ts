@@ -647,6 +647,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
               schemaId: schema.id,
               schemaName: schema.name,
               roleSlotId: slot.id,
+              roleSlotType: slot.slotType,
               roleLabel: slot.label,
               displayLabel: slot.label,
             },

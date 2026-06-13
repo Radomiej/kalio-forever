@@ -83,4 +83,26 @@ describe('CLIChildConversationCard', () => {
     fireEvent.click(screen.getByTestId('cli-child-stop-cli-child-1'));
     expect(eventBus.stopTurn).toHaveBeenCalledWith('cli-child-1');
   });
+
+  it('hides navigation actions when the child session does not exist yet', () => {
+    useSessionStore.setState({
+      sessions: [],
+      activeSessionId: 'parent-1',
+      setActiveSession: vi.fn(),
+      setPendingMessage: vi.fn(),
+    });
+
+    render(
+      <CLIChildConversationCard
+        toolName="spawn_cli_agent"
+        parentSessionId="parent-1"
+        parentCallId="call-1"
+        childSessionId="cli-child-1"
+      />,
+    );
+
+    expect(screen.queryByTestId('cli-child-open-cli-child-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('cli-child-followup-cli-child-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cli-child-stop-cli-child-1')).toBeInTheDocument();
+  });
 });

@@ -119,14 +119,17 @@ function RouterStep({
 
 function AgentStep({
   step,
+  canOpenBranchSession,
   onOpenBranch,
   onOpenStep,
 }: {
   step: TraceStep;
+  canOpenBranchSession: (sessionId: string | undefined) => boolean;
   onOpenBranch: (sessionId: string) => void;
   onOpenStep: (step: TraceStep) => void;
 }) {
   const branchSessionId = step.stream?.branchSessionId;
+  const openableBranchSessionId = canOpenBranchSession(branchSessionId) ? branchSessionId : undefined;
   const status = statusForStep(step);
 
   return (
@@ -134,10 +137,10 @@ function AgentStep({
       type="button"
       className="min-w-0 rounded-lg border border-sky-400/20 bg-sky-400/5 px-2.5 py-2 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-400/10 disabled:cursor-default disabled:hover:border-sky-400/20 disabled:hover:bg-sky-400/5"
       data-testid="architecture-route-agent"
-      data-session-id={branchSessionId}
+      data-session-id={openableBranchSessionId}
       onClick={() => {
-        if (branchSessionId) {
-          onOpenBranch(branchSessionId);
+        if (openableBranchSessionId) {
+          onOpenBranch(openableBranchSessionId);
           return;
         }
         onOpenStep(step);
@@ -159,10 +162,12 @@ function AgentStep({
 
 function ParallelBranches({
   steps,
+  canOpenBranchSession,
   onOpenBranch,
   onOpenStep,
 }: {
   steps: TraceStep[];
+  canOpenBranchSession: (sessionId: string | undefined) => boolean;
   onOpenBranch: (sessionId: string) => void;
   onOpenStep: (step: TraceStep) => void;
 }) {
@@ -178,6 +183,7 @@ function ParallelBranches({
       <div className="grid gap-1.5 sm:grid-cols-2">
         {steps.map((step) => {
           const branchSessionId = step.stream?.branchSessionId;
+          const openableBranchSessionId = canOpenBranchSession(branchSessionId) ? branchSessionId : undefined;
           const status = statusForStep(step);
           return (
           <button
@@ -185,10 +191,10 @@ function ParallelBranches({
             key={step.eventId ?? `${step.nodeId}-${step.visitIndex ?? 0}`}
             className="min-w-0 rounded-md border border-base-content/10 bg-base-300/45 px-2 py-1.5 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-400/10 disabled:cursor-default disabled:hover:border-base-content/10 disabled:hover:bg-base-300/45"
             data-testid="architecture-route-agent"
-            data-session-id={branchSessionId}
+            data-session-id={openableBranchSessionId}
             onClick={() => {
-              if (branchSessionId) {
-                onOpenBranch(branchSessionId);
+              if (openableBranchSessionId) {
+                onOpenBranch(openableBranchSessionId);
                 return;
               }
               onOpenStep(step);
@@ -285,11 +291,13 @@ export function ArchitectureRunTimeline({
   onOpenCanvas,
   onOpenBranch,
   onOpenStep,
+  knownBranchSessionIds,
 }: {
   run: ArchitectureChatRunSummary;
   onOpenCanvas: () => void;
   onOpenBranch: (sessionId: string) => void;
   onOpenStep?: (focus: { eventId?: string; nodeId?: string }) => void;
+  knownBranchSessionIds?: ReadonlySet<string>;
 }) {
   const stages = buildTimelineStages(run);
   const routers = stages
@@ -300,6 +308,11 @@ export function ArchitectureRunTimeline({
   const hasMerge = Boolean(finalRouter && finalRouter !== firstRouter);
   const shellSegments = stages.map(stageSegment);
   const stepCount = graphStepCount(run);
+  const canOpenBranchSession = (sessionId: string | undefined) => (
+    typeof sessionId === 'string'
+    && sessionId.trim().length > 0
+    && (knownBranchSessionIds === undefined || knownBranchSessionIds.has(sessionId))
+  );
   const openStep = (step: TraceStep) => {
     onOpenStep?.(stepFocus(step));
   };
@@ -327,12 +340,28 @@ export function ArchitectureRunTimeline({
       <div className="grid gap-2 border-l border-sky-400/20 pl-2">
         {stages.map((stage, index) => {
           if (stage.kind === 'parallel') {
-            return <ParallelBranches key={`parallel-${index}`} steps={stage.steps} onOpenBranch={onOpenBranch} onOpenStep={openStep} />;
+            return (
+              <ParallelBranches
+                key={`parallel-${index}`}
+                steps={stage.steps}
+                canOpenBranchSession={canOpenBranchSession}
+                onOpenBranch={onOpenBranch}
+                onOpenStep={openStep}
+              />
+            );
           }
 
           const { step } = stage;
             if (step.speaker === 'participant') {
-              return <AgentStep key={step.eventId ?? `${step.nodeId}-${index}`} step={step} onOpenBranch={onOpenBranch} onOpenStep={openStep} />;
+              return (
+                <AgentStep
+                  key={step.eventId ?? `${step.nodeId}-${index}`}
+                  step={step}
+                  canOpenBranchSession={canOpenBranchSession}
+                  onOpenBranch={onOpenBranch}
+                  onOpenStep={openStep}
+                />
+              );
             }
             if (step.speaker === 'router') {
               const label = step === firstRouter ? 'Router dispatch' : step === finalRouter && hasMerge ? 'Router merge' : nodeLabel(step);

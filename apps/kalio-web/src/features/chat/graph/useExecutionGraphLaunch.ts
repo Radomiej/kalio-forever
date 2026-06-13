@@ -198,6 +198,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
         runId: pendingAssistantMessageId,
         schemaId,
         status: 'running',
+        hostProjectionKind: 'workflow-envelope',
         trace: [],
         routeHops: [],
       },
@@ -259,6 +260,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
           id: `architecture-turn-${result.run.id}`,
           sessionId: sessionWithScope.id,
           promptMessageId: userMessageId,
+          turnKind: projection.turnKind,
           items: projection.turnItems,
           done: projectionDone,
         };

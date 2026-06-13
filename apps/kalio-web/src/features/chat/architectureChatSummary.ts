@@ -35,6 +35,7 @@ export type ArchitectureChatTurnDraft = {
 export type ArchitectureRunTurnProjection = {
   messages: ChatMessage[];
   turnItems: AgentTurnItem[];
+  turnKind: 'workflow-envelope';
 };
 
 function isTraceSpeaker(value: string): value is TraceSpeaker {
@@ -62,12 +63,13 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
       visitIndex: visitIndexByEventId.get(message.eventId),
       incompleteReason: message.incompleteReason ?? incompleteReasonByEventId.get(message.eventId),
       routerOutput: sanitizeRouterOutput(routerOutputByEventId.get(message.eventId)),
-      stream: streamByEventId.get(message.eventId) ?? fallbackStreamForMessage(result, message),
+      stream: streamByEventId.get(message.eventId),
     }));
   const metadata: ArchitectureRunSummaryWithGraph = {
     runId: result.run.id,
     schemaId: schemaLabel,
     status: result.run.status,
+    hostProjectionKind: 'workflow-envelope',
     finalArtifact: [...result.chat.messages]
       .reverse()
       .find((message) => message.speaker === 'finalizer')
@@ -175,6 +177,7 @@ export function findArchitectureRunInMessages(messages: ChatMessage[]): Architec
     runId,
     schemaId: schemaLabel,
     status: 'completed',
+    hostProjectionKind: 'workflow-envelope',
     finalArtifact: [...textTrace].reverse().find((step) => step.speaker === 'finalizer')?.content,
     trace: [...participantTrace, ...textTrace].sort(compareTraceByArchitectureEvent),
     routeHops: [],
@@ -333,7 +336,12 @@ export function buildArchitectureRunTurnProjection(
   const messages: ChatMessage[] = [];
   const turnItems: AgentTurnItem[] = [];
 
-  const toolCalls = branchMessages.map((message) => toSubagentToolCall(result, message, streamByEventId.get(message.eventId)));
+  const toolCalls = branchMessages
+    .map((message) => {
+      const stream = streamByEventId.get(message.eventId);
+      return stream ? toSubagentToolCall(result, message, stream) : null;
+    })
+    .filter((toolCall): toolCall is LLMToolCall => toolCall !== null);
   if (toolCalls.length > 0) {
     messages.push({
       id: `architecture:${result.run.id}:tool-calls`,
@@ -345,16 +353,19 @@ export function buildArchitectureRunTurnProjection(
       createdAt: now,
     });
     turnItems.push(...toolCalls.map((call) => ({ kind: 'tool' as const, callId: call.id })));
-    branchMessages.forEach((message, index) => {
+    branchMessages
+      .map((message, index) => ({ message, index, stream: streamByEventId.get(message.eventId) }))
+      .filter((entry): entry is typeof entry & { stream: ArchitectureBranchStreamSummary } => Boolean(entry.stream))
+      .forEach(({ message, index, stream }) => {
       messages.push({
         id: `architecture:${result.run.id}:tool-result:${message.eventId}`,
         sessionId,
         role: 'tool_result',
-        content: JSON.stringify(toSubagentToolResult(result, sessionId, message, streamByEventId.get(message.eventId))),
+        content: JSON.stringify(toSubagentToolResult(result, sessionId, message, stream)),
         toolCallId: `architecture:${result.run.id}:${message.eventId}`,
         createdAt: now + 1 + index,
       });
-    });
+      });
   }
 
   const assistantTextMessages = textMessages.map((message, index): ChatMessage => ({
@@ -386,13 +397,13 @@ export function buildArchitectureRunTurnProjection(
     turnItems.push({ kind: 'text', messageId: fallbackMessage.id });
   }
 
-  return { messages, turnItems };
+  return { messages, turnItems, turnKind: 'workflow-envelope' };
 }
 
 function toSubagentToolCall(
   result: ArchitectRunResult,
   message: ArchitectureRunChatMessage,
-  stream: ArchitectureBranchStreamSummary | undefined,
+  stream: ArchitectureBranchStreamSummary,
 ): LLMToolCall {
   const schemaLabel = resolveArchitectureSchemaLabel(result);
   return {
@@ -404,7 +415,7 @@ function toSubagentToolCall(
       schemaName: schemaLabel,
       nodeId: message.route?.fromNodeId,
       roleSlotId: message.roleSlotId,
-      childSessionId: stream?.branchSessionId ?? fallbackChildSessionId(result, message),
+      childSessionId: stream.branchSessionId,
     },
   };
 }
@@ -413,38 +424,18 @@ function toSubagentToolResult(
   result: ArchitectRunResult,
   parentSessionId: string,
   message: ArchitectureRunChatMessage,
-  stream: ArchitectureBranchStreamSummary | undefined,
+  stream: ArchitectureBranchStreamSummary,
 ): SubagentToolResult {
   return {
     result: message.content,
     taskId: message.eventId,
-    childSessionId: stream?.branchSessionId ?? fallbackChildSessionId(result, message),
+    childSessionId: stream.branchSessionId,
     parentSessionId,
     vfsMode: 'shared',
     vfsSessionId: result.run.rootSessionId ?? parentSessionId,
     copiedFiles: [],
     durationMs: 0,
   };
-}
-
-function fallbackStreamForMessage(
-  result: ArchitectRunResult,
-  message: ArchitectureRunChatMessage,
-): ArchitectureBranchStreamSummary | undefined {
-  if (message.speaker !== 'participant') {
-    return undefined;
-  }
-  return {
-    streamGroupId: `architecture:${result.run.id}:${message.route?.fromNodeId ?? message.eventId}`,
-    branchSessionId: fallbackChildSessionId(result, message),
-    status: 'completed',
-    chunkCount: 0,
-    text: compactArchitectureTraceContent(message.content, message.speaker),
-  };
-}
-
-function fallbackChildSessionId(result: ArchitectRunResult, message: ArchitectureRunChatMessage): string {
-  return `arch-${result.run.id}-${message.roleSlotId ?? message.eventId}`;
 }
 
 function speakerLabel(speaker: TraceSpeaker, roleSlotId: string | undefined): string {

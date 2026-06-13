@@ -142,9 +142,9 @@ function countDescendantRuntimeStates(
   sessionStatusSnapshots: Record<string, SocketEvents['session:status']>,
   sessionAgentTurns: Record<string, AgentTurn[]>,
   architectureSessionRuntimeStates: Map<string, SessionRuntimeState>,
-): { running: number; waiting: number } {
+): { pending: number; running: number; waiting: number } {
   const safeChildSessionsByParent = childSessionsByParent ?? new Map<string, ChatSession[]>();
-  const counts = { running: 0, waiting: 0 };
+  const counts = { pending: 0, running: 0, waiting: 0 };
   const pending = [...(safeChildSessionsByParent.get(sessionId) ?? [])];
 
   while (pending.length > 0) {
@@ -164,11 +164,28 @@ function countDescendantRuntimeStates(
       counts.waiting += 1;
     } else if (state === 'running') {
       counts.running += 1;
+    } else if (state === 'pending') {
+      counts.pending += 1;
     }
     pending.push(...(safeChildSessionsByParent.get(child.id) ?? []));
   }
 
   return counts;
+}
+
+function descendantActivityState(
+  counts: { pending: number; running: number; waiting: number },
+): SessionRuntimeState | null {
+  if (counts.waiting > 0) {
+    return 'waiting';
+  }
+  if (counts.running > 0) {
+    return 'running';
+  }
+  if (counts.pending > 0) {
+    return 'pending';
+  }
+  return null;
 }
 
 export function SessionPanelSessionItem({
@@ -206,16 +223,6 @@ export function SessionPanelSessionItem({
   const sessionKind = sessionKindPresentation(session);
   const SessionKindIcon = sessionKind.icon;
   const architectureLabel = architectureBadgeLabel(session);
-  const runtimeState = sessionRuntimeState(
-    session.id,
-    pendingConfirmations,
-    pendingBudgetApprovals,
-    activeLoopSessionIds,
-    queuedDepthBySession,
-    sessionStatusSnapshots,
-    sessionAgentTurns,
-    architectureSessionRuntimeStates,
-  );
   const descendantStates = countDescendantRuntimeStates(
     session.id,
     childSessionsByParent,
@@ -227,10 +234,26 @@ export function SessionPanelSessionItem({
     sessionAgentTurns,
     architectureSessionRuntimeStates,
   );
+  const runtimeState = sessionRuntimeState(
+    session.id,
+    pendingConfirmations,
+    pendingBudgetApprovals,
+    activeLoopSessionIds,
+    queuedDepthBySession,
+    sessionStatusSnapshots,
+    sessionAgentTurns,
+    architectureSessionRuntimeStates,
+  );
+  const descendantState = descendantActivityState(descendantStates);
+  const effectiveRuntimeState = descendantState && (runtimeState === null || runtimeState === 'done')
+    ? descendantState
+    : runtimeState;
   const activeDescendantLabel = descendantStates.waiting > 0
     ? `${descendantStates.waiting} waiting`
     : descendantStates.running > 0
       ? `${descendantStates.running} active`
+      : descendantStates.pending > 0
+        ? `${descendantStates.pending} pending`
       : null;
 
   return (
@@ -287,7 +310,7 @@ export function SessionPanelSessionItem({
               >
                 {displayTitle}
               </span>
-              {runtimeState === 'waiting' && (
+              {effectiveRuntimeState === 'waiting' && (
                 <AlertTriangle
                   size={10}
                   className="text-warning shrink-0"
@@ -295,7 +318,7 @@ export function SessionPanelSessionItem({
                   data-testid={`session-pending-confirmation-${session.id}`}
                 />
               )}
-              {runtimeState === 'pending' && (
+              {effectiveRuntimeState === 'pending' && (
                 <Circle
                   size={10}
                   className="shrink-0 text-base-content/40"
@@ -303,7 +326,7 @@ export function SessionPanelSessionItem({
                   data-testid={`session-pending-${session.id}`}
                 />
               )}
-              {runtimeState === 'running' && (
+              {effectiveRuntimeState === 'running' && (
                 <Loader2
                   size={10}
                   className="shrink-0 animate-spin text-sky-300"
@@ -311,7 +334,7 @@ export function SessionPanelSessionItem({
                   data-testid={`session-running-${session.id}`}
                 />
               )}
-              {runtimeState === 'stopped' && (
+              {effectiveRuntimeState === 'stopped' && (
                 <XCircle
                   size={10}
                   className="shrink-0 text-base-content/45"
@@ -319,7 +342,7 @@ export function SessionPanelSessionItem({
                   data-testid={`session-stopped-${session.id}`}
                 />
               )}
-              {runtimeState === 'done' && (
+              {effectiveRuntimeState === 'done' && (
                 <CheckCircle2
                   size={10}
                   className="shrink-0 text-emerald-300"
@@ -327,7 +350,7 @@ export function SessionPanelSessionItem({
                   data-testid={`session-done-${session.id}`}
                 />
               )}
-              {runtimeState === 'error' && (
+              {effectiveRuntimeState === 'error' && (
                 <XCircle
                   size={10}
                   className="shrink-0 text-rose-300"

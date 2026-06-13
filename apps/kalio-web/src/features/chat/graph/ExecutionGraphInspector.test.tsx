@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@kalio/types';
+import { useSessionStore } from '../../../store/sessionStore';
 import { ExecutionGraphInspector } from './ExecutionGraphInspector';
 import type { ExecutionGraphNode, ExecutionGraphNodePayload } from './executionGraphModel';
 
@@ -52,6 +53,17 @@ function makeNode(payload: ExecutionGraphNodePayload, overrides: Partial<Executi
 }
 
 describe('ExecutionGraphInspector', () => {
+  beforeEach(() => {
+    useSessionStore.setState({
+      sessions: [
+        { id: 'branch-session-1234567890', personaId: 'default', title: 'Architecture branch', createdAt: 1, updatedAt: 1 },
+        { id: 'flow-child-1', personaId: 'default', title: 'AgentFlow child', createdAt: 1, updatedAt: 1 },
+        { id: 'child-session-1', personaId: 'default', title: 'Sub-agent child', createdAt: 1, updatedAt: 1 },
+        { id: 'cli-child-1', personaId: 'default', title: 'CLI child', createdAt: 1, updatedAt: 1 },
+      ],
+    });
+  });
+
   it('keeps session ids and raw payload hidden until explicitly expanded', () => {
     render(
       <ExecutionGraphInspector
@@ -465,6 +477,57 @@ describe('ExecutionGraphInspector', () => {
 
     expect(screen.getByRole('heading', { name: 'Final response' })).toBeTruthy();
     expect(screen.getByText('Awaiting reply')).toBeTruthy();
+  });
+
+  it('hides child-session actions when the projected session id is not backed by a real session', () => {
+    useSessionStore.setState({ sessions: [] });
+
+    render(
+      <ExecutionGraphInspector
+        activeSessionId="session-1"
+        inspectorWidth={360}
+        selectedConfirmation={null}
+        selectedNode={{
+          id: 'agent-flow:ghost',
+          kind: 'agent-flow',
+          title: 'Projected AgentFlow',
+          subtitle: 'ghost / running',
+          status: 'running',
+          column: 1,
+          row: 0,
+          x: 0,
+          y: 0,
+          width: 220,
+          height: 140,
+          sessionId: 'ghost-flow-child',
+          payload: {
+            kind: 'agent-flow',
+            childExecutionKind: 'sub_agentflow',
+            result: {
+              flowRunId: 'ghost-flow',
+              childSessionId: 'ghost-flow-child',
+              openChatSessionId: 'ghost-flow-child',
+              openGraphRunId: 'ghost-flow',
+              status: 'running',
+              summary: 'Projected only.',
+              decisions: [],
+              nextActions: [],
+              artifacts: [],
+            },
+            childSessionId: 'ghost-flow-child',
+            graphRunId: 'ghost-flow',
+            inputPrompt: 'Verify delivery',
+          },
+        }}
+        onOpenSessionInConversation={undefined}
+        setActiveSession={vi.fn()}
+        setPendingConfirmation={vi.fn()}
+        setPendingMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Open child chat' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open child graph' })).toBeNull();
   });
 
   it('keeps long node preview text collapsed until the user asks for details', () => {

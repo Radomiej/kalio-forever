@@ -14,6 +14,7 @@ import {
   type SessionOriginFilter,
 } from './sessionListModel';
 import {
+  isTechnicalArchitectureSession,
   buildArchitectureSessionRuntimeStates,
   buildChildSessionsByParent,
   countSessionDescendants,
@@ -23,6 +24,26 @@ import {
 import { renderSessionChildRows, SessionPanelSessionItem } from './SessionPanelRow';
 
 const LAST_ACTIVE_SESSION_STORAGE_KEY = 'kalio:last-active-session-id';
+
+function filterRenderableSessions(
+  orderedSessions: ChatSession[],
+  sessionMessages: Record<string, ChatMessage[]>,
+): {
+  renderableSessions: ChatSession[];
+  architectureSessionRuntimeStates: ReturnType<typeof buildArchitectureSessionRuntimeStates>;
+} {
+  const architectureSessionRuntimeStates = buildArchitectureSessionRuntimeStates(
+    orderedSessions,
+    sessionMessages,
+  );
+
+  return {
+    architectureSessionRuntimeStates,
+    // Sidebar should reflect persisted child sessions only. Planned graph nodes belong to the
+    // workflow timeline, not the conversation tree.
+    renderableSessions: orderedSessions.filter((session) => !isTechnicalArchitectureSession(session)),
+  };
+}
 
 function loadStoredActiveSessionId(): string | null {
   if (typeof window === 'undefined') {
@@ -89,8 +110,12 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       .then((r) => {
         setSessions(r.data);
         const orderedSessions = sortSessionsForSidebar(r.data);
-        const sessionById = new Map(orderedSessions.map((session) => [session.id, session]));
-        const selectableSessions = orderedSessions.filter((session) => isVisibleSidebarSession(session, null, 'all', sessionById));
+        const { renderableSessions } = filterRenderableSessions(
+          orderedSessions,
+          {},
+        );
+        const sessionById = new Map(renderableSessions.map((session) => [session.id, session]));
+        const selectableSessions = renderableSessions.filter((session) => isVisibleSidebarSession(session, null, 'all', sessionById));
         if (!useSessionStore.getState().activeSessionId && selectableSessions.length > 0) {
           const storedSessionId = loadStoredActiveSessionId();
           const initialSessionId = storedSessionId && selectableSessions.some((session) => session.id === storedSessionId)
@@ -168,15 +193,16 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
 
   const sidebarSessions = originFilter === 'archived' ? archivedSessions : sessions;
   const orderedSessions = sortSessionsForSidebar(sidebarSessions);
-  const sessionById = new Map(orderedSessions.map((session) => [session.id, session]));
-  const visibleSessions = orderedSessions
-    .filter((session) => isVisibleSidebarSession(session, activeSessionId, originFilter, sessionById));
-  const sessionListEntries = buildSessionListEntries(orderedSessions, activeSessionId, originFilter);
-  const childSessionsByParent = buildChildSessionsByParent(orderedSessions);
-  const architectureSessionRuntimeStates = buildArchitectureSessionRuntimeStates(
+  const activeLoopSessionIds = new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId));
+  const { renderableSessions, architectureSessionRuntimeStates } = filterRenderableSessions(
     orderedSessions,
     sessionMessages ?? {},
   );
+  const sessionById = new Map(renderableSessions.map((session) => [session.id, session]));
+  const visibleSessions = renderableSessions
+    .filter((session) => isVisibleSidebarSession(session, activeSessionId, originFilter, sessionById));
+  const sessionListEntries = buildSessionListEntries(renderableSessions, activeSessionId, originFilter);
+  const childSessionsByParent = buildChildSessionsByParent(renderableSessions);
   const descendantCountByParent = new Map<string, number>();
   const activeOriginFilter = SESSION_ORIGIN_FILTERS.find((filter) => filter.id === originFilter) ?? SESSION_ORIGIN_FILTERS[0];
 
@@ -368,7 +394,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
             childSessionsByParent,
             pendingConfirmations,
             pendingBudgetApprovals,
-            activeLoopSessionIds: new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId)),
+            activeLoopSessionIds,
             queuedDepthBySession: queuedDepthBySession ?? {},
             sessionStatusSnapshots: sessionStatusSnapshots ?? {},
             sessionAgentTurns: sessionAgentTurns ?? {},

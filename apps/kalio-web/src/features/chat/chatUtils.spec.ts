@@ -174,6 +174,52 @@ describe('buildTurnsFromHistory', () => {
     expect(turns[0].items.some((i) => i.kind === 'text')).toBe(true);
   });
 
+  it('restores architecture run messages as workflow envelope turns', () => {
+    const msgs = [
+      makeMsg({ id: 'u1', role: 'user', content: 'Run workflow' }),
+      makeMsg({
+        id: 'a1',
+        role: 'assistant',
+        content: 'Architecture run is running.',
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          hostProjectionKind: 'workflow-envelope',
+          trace: [],
+          routeHops: [],
+        },
+      }),
+    ];
+    const turns = buildTurnsFromHistory(msgs, 's1');
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0].turnKind).toBe('workflow-envelope');
+  });
+
+  it('does not infer workflow envelope for legacy architecture messages without hostProjectionKind', () => {
+    const msgs = [
+      makeMsg({ id: 'u1', role: 'user', content: 'Run workflow' }),
+      makeMsg({
+        id: 'a1',
+        role: 'assistant',
+        content: 'Architecture run is running.',
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          trace: [],
+          routeHops: [],
+        },
+      }),
+    ];
+
+    const turns = buildTurnsFromHistory(msgs, 's1');
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0].turnKind).toBeUndefined();
+  });
+
   it('adds thinking item when assistant message has thinking field', () => {
     const msgs = [makeMsg({ id: 'a1', role: 'assistant', content: 'ok', thinking: 'let me think…' })];
     const turns = buildTurnsFromHistory(msgs, 's1');

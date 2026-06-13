@@ -80,7 +80,7 @@ describe('buildAgentFlowPreviews', () => {
     ]);
   });
 
-  it('ignores malformed history entries and still surfaces successful tool-flow previews', () => {
+  it('ignores malformed history entries and only surfaces AgentFlow previews backed by real sessions', () => {
     const messages = [
       message({
         id: 'ignored-non-tool',
@@ -162,21 +162,12 @@ describe('buildAgentFlowPreviews', () => {
 
     const previews = buildAgentFlowPreviews(messages, toolActivities, sessions);
 
-    expect(previews.map((preview) => preview.flowRunId)).toEqual([
-      'flow-run-tool',
-      'flow-run-message',
-    ]);
+    expect(previews.map((preview) => preview.flowRunId)).toEqual(['flow-run-tool']);
     expect(previews[0]).toMatchObject({
       sessionId: 'flow-chat-tool',
       graphRunId: 'flow-graph-tool',
       title: 'Tool AgentFlow chat',
       updatedAt: 30,
-    });
-    expect(previews[1]).toMatchObject({
-      sessionId: 'flow-child-message',
-      graphRunId: 'flow-run-message',
-      title: 'AgentFlow flow-run-message',
-      updatedAt: 0,
     });
   });
 });

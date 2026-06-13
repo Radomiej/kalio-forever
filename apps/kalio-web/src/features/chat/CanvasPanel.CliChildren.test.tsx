@@ -50,9 +50,9 @@ describe('buildCliChildPreviews', () => {
     expect(previews[1]?.childTitle).toBe('codex CLI');
   });
 
-  it('falls back to agent-based title when session title is missing', () => {
+  it('ignores projections that do not map to a real child session row', () => {
     const previews = buildCliChildPreviews('session-1', projections, new Map());
 
-    expect(previews.find((preview) => preview.childSessionId === 'cli-child-a')?.childTitle).toBe('copilot CLI');
+    expect(previews).toEqual([]);
   });
 });

@@ -118,6 +118,37 @@ function resolveArchitectureLabel(session: ChatSession, messages: ChatMessage[])
   return architectureSessionLabel(session) ?? architectureMessageLabel(messages);
 }
 
+function isChildSessionWithoutMessages(
+  session: ChatSession | null,
+): session is ChatSession & { parentSessionId: string } {
+  return typeof session?.parentSessionId === 'string' && session.parentSessionId.length > 0;
+}
+
+function PendingChildSessionScreen({ activeSession }: { activeSession: ChatSession }) {
+  const architectureLabel = architectureSessionLabel(activeSession);
+  const waitingLabel = architectureLabel ? `${architectureLabel} branch` : 'Sub-conversation';
+
+  return (
+    <div
+      className="flex min-h-[18rem] items-center justify-center px-6 py-10 text-center"
+      data-testid="pending-child-session-screen"
+    >
+      <div className="max-w-xl">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-base-content/45">
+          {waitingLabel}
+        </p>
+        <h2 className="mt-2 text-lg font-semibold text-base-content">
+          Waiting for the first persisted message
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-base-content/65">
+          This child session already exists, but the agent has not written visible chat output yet.
+          Use the host workflow timeline to track live router and branch progress.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 interface ChatStatusBannersProps {
   connectionState: ChatConnectionState;
   error: string | null;
@@ -296,6 +327,10 @@ export function ChatWelcomeScreen({
   selectedPersonaId,
   selectedArchitectureId,
 }: ChatWelcomeScreenProps) {
+  if (activeSession && isChildSessionWithoutMessages(activeSession)) {
+    return <PendingChildSessionScreen activeSession={activeSession} />;
+  }
+
   return (
     <>
       {activeSessionId && (

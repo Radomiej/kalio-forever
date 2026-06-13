@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { AgentTurnBubble } from './AgentTurnBubble';
-import type { ChatMessage } from '@kalio/types';
+import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { ToolActivity } from '../../store/agentStore';
 import type { AgentTurn, AgentTurnItem } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
@@ -9,11 +9,15 @@ import { eventBus } from '../../services/eventBus';
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockMessages: ChatMessage[] = [];
+let mockSessions: ChatSession[] = [{ id: 's1', personaId: 'default', title: 'Main session', createdAt: 1, updatedAt: 1 }];
+let mockStreamingChunks: Record<string, string> = {};
+let mockThinkingChunks: Record<string, string> = {};
 
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: () => ({
-    streamingChunks: {},
-    thinkingChunks: {},
+    sessions: mockSessions,
+    streamingChunks: mockStreamingChunks,
+    thinkingChunks: mockThinkingChunks,
     messages: mockMessages,
   }),
 }));
@@ -110,6 +114,9 @@ describe('AgentTurnBubble', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMessages.length = 0; // Clear mock messages
+    mockSessions = [{ id: 's1', personaId: 'default', title: 'Main session', createdAt: 1, updatedAt: 1 }];
+    mockStreamingChunks = {};
+    mockThinkingChunks = {};
     mockAgentStoreState.toolArgProgress = null;
     mockAgentStoreState.setCanvasOpen.mockClear();
     mockAgentStoreState.setCanvasFocus.mockClear();
@@ -155,6 +162,122 @@ describe('AgentTurnBubble', () => {
     mockMessages.push(makeMsg({ id: 'msg-1', content: '**bold** text' }));
     render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }])} toolActivities={[]} />);
     expect(screen.getByTestId('markdown-viewer')).toHaveTextContent('**bold** text');
+  });
+
+  it('REGRESSION: hides duplicated assistant text within one turn while keeping the tool chip', () => {
+    mockMessages.push(
+      makeMsg({ id: 'msg-before-tool', content: 'Same final answer' }),
+      makeMsg({
+        id: 'msg-tool-host',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'tc-dup', name: 'fs_read', args: { path: 'README.md' } }],
+      }),
+      makeMsg({ id: 'msg-after-tool', content: 'Same final answer' }),
+      makeMsg({ id: 'msg-tool-result', role: 'tool_result', content: '{"ok":true}', toolCallId: 'tc-dup' }),
+    );
+
+    render(
+      <AgentTurnBubble
+        turn={makeTurn([
+          { kind: 'text', messageId: 'msg-before-tool' },
+          { kind: 'tool', callId: 'tc-dup' },
+          { kind: 'text', messageId: 'msg-after-tool' },
+        ])}
+        toolActivities={[]}
+      />,
+    );
+
+    expect(screen.getAllByTestId('markdown-viewer')).toHaveLength(1);
+    expect(screen.getByTestId('history-tool-fs_read')).toBeInTheDocument();
+  });
+
+  it('REGRESSION: keeps identical assistant text visible when it belongs to separate turn bubbles', () => {
+    mockMessages.push(
+      makeMsg({ id: 'msg-turn-1', content: 'Same final answer', turnId: 'turn-1' }),
+      makeMsg({ id: 'msg-turn-2', content: 'Same final answer', turnId: 'turn-2' }),
+    );
+
+    render(
+      <>
+        <AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-turn-1' }])} toolActivities={[]} />
+        <AgentTurnBubble
+          turn={{
+            ...makeTurn([{ kind: 'text', messageId: 'msg-turn-2' }]),
+            id: 'turn-2',
+          }}
+          toolActivities={[]}
+        />
+      </>,
+    );
+
+    const markdowns = screen.getAllByTestId('markdown-viewer');
+    expect(markdowns).toHaveLength(2);
+    expect(markdowns[0]).toHaveTextContent('Same final answer');
+    expect(markdowns[1]).toHaveTextContent('Same final answer');
+  });
+
+  it('keeps distinct assistant texts from separate iterations visible', () => {
+    mockMessages.push(
+      makeMsg({ id: 'msg-before-tool', content: 'Interim answer' }),
+      makeMsg({
+        id: 'msg-tool-host',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'tc-distinct', name: 'fs_read', args: { path: 'README.md' } }],
+      }),
+      makeMsg({ id: 'msg-after-tool', content: 'Updated final answer' }),
+      makeMsg({ id: 'msg-tool-result', role: 'tool_result', content: '{"ok":true}', toolCallId: 'tc-distinct' }),
+    );
+
+    render(
+      <AgentTurnBubble
+        turn={makeTurn([
+          { kind: 'text', messageId: 'msg-before-tool' },
+          { kind: 'tool', callId: 'tc-distinct' },
+          { kind: 'text', messageId: 'msg-after-tool' },
+        ])}
+        toolActivities={[]}
+      />,
+    );
+
+    const markdowns = screen.getAllByTestId('markdown-viewer');
+    expect(markdowns).toHaveLength(2);
+    expect(markdowns[0]).toHaveTextContent('Interim answer');
+    expect(markdowns[1]).toHaveTextContent('Updated final answer');
+  });
+
+  it('does not hide a later live streaming answer even if an earlier completed answer exists', () => {
+    mockMessages.push(
+      makeMsg({ id: 'msg-before-tool', content: 'Same final answer' }),
+      makeMsg({
+        id: 'msg-tool-host',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'tc-live', name: 'fs_read', args: { path: 'README.md' } }],
+      }),
+      makeMsg({ id: 'msg-after-tool', content: 'Same final answer', streaming: true }),
+      makeMsg({ id: 'msg-tool-result', role: 'tool_result', content: '{"ok":true}', toolCallId: 'tc-live' }),
+    );
+    mockStreamingChunks = {
+      'msg-after-tool': 'Same final answer with extra streamed detail',
+    };
+
+    render(
+      <AgentTurnBubble
+        turn={makeTurn([
+          { kind: 'text', messageId: 'msg-before-tool' },
+          { kind: 'tool', callId: 'tc-live' },
+          { kind: 'text', messageId: 'msg-after-tool' },
+        ], false)}
+        toolActivities={[]}
+      />,
+    );
+
+    const markdowns = screen.getAllByTestId('markdown-viewer');
+    expect(markdowns).toHaveLength(2);
+    expect(markdowns[0]).toHaveTextContent('Same final answer');
+    expect(markdowns[1]).toHaveTextContent('Same final answer with extra streamed detail');
   });
 
   it('renders history tool call bubbles for tool_result messages', () => {
@@ -300,6 +423,10 @@ describe('AgentTurnBubble', () => {
   });
 
   it('renders an architecture route timeline and opens the run canvas', () => {
+    mockSessions = [
+      { id: 's1', personaId: 'default', title: 'Main session', createdAt: 1, updatedAt: 1 },
+      { id: 'branch-pragmatist', personaId: 'default', title: 'Pragmatist branch', kind: 'subagent', parentSessionId: 'arch-root', createdAt: 2, updatedAt: 2 },
+    ];
     mockMessages.push(makeMsg({
       id: 'msg-arch',
       content: '### Finalizer',
@@ -434,6 +561,52 @@ describe('AgentTurnBubble', () => {
     expect(screen.getByTestId('architecture-run-timeline')).toHaveTextContent('Router -> Pragmatist');
     expect(screen.getByTestId('architecture-route-agent')).toHaveTextContent('Pragmatist branch result');
     expect(screen.queryByTestId('history-tool-run_subagent')).not.toBeInTheDocument();
+  });
+
+  it('does not open a synthetic architecture branch session that is missing from the session store', () => {
+    mockMessages.push(
+      makeMsg({
+        id: 'msg-arch-missing',
+        content: '### Finalizer',
+        architectureRun: {
+          runId: 'run-missing',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          trace: [
+            {
+              speaker: 'participant',
+              content: 'Pending analyst branch',
+              eventId: 'event-analyst',
+              nodeId: 'analyst',
+              nextNodeId: 'router',
+              stream: {
+                streamGroupId: 'run-missing',
+                branchSessionId: 'arch-run-missing-analyst',
+                status: 'started',
+                chunkCount: 0,
+                text: '',
+              },
+            },
+          ],
+          routeHops: [],
+        },
+      }),
+    );
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-arch-missing' }])} toolActivities={[]} />);
+
+    fireEvent.click(screen.getByTestId('architecture-route-agent'));
+
+    expect(mockAgentStoreState.setCanvasFocus).toHaveBeenCalledWith({
+      kind: 'architecture-run',
+      runId: 'run-missing',
+      eventId: 'event-analyst',
+      nodeId: 'analyst',
+    });
+    expect(mockAgentStoreState.setCanvasFocus).not.toHaveBeenCalledWith({
+      kind: 'architecture-branch',
+      sessionId: 'arch-run-missing-analyst',
+    });
   });
 
   it('does not mark reconstructed in-flight architecture runs as completed', () => {

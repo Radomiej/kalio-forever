@@ -2,6 +2,7 @@ import type { ChatMessage } from '@kalio/types';
 import type { AgentTurn } from '../../../store/sessionStore';
 import { findArchitectureRunInMessages } from '../architectureChatSummary';
 import { architectureRunContainsMessage, renderArchitectureRunProjection } from './executionGraphArchitectureRun';
+import { findWorkflowEnvelopeArchitectureMessage } from './executionGraphWorkflowEnvelope';
 import {
   buildCopiedFileArtifact,
   buildToolCycleLabel,
@@ -147,29 +148,43 @@ export function buildExecutionGraphModel({
     const finalMessage = getFinalAnswerMessage(turn, messageById);
     const turnIdentity = buildTurnIdentity(turn, sessionById, personaById);
     const thinkingPreviews = thinkingPreviewsForTurn(turn);
-    const turnNode = addNode({
-      id: `turn:${turn.id}`,
-      kind: 'turn',
-      title: 'Turn',
-      subtitle: turnIdentity.subtitle,
-      detail: [buildToolCycleLabel(turnToolItems.length), compactGraphText(finalMessage?.content)].filter(Boolean).join(' - ') || turnIdentity.detail,
-      status: getTurnStatus(turn, toolSnapshots),
-      column: baseColumn,
-      row: startRow,
-      sessionId: turn.sessionId,
-      turnId: turn.id,
-      payload: {
+    const workflowEnvelopeMessage = turn.turnKind === 'workflow-envelope'
+      ? findWorkflowEnvelopeArchitectureMessage(turn, messages, messageById, finalMessage)
+      : null;
+    const isWorkflowEnvelope = turn.turnKind === 'workflow-envelope' && workflowEnvelopeMessage !== null;
+    const graphToolItems = isWorkflowEnvelope ? [] : turnToolItems;
+
+    const turnNode = isWorkflowEnvelope
+      ? null
+      : addNode({
+        id: `turn:${turn.id}`,
         kind: 'turn',
-        turn,
-        textPreview: finalMessage?.content ?? null,
-        toolCount: turnToolItems.length,
-        thinkingCount: turn.items.filter((item) => item.kind === 'thinking').length,
-        thinkingPreviews,
-        actorLabel: turnIdentity.actorLabel,
-        modelLabel: turnIdentity.modelLabel,
-      },
-    });
-    addEdge(parentNodeId, turnNode.id);
+        title: 'Turn',
+        subtitle: turnIdentity.subtitle,
+        detail: [buildToolCycleLabel(graphToolItems.length), compactGraphText(finalMessage?.content)].filter(Boolean).join(' - ') || turnIdentity.detail,
+        status: getTurnStatus(turn, toolSnapshots),
+        column: baseColumn,
+        row: startRow,
+        sessionId: turn.sessionId,
+        turnId: turn.id,
+        payload: {
+          kind: 'turn',
+          turn,
+          textPreview: finalMessage?.content ?? null,
+          toolCount: graphToolItems.length,
+          thinkingCount: turn.items.filter((item) => item.kind === 'thinking').length,
+          thinkingPreviews,
+          actorLabel: turnIdentity.actorLabel,
+          modelLabel: turnIdentity.modelLabel,
+        },
+      });
+
+    if (turnNode) {
+      addEdge(parentNodeId, turnNode.id);
+    }
+
+    const turnSourceNodeId = turnNode?.id ?? parentNodeId;
+    const turnSourceColumn = turnNode?.column ?? Math.max(baseColumn - 1, 0);
 
     const renderNestedSessionTurns = (
       subagentNodeId: string,
@@ -419,8 +434,8 @@ export function buildExecutionGraphModel({
     let maxRow = startRow;
     const outcomeIds: string[] = [];
 
-    if (collapseTools && turnToolItems.length > 1) {
-      const groupedTools = turnToolItems.map((item) => {
+    if (collapseTools && graphToolItems.length > 1) {
+      const groupedTools = graphToolItems.map((item) => {
         const snapshot = toolSnapshots.get(item.callId);
         return {
           callId: item.callId,
@@ -452,11 +467,11 @@ export function buildExecutionGraphModel({
         turnId: turn.id,
         payload: { kind: 'tool-group', tools: groupedTools },
       });
-      addEdge(turnNode.id, groupNode.id);
+      addEdge(turnSourceNodeId, groupNode.id);
       maxRow = Math.max(maxRow, groupNode.row);
 
       let nextOutcomeRow = groupNode.row + 1;
-      turnToolItems.forEach((item) => {
+      graphToolItems.forEach((item) => {
         const outcome = renderOutcomes(item.callId, groupNode.id, nextOutcomeRow, baseColumn + 1);
         outcomeIds.push(...outcome.outcomeIds);
         if (outcome.maxRow >= nextOutcomeRow) {
@@ -465,7 +480,7 @@ export function buildExecutionGraphModel({
         }
       });
     } else {
-      turnToolItems.forEach((item, index) => {
+      graphToolItems.forEach((item, index) => {
         const snapshot = toolSnapshots.get(item.callId);
         const branchLabel = architectureBranchLabel(snapshot);
         const toolRow = startRow + index + 1;
@@ -498,7 +513,7 @@ export function buildExecutionGraphModel({
             confirmationRequired: snapshot?.activity?.status === 'awaiting_confirmation',
           },
         });
-        addEdge(turnNode.id, toolNode.id);
+        addEdge(turnSourceNodeId, toolNode.id);
         maxRow = Math.max(maxRow, toolRow);
 
         const outcome = renderOutcomes(item.callId, toolNode.id, toolRow + 1, baseColumn + 1);
@@ -509,13 +524,14 @@ export function buildExecutionGraphModel({
       });
     }
 
-    if (finalMessage) {
+    const finalRenderableMessage = workflowEnvelopeMessage ?? finalMessage;
+    if (finalRenderableMessage) {
       const branchMaxColumn = nodes
-        .slice(nodes.findIndex((node) => node.id === turnNode.id))
-        .reduce((value, node) => Math.max(value, node.column), baseColumn);
-      const turnArchitectureRun = finalMessage.architectureRun
+        .filter((node) => node.turnId === turn.id)
+        .reduce((value, node) => Math.max(value, node.column), turnSourceColumn);
+      const turnArchitectureRun = finalRenderableMessage.architectureRun
         ? null
-        : architectureRunFromHistory && architectureRunContainsMessage(architectureRunFromHistory, finalMessage)
+        : architectureRunFromHistory && architectureRunContainsMessage(architectureRunFromHistory, finalRenderableMessage)
           ? architectureRunFromHistory
           : null;
       const architectureProjection = renderArchitectureRunProjection({
@@ -523,10 +539,10 @@ export function buildExecutionGraphModel({
         addNode,
         architectureRun: turnArchitectureRun,
         branchMaxColumn,
-        finalMessage,
+        finalMessage: finalRenderableMessage,
         startRow,
         turn,
-        turnNodeId: turnNode.id,
+        turnNodeId: turnSourceNodeId,
       });
       maxRow = Math.max(maxRow, architectureProjection.maxRow);
 
@@ -535,14 +551,14 @@ export function buildExecutionGraphModel({
         kind: 'final-answer',
         title: 'Final response',
         subtitle: 'Last chat reply',
-        detail: finalMessage.content,
+        detail: finalMessage?.content ?? finalRenderableMessage.content,
         status: turn.done ? 'success' : 'running',
         column: architectureProjection.finalColumn,
         row: startRow,
         turnId: turn.id,
         payload: {
           kind: 'final-answer',
-          message: finalMessage,
+          message: finalMessage ?? finalRenderableMessage,
           turn,
         },
       });
