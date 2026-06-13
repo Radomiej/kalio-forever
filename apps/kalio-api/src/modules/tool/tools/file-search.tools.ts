@@ -1,17 +1,26 @@
+import { eq } from 'drizzle-orm';
 import { Injectable } from '@nestjs/common';
 import {
-  readdirSync, readFileSync, statSync, existsSync,
+  readdirSync, readFileSync, statSync, existsSync, type Dirent,
 } from 'node:fs';
 import { join, relative } from 'node:path';
+import type { SessionRuntimeContext } from '@kalio/types';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
+import { DrizzleService } from '../../../database/drizzle.service';
+import { sessions } from '../../../database/schema';
 import { shouldSkipTraversalDirectory } from '../../../common/utils/traversal-exclusions.util';
 import { escapeRegex, globToRegex } from './search.utils';
 
 function walkDir(dir: string, maxDepth: number, depth = 0): string[] {
   if (depth > maxDepth) return [];
-  const entries = readdirSync(dir, { withFileTypes: true });
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
   const results: string[] = [];
   for (const e of entries) {
     if (e.isDirectory() && shouldSkipTraversalDirectory(e.name)) {
@@ -25,6 +34,43 @@ function walkDir(dir: string, maxDepth: number, depth = 0): string[] {
     }
   }
   return results;
+}
+
+async function resolveScopedRoots(
+  request: ToolCallRequest,
+  allowedPaths: AllowedPathsService,
+  drizzle: DrizzleService,
+): Promise<string[]> {
+  const scopedRoot = await resolveSessionScopedRoot(request.sessionId, drizzle);
+  if (scopedRoot && await allowedPaths.isAllowed(scopedRoot)) {
+    return [scopedRoot];
+  }
+  return allowedPaths.getRoots();
+}
+
+async function resolveSessionScopedRoot(
+  sessionId: string,
+  drizzle: DrizzleService,
+): Promise<string | null> {
+  const [row] = await drizzle.db
+    .select({ runtimeContext: sessions.runtimeContext })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return normalizeLaunchScopePath(row?.runtimeContext);
+}
+
+function normalizeLaunchScopePath(runtimeContext: SessionRuntimeContext | null | undefined): string | null {
+  const architectureContext = runtimeContext?.architectureContext;
+  const projectPath = architectureContext?.['projectPath'];
+  if (typeof projectPath === 'string' && projectPath.trim().length > 0) {
+    return projectPath.trim();
+  }
+  const executionCwd = architectureContext?.['executionCwd'];
+  if (typeof executionCwd === 'string' && executionCwd.trim().length > 0) {
+    return executionCwd.trim();
+  }
+  return null;
 }
 
 @Injectable()
@@ -44,7 +90,10 @@ function walkDir(dir: string, maxDepth: number, depth = 0): string[] {
   requiresConfirmation: false,
 })
 export class GrepSearchTool {
-  constructor(private readonly allowedPaths: AllowedPathsService) {}
+  constructor(
+    private readonly allowedPaths: AllowedPathsService,
+    private readonly drizzle: DrizzleService,
+  ) {}
 
   async execute(request: ToolCallRequest): Promise<{ matches: Array<{ file: string; line: number; text: string }>; total: number }> {
     const query = request.args['query'] as string;
@@ -52,7 +101,7 @@ export class GrepSearchTool {
     const includePattern = request.args['includePattern'] as string | undefined;
     const maxResults = (request.args['maxResults'] as number) ?? 50;
 
-    const roots = await this.allowedPaths.getRoots();
+    const roots = await resolveScopedRoots(request, this.allowedPaths, this.drizzle);
     if (roots.length === 0) {
       return { matches: [], total: 0 };
     }
@@ -115,13 +164,16 @@ export class GrepSearchTool {
   requiresConfirmation: false,
 })
 export class FileSearchTool {
-  constructor(private readonly allowedPaths: AllowedPathsService) {}
+  constructor(
+    private readonly allowedPaths: AllowedPathsService,
+    private readonly drizzle: DrizzleService,
+  ) {}
 
   async execute(request: ToolCallRequest): Promise<{ files: string[]; total: number }> {
     const pattern = request.args['pattern'] as string;
     const maxResults = (request.args['maxResults'] as number) ?? 100;
 
-    const roots = await this.allowedPaths.getRoots();
+    const roots = await resolveScopedRoots(request, this.allowedPaths, this.drizzle);
     if (roots.length === 0) {
       return { files: [], total: 0 };
     }
