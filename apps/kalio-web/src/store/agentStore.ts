@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { AgentRunContext, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
+import type { AgentBudgetApprovalRequest, AgentRunContext, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
+import type { CLIChildProjection } from '../features/chat/cliChildProjection.model';
 
 export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled' | 'expired';
 
@@ -36,6 +37,7 @@ interface AgentState {
   streamingMessageId: string | undefined;
   /** Pending tool confirmations keyed by sessionId — one per session at most */
   pendingConfirmations: Record<string, ToolConfirmationRequest>;
+  pendingBudgetApprovals: Record<string, AgentBudgetApprovalRequest>;
   availableTools: ToolMeta[];
   tools: ToolMeta[];
   /** Tool calls active in the current turn, in order */
@@ -67,6 +69,7 @@ interface AgentState {
 
   setStreaming: (streaming: boolean, messageId?: string) => void;
   setPendingConfirmation: (sessionId: string, req: ToolConfirmationRequest | null) => void;
+  setPendingBudgetApproval: (sessionId: string, req: AgentBudgetApprovalRequest | null) => void;
   setAvailableTools: (tools: ToolMeta[]) => void;
   setTools: (tools: ToolMeta[]) => void;
   getToolActivitiesForSession: (sessionId: string | null) => ToolActivity[];
@@ -91,6 +94,15 @@ interface AgentState {
   cliAgentOutput: Record<string, string>;
   appendCLIAgentChunk: (callId: string, chunk: string) => void;
   clearCLIAgentOutput: (callId: string) => void;
+  /** Live CLI child session projections keyed by childSessionId */
+  cliChildProjections: Record<string, CLIChildProjection>;
+  upsertCLIChildProjection: (projection: CLIChildProjection) => void;
+  updateCLIChildProjection: (childSessionId: string, patch: Partial<CLIChildProjection>) => void;
+  rebuildCLIChildProjections: (parentSessionId: string, projections: CLIChildProjection[]) => void;
+  clearCLIChildProjectionsForParent: (parentSessionId: string) => void;
+  /** Pending chat queue depth per session (from chat:queued) */
+  queuedDepthBySession: Record<string, number>;
+  setQueuedDepth: (sessionId: string, depth: number) => void;
 }
 
 function upsertActivity(list: ToolActivity[], activity: ToolActivity): ToolActivity[] {
@@ -107,6 +119,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   isStreaming: false,
   streamingMessageId: undefined,
   pendingConfirmations: {},
+  pendingBudgetApprovals: {},
   availableTools: [],
   tools: [],
   toolActivities: [],
@@ -120,6 +133,8 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   canvasFocus: null,
   activeAgentLoops: {},
   cliAgentOutput: {},
+  cliChildProjections: {},
+  queuedDepthBySession: {},
   toolArgProgress: null,
 
   setStreaming: (streaming, messageId = undefined) =>
@@ -136,6 +151,19 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
         return { pendingConfirmations: next };
       }
       return { pendingConfirmations: { ...s.pendingConfirmations, [sessionId]: req } };
+    }),
+  setPendingBudgetApproval: (sessionId, req) =>
+    set((s) => {
+      if (!sessionId.trim()) {
+        return s;
+      }
+
+      if (req === null) {
+        const next = { ...s.pendingBudgetApprovals };
+        delete next[sessionId];
+        return { pendingBudgetApprovals: next };
+      }
+      return { pendingBudgetApprovals: { ...s.pendingBudgetApprovals, [sessionId]: req } };
     }),
   setAvailableTools: (tools) => set({ availableTools: tools }),
   setTools: (tools) => set({ tools }),
@@ -321,4 +349,60 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
       delete nextCliAgentOutput[callId];
       return { cliAgentOutput: nextCliAgentOutput };
     }),
+
+  upsertCLIChildProjection: (projection) =>
+    set((s) => ({
+      cliChildProjections: {
+        ...s.cliChildProjections,
+        [projection.childSessionId]: {
+          ...s.cliChildProjections[projection.childSessionId],
+          ...projection,
+        },
+      },
+    })),
+
+  updateCLIChildProjection: (childSessionId, patch) =>
+    set((s) => {
+      const current = s.cliChildProjections[childSessionId];
+      if (!current) return s;
+      return {
+        cliChildProjections: {
+          ...s.cliChildProjections,
+          [childSessionId]: { ...current, ...patch },
+        },
+      };
+    }),
+
+  rebuildCLIChildProjections: (parentSessionId, projections) =>
+    set((s) => {
+      const next = { ...s.cliChildProjections };
+      for (const key of Object.keys(next)) {
+        if (next[key]?.parentSessionId === parentSessionId) {
+          delete next[key];
+        }
+      }
+      for (const projection of projections) {
+        next[projection.childSessionId] = projection;
+      }
+      return { cliChildProjections: next };
+    }),
+
+  clearCLIChildProjectionsForParent: (parentSessionId) =>
+    set((s) => {
+      const next = { ...s.cliChildProjections };
+      for (const [key, projection] of Object.entries(next)) {
+        if (projection.parentSessionId === parentSessionId) {
+          delete next[key];
+        }
+      }
+      return { cliChildProjections: next };
+    }),
+
+  setQueuedDepth: (sessionId, depth) =>
+    set((s) => ({
+      queuedDepthBySession: {
+        ...s.queuedDepthBySession,
+        [sessionId]: depth,
+      },
+    })),
 }));

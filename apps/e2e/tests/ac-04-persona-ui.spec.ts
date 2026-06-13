@@ -42,11 +42,9 @@ test.describe('AC-04: Personas UI', () => {
     await page.getByTestId('persona-prompt-textarea').fill('You are a test persona.');
     await page.getByTestId('persona-save-btn').click();
 
-    // Form should close and new persona should appear in list
-    await expect(page.getByTestId('persona-name-input')).not.toBeVisible({ timeout: 3000 });
-    await expect(
-      page.getByTestId('persona-item').filter({ hasText: personaName }),
-    ).toBeVisible({ timeout: 10000 });
+    const item = page.getByTestId('persona-item').filter({ hasText: personaName });
+    await expect(item).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('persona-name-input')).toHaveValue(personaName);
 
     // Cleanup
     const list = await request.get(`${API_BASE}/personas`);
@@ -86,7 +84,10 @@ test.describe('AC-04: Personas UI', () => {
 
     const item = page.getByTestId('persona-item').filter({ hasText: personaName });
     await expect(item).toBeVisible({ timeout: 5000 });
-    await item.locator('[data-testid="persona-delete-btn"]').click();
+    page.once('dialog', (dialog) => dialog.accept());
+    await item.click();
+    await expect(page.getByTestId('persona-delete-btn')).toBeVisible();
+    await page.getByTestId('persona-delete-btn').click();
     await expect(item).not.toBeVisible({ timeout: 3000 });
 
     // Verify removed via API
@@ -108,9 +109,9 @@ test.describe('AC-04: Personas UI', () => {
 
     const item = page.getByTestId('persona-item').filter({ hasText: personaName });
     await expect(item).toBeVisible({ timeout: 5000 });
-    // Click the expand button (the main row toggle)
-    await item.locator('button').first().click();
-    await expect(item.getByText('Expand system prompt content here.').first()).toBeVisible();
+    await item.click();
+    await expect(page.getByTestId('persona-name-input')).toHaveValue(personaName);
+    await expect(page.getByTestId('persona-prompt-textarea')).toHaveValue('Expand system prompt content here.');
 
     await request.delete(`${API_BASE}/personas/${persona.id}`);
   });

@@ -4,6 +4,7 @@ import type { ToolActivity } from '../../../store/agentStore';
 import { buildTurnsFromHistory } from '../chatUtils';
 import { buildExecutionGraphModel } from './executionGraphModel';
 import { NODE_HEIGHT, ROW_GAP } from './executionGraphModel.helpers';
+import { DEFAULT_TEST_PERSONA_AVATAR } from '../../../test/personaFixtures';
 
 function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -36,6 +37,7 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
     allowedTools: [],
     skillIds: [],
     mcpPolicy: 'deny_all',
+    ...DEFAULT_TEST_PERSONA_AVATAR,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -921,8 +923,9 @@ describe('buildExecutionGraphModel', () => {
 
     expect(rootTurnNode?.subtitle).toContain('RaBuilder');
     expect(rootTurnNode?.subtitle).toContain('gpt-4.1');
-    expect(subagentNode?.subtitle).toContain('Explore layout options for the execution graph');
-    expect(subagentNode?.detail).toContain('claude-sonnet-4.6');
+    expect(subagentNode?.subtitle).toContain('UX Designer');
+    expect(subagentNode?.subtitle).toContain('claude-sonnet-4.6');
+    expect(subagentNode?.detail).toContain('Explore layout options for the execution graph');
     expect(childTurnNode?.subtitle).toContain('UX Designer');
     expect(childTurnNode?.subtitle).toContain('claude-sonnet-4.6');
     expect(childTurnNode?.row).toBe(subagentNode?.row);

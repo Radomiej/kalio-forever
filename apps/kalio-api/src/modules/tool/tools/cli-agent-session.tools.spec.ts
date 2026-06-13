@@ -12,12 +12,17 @@ import {
 } from './cli-agent-session.tools';
 import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
-function makeRequest(toolName: string, args: Record<string, unknown>): ToolCallRequest {
+function makeRequest(
+  toolName: string,
+  args: Record<string, unknown>,
+  emit: ToolCallRequest['_emit'] = vi.fn(),
+): ToolCallRequest {
   return {
     callId: 'call-cli-tools',
     sessionId: 'sess-parent',
     toolName,
     args,
+    _emit: emit,
   };
 }
 
@@ -137,7 +142,7 @@ describe('CLI agent session tools', () => {
         verificationCommands: ['pnpm test'],
       },
     }));
-    expect(runtime.spawnSession).toHaveBeenCalledWith(expect.not.objectContaining({
+    expect(runtime.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
       emit: expect.any(Function),
     }));
     expect(result).toMatchObject({
@@ -221,7 +226,7 @@ describe('CLI agent session tools', () => {
       childSessionId: 'cli-child-1',
     }));
 
-    expect(runtime.stopSession).toHaveBeenCalledWith('sess-parent', 'cli-child-1');
+    expect(runtime.stopSession).toHaveBeenCalledWith('sess-parent', 'cli-child-1', expect.any(Function));
     expect(result).toMatchObject({
       childSessionId: 'cli-child-1',
       status: 'stopped',

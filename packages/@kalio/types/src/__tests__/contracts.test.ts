@@ -13,6 +13,7 @@ import type {
   ContextCompactionStrategy,
   ContextPreviewMessage,
   ContextPreviewRequest,
+  SessionRuntimeContext,
   ChatMessage,
   ChatSession,
   CreateSessionDto,
@@ -101,10 +102,14 @@ describe('@kalio/types contract shape', () => {
       model: string;
       allowedTools: string[];
     }>();
-    expectTypeOf<Pick<Persona, 'id' | 'skillIds' | 'mcpPolicy' | 'createdAt' | 'updatedAt'>>().toEqualTypeOf<{
+    expectTypeOf<Pick<Persona, 'id' | 'skillIds' | 'mcpPolicy' | 'avatarSeed' | 'avatarVariant' | 'avatarPaletteKey' | 'avatarIndex' | 'createdAt' | 'updatedAt'>>().toEqualTypeOf<{
       id: ID;
       skillIds: string[];
       mcpPolicy: 'allow_all' | 'deny_all' | 'allow_list';
+      avatarSeed: string;
+      avatarVariant: 'marble' | 'beam' | 'pixel' | 'sunset' | 'ring' | 'bauhaus';
+      avatarPaletteKey: 'ocean' | 'sunset' | 'forest' | 'violet' | 'ember' | 'slate' | 'candy' | 'mono';
+      avatarIndex: number;
       createdAt: Timestamp;
       updatedAt: Timestamp;
     }>();
@@ -388,10 +393,23 @@ describe('@kalio/types contract shape', () => {
 
   it('keeps LLM context preview contracts explicit', () => {
     expectTypeOf<ContextCompactionStrategy>().toEqualTypeOf<'backend-default' | 'summary' | 'evidence_only'>();
-    expectTypeOf<ContextPreviewRequest>().toEqualTypeOf<{
-      personaId: ID;
+    type SessionContextPreviewRequest = Extract<ContextPreviewRequest, { sessionId: string }>;
+    type RuntimeContextPreviewRequest = Extract<ContextPreviewRequest, { target: 'runtime' }>;
+    expectTypeOf<SessionContextPreviewRequest>().toMatchTypeOf<{
+      target?: 'session';
+      sessionId: string;
+      personaId: string;
       draftUserMessage?: string;
       attachments?: ChatMessage['attachments'];
+      runtimeContext?: never;
+    }>();
+    expectTypeOf<RuntimeContextPreviewRequest>().toMatchTypeOf<{
+      target: 'runtime';
+      personaId: string;
+      runtimeContext: SessionRuntimeContext;
+      draftUserMessage?: string;
+      attachments?: ChatMessage['attachments'];
+      sessionId?: never;
     }>();
     expectTypeOf<ContextPreviewMessage>().toEqualTypeOf<{
       role: 'system' | 'user' | 'assistant' | 'tool';
@@ -484,6 +502,7 @@ describe('@kalio/types contract shape', () => {
         label: string;
         kind: 'parallel' | 'role' | 'router' | 'artifact';
         roleSlotId?: string;
+        maxToolAttempts?: number;
         behavior?: {
           mode: ArchitectureNodeBehaviorMode;
           fanOut?: ArchitectureNodeFanOutMode;
@@ -550,6 +569,7 @@ describe('@kalio/types contract shape', () => {
         label: string;
         kind: 'parallel' | 'role' | 'router' | 'artifact';
         roleSlotId?: string;
+        maxToolAttempts?: number;
         behavior?: {
           mode: ArchitectureNodeBehaviorMode;
           fanOut?: ArchitectureNodeFanOutMode;

@@ -8,6 +8,8 @@ interface Props {
   disabled?: boolean;
   loading?: boolean;
   placeholder?: string;
+  focusRequestId?: number;
+  onFocusRequestConsumed?: () => void;
   'aria-label'?: string;
   'data-testid'?: string;
 }
@@ -25,6 +27,8 @@ export function ModelCombobox({
   disabled,
   loading,
   placeholder,
+  focusRequestId,
+  onFocusRequestConsumed,
   'aria-label': ariaLabel,
   'data-testid': testId,
 }: Props) {
@@ -33,12 +37,36 @@ export function ModelCombobox({
   const [typedSinceOpen, setTypedSinceOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const lastFocusRequestRef = useRef<number | null>(null);
+
+  const focusInput = () => {
+    const input = inputRef.current;
+    if (!input) {
+      return;
+    }
+
+    if (typeof input.scrollIntoView === 'function') {
+      input.scrollIntoView({ block: 'center', inline: 'nearest' });
+    }
+    input.focus({ preventScroll: true });
+  };
 
   useEffect(() => {
     if (open && inputRef.current) {
-      inputRef.current.focus();
+      inputRef.current.focus({ preventScroll: true });
     }
   }, [open]);
+
+  useEffect(() => {
+    if (focusRequestId === undefined || focusRequestId <= 0 || focusRequestId === lastFocusRequestRef.current) {
+      return;
+    }
+
+    lastFocusRequestRef.current = focusRequestId;
+    focusInput();
+    inputRef.current?.select();
+    onFocusRequestConsumed?.();
+  }, [focusRequestId, onFocusRequestConsumed]);
 
   const openDropdown = () => {
     setQuery('');
@@ -81,6 +109,7 @@ export function ModelCombobox({
           }}
           onFocus={() => {
             openDropdown();
+            focusInput();
             inputRef.current?.select();
           }}
           disabled={disabled || loading}

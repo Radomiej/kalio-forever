@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { SETTINGS_BLOCKS } from './registry';
+import { useSettingsStore } from './settingsStore';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -9,12 +10,46 @@ interface SettingsModalProps {
 
 export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
   const [tabId, setTabId] = useState(initialTab ?? SETTINGS_BLOCKS[0]?.id ?? 'llm');
+  const contentRef = useRef<HTMLDivElement>(null);
+  const pendingRuntimeFocusRequestRef = useRef(false);
+  const requestedSettingsTab = useSettingsStore((state) => state.requestedSettingsTab);
+  const clearRequestedSettingsTab = useSettingsStore((state) => state.clearRequestedSettingsTab);
+  const requestRuntimeModelFocus = useSettingsStore((state) => state.requestRuntimeModelFocus);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    if (!requestedSettingsTab) {
+      return;
+    }
+
+    pendingRuntimeFocusRequestRef.current = requestedSettingsTab === 'runtime';
+    setTabId(requestedSettingsTab);
+    clearRequestedSettingsTab();
+  }, [clearRequestedSettingsTab, requestedSettingsTab]);
+
+  useEffect(() => {
+    if (tabId !== 'runtime' || !pendingRuntimeFocusRequestRef.current) {
+      return;
+    }
+
+    pendingRuntimeFocusRequestRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      requestRuntimeModelFocus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [requestRuntimeModelFocus, tabId]);
+
+  useEffect(() => {
+    if (typeof contentRef.current?.scrollTo === 'function') {
+      contentRef.current.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  }, [tabId]);
 
   const activeBlock = SETTINGS_BLOCKS.find((b) => b.id === tabId) ?? SETTINGS_BLOCKS[0];
   const ActiveComponent = activeBlock?.component;
@@ -48,11 +83,12 @@ export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
             {SETTINGS_BLOCKS.map((block) => (
               <button
                 key={block.id}
+                type="button"
                 className={`btn btn-sm justify-start gap-3 w-full border-none shadow-none font-medium transition-colors ${
                   tabId === block.id
                     ? 'bg-sky-500/10 text-sky-400 border-l-2 border-sky-500 hover:bg-sky-500/15 rounded-none rounded-r-lg'
                     : 'bg-transparent text-base-content/70 hover:bg-base-300 hover:text-base-content'
-                }`}
+                  }`}
                 onClick={() => setTabId(block.id)}
                 data-testid={`settings-tab-${block.id}`}
               >
@@ -64,7 +100,7 @@ export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
 
           {/* Panel */}
           <div className="flex-1 overflow-hidden relative">
-            <div className="absolute inset-0 overflow-y-auto p-6">
+            <div ref={contentRef} className="absolute inset-0 overflow-y-auto p-6">
               <div className="max-w-3xl mx-auto bg-base-100 rounded-lg p-6 shadow-sm border border-base-200">
                 {ActiveComponent && <ActiveComponent />}
               </div>

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SessionPanel } from './SessionPanel';
 import { formatRelativeTime } from './session.utils';
 import type { ChatSession, Persona } from '@kalio/types';
+import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -10,6 +11,7 @@ const mockSetSessions = vi.fn();
 const mockSetActiveSession = vi.fn();
 const mockAddSession = vi.fn();
 const mockSetMessages = vi.fn();
+const mockSetAgentTurns = vi.fn();
 const mockRemoveSession = vi.fn();
 const mockUpdateSession = vi.fn();
 
@@ -25,7 +27,7 @@ function chooseOriginFilter(filterId: 'all' | 'user' | 'agent' | 'archived'): vo
 }
 
 const mockPersonas: Persona[] = [
-  { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', allowedTools: [], skillIds: [], mcpPolicy: 'allow_all', createdAt: 0, updatedAt: 0 },
+  { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', allowedTools: [], skillIds: [], mcpPolicy: 'allow_all', ...DEFAULT_TEST_PERSONA_AVATAR, createdAt: 0, updatedAt: 0 },
 ];
 
 const mockState: {
@@ -35,6 +37,8 @@ const mockState: {
   setActiveSession: typeof mockSetActiveSession;
   addSession: typeof mockAddSession;
   setMessages: typeof mockSetMessages;
+  setAgentTurns: typeof mockSetAgentTurns;
+  getSessionActiveTurnId: (sessionId: string | null) => string | null;
   removeSession: typeof mockRemoveSession;
   updateSession: typeof mockUpdateSession;
 } = {
@@ -44,6 +48,8 @@ const mockState: {
   setActiveSession: mockSetActiveSession,
   addSession: mockAddSession,
   setMessages: mockSetMessages,
+  setAgentTurns: mockSetAgentTurns,
+  getSessionActiveTurnId: () => null,
   removeSession: mockRemoveSession,
   updateSession: mockUpdateSession,
 };
@@ -75,15 +81,34 @@ vi.mock('../../services/apiClient', () => ({
 // ── agentStore mock ───────────────────────────────────────────────────────────
 
 const mockSetPendingConfirmation = vi.hoisted(() => vi.fn());
+const mockSetPendingBudgetApproval = vi.hoisted(() => vi.fn());
 
 vi.mock('../../store/agentStore', () => ({
   useAgentStore: Object.assign(
-    (selector?: (s: { pendingConfirmations: Record<string, unknown>; setPendingConfirmation: typeof mockSetPendingConfirmation }) => unknown) => {
-      const state = { pendingConfirmations: {}, setPendingConfirmation: mockSetPendingConfirmation };
+    (selector?: (s: {
+      pendingConfirmations: Record<string, unknown>;
+      pendingBudgetApprovals: Record<string, unknown>;
+      hasActiveLoopForSession: (sessionId: string | null) => boolean;
+      setPendingConfirmation: typeof mockSetPendingConfirmation;
+      setPendingBudgetApproval: typeof mockSetPendingBudgetApproval;
+    }) => unknown) => {
+      const state = {
+        pendingConfirmations: {},
+        pendingBudgetApprovals: {},
+        hasActiveLoopForSession: () => false,
+        setPendingConfirmation: mockSetPendingConfirmation,
+        setPendingBudgetApproval: mockSetPendingBudgetApproval,
+      };
       return selector ? selector(state) : state;
     },
     {
-      getState: () => ({ pendingConfirmations: {}, setPendingConfirmation: mockSetPendingConfirmation }),
+      getState: () => ({
+        pendingConfirmations: {},
+        pendingBudgetApprovals: {},
+        hasActiveLoopForSession: () => false,
+        setPendingConfirmation: mockSetPendingConfirmation,
+        setPendingBudgetApproval: mockSetPendingBudgetApproval,
+      }),
     },
   ),
 }));
@@ -126,6 +151,9 @@ describe('SessionPanel', () => {
     sessionStorage.clear();
     mockState.sessions = mockSessions;
     mockState.activeSessionId = 's1';
+    mockSetActiveSession.mockImplementation((id: string | null) => {
+      mockState.activeSessionId = id;
+    });
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
       if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
@@ -184,7 +212,7 @@ describe('SessionPanel', () => {
     expect(screen.getByTestId('subagent-session-badge-sub-1')).toBeTruthy();
   });
 
-  it('expands the full agent tree and labels New Chat roots with their architecture run', async () => {
+  it('expands the full agent tree without replacing the parent chat title', async () => {
     const now = Date.now();
     const architectureSessions: ChatSession[] = [
       { id: 'host', personaId: 'default', title: 'New Chat', createdAt: now - 5000, updatedAt: now - 5000 },
@@ -203,12 +231,13 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
 
-    expect(screen.getByText('Architecture: Runtime MVP proof')).toBeTruthy();
+    expect(screen.getByText('New Chat')).toBeTruthy();
     const toggle = screen.getByTestId('toggle-session-children-host');
     expect(toggle).toHaveTextContent('4');
 
     fireEvent.click(toggle);
 
+    expect(screen.getByText('Architecture: Runtime MVP proof')).toBeTruthy();
     expect(screen.getByText('Goal Master Delivery Loop: Orchestrator')).toBeTruthy();
     expect(screen.getByText('Goal Master Delivery Loop: Implementer')).toBeTruthy();
     expect(screen.getByText('codex CLI: Write proof file')).toBeTruthy();
@@ -543,6 +572,33 @@ describe('SessionPanel', () => {
 
     await waitFor(() => expect(sessionStorage.getItem('kalio:last-active-session-id')).toBe('s2'));
   });
+
+  it('rebuilds agent turns from fetched history when the selected session has no live turn', async () => {
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      if (url === '/api/sessions/s2/messages') {
+        return Promise.resolve({
+          data: [
+            { id: 'u1', sessionId: 's2', role: 'user', content: 'What can you do?', createdAt: 1 },
+            { id: 'a1', sessionId: 's2', role: 'assistant', content: 'Answer', createdAt: 2 },
+          ],
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+
+    const items = screen.getAllByTestId('session-item');
+    fireEvent.click(items[0]!);
+
+    await waitFor(() => expect(mockSetAgentTurns).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ done: true, sessionId: 's2' })]),
+      's2',
+    ));
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -572,6 +628,28 @@ describe('REGRESSION: pendingConfirmations cleaned up on session delete', () => 
 
     // Wait for the async delete + cleanup chain to finish
     await waitFor(() => expect(mockSetPendingConfirmation).toHaveBeenCalledWith('s2', null));
+  });
+
+  it('deleting or archiving a session also clears pending budget approvals', async () => {
+    mockApiDelete.mockResolvedValue({});
+    mockApiPost.mockResolvedValue({});
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
+
+    const deleteButtons = screen.getAllByTitle('Delete');
+    fireEvent.click(deleteButtons[0]!);
+    await waitFor(() => expect(mockSetPendingBudgetApproval).toHaveBeenCalledWith('s2', null));
+
+    chooseOriginFilter('agent');
+    const archiveButtons = screen.getAllByTitle('Archive');
+    fireEvent.click(archiveButtons[0]!);
+    await waitFor(() => expect(mockSetPendingBudgetApproval).toHaveBeenCalledWith('s2', null));
   });
 });
 

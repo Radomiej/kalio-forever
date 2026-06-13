@@ -14,10 +14,11 @@ import { CanvasFocusSection } from './CanvasPanel.Focus';
 import { findFocusedSubAgentFlowResult, SessionStats, ThinkingPreview, ToolCard } from './CanvasPanel.Parts';
 import { AgentFlowConversationCard, buildAgentFlowPreviews } from './CanvasPanel.AgentFlows';
 import { buildSubagentPreviews, SubagentConversationCard } from './CanvasPanel.Subagents';
+import { buildCliChildPreviews, CliChildConversationCanvasCard } from './CanvasPanel.CliChildren';
 import { SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
 
 export function CanvasPanel() {
-  const { toolActivities, isStreaming, canvasOpen, canvasFocus, setCanvasFocus, toggleCanvas, activeAgentLoops } = useAgentStore();
+  const { toolActivities, isStreaming, canvasOpen, canvasFocus, setCanvasFocus, toggleCanvas, activeAgentLoops, cliChildProjections } = useAgentStore();
   const { messages, activeSessionId, sessions, sessionMessages, setActiveSession, getSessionMessages, setMessages } = useSessionStore();
   const [hydratedSubagentSessions, setHydratedSubagentSessions] = useState<Record<string, true>>({});
   const open = canvasOpen;
@@ -31,6 +32,14 @@ export function CanvasPanel() {
   const agentFlowPreviews = useMemo(
     () => buildAgentFlowPreviews(messages, toolActivities, sessions),
     [messages, sessions, toolActivities],
+  );
+  const sessionTitleMap = useMemo(
+    () => new Map(sessions.map((session) => [session.id, session.title])),
+    [sessions],
+  );
+  const cliChildPreviews = useMemo(
+    () => buildCliChildPreviews(activeSessionId, cliChildProjections, sessionTitleMap),
+    [activeSessionId, cliChildProjections, sessionTitleMap],
   );
   const architectureRun = useMemo(
     () => findArchitectureRunInMessages(messages),
@@ -49,13 +58,14 @@ export function CanvasPanel() {
       new Set(
         [
           ...subagentPreviews.map((preview) => preview.sessionId),
+          ...cliChildPreviews.map((preview) => preview.childSessionId),
           ...agentFlowPreviews.map((preview) => preview.sessionId),
           ...(focusedCanvasSessionId ? [focusedCanvasSessionId] : []),
         ]
           .filter((sessionId) => sessionId !== activeSessionId),
       ),
     ).sort(),
-    [activeSessionId, agentFlowPreviews, focusedCanvasSessionId, subagentPreviews],
+    [activeSessionId, agentFlowPreviews, cliChildPreviews, focusedCanvasSessionId, subagentPreviews],
   );
   const childPreviewSessionKey = childPreviewSessionIds.join('|');
   const identifiedChildPreviewSessionIdsRef = useRef<Set<string>>(new Set());
@@ -80,6 +90,7 @@ export function CanvasPanel() {
     || subagentActivities.length > 0
     || subagentLoops.length > 0
     || subagentPreviews.length > 0
+    || cliChildPreviews.length > 0
     || agentFlowPreviews.length > 0
     || open;
 
@@ -204,6 +215,21 @@ export function CanvasPanel() {
                         preview={preview}
                         onOpenChat={() => setActiveSession(preview.sessionId)}
                         onOpenGraph={() => setCanvasFocus({ kind: 'architecture-run', runId: preview.graphRunId })}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {cliChildPreviews.length > 0 && (
+                <section data-testid="canvas-cli-children-section">
+                  <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">CLI children</p>
+                  <div className="space-y-1.5">
+                    {cliChildPreviews.map((preview) => (
+                      <CliChildConversationCanvasCard
+                        key={preview.childSessionId}
+                        preview={preview}
+                        onOpen={() => setActiveSession(preview.childSessionId)}
                       />
                     ))}
                   </div>

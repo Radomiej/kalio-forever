@@ -1,7 +1,32 @@
 import axios from 'axios';
 import type { RAAppSummary, RAAppGroup, VFSListResult } from '@kalio/types';
 
-const apiUrl = import.meta.env['VITE_API_URL'] as string ?? 'http://localhost:3016';
+function resolveConfiguredApiUrl(): string {
+  const configured = import.meta.env['VITE_API_URL'] as string | undefined;
+  if (typeof configured === 'string' && configured.trim().length > 0) {
+    return configured.trim();
+  }
+
+  return '/';
+}
+
+export function getApiBaseUrl(): string {
+  const configured = apiClient.defaults?.baseURL ?? '';
+  if (typeof configured === 'string' && configured.trim().length > 0) {
+    if (/^https?:\/\//i.test(configured)) {
+      return configured.replace(/\/+$/, '');
+    }
+    if (typeof globalThis !== 'undefined' && globalThis.location?.origin) {
+      return new URL(configured, globalThis.location.origin).toString().replace(/\/+$/, '');
+    }
+  }
+  if (typeof globalThis !== 'undefined' && globalThis.location?.origin) {
+    return globalThis.location.origin;
+  }
+  return 'http://localhost:3016';
+}
+
+const apiUrl = resolveConfiguredApiUrl();
 
 export const apiClient = axios.create({
   baseURL: apiUrl,
@@ -26,13 +51,13 @@ export async function getSessionVfsFiles(sessionId: string): Promise<VFSListResu
 }
 
 export function getSessionVfsServeUrl(sessionId: string, filePath: string): string {
-  const baseUrl = apiClient.defaults.baseURL ?? '';
+  const baseUrl = getApiBaseUrl();
   const encodedPath = filePath.split('/').map((segment) => encodeURIComponent(segment)).join('/');
   return `${baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/vfs/serve-path/${encodedPath}`;
 }
 
 export function getRAAppGroupDownloadUrl(slug: string, version: string): string {
-  const baseUrl = apiClient.defaults.baseURL ?? '';
+  const baseUrl = getApiBaseUrl();
   return `${baseUrl}/api/ra-apps/groups/${encodeURIComponent(slug)}/download/${encodeURIComponent(version)}`;
 }
 

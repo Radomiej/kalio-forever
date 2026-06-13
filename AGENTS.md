@@ -159,12 +159,18 @@ Boris Cherny (creator of Claude Code) keeps his team's file around 100 lines. Un
 ### Commands
 - Install: `pnpm install` (from root)
 - Build: `pnpm turbo run build`
-- Test (all): `pnpm turbo run test`
-- Test (e2e): `pnpm turbo run test:e2e`
+- Test (all): `pnpm test` (local gate) or `pnpm turbo run test` (CI workspace tests)
+- Test (e2e): `pnpm test:e2e` (self-contained Playwright stack on random ports)
 - Lint: `pnpm turbo run lint`
 - Typecheck: `pnpm turbo run typecheck`
 - Audit report: `pnpm audit:report`
-- Run locally: `.\start-dev.ps1` (starts both API on port 3016 and web on port 5188)
+- Dev (hot reload): `pnpm dev` / `.\start-dev.ps1` (API :3016, web :5188)
+- QA (built dist): `pnpm qa` / `pnpm qa:rebuild` (API :3316, web :5288)
+- Managed QA stack: `pnpm stack:start` / `pnpm stack:stop`
+- Prod (built dist): `pnpm prod` / `pnpm prod:rebuild` (API :4016, web :6188)
+- Windows user install: `scripts/install.ps1` → Scheduled Task autostart after reboot
+
+Full local workflow: `docs/local-dev-guide.md`. User install: `docs/quickstart-user.md`.
 
 Prefer single-file or single-test runs during iteration. Full suites are for the final verification pass.
 
@@ -176,6 +182,7 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 ### Conventions specific to this repo
 - Naming: PascalCase for classes, camelCase for variables/methods, kebab-case for files
 - Import style: Only import from `@kalio/types` across module boundaries. Zero cross-module imports.
+- Native tool classes should stay thin; domain logic belongs in services, not in tool handlers.
 - Error handling pattern: Never use empty catch. Always log errors with context and rethrow or handle explicitly.
 - Testing pattern and framework: Vitest for unit/integration, Playwright for E2E. Mock LLM with `MockLLMProvider` in tests.
 - For critical architecture/runtime work, keep bug-hunter agents running by default: two backend-focused hunters, one frontend-focused hunter, plus one coverage guardian tracking meaningful 80%+ FE/BE coverage. Scope them to disjoint files, require real regression evidence, and do not accept coverage-only or mock-only tests that miss user-visible behavior.
@@ -191,7 +198,7 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - LLM calls from frontend (all LLM traffic goes through Socket.IO gateway)
 - Direct filesystem access outside VFSModule (all file I/O through `VFSService`)
 - Type duplication (all shared types live in `@kalio/types/src/index.ts`)
-- Destructive tools without `requiresConfirmation: true` (VFS delete, terminal exec, etc.)
+- Destructive tools without `requiresConfirmation: true`, or overrides that disable confirmation for destructive tools (VFS delete, terminal exec, etc.)
 
 ---
 
@@ -227,6 +234,8 @@ When the user corrects your approach, append a one-line rule here before ending 
 - For subagent acceleration, use GPT-5.4 mini for simple isolated checks and GPT-5.3 Codex or GPT-5.4 for normal implementation/review work; do not use GPT-5.5.
 - Treat `.\start-dev.ps1` ports `3016/5188` as the official manual-dev hot-reload stack; treat `node scripts/stack-manager.mjs start --backend-port 0 --frontend-port 0` as an isolated built QA stack on random ports using `NODE_ENV=production`, `data/kalio-qa.db`, and `data/workspaces-qa`.
 - For failing CI work, start with `superpowers:systematic-debugging` and finish with `superpowers:verification-before-completion` before claiming the pipeline is fixed.
+- On Windows, always use system Node (`C:\Program Files\nodejs\node.exe`) for `node`/`pnpm`/`npm` installs and rebuilds; never Cursor's bundled Node 22 — prepend that directory to PATH when the agent shell resolves the wrong `node`.
+- Keep `docs/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/post-mvp-plans.md`.
 
 ---
 

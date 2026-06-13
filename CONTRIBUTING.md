@@ -22,8 +22,12 @@ Read **[AGENTS.md](./AGENTS.md)** — it is the canonical operating guide for al
 # Prerequisites: Node.js >= 22, pnpm >= 9
 pnpm install
 cp .env.example .env   # set LLM_PROVIDER=mock for offline dev
-.\start-dev.ps1        # starts API (:3016) + web (:5188)
+pnpm dev               # or .\start-dev.ps1 — API :3016 + web :5188, hot reload
 ```
+
+For the full local workflow — dev vs QA stacks, test gates, CI, and entry points — see **[docs/local-dev-guide.md](./docs/local-dev-guide.md)**.
+
+**QA (built dist, no hot reload):** `pnpm qa` or `pnpm qa:rebuild` → http://localhost:5288 (API :3316).
 
 ---
 

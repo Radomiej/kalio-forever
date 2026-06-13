@@ -1,5 +1,5 @@
 import type { ArchitectNode, ArchitectSchema } from './architect.types';
-import { getNodeDimensions } from './ArchitectGraphGeometry';
+import { getNodeDimensions, PIN_ANCHOR_DEFAULT_ZOOM, pinHitboxSize, pinOutwardOffset } from './ArchitectGraphGeometry';
 
 export const MIN_ZOOM = 0.65;
 export const MAX_ZOOM = 1.6;
@@ -110,12 +110,13 @@ export function fitArchitectGraphViewport({
     };
   }
 
+  const pinOutset = pinOutwardOffset(pinHitboxSize(PIN_ANCHOR_DEFAULT_ZOOM));
   const bounds = nodes.reduce((current, node) => {
     const dimensions = getNodeDimensions(node);
     return {
-      minX: Math.min(current.minX, node.x),
+      minX: Math.min(current.minX, node.x - pinOutset),
       minY: Math.min(current.minY, node.y),
-      maxX: Math.max(current.maxX, node.x + dimensions.width),
+      maxX: Math.max(current.maxX, node.x + dimensions.width + pinOutset),
       maxY: Math.max(current.maxY, node.y + dimensions.height),
     };
   }, {

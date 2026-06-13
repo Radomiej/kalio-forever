@@ -136,12 +136,15 @@ async function runMockFallbackFlow(page: Page, request: APIRequestContext): Prom
 }
 
 test.describe('Mock tool intent fallback', () => {
-  test('shows synthetic Preparing raapp_create without tool:arg_progress chunks', async ({ page, request }) => {
+  test('shows synthetic Preparing raapp_create without tool:arg_progress chunks', async ({ page, request }, testInfo) => {
     const { confirmations, progressEvents, chatErrors, seenIndicatorText } = await runMockFallbackFlow(page, request);
 
     expect(chatErrors).toEqual([]);
     expect(confirmations.some((event) => event.data.toolName === 'raapp_create')).toBe(true);
     expect(progressEvents.some((event) => event.data.toolName === 'raapp_create')).toBe(false);
     expect(seenIndicatorText).toMatch(/Preparing\s+raapp_create/i);
+
+    const screenshotPath = testInfo.outputPath('tool-intent-progress-proof.png');
+    await page.screenshot({ path: screenshotPath, fullPage: true });
   });
 });

@@ -1,4 +1,11 @@
-import type { AgentRunContext, SocketEvents, SubagentCopiedFile, ToolMeta, VFSMode } from '@kalio/types';
+import type {
+  AgentRunContext,
+  ArchitectureSlotToolPolicy,
+  SocketEvents,
+  SubagentCopiedFile,
+  ToolMeta,
+  VFSMode,
+} from '@kalio/types';
 
 export const SUBAGENT_RUNTIME = Symbol('SUBAGENT_RUNTIME');
 
@@ -14,7 +21,9 @@ export interface RunSubagentRequest {
   childSessionId?: string;
   personaId?: string;
   model?: string;
-  availableTools: ToolMeta[];
+  availableTools?: ToolMeta[];
+  slotPolicy?: ArchitectureSlotToolPolicy;
+  architectureContext?: Record<string, unknown>;
   timeoutMs: number;
   maxIterations?: number;
   vfsMode: VFSMode;

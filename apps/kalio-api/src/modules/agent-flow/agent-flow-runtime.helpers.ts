@@ -165,8 +165,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function mergedRunContext(run: AgentFlowRun): RunSubAgentFlowArgs['context'] {
   const base = run.checkpoint?.context;
   const resume = run.checkpoint?.resumeContext;
+  if (typeof base === 'string' && isRecord(resume)) {
+    return { subAgentFlowContext: base, ...resume };
+  }
   if (isRecord(base) && isRecord(resume)) {
     return { ...base, ...resume };
+  }
+  if (isRecord(base) && resume === undefined) {
+    return { ...base };
   }
   return resume ?? base;
 }

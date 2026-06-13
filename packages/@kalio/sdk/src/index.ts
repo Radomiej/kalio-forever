@@ -6,6 +6,8 @@ import type {
   ToolConfirmationRequest,
   ToolResult,
   ChatSession,
+  AgentBudgetApprovalInvalidated,
+  AgentBudgetApprovalRequest,
 } from '@kalio/types';
 
 export type ChunkHandler = (chunk: LLMStreamChunk) => void;
@@ -13,9 +15,12 @@ export type CompleteHandler = (payload: SocketEvents['chat:complete']) => void;
 export type ErrorHandler = (payload: SocketEvents['chat:error']) => void;
 export type ConfirmationHandler = (req: ToolConfirmationRequest) => void;
 export type ConfirmationInvalidatedHandler = (payload: ToolConfirmationInvalidated) => void;
+export type BudgetApprovalHandler = (payload: AgentBudgetApprovalRequest) => void;
+export type BudgetApprovalInvalidatedHandler = (payload: AgentBudgetApprovalInvalidated) => void;
 export type ToolStartHandler = (payload: SocketEvents['tool:start']) => void;
 export type ToolResultHandler = (result: ToolResult) => void;
 export type SessionCreatedHandler = (session: ChatSession) => void;
+export type SessionUpdatedHandler = (session: ChatSession) => void;
 export type ContextHandler = (payload: SocketEvents['chat:context']) => void;
 export type AgentStartHandler = (payload: SocketEvents['agent:start']) => void;
 export type AgentDoneHandler = (payload: SocketEvents['agent:done']) => void;
@@ -23,6 +28,7 @@ export type RaAppNativeResultHandler = (payload: SocketEvents['raapp:native_resu
 export type CLIAgentProgressHandler = (payload: SocketEvents['cli_agent:progress']) => void;
 export type ToolArgProgressHandler = (payload: SocketEvents['tool:arg_progress']) => void;
 export type SessionStatusHandler = (payload: SocketEvents['session:status']) => void;
+export type QueuedHandler = (payload: SocketEvents['chat:queued']) => void;
 export type ReconnectHandler = () => void;
 export type DisconnectHandler = (reason: string) => void;
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
@@ -92,6 +98,10 @@ export class KalioSDK {
 
   cancelTool(payload: SocketEvents['tool:cancel']): void {
     this.socket.emit('tool:cancel', payload);
+  }
+
+  approveAgentBudget(payload: SocketEvents['agent:budget_approve']): void {
+    this.socket.emit('agent:budget_approve', payload);
   }
 
   approveRaApp(payload: SocketEvents['raapp:approve']): void {
@@ -222,6 +232,35 @@ export class KalioSDK {
     return () => this.socket.off('session:created', wrappedHandler);
   }
 
+  onAgentBudgetRequired(handler: BudgetApprovalHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['agent:budget_required']) => {
+      console.groupCollapsed(`[Thread] BUDGET REQUIRED sessionId=${payload.sessionId} used=${payload.usedIterations}/${payload.currentLimit}`);
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('agent:budget_required', wrappedHandler);
+    return () => this.socket.off('agent:budget_required', wrappedHandler);
+  }
+
+  onAgentBudgetInvalidated(handler: BudgetApprovalInvalidatedHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['agent:budget_invalidated']) => {
+      console.groupCollapsed(`[Thread] BUDGET INVALIDATED ${payload.requestId} -> ${payload.reason}`);
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('agent:budget_invalidated', wrappedHandler);
+    return () => this.socket.off('agent:budget_invalidated', wrappedHandler);
+  }
+
+  onSessionUpdated(handler: SessionUpdatedHandler): () => void {
+    const wrappedHandler = (session: ChatSession) => {
+      console.log('[Thread] SESSION UPDATED:', session.id, session.title);
+      handler(session);
+    };
+    this.socket.on('session:updated', wrappedHandler);
+    return () => this.socket.off('session:updated', wrappedHandler);
+  }
+
   onContext(handler: ContextHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['chat:context']) => {
       console.groupCollapsed('[Thread] 🎯 CONTEXT');
@@ -276,6 +315,14 @@ export class KalioSDK {
     };
     this.socket.on('session:status', wrappedHandler);
     return () => this.socket.off('session:status', wrappedHandler);
+  }
+
+  onQueued(handler: QueuedHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['chat:queued']) => {
+      handler(payload);
+    };
+    this.socket.on('chat:queued', wrappedHandler);
+    return () => this.socket.off('chat:queued', wrappedHandler);
   }
 
   /**

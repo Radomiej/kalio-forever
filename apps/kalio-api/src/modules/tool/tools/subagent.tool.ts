@@ -174,7 +174,9 @@ export class SubagentTool {
     const tools = personaId != null
       ? await this.getPersonaTools(personaId)
       : (request.availableTools ?? await this.getPersonaTools('default'));
-    const maxIterations = await this.credentialsService.getMaxToolAttempts();
+    const personaConfig = await this.personaService.getSessionConfig(personaId ?? 'default');
+    const systemMaxIterations = await this.credentialsService.getMaxToolAttempts();
+    const maxIterations = personaConfig?.maxToolAttempts ?? systemMaxIterations;
     const runtime = this.getRuntime();
     return runtime.runSubagent({
       parentSessionId: sessionId,

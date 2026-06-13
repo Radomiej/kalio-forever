@@ -9,6 +9,10 @@ const { axiosCreate, mockGet, mockPost, mockDelete } = vi.hoisted(() => ({
     get: mockGet,
     post: mockPost,
     delete: mockDelete,
+    defaults: {
+      baseURL: '',
+      headers: { 'Content-Type': 'application/json' },
+    },
   })),
 }));
 
@@ -23,15 +27,33 @@ import {
   approveRAAppDraft,
   deleteRAAppGroup,
   discardRAAppDraft,
+  getApiBaseUrl,
   getRAAppGroups,
   getRAApps,
+  getRAAppGroupDownloadUrl,
+  getSessionVfsServeUrl,
   rollbackRAApp,
   uploadRAApp,
 } from './apiClient';
 
+type ApiClientWithDefaults = typeof apiClient & {
+  defaults?: {
+    baseURL?: string;
+    headers?: unknown;
+  };
+};
+
+function setApiClientDefaults(baseURL: string) {
+  (apiClient as unknown as ApiClientWithDefaults).defaults = {
+    baseURL,
+    headers: { 'Content-Type': 'application/json' },
+  } as ApiClientWithDefaults['defaults'];
+}
+
 describe('apiClient helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setApiClientDefaults('');
   });
 
   it('creates the shared axios client with JSON defaults', async () => {
@@ -144,5 +166,27 @@ describe('apiClient helpers', () => {
 
   it('exports the configured shared client instance', () => {
     expect(apiClient).toBeDefined();
+  });
+
+  it('resolves absolute helper urls against the current browser origin for relative api base urls', () => {
+    expect(getApiBaseUrl()).toBe(window.location.origin);
+    expect(getSessionVfsServeUrl('session-1', 'drafts/index.html')).toBe(
+      `${window.location.origin}/api/sessions/session-1/vfs/serve-path/drafts/index.html`,
+    );
+    expect(getRAAppGroupDownloadUrl('cats-suite', '1.0.0')).toBe(
+      `${window.location.origin}/api/ra-apps/groups/cats-suite/download/1.0.0`,
+    );
+  });
+
+  it('preserves relative api base path prefixes in helper urls', () => {
+    setApiClientDefaults('/backend');
+
+    expect(getApiBaseUrl()).toBe(`${window.location.origin}/backend`);
+    expect(getSessionVfsServeUrl('session-1', 'drafts/index.html')).toBe(
+      `${window.location.origin}/backend/api/sessions/session-1/vfs/serve-path/drafts/index.html`,
+    );
+    expect(getRAAppGroupDownloadUrl('cats-suite', '1.0.0')).toBe(
+      `${window.location.origin}/backend/api/ra-apps/groups/cats-suite/download/1.0.0`,
+    );
   });
 });

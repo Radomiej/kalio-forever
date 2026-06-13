@@ -6,6 +6,11 @@ import type { SessionsService } from '../sessions.service';
 import type { RAAppHITLService, SavedApproval } from '../../raapp/raapp-hitl.service';
 import type { AgentFlowRunSnapshot, ToolConfirmationRequest } from '@kalio/types';
 import type { AgentFlowRuntimePort } from '../../agent-flow/agent-flow-runtime.port';
+import { CLI_AGENT_SESSION_RUNTIME } from '../../cli-agent/cli-agent-session-runtime.port';
+import type { CLIAgentSessionRuntimePort } from '../../cli-agent/cli-agent-session-runtime.port';
+import type { SessionEventsService } from '../session-events.service';
+import type { AgentBudgetApprovalService } from '../agent-budget-approval.service';
+import type { ModuleRef } from '@nestjs/core';
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
 
@@ -16,6 +21,9 @@ describe('ChatGateway', () => {
   let sessions: SessionsService;
   let raappHITL: RAAppHITLService;
   let agentFlowRuntime: AgentFlowRuntimePort;
+  let cliAgentSessionRuntime: CLIAgentSessionRuntimePort;
+  let sessionEvents: SessionEventsService;
+  let agentBudgetApprovals: AgentBudgetApprovalService;
   let client: { id: string; emit: ReturnType<typeof vi.fn> };
   let observer: { id: string; emit: ReturnType<typeof vi.fn> };
 
@@ -36,6 +44,13 @@ describe('ChatGateway', () => {
 
     sessions = {
       listChildren: vi.fn().mockResolvedValue([]),
+      get: vi.fn().mockResolvedValue({
+        id: 'child-session',
+        personaId: 'default',
+        title: 'Child',
+        createdAt: 1,
+        updatedAt: 1,
+      }),
     } as unknown as SessionsService;
 
     raappHITL = {
@@ -50,6 +65,30 @@ describe('ChatGateway', () => {
       run: vi.fn(),
     } as unknown as AgentFlowRuntimePort;
 
+    cliAgentSessionRuntime = {
+      stopSession: vi.fn().mockResolvedValue({
+        childSessionId: 'cli-child-1',
+        parentSessionId: 'session-1',
+        agentId: 'codex',
+        workdir: 'C:/repo',
+        status: 'stopped',
+        lastPrompt: 'task',
+        updatedAt: Date.now(),
+      }),
+    } as unknown as CLIAgentSessionRuntimePort;
+
+    sessionEvents = {
+      onSessionCreated: vi.fn().mockReturnValue(() => undefined),
+      onSessionUpdated: vi.fn().mockReturnValue(() => undefined),
+      emitSessionCreated: vi.fn(),
+      emitSessionUpdated: vi.fn(),
+    } as unknown as SessionEventsService;
+    agentBudgetApprovals = {
+      getPendingApprovals: vi.fn().mockReturnValue([]),
+      isSyntheticPendingApproval: vi.fn().mockReturnValue(false),
+      resolveApproval: vi.fn().mockReturnValue('resolved'),
+    } as unknown as AgentBudgetApprovalService;
+
     client = {
       id: 'socket-1',
       emit: vi.fn(),
@@ -59,7 +98,7 @@ describe('ChatGateway', () => {
       emit: vi.fn(),
     };
 
-    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL, sessions, agentFlowRuntime);
+    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals, agentFlowRuntime, cliAgentSessionRuntime);
     gateway.handleConnection(client as never);
     gateway.handleConnection(observer as never);
     (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
@@ -107,6 +146,143 @@ describe('ChatGateway', () => {
     await gateway.handleChatStop(client as never, { sessionId: 'child-session' });
 
     expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('child-session');
+  });
+
+  it('does not delegate chat:stop to CLI runtime for non-cli-agent sessions', async () => {
+    vi.mocked(sessions.get).mockResolvedValue({
+      id: 'session-1',
+      personaId: 'default',
+      title: 'Parent chat',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+
+    expect(cliAgentSessionRuntime.stopSession).not.toHaveBeenCalled();
+  });
+
+  it('forwards terminal tool:result from cli stopSession emit to the initiating socket', async () => {
+    vi.mocked(sessions.get).mockResolvedValue({
+      id: 'cli-child-1',
+      personaId: 'default',
+      title: 'codex CLI',
+      kind: 'cli-agent',
+      parentSessionId: 'session-1',
+      parentToolCallId: 'call-cli-1',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    vi.mocked(cliAgentSessionRuntime.stopSession).mockImplementation(async (_parent, _child, emit) => {
+      emit?.('tool:result', {
+        callId: 'call-cli-1',
+        toolName: 'run_cli_agent',
+        sessionId: 'cli-child-1',
+        status: 'cancelled',
+      });
+      emit?.('agent:done', { sessionId: 'cli-child-1', turnId: 'cli-turn-call-cli-1' });
+      return {
+        childSessionId: 'cli-child-1',
+        parentSessionId: 'session-1',
+        agentId: 'codex',
+        workdir: 'C:/repo',
+        status: 'stopped',
+        lastPrompt: 'task',
+        updatedAt: Date.now(),
+      };
+    });
+    (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+      .get(client.id)
+      ?.add('cli-child-1');
+
+    await gateway.handleChatStop(client as never, { sessionId: 'cli-child-1' });
+
+    expect(client.emit).toHaveBeenCalledWith(
+      'tool:result',
+      expect.objectContaining({
+        sessionId: 'cli-child-1',
+        status: 'cancelled',
+      }),
+    );
+    expect(client.emit).toHaveBeenCalledWith(
+      'agent:done',
+      expect.objectContaining({ sessionId: 'cli-child-1' }),
+    );
+    expect(client.emit.mock.calls.filter(([event]) => event === 'tool:result').length).toBe(1);
+    expect(client.emit.mock.calls.filter(([event]) => event === 'agent:done').length).toBe(1);
+  });
+
+  it('delegates chat:stop on cli-agent child sessions to CLIAgentSessionRuntimeService', async () => {
+    vi.mocked(sessions.get).mockResolvedValue({
+      id: 'cli-child-1',
+      personaId: 'default',
+      title: 'codex CLI',
+      kind: 'cli-agent',
+      parentSessionId: 'session-1',
+      parentToolCallId: 'call-cli-1',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+      .get(client.id)
+      ?.add('cli-child-1');
+
+    await gateway.handleChatStop(client as never, { sessionId: 'cli-child-1' });
+
+    expect(cliAgentSessionRuntime.stopSession).toHaveBeenCalledWith(
+      'session-1',
+      'cli-child-1',
+      expect.any(Function),
+    );
+    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('cli-child-1');
+  });
+
+  it('falls back to ModuleRef for CLI runtime lookup when the constructor token is absent', async () => {
+    const moduleRef = {
+      get: vi.fn().mockImplementation((token: unknown) => {
+        if (token === CLI_AGENT_SESSION_RUNTIME) {
+          return cliAgentSessionRuntime;
+        }
+        return undefined;
+      }),
+    } as unknown as ModuleRef;
+    gateway = new ChatGateway(
+      toolDispatch,
+      pipeline,
+      raappHITL,
+      sessions,
+      sessionEvents,
+      agentBudgetApprovals,
+      agentFlowRuntime,
+      undefined,
+      moduleRef,
+    );
+    gateway.handleConnection(client as never);
+    (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+      .get(client.id)
+      ?.add('session-1');
+      (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+      .get(client.id)
+      ?.add('cli-child-1');
+    vi.mocked(sessions.get).mockResolvedValue({
+      id: 'cli-child-1',
+      personaId: 'default',
+      title: 'codex CLI',
+      kind: 'cli-agent',
+      parentSessionId: 'session-1',
+      parentToolCallId: 'call-cli-1',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    await gateway.handleChatStop(client as never, { sessionId: 'cli-child-1' });
+
+    expect(moduleRef.get).toHaveBeenCalledWith(CLI_AGENT_SESSION_RUNTIME, { strict: false });
+    expect(cliAgentSessionRuntime.stopSession).toHaveBeenCalledWith(
+      'session-1',
+      'cli-child-1',
+      expect.any(Function),
+    );
   });
 
   it('REGRESSION: child-session stream events do not grant tool confirmation rights to the initiator', async () => {
@@ -166,6 +342,117 @@ describe('ChatGateway', () => {
 
     expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'session-1');
     expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'child-session');
+  });
+
+  it('REGRESSION: stopping a parent session delegates descendant cli-agent children through the CLI runtime', async () => {
+    (sessions.listChildren as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([{ id: 'cli-child-1' }])
+      .mockResolvedValueOnce([]);
+    vi.mocked(sessions.get).mockImplementation(async (sessionId: string) => {
+      if (sessionId === 'cli-child-1') {
+        return {
+          id: 'cli-child-1',
+          personaId: 'default',
+          title: 'codex CLI',
+          kind: 'cli-agent',
+          parentSessionId: 'session-1',
+          parentToolCallId: 'call-cli-1',
+          createdAt: 1,
+          updatedAt: 1,
+        };
+      }
+
+      return {
+        id: 'session-1',
+        personaId: 'default',
+        title: 'Parent chat',
+        createdAt: 1,
+        updatedAt: 1,
+      };
+    });
+    vi.mocked(cliAgentSessionRuntime.stopSession).mockImplementation(async (_parent, _child, emit) => {
+      emit?.('tool:result', {
+        callId: 'call-cli-1',
+        toolName: 'run_cli_agent',
+        sessionId: 'cli-child-1',
+        status: 'cancelled',
+      });
+      emit?.('agent:done', { sessionId: 'cli-child-1', turnId: 'cli-turn-call-cli-1' });
+      return {
+        childSessionId: 'cli-child-1',
+        parentSessionId: 'session-1',
+        agentId: 'codex',
+        workdir: 'C:/repo',
+        status: 'stopped',
+        lastPrompt: 'task',
+        updatedAt: Date.now(),
+      };
+    });
+    (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+      .get(client.id)
+      ?.add('cli-child-1');
+
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+
+    expect(cliAgentSessionRuntime.stopSession).toHaveBeenCalledWith(
+      'session-1',
+      'cli-child-1',
+      expect.any(Function),
+    );
+    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'session-1');
+    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'cli-child-1');
+    expect(client.emit).toHaveBeenCalledWith(
+      'tool:result',
+      expect.objectContaining({
+        sessionId: 'cli-child-1',
+        status: 'cancelled',
+      }),
+    );
+    expect(client.emit).toHaveBeenCalledWith(
+      'agent:done',
+      expect.objectContaining({ sessionId: 'cli-child-1' }),
+    );
+    expect(client.emit.mock.calls.filter(([event]) => event === 'tool:result').length).toBe(1);
+    expect(client.emit.mock.calls.filter(([event]) => event === 'agent:done').length).toBe(1);
+  });
+
+  it('REGRESSION: allows subscriber-only stop on cli-agent child after child events were streamed', async () => {
+    vi.mocked(sessions.get).mockResolvedValue({
+      id: 'cli-child-1',
+      personaId: 'default',
+      title: 'codex CLI',
+      kind: 'cli-agent',
+      parentSessionId: 'session-1',
+      parentToolCallId: 'call-cli-1',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
+      emit('chat:chunk', {
+        sessionId: 'cli-child-1',
+        messageId: 'msg-cli-1',
+        delta: 'cli child output',
+        done: false,
+      });
+    });
+
+    await gateway.handleChatSend(client as never, {
+      sessionId: 'session-1',
+      content: 'spawn cli child',
+      personaId: 'default',
+    });
+
+    const socketSessions = (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions;
+    expect(socketSessions.get(client.id)?.has('cli-child-1')).toBe(false);
+
+    await gateway.handleChatStop(client as never, { sessionId: 'cli-child-1' });
+
+    expect(cliAgentSessionRuntime.stopSession).toHaveBeenCalledWith(
+      'session-1',
+      'cli-child-1',
+      expect.any(Function),
+    );
+    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('cli-child-1');
   });
 
   it('REGRESSION: stopping a parent session cascades to active AgentFlow runs', async () => {
@@ -403,6 +690,39 @@ describe('ChatGateway', () => {
         'session-1',
         'Do not write files; explain the plan instead.',
       );
+    });
+  });
+
+  describe('budget approvals', () => {
+    it('replays invalidation to the approving socket for synthetic seeded approvals', () => {
+      vi.mocked(agentBudgetApprovals.getPendingApprovals).mockReturnValue([
+        {
+          requestId: 'budget-1',
+          sessionId: 'session-1',
+          scope: 'chat',
+          usedIterations: 60,
+          currentLimit: 60,
+          suggestedNextLimit: 70,
+          requestedBy: 'chat-agent',
+        },
+      ]);
+      vi.mocked(agentBudgetApprovals.isSyntheticPendingApproval).mockReturnValue(true);
+
+      gateway.handleAgentBudgetApprove(client as never, {
+        requestId: 'budget-1',
+        sessionId: 'session-1',
+        decision: 'allow_ten',
+      });
+
+      expect(agentBudgetApprovals.resolveApproval).toHaveBeenCalledWith('budget-1', 'session-1', 'allow_ten');
+      expect(client.emit).toHaveBeenCalledWith('agent:budget_invalidated', {
+        requestId: 'budget-1',
+        sessionId: 'session-1',
+        agentRun: undefined,
+        reason: 'approved',
+        decision: 'allow_ten',
+        approvedLimit: 70,
+      });
     });
   });
 });

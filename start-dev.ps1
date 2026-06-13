@@ -20,6 +20,70 @@ if (-not $localAppData) {
 $devDataRoot = Join-Path $localAppData "kalio-forever-dev"
 $BE_PORT = $BackendPort
 $FE_PORT = $FrontendPort
+
+# Singleton lock — must run before port cleanup or stack startup.
+$script:devStackMutex = $null
+$script:devStackMutexOwned = $false
+$devStackMutexName = "Global\KalioForever-DevStack-$BE_PORT-$FE_PORT"
+try {
+    $script:devStackMutex = [System.Threading.Mutex]::new($false, $devStackMutexName)
+    $script:devStackMutexOwned = $script:devStackMutex.WaitOne(0, $false)
+    if (-not $script:devStackMutexOwned) {
+        $beHealthy = $false
+        $feHealthy = $false
+        try {
+            $beResponse = Invoke-WebRequest -Uri "http://localhost:$BE_PORT/api/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            $beHealthy = $beResponse.StatusCode -eq 200
+        } catch { }
+        try {
+            $feResponse = Invoke-WebRequest -Uri "http://localhost:$FE_PORT" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            $feHealthy = $feResponse.StatusCode -eq 200
+        } catch { }
+
+        if ($beHealthy -and $feHealthy) {
+            Write-Host "[OK] Kalio dev stack already running on ports $BE_PORT/$FE_PORT." -ForegroundColor Green
+            Write-Host "  Backend  -> http://localhost:$BE_PORT" -ForegroundColor Green
+            Write-Host "  Frontend -> http://localhost:$FE_PORT" -ForegroundColor Green
+            Write-Host "  Attached to existing stack (dev-servers watchdog)." -ForegroundColor DarkGray
+            if ($script:devStackMutex) {
+                try { $script:devStackMutex.Dispose() } catch { }
+                $script:devStackMutex = $null
+            }
+            while ($true) {
+                Start-Sleep -Seconds 15
+                $stillHealthy = $true
+                try {
+                    $beCheck = Invoke-WebRequest -Uri "http://localhost:$BE_PORT/api/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                    if ($beCheck.StatusCode -ne 200) { $stillHealthy = $false }
+                } catch { $stillHealthy = $false }
+                try {
+                    $feCheck = Invoke-WebRequest -Uri "http://localhost:$FE_PORT" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                    if ($feCheck.StatusCode -ne 200) { $stillHealthy = $false }
+                } catch { $stillHealthy = $false }
+                if (-not $stillHealthy) {
+                    Write-Host "[WARN] Existing stack became unhealthy; exiting so dev-servers can restart." -ForegroundColor Yellow
+                    exit 1
+                }
+            }
+        }
+
+        Write-Host "[FAIL] Kalio dev stack already running (ports $BE_PORT/$FE_PORT)." -ForegroundColor Red
+        Write-Host "  Stop dev-servers Kalio or the other start-dev.ps1 before starting again." -ForegroundColor DarkYellow
+        if ($script:devStackMutex) {
+            try { $script:devStackMutex.Dispose() } catch { }
+            $script:devStackMutex = $null
+        }
+        exit 1
+    }
+} catch {
+    if ($script:devStackMutex) {
+        try { $script:devStackMutex.Dispose() } catch { }
+        $script:devStackMutex = $null
+    }
+    Write-Host "[FAIL] Could not acquire dev stack singleton lock: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
 $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $nodeCmd) { $nodeCmd = Get-Command node -ErrorAction SilentlyContinue }
 if (-not $nodeCmd) { Write-Host "[FAIL] node not found on PATH" -ForegroundColor Red; exit 1 }
@@ -257,6 +321,18 @@ function Clear-OccupiedPorts {
     return $true
 }
 
+function Release-DevStackMutex {
+    if ($script:devStackMutexOwned -and $script:devStackMutex) {
+        try { [void]$script:devStackMutex.ReleaseMutex() } catch { }
+        $script:devStackMutexOwned = $false
+    }
+    if ($script:devStackMutex) {
+        try { $script:devStackMutex.Dispose() } catch { }
+        $script:devStackMutex = $null
+    }
+}
+
+try {
 # --- Kill any leftover processes on our ports ---
 Write-Host "KALIO Dev Stack" -ForegroundColor Cyan
 Write-Host "  Clearing ports $BE_PORT and $FE_PORT..." -ForegroundColor DarkYellow
@@ -337,7 +413,17 @@ if ($useDedicatedPorts) {
 # crashes with exit code -1 (4294967295) on Windows when stdout is redirected
 # to a file or pipe. The process MUST inherit the real console handles.
 # We therefore run Vite directly via node without any output redirect.
-$feProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList $viteJs `
+# Bind Vite to all local interfaces so the dev stack is reachable through both
+# localhost and 127.0.0.1 during manual QA and Playwright external-server reuse.
+$feArgs = @(
+    $viteJs
+    '--host'
+    '0.0.0.0'
+    '--port'
+    "$FE_PORT"
+    '--strictPort'
+)
+$feProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList $feArgs `
     -WorkingDirectory $web -NoNewWindow -PassThru
 
 Write-Host "  Frontend -> http://localhost:$FE_PORT  (PID $($feProcess.Id))" -ForegroundColor Green
@@ -364,4 +450,7 @@ try {
     Stop-KalioStack -BeProcess $beProcess -FeProcess $feProcess -Ports @($BE_PORT, $FE_PORT)
     Restore-EnvVars -Values $previousEnv
     Write-Host "[OK] Stack stopped." -ForegroundColor Green
+}
+} finally {
+    Release-DevStackMutex
 }

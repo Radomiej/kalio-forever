@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = resolve(fileURLToPath(import.meta.url), '..');
@@ -17,8 +17,13 @@ const frontendLogPath = resolve(logsDir, 'frontend.log');
 
 const action = process.argv[2] ?? 'status';
 const args = process.argv.slice(3);
-const backendPortArg = Number.parseInt(getArgValue(args, '--backend-port', '0'), 10);
-const frontendPortArg = Number.parseInt(getArgValue(args, '--frontend-port', '0'), 10);
+const stackProfile = getArgValue(args, '--profile', '');
+const isProdProfile = stackProfile === 'prod' || process.env.KALIO_INSTALL_PROFILE === 'prod';
+const backendPortDefault = isProdProfile ? '4016' : '0';
+const frontendPortDefault = isProdProfile ? '6188' : '0';
+const backendPortArg = Number.parseInt(getArgValue(args, '--backend-port', backendPortDefault), 10);
+const frontendPortArg = Number.parseInt(getArgValue(args, '--frontend-port', frontendPortDefault), 10);
+const useDirectRuntime = args.includes('--runtime') && getArgValue(args, '--runtime', '') === 'direct';
 
 const apiDir = resolve(repoRoot, 'apps/kalio-api');
 const backendDist = resolve(apiDir, 'dist/main.js');
@@ -55,7 +60,49 @@ function getArgValue(argv, flag, fallback) {
 }
 
 function showUsage() {
-  console.log('Usage: node scripts/stack-manager.mjs <start|status|stop> [--backend-port <port|0>] [--frontend-port <port|0>] [--use-env-llm] [--provider xiaomimimo] [--model mimo-v2.5] [--base-url https://api.xiaomimimo.com/v1] [--database-path data/kalio-qa.db] [--workspace-root data/workspaces-qa]');
+  console.log('Usage: node scripts/stack-manager.mjs <start|status|stop> [--profile prod] [--backend-port <port|0>] [--frontend-port <port|0>] [--skip-build] [--runtime direct] [--use-env-llm] [--env-file <path>] [--data-root <path>] [--database-path <path>] [--workspace-root <path>] [--memory-db-path <path>] [--embedding-cache-dir <path>] [--provider xiaomimimo] [--model mimo-v2.5] [--base-url https://api.xiaomimimo.com/v1]');
+}
+
+function resolveConfiguredPath(pathValue) {
+  if (!pathValue) {
+    return pathValue;
+  }
+
+  return resolve(repoRoot, pathValue);
+}
+
+function resolveDataPaths() {
+  const dataRootArg = getArgValue(args, '--data-root', '');
+  if (dataRootArg) {
+    const dataRoot = resolveConfiguredPath(dataRootArg);
+    const defaultDatabaseName = isProdProfile ? 'kalio.db' : 'kalio-qa.db';
+    return {
+      databasePath: resolveConfiguredPath(getArgValue(args, '--database-path', resolve(dataRoot, defaultDatabaseName))),
+      workspaceRoot: resolveConfiguredPath(getArgValue(args, '--workspace-root', resolve(dataRoot, 'workspaces'))),
+      memoryDbPath: resolveConfiguredPath(getArgValue(args, '--memory-db-path', resolve(dataRoot, 'memory'))),
+      embeddingCacheDir: resolveConfiguredPath(getArgValue(args, '--embedding-cache-dir', resolve(dataRoot, 'embeddings-cache'))),
+    };
+  }
+
+  const defaultDatabasePath = isProdProfile ? resolve(repoRoot, 'data/kalio.db') : databasePath;
+  const defaultWorkspaceRoot = isProdProfile ? resolve(repoRoot, 'data/workspaces') : workspaceRoot;
+  const defaultMemoryDbPath = isProdProfile ? resolve(repoRoot, 'data/memory') : resolve(repoRoot, 'data/memory-qa');
+  const defaultEmbeddingCacheDir = isProdProfile ? resolve(repoRoot, 'data/embeddings-cache') : resolve(repoRoot, 'data/embeddings-cache-qa');
+
+  return {
+    databasePath: resolveConfiguredPath(getArgValue(args, '--database-path', defaultDatabasePath)),
+    workspaceRoot: resolveConfiguredPath(getArgValue(args, '--workspace-root', defaultWorkspaceRoot)),
+    memoryDbPath: resolveConfiguredPath(getArgValue(args, '--memory-db-path', defaultMemoryDbPath)),
+    embeddingCacheDir: resolveConfiguredPath(getArgValue(args, '--embedding-cache-dir', defaultEmbeddingCacheDir)),
+  };
+}
+
+function ensureDataDirs(paths) {
+  for (const dirPath of [dirname(paths.databasePath), paths.workspaceRoot, paths.memoryDbPath, paths.embeddingCacheDir]) {
+    if (dirPath) {
+      mkdirSync(dirPath, { recursive: true });
+    }
+  }
 }
 
 function resolveCommand(name) {
@@ -68,6 +115,52 @@ function resolveCommand(name) {
     }
   }
   return null;
+}
+
+function resolveEnvFilePath(envFile) {
+  if (!envFile) {
+    return resolve(repoRoot, '.env');
+  }
+
+  return isAbsolute(envFile) ? envFile : resolve(repoRoot, envFile);
+}
+
+function resolveWorkspaceCli(primaryPath, packagePrefix, relativePath) {
+  if (existsSync(primaryPath)) {
+    return primaryPath;
+  }
+
+  const pnpmStore = resolve(repoRoot, 'node_modules/.pnpm');
+  if (!existsSync(pnpmStore)) {
+    return null;
+  }
+
+  const match = readdirSync(pnpmStore)
+    .filter((entry) => entry.startsWith(packagePrefix))
+    .sort()[0];
+
+  if (!match) {
+    return null;
+  }
+
+  const candidate = resolve(pnpmStore, match, relativePath);
+  return existsSync(candidate) ? candidate : null;
+}
+
+function resolveViteBin() {
+  return resolveWorkspaceCli(
+    resolve(webDir, 'node_modules/vite/bin/vite.js'),
+    'vite@',
+    'node_modules/vite/bin/vite.js',
+  );
+}
+
+function getPnpmLauncherOrNull() {
+  try {
+    return getPnpmLauncher();
+  } catch {
+    return null;
+  }
 }
 
 function getPnpmLauncher() {
@@ -165,8 +258,8 @@ function resolveQaEnv() {
   const testEnvFile = getArgValue(args, '--test-env-file', '.env.test');
   const useEnvLlm = args.includes('--use-env-llm');
   const fileEnv = {
-    ...readEnvFile(resolve(repoRoot, testEnvFile)),
-    ...readEnvFile(resolve(repoRoot, envFile)),
+    ...readEnvFile(resolveEnvFilePath(testEnvFile)),
+    ...readEnvFile(resolveEnvFilePath(envFile)),
   };
   const llmEnv = useEnvLlm ? { ...fileEnv, ...process.env } : {};
 
@@ -180,17 +273,77 @@ function resolveQaEnv() {
   };
 }
 
+function resolveCredentialsMasterKey(qaEnv) {
+  const configured = qaEnv.CREDENTIALS_MASTER_KEY?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  if (isProdProfile) {
+    throw new Error('CREDENTIALS_MASTER_KEY is required for prod profile. Set it in --env-file before starting the stack.');
+  }
+
+  return 'playwright-test-master-key-32-chars-minimum';
+}
+
 function commonEnv(qaEnv) {
-  const resolvedDatabasePath = resolve(repoRoot, getArgValue(args, '--database-path', databasePath));
-  const resolvedWorkspaceRoot = resolve(repoRoot, getArgValue(args, '--workspace-root', workspaceRoot));
+  const dataPaths = resolveDataPaths();
+  ensureDataDirs(dataPaths);
 
   return {
     ...qaEnv,
     NODE_ENV: 'production',
-    CREDENTIALS_MASTER_KEY: qaEnv.CREDENTIALS_MASTER_KEY ?? 'playwright-test-master-key-32-chars-minimum',
-    DATABASE_PATH: resolvedDatabasePath,
-    WORKSPACE_ROOT: resolvedWorkspaceRoot,
+    KALIO_INSTALL_PROFILE: isProdProfile ? 'prod' : qaEnv.KALIO_INSTALL_PROFILE,
+    CREDENTIALS_MASTER_KEY: resolveCredentialsMasterKey(qaEnv),
+    DATABASE_PATH: dataPaths.databasePath,
+    WORKSPACE_ROOT: dataPaths.workspaceRoot,
+    MEMORY_DB_PATH: dataPaths.memoryDbPath,
+    EMBEDDING_CACHE_DIR: dataPaths.embeddingCacheDir,
   };
+}
+
+function resolveFrontendLauncher() {
+  if (useDirectRuntime) {
+    const viteBin = resolveViteBin();
+    if (!viteBin) {
+      throw new Error('vite CLI not found for direct runtime. Run pnpm install from repo root.');
+    }
+
+    return {
+      mode: 'direct',
+      command: process.execPath,
+      argsPrefix: [viteBin],
+      cwd: webDir,
+      shell: false,
+      label: `${process.execPath} ${viteBin} preview --configLoader runner --strictPort`,
+    };
+  }
+
+  try {
+    const pnpm = getPnpmLauncher();
+    return {
+      mode: 'pnpm',
+      command: pnpm.command,
+      argsPrefix: [...pnpm.argsPrefix, '--filter', 'kalio-web', 'exec', 'vite'],
+      cwd: repoRoot,
+      shell: pnpm.shell,
+      label: `${pnpm.command} ${pnpm.argsPrefix.join(' ')} --filter kalio-web exec vite preview --configLoader runner --strictPort`,
+    };
+  } catch (error) {
+    const viteBin = resolveViteBin();
+    if (!viteBin) {
+      throw error;
+    }
+
+    return {
+      mode: 'direct',
+      command: process.execPath,
+      argsPrefix: [viteBin],
+      cwd: webDir,
+      shell: false,
+      label: `${process.execPath} ${viteBin} preview --configLoader runner --strictPort`,
+    };
+  }
 }
 
 async function startStack() {
@@ -223,13 +376,18 @@ async function startStack() {
     VITE_PORT: String(frontendPort),
   };
 
-  const pnpm = getPnpmLauncher();
+  const pnpm = getPnpmLauncherOrNull();
   if (!args.includes('--skip-build')) {
+    if (!pnpm) {
+      throw new Error('pnpm launcher not found. Install dependencies before building the stack.');
+    }
     await buildStack(pnpm, backendEnv, frontendEnv);
   }
   if (!existsSync(backendDist) || !existsSync(resolve(webDir, 'dist/index.html'))) {
-    throw new Error('QA stack requires built backend and frontend artifacts. Run without --skip-build or run: pnpm build');
+    throw new Error('Built stack requires backend and frontend dist artifacts. Run without --skip-build or run: pnpm build');
   }
+
+  const frontendLauncher = resolveFrontendLauncher();
 
   const backend = spawn(process.execPath, [backendDist], {
     cwd: apiDir,
@@ -243,13 +401,9 @@ async function startStack() {
     windowsHide: true,
   });
   const frontend = spawnProcess(
-    pnpm.command,
+    frontendLauncher.command,
     [
-      ...pnpm.argsPrefix,
-      '--filter',
-      'kalio-web',
-      'exec',
-      'vite',
+      ...frontendLauncher.argsPrefix,
       'preview',
       '--configLoader',
       'runner',
@@ -260,14 +414,14 @@ async function startStack() {
       '--strictPort',
     ],
     {
-      cwd: repoRoot,
+      cwd: frontendLauncher.cwd,
       env: {
         ...frontendEnv,
         PATH: process.env.PATH ?? process.env.Path ?? '',
         Path: process.env.Path ?? process.env.PATH ?? '',
       },
       stdio: ['ignore', frontendLog, frontendLog],
-      shell: pnpm.shell,
+      shell: frontendLauncher.shell,
       detached: true,
       windowsHide: true,
     },
@@ -295,8 +449,9 @@ async function startStack() {
     },
     frontend: {
       pid: frontend.pid,
-      cwd: repoRoot,
-      command: `${pnpm.command} ${pnpm.argsPrefix.join(' ')} --filter kalio-web exec vite preview --configLoader runner --strictPort`,
+      cwd: frontendLauncher.cwd,
+      command: frontendLauncher.label,
+      runtime: frontendLauncher.mode,
     },
     backendPort,
     frontendPort,
@@ -307,6 +462,11 @@ async function startStack() {
     model: backendEnv.LLM_MODEL,
     databasePath: backendEnv.DATABASE_PATH,
     workspaceRoot: backendEnv.WORKSPACE_ROOT,
+    memoryDbPath: backendEnv.MEMORY_DB_PATH,
+    embeddingCacheDir: backendEnv.EMBEDDING_CACHE_DIR,
+    dataRoot: getArgValue(args, '--data-root', ''),
+    profile: isProdProfile ? 'prod' : stackProfile || 'qa',
+    installRoot: repoRoot,
   });
 
   try {
@@ -317,8 +477,11 @@ async function startStack() {
     throw error;
   }
 
-  console.log(`[stack] QA stack started: ${backendUrl} + ${frontendUrl}`);
+  const stackLabel = isProdProfile ? 'prod' : 'built';
+  console.log(`[stack] ${stackLabel} stack started: ${backendUrl} + ${frontendUrl}`);
   console.log(`[stack] provider=${backendEnv.LLM_PROVIDER} model=${backendEnv.LLM_MODEL}`);
+  console.log(`[stack] database=${backendEnv.DATABASE_PATH}`);
+  console.log(`[stack] workspace=${backendEnv.WORKSPACE_ROOT}`);
   console.log(`[stack] logs: ${backendLogPath}, ${frontendLogPath}`);
 
   backend.unref();
@@ -490,6 +653,21 @@ function reportStateProcesses(state) {
   console.log(`[stack] backend pid ${state.backend?.pid ?? 'unknown'}  (${state.backend?.cwd ?? 'unknown cwd'})`);
   console.log(`[stack] frontend pid ${state.frontend?.pid ?? 'unknown'} (${state.frontend?.cwd ?? 'unknown cwd'})`);
   console.log(`[stack] ports: backend=${state.backendPort ?? 'unknown'}, frontend=${state.frontendPort ?? 'unknown'}`);
+  if (state.databasePath) {
+    console.log(`[stack] database=${state.databasePath}`);
+  }
+  if (state.workspaceRoot) {
+    console.log(`[stack] workspace=${state.workspaceRoot}`);
+  }
+  if (state.dataRoot) {
+    console.log(`[stack] data-root=${state.dataRoot}`);
+  }
+  if (state.profile) {
+    console.log(`[stack] profile=${state.profile}`);
+  }
+  if (state.installRoot) {
+    console.log(`[stack] install-root=${state.installRoot}`);
+  }
 }
 
 function isProcessAlive(pid) {

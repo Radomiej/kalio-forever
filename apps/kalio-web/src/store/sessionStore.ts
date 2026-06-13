@@ -57,6 +57,7 @@ interface SessionState {
   finalizeAgentTurn: (sessionId?: string | null) => void;
   clearAgentTurns: (sessionId?: string | null) => void;
   setAgentTurns: (turns: AgentTurn[], sessionId?: string | null) => void;
+  updateAgentTurn: (turnId: ID, patch: Partial<AgentTurn>, sessionId?: string | null) => void;
   markAgentTurnError: (turnId: ID, error: { code: string; message: string }, sessionId?: string | null) => void;
   removeLastAgentTurn: (sessionId?: string | null) => void;
 }
@@ -81,7 +82,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   setSessions: (sessions) => set({ sessions }),
   addSession: (session) =>
-    set((s) => ({ sessions: [...s.sessions, session] })),
+    set((s) => ({
+      sessions: s.sessions.some((item) => item.id === session.id)
+        ? s.sessions.map((item) => item.id === session.id ? { ...item, ...session } : item)
+        : [...s.sessions, session],
+    })),
   createSession: (title) => {
     const id = crypto.randomUUID();
     const newSession: ChatSession = {
@@ -488,6 +493,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         },
         agentTurns: targetSessionId === s.activeSessionId ? turns : s.agentTurns,
         activeTurnId: targetSessionId === s.activeSessionId ? null : s.activeTurnId,
+      };
+    }),
+
+  updateAgentTurn: (turnId, patch, sessionId) =>
+    set((s) => {
+      const targetSessionId = sessionId ?? s.activeSessionId;
+      if (!targetSessionId) return s;
+      const nextSessionTurns = getStoredSessionTurns(s, targetSessionId).map((turn) =>
+        turn.id === turnId ? { ...turn, ...patch } : turn,
+      );
+      return {
+        sessionAgentTurns: {
+          ...s.sessionAgentTurns,
+          [targetSessionId]: nextSessionTurns,
+        },
+        agentTurns: targetSessionId === s.activeSessionId ? nextSessionTurns : s.agentTurns,
       };
     }),
 

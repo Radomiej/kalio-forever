@@ -43,4 +43,35 @@ describe('DrizzleService AgentFlow bootstrap repair', () => {
     ]));
     sqlite.close();
   });
+
+  it('backfills new personas columns on an existing older table', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec(`
+      CREATE TABLE personas (
+        id text PRIMARY KEY NOT NULL,
+        name text NOT NULL,
+        system_prompt text NOT NULL DEFAULT '',
+        model text NOT NULL,
+        allowed_tools text NOT NULL DEFAULT '[]',
+        created_at integer NOT NULL,
+        updated_at integer NOT NULL
+      );
+    `);
+    const service = new DrizzleService(null as never);
+    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+
+    (service as unknown as { ensurePersonaColumns: () => void }).ensurePersonaColumns();
+
+    const columns = sqlite.prepare('PRAGMA table_info(personas)').all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'mcp_policy',
+      'avatar_seed',
+      'avatar_variant',
+      'avatar_palette_key',
+      'avatar_index',
+      'skill_ids',
+      'max_tool_attempts',
+    ]));
+    sqlite.close();
+  });
 });

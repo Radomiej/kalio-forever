@@ -8,7 +8,7 @@
  * because addToolActivity was only called from the confirmation handler.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, act, fireEvent, screen } from '@testing-library/react';
+import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { buildArchitectureRunContext, ChatInterface } from './ChatInterface';
 import { computeAnsweredCallIds } from './chatUtils';
 import type { ChatMessage, VFSFile } from '@kalio/types';
@@ -89,6 +89,7 @@ vi.mock('../../services/eventBus', () => ({
     onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
     onToolArgProgress: (h: (...args: unknown[]) => void) => capture('tool:arg_progress', h),
     onSessionStatus: (h: (...args: unknown[]) => void) => capture('session:status', h),
+    onQueued: (h: (...args: unknown[]) => void) => capture('chat:queued', h),
     onReconnect: (h: (...args: unknown[]) => void) => capture('socket:reconnect', h),
     onConnectionState: (h: (...args: unknown[]) => void) => capture('socket:connection_state', h),
     identifySession: mockIdentifySession,
@@ -136,6 +137,9 @@ const agentStoreState = {
   activeToolNames: [],
   callIdToName: {},
   activeAgentLoops: {} as Record<string, { sessionId: string; turnId: string; startedAt: number }>,
+  cliChildProjections: {} as Record<string, unknown>,
+  queuedDepthBySession: {} as Record<string, number>,
+  cliAgentOutput: {} as Record<string, string>,
   setStreaming,
   setPendingConfirmation,
   addToolActivity,
@@ -162,6 +166,10 @@ const agentStoreState = {
   setToolArgProgress,
   appendCLIAgentChunk,
   clearCLIAgentOutput,
+  upsertCLIChildProjection: vi.fn(),
+  updateCLIChildProjection: vi.fn(),
+  rebuildCLIChildProjections: vi.fn(),
+  setQueuedDepth: vi.fn(),
 };
 
 vi.mock('../../store/agentStore', () => ({
@@ -172,6 +180,7 @@ vi.mock('../../store/agentStore', () => ({
 
 // ── sessionStore mock ─────────────────────────────────────────────────────────
 const setAgentTurns = vi.fn();
+const updateAgentTurn = vi.fn();
 const setMessages = vi.fn();
 const markAgentTurnError = vi.fn();
 const removeLastAgentTurn = vi.fn();
@@ -223,6 +232,7 @@ vi.mock('../../store/sessionStore', () => ({
       setMessages,
       updateSession,
       setAgentTurns,
+      updateAgentTurn,
       startAgentTurn,
       addTurnItem,
       finalizeAgentTurn,
@@ -250,6 +260,7 @@ vi.mock('../../store/sessionStore', () => ({
         setPendingRAAppId: mockSetPendingRAAppId,
         setMessages,
         setAgentTurns,
+        updateAgentTurn,
         updateSession,
         streamingChunks: mockStreamingChunks,
         thinkingChunks: mockThinkingChunks,
@@ -268,9 +279,19 @@ vi.mock('../../store/sessionStore', () => ({
 }));
 
 // ── settingsStore mock ────────────────────────────────────────────────────────
+const settingsStoreState = {
+  conversationTitleSettings: {
+    autoRenameEnabled: false,
+    renameEveryReplies: 3,
+  },
+  getEffectiveModel: () => 'test-model',
+  setConversationTitleSettings: vi.fn((settings: { autoRenameEnabled: boolean; renameEveryReplies: number }) => {
+    settingsStoreState.conversationTitleSettings = settings;
+  }),
+};
+
 vi.mock('../settings/settingsStore', () => ({
-  useSettingsStore: (selector: (s: { getEffectiveModel: () => string }) => unknown) =>
-    selector({ getEffectiveModel: () => 'test-model' }),
+  useSettingsStore: (selector: (state: typeof settingsStoreState) => unknown) => selector(settingsStoreState),
 }));
 
 // ── context usage mock ────────────────────────────────────────────────────────
@@ -298,6 +319,7 @@ vi.mock('../../services/apiClient', () => ({
   apiClient: {
     get: vi.fn(() => Promise.resolve({ data: [] })),
     post: vi.fn(() => Promise.resolve({ data: {} })),
+    patch: vi.fn(() => Promise.resolve({ data: {} })),
   },
   getSessionVfsFiles: vi.fn(() => Promise.resolve({ files: [] })),
 }));
@@ -315,6 +337,7 @@ vi.mock('./ChatInput', () => ({
   ChatInput: (props: {
     architectures?: Array<{ id: string; name: string }>;
     disabled: boolean;
+    isStreaming?: boolean;
     onArchitectureChange?: (schemaId: string) => void;
     onArchitectureRun?: (content: string, schemaId: string) => void;
     onSend: (content: string, personaId: string) => void;
@@ -336,14 +359,18 @@ vi.mock('./ChatInput', () => ({
         data-testid="chat-send-btn"
         disabled={props.disabled}
         onClick={() => {
-          const value = (document.querySelector('[data-testid="chat-input"]') as HTMLTextAreaElement | null)?.value ?? '';
+          const input = document.querySelector('[data-testid="chat-input"]') as HTMLTextAreaElement | null;
+          const value = input?.value ?? '';
           const content = value.trim();
           if (!content) return;
           if (props.selectedArchitectureId && props.selectedArchitectureId !== 'single-chat') {
+            if (props.isStreaming) return;
             props.onArchitectureRun?.(content, props.selectedArchitectureId);
+            if (input) input.value = '';
             return;
           }
           props.onSend(content, 'default');
+          if (input) input.value = '';
         }}
       >
         Send
@@ -378,8 +405,14 @@ beforeEach(() => {
   mockChunkSessionIds = {};
   mockMessages = [];
   mockSessions = createMockSessions();
+  settingsStoreState.conversationTitleSettings = {
+    autoRenameEnabled: false,
+    renameEveryReplies: 3,
+  };
+  agentStoreState.isStreaming = false;
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
+  getSessionMessages.mockReturnValue(mockMessages);
   vi.clearAllMocks();
   mockSendMessage.mockReturnValue(true);
   mockGetArchitectureSchemas.mockResolvedValue([]);
@@ -396,6 +429,17 @@ beforeEach(() => {
     chat: { runId: 'goal-run-1', messages: [] },
     agentFlowRunId: 'agent-flow-1',
     agentFlowStatus: 'done',
+  });
+  vi.mocked(apiClient.get).mockImplementation((url: string) => {
+    if (url === '/api/credentials/settings/conversation-title') {
+      return Promise.resolve({
+        data: {
+          autoRenameEnabled: false,
+          renameEveryReplies: 3,
+        },
+      } as never);
+    }
+    return Promise.resolve({ data: [] } as never);
   });
 });
 
@@ -416,8 +460,9 @@ describe('ChatInterface event wiring', () => {
       updatedAt: 1,
     }];
 
-    expect(buildArchitectureRunContext('session-1', files)).toEqual({
+    expect(buildArchitectureRunContext('session-1', files, ['vfs_read', 'fs_read'])).toEqual({
       parentSessionId: 'session-1',
+      launchAllowedToolNames: ['vfs_read', 'fs_read'],
       hydrateFromSessionId: 'session-1',
       hydrateTargetPrefix: 'project',
       hydrateFilePaths: ['README.md'],
@@ -425,8 +470,18 @@ describe('ChatInterface event wiring', () => {
   });
 
   it('keeps prompt-only architecture runs explicit when no VFS files are attached', () => {
-    expect(buildArchitectureRunContext('session-1', [])).toEqual({
+    expect(buildArchitectureRunContext('session-1', [], ['vfs_read'])).toEqual({
       parentSessionId: 'session-1',
+      launchAllowedToolNames: ['vfs_read'],
+    });
+  });
+
+  it('includes the selected project path in architecture launch context', () => {
+    expect(buildArchitectureRunContext('session-1', [], ['vfs_read'], 'C:\\Projekty\\kalio-forever')).toEqual({
+      parentSessionId: 'session-1',
+      projectPath: 'C:\\Projekty\\kalio-forever',
+      executionCwd: 'C:\\Projekty\\kalio-forever',
+      launchAllowedToolNames: ['vfs_read'],
     });
   });
 
@@ -445,6 +500,7 @@ describe('ChatInterface event wiring', () => {
 
     await renderChatInterface();
     await act(async () => {
+      fireEvent.click(await screen.findByTestId('welcome-mode-workflow'));
       fireEvent.change(await screen.findByTestId('welcome-architecture-select'), {
         target: { value: 'strategic-decision-council' },
       });
@@ -459,7 +515,111 @@ describe('ChatInterface event wiring', () => {
     expect(screen.queryByTestId('chat-recovery-notice')).toBeNull();
   });
 
+  it('passes the active project path into non-goal architecture launches from chat', async () => {
+    mockSessions = mockSessions.map((session) => (
+      session.id === 'session-1'
+        ? {
+            ...session,
+            runtimeContext: {
+              runtimeKind: 'chat',
+              architectureContext: {
+                projectPath: 'C:\\Projekty\\kalio-forever',
+              },
+            },
+          }
+        : session
+    ));
+    mockGetArchitectureSchemas.mockResolvedValue([
+      {
+        id: 'strategic-decision-council',
+        name: 'Strategic Decision Council',
+        version: '0.1.0',
+        description: '',
+        nodes: [],
+        edges: [],
+        roleSlots: [],
+      },
+    ]);
+
+    await renderChatInterface();
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('welcome-mode-workflow'));
+      fireEvent.change(await screen.findByTestId('welcome-architecture-select'), {
+        target: { value: 'strategic-decision-council' },
+      });
+      fireEvent.change(await screen.findByTestId('welcome-prompt-input'), {
+        target: { value: 'Pick a stack.' },
+      });
+      fireEvent.click(await screen.findByTestId('welcome-run-prompt'));
+      await flushReactEffects();
+    });
+
+    await waitFor(() => {
+      expect(mockStartArchitectureRun).toHaveBeenCalledWith(
+        'strategic-decision-council',
+        'Pick a stack.',
+        {},
+        'subagent_execution',
+        undefined,
+        expect.objectContaining({
+          parentSessionId: 'session-1',
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        }),
+        expect.any(Function),
+      );
+    });
+  });
+
+  it('fail-first: does not start architecture run while streaming and keeps composer draft', async () => {
+    mockGetArchitectureSchemas.mockResolvedValue([
+      {
+        id: 'strategic-decision-council',
+        name: 'Strategic Decision Council',
+        version: '0.1.0',
+        description: '',
+        nodes: [],
+        edges: [],
+        roleSlots: [],
+      },
+    ]);
+    mockMessages = [{ id: 'u1', role: 'user', content: 'hello', sessionId: 'session-1', createdAt: 1 }];
+    getSessionMessages.mockReturnValue(mockMessages);
+    agentStoreState.isStreaming = true;
+    mockStartArchitectureRun.mockClear();
+
+    await renderChatInterface();
+    await screen.findByTestId('chat-architecture-select');
+    await screen.findByRole('option', { name: 'Strategic Decision Council' });
+    await act(async () => {
+      fireEvent.change(screen.getByTestId('chat-architecture-select'), {
+        target: { value: 'strategic-decision-council' },
+      });
+      fireEvent.change(screen.getByTestId('chat-input'), {
+        target: { value: 'keep this architecture draft' },
+      });
+      fireEvent.click(screen.getByTestId('chat-send-btn'));
+      await flushReactEffects();
+    });
+
+    expect(mockStartArchitectureRun).not.toHaveBeenCalled();
+    expect((screen.getByTestId('chat-input') as HTMLTextAreaElement).value).toBe('keep this architecture draft');
+  });
+
   it('routes Goal Master Delivery Loop from Talk through canonical AgentFlow with strict proof context', async () => {
+    mockSessions = mockSessions.map((session) => (
+      session.id === 'session-1'
+        ? {
+            ...session,
+            runtimeContext: {
+              runtimeKind: 'chat',
+              architectureContext: {
+                projectPath: 'C:\\Projekty\\kalio-forever',
+              },
+            },
+          }
+        : session
+    ));
     mockGetArchitectureSchemas.mockResolvedValue([
       {
         id: 'goal-master-delivery-loop',
@@ -474,24 +634,33 @@ describe('ChatInterface event wiring', () => {
 
     await renderChatInterface();
     await act(async () => {
-      const select = await screen.findByTestId('welcome-architecture-select');
-      const input = await screen.findByTestId('welcome-prompt-input');
-      const send = await screen.findByTestId('welcome-run-prompt');
+      fireEvent.click(await screen.findByTestId('welcome-mode-workflow'));
+      await flushReactEffects();
+    });
+    await screen.findByRole('option', { name: 'Goal Master Delivery Loop' });
+    await act(async () => {
+      const select = screen.getByTestId('welcome-architecture-select');
+      const input = screen.getByTestId('welcome-prompt-input');
+      const send = screen.getByTestId('welcome-run-prompt');
       fireEvent.change(select, { target: { value: 'goal-master-delivery-loop' } });
       fireEvent.change(input, { target: { value: 'Deliver with proof.' } });
       fireEvent.click(send);
       await flushReactEffects();
     });
 
-    expect(mockStartGoalGuardAgentFlowRun).toHaveBeenCalledWith(
+    await waitFor(() => {
+      expect(mockStartGoalGuardAgentFlowRun).toHaveBeenCalledWith(
       'Deliver with proof.',
       expect.objectContaining({
         parentSessionId: 'session-1',
+        projectPath: 'C:\\Projekty\\kalio-forever',
+        executionCwd: 'C:\\Projekty\\kalio-forever',
         requireGoalMasterLoopProof: true,
         requireImplementerWriteProof: true,
       }),
       'session-1',
-    );
+      );
+    });
     expect(mockStartArchitectureRun).not.toHaveBeenCalled();
   });
 
@@ -544,9 +713,10 @@ describe('ChatInterface event wiring', () => {
 
     await emitEvent('socket:reconnect', undefined);
 
-    expect(setMessages).toHaveBeenCalledWith([localMessage]);
+    expect(setMessages).toHaveBeenCalledWith([localMessage], 'session-1');
     expect(setAgentTurns).toHaveBeenCalledWith(
       expect.any(Array),
+      'session-1',
     );
   });
 
@@ -563,6 +733,50 @@ describe('ChatInterface event wiring', () => {
     expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-restored');
     expect(startAgentTurn).toHaveBeenCalledWith('turn-restored', 'session-1');
     expect(setStreaming).toHaveBeenCalledWith(true);
+  });
+
+  it('merges raapp:native_result into the target session even when it is not active', async () => {
+    const inactiveSessionId = 'session-2';
+    const toolCallId = 'call-raapp-1';
+    const inactiveMessage: ChatMessage = {
+      id: 'tool-result-1',
+      sessionId: inactiveSessionId,
+      role: 'tool_result',
+      content: JSON.stringify({
+        pendingApprovals: [{ id: 'approval-1', label: 'Approve' }],
+      }),
+      toolCallId,
+      createdAt: 20,
+    };
+
+    mockActiveSessionId = 'session-1';
+    getSessionMessages.mockImplementation(((sessionId: string | null) => (
+      sessionId === inactiveSessionId ? [inactiveMessage] : mockMessages
+    )) as typeof getSessionMessages);
+
+    await renderChatInterface();
+    setMessages.mockClear();
+
+    await emitEvent('raapp:native_result', {
+      sessionId: inactiveSessionId,
+      toolCallId,
+      results: [{ id: 'approval-1', system: 'test', status: 'executed' }],
+    });
+
+    expect(setMessages).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          sessionId: inactiveSessionId,
+          toolCallId,
+          role: 'tool_result',
+          content: JSON.stringify({
+            pendingApprovals: [],
+            nativeResults: [{ id: 'approval-1', system: 'test', status: 'executed' }],
+          }),
+        }),
+      ],
+      inactiveSessionId,
+    );
   });
 
   it('shows safe resume guidance when backend replays an interrupted LLM run', async () => {
@@ -1021,6 +1235,7 @@ describe('ChatInterface event wiring', () => {
       });
 
     expect(addSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'child-session', kind: 'subagent' }));
+    expect(mockIdentifySession).toHaveBeenCalledWith('child-session');
   });
 
   it('ignores tool:result streaming state changes from a different session', async () => {
@@ -1094,6 +1309,124 @@ describe('ChatInterface event wiring', () => {
       'title-gen',
       expect.objectContaining({ status: 'done' }),
     );
+  });
+
+  it('auto-rename cadence triggers only on every configured Nth assistant reply', async () => {
+    mockSessions = mockSessions.map((session) =>
+      session.id === 'session-1'
+        ? { ...session, title: 'Architecture Review' }
+        : session,
+    );
+    mockMessages = [
+      { id: 'user-1', sessionId: 'session-1', role: 'user', content: 'Review this architecture', createdAt: 1 },
+      { id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'First answer', createdAt: 2 },
+    ];
+    settingsStoreState.conversationTitleSettings = {
+      autoRenameEnabled: true,
+      renameEveryReplies: 2,
+    };
+    settingsStoreState.setConversationTitleSettings.mockImplementation((settings: { autoRenameEnabled: boolean; renameEveryReplies: number }) => {
+      settingsStoreState.conversationTitleSettings = settings;
+    });
+    vi.mocked(apiClient.get).mockImplementation((url: string) => {
+      if (url === '/api/credentials/settings/conversation-title') {
+        return Promise.resolve({
+          data: {
+            autoRenameEnabled: true,
+            renameEveryReplies: 2,
+          },
+        } as never);
+      }
+      return Promise.resolve({ data: [] } as never);
+    });
+    vi.mocked(apiClient.post).mockImplementation((url: string) => {
+      if (url === '/api/sessions/session-1/generate-title') {
+        return Promise.resolve({ data: { title: 'Updated Conversation Title' } } as never);
+      }
+      return Promise.reject(new Error(`unexpected apiClient.post call: ${url}`));
+    });
+
+    await renderChatInterface();
+    addLlmActivity.mockClear();
+    updateLlmActivity.mockClear();
+    updateSession.mockClear();
+    vi.mocked(apiClient.post).mockClear();
+
+    await emitEvent('chat:complete', {
+      sessionId: 'session-1',
+      messageId: 'assistant-1',
+    });
+
+    expect(apiClient.post).not.toHaveBeenCalled();
+    expect(addLlmActivity).not.toHaveBeenCalled();
+
+    mockMessages = [
+      ...mockMessages,
+      { id: 'assistant-2', sessionId: 'session-1', role: 'assistant', content: 'Second answer', createdAt: 3 },
+    ];
+
+    await emitEvent('chat:complete', {
+      sessionId: 'session-1',
+      messageId: 'assistant-2',
+    });
+
+    expect(apiClient.post).toHaveBeenCalledWith('/api/sessions/session-1/generate-title');
+    expect(addLlmActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'title-gen', status: 'running' }),
+    );
+    expect(updateSession).toHaveBeenCalledWith('session-1', { title: 'Updated Conversation Title' });
+  });
+
+  it('auto-rename cadence still runs after a later user reply', async () => {
+    mockSessions = mockSessions.map((session) =>
+      session.id === 'session-1'
+        ? { ...session, title: 'Architecture Review' }
+        : session,
+    );
+    mockMessages = [
+      { id: 'user-1', sessionId: 'session-1', role: 'user', content: 'Review this architecture', createdAt: 1 },
+      { id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'First answer', createdAt: 2 },
+      { id: 'user-2', sessionId: 'session-1', role: 'user', content: 'Now compare two options', createdAt: 3 },
+      { id: 'assistant-2', sessionId: 'session-1', role: 'assistant', content: 'Second answer', createdAt: 4 },
+    ];
+    settingsStoreState.conversationTitleSettings = {
+      autoRenameEnabled: true,
+      renameEveryReplies: 2,
+    };
+    settingsStoreState.setConversationTitleSettings.mockImplementation((settings: { autoRenameEnabled: boolean; renameEveryReplies: number }) => {
+      settingsStoreState.conversationTitleSettings = settings;
+    });
+    vi.mocked(apiClient.get).mockImplementation((url: string) => {
+      if (url === '/api/credentials/settings/conversation-title') {
+        return Promise.resolve({
+          data: {
+            autoRenameEnabled: true,
+            renameEveryReplies: 2,
+          },
+        } as never);
+      }
+      return Promise.resolve({ data: [] } as never);
+    });
+    vi.mocked(apiClient.post).mockImplementation((url: string) => {
+      if (url === '/api/sessions/session-1/generate-title') {
+        return Promise.resolve({ data: { title: 'Renamed After Follow-up' } } as never);
+      }
+      return Promise.reject(new Error(`unexpected apiClient.post call: ${url}`));
+    });
+
+    await renderChatInterface();
+    addLlmActivity.mockClear();
+    updateLlmActivity.mockClear();
+    updateSession.mockClear();
+    vi.mocked(apiClient.post).mockClear();
+
+    await emitEvent('chat:complete', {
+      sessionId: 'session-1',
+      messageId: 'assistant-2',
+    });
+
+    expect(apiClient.post).toHaveBeenCalledWith('/api/sessions/session-1/generate-title');
+    expect(updateSession).toHaveBeenCalledWith('session-1', { title: 'Renamed After Follow-up' });
   });
 });
 
@@ -1663,7 +1996,7 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     // (The real assertion is in the next test.)
   });
 
-  it('REGRESSION: setAgentTurns is NOT called when activeAgentLoops has an entry for the session', async () => {
+  it('REGRESSION: setAgentTurns is NOT called when an active loop still owns the session turn', async () => {
     // Arrange: fetch returns a deferred promise so we control timing
     let resolveMessages!: (d: unknown) => void;
     const deferred = new Promise((res) => {
@@ -1683,6 +2016,7 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     agentStoreState.activeAgentLoops = {
       'session-1': { sessionId: 'session-1', turnId: 'turn-live', startedAt: Date.now() },
     };
+    mockActiveTurnId = 'turn-live';
 
     await renderChatInterface();
     // useEffect fired during render; fetch is pending. Clear any setup-time calls.
@@ -1694,7 +2028,7 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
       await deferred;
     });
 
-    // Assert: because activeAgentLoops['session-1'] is populated, setAgentTurns
+    // Assert: because an active loop still owns the live turn id, setAgentTurns
     // must NOT be called. Calling it would set activeTurnId = null, making all
     // subsequent addTurnItem / finalizeAgentTurn calls no-ops.
     expect(setAgentTurns).not.toHaveBeenCalled();
@@ -1742,6 +2076,47 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
       vi.mocked(apiClient.get).mockReset();
       vi.mocked(apiClient.get).mockResolvedValue({ data: [] } as never);
     });
+
+  it('rebuilds history turns when a stale active loop exists without an active turn id', async () => {
+    const historyMsg = {
+      id: 'a2',
+      sessionId: 'session-1',
+      role: 'assistant' as const,
+      content: 'Persisted architecture summary',
+      createdAt: 0,
+    };
+    let resolveMessages!: (messages: unknown) => void;
+    const deferredMessages = new Promise((resolve) => {
+      resolveMessages = resolve;
+    });
+    vi.mocked(apiClient.get).mockImplementation((url: string) => {
+      if (url === '/api/sessions/session-1/messages') {
+        return deferredMessages.then((messages) => ({ data: messages } as never));
+      }
+      return Promise.resolve({ data: [] } as never);
+    });
+
+    agentStoreState.activeAgentLoops = {
+      'stale-loop': { sessionId: 'session-1', turnId: 'turn-stale', startedAt: Date.now() },
+    };
+    mockActiveTurnId = null;
+
+    await renderChatInterface();
+    setAgentTurns.mockClear();
+
+    await act(async () => {
+      resolveMessages([historyMsg]);
+      await deferredMessages;
+      await flushReactEffects();
+    });
+
+    expect(setAgentTurns).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ done: true })]),
+    );
+
+    vi.mocked(apiClient.get).mockReset();
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] } as never);
+  });
   });
 
 // ─────────────────────────────────────────────────────────────────────────────

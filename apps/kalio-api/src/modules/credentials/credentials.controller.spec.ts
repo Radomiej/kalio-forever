@@ -36,6 +36,8 @@ describe('CredentialsController', () => {
     setMaxToolAttempts: vi.fn(),
     getGenerationSettings: vi.fn(),
     setGenerationSettings: vi.fn(),
+    getConversationTitleSettings: vi.fn(),
+    setConversationTitleSettings: vi.fn(),
     getModelsForCredential: vi.fn(),
     updateModel: vi.fn(),
     getApiKey: vi.fn(),
@@ -344,6 +346,7 @@ describe('CredentialsController', () => {
       mockService.getContextWindowSize.mockResolvedValue(128000);
       mockService.getMaxToolAttempts.mockResolvedValue(12);
       mockService.getGenerationSettings.mockResolvedValue({ temperature: 0.8, maxTokens: 2048 });
+      mockService.getConversationTitleSettings.mockResolvedValue({ autoRenameEnabled: true, renameEveryReplies: 4 });
       mockTimeoutSettings.getTimeoutSettings.mockResolvedValue({
         webSearchTimeoutMs: 180000,
         providerLocalTimeoutMs: 5000,
@@ -352,10 +355,11 @@ describe('CredentialsController', () => {
 
       const port = await startHttpApp();
 
-      const [contextWindowRes, maxToolAttemptsRes, generationRes, toolTimeoutsRes] = await Promise.all([
+      const [contextWindowRes, maxToolAttemptsRes, generationRes, conversationTitleRes, toolTimeoutsRes] = await Promise.all([
         fetch(`http://127.0.0.1:${port}/credentials/settings/context-window`),
         fetch(`http://127.0.0.1:${port}/credentials/settings/max-tool-attempts`),
         fetch(`http://127.0.0.1:${port}/credentials/settings/generation`),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/conversation-title`),
         fetch(`http://127.0.0.1:${port}/credentials/settings/tool-timeouts`),
       ]);
 
@@ -367,6 +371,9 @@ describe('CredentialsController', () => {
 
       expect(generationRes.status).toBe(200);
       await expect(generationRes.json()).resolves.toEqual({ temperature: 0.8, maxTokens: 2048 });
+
+      expect(conversationTitleRes.status).toBe(200);
+      await expect(conversationTitleRes.json()).resolves.toEqual({ autoRenameEnabled: true, renameEveryReplies: 4 });
 
       expect(toolTimeoutsRes.status).toBe(200);
       await expect(toolTimeoutsRes.json()).resolves.toEqual({
@@ -380,11 +387,12 @@ describe('CredentialsController', () => {
       mockService.setContextWindowSize.mockResolvedValue(undefined);
       mockService.setMaxToolAttempts.mockResolvedValue(undefined);
       mockService.setGenerationSettings.mockResolvedValue(undefined);
+      mockService.setConversationTitleSettings.mockResolvedValue(undefined);
       mockTimeoutSettings.setTimeoutSettings.mockResolvedValue(undefined);
 
       const port = await startHttpApp();
 
-      const [contextWindowRes, maxToolAttemptsRes, generationRes, toolTimeoutsRes] = await Promise.all([
+      const [contextWindowRes, maxToolAttemptsRes, generationRes, conversationTitleRes, toolTimeoutsRes] = await Promise.all([
         fetch(`http://127.0.0.1:${port}/credentials/settings/context-window`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -400,6 +408,11 @@ describe('CredentialsController', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ temperature: 0.9, maxTokens: 1024 }),
         }),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/conversation-title`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ autoRenameEnabled: true, renameEveryReplies: 6 }),
+        }),
         fetch(`http://127.0.0.1:${port}/credentials/settings/tool-timeouts`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -410,11 +423,13 @@ describe('CredentialsController', () => {
       expect(contextWindowRes.status).toBe(204);
       expect(maxToolAttemptsRes.status).toBe(204);
       expect(generationRes.status).toBe(204);
+      expect(conversationTitleRes.status).toBe(204);
       expect(toolTimeoutsRes.status).toBe(204);
 
       expect(mockService.setContextWindowSize).toHaveBeenCalledWith(64000);
       expect(mockService.setMaxToolAttempts).toHaveBeenCalledWith(16);
       expect(mockService.setGenerationSettings).toHaveBeenCalledWith({ temperature: 0.9, maxTokens: 1024 });
+      expect(mockService.setConversationTitleSettings).toHaveBeenCalledWith({ autoRenameEnabled: true, renameEveryReplies: 6 });
       expect(mockTimeoutSettings.setTimeoutSettings).toHaveBeenCalledWith({ providerRemoteTimeoutMs: 25000 });
     });
   });
@@ -495,6 +510,21 @@ describe('CredentialsController', () => {
       mockService.setGenerationSettings.mockResolvedValue(undefined);
       await controller.setGenerationSettings({ temperature: 0.9, maxTokens: 2048 });
       expect(mockService.setGenerationSettings).toHaveBeenCalledWith({ temperature: 0.9, maxTokens: 2048 });
+    });
+  });
+
+  describe('conversation title settings', () => {
+    it('returns conversation title settings', async () => {
+      const settings = { autoRenameEnabled: true, renameEveryReplies: 4 };
+      mockService.getConversationTitleSettings.mockResolvedValue(settings);
+      const result = await controller.getConversationTitleSettings();
+      expect(result).toBe(settings);
+    });
+
+    it('calls service with provided conversation title settings', async () => {
+      mockService.setConversationTitleSettings.mockResolvedValue(undefined);
+      await controller.setConversationTitleSettings({ autoRenameEnabled: true, renameEveryReplies: 6 });
+      expect(mockService.setConversationTitleSettings).toHaveBeenCalledWith({ autoRenameEnabled: true, renameEveryReplies: 6 });
     });
   });
 
@@ -609,6 +639,29 @@ describe('CredentialsController', () => {
       }
     });
 
+    it('returns a local validation error for custom providers without baseUrl and does not call upstream', async () => {
+      const cred = makeCredential({
+        provider: 'custom',
+        baseUrl: undefined,
+      });
+      mockService.findAll.mockResolvedValue([cred]);
+      mockService.getApiKey.mockResolvedValue('sk-test');
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn();
+
+      try {
+        const result = await controller.testById('cred-1');
+
+        expect(result).toEqual(expect.objectContaining({
+          ok: false,
+          error: 'baseUrl is required for custom or unrecognized providers',
+        }));
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it('uses remote timeout for remote providers', async () => {
       const cred = makeCredential({
         provider: 'openai',
@@ -630,6 +683,20 @@ describe('CredentialsController', () => {
   });
 
   describe('testConnection()', () => {
+    it('returns a local validation error for custom providers without baseUrl', async () => {
+      const result = await controller.testConnection({
+        provider: 'custom',
+        apiKey: 'sk-test',
+        model: 'custom-model',
+      });
+
+      expect(result).toEqual(expect.objectContaining({
+        ok: false,
+        error: 'baseUrl is required for custom or unrecognized providers',
+      }));
+      expect(mockLLMService.streamChatWithConfig).not.toHaveBeenCalled();
+    });
+
     it('returns ok=false on LLM stream failure', async () => {
       mockLLMService.streamChatWithConfig.mockRejectedValueOnce(new Error('stream failure'));
       const result = await controller.testConnection({

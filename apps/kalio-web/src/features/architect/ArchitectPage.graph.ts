@@ -4,6 +4,7 @@ import type { ArchitectNode, ArchitectSchema, NodeBehaviorOverrideMap, NodeKindO
 export interface GraphDraft {
   nodePositions: Record<string, { x: number; y: number }>;
   nodeBehaviors: NodeBehaviorOverrideMap;
+  nodeMaxToolAttempts: Record<string, number | undefined>;
   addedNodes: ArchitectNode[];
   edges: ArchitectSchema['edges'] | null;
 }
@@ -11,6 +12,7 @@ export interface GraphDraft {
 export const EMPTY_GRAPH_DRAFT: GraphDraft = {
   nodePositions: {},
   nodeBehaviors: {},
+  nodeMaxToolAttempts: {},
   addedNodes: [],
   edges: null,
 };
@@ -63,11 +65,13 @@ export function applyGraphDraft(
       ...node,
       ...(graphDraft.nodePositions[node.id] ?? {}),
       kind: kindOverrides[node.id] ?? node.kind,
+      maxToolAttempts: graphDraft.nodeMaxToolAttempts[node.id] ?? node.maxToolAttempts,
       behavior: graphDraft.nodeBehaviors[node.id] ?? node.behavior,
     })).concat(graphDraft.addedNodes.map((node) => ({
       ...node,
       ...(graphDraft.nodePositions[node.id] ?? {}),
       kind: kindOverrides[node.id] ?? node.kind,
+      maxToolAttempts: graphDraft.nodeMaxToolAttempts[node.id] ?? node.maxToolAttempts,
       behavior: graphDraft.nodeBehaviors[node.id] ?? node.behavior,
     }))),
     edges: graphDraft.edges ?? schema.edges,
@@ -87,6 +91,7 @@ export function toSchemaNodes(schema: ArchitectSchema): ArchitectureSchemaNode[]
     label: node.label,
     kind: node.kind,
     roleSlotId: node.roleSlotId,
+    maxToolAttempts: node.maxToolAttempts,
     behavior: node.behavior ? { ...node.behavior } : undefined,
     x: node.x,
     y: node.y,

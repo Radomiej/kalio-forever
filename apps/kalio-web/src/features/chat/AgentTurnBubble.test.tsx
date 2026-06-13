@@ -4,6 +4,7 @@ import { AgentTurnBubble } from './AgentTurnBubble';
 import type { ChatMessage } from '@kalio/types';
 import type { ToolActivity } from '../../store/agentStore';
 import type { AgentTurn, AgentTurnItem } from '../../store/sessionStore';
+import { eventBus } from '../../services/eventBus';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,13 @@ const mockAgentStoreState = {
   toolArgProgress: null as { toolName: string; totalChars: number; charsPerSec: number } | null,
   setCanvasOpen: vi.fn(),
   setCanvasFocus: vi.fn(),
+  pendingBudgetApprovals: {} as Record<string, {
+    requestId: string;
+    sessionId: string;
+    currentLimit: number;
+    usedIterations: number;
+  }>,
+  setPendingBudgetApproval: vi.fn(),
 };
 
 vi.mock('../../store/agentStore', () => ({
@@ -32,7 +40,15 @@ vi.mock('../../store/agentStore', () => ({
     toolArgProgress: mockAgentStoreState.toolArgProgress,
     setCanvasOpen: mockAgentStoreState.setCanvasOpen,
     setCanvasFocus: mockAgentStoreState.setCanvasFocus,
+    pendingBudgetApprovals: mockAgentStoreState.pendingBudgetApprovals,
+    setPendingBudgetApproval: mockAgentStoreState.setPendingBudgetApproval,
   }),
+}));
+
+vi.mock('../../services/eventBus', () => ({
+  eventBus: {
+    approveAgentBudget: vi.fn(),
+  },
 }));
 
 vi.mock('../../components/markdown/MarkdownViewer', () => ({
@@ -86,6 +102,8 @@ describe('AgentTurnBubble', () => {
     mockAgentStoreState.toolArgProgress = null;
     mockAgentStoreState.setCanvasOpen.mockClear();
     mockAgentStoreState.setCanvasFocus.mockClear();
+    mockAgentStoreState.pendingBudgetApprovals = {};
+    mockAgentStoreState.setPendingBudgetApproval.mockClear();
   });
 
   it('renders agent turn bubble with data-testid', () => {
@@ -799,5 +817,101 @@ describe('turn.error indicator', () => {
     mockMessages.push(makeMsg({ id: 'msg-1', content: 'Full answer' }));
     render(<AgentTurnBubble turn={turn} toolActivities={[]} />);
     expect(screen.queryByTestId('turn-error-indicator')).not.toBeInTheDocument();
+  });
+});
+
+describe('budget approval HITL', () => {
+  it('renders budget approval actions for an active turn', () => {
+    mockMessages.push(makeMsg({ id: 'msg-1', content: 'Working...' }));
+    mockAgentStoreState.pendingBudgetApprovals = {
+      s1: {
+        requestId: 'budget-1',
+        sessionId: 's1',
+        currentLimit: 60,
+        usedIterations: 60,
+      },
+    };
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], false)} toolActivities={[]} />);
+
+    expect(screen.getByTestId('turn-budget-approval')).toHaveTextContent('Agent reached tool loop limit 60/60');
+    expect(screen.getByRole('button', { name: 'Block' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '+1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '+10' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unlimited' })).toBeInTheDocument();
+  });
+
+  it('submits an incremental budget approval only once and disables repeated clicks', () => {
+    mockMessages.push(makeMsg({ id: 'msg-1', content: 'Working...' }));
+    mockAgentStoreState.pendingBudgetApprovals = {
+      s1: {
+        requestId: 'budget-1',
+        sessionId: 's1',
+        currentLimit: 60,
+        usedIterations: 60,
+      },
+    };
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], false)} toolActivities={[]} />);
+
+    const plusTen = screen.getByRole('button', { name: '+10' });
+    fireEvent.click(plusTen);
+    fireEvent.click(plusTen);
+
+    expect(eventBus.approveAgentBudget).toHaveBeenCalledWith({
+      requestId: 'budget-1',
+      sessionId: 's1',
+      decision: 'allow_ten',
+    });
+    expect(eventBus.approveAgentBudget).toHaveBeenCalledTimes(1);
+    expect(plusTen).toBeDisabled();
+    expect(mockAgentStoreState.setPendingBudgetApproval).not.toHaveBeenCalled();
+  });
+
+  it('submits unlimited budget approval once and disables the remaining actions', () => {
+    mockMessages.push(makeMsg({ id: 'msg-1', content: 'Working...' }));
+    mockAgentStoreState.pendingBudgetApprovals = {
+      s1: {
+        requestId: 'budget-1',
+        sessionId: 's1',
+        currentLimit: 60,
+        usedIterations: 60,
+      },
+    };
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], false)} toolActivities={[]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unlimited' }));
+    expect(eventBus.approveAgentBudget).toHaveBeenCalledWith({
+      requestId: 'budget-1',
+      sessionId: 's1',
+      decision: 'allow_unlimited',
+    });
+    expect(screen.getByRole('button', { name: '+1' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Unlimited' })).toBeDisabled();
+    expect(mockAgentStoreState.setPendingBudgetApproval).not.toHaveBeenCalled();
+  });
+
+  it('blocks the extra budget request and clears local pending state', () => {
+    mockMessages.push(makeMsg({ id: 'msg-1', content: 'Working...' }));
+    mockAgentStoreState.pendingBudgetApprovals = {
+      s1: {
+        requestId: 'budget-1',
+        sessionId: 's1',
+        currentLimit: 60,
+        usedIterations: 60,
+      },
+    };
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], false)} toolActivities={[]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Block' }));
+
+    expect(eventBus.approveAgentBudget).toHaveBeenCalledWith({
+      requestId: 'budget-1',
+      sessionId: 's1',
+      decision: 'block',
+    });
+    expect(mockAgentStoreState.setPendingBudgetApproval).toHaveBeenCalledWith('s1', null);
   });
 });

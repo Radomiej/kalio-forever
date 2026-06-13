@@ -15,15 +15,20 @@
 
 ## Commands
 
+See `docs/local-dev-guide.md` for the full dev/QA/CI map.
+
 ```
 pnpm install                      # install from root
-pnpm turbo run build              # build all
-pnpm turbo run test               # unit tests all
-pnpm turbo run typecheck          # tsc --noEmit all
+pnpm dev                          # hot reload: API :3016 + web :5188
+pnpm qa                           # built QA stack: API :3316 + web :5288
+pnpm qa:rebuild                   # build + QA stack
+pnpm build                        # build types, sdk, api, web
+pnpm test                         # local gate (preflight + Vitest + script tests)
+pnpm test:e2e                     # Playwright E2E (auto-starts stack)
+pnpm typecheck                    # tsc --noEmit all
+pnpm lint                         # lint api + web
 pnpm audit:report                 # static audit + prioritized report
-.\start-dev.ps1                   # API :3016 + web :5188
-pnpm turbo run lint               # lint all
-pnpm turbo run test:e2e           # Playwright E2E
+pnpm stack:start                  # managed built stack, random ports
 ```
 
 Single-file or narrow-scope iteration:

@@ -1,0 +1,206 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
+import { useChatSessionActivation } from './useChatSessionActivation';
+import { useAgentStore } from '../../../store/agentStore';
+import { useSessionStore } from '../../../store/sessionStore';
+import { apiClient } from '../../../services/apiClient';
+import { eventBus } from '../../../services/eventBus';
+
+vi.mock('../../../services/apiClient', () => ({
+  apiClient: {
+    get: vi.fn(),
+  },
+}));
+
+vi.mock('../../../services/eventBus', () => ({
+  eventBus: {
+    identifySession: vi.fn(),
+  },
+}));
+
+describe('useChatSessionActivation', () => {
+  beforeEach(() => {
+    vi.mocked(apiClient.get).mockReset();
+    vi.mocked(eventBus.identifySession).mockReset();
+    useAgentStore.setState({
+      callIdToName: {},
+      cliChildProjections: {},
+      activeAgentLoops: {},
+    });
+    useSessionStore.setState({
+      activeSessionId: 'session-1',
+      sessions: [{ id: 'session-1', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 1 }],
+      messages: [],
+      sessionMessages: { 'session-1': [] },
+      agentTurns: [],
+      sessionAgentTurns: { 'session-1': [] },
+      activeTurnId: null,
+      sessionActiveTurnIds: { 'session-1': null },
+      getSessionMessages: () => [],
+      pendingMessage: null,
+      pendingRAAppId: null,
+    });
+  });
+
+  it('rebuilds CLI child projections when session history is loaded', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [
+        {
+          id: 'assistant-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex' } }],
+          createdAt: 1,
+        },
+        {
+          id: 'tool-1',
+          sessionId: 'session-1',
+          role: 'tool_result',
+          toolCallId: 'call-cli-1',
+          content: JSON.stringify({
+            childSessionId: 'cli-child-1',
+            parentSessionId: 'session-1',
+            agentId: 'codex',
+            workdir: 'C:/repo',
+            status: 'stopped',
+            lastPrompt: 'Inspect repo',
+            updatedAt: 100,
+            lastOutput: 'CLI agent stopped.',
+          }),
+          createdAt: 2,
+        },
+      ],
+    });
+
+    const handleSendRef = { current: vi.fn() };
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef,
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().cliChildProjections['cli-child-1']).toMatchObject({
+        status: 'stopped',
+        lastOutput: 'CLI agent stopped.',
+        toolName: 'spawn_cli_agent',
+      });
+    });
+    expect(useAgentStore.getState().callIdToName['call-cli-1']).toBe('spawn_cli_agent');
+  });
+
+  it('identifies rebuilt CLI child sessions discovered only from loaded history', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [
+        {
+          id: 'assistant-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex' } }],
+          createdAt: 1,
+        },
+        {
+          id: 'tool-1',
+          sessionId: 'session-1',
+          role: 'tool_result',
+          toolCallId: 'call-cli-1',
+          content: JSON.stringify({
+            childSessionId: 'cli-child-history-only',
+            parentSessionId: 'session-1',
+            agentId: 'codex',
+            workdir: 'C:/repo',
+            status: 'running',
+            lastPrompt: 'Inspect repo',
+            updatedAt: 100,
+            lastOutput: 'working',
+          }),
+          createdAt: 2,
+        },
+      ],
+    });
+
+    const handleSendRef = { current: vi.fn() };
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef,
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().cliChildProjections['cli-child-history-only']).toMatchObject({
+        status: 'running',
+        toolName: 'spawn_cli_agent',
+      });
+    });
+    expect(eventBus.identifySession).toHaveBeenCalledWith('cli-child-history-only');
+  });
+
+  it('backfills promptMessageId for an active recovered turn after history load', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [
+        {
+          id: 'user-1',
+          sessionId: 'session-1',
+          role: 'user',
+          content: 'Need more tool calls.',
+          createdAt: 1,
+        },
+      ],
+    });
+    useAgentStore.setState({
+      activeAgentLoops: {
+        'session-1': {
+          sessionId: 'session-1',
+          turnId: 'turn-live',
+          startedAt: 1,
+        },
+      },
+    });
+    useSessionStore.setState({
+      sessionAgentTurns: {
+        'session-1': [{
+          id: 'turn-live',
+          sessionId: 'session-1',
+          items: [],
+          done: false,
+        }],
+      },
+      sessionActiveTurnIds: {
+        'session-1': 'turn-live',
+      },
+      agentTurns: [{
+        id: 'turn-live',
+        sessionId: 'session-1',
+        items: [],
+        done: false,
+      }],
+      activeTurnId: 'turn-live',
+    });
+
+    const updateAgentTurn = vi.fn();
+    const handleSendRef = { current: vi.fn() };
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef,
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn,
+    }));
+
+    await waitFor(() => {
+      expect(updateAgentTurn).toHaveBeenCalledWith('turn-live', { promptMessageId: 'user-1' }, 'session-1');
+    });
+  });
+});

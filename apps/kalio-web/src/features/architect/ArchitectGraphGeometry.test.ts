@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { getNodeDimensions, inputPin, outputPin } from './ArchitectGraphGeometry';
+import {
+  getNodeDimensions,
+  inputPin,
+  outputPin,
+  PIN_ANCHOR_DEFAULT_ZOOM,
+  pinHitboxSize,
+  pinOutwardOffset,
+} from './ArchitectGraphGeometry';
 import type { ArchitectNode } from './architect.types';
 
 describe('ArchitectGraphGeometry', () => {
@@ -18,6 +25,27 @@ describe('ArchitectGraphGeometry', () => {
     expect(inputPin(tall).y).toBe(tall.y + getNodeDimensions(tall).height / 2);
     expect(outputPin(tall).y).toBe(tall.y + getNodeDimensions(tall).height / 2);
     expect(inputPin(tall).y).toBeGreaterThan(inputPin(compact).y);
+  });
+
+  it('adds height for router and parallel behavior badges', () => {
+    const plain = makeNode({ kind: 'router' });
+    const withBehavior = makeNode({
+      kind: 'router',
+      behavior: { mode: 'rank_then_merge', fanOut: 'sequential', convergeToNodeId: 'node' },
+    });
+
+    expect(getNodeDimensions(withBehavior).height).toBeGreaterThan(getNodeDimensions(plain).height);
+    expect(outputPin(withBehavior).y).toBe(withBehavior.y + getNodeDimensions(withBehavior).pinY);
+  });
+
+  it('anchors pins outward from the card edge based on zoom-aware hitbox size', () => {
+    const node = makeNode({ x: 120, y: 120 });
+    const hitbox = pinHitboxSize(PIN_ANCHOR_DEFAULT_ZOOM);
+    const outward = pinOutwardOffset(hitbox);
+
+    expect(outputPin(node).x).toBe(node.x + 176 + outward);
+    expect(inputPin(node).x).toBe(node.x - outward);
+    expect(outputPin(node).x - inputPin(node).x).toBeCloseTo(176 + outward * 2);
   });
 });
 

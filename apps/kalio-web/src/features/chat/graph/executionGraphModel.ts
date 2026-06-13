@@ -221,9 +221,13 @@ export function buildExecutionGraphModel({
         const subagentNode = addNode({
           id: `subagent:${subagentResult.childSessionId}`,
           kind: 'subagent',
-          title: childPersona?.name ?? childSession?.title ?? `Sub-agent ${subagentResult.childSessionId.slice(0, 8)}`,
-          subtitle: contextPrompt ?? 'Sub-agent context',
+          title: childSession?.title ?? childPersona?.name ?? `Sub-agent ${subagentResult.childSessionId.slice(0, 8)}`,
+          subtitle: [
+            childPersona?.name,
+            childPersona?.model,
+          ].filter(Boolean).join(' - ') || 'Sub-agent branch',
           detail: [
+            contextPrompt,
             childPersona?.model,
             subagentResult.vfsMode === 'isolated' ? 'isolated VFS' : 'shared VFS',
             compactGraphText(subagentResult.result),
@@ -284,8 +288,9 @@ export function buildExecutionGraphModel({
           id: `cli-agent:${cliAgentResult.childSessionId}`,
           kind: 'cli-agent',
           title: childSession?.title ?? `${cliAgentResult.agentId} CLI`,
-          subtitle: cliAgentResult.lastPrompt || extractSubagentContextPrompt(snapshot.args) || 'CLI session',
+          subtitle: cliAgentResult.agentId || 'CLI session',
           detail: [
+            cliAgentResult.lastPrompt || extractSubagentContextPrompt(snapshot.args),
             cliAgentResult.agentId,
             cliAgentResult.workdir,
             compactGraphText(cliAgentResult.lastOutput),

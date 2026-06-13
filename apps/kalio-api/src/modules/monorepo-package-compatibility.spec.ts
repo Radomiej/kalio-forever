@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 function readJson(pkgName: string, file: string) {
@@ -13,6 +13,11 @@ function readKalioJson(shortName: string, file: string) {
   const monorepoRoot = resolve(__dirname, '../../../..');
   const pkgPath = resolve(monorepoRoot, 'packages', '@kalio', shortName, file);
   return JSON.parse(readFileSync(pkgPath, 'utf-8'));
+}
+
+function resolveKalioPackagePath(shortName: string, file: string) {
+  const monorepoRoot = resolve(__dirname, '../../../..');
+  return resolve(monorepoRoot, 'packages', '@kalio', shortName, file);
 }
 
 // Regression test for: Module system mismatch between @kalio/types (CommonJS) and @kalio/sdk (ES2022)
@@ -64,6 +69,8 @@ describe('Monorepo Package Compatibility (REGRESSION TEST)', () => {
       // @kalio/types should point to dist/ (built output)
       expect(typesPackage.main).toMatch(/dist/);
       expect(typesPackage.types).toMatch(/dist/);
+      expect(existsSync(resolveKalioPackagePath('types', typesPackage.main))).toBe(true);
+      expect(existsSync(resolveKalioPackagePath('types', typesPackage.types))).toBe(true);
       
       if (typesPackage.main.includes('src')) {
         throw new Error('@kalio/types package.json points to src/ but requires build step');
@@ -74,12 +81,12 @@ describe('Monorepo Package Compatibility (REGRESSION TEST)', () => {
       const sdkPackage = readKalioJson('sdk', 'package.json');
       const typesPackage = readKalioJson('types', 'package.json');
       
-      const typesUsesDist = typesPackage.main.includes('dist');
-      const sdkUsesDist = sdkPackage.main.includes('dist') || sdkPackage.main.includes('src');
-      
-      // Both should be resolvable (either both dist or both src is fine for a monorepo)
       expect(typesPackage.main).toBeDefined();
       expect(sdkPackage.main).toBeDefined();
+      expect(sdkPackage.main).toMatch(/dist/);
+      expect(sdkPackage.types).toMatch(/dist/);
+      expect(existsSync(resolveKalioPackagePath('sdk', sdkPackage.main))).toBe(true);
+      expect(existsSync(resolveKalioPackagePath('sdk', sdkPackage.types))).toBe(true);
     });
   });
 

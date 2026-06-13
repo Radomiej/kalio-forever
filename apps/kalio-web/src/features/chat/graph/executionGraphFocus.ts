@@ -84,6 +84,13 @@ function messageReferencesArchitecture(message: ChatMessage): boolean {
 }
 
 function findPromptStartIndex(messages: ChatMessage[], latestArchitectureIndex: number): number {
+  if (messages[latestArchitectureIndex]?.role === 'assistant') {
+    for (let index = latestArchitectureIndex - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === 'user') {
+        return index;
+      }
+    }
+  }
   for (let index = latestArchitectureIndex; index >= 0; index -= 1) {
     if (messages[index]?.role === 'user') {
       return index;

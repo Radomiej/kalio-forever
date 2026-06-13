@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Send, Square } from 'lucide-react';
+import { Send, Square, Zap } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import type { ArchitectSchema } from '../architect/architect.types';
 
 interface ChatInputProps {
-  onSend: (content: string, personaId: string) => void;
+  onSend: (content: string, personaId: string, options?: { interrupt?: boolean }) => void;
   disabled: boolean;
   isStreaming?: boolean;
+  queuedDepth?: number;
   onStop?: () => void;
   architectures?: Pick<ArchitectSchema, 'id' | 'name'>[];
   selectedArchitectureId?: string;
@@ -19,6 +20,7 @@ export function ChatInput({
   architectures = [],
   disabled,
   isStreaming = false,
+  queuedDepth = 0,
   onArchitectureChange,
   onArchitectureRun,
   onDraftChange,
@@ -27,44 +29,29 @@ export function ChatInput({
   selectedArchitectureId = 'single-chat',
 }: ChatInputProps) {
   const [value, setValue] = useState('');
-  const [isSendLocked, setIsSendLocked] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const sawParentDisableRef = useRef(false);
+  const lastSendAtRef = useRef(0);
   const { activeSessionId, sessions } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
-  const effectiveDisabled = disabled || isSendLocked;
-  const showStopButton = Boolean(onStop) && (isStreaming || isSendLocked);
+  const hasText = value.trim().length > 0;
+  const showStopButton = Boolean(onStop) && isStreaming;
 
-  useEffect(() => {
-    if (!isSendLocked) return;
-
-    if (disabled) {
-      sawParentDisableRef.current = true;
-      return;
-    }
-
-    if (sawParentDisableRef.current) {
-      sawParentDisableRef.current = false;
-      setIsSendLocked(false);
-    }
-  }, [disabled, isSendLocked]);
-
-  const handleSend = () => {
+  const handleSend = (interrupt = false) => {
     const trimmed = value.trim();
-    if (!trimmed || effectiveDisabled) return;
+    if (!trimmed || disabled) return;
+
+    const now = Date.now();
+    if (now - lastSendAtRef.current < 150) return;
+    lastSendAtRef.current = now;
 
     const activeArchitecture = architectures.find((schema) => schema.id === selectedArchitectureId) ?? null;
-    sawParentDisableRef.current = false;
-    setIsSendLocked(true);
-    try {
-      if (activeArchitecture && onArchitectureRun) {
-        onArchitectureRun(trimmed, activeArchitecture.id);
-      } else {
-        onSend(trimmed, activeSession?.personaId ?? 'default');
+    if (activeArchitecture && onArchitectureRun) {
+      if (isStreaming) {
+        return;
       }
-    } catch (error) {
-      setIsSendLocked(false);
-      throw error;
+      onArchitectureRun(trimmed, activeArchitecture.id);
+    } else {
+      onSend(trimmed, activeSession?.personaId ?? 'default', { interrupt });
     }
     setValue('');
     onDraftChange?.('');
@@ -74,7 +61,11 @@ export function ChatInput({
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      if (e.altKey && isStreaming) {
+        handleSend(true);
+        return;
+      }
+      handleSend(false);
     }
   };
 
@@ -84,6 +75,10 @@ export function ChatInput({
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   };
 
+  useEffect(() => {
+    if (!isStreaming && queuedDepth === 0) return;
+  }, [isStreaming, queuedDepth]);
+
   return (
     <div data-testid="chat-input-area" className="bg-base-100 border-t border-base-300">
       {!activeSessionId && (
@@ -91,8 +86,12 @@ export function ChatInput({
           Select or create a session to start chatting.
         </p>
       )}
+      {queuedDepth > 0 && (
+        <p data-testid="chat-queued-badge" className="px-4 pt-2 text-xs text-info">
+          Queued ({queuedDepth})
+        </p>
+      )}
       <div className="flex items-center gap-2 px-3 pb-3 pt-2">
-        {/* Pill container */}
         <div className="flex-1 flex items-center border-2 border-base-300 rounded-2xl bg-base-100 focus-within:border-sky-500/60 transition-colors px-3 py-1.5 gap-2 min-h-[44px]">
           {onArchitectureChange && (
             <select
@@ -100,7 +99,7 @@ export function ChatInput({
               className="select select-bordered select-xs h-8 min-h-8 w-36 shrink-0 bg-base-200 text-[11px] sm:w-48"
               value={selectedArchitectureId}
               onChange={(event) => onArchitectureChange(event.target.value)}
-              disabled={effectiveDisabled}
+              disabled={disabled}
               data-testid="chat-architecture-select"
             >
               <option value="single-chat">Single Chat</option>
@@ -117,7 +116,7 @@ export function ChatInput({
             placeholder={disabled && !activeSessionId ? 'Select a session first…' : 'Ask Kalio…'}
             rows={1}
             value={value}
-            disabled={effectiveDisabled}
+            disabled={disabled}
             onChange={(e) => {
               setValue(e.target.value);
               onDraftChange?.(e.target.value);
@@ -125,26 +124,39 @@ export function ChatInput({
             onKeyDown={handleKeyDown}
             onInput={handleInput}
           />
-          {showStopButton ? (
+          {showStopButton && (
             <button
               data-testid="chat-stop-btn"
               className="btn btn-sm h-[32px] w-[32px] p-0 bg-error border-none text-white hover:bg-error/80 rounded-full shrink-0"
               onClick={onStop}
               aria-label="Stop agent"
+              type="button"
             >
               <Square size={14} fill="currentColor" />
             </button>
-          ) : (
+          )}
+          {isStreaming && hasText && (
             <button
-              data-testid="chat-send-btn"
-              className="btn btn-sm h-[32px] w-[32px] p-0 bg-[#00D535] border-none text-white hover:bg-[#00C030] rounded-full shrink-0 disabled:opacity-40"
-              disabled={effectiveDisabled || !value.trim()}
-              onClick={handleSend}
-              aria-label="Send message"
+              data-testid="chat-interrupt-btn"
+              className="btn btn-sm h-[32px] px-2 bg-warning border-none text-warning-content hover:bg-warning/80 rounded-full shrink-0 gap-1"
+              onClick={() => handleSend(true)}
+              aria-label="Interrupt and send"
+              type="button"
             >
-              <Send size={16} />
+              <Zap size={14} />
+              <span className="hidden sm:inline text-[11px]">Interrupt</span>
             </button>
           )}
+          <button
+            data-testid="chat-send-btn"
+            className="btn btn-sm h-[32px] w-[32px] p-0 bg-[#00D535] border-none text-white hover:bg-[#00C030] rounded-full shrink-0 disabled:opacity-40"
+            disabled={disabled || !hasText}
+            onClick={() => handleSend(false)}
+            aria-label="Send message"
+            type="button"
+          >
+            <Send size={16} />
+          </button>
         </div>
       </div>
     </div>

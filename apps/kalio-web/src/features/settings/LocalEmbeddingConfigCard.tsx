@@ -150,7 +150,7 @@ export function LocalEmbeddingConfigCard({
           {localTestState === 'testing' ? <Loader2 size={13} className="animate-spin" /> : null}
           Test local
         </button>
-        <button className="btn btn-outline btn-sm" disabled={!canUseLocal || syncing === 'use-local'} onClick={onUseLocal} data-testid="embedding-use-local-btn">
+        <button className="btn btn-outline btn-sm" disabled={(!canUseLocal && !dirty) || syncing === 'use-local'} onClick={onUseLocal} data-testid="embedding-use-local-btn">
           {syncing === 'use-local' ? <Loader2 size={13} className="animate-spin" /> : null}
           Use local
         </button>

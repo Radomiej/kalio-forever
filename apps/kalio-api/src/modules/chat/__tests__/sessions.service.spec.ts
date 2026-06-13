@@ -5,6 +5,8 @@ import type { IMessageRepository } from '../interfaces/message-repository.interf
 import type { DrizzleService } from '../../../database/drizzle.service';
 import type { SessionManagerService } from '../session-manager.service';
 import type { ChatSessionKind } from '@kalio/types';
+import type { SessionEventsService } from '../session-events.service';
+import type { LLMService } from '../../llm/llm.service';
 
 interface FakeRow {
   id: string;
@@ -14,6 +16,7 @@ interface FakeRow {
   parentSessionId?: string | null;
   parentTurnId?: string | null;
   parentToolCallId?: string | null;
+  runtimeContext?: unknown;
   archivedAt?: number | Date | null;
   createdAt: number | Date;
   updatedAt: number | Date;
@@ -64,6 +67,8 @@ function makeDrizzle(rows: FakeRow[]): { drizzle: DrizzleService; rows: FakeRow[
 describe('SessionsService', () => {
   let service: SessionsService;
   let repo: IMessageRepository;
+  let sessionEvents: SessionEventsService;
+  let llm: LLMService;
   let rows: FakeRow[];
   let ops: string[];
 
@@ -77,7 +82,20 @@ describe('SessionsService', () => {
     const fixture = makeDrizzle(rows);
     ops = fixture.ops;
     const sessionManager = {} as unknown as SessionManagerService;
-    service = new SessionsService(fixture.drizzle, sessionManager, repo);
+    sessionEvents = {
+      onSessionCreated: vi.fn().mockReturnValue(() => undefined),
+      onSessionUpdated: vi.fn().mockReturnValue(() => undefined),
+      emitSessionCreated: vi.fn(),
+      emitSessionUpdated: vi.fn(),
+    } as unknown as SessionEventsService;
+    llm = {
+      streamChat: vi.fn().mockImplementation(async (_messages, _tools, options) => {
+        options.onChunk({ delta: 'Generated Title', done: false, sessionId: 'title', messageId: 'title-msg' });
+        options.onChunk({ delta: '', done: true, sessionId: 'title', messageId: 'title-msg' });
+        return [];
+      }),
+    } as unknown as LLMService;
+    service = new SessionsService(fixture.drizzle, sessionManager, sessionEvents, repo, llm);
   });
 
   describe('create', () => {
@@ -208,28 +226,99 @@ describe('SessionsService', () => {
     });
   });
 
+  describe('update', () => {
+    it('updates runtimeContext on an existing session', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: 'Old', createdAt: 0, updatedAt: 0 });
+      const runtimeContext = {
+        runtimeKind: 'chat' as const,
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      };
+
+      await service.update('s1', { runtimeContext });
+
+      expect(ops).toContain('update');
+      expect(rows[0].runtimeContext).toEqual(runtimeContext);
+    });
+
+    it('updates metadata and runtimeContext in the same call', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: 'Old', createdAt: 0, updatedAt: 0 });
+      const runtimeContext = {
+        runtimeKind: 'chat' as const,
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      };
+
+      await service.update('s1', {
+        title: 'New Title',
+        personaId: 'builder',
+        runtimeContext,
+      });
+
+      expect(rows[0].title).toBe('New Title');
+      expect(rows[0].personaId).toBe('builder');
+      expect(rows[0].runtimeContext).toEqual(runtimeContext);
+      expect(sessionEvents.emitSessionUpdated).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('generateTitle', () => {
     it('throws NotFoundException for missing session', async () => {
       await expect(service.generateTitle('missing')).rejects.toThrow(NotFoundException);
     });
 
-    it('returns title from first user message content (truncated at 60 chars)', async () => {
+    it('returns generated title text when the LLM produces a summary', async () => {
       rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
       (repo.loadHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
         { id: '1', sessionId: 's1', role: 'user', content: 'Hello world', createdAt: 1 },
       ]);
       const result = await service.generateTitle('s1');
-      expect(result.title).toBe('Hello world');
+      expect(result.title).toBe('Generated Title');
     });
 
-    it('truncates title with ellipsis when content exceeds 60 chars', async () => {
+    it('falls back to a deterministic heuristic when the provider echoes the prompt', async () => {
       rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
-      const longContent = 'A'.repeat(80);
+      (llm.streamChat as ReturnType<typeof vi.fn>).mockImplementationOnce(async (_messages, _tools, options) => {
+        options.onChunk({
+          delta: '[MockLLM] Echo: Session title regression verification uses a deliberately long first prompt to exceed sixty characters.',
+          done: false,
+          sessionId: 'title',
+          messageId: 'title-msg',
+        });
+        options.onChunk({ delta: '', done: true, sessionId: 'title', messageId: 'title-msg' });
+        return [];
+      });
       (repo.loadHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
-        { id: '1', sessionId: 's1', role: 'user', content: longContent, createdAt: 1 },
+        {
+          id: '1',
+          sessionId: 's1',
+          role: 'user',
+          content: 'Session title regression verification uses a deliberately long first prompt to exceed sixty characters. Reply with exactly OK and do not use tools.',
+          createdAt: 1,
+        },
       ]);
       const result = await service.generateTitle('s1');
-      expect(result.title).toBe('A'.repeat(60) + '…');
+      expect(result.title).toBe('Session Title Regression Verification');
+    });
+
+    it('derives an architecture review fallback from workflow prompts when needed', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
+      (llm.streamChat as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('provider unavailable'));
+      (repo.loadHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: '1',
+          sessionId: 's1',
+          role: 'user',
+          content: '[Architecture: Strategic Decision Council]\nC:\\Projekty\\FamilyQuest ocen architekturę i co byś w niej zmienił?',
+          createdAt: 1,
+        },
+      ]);
+      const result = await service.generateTitle('s1');
+      expect(result.title).toBe('Architecture Review FamilyQuest');
     });
 
     it('returns "New Chat" when no user messages in history', async () => {

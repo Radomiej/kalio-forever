@@ -26,11 +26,76 @@ export interface LLMMessage {
 
 export type ContextCompactionStrategy = 'backend-default' | 'summary' | 'evidence_only';
 
-export interface ContextPreviewRequest {
-  personaId: ID;
+export type SessionRuntimeKind = 'chat' | 'subagent' | 'agent-flow-branch' | 'cli-agent' | 'agent-flow-root';
+export type SystemPromptProfile = 'default-chat' | 'subagent' | 'agent-flow-branch';
+export type RuntimeProfileSource = 'session' | 'request' | 'persona-default';
+
+export type ToolPolicyProfile = 'default-chat' | 'subagent' | 'agent-flow-branch' | 'agent-flow-root' | 'cli-agent';
+
+export type ToolDenyReason =
+  | 'not_in_persona_allowlist'
+  | 'not_in_runtime_explicit_list'
+  | 'slot_policy_denied'
+  | 'missing_project_path'
+  | 'missing_execution_cwd'
+  | 'cli_unavailable'
+  | 'requires_confirmation'
+  | 'subagent_depth_limit';
+
+export type ToolPolicySource = 'persona' | 'runtime-explicit' | 'architecture-slot-policy' | 'merged';
+
+export interface ToolPolicyDeniedTool {
+  name: string;
+  reason: ToolDenyReason;
+}
+
+export interface ToolPolicyDecision {
+  tools: ToolMeta[];
+  source: ToolPolicySource;
+  allowedToolNames: string[];
+  denied: ToolPolicyDeniedTool[];
+  warnings: string[];
+}
+
+export interface ArchitectureSlotToolPolicy {
+  allowedToolNames: string[];
+  stripRequiresConfirmation?: boolean;
+  applyCliDescriptionPreferences?: boolean;
+}
+
+export interface SessionRuntimeContext {
+  runtimeKind: SessionRuntimeKind;
+  parentSessionId?: ID;
+  parentToolCallId?: ID;
+  vfsMode?: VFSMode;
+  vfsSessionId?: ID;
+  modelOverride?: string;
+  explicitToolNames?: string[];
+  systemPromptProfile?: SystemPromptProfile;
+  toolPolicyProfile?: ToolPolicyProfile;
+  architectureSlotId?: ID;
+  architectureSlotPolicy?: ArchitectureSlotToolPolicy;
+  architectureContext?: Record<string, unknown>;
+}
+
+type ContextPreviewBase = {
   draftUserMessage?: string;
   attachments?: ChatAttachment[];
-}
+};
+
+export type ContextPreviewRequest =
+  | (ContextPreviewBase & {
+      target?: 'session';
+      sessionId: ID;
+      personaId: ID;
+      runtimeContext?: never;
+    })
+  | (ContextPreviewBase & {
+      target: 'runtime';
+      personaId: ID;
+      runtimeContext: SessionRuntimeContext;
+      sessionId?: never;
+    });
 
 export interface ContextPreviewMessage {
   role: LLMRole;
@@ -64,6 +129,10 @@ export interface LLMContextPreview {
   effectiveSystemPrompt: string;
   tools: ToolMeta[];
   messages: ContextPreviewMessage[];
+  runtimeKind?: SessionRuntimeKind;
+  runtimeProfileSource?: RuntimeProfileSource;
+  warnings?: string[];
+  toolPolicy?: ToolPolicyDecision;
 }
 
 export interface LLMStreamChunk {
@@ -106,14 +175,33 @@ export type LLMProviderType =
 /** Controls which MCP tools a persona can access. */
 export type MCPPolicy = 'allow_all' | 'deny_all' | 'allow_list';
 
+/** boring-avatars theme variant persisted on Persona records. */
+export type AvatarVariant = 'marble' | 'beam' | 'pixel' | 'sunset' | 'ring' | 'bauhaus';
+
+/** Stable palette identifier; hex colors are resolved client-side from this key. */
+export type AvatarPaletteKey = 'ocean' | 'sunset' | 'forest' | 'violet' | 'ember' | 'slate' | 'candy' | 'mono';
+
+/** Persistent boring-avatars token stored on Persona (no raw color arrays). */
+export interface PersonaAvatarToken {
+  avatarSeed: string;
+  avatarVariant: AvatarVariant;
+  avatarPaletteKey: AvatarPaletteKey;
+  avatarIndex: number;
+}
+
 export interface Persona {
   id: ID;
   name: string;
   systemPrompt: string;
   model: string;           // e.g. "claude-sonnet-4-6", "gpt-4o", "qwen3:8b"
+  maxToolAttempts?: number | null;
   allowedTools: string[];  // native tool names available to this persona (tool allowlist)
   skillIds: string[];      // IDs of Skill entities whose prompts are injected into system prompt
   mcpPolicy: MCPPolicy;    // how MCP tools are filtered for this persona
+  avatarSeed: string;
+  avatarVariant: AvatarVariant;
+  avatarPaletteKey: AvatarPaletteKey;
+  avatarIndex: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -129,6 +217,7 @@ export interface PersonaKV {
 export interface PersonaSessionConfig {
   systemPrompt: string;
   model: string;
+  maxToolAttempts?: number | null;
   allowedTools: string[];  // filtered tool list for this session
   skillIds: string[];      // Skill entity IDs whose prompts get injected
   mcpPolicy: MCPPolicy;    // how MCP tools are filtered for this session
@@ -139,18 +228,28 @@ export interface CreatePersonaDto {
   name: string;
   systemPrompt: string;
   model: string;
+  maxToolAttempts?: number;
   allowedTools: string[];
   skillIds?: string[];
   mcpPolicy?: MCPPolicy;
+  avatarSeed?: string;
+  avatarVariant?: AvatarVariant;
+  avatarPaletteKey?: AvatarPaletteKey;
+  avatarIndex?: number;
 }
 
 export interface UpdatePersonaDto {
   name?: string;
   systemPrompt?: string;
   model?: string;
+  maxToolAttempts?: number | null;
   allowedTools?: string[];
   skillIds?: string[];
   mcpPolicy?: MCPPolicy;
+  avatarSeed?: string;
+  avatarVariant?: AvatarVariant;
+  avatarPaletteKey?: AvatarPaletteKey;
+  avatarIndex?: number;
 }
 
 // ─── Session / Chat ───────────────────────────────────────────────────────────
@@ -215,6 +314,7 @@ export interface ChatSession {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
+  runtimeContext?: SessionRuntimeContext;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -226,6 +326,7 @@ export interface CreateSessionDto {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
+  runtimeContext?: SessionRuntimeContext;
 }
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
@@ -498,6 +599,36 @@ export interface ToolConfirmationInvalidated {
   reason: 'timeout' | 'cancelled' | 'confirmed' | 'not_found' | 'replay_stale';
   message?: string;
   agentRun?: AgentRunContext;
+}
+
+export type AgentBudgetApprovalDecision = 'block' | 'allow_one' | 'allow_ten' | 'allow_unlimited';
+
+export interface AgentBudgetApprovalRequest {
+  requestId: string;
+  sessionId: ID;
+  scope: Extract<SessionRuntimeKind, 'chat' | 'subagent' | 'agent-flow-branch'>;
+  usedIterations: number;
+  currentLimit: number;
+  requestedBy?: string;
+  suggestedNextLimit?: number;
+  personaId?: ID;
+  nodeId?: string;
+  roleSlotId?: string;
+  agentRun?: AgentRunContext;
+}
+
+export interface AgentBudgetApprovalInvalidated {
+  requestId: string;
+  sessionId: ID;
+  reason: 'approved' | 'cancelled' | 'not_found' | 'aborted';
+  decision?: AgentBudgetApprovalDecision;
+  approvedLimit?: number;
+  agentRun?: AgentRunContext;
+}
+
+export interface ConversationTitleSettings {
+  autoRenameEnabled: boolean;
+  renameEveryReplies: number;
 }
 
 // ─── VFS ──────────────────────────────────────────────────────────────────────
@@ -807,6 +938,7 @@ export interface SocketEvents {
   // Tool HITL — client → server
   'tool:confirm': { requestId: string; sessionId: ID; message?: string };
   'tool:cancel': { requestId: string; sessionId: ID; message?: string };
+  'agent:budget_approve': { requestId: string; sessionId: ID; decision: AgentBudgetApprovalDecision };
 
   // Tool execution lifecycle — server → client
   'tool:start': { callId: ID; toolName: string; args: Record<string, unknown>; sessionId?: ID; agentRun?: AgentRunContext };
@@ -824,6 +956,8 @@ export interface SocketEvents {
   // Agent loop lifecycle — server → client
   'agent:start': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
   'agent:done': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
+  'agent:budget_required': AgentBudgetApprovalRequest;
+  'agent:budget_invalidated': AgentBudgetApprovalInvalidated;
 
   // MCP — server → client
   'mcp:server:status': { serverId: ID; serverName: string; status: string; toolCount: number; lastError?: string };
@@ -833,7 +967,7 @@ export interface SocketEvents {
 
   // Sessions — server → client
   'session:created': ChatSession;
-  'session:updated': Pick<ChatSession, 'id' | 'title' | 'updatedAt'>;
+  'session:updated': ChatSession;
   'session:status': { sessionId: ID; active: boolean; turnId?: ID; queueLength: number; run?: ChatRunSnapshot };
 
   // Session re-registration — client → server (sent after reconnect)
@@ -1251,6 +1385,7 @@ export interface ArchitectureSchemaNode {
   label: string;
   kind: ArchitectureNodeKind;
   roleSlotId?: string;
+  maxToolAttempts?: number;
   behavior?: {
     mode: ArchitectureNodeBehaviorMode;
     fanOut?: ArchitectureNodeFanOutMode;
@@ -1413,6 +1548,8 @@ export interface ArchitectureExecutionEvent {
 
 export interface ArchitectureGraphProjection {
   runId: ID;
+  schemaId?: ID;
+  schemaName?: string;
   status?: ArchitectureRunStatus;
   nodes: Array<{
     id: string;

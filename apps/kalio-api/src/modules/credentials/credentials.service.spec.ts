@@ -260,6 +260,34 @@ describe('CredentialsService', () => {
     });
   });
 
+  describe('conversation title settings', () => {
+    it('returns defaults when no conversation title settings are stored', async () => {
+      await expect(svc.getConversationTitleSettings()).resolves.toEqual({
+        autoRenameEnabled: false,
+        renameEveryReplies: 3,
+      });
+    });
+
+    it('persists and clamps conversation title settings', async () => {
+      await svc.setConversationTitleSettings({
+        autoRenameEnabled: true,
+        renameEveryReplies: 12.4,
+      });
+
+      await expect(svc.getConversationTitleSettings()).resolves.toEqual({
+        autoRenameEnabled: true,
+        renameEveryReplies: 10,
+      });
+
+      await svc.setConversationTitleSettings({ renameEveryReplies: 0 });
+
+      await expect(svc.getConversationTitleSettings()).resolves.toEqual({
+        autoRenameEnabled: true,
+        renameEveryReplies: 1,
+      });
+    });
+  });
+
   describe('updateModel()', () => {
     it('throws NotFoundException for nonexistent credential', async () => {
       await expect(svc.updateModel('nonexistent', 'gpt-4o')).rejects.toThrow();

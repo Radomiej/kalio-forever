@@ -12,57 +12,44 @@ async function goToPersonas(page: import('@playwright/test').Page) {
 }
 
 test.describe('AC-04: Persona Tool Picker', () => {
-  test('create form has a collapsible Tools section', async ({ page }) => {
+  test('create form renders the tool picker in the editor section', async ({ page }) => {
     await goToPersonas(page);
     await page.getByTestId('new-persona-btn').click();
 
-    const toggle = page.getByTestId('persona-tools-toggle');
-    await expect(toggle).toBeVisible();
-    // Tool picker hidden by default
-    await expect(page.getByTestId('persona-tool-picker')).not.toBeVisible();
-    // Open it
-    await toggle.click();
+    await expect(page.getByText('Tools and MCP policy')).toBeVisible();
     await expect(page.getByTestId('persona-tool-picker')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('group-toggle-vfs')).toBeVisible({ timeout: 5000 });
   });
 
   test('Enable All / Disable All buttons work', async ({ page }) => {
     await goToPersonas(page);
     await page.getByTestId('new-persona-btn').click();
-    await page.getByTestId('persona-tools-toggle').click();
 
     const picker = page.getByTestId('persona-tool-picker');
     await expect(picker).toBeVisible({ timeout: 5000 });
 
-    // Enable all
     await picker.getByTestId('tools-enable-all').click();
-    // At least one checkbox should be checked
-    const firstCheckbox = picker.locator('input[type="checkbox"]').nth(1);
-    await expect(firstCheckbox).toBeChecked();
+    await expect(picker.getByTestId('group-toggle-vfs')).toBeChecked();
+    await expect(picker.getByTestId('tool-toggle-vfs_read').locator('input[type="checkbox"]')).toBeChecked();
+    await expect(picker.getByTestId('tool-toggle-memory_search').locator('input[type="checkbox"]')).toBeChecked();
 
-    // Disable all
     await picker.getByTestId('tools-disable-all').click();
-    // All checkboxes unchecked
-    const checkboxes = picker.locator('input[type="checkbox"]');
-    const count = await checkboxes.count();
-    for (let i = 0; i < count; i++) {
-      await expect(checkboxes.nth(i)).not.toBeChecked();
-    }
+    await expect(picker.getByTestId('group-toggle-vfs')).not.toBeChecked();
+    await expect(picker.getByTestId('tool-toggle-vfs_read').locator('input[type="checkbox"]')).not.toBeChecked();
+    await expect(picker.getByTestId('tool-toggle-memory_search').locator('input[type="checkbox"]')).not.toBeChecked();
   });
 
   test('group toggle selects all tools in group', async ({ page }) => {
     await goToPersonas(page);
     await page.getByTestId('new-persona-btn').click();
-    await page.getByTestId('persona-tools-toggle').click();
 
     const picker = page.getByTestId('persona-tool-picker');
     await expect(picker).toBeVisible({ timeout: 5000 });
 
-    // Toggle the VFS group
     const vfsGroupToggle = picker.getByTestId('group-toggle-vfs');
     await expect(vfsGroupToggle).toBeVisible({ timeout: 5000 });
     await vfsGroupToggle.check();
 
-    // vfs_read should now be checked
     const vfsRead = picker.getByTestId('tool-toggle-vfs_read');
     await expect(vfsRead).toBeVisible();
     await expect(vfsRead.locator('input[type="checkbox"]')).toBeChecked();
@@ -71,7 +58,6 @@ test.describe('AC-04: Persona Tool Picker', () => {
   test('individual tool toggle works', async ({ page }) => {
     await goToPersonas(page);
     await page.getByTestId('new-persona-btn').click();
-    await page.getByTestId('persona-tools-toggle').click();
 
     const picker = page.getByTestId('persona-tool-picker');
     await expect(picker).toBeVisible({ timeout: 5000 });
@@ -86,10 +72,9 @@ test.describe('AC-04: Persona Tool Picker', () => {
     await expect(cb).not.toBeChecked();
   });
 
-  test('tools badge shows count when persona has tools', async ({ page, request }) => {
+  test('persona list meta shows tool count for saved tools', async ({ page, request }) => {
     const personaName = uniquePersonaName('AC04 Tools Badge');
 
-    // Create persona with tools via API
     const res = await request.post(`${API_BASE}/personas`, {
       data: {
         name: personaName,
@@ -104,13 +89,13 @@ test.describe('AC-04: Persona Tool Picker', () => {
 
     const item = page.getByTestId('persona-item').filter({ hasText: personaName });
     await expect(item).toBeVisible({ timeout: 5000 });
-    // Badge shows "3"
-    await expect(item.locator('.badge', { hasText: '3' })).toBeVisible();
+    await expect(item).toContainText('3 tools');
+    await expect(item).toContainText('MCP allow_all');
 
     await request.delete(`${API_BASE}/personas/${persona.id}`);
   });
 
-  test('tool badges shown in expanded read view', async ({ page, request }) => {
+  test('selecting a persona hydrates its saved tools in the main editor', async ({ page, request }) => {
     const personaName = uniquePersonaName('AC04 Tools Expanded');
 
     const res = await request.post(`${API_BASE}/personas`, {
@@ -127,11 +112,12 @@ test.describe('AC-04: Persona Tool Picker', () => {
 
     const item = page.getByTestId('persona-item').filter({ hasText: personaName });
     await expect(item).toBeVisible({ timeout: 5000 });
-    // Expand
-    await item.locator('button').first().click();
-    // VFS group badge should appear (2 vfs tools)
-    await expect(item.locator('.badge', { hasText: /VFS/ }).first()).toBeVisible();
-    await expect(item.locator('.badge', { hasText: /Terminal/ }).first()).toBeVisible();
+    await item.click();
+
+    await expect(page.getByTestId('persona-name-input')).toHaveValue(personaName);
+    await expect(page.getByTestId('tool-toggle-vfs_read').locator('input[type="checkbox"]')).toBeChecked();
+    await expect(page.getByTestId('tool-toggle-vfs_list').locator('input[type="checkbox"]')).toBeChecked();
+    await expect(page.getByTestId('tool-toggle-terminal_spawn').locator('input[type="checkbox"]')).toBeChecked();
 
     await request.delete(`${API_BASE}/personas/${persona.id}`);
   });
@@ -143,18 +129,17 @@ test.describe('AC-04: Persona Tool Picker', () => {
     await page.getByTestId('new-persona-btn').click();
     await page.getByTestId('persona-name-input').fill(personaName);
     await page.getByTestId('persona-model-input').fill('mock');
-    await page.getByTestId('persona-tools-toggle').click();
 
     const picker = page.getByTestId('persona-tool-picker');
     await expect(picker).toBeVisible({ timeout: 5000 });
 
-    // Enable vfs_read
     const vfsRead = picker.getByTestId('tool-toggle-vfs_read');
     await expect(vfsRead).toBeVisible({ timeout: 5000 });
     await vfsRead.click();
 
     await page.getByTestId('persona-save-btn').click();
-    await expect(page.getByTestId('persona-name-input')).not.toBeVisible({ timeout: 3000 });
+    await expect(page.getByTestId('persona-name-input')).toHaveValue(personaName);
+    await expect(page.getByTestId('persona-item').filter({ hasText: personaName })).toBeVisible({ timeout: 5000 });
 
     // Verify via API
     const list = await request.get(`${API_BASE}/personas`);

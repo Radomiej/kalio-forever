@@ -14,10 +14,6 @@ type ToolEvidence = {
   toolNames: string[];
   successfulToolNames: string[];
 };
-type ArchitectureGraphProjectionNodeWithEvidence = ArchitectureGraphProjectionNode & {
-  toolEvidence?: Record<string, unknown>;
-  incompleteReason?: string;
-};
 
 export function architectureRunIdFromRootSession(sessionId: string | null): string | null {
   const match = sessionId?.match(/^arch-(.+)-root$/);
@@ -74,7 +70,7 @@ function toExecutionNode(input: {
   const matchingHops = routeHops.filter((hop) => hop.fromNodeId === node.id || hop.toNodeId === node.id);
   const summary = {
     runId: graph.runId,
-    schemaId: 'architecture-run',
+    schemaId: graph.schemaName ?? graph.schemaId ?? 'architecture-run',
     status: graph.status ?? graphStatus(graph.nodes),
     trace: node.eventIds.map((eventId) => ({
       speaker: node.kind === 'artifact' ? 'finalizer' as const : node.kind === 'router' ? 'router' as const : 'participant' as const,
@@ -213,12 +209,12 @@ function graphColumnByDagLevel(graph: ArchitectureGraphProjection): Map<string, 
 }
 
 function extractIncompleteReason(node: ArchitectureGraphProjectionNode): string | undefined {
-  const value = (node as ArchitectureGraphProjectionNodeWithEvidence).incompleteReason;
+  const value = node.incompleteReason;
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function extractToolEvidence(node: ArchitectureGraphProjectionNode): ToolEvidence | undefined {
-  const value = (node as ArchitectureGraphProjectionNodeWithEvidence).toolEvidence;
+  const value = node.toolEvidence;
   if (!value) return undefined;
   return {
     toolCallCount: numericValue(value.toolCallCount),

@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { GRAPH_MOUSE_FALLBACK_POINTER_ID, graphPointerDistance, graphViewportCenter, graphViewportClassName, graphViewportPointFromClient, graphWorldDeltaFromClientDelta, graphWorldPointFromClient, hasGraphDragStarted, nextGraphPan, nextGraphPanForAutoPan, nextGraphPanForZoom, shouldStartGraphPan, useGraphViewport } from './useGraphInteraction';
+import { describe, expect, it, vi } from 'vitest';
+import { acquirePointerCaptureIfSupported, GRAPH_MOUSE_FALLBACK_POINTER_ID, graphPointerDistance, graphViewportCenter, graphViewportClassName, graphViewportPointFromClient, graphWorldDeltaFromClientDelta, graphWorldPointFromClient, hasGraphDragStarted, nextGraphPan, nextGraphPanForAutoPan, nextGraphPanForZoom, releasePointerCaptureIfHeld, shouldStartGraphPan, useGraphViewport } from './useGraphInteraction';
 
 describe('graph interaction helpers', () => {
   it('computes pan from the original viewport and pointer delta', () => {
@@ -159,5 +159,19 @@ describe('graph interaction helpers', () => {
       width: 300,
       height: 200,
     } as DOMRect, 110, 120)).toEqual({ x: 95, y: 90 });
+  });
+
+  it('acquires and releases pointer capture when supported', () => {
+    const element = document.createElement('div');
+    const setPointerCapture = vi.fn();
+    const hasPointerCapture = vi.fn(() => true);
+    const releasePointerCapture = vi.fn();
+    Object.assign(element, { setPointerCapture, hasPointerCapture, releasePointerCapture });
+
+    acquirePointerCaptureIfSupported(element, 3);
+    expect(setPointerCapture).toHaveBeenCalledWith(3);
+
+    releasePointerCaptureIfHeld(element, 3);
+    expect(releasePointerCapture).toHaveBeenCalledWith(3);
   });
 });

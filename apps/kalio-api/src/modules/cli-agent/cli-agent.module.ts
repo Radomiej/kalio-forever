@@ -10,6 +10,7 @@ import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
 import { CodexAdapter } from './adapters/codex.adapter';
 import { CLIAgentSessionService } from './cli-agent-session.service';
 import { CLIAgentSessionRuntimeService } from './cli-agent-session-runtime.service';
+import { CLI_AGENT_SESSION_RUNTIME } from './cli-agent-session-runtime.port';
 import { CLIAgentPtyService } from './cli-agent-pty.service';
 
 @Module({
@@ -21,11 +22,22 @@ import { CLIAgentPtyService } from './cli-agent-pty.service';
     CLIAgentPtyService,
     CLIAgentSessionService,
     CLIAgentSessionRuntimeService,
+    {
+      provide: CLI_AGENT_SESSION_RUNTIME,
+      useExisting: CLIAgentSessionRuntimeService,
+    },
     CopilotAdapter,
     GeminiAdapter,
     ClaudeCodeAdapter,
     CodexAdapter,
   ],
-  exports: [CLIAgentService, CLIAgentConfigService, CLIAgentPtyService, CLIAgentSessionService, CLIAgentSessionRuntimeService],
+  exports: [
+    CLIAgentService,
+    CLIAgentConfigService,
+    CLIAgentPtyService,
+    CLIAgentSessionService,
+    CLIAgentSessionRuntimeService,
+    CLI_AGENT_SESSION_RUNTIME,
+  ],
 })
 export class CLIAgentModule {}

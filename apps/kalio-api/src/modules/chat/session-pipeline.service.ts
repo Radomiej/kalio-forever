@@ -12,6 +12,8 @@ const QUEUE_CAP = 10;
 
 interface ActiveSlot {
   donePromise: Promise<void>;
+  resolveDone: () => void;
+  seeded?: boolean;
   turnId: string;
   startedAt: number;
 }
@@ -56,6 +58,21 @@ export class SessionPipelineService {
     private readonly chat: ChatService,
     @Optional() private readonly runJournal?: RunJournalService,
   ) {}
+
+  private createActiveSlot(turnId: string, options?: { seeded?: boolean }): ActiveSlot {
+    let resolveDone!: () => void;
+    const donePromise = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+
+    return {
+      donePromise,
+      resolveDone,
+      ...(options?.seeded ? { seeded: true } : {}),
+      turnId,
+      startedAt: Date.now(),
+    };
+  }
 
   async submit(payload: ChatSendPayload, emit: EmitFn): Promise<void> {
     const sid = payload.sessionId;
@@ -106,7 +123,7 @@ export class SessionPipelineService {
       // Idle session: claim the active slot before releasing the lock so
       // any concurrent submit will see us as active.
       const turnId = nanoid();
-      this.active.set(sid, { donePromise: Promise.resolve(), turnId, startedAt: Date.now() });
+      this.active.set(sid, this.createActiveSlot(turnId));
       return { kind: 'dispatch', turnId };
     });
 
@@ -124,7 +141,7 @@ export class SessionPipelineService {
       // Re-claim the slot atomically before dispatching the interrupting
       // payload (the prior turn just released it).
       await this.mutex.runExclusive(sid, async () => {
-        this.active.set(sid, { donePromise: Promise.resolve(), turnId: decision.turnId, startedAt: Date.now() });
+        this.active.set(sid, this.createActiveSlot(decision.turnId));
       });
     }
 
@@ -156,6 +173,38 @@ export class SessionPipelineService {
     });
   }
 
+  /**
+   * Abort the active turn, drop queued items, and wait for the current turn to
+   * settle before releasing the slot. Used before destructive lifecycle
+   * actions like session deletion so message persistence cannot race the row
+   * removal.
+   */
+  async stopAndDrain(sessionId: string): Promise<void> {
+    const activeSlot = await this.mutex.runExclusive<ActiveSlot | null>(sessionId, async () => {
+      const slot = this.active.get(sessionId) ?? null;
+      if (slot) {
+        this.chat.abort(sessionId);
+      }
+      this.queues.delete(sessionId);
+      return slot;
+    });
+
+    if (activeSlot && !activeSlot.seeded) {
+      try {
+        await activeSlot.donePromise;
+      } catch (err) {
+        this.logger.warn(
+          `Draining aborted turn rejected for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    await this.mutex.runExclusive(sessionId, async () => {
+      this.active.delete(sessionId);
+      this.queues.delete(sessionId);
+    });
+  }
+
   getActiveSessionIds(): ReadonlySet<string> {
     return new Set(this.active.keys());
   }
@@ -178,6 +227,15 @@ export class SessionPipelineService {
       ...status,
       ...(run ? { run } : {}),
     };
+  }
+
+  seedActiveTurn(sessionId: string, turnId: string): void {
+    this.active.set(sessionId, this.createActiveSlot(turnId, { seeded: true }));
+  }
+
+  clearSeededActiveTurn(sessionId: string): void {
+    this.active.delete(sessionId);
+    this.queues.delete(sessionId);
   }
 
   /**
@@ -211,7 +269,7 @@ export class SessionPipelineService {
         const next = queue.shift()!;
         // Keep `active` set so concurrent submits enqueue rather than dispatch.
         const nextTurnId = nanoid();
-        this.active.set(sid, { donePromise: Promise.resolve(), turnId: nextTurnId, startedAt: Date.now() });
+        this.active.set(sid, this.createActiveSlot(nextTurnId));
         return { ...next, turnId: nextTurnId };
       });
     }
@@ -219,12 +277,13 @@ export class SessionPipelineService {
 
   private async runOne(payload: ChatSendPayload, emit: EmitFn, turnId: string): Promise<void> {
     const sid = payload.sessionId;
-    const startedAt = this.active.get(sid)?.startedAt ?? Date.now();
+    const slot = this.active.get(sid) ?? this.createActiveSlot(turnId);
+    const startedAt = slot.startedAt;
     const run = await this.runJournal?.startRun({
       sessionId: sid,
       turnId,
     });
-    const donePromise = this.chat
+    const executionPromise = this.chat
       .handleTurn(sid, payload.content, payload.personaId, emit, payload.attachments, turnId, run?.id)
       .catch((err) => {
         // ChatService.handleTurn already swallows its own errors, but be
@@ -234,8 +293,10 @@ export class SessionPipelineService {
         );
       });
 
-    // Update donePromise so an interrupt waiter can observe completion.
-    this.active.set(sid, { donePromise, turnId, startedAt });
-    await donePromise;
+    try {
+      await executionPromise;
+    } finally {
+      slot.resolveDone();
+    }
   }
 }

@@ -1,14 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Plus, Loader2, AlertCircle, Folder, Trash2 } from 'lucide-react';
 import type { AllowedPath, CreateAllowedPathDto } from '@kalio/types';
-
-interface DirectoryPickerHandle {
-  name: string;
-}
-
-type DirectoryPickerWindow = Window & {
-  showDirectoryPicker?: () => Promise<DirectoryPickerHandle>;
-};
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -29,7 +21,6 @@ export function AllowedPathsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [inputPath, setInputPath] = useState('');
   const [adding, setAdding] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,27 +67,6 @@ export function AllowedPathsPanel() {
     }
   };
 
-  const handlePickFolder = async () => {
-    const pickerWindow = window as DirectoryPickerWindow;
-    if (!pickerWindow.showDirectoryPicker) {
-      setError('Native folder picker is not available in this browser. Please type the path manually.');
-      inputRef.current?.focus();
-      return;
-    }
-    try {
-      const dirHandle = await pickerWindow.showDirectoryPicker();
-      // We can't get the absolute path from File System Access API for privacy reasons,
-      // so we ask the user to type or paste it after selecting a folder name as a hint
-      setInputPath(dirHandle.name);
-      inputRef.current?.focus();
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return;
-      }
-      setError(err instanceof Error ? err.message : 'Failed to open directory picker');
-    }
-  };
-
   return (
     <div className="flex flex-col gap-5" data-testid="allowed-paths-panel">
       <div>
@@ -111,7 +81,7 @@ export function AllowedPathsPanel() {
         <div className="alert alert-warning py-2 text-xs gap-2">
           <AlertCircle size={14} />
           {error}
-          <button className="btn btn-ghost btn-xs ml-auto" onClick={() => setError(null)}>✕</button>
+          <button className="btn btn-ghost btn-xs ml-auto" onClick={() => setError(null)}>x</button>
         </div>
       )}
 
@@ -120,7 +90,6 @@ export function AllowedPathsPanel() {
         <h3 className="text-sm font-semibold">Add Directory</h3>
         <div className="flex gap-2">
           <input
-            ref={inputRef}
             className="input input-bordered input-sm flex-1 font-mono"
             placeholder="e.g. C:\\Projekty\\ra-kingdom-stack"
             value={inputPath}
@@ -128,14 +97,6 @@ export function AllowedPathsPanel() {
             onKeyDown={(e) => { if (e.key === 'Enter') void handleAdd(); }}
             data-testid="allowed-path-input"
           />
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm gap-1"
-            onClick={() => void handlePickFolder()}
-            title="Pick folder (if browser supports it)"
-          >
-            <Folder size={14} />
-          </button>
           <button
             className="btn btn-primary btn-sm gap-1"
             onClick={() => void handleAdd()}

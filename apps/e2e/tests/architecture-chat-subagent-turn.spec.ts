@@ -121,7 +121,7 @@ test.describe('Architecture chat turn projection', () => {
     }
   });
 
-  test('renders council branches as sub-agent chips and restores them after reload', async ({ page, request }) => {
+  test('renders council branches as sub-agent chips and restores them after reload', async ({ page, request }, testInfo) => {
     test.setTimeout(120_000);
     const title = `Architecture E2E ${Date.now()}`;
     const response = await request.post(`${API_BASE}/sessions`, {
@@ -154,11 +154,22 @@ test.describe('Architecture chat turn projection', () => {
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Available next nodes:');
       await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Act as a graph router.');
 
+      const visibleSessionCountBeforeExpand = await page.getByTestId('session-item').count();
+      const childToggle = page.getByTestId(`toggle-session-children-${session.id}`);
+      await expect(childToggle).toBeVisible({ timeout: 30_000 });
+      await childToggle.click();
+      await expect
+        .poll(async () => page.getByTestId('session-item').count(), { timeout: 10_000 })
+        .toBeGreaterThan(visibleSessionCountBeforeExpand);
+
       await page.getByTestId('open-architecture-run-canvas').click();
       await expect(page.getByTestId('canvas-panel')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('architecture-run-canvas-section')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('architecture-run-branches')).toContainText('Pragmatist');
       await expect(page.getByTestId('architecture-run-routing')).toContainText('Router');
+
+      const screenshotPath = testInfo.outputPath('architecture-sidebar-children-proof.png');
+      await page.screenshot({ path: screenshotPath, fullPage: true });
 
       const firstTimelineBranch = page.getByTestId('architecture-route-agent').first();
       const timelineChildSessionId = await firstTimelineBranch.getAttribute('data-session-id');

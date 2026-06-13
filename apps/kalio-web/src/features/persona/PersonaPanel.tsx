@@ -2,7 +2,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { BrainCircuit, Plus } from 'lucide-react';
 import { apiClient } from '../../services/apiClient';
 import type { Persona, CreatePersonaDto, UpdatePersonaDto } from '@kalio/types';
-import { PersonaForm, PersonaPageState, PersonaPageSummary, PersonaRow } from './PersonaPanel.Parts';
+import { PersonaEditorPanel } from './PersonaEditorPanel';
+import { PersonaListItem } from './PersonaListItem';
+import { PersonaPageState } from './PersonaPageState';
 
 export function PersonaPanel() {
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -39,9 +41,10 @@ export function PersonaPanel() {
     setShowCreate(false);
   };
 
-  const handleUpdate = async (id: string, patch: UpdatePersonaDto) => {
-    const { data } = await apiClient.put<Persona>(`/api/personas/${id}`, patch);
-    setPersonas((prev) => prev.map((p) => (p.id === id ? data : p)));
+  const handleUpdate = async (patch: UpdatePersonaDto) => {
+    if (!selectedPersonaId) return;
+    const { data } = await apiClient.put<Persona>(`/api/personas/${selectedPersonaId}`, patch);
+    setPersonas((prev) => prev.map((p) => (p.id === selectedPersonaId ? data : p)));
   };
 
   const handleDelete = async (id: string) => {
@@ -50,7 +53,7 @@ export function PersonaPanel() {
     setSelectedPersonaId((current) => (current === id ? null : current));
   };
 
-  const selectedPersona = personas.find((persona) => persona.id === selectedPersonaId) ?? personas[0] ?? null;
+  const selectedPersona = personas.find((persona) => persona.id === selectedPersonaId) ?? null;
 
   return (
     <div data-testid="persona-panel" className="flex h-full flex-col overflow-hidden bg-base-100">
@@ -70,7 +73,7 @@ export function PersonaPanel() {
           </div>
           <button
             className="btn btn-primary btn-sm gap-2"
-            onClick={() => setShowCreate((v) => !v)}
+            onClick={() => { setShowCreate(true); setSelectedPersonaId(null); }}
             title="New persona"
             data-testid="new-persona-btn"
           >
@@ -109,14 +112,12 @@ export function PersonaPanel() {
           )}
 
           <div className="flex flex-col gap-2">
-            {personas.map((p) => (
-              <PersonaRow
-                key={p.id}
-                persona={p}
-                selected={p.id === selectedPersona?.id}
-                onSelect={() => { setSelectedPersonaId(p.id); setShowCreate(false); }}
-                onUpdate={(patch) => void handleUpdate(p.id, patch)}
-                onDelete={() => void handleDelete(p.id)}
+            {personas.map((persona) => (
+              <PersonaListItem
+                key={persona.id}
+                persona={persona}
+                selected={persona.id === selectedPersonaId && !showCreate}
+                onSelect={() => { setSelectedPersonaId(persona.id); setShowCreate(false); }}
               />
             ))}
           </div>
@@ -129,15 +130,26 @@ export function PersonaPanel() {
             ) : loadError ? (
               <PersonaPageState title="Unable to load personas" body={loadError} actionLabel="Retry" onAction={() => void load()} tone="error" />
             ) : showCreate ? (
-              <section className="rounded-lg border border-base-300 bg-base-200/50">
-                <div className="border-b border-base-300 px-4 py-3">
-                  <h2 className="text-sm font-semibold text-base-content">Create persona</h2>
-                  <p className="text-xs text-base-content/45">Define prompt, model, and tool access in one place.</p>
-                </div>
-                <PersonaForm onSave={handleCreate} onCancel={() => setShowCreate(false)} />
-              </section>
+              <PersonaEditorPanel
+                mode="create"
+                persona={null}
+                onSave={handleCreate}
+                onCancel={() => setShowCreate(false)}
+              />
+            ) : selectedPersona ? (
+              <PersonaEditorPanel
+                mode="edit"
+                persona={selectedPersona}
+                onSave={handleUpdate}
+                onDelete={handleDelete}
+              />
             ) : (
-              <PersonaPageSummary persona={selectedPersona} onCreate={() => setShowCreate(true)} />
+              <PersonaPageState
+                title="No persona selected"
+                body="Create a persona or choose one from the list to edit its prompt, avatar, and tool policy."
+                actionLabel="New persona"
+                onAction={() => setShowCreate(true)}
+              />
             )}
           </div>
         </main>
@@ -145,4 +157,3 @@ export function PersonaPanel() {
     </div>
   );
 }
-

@@ -12,7 +12,6 @@ import {
   OpenAICompatibleEmbeddingProvider,
   OllamaEmbeddingProvider,
   buildDefaultLocalEmbeddingConfig,
-  readEmbeddingEnabled,
 } from './embedding.service';
 
 const { pipelineMock } = vi.hoisted(() => ({
@@ -31,7 +30,7 @@ pipelineMock.mockImplementation(async () => async () => ({
   data: new Float32Array(384).fill(0.01),
 }));
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function makeTestDeps(): {
   drizzleSvc: DrizzleService;
@@ -64,10 +63,8 @@ function makeTestDeps(): {
   return { drizzleSvc, appSettings, embeddingCredentials };
 }
 
-function makeConfig(env: Record<string, string | boolean> = {}): ConfigService {
-  return {
-    get: <T>(key: string, def?: T) => (key in env ? env[key] as T : def as T),
-  } as unknown as ConfigService;
+function makeConfig(env: Record<string, string> = {}): ConfigService {
+  return { get: (key: string, def = '') => env[key] ?? def } as unknown as ConfigService;
 }
 
 function makeService(env: Record<string, string> = {}): {
@@ -78,6 +75,13 @@ function makeService(env: Record<string, string> = {}): {
   const config = makeConfig(env);
   const svc = new EmbeddingService(config, embeddingCredentials);
   return { svc, credentials: embeddingCredentials };
+}
+
+function makeBooleanEnabledConfig(enabled: boolean): ConfigService {
+  return {
+    get: <T>(key: string, def?: T): T =>
+      (key === 'EMBEDDING_ENABLED' ? enabled : def) as T,
+  } as ConfigService;
 }
 
 // ── MockEmbeddingProvider ─────────────────────────────────────────────────────
@@ -101,7 +105,7 @@ describe('MockEmbeddingProvider', () => {
   });
 });
 
-// ── OllamaEmbeddingProvider ───────────────────────────────────────────────────
+// â”€â”€ OllamaEmbeddingProvider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('OllamaEmbeddingProvider', () => {
   it('getDimensions returns constructor value', () => {
@@ -152,7 +156,7 @@ describe('OllamaEmbeddingProvider', () => {
   });
 });
 
-// ── OpenAICompatibleEmbeddingProvider ─────────────────────────────────────────
+// â”€â”€ OpenAICompatibleEmbeddingProvider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('OpenAICompatibleEmbeddingProvider', () => {
   it('getDimensions returns constructor value', () => {
@@ -225,10 +229,10 @@ describe('OpenAICompatibleEmbeddingProvider', () => {
   });
 });
 
-// ── EmbeddingService ──────────────────────────────────────────────────────────
+// â”€â”€ EmbeddingService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('EmbeddingService', () => {
-  describe('reloadFromCredential — no DB credential, no env', () => {
+  describe('reloadFromCredential â€” no DB credential, no env', () => {
     it('uses the local default embedding model when nothing configured', async () => {
       const { svc } = makeService();
       await svc.reloadFromCredential();
@@ -268,9 +272,22 @@ describe('EmbeddingService', () => {
       expect(status.configured).toBe(false);
       await expect(svc.embedOne('hello')).rejects.toThrow('disabled');
     });
+
+    it('disables embeddings when ConfigService returns boolean false for EMBEDDING_ENABLED', async () => {
+      const { embeddingCredentials } = makeTestDeps();
+      const svc = new EmbeddingService(makeBooleanEnabledConfig(false), embeddingCredentials);
+
+      await svc.reloadFromCredential();
+
+      const status = svc.getStatus();
+      expect(status.provider).toBe('disabled');
+      expect(status.source).toBe('disabled');
+      expect(status.configured).toBe(false);
+      await expect(svc.embedOne('hello')).rejects.toThrow('disabled');
+    });
   });
 
-  describe('reloadFromCredential — env vars', () => {
+  describe('reloadFromCredential â€” env vars', () => {
     it('uses env provider when EMBEDDING_API_KEY + EMBEDDING_BASE_URL set', async () => {
       const { svc } = makeService({
         EMBEDDING_API_KEY: 'sk-env',
@@ -285,7 +302,7 @@ describe('EmbeddingService', () => {
       expect(status.model).toBe('text-embedding-ada-002');
     });
 
-    it('does NOT fall back to LLM_API_KEY/LLM_BASE_URL — embedding must be explicitly configured', async () => {
+    it('does NOT fall back to LLM_API_KEY/LLM_BASE_URL â€” embedding must be explicitly configured', async () => {
       // Regression: LLM env vars must never be used as embedding fallback.
       // An LLM key may not support embeddings API; silently using it causes
       // confusing failures at runtime.
@@ -347,20 +364,16 @@ describe('EmbeddingService', () => {
     });
   });
 
-  describe('readEmbeddingEnabled', () => {
-    it('treats boolean false from Joi config as disabled', () => {
-      const config = makeConfig({ EMBEDDING_ENABLED: false });
-      expect(readEmbeddingEnabled(config)).toBe(false);
-      expect(buildDefaultLocalEmbeddingConfig(config).enabled).toBe(false);
-    });
-
-    it('treats string "false" as disabled', () => {
-      const config = makeConfig({ EMBEDDING_ENABLED: 'false' });
-      expect(readEmbeddingEnabled(config)).toBe(false);
-    });
-  });
-
   describe('buildDefaultLocalEmbeddingConfig', () => {
+    it('treats EMBEDDING_ENABLED=false as disabled regardless of string casing', () => {
+      expect(buildDefaultLocalEmbeddingConfig(makeConfig({ EMBEDDING_ENABLED: 'false' })).enabled).toBe(false);
+      expect(buildDefaultLocalEmbeddingConfig(makeConfig({})).enabled).toBe(true);
+    });
+
+    it('treats boolean EMBEDDING_ENABLED=false as disabled', () => {
+      expect(buildDefaultLocalEmbeddingConfig(makeBooleanEnabledConfig(false)).enabled).toBe(false);
+    });
+
     it('falls back to legacy dimensions when EMBEDDING_LOCAL_DIMENSIONS is invalid', () => {
       const config = makeConfig({
         EMBEDDING_MODEL: 'Xenova/distiluse-base-multilingual-cased-v2',
@@ -375,7 +388,7 @@ describe('EmbeddingService', () => {
     });
   });
 
-  describe('reloadFromCredential — DB credential takes priority over env', () => {
+  describe('reloadFromCredential â€” DB credential takes priority over env', () => {
     it('uses DB credential and ignores env when active credential exists', async () => {
       const { svc, credentials } = makeService({
         EMBEDDING_API_KEY: 'sk-env',
@@ -416,7 +429,7 @@ describe('EmbeddingService', () => {
     });
   });
 
-  describe('getStatus — ollama URL detection', () => {
+  describe('getStatus â€” ollama URL detection', () => {
     it('reports provider as ollama for localhost:11434 URL', async () => {
       const { svc, credentials } = makeService();
       const c = await credentials.create({ name: 'Ollama', provider: 'ollama', apiKey: '', baseUrl: 'http://localhost:11434', model: 'nomic-embed-text', dimensions: 768 });
@@ -487,7 +500,7 @@ describe('EmbeddingService', () => {
   describe('edge case: getProvider before onModuleInit', () => {
     it('boots the local default provider without crashing', async () => {
       const { svc } = makeService();
-      // Do NOT call reloadFromCredential — embedOne should bootstrap the default provider lazily.
+      // Do NOT call reloadFromCredential â€” embedOne should bootstrap the default provider lazily.
       const vec = await svc.embedOne('test before init');
       expect(Array.isArray(vec)).toBe(true);
     });

@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import type { Credential, CreateCredentialDto, LLMProviderType } from '@kalio/types';
+import type { ConversationTitleSettings, Credential, CreateCredentialDto, LLMProviderType } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { credentials, appSettings } from '../../database/schema';
 import { eq } from 'drizzle-orm';
@@ -378,6 +378,30 @@ export class CredentialsService {
       await this.drizzle.db.update(appSettings).set({ value: String(normalized), updatedAt: now }).where(eq(appSettings.key, 'max_tool_attempts'));
     } else {
       await this.drizzle.db.insert(appSettings).values({ key: 'max_tool_attempts', value: String(normalized), updatedAt: now });
+    }
+  }
+
+  async getConversationTitleSettings(): Promise<ConversationTitleSettings> {
+    const [enabledRow, cadenceRow] = await Promise.all([
+      this.drizzle.db.select().from(appSettings).where(eq(appSettings.key, 'conversation_title_auto_rename')).then((r) => r[0]),
+      this.drizzle.db.select().from(appSettings).where(eq(appSettings.key, 'conversation_title_rename_every_replies')).then((r) => r[0]),
+    ]);
+
+    const renameEveryRepliesParsed = cadenceRow ? parseInt(cadenceRow.value, 10) : 3;
+    return {
+      autoRenameEnabled: enabledRow ? enabledRow.value === 'true' : false,
+      renameEveryReplies: Number.isFinite(renameEveryRepliesParsed) ? Math.max(1, Math.min(10, renameEveryRepliesParsed)) : 3,
+    };
+  }
+
+  async setConversationTitleSettings(settings: Partial<ConversationTitleSettings>): Promise<void> {
+    const now = new Date();
+    if (settings.autoRenameEnabled !== undefined) {
+      await this.upsertSetting('conversation_title_auto_rename', settings.autoRenameEnabled ? 'true' : 'false', now);
+    }
+    if (settings.renameEveryReplies !== undefined) {
+      const normalized = Math.max(1, Math.min(10, Math.round(settings.renameEveryReplies)));
+      await this.upsertSetting('conversation_title_rename_every_replies', String(normalized), now);
     }
   }
 }

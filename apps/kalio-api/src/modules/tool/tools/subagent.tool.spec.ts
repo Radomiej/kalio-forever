@@ -197,7 +197,7 @@ describe('SubagentTool', () => {
       availableTools: parentVisibleTools,
     });
 
-    expect(personaService.getSessionConfig).not.toHaveBeenCalled();
+    expect(personaService.getSessionConfig).toHaveBeenCalledWith('default');
     expect(runtime.runSubagent).toHaveBeenCalledWith(expect.objectContaining({
       availableTools: parentVisibleTools,
     }));

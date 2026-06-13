@@ -33,6 +33,8 @@ describe('buildArchitectureGraphProjection', () => {
     const graph = buildArchitectureGraphProjection('run-1', schema, [], 'failed');
 
     expect(graph.status).toBe('failed');
+    expect(graph.schemaId).toBe('test-schema');
+    expect(graph.schemaName).toBe('Test Schema');
     expect(graph.nodes[0]?.status).toBe('pending');
   });
 

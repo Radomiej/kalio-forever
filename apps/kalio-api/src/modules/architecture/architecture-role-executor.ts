@@ -7,47 +7,15 @@ import type {
   ArchitectureRun,
   ArchitectureSchema,
   ArchitectureSchemaNode,
-  ToolMeta,
 } from '@kalio/types';
-import { ToolDispatchService } from '../chat/tool-dispatch.service';
+import { buildArchitectureSlotToolPolicy } from '../chat/architecture-slot-tool-policy';
 import { SUBAGENT_RUNTIME, type SubagentEmit, type SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { FINAL_ARTIFACT_CONTRACT_INSTRUCTION, parseFinalArtifactContract } from './architecture-final-artifact-contract';
 import { createArchitectureBranchStreamHook, type ArchitectureBranchStreamSnapshot } from './architecture-stream-hooks';
+import { PersonaService } from '../persona/persona.service';
+import { CredentialsService } from '../credentials/credentials.service';
 
 export const ARCHITECTURE_ROLE_EXECUTOR = Symbol('ARCHITECTURE_ROLE_EXECUTOR');
-const ARCHITECTURE_BRANCH_TOOL_NAMES = new Set([
-  'vfs_list',
-  'vfs_read',
-  'vfs_grep_search',
-  'vfs_file_search',
-]);
-const ARCHITECTURE_TOOL_EXECUTOR_TOOL_NAMES = new Set([
-  ...ARCHITECTURE_BRANCH_TOOL_NAMES,
-  'vfs_write',
-]);
-const ARCHITECTURE_PROJECT_READ_TOOL_NAMES = new Set([
-  'fs_list',
-  'fs_read',
-]);
-const ARCHITECTURE_PROJECT_WRITE_TOOL_NAMES = new Set([
-  'fs_write',
-]);
-const ARCHITECTURE_TERMINAL_TOOL_NAMES = new Set([
-  'terminal_spawn',
-  'terminal_output',
-  'terminal_list',
-]);
-const ARCHITECTURE_SUBAGENT_TOOL_NAMES = new Set([
-  'run_subagent',
-  'spawn_subagent',
-  'message_subagent',
-]);
-const ARCHITECTURE_CLI_AGENT_TOOL_NAMES = new Set([
-  'spawn_cli_agent',
-  'message_cli_agent',
-  'get_cli_agent_status',
-  'wait_for',
-]);
 
 export interface ArchitectureRoleExecutionInput {
   schema: ArchitectureSchema;
@@ -108,8 +76,8 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     @Optional()
     @Inject(SUBAGENT_RUNTIME)
     private readonly subagentRuntime?: SubagentRuntimePort,
-    @Optional()
-    private readonly toolDispatch?: ToolDispatchService,
+    @Optional() private readonly personaService?: PersonaService,
+    @Optional() private readonly credentialsService?: CredentialsService,
   ) {}
 
   async execute(input: ArchitectureRoleExecutionInput): Promise<ArchitectureRoleExecutionResult> {
@@ -145,7 +113,11 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       personaId: input.personaId,
       parentEmit: input.emit,
     });
-    const availableTools = this.architectureBranchTools(input);
+    const slotPolicy = buildArchitectureSlotToolPolicy({
+      slot: input.slot,
+      architectureContext: input.run.context,
+      incomingEvents: input.incomingEvents,
+    });
     let result: Awaited<ReturnType<SubagentRuntimePort['runSubagent']>>;
     try {
       result = await this.subagentRuntime.runSubagent({
@@ -160,9 +132,10 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
           nodeId: input.node?.id,
           roleSlotId: input.slot.id,
         },
-        availableTools,
+        slotPolicy: slotPolicy ?? undefined,
+        architectureContext: input.run.context,
         timeoutMs: this.timeoutMsForSlot(input),
-        maxIterations: this.maxIterationsForSlot(input),
+        maxIterations: await this.maxIterationsForSlot(input),
         vfsMode: 'shared',
         copyOutputs: false,
         autoApproveTools: this.autoApproveToolsForSlot(input),
@@ -265,10 +238,21 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       && value <= 1_200_000;
   }
 
-  private maxIterationsForSlot(input: ArchitectureRoleExecutionInput): number {
+  private async maxIterationsForSlot(input: ArchitectureRoleExecutionInput): Promise<number> {
+    if (typeof input.node?.maxToolAttempts === 'number') {
+      return Math.max(1, Math.min(100, Math.round(input.node.maxToolAttempts)));
+    }
+    const personaOverride = await this.personaService?.getSessionConfig(input.personaId).then((config) => config?.maxToolAttempts ?? null);
+    if (typeof personaOverride === 'number') {
+      return Math.max(1, Math.min(100, Math.round(personaOverride)));
+    }
     const configured = this.maxIterationsFromContext(input.run.context, input.slot.id);
     if (configured !== undefined) {
       return configured;
+    }
+    const global = await this.credentialsService?.getMaxToolAttempts();
+    if (typeof global === 'number' && Number.isFinite(global)) {
+      return Math.max(1, Math.min(100, Math.round(global)));
     }
     return input.slot.slotType === 'tool_executor' ? 2 : 4;
   }
@@ -320,140 +304,6 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       return tools;
     }
     return undefined;
-  }
-
-  private architectureBranchTools(input: ArchitectureRoleExecutionInput): ToolMeta[] {
-    const allTools = this.toolDispatch?.getToolMetas() ?? [];
-    if (input.slot.slotType === 'finalizer') {
-      return [];
-    }
-    const hasLocalProjectContext = this.hasLocalProjectContext(input.run.context);
-    const canUseCliAgents = this.canUseCliAgentsForSlot(input.run.context, input.slot);
-    if (input.slot.slotType === 'tool_executor') {
-      const gateImplementationReads = this.isImplementationWriterSlot(input.slot)
-        && this.hasIncomingReadEvidence(input.incomingEvents);
-      return this.withCliToolPreferences(allTools.filter((tool) => (
-        (ARCHITECTURE_TOOL_EXECUTOR_TOOL_NAMES.has(tool.name) && (
-          !gateImplementationReads || !ARCHITECTURE_BRANCH_TOOL_NAMES.has(tool.name)
-        ))
-        || (canUseCliAgents && (tool.name === 'get_cli_agent_status' || tool.name === 'wait_for'))
-        || (canUseCliAgents && this.isImplementationWriterSlot(input.slot) && ARCHITECTURE_CLI_AGENT_TOOL_NAMES.has(tool.name))
-        || (hasLocalProjectContext && (
-          (!gateImplementationReads && ARCHITECTURE_PROJECT_READ_TOOL_NAMES.has(tool.name))
-          || ARCHITECTURE_PROJECT_WRITE_TOOL_NAMES.has(tool.name)
-        ))
-        || (
-          !gateImplementationReads
-          && this.hasExecutionCwd(input.run.context)
-          && ARCHITECTURE_TERMINAL_TOOL_NAMES.has(tool.name)
-        )
-      )), input.run.context);
-    }
-    if (this.isOrchestrationSlot(input.slot)) {
-      return this.withCliToolPreferences(allTools.filter((tool) => (
-        ARCHITECTURE_BRANCH_TOOL_NAMES.has(tool.name)
-        || (this.canUseOrchestratorSubagents(input.run.context) && ARCHITECTURE_SUBAGENT_TOOL_NAMES.has(tool.name))
-        || (canUseCliAgents && ARCHITECTURE_CLI_AGENT_TOOL_NAMES.has(tool.name))
-        || (canUseCliAgents && tool.name === 'stop_cli_agent' && this.canUseCliStop(input.run.context))
-        || (hasLocalProjectContext && ARCHITECTURE_PROJECT_READ_TOOL_NAMES.has(tool.name))
-      )), input.run.context);
-    }
-    if (input.slot.slotType === 'judge') {
-      return this.withCliToolPreferences(allTools.filter((tool) => (
-        ARCHITECTURE_BRANCH_TOOL_NAMES.has(tool.name)
-        || tool.name === 'run_subagent'
-        || (canUseCliAgents && (tool.name === 'get_cli_agent_status' || tool.name === 'wait_for'))
-        || (hasLocalProjectContext && ARCHITECTURE_PROJECT_READ_TOOL_NAMES.has(tool.name))
-      )), input.run.context);
-    }
-    if (this.isGoalGuardProofImplementer(input)) {
-      return this.withCliToolPreferences(allTools.filter((tool) => (
-        ARCHITECTURE_BRANCH_TOOL_NAMES.has(tool.name)
-        || tool.name === 'vfs_write'
-        || (this.canAutoApproveProjectWrites(input.run.context) && tool.name === 'fs_write')
-        || (hasLocalProjectContext && ARCHITECTURE_PROJECT_READ_TOOL_NAMES.has(tool.name))
-      )), input.run.context);
-    }
-    return this.withCliToolPreferences(allTools.filter((tool) => (
-      (
-        ARCHITECTURE_BRANCH_TOOL_NAMES.has(tool.name)
-        || (hasLocalProjectContext && ARCHITECTURE_PROJECT_READ_TOOL_NAMES.has(tool.name))
-      ) && !tool.requiresConfirmation
-    )), input.run.context);
-  }
-
-  private hasIncomingReadEvidence(events: ArchitectureExecutionEvent[] | undefined): boolean {
-    return (events ?? []).some((event) => {
-      if (!event.data || typeof event.data !== 'object' || Array.isArray(event.data)) {
-        return false;
-      }
-      const evidence = (event.data as Record<string, unknown>)['toolEvidence'];
-      if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
-        return false;
-      }
-      const successfulToolNames = (evidence as Record<string, unknown>)['successfulToolNames'];
-      return Array.isArray(successfulToolNames) && successfulToolNames.some((name) => (
-        name === 'vfs_read'
-        || name === 'vfs_list'
-        || name === 'vfs_grep_search'
-        || name === 'vfs_file_search'
-        || name === 'fs_read'
-        || name === 'fs_list'
-      ));
-    });
-  }
-
-  private withCliToolPreferences(tools: ToolMeta[], context: Record<string, unknown> | undefined): ToolMeta[] {
-    const preferences = this.cliAgentToolPreferences(context);
-    if (!preferences) {
-      return tools;
-    }
-    return tools.map((tool) => {
-      if (!ARCHITECTURE_CLI_AGENT_TOOL_NAMES.has(tool.name) && tool.name !== 'run_cli_agent' && tool.name !== 'stop_cli_agent') {
-        return tool;
-      }
-      return {
-        ...tool,
-        description: `${tool.description}\n\nArchitecture CLI preferences: ${preferences}`,
-      };
-    });
-  }
-
-  private cliAgentToolPreferences(context: Record<string, unknown> | undefined): string | null {
-    const raw = context?.['cliAgentToolPreferences'];
-    if (typeof raw === 'string' && raw.trim().length > 0) {
-      return raw.trim();
-    }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      return null;
-    }
-    const lines = Object.entries(raw as Record<string, unknown>)
-      .map(([agentId, value]) => this.cliAgentPreferenceLine(agentId, value))
-      .filter((value): value is string => typeof value === 'string' && value.length > 0);
-    return lines.length > 0 ? lines.join(' | ') : null;
-  }
-
-  private cliAgentPreferenceLine(agentId: string, value: unknown): string | null {
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return `${agentId}: ${value.trim()}`;
-    }
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return null;
-    }
-    const record = value as Record<string, unknown>;
-    const model = typeof record['model'] === 'string' && record['model'].trim().length > 0
-      ? record['model'].trim()
-      : null;
-    const preference = typeof record['preference'] === 'string' && record['preference'].trim().length > 0
-      ? record['preference'].trim()
-      : null;
-    if (model && preference) {
-      return `${agentId} (model ${model}): ${preference}`;
-    }
-    if (model) {
-      return `${agentId} (model ${model})`;
-    }
-    return preference ? `${agentId}: ${preference}` : null;
   }
 
   private buildObjective(input: ArchitectureRoleExecutionInput): string {

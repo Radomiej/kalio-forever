@@ -145,6 +145,7 @@ export class SpawnCliAgentTool {
       agentId,
       timeoutMs: inactivityTimeoutMs,
       acceptanceHints,
+      emit: request._emit,
     });
   }
 

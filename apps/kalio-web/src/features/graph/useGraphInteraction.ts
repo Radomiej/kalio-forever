@@ -276,6 +276,15 @@ export function hasPointerEvents(): boolean {
   return typeof window !== 'undefined' && 'PointerEvent' in window;
 }
 
+export function acquirePointerCaptureIfSupported(element: Element, pointerId: number): void {
+  if (
+    'setPointerCapture' in element
+    && typeof element.setPointerCapture === 'function'
+  ) {
+    element.setPointerCapture(pointerId);
+  }
+}
+
 export function releasePointerCaptureIfHeld(element: Element, pointerId: number): void {
   if (
     'hasPointerCapture' in element

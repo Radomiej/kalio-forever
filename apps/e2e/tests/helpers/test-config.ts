@@ -96,6 +96,14 @@ export async function selectArchitectureInComposer(page: Page, architectureId: s
 		return;
 	}
 
+	const workflowModeButton = page.getByTestId('welcome-mode-workflow');
+	if (await workflowModeButton.isVisible().catch(() => false)) {
+		await workflowModeButton.click();
+		await expect(welcomeSelect).toBeVisible({ timeout: 5000 });
+		await welcomeSelect.selectOption(architectureId);
+		return;
+	}
+
 	await page.getByTestId('chat-architecture-select').selectOption(architectureId);
 }
 

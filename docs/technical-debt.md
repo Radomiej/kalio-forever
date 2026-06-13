@@ -1,5 +1,25 @@
 # Technical Debt
 
+## Confirmation Policy Must Be Enforced In Code
+
+Date: 2026-06-12
+
+Current state:
+- Native tools with default `requiresConfirmation: true` are not downgraded in-memory by `ToolRegistryService.setOverride()`, even if `/api/tools/:name` persists `false`.
+- The Settings tool panel still exposes a generic reversible confirmation toggle for every tool.
+- MCP discovery currently defaults discovered tools to `requiresConfirmation: false` unless the upstream MCP metadata says otherwise.
+
+Debt:
+- The destructive/non-destructive distinction is not yet a formal backend capability contract shared across native tools, MCP tools, persisted overrides, and settings UI.
+- Confirmation for destructive tools must be enforced centrally in backend policy, not inferred only from UI toggles or upstream MCP metadata.
+- Overrides should only tighten confirmation for safe/status tools; they must not disable confirmation for destructive/write/exec tools.
+
+Acceptance:
+- Backend rejects confirmation downgrades for destructive tools regardless of caller or transport.
+- Destructive capability is classified centrally and reused by native tools and MCP tools.
+- Settings UI reflects immutable confirmation for destructive tools instead of a generic on/off toggle.
+- Regression tests cover native destructive tools, MCP tools, and persisted override reload.
+
 ## AgentFlow Runtime And Workflow QA
 
 Date: 2026-06-04

@@ -1,4 +1,6 @@
 import type { RefObject } from 'react';
+import type { ChatMessage, SocketEvents } from '@kalio/types';
+import type { ChatConnectionState } from '../ChatInterface.Parts';
 
 type ToolArgProgress = { toolName: string; totalChars: number; charsPerSec: number };
 
@@ -66,4 +68,78 @@ export function canReleaseComposerAfterToolResult({
   }
 
   return !hasActiveLoop && !hasActiveTool && !hasPendingChunks;
+}
+
+export function handleSessionStatusEvent(
+  payload: SocketEvents['session:status'],
+  deps: {
+    getActiveSessionId: () => string | null;
+    hasActiveLoopForSession: (sessionId: string) => boolean;
+    getSessionActiveTurnId: (sessionId: string) => string | null;
+    setRecoveryNotice: (value: string) => void;
+    addActiveAgentLoop: (sessionId: string, turnId: string) => void;
+    startAgentTurn: (turnId: string, sessionId: string) => void;
+    setAwaitingFirstChunk: (value: boolean) => void;
+    setStreaming: (value: boolean) => void;
+  },
+): void {
+  if (payload.run?.status === 'interrupted_needs_retry' && payload.sessionId === deps.getActiveSessionId()) {
+    deps.setRecoveryNotice(
+      payload.run.safeResume
+        ? 'Backend restarted during LLM work. Retry is safe from the current transcript.'
+        : 'Backend restarted during tool execution. Manual retry avoids duplicate tool execution.',
+    );
+  }
+
+  if (!payload.active || !payload.turnId) return;
+
+  if (!deps.hasActiveLoopForSession(payload.sessionId)) {
+    deps.addActiveAgentLoop(payload.sessionId, payload.turnId);
+  }
+  if (!deps.getSessionActiveTurnId(payload.sessionId)) {
+    deps.startAgentTurn(payload.turnId, payload.sessionId);
+  }
+  if (payload.sessionId === deps.getActiveSessionId()) {
+    deps.setAwaitingFirstChunk(false);
+    deps.setStreaming(true);
+  }
+}
+
+export function handleConnectionStateEvent(
+  state: { status: ChatConnectionState; recovered?: boolean },
+  deps: {
+    setConnectionState: (value: ChatConnectionState) => void;
+    setRecoveryNotice: (value: string) => void;
+  },
+): void {
+  deps.setConnectionState(state.status);
+  if (state.status === 'connected') {
+    if (state.recovered) {
+      deps.setRecoveryNotice('Recovered missed stream events after reconnect.');
+    }
+    return;
+  }
+  if (state.status === 'reconnecting') {
+    deps.setRecoveryNotice('Connection dropped. Reconnecting and preserving this session.');
+  }
+}
+
+export function mergeRaAppNativeResultIntoMessages(
+  messages: ChatMessage[],
+  toolCallId: string,
+  results: unknown,
+): ChatMessage[] {
+  return messages.map((message) => {
+    if (message.toolCallId !== toolCallId || message.role !== 'tool_result') return message;
+    try {
+      const data = JSON.parse(message.content) as Record<string, unknown>;
+      return {
+        ...message,
+        content: JSON.stringify({ ...data, nativeResults: results, pendingApprovals: [] }),
+      };
+    } catch (err) {
+      console.error('[ChatInterface] failed to merge RA-App native result', err instanceof Error ? err : new Error(String(err)));
+      return message;
+    }
+  });
 }

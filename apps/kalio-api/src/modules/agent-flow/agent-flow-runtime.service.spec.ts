@@ -18,6 +18,132 @@ function adapter() {
 }
 
 describe('AgentFlowRuntimeService', () => {
+  it('inherits parent session allowance into durable start context and checkpoint', async () => {
+    vi.useFakeTimers();
+    const architectureAdapter = adapter();
+    const repository = new AgentFlowRunRepository();
+    const sessions = {
+      get: vi.fn(async (id: string) => {
+        if (id !== 'branch-parent') {
+          throw new Error(`unexpected session ${id}`);
+        }
+        return {
+          id,
+          personaId: 'default',
+          title: 'Branch',
+          kind: 'subagent',
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureContext: {
+              projectPath: 'C:\\Projekty\\TurboProject2',
+              executionCwd: 'C:\\Projekty\\TurboProject2',
+            },
+          },
+          createdAt: 1,
+          updatedAt: 1,
+        };
+      }),
+    };
+    const architectureRuntime = {
+      findRunDurable: vi.fn(async () => null),
+    };
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+      undefined,
+      sessions as never,
+      architectureRuntime as never,
+    );
+    architectureAdapter.start.mockResolvedValue({
+      run: {
+        id: 'run-inherit',
+        parentSessionId: 'branch-parent',
+        childSessionId: 'child-inherit',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'running',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+    } satisfies AgentFlowRunSnapshot);
+
+    await service.start({
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Nested child flow',
+      parentSessionId: 'branch-parent',
+    });
+
+    expect(architectureAdapter.start).toHaveBeenCalledWith(expect.objectContaining({
+      context: {
+        projectPath: 'C:\\Projekty\\TurboProject2',
+        executionCwd: 'C:\\Projekty\\TurboProject2',
+      },
+    }));
+    expect(repository.getSnapshot('run-inherit')?.run.checkpoint?.context).toEqual({
+      projectPath: 'C:\\Projekty\\TurboProject2',
+      executionCwd: 'C:\\Projekty\\TurboProject2',
+    });
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('keeps inherited projectPath in checkpoint context after adapter refresh', async () => {
+    const architectureAdapter = adapter();
+    const repository = new AgentFlowRunRepository();
+    const service = new AgentFlowRuntimeService(
+      architectureAdapter as unknown as ArchitectureAgentFlowAdapter,
+      repository,
+    );
+    repository.saveSnapshot({
+      run: {
+        id: 'run-refresh-context',
+        parentSessionId: 'parent-ctx',
+        childSessionId: 'child-ctx',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'running',
+        startMode: 'durable',
+        returnMode: 'summary',
+        checkpoint: {
+          goal: 'Keep allowance',
+          context: {
+            projectPath: 'C:\\Projekty\\TurboProject2',
+            executionCwd: 'C:\\Projekty\\TurboProject2',
+          },
+        },
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+    });
+    architectureAdapter.getSnapshot.mockResolvedValue({
+      run: {
+        id: 'run-refresh-context',
+        parentSessionId: 'parent-ctx',
+        childSessionId: 'child-ctx',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'running',
+        startMode: 'durable',
+        returnMode: 'summary',
+        checkpoint: {
+          goal: 'Keep allowance',
+          context: undefined,
+        },
+        createdAt: 1,
+        updatedAt: 3,
+      },
+      events: [],
+    } satisfies AgentFlowRunSnapshot);
+
+    const refreshed = await service.getSnapshot('run-refresh-context');
+
+    expect(refreshed?.run.checkpoint?.context).toEqual({
+      projectPath: 'C:\\Projekty\\TurboProject2',
+      executionCwd: 'C:\\Projekty\\TurboProject2',
+    });
+  });
+
   it('starts durable runs with an async adapter snapshot', async () => {
     vi.useFakeTimers();
     const architectureAdapter = adapter();

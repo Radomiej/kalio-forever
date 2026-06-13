@@ -332,6 +332,10 @@ describe('PersonaService', () => {
         model: 'gpt-4',
         allowedTools: [],
         skillIds: [],
+        avatarSeed: 'locked-seed',
+        avatarVariant: 'ring',
+        avatarPaletteKey: 'violet',
+        avatarIndex: 2,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -345,6 +349,73 @@ describe('PersonaService', () => {
       await service.update('p1', { name: 'New Name' });
 
       expect(mockDb.update).toHaveBeenCalled();
+    });
+
+    it('create stores default avatar token when dto omits avatar fields', async () => {
+      const valuesMock = vi.fn().mockResolvedValue(undefined);
+      mockDb.insert.mockReturnValue({ values: valuesMock });
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{
+            id: 'new-id',
+            name: 'Research Bot',
+            systemPrompt: 'Prompt',
+            model: 'gpt-4o-mini',
+            allowedTools: [],
+            skillIds: [],
+            mcpPolicy: 'allow_all',
+            avatarSeed: 'research bot',
+            avatarVariant: 'marble',
+            avatarPaletteKey: 'ocean',
+            avatarIndex: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          }]),
+        }),
+      });
+
+      await service.create({
+        name: 'Research Bot',
+        systemPrompt: 'Prompt',
+        model: 'gpt-4o-mini',
+        allowedTools: [],
+      });
+
+      expect(valuesMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          avatarSeed: 'research bot',
+          avatarVariant: 'marble',
+          avatarPaletteKey: 'ocean',
+          avatarIndex: 0,
+        }),
+      );
+    });
+
+    it('findAll resolves avatar fallback for legacy rows without stored token', async () => {
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockResolvedValue([{
+          id: 'legacy',
+          name: 'Legacy Persona',
+          systemPrompt: 'Prompt',
+          model: 'gpt-4',
+          allowedTools: [],
+          skillIds: [],
+          mcpPolicy: 'allow_all',
+          avatarSeed: null,
+          avatarVariant: null,
+          avatarPaletteKey: null,
+          avatarIndex: null,
+          createdAt: 1234567890,
+          updatedAt: 1234567890,
+        }]),
+      });
+
+      const result = await service.findAll();
+
+      expect(result[0]?.avatarSeed).toBe('legacy persona');
+      expect(result[0]?.avatarVariant).toBe('marble');
+      expect(result[0]?.avatarPaletteKey).toBe('ocean');
+      expect(result[0]?.avatarIndex).toBe(0);
     });
   });
 
@@ -676,6 +747,46 @@ describe('PersonaService', () => {
   });
 
   describe('onApplicationBootstrap — seeded model sync', () => {
+    it('seeds default persona without a hardcoded model override', async () => {
+      vi.spyOn(
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            systemPrompt: string;
+            model?: string;
+            allowedTools: string[];
+            skillIds?: string[];
+          }>;
+        },
+        'loadPersonasConfig',
+      ).mockReturnValue({
+        default: {
+          name: 'Default',
+          systemPrompt: 'You are a helpful AI assistant.',
+          allowedTools: [],
+          skillIds: [],
+        },
+      });
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      const valuesMock = vi.fn().mockResolvedValue(undefined);
+      mockDb.insert.mockReturnValue({ values: valuesMock });
+
+      await service.onApplicationBootstrap();
+
+      expect(valuesMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'default',
+          model: '',
+        }),
+      );
+    });
+
     it('fills an empty stored seeded model from personas config', async () => {
       vi.spyOn(
         service as unknown as {

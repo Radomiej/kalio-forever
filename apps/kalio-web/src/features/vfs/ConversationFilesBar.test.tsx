@@ -15,6 +15,7 @@ vi.mock('../../services/apiClient', () => ({
       baseURL: 'http://api.example.com',
     },
   },
+  getApiBaseUrl: () => 'http://api.example.com',
 }));
 
 import { ConversationFilesBar } from './ConversationFilesBar';
