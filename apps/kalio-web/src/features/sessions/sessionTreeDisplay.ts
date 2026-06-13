@@ -4,6 +4,8 @@ export type SessionRuntimeState = 'pending' | 'waiting' | 'running' | 'error' | 
 type ArchitectureRunWithGraph = NonNullable<ChatMessage['architectureRun']> & {
   graphNodes?: ArchitectureGraphProjection['nodes'];
 };
+const TECHNICAL_ARCHITECTURE_SLOT_IDS = new Set(['router', 'finalizer']);
+const TECHNICAL_ARCHITECTURE_SLOT_TYPES = new Set(['router', 'finalizer']);
 
 export function buildChildSessionsByParent(sessions: ChatSession[]): Map<string, ChatSession[]> {
   return sessions.reduce((acc, session) => {
@@ -57,15 +59,16 @@ export function buildArchitectureSessionRuntimeStates(
 ): Map<string, SessionRuntimeState> {
   const statusBySession = new Map<string, SessionRuntimeState>();
   const architectureSessions = sessions.filter((session) => architectureRunIdForSession(session));
-  architectureSessions.forEach((session) => {
-    statusBySession.set(session.id, 'pending');
-  });
   const runs = Object.values(sessionMessages)
     .flat()
     .map((message) => message.architectureRun as ArchitectureRunWithGraph | undefined)
     .filter((run): run is ArchitectureRunWithGraph => Boolean(run));
 
   for (const run of runs) {
+    const graphNodeById = new Map(
+      (run.graphNodes ?? []).map((node) => [normalizeArchitectureNodeKey(node.id), node]),
+    );
+
     for (const session of architectureSessions) {
       if (architectureRunIdForSession(session) !== run.runId) {
         continue;
@@ -75,9 +78,14 @@ export function buildArchitectureSessionRuntimeStates(
         statusBySession.set(session.id, statusFromArchitectureRun(run.status));
         continue;
       }
-      const graphNode = run.graphNodes?.find((node) => nodeMatchesArchitectureSlot(node, slotId));
-      if (graphNode) {
-        statusBySession.set(session.id, statusFromGraphNode(graphNode.status));
+      const node = graphNodeById.get(normalizeArchitectureNodeKey(slotId));
+      if (node) {
+        statusBySession.set(session.id, statusFromArchitectureGraphNode(node.status));
+        continue;
+      }
+      const fallbackState = fallbackArchitectureBranchState(run.status);
+      if (fallbackState) {
+        statusBySession.set(session.id, fallbackState);
       }
     }
 
@@ -91,6 +99,16 @@ export function buildArchitectureSessionRuntimeStates(
   }
 
   return statusBySession;
+}
+
+export function isTechnicalArchitectureSession(session: ChatSession): boolean {
+  const slotType = architectureSlotTypeForSession(session);
+  if (typeof slotType === 'string' && TECHNICAL_ARCHITECTURE_SLOT_TYPES.has(slotType)) {
+    return true;
+  }
+  const slotId = architectureSlotIdForSession(session);
+  // TODO: legacy fallback - older persisted branch sessions may expose roleSlotId without roleSlotType.
+  return typeof slotId === 'string' && TECHNICAL_ARCHITECTURE_SLOT_IDS.has(slotId);
 }
 
 export function sessionStatusSnapshotToRuntimeState(
@@ -134,10 +152,14 @@ function statusFromArchitectureRun(status: NonNullable<ChatMessage['architecture
   return 'error';
 }
 
-function statusFromGraphNode(status: ArchitectureGraphProjection['nodes'][number]['status']): SessionRuntimeState {
-  if (status === 'completed') return 'done';
+function statusFromArchitectureGraphNode(
+  status: ArchitectureGraphProjection['nodes'][number]['status'],
+): SessionRuntimeState {
+  if (status === 'pending') return 'pending';
   if (status === 'running') return 'running';
-  return 'pending';
+  if (status === 'completed') return 'done';
+  if (status === 'cancelled') return 'stopped';
+  return 'error';
 }
 
 function statusFromArchitectureTraceStep(step: NonNullable<ChatMessage['architectureRun']>['trace'][number]): SessionRuntimeState {
@@ -156,6 +178,15 @@ function statusFromArchitectureTraceStep(step: NonNullable<ChatMessage['architec
   return step.content.trim().length > 0 ? 'done' : 'pending';
 }
 
+function fallbackArchitectureBranchState(
+  status: NonNullable<ChatMessage['architectureRun']>['status'],
+): SessionRuntimeState | null {
+  if (status === 'queued' || status === 'running') {
+    return 'pending';
+  }
+  return null;
+}
+
 function architectureRunIdForSession(session: ChatSession): string | undefined {
   const runId = architectureContext(session)['architectureRunId'];
   if (typeof runId === 'string' && runId.trim().length > 0) {
@@ -165,24 +196,19 @@ function architectureRunIdForSession(session: ChatSession): string | undefined {
     ?? architectureRunIdFromParentToolCall(session.runtimeContext?.parentToolCallId);
 }
 
-function architectureSlotIdForSession(session: ChatSession): string | undefined {
+export function architectureSlotIdForSession(session: ChatSession): string | undefined {
   const slotId = session.runtimeContext?.architectureSlotId ?? architectureContext(session)['roleSlotId'];
   return typeof slotId === 'string' && slotId.trim().length > 0 ? slotId.trim() : undefined;
+}
+
+function architectureSlotTypeForSession(session: ChatSession): string | undefined {
+  const slotType = architectureContext(session)['roleSlotType'];
+  return typeof slotType === 'string' && slotType.trim().length > 0 ? slotType.trim() : undefined;
 }
 
 function architectureContext(session: ChatSession): Record<string, unknown> {
   const context = session.runtimeContext?.architectureContext;
   return context && typeof context === 'object' && !Array.isArray(context) ? context : {};
-}
-
-function nodeMatchesArchitectureSlot(node: ArchitectureGraphProjection['nodes'][number], slotId: string): boolean {
-  const normalizedSlotId = normalizeArchitectureIdentifier(slotId);
-  return normalizeArchitectureIdentifier(node.id) === normalizedSlotId
-    || normalizeArchitectureIdentifier(node.label) === normalizedSlotId;
-}
-
-function normalizeArchitectureIdentifier(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
 function architectureRunIdFromParentToolCall(parentToolCallId: string | undefined): string | undefined {
@@ -191,4 +217,8 @@ function architectureRunIdFromParentToolCall(parentToolCallId: string | undefine
   }
   const match = /^architecture:([^:]+):/.exec(parentToolCallId.trim());
   return match?.[1];
+}
+
+function normalizeArchitectureNodeKey(value: string): string {
+  return value.trim().toLowerCase().replace(/_/g, '-');
 }

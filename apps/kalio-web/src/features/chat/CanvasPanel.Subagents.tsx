@@ -94,16 +94,18 @@ export function buildSubagentPreviews(
   sessions: ChatSession[],
 ): SubagentCanvasPreview[] {
   const previews = new Map<string, SubagentCanvasPreview>();
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
   const sessionUpdatedAt = new Map(sessions.map((session) => [session.id, session.updatedAt]));
 
   Object.values(activeAgentLoops)
     .filter((loop) => loop.agentRun?.agentType === 'subagent')
     .forEach((loop) => {
-      const session = sessions.find((item) => item.id === loop.sessionId);
+      const session = sessionsById.get(loop.sessionId);
+      if (!session) return;
       previews.set(loop.sessionId, {
         sessionId: loop.sessionId,
         label: loop.agentRun?.label ?? 'Sub-agent',
-        title: session?.title ?? loop.agentRun?.label ?? 'Sub-agent',
+        title: session.title,
         copiedFiles: [],
         summary: null,
         status: 'running',
@@ -116,13 +118,14 @@ export function buildSubagentPreviews(
     .forEach((activity) => {
       const result = extractSubagentResult(activity.result?.data);
       if (!result) return;
-      const session = sessions.find((item) => item.id === result.childSessionId);
+      const session = sessionsById.get(result.childSessionId);
+      if (!session) return;
       const existing = previews.get(result.childSessionId);
       const fallbackLabel = titleFromSessionId(result.childSessionId);
       previews.set(result.childSessionId, {
         sessionId: result.childSessionId,
         label: existing?.label ?? fallbackLabel,
-        title: session?.title ?? existing?.title ?? `Sub-agent ${result.childSessionId.slice(0, 8)}`,
+        title: session.title,
         copiedFiles: result.copiedFiles,
         summary: compactPreviewText(result.result),
         status: existing?.status === 'running' ? 'running' : 'success',
@@ -135,13 +138,14 @@ export function buildSubagentPreviews(
     .forEach((activity) => {
       const childSessionId = failedSubagentSessionId(activity);
       if (!childSessionId) return;
-      const session = sessions.find((item) => item.id === childSessionId);
+      const session = sessionsById.get(childSessionId);
+      if (!session) return;
       const existing = previews.get(childSessionId);
       const fallbackLabel = titleFromSessionId(childSessionId);
       previews.set(childSessionId, {
         sessionId: childSessionId,
         label: existing?.label ?? activity.agentRun?.label ?? activity.result?.agentRun?.label ?? fallbackLabel,
-        title: session?.title ?? existing?.title ?? `Sub-agent ${childSessionId.slice(0, 8)}`,
+        title: session.title,
         copiedFiles: existing?.copiedFiles ?? [],
         summary: failedSubagentSummary(activity),
         status: 'error',
@@ -153,13 +157,14 @@ export function buildSubagentPreviews(
     .map(extractSubagentResultFromMessage)
     .filter((result): result is SubagentToolResult => result !== null)
     .forEach((result) => {
-      const session = sessions.find((item) => item.id === result.childSessionId);
+      const session = sessionsById.get(result.childSessionId);
+      if (!session) return;
       const existing = previews.get(result.childSessionId);
       const fallbackLabel = titleFromSessionId(result.childSessionId);
       previews.set(result.childSessionId, {
         sessionId: result.childSessionId,
         label: existing?.label ?? fallbackLabel,
-        title: session?.title ?? existing?.title ?? `Sub-agent ${result.childSessionId.slice(0, 8)}`,
+        title: session.title,
         copiedFiles: existing?.copiedFiles.length ? existing.copiedFiles : result.copiedFiles,
         summary: existing?.summary ?? compactPreviewText(result.result),
         status: existing?.status ?? 'success',

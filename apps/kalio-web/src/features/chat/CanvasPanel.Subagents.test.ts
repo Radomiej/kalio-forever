@@ -44,4 +44,30 @@ describe('buildSubagentPreviews', () => {
       }),
     ]);
   });
+
+  it('ignores projected sub-agent results when no real child session exists', () => {
+    const toolActivities: ToolActivity[] = [
+      {
+        callId: 'call-missing-subagent',
+        toolName: 'run_subagent',
+        args: {},
+        status: 'success',
+        startedAt: 1,
+        finishedAt: 2,
+        result: {
+          callId: 'call-missing-subagent',
+          status: 'success',
+          data: {
+            childSessionId: 'sub-missing',
+            result: 'draft output',
+            taskId: 'task-1',
+            parentSessionId: 'session-1',
+            copiedFiles: [],
+          },
+        },
+      },
+    ];
+
+    expect(buildSubagentPreviews([], toolActivities, {}, [])).toEqual([]);
+  });
 });

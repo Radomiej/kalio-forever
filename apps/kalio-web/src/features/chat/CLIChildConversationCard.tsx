@@ -46,6 +46,9 @@ export function CLIChildConversationCard({
     resultData,
     childSessionId,
   });
+  const childSessionExists = useSessionStore((state) => (
+    projection?.childSessionId != null && state.sessions.some((session) => session.id === projection.childSessionId)
+  ));
 
   if (!projection || projection.childSessionId.startsWith('pending-')) {
     if (!projection) return null;
@@ -128,15 +131,17 @@ export function CLIChildConversationCard({
       )}
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className="btn btn-xs btn-ghost gap-1"
-          onClick={openChildChat}
-          data-testid={`cli-child-open-${projection.childSessionId}`}
-        >
-          <ExternalLink size={12} />
-          Open child chat
-        </button>
+        {childSessionExists && (
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost gap-1"
+            onClick={openChildChat}
+            data-testid={`cli-child-open-${projection.childSessionId}`}
+          >
+            <ExternalLink size={12} />
+            Open child chat
+          </button>
+        )}
         {isRunning && (
           <button
             type="button"
@@ -148,15 +153,17 @@ export function CLIChildConversationCard({
             Stop
           </button>
         )}
-        <button
-          type="button"
-          className="btn btn-xs btn-ghost gap-1"
-          onClick={steerChild}
-          data-testid={`cli-child-followup-${projection.childSessionId}`}
-        >
-          <MessageSquareText size={12} />
-          Steer CLI child
-        </button>
+        {childSessionExists && (
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost gap-1"
+            onClick={steerChild}
+            data-testid={`cli-child-followup-${projection.childSessionId}`}
+          >
+            <MessageSquareText size={12} />
+            Steer CLI child
+          </button>
+        )}
         <button
           type="button"
           className="btn btn-xs btn-ghost gap-1"

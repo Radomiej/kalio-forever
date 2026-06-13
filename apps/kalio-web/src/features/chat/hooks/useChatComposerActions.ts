@@ -187,6 +187,7 @@ export function useChatComposerActions({
         runId: pendingAssistantMessageId,
         schemaId,
         status: 'running',
+        hostProjectionKind: 'workflow-envelope',
         trace: [],
         routeHops: [],
       },
@@ -239,6 +240,7 @@ export function useChatComposerActions({
           id: `architecture-turn-${result.run.id}`,
           sessionId: activeSessionId,
           promptMessageId: userMessageId,
+          turnKind: projection.turnKind,
           items: projection.turnItems,
           done: projectionDone,
         };

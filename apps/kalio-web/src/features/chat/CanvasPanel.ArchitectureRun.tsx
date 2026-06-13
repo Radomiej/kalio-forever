@@ -39,6 +39,10 @@ function findSessionTitle(sessions: ChatSession[], sessionId: string): string {
   return sessions.find((session) => session.id === sessionId)?.title ?? sessionId;
 }
 
+function hasBranchSession(sessions: ChatSession[], sessionId: string | undefined): sessionId is string {
+  return typeof sessionId === 'string' && sessions.some((session) => session.id === sessionId);
+}
+
 function visibleTranscript(messages: ChatMessage[]): ChatMessage[] {
   return messages
     .filter((message) => message.role === 'user' || message.role === 'assistant')
@@ -98,6 +102,7 @@ function ArchitectureTraceCard({
   focused?: boolean;
 }) {
   const branchSessionId = step.stream?.branchSessionId;
+  const openableBranchSessionId = hasBranchSession(sessions, branchSessionId) ? branchSessionId : undefined;
   const visibleMessages = visibleTranscript(transcript);
   const tone = step.speaker === 'participant'
     ? 'border-sky-500/20 bg-sky-500/5'
@@ -122,14 +127,14 @@ function ArchitectureTraceCard({
             {step.nextNodeId ? ` -> ${step.nextNodeId}` : ''}
           </p>
         </div>
-        {branchSessionId && (
+        {openableBranchSessionId && (
           <button
             type="button"
             className="btn btn-ghost btn-xs"
-            onClick={() => onOpenSession(branchSessionId)}
-            data-testid={`architecture-open-branch-${branchSessionId}`}
-            data-session-id={branchSessionId}
-            title={findSessionTitle(sessions, branchSessionId)}
+            onClick={() => onOpenSession(openableBranchSessionId)}
+            data-testid={`architecture-open-branch-${openableBranchSessionId}`}
+            data-session-id={openableBranchSessionId}
+            title={findSessionTitle(sessions, openableBranchSessionId)}
           >
             Open
           </button>
@@ -138,8 +143,8 @@ function ArchitectureTraceCard({
       <p className="text-base-content/65 leading-relaxed line-clamp-4">
         {compact(compactArchitectureTraceContent(step.content, step.speaker))}
       </p>
-      {branchSessionId && (
-        <div className="space-y-1" data-testid={`architecture-run-branch-transcript-${branchSessionId}`}>
+      {openableBranchSessionId && (
+        <div className="space-y-1" data-testid={`architecture-run-branch-transcript-${openableBranchSessionId}`}>
           {visibleMessages.length > 0 ? (
             visibleMessages.map((message) => (
               <div key={message.id} className="rounded bg-base-200/65 px-2 py-1">
@@ -264,13 +269,16 @@ function ArchitectureSequentialFlow({
 
 function ArchitectureTranscriptEntry({
   step,
+  sessions,
   getBranchMessages,
 }: {
   step: TraceStep;
+  sessions: ChatSession[];
   getBranchMessages: (sessionId: string) => ChatMessage[];
 }) {
   const branchSessionId = step.stream?.branchSessionId;
-  const transcript = branchSessionId ? visibleTranscript(getBranchMessages(branchSessionId)) : [];
+  const openableBranchSessionId = hasBranchSession(sessions, branchSessionId) ? branchSessionId : undefined;
+  const transcript = openableBranchSessionId ? visibleTranscript(getBranchMessages(openableBranchSessionId)) : [];
 
   return (
     <div className="rounded-lg border border-base-300 bg-base-200/30 px-2.5 py-2 text-xs" data-testid="architecture-run-transcript-entry">
@@ -293,8 +301,8 @@ function ArchitectureTranscriptEntry({
       <p className="text-base-content/60 leading-relaxed">
         {compact(compactArchitectureTraceContent(step.content, step.speaker))}
       </p>
-      {branchSessionId && transcript.length > 0 && (
-        <div className="mt-1 space-y-1" data-testid={`architecture-run-transcript-branch-${branchSessionId}`}>
+      {openableBranchSessionId && transcript.length > 0 && (
+        <div className="mt-1 space-y-1" data-testid={`architecture-run-transcript-branch-${openableBranchSessionId}`}>
           {transcript.map((message) => (
             <div key={message.id} className="rounded bg-base-100/65 px-2 py-1">
               <span className="text-base-content/35 mr-1">{message.role === 'user' ? 'User:' : 'Agent:'}</span>
@@ -357,6 +365,7 @@ export function ArchitectureRunCanvasSection({
           <ArchitectureTranscriptEntry
             key={step.eventId ?? `${step.speaker}-${step.nodeId ?? index}-${step.visitIndex ?? 0}`}
             step={step}
+            sessions={sessions}
             getBranchMessages={getBranchMessages}
           />
         ))}

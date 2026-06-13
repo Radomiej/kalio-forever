@@ -102,6 +102,43 @@ describe('buildCopiedChatText', () => {
 });
 
 describe('ChatWelcomeScreen', () => {
+  it('shows a waiting placeholder for empty child sessions instead of the launch screen', () => {
+    render(
+      <ChatWelcomeScreen
+        activeSession={{
+          ...session(),
+          id: 'branch-1',
+          title: 'Strategic Decision Council: Analyst',
+          kind: 'subagent',
+          parentSessionId: 'arch-root',
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureContext: {
+              displayLabel: 'Analyst',
+            },
+          },
+        }}
+        activeSessionId="branch-1"
+        architectures={[schema()]}
+        isStreaming={false}
+        onArchitectureChange={vi.fn()}
+        onArchitectureRun={vi.fn()}
+        onDraftChange={vi.fn()}
+        onPersonaChange={vi.fn()}
+        onProjectPathChange={vi.fn()}
+        onSend={vi.fn()}
+        personas={[persona()]}
+        projectPath=""
+        selectedPersonaId="default"
+        selectedArchitectureId="single-chat"
+      />,
+    );
+
+    expect(screen.getByTestId('pending-child-session-screen')).toBeInTheDocument();
+    expect(screen.queryByTestId('welcome-run-prompt')).not.toBeInTheDocument();
+    expect(screen.getByText('Waiting for the first persisted message')).toBeInTheDocument();
+  });
+
   it('runs the prompt through the selected architecture instead of direct chat', () => {
     const onArchitectureRun = vi.fn();
     const onSend = vi.fn();

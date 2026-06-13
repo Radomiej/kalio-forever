@@ -198,7 +198,9 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
   }, [activeArchitectureRunId, activeSessionId]);
 
   useEffect(() => {
+    const knownSessionIds = new Set(sessions.map((session) => session.id));
     const branchSessionIds = extractArchitectureBranchSessionIds(focusedGraph.messages)
+      .filter((sessionId) => knownSessionIds.has(sessionId))
       .filter((sessionId) => (sessionMessages[sessionId]?.length ?? 0) === 0);
     if (branchSessionIds.length === 0) {
       return;
@@ -221,7 +223,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     return () => {
       cancelled = true;
     };
-  }, [focusedGraph.messages, sessionMessages, setAgentTurns, setMessages]);
+  }, [focusedGraph.messages, sessionMessages, sessions, setAgentTurns, setMessages]);
 
   useEffect(() => {
     if (!activeSessionId || !activeArchitectureRunId) {

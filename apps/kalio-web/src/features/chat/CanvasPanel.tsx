@@ -22,6 +22,10 @@ export function CanvasPanel() {
   const { messages, activeSessionId, sessions, sessionMessages, setActiveSession, getSessionMessages, setMessages } = useSessionStore();
   const [hydratedSubagentSessions, setHydratedSubagentSessions] = useState<Record<string, true>>({});
   const open = canvasOpen;
+  const knownSessionIds = useMemo(
+    () => new Set(sessions.map((session) => session.id)),
+    [sessions],
+  );
   const subagentLoops = Object.values(activeAgentLoops).filter((loop) => loop.agentRun?.agentType === 'subagent');
   const masterActivities = toolActivities.filter((activity) => activity.agentRun?.agentType !== 'subagent');
   const subagentActivities = toolActivities.filter((activity) => activity.agentRun?.agentType === 'subagent');
@@ -62,10 +66,10 @@ export function CanvasPanel() {
           ...agentFlowPreviews.map((preview) => preview.sessionId),
           ...(focusedCanvasSessionId ? [focusedCanvasSessionId] : []),
         ]
-          .filter((sessionId) => sessionId !== activeSessionId),
+          .filter((sessionId) => sessionId !== activeSessionId && knownSessionIds.has(sessionId)),
       ),
     ).sort(),
-    [activeSessionId, agentFlowPreviews, cliChildPreviews, focusedCanvasSessionId, subagentPreviews],
+    [activeSessionId, agentFlowPreviews, cliChildPreviews, focusedCanvasSessionId, knownSessionIds, subagentPreviews],
   );
   const childPreviewSessionKey = childPreviewSessionIds.join('|');
   const identifiedChildPreviewSessionIdsRef = useRef<Set<string>>(new Set());

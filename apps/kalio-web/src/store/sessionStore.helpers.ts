@@ -9,6 +9,7 @@ export interface AgentTurn {
   id: ID;
   sessionId: ID;
   promptMessageId?: ID;
+  turnKind?: 'workflow-envelope';
   agentRun?: AgentRunContext;
   items: AgentTurnItem[];
   done: boolean;

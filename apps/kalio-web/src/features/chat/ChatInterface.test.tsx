@@ -118,6 +118,7 @@ const removeActiveAgentLoop = vi.fn();
 const appendCLIAgentChunk = vi.fn();
 const clearCLIAgentOutput = vi.fn();
 const setToolArgProgress = vi.fn();
+const setSessionStatusSnapshot = vi.fn();
 
 const agentStoreState = {
   isStreaming: false,
@@ -166,6 +167,7 @@ const agentStoreState = {
   setToolArgProgress,
   appendCLIAgentChunk,
   clearCLIAgentOutput,
+  setSessionStatusSnapshot,
   upsertCLIChildProjection: vi.fn(),
   updateCLIChildProjection: vi.fn(),
   rebuildCLIChildProjections: vi.fn(),
@@ -1146,6 +1148,7 @@ describe('ChatInterface event wiring', () => {
 
   it('subagent tool:result persists the child tool_result under the child session id', async () => {
     await renderChatInterface();
+    agentStoreState.toolActivities = [{ callId: 'call-sub', toolName: 'vfs_write', sessionId: 'child-session' }];
 
     await emitEvent('tool:result', {
         callId: 'call-sub',
@@ -1242,6 +1245,7 @@ describe('ChatInterface event wiring', () => {
   it('ignores tool:result streaming state changes from a different session', async () => {
     mockActiveSessionId = 'session-1';
     await renderChatInterface();
+    agentStoreState.toolActivities = [{ callId: 'call-background', toolName: 'fs_read', sessionId: 'session-2' }];
     setStreaming.mockClear();
 
     await emitEvent('tool:result', {

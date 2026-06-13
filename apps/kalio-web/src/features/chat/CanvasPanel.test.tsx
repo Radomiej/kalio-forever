@@ -231,6 +231,10 @@ describe('CanvasPanel subagent grouping', () => {
     };
     agentState.canvasFocus = null;
     agentState.setCanvasFocus.mockClear();
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      { id: 'sub-session-1', personaId: 'default', title: 'Sub-agent: demo', kind: 'subagent', createdAt: 2, updatedAt: 2 },
+    ];
     sessionState.messages = [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }];
     sessionState.sessionMessages = {
       'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }],
@@ -434,6 +438,50 @@ describe('CanvasPanel subagent grouping', () => {
     expect(sessionState.setActiveSession).toHaveBeenCalledWith('sub-session-1');
   });
 
+  it('hides branch open controls and transcripts for synthetic architecture branch ids missing from sessions', () => {
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-run', runId: 'run-missing' };
+    sessionState.messages = [
+      {
+        id: 'arch-missing',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: '### Router',
+        createdAt: 3,
+        architectureRun: {
+          runId: 'run-missing',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          trace: [
+            {
+              speaker: 'participant',
+              content: 'Analyst branch pending',
+              eventId: 'event-analyst',
+              nodeId: 'analyst',
+              nextNodeId: 'router',
+              stream: {
+                streamGroupId: 'group-missing',
+                branchSessionId: 'arch-run-missing-analyst',
+                status: 'started',
+                chunkCount: 0,
+                text: '',
+              },
+            },
+          ],
+          routeHops: [],
+        },
+      },
+    ];
+    sessionState.sessionMessages = { 'session-1': sessionState.messages };
+
+    render(<CanvasPanel />);
+
+    expect(screen.queryByTestId('architecture-open-branch-arch-run-missing-analyst')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('architecture-run-branch-transcript-arch-run-missing-analyst')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('architecture-run-transcript-branch-arch-run-missing-analyst')).not.toBeInTheDocument();
+  });
+
   it('shows a waiting state for a focused architecture branch before its transcript hydrates', () => {
     agentState.toolActivities = [];
     agentState.activeAgentLoops = {};
@@ -455,6 +503,10 @@ describe('CanvasPanel subagent grouping', () => {
     agentState.toolActivities = [];
     agentState.activeAgentLoops = {};
     agentState.canvasFocus = { kind: 'architecture-run', runId: 'run-partial' };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      { id: 'sub-session-partial', personaId: 'default', title: 'Pragmatist partial', kind: 'subagent', parentSessionId: 'arch-root', createdAt: 2, updatedAt: 2 },
+    ];
     sessionState.messages = [
       {
         id: 'arch-partial',
@@ -509,6 +561,11 @@ describe('CanvasPanel subagent grouping', () => {
     agentState.toolActivities = [];
     agentState.activeAgentLoops = {};
     agentState.canvasFocus = { kind: 'architecture-run', runId: 'run-sequential' };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      { id: 'sub-session-one', personaId: 'default', title: 'Agent one branch', kind: 'subagent', parentSessionId: 'arch-root', createdAt: 2, updatedAt: 2 },
+      { id: 'sub-session-two', personaId: 'default', title: 'Agent two branch', kind: 'subagent', parentSessionId: 'arch-root', createdAt: 3, updatedAt: 3 },
+    ];
     sessionState.messages = [
       {
         id: 'arch-sequential',
@@ -885,6 +942,13 @@ describe('CanvasPanel subagent grouping', () => {
 
 describe('CanvasPanel CLI children section', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    sessionState.messages = [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }];
+    sessionState.sessionMessages = {
+      'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }],
+    };
     agentState.cliChildProjections = {
       'cli-child-1': {
         childSessionId: 'cli-child-1',
@@ -920,5 +984,29 @@ describe('CanvasPanel CLI children section', () => {
     expect(screen.getByTestId('cli-child-card-cli-child-1')).toBeInTheDocument();
     expect(screen.getByTestId('cli-child-status-cli-child-1')).toHaveTextContent('stopped');
     expect(screen.getByTestId('cli-child-output-cli-child-1')).toHaveTextContent('done');
+  });
+
+  it('does not render or hydrate projected CLI children without a real session row', () => {
+    agentState.cliChildProjections = {
+      'cli-child-ghost': {
+        childSessionId: 'cli-child-ghost',
+        parentSessionId: 'session-1',
+        parentCallId: 'call-cli-ghost',
+        agentId: 'codex',
+        status: 'running',
+        lastOutput: 'ghost output',
+        toolName: 'spawn_cli_agent',
+        childTitle: 'ghost CLI',
+      },
+    };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+    ];
+
+    render(<CanvasPanel />);
+
+    expect(screen.queryByTestId('canvas-cli-children-section')).not.toBeInTheDocument();
+    expect(mockIdentifySession).not.toHaveBeenCalledWith('cli-child-ghost');
+    expect(mockApiGet).not.toHaveBeenCalled();
   });
 });

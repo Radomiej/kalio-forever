@@ -1849,6 +1849,12 @@ describe('ArchitectureRuntimeService', () => {
       personaId: 'persona.delivery_override',
       parentSessionId: run.rootSessionId,
       kind: 'subagent',
+      runtimeContext: {
+        architectureContext: {
+          roleSlotId: 'pragmatist',
+          roleSlotType: 'participant',
+        },
+      },
     });
   });
 

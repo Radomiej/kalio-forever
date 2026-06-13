@@ -45,6 +45,187 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
 }
 
 describe('buildExecutionGraphModel', () => {
+  it('renders workflow envelope turns without a Default agent node', () => {
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Run the council graph', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        content: 'Architecture run running: strategic-decision-council',
+        createdAt: 2,
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          hostProjectionKind: 'workflow-envelope',
+          trace: [],
+          routeHops: [],
+        },
+      }),
+    ];
+    const turns = buildTurnsFromHistory(messages, 'session-1');
+
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns,
+      toolActivities: [],
+      activeAgentLoops: {},
+      sessions: [makeSession()],
+      sessionMessages: {
+        'session-1': messages,
+      },
+      personas: [makePersona({ id: 'default', name: 'Default', model: 'mimo-v2.5' })],
+    });
+
+    expect(model.nodes.some((node) => node.kind === 'turn')).toBe(false);
+    expect(model.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'architecture-run:a1',
+        kind: 'architecture-run',
+        column: 1,
+        payload: expect.objectContaining({
+          kind: 'architecture-run',
+          summary: expect.objectContaining({ hostProjectionKind: 'workflow-envelope' }),
+        }),
+      }),
+      expect.objectContaining({
+        id: `final:${turns[0]?.id}`,
+        kind: 'final-answer',
+        column: 2,
+        payload: expect.objectContaining({
+          kind: 'final-answer',
+          message: expect.objectContaining({ id: 'a1' }),
+        }),
+      }),
+    ]));
+    expect(model.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceId: 'prompt:u1', targetId: 'architecture-run:a1' }),
+      expect.objectContaining({ sourceId: 'architecture-run:a1', targetId: `final:${turns[0]?.id}` }),
+    ]));
+  });
+
+  it('falls back to a normal turn when a workflow-envelope turn has no architecture message', () => {
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Run the council graph', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        content: 'Plain assistant answer',
+        createdAt: 2,
+      }),
+    ];
+    const turns = buildTurnsFromHistory(messages, 'session-1').map((turn) => ({
+      ...turn,
+      turnKind: 'workflow-envelope' as const,
+    }));
+
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns,
+      toolActivities: [],
+      activeAgentLoops: {},
+      sessions: [makeSession()],
+      sessionMessages: {
+        'session-1': messages,
+      },
+      personas: [makePersona({ id: 'default', name: 'Default', model: 'mimo-v2.5' })],
+    });
+
+    expect(model.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: `turn:${turns[0]?.id}`,
+        kind: 'turn',
+      }),
+      expect.objectContaining({
+        id: `final:${turns[0]?.id}`,
+        kind: 'final-answer',
+      }),
+    ]));
+  });
+
+  it('does not render generic run_subagent tool nodes for workflow-envelope turns', () => {
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Run the council graph', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        content: '',
+        createdAt: 2,
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          hostProjectionKind: 'workflow-envelope',
+          trace: [
+            {
+              speaker: 'participant',
+              content: 'Pragmatist answer',
+              eventId: 'event-1',
+              nodeId: 'pragmatist',
+              nextNodeId: 'router',
+              stream: {
+                streamGroupId: 'run-1',
+                branchSessionId: 'arch-run-1-pragmatist',
+                status: 'completed',
+                chunkCount: 2,
+                text: 'Pragmatist answer',
+              },
+            },
+          ],
+          routeHops: [],
+        },
+        toolCalls: [{
+          id: 'architecture:run-1:event-1',
+          name: 'run_subagent',
+          args: {
+            architectureRunId: 'run-1',
+            roleSlotId: 'pragmatist',
+            childSessionId: 'arch-run-1-pragmatist',
+          },
+        }],
+      }),
+      makeMessage({
+        id: 'r1',
+        role: 'tool_result',
+        toolCallId: 'architecture:run-1:event-1',
+        content: JSON.stringify({
+          taskId: 'event-1',
+          childSessionId: 'arch-run-1-pragmatist',
+          parentSessionId: 'session-1',
+          vfsMode: 'shared',
+          vfsSessionId: 'arch-run-1-root',
+          copiedFiles: [],
+          durationMs: 10,
+          result: 'Pragmatist answer',
+        }),
+        createdAt: 3,
+      }),
+    ];
+    const turns = buildTurnsFromHistory(messages, 'session-1');
+
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns,
+      toolActivities: [],
+      activeAgentLoops: {},
+      sessions: [
+        makeSession(),
+        makeSession({ id: 'arch-run-1-pragmatist', title: 'Strategic Decision Council: Pragmatist', kind: 'subagent', parentSessionId: 'arch-run-1-root' }),
+      ],
+      sessionMessages: {
+        'session-1': messages,
+      },
+      personas: [makePersona({ id: 'default', name: 'Default', model: 'mimo-v2.5' })],
+    });
+
+    expect(model.nodes.some((node) => node.id === 'tool:architecture:run-1:event-1')).toBe(false);
+    expect(model.nodes.some((node) => node.id === 'subagent:arch-run-1-pragmatist')).toBe(false);
+    expect(model.nodes.some((node) => node.id === 'architecture-run:a1')).toBe(true);
+  });
+
   it('renders architecture run metadata as graph nodes and route hops', () => {
     const messages: ChatMessage[] = [
       makeMessage({ id: 'u1', role: 'user', content: 'Run the council graph', createdAt: 1 }),
