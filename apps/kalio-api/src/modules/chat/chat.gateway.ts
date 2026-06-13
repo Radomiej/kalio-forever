@@ -9,7 +9,7 @@ import {
 import { Inject, Logger, Optional, UseFilters } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { Socket } from 'socket.io';
-import type { AgentFlowRunSnapshot, SocketEvents } from '@kalio/types';
+import type { SocketEvents } from '@kalio/types';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
@@ -23,6 +23,8 @@ import {
   CLI_AGENT_SESSION_RUNTIME,
   type CLIAgentSessionRuntimePort,
 } from '../cli-agent/cli-agent-session-runtime.port';
+import { findAgentFlowSnapshotsForSessions, isActiveAgentFlowSnapshot } from './chat.gateway.agentflow-stop';
+import { emitSessionLifecycleEventToSubscribers } from './chat.gateway.lifecycle';
 
 @UseFilters(WsExceptionFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -33,6 +35,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly socketSessions = new Map<string, Set<string>>();
   private readonly clients = new Map<string, Socket>();
   private readonly sessionSubscribers = new Map<string, Set<string>>();
+  private sessionLifecycleBroadcastQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly toolDispatch: ToolDispatchService,
@@ -348,19 +351,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     event: K,
     payload: SocketEvents[K],
   ): void {
-    const sessionId = event === 'session:created' ? payload.id : payload.id;
-    const sessionSubscribers = this.sessionSubscribers.get(sessionId);
-    sessionSubscribers?.forEach((socketId) => {
-      this.clients.get(socketId)?.emit(event, payload);
-    });
-
-    const parentSessionId = payload.parentSessionId;
-    if (parentSessionId) {
-      const parentSubscribers = this.sessionSubscribers.get(parentSessionId);
-      parentSubscribers?.forEach((socketId) => {
-        this.clients.get(socketId)?.emit(event, payload);
+    this.sessionLifecycleBroadcastQueue = this.sessionLifecycleBroadcastQueue
+      .catch(() => undefined)
+      .then(() => emitSessionLifecycleEventToSubscribers({
+        event,
+        payload,
+        clients: this.clients,
+        sessionSubscribers: this.sessionSubscribers,
+        sessionsService: this.sessionsService,
+        logger: this.logger,
+      }))
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Failed to emit lifecycle event ${event} for session ${payload.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
       });
-    }
   }
 
   @SubscribeMessage('agent:budget_approve')
@@ -404,9 +411,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
     const sessionIdSet = new Set(sessionIds);
-    const snapshots = await this.findAgentFlowSnapshotsForSessions(agentFlowRuntime, sessionIds);
+    const snapshots = await findAgentFlowSnapshotsForSessions(agentFlowRuntime, sessionIds);
     const activeSnapshots = snapshots.filter((snapshot) => (
-      this.isActiveAgentFlowSnapshot(snapshot)
+      isActiveAgentFlowSnapshot(snapshot)
       && (
         sessionIdSet.has(snapshot.run.parentSessionId)
         || sessionIdSet.has(snapshot.run.childSessionId)
@@ -483,22 +490,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  private async findAgentFlowSnapshotsForSessions(agentFlowRuntime: AgentFlowRuntimePort, sessionIds: string[]): Promise<AgentFlowRunSnapshot[]> {
-    if (agentFlowRuntime.findAll) {
-      return agentFlowRuntime.findAll();
-    }
-    if (!agentFlowRuntime.findByParentSessionId) {
-      return [];
-    }
-    const snapshots = await Promise.all(sessionIds.map((sessionId) => agentFlowRuntime.findByParentSessionId?.(sessionId) ?? Promise.resolve([])));
-    return snapshots.flat();
-  }
-
-  private isActiveAgentFlowSnapshot(snapshot: AgentFlowRunSnapshot): boolean {
-    return snapshot.run.status === 'running'
-      || snapshot.run.status === 'queued'
-      || snapshot.run.status === 'waiting_on_orchestrator';
-  }
 }
 
 function nextApprovedBudgetLimit(

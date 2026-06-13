@@ -4,7 +4,7 @@ import type { ToolDispatchService } from '../tool-dispatch.service';
 import type { SessionPipelineService } from '../session-pipeline.service';
 import type { SessionsService } from '../sessions.service';
 import type { RAAppHITLService, SavedApproval } from '../../raapp/raapp-hitl.service';
-import type { AgentFlowRunSnapshot, ToolConfirmationRequest } from '@kalio/types';
+import type { AgentFlowRunSnapshot, ChatSession, ToolConfirmationRequest } from '@kalio/types';
 import type { AgentFlowRuntimePort } from '../../agent-flow/agent-flow-runtime.port';
 import { CLI_AGENT_SESSION_RUNTIME } from '../../cli-agent/cli-agent-session-runtime.port';
 import type { CLIAgentSessionRuntimePort } from '../../cli-agent/cli-agent-session-runtime.port';
@@ -13,6 +13,8 @@ import type { AgentBudgetApprovalService } from '../agent-budget-approval.servic
 import type { ModuleRef } from '@nestjs/core';
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
+type SessionCreatedHandler = (event: { session: ChatSession }) => void;
+type SessionUpdatedHandler = (event: { session: ChatSession }) => void;
 
 describe('ChatGateway', () => {
   let gateway: ChatGateway;
@@ -105,6 +107,33 @@ describe('ChatGateway', () => {
       .get(client.id)
       ?.add('session-1');
   });
+
+  function createdHandler(): SessionCreatedHandler {
+    return vi.mocked(sessionEvents.onSessionCreated).mock.calls[0]?.[0] as SessionCreatedHandler;
+  }
+
+  function updatedHandler(): SessionUpdatedHandler {
+    return vi.mocked(sessionEvents.onSessionUpdated).mock.calls[0]?.[0] as SessionUpdatedHandler;
+  }
+
+  function sessionFixture(overrides: Partial<ChatSession>): ChatSession {
+    return {
+      id: 'session-fixture',
+      personaId: 'default',
+      title: 'Session fixture',
+      createdAt: 1,
+      updatedAt: 1,
+      ...overrides,
+    };
+  }
+
+  async function flushLifecycleBroadcast(): Promise<void> {
+    await (gateway as unknown as { sessionLifecycleBroadcastQueue?: Promise<void> }).sessionLifecycleBroadcastQueue;
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
 
   it('broadcasts child-session stream events to sockets that identified that child session', async () => {
     await gateway.handleSessionIdentify(observer as never, { sessionId: 'child-session' });
@@ -331,6 +360,122 @@ describe('ChatGateway', () => {
 
     expect(socketSessions.has('socket-1')).toBe(false);
     expect(sessionSubscribers.get('child-session')?.has('socket-1')).not.toBe(true);
+  });
+
+  it('REGRESSION: emits grandchild session lifecycle events to ancestor session subscribers', async () => {
+    const host = sessionFixture({ id: 'host-session', title: 'Host' });
+    const root = sessionFixture({ id: 'arch-run-root', title: 'Architecture root', parentSessionId: host.id });
+    const branch = sessionFixture({
+      id: 'arch-run-pragmatist',
+      title: 'Architecture: Pragmatist',
+      kind: 'subagent',
+      parentSessionId: root.id,
+    });
+    vi.mocked(sessions.get).mockImplementation(async (sessionId: string) => {
+      if (sessionId === host.id) return host;
+      if (sessionId === root.id) return root;
+      if (sessionId === branch.id) return branch;
+      throw new Error(`Unknown session ${sessionId}`);
+    });
+
+    await gateway.handleSessionIdentify(client as never, { sessionId: host.id });
+    client.emit.mockClear();
+
+    createdHandler()({ session: root });
+    createdHandler()({ session: branch });
+    updatedHandler()({ session: { ...branch, title: 'Architecture: Pragmatist updated', updatedAt: 2 } });
+    await flushLifecycleBroadcast();
+
+    expect(client.emit).toHaveBeenCalledWith('session:created', expect.objectContaining({ id: root.id }));
+    expect(client.emit).toHaveBeenCalledWith('session:created', expect.objectContaining({ id: branch.id }));
+    expect(client.emit).toHaveBeenCalledWith('session:updated', expect.objectContaining({ id: branch.id }));
+  });
+
+  it('REGRESSION: preserves session lifecycle ordering for a grandchild branch when ancestor lookup is slow', async () => {
+    const host = sessionFixture({ id: 'host-session', title: 'Host' });
+    const root = sessionFixture({ id: 'arch-run-root', title: 'Architecture root', parentSessionId: host.id });
+    const branch = sessionFixture({
+      id: 'arch-run-pragmatist',
+      title: 'Architecture: Pragmatist',
+      kind: 'subagent',
+      parentSessionId: root.id,
+    });
+    let rootLookupCount = 0;
+    let releaseFirstRootLookup: (() => void) | undefined;
+    vi.mocked(sessions.get).mockImplementation(async (sessionId: string) => {
+      if (sessionId === root.id) {
+        rootLookupCount += 1;
+        if (rootLookupCount === 1) {
+          await new Promise<void>((resolve) => {
+            releaseFirstRootLookup = resolve;
+          });
+        }
+        return root;
+      }
+      if (sessionId === host.id) return host;
+      if (sessionId === branch.id) return branch;
+      throw new Error(`Unknown session ${sessionId}`);
+    });
+
+    await gateway.handleSessionIdentify(client as never, { sessionId: host.id });
+    client.emit.mockClear();
+
+    createdHandler()({ session: branch });
+    updatedHandler()({ session: { ...branch, title: 'Architecture: Pragmatist updated', updatedAt: 2 } });
+    for (let attempt = 0; attempt < 10 && !releaseFirstRootLookup; attempt += 1) {
+      await Promise.resolve();
+    }
+    expect(releaseFirstRootLookup).toBeTypeOf('function');
+    releaseFirstRootLookup?.();
+    await flushLifecycleBroadcast();
+
+    const branchLifecycleEvents = client.emit.mock.calls
+      .filter(([event, payload]) =>
+        (event === 'session:created' || event === 'session:updated')
+        && typeof payload === 'object'
+        && payload !== null
+        && (payload as ChatSession).id === branch.id)
+      .map(([event]) => event);
+
+    expect(branchLifecycleEvents).toEqual(['session:created', 'session:updated']);
+  });
+
+  it('REGRESSION: emits a lifecycle event once when a socket subscribes to both parent and child root', async () => {
+    const host = sessionFixture({ id: 'host-session', title: 'Host' });
+    const root = sessionFixture({ id: 'arch-run-root', title: 'Architecture root', parentSessionId: host.id });
+    const branch = sessionFixture({
+      id: 'arch-run-pragmatist',
+      title: 'Architecture: Pragmatist',
+      kind: 'subagent',
+      parentSessionId: root.id,
+    });
+    vi.mocked(sessions.get).mockImplementation(async (sessionId: string) => {
+      if (sessionId === host.id) return host;
+      if (sessionId === root.id) return root;
+      if (sessionId === branch.id) return branch;
+      throw new Error(`Unknown session ${sessionId}`);
+    });
+
+    await gateway.handleSessionIdentify(client as never, { sessionId: host.id });
+    await gateway.handleSessionIdentify(client as never, { sessionId: root.id });
+    client.emit.mockClear();
+
+    createdHandler()({ session: branch });
+    updatedHandler()({ session: { ...branch, title: 'Architecture: Pragmatist updated', updatedAt: 2 } });
+    await flushLifecycleBroadcast();
+
+    expect(client.emit.mock.calls.filter(([event, payload]) => (
+      event === 'session:created'
+      && typeof payload === 'object'
+      && payload !== null
+      && (payload as ChatSession).id === branch.id
+    ))).toHaveLength(1);
+    expect(client.emit.mock.calls.filter(([event, payload]) => (
+      event === 'session:updated'
+      && typeof payload === 'object'
+      && payload !== null
+      && (payload as ChatSession).id === branch.id
+    ))).toHaveLength(1);
   });
 
   it('REGRESSION: stopping a parent session also stops its child subagent sessions', async () => {

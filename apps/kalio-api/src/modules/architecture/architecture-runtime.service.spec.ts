@@ -4103,6 +4103,182 @@ describe('ArchitectureRuntimeService', () => {
     });
   });
 
+  it('reconstructs cancelled architecture runs from stop audit rows after runtime memory is gone', async () => {
+    const { service, audit } = createService();
+    const runId = 'durable-cancelled-run';
+    const createdAt = 1_780_003_000_000;
+    audit.listEntries.mockResolvedValue([
+      auditRow({
+        id: 'audit-1',
+        createdAt,
+        label: 'architecture_event:run_created:runtime',
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_event',
+          runId,
+          architectureRunId: runId,
+          schemaId: 'strategic-decision-council',
+          executionMode: 'subagent_execution',
+          eventId: `${runId}:event:1`,
+          eventType: 'run_created',
+          sequence: 1,
+          messagePreview: 'Architecture run created for: Cancel durable replay.',
+        },
+      }),
+      auditRow({
+        id: 'audit-2',
+        createdAt: createdAt + 1,
+        label: 'architecture_event:participant_output:analyst',
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_event',
+          runId,
+          architectureRunId: runId,
+          schemaId: 'strategic-decision-council',
+          executionMode: 'subagent_execution',
+          eventId: `${runId}:event:2`,
+          eventType: 'participant_output',
+          sequence: 2,
+          nodeId: 'analyst',
+          roleSlotId: 'analyst',
+          messagePreview: 'Analyst started work before cancellation.',
+        },
+      }),
+      auditRow({
+        id: 'audit-3',
+        createdAt: createdAt + 2,
+        label: 'architecture_event:run_stopped:runtime',
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_event',
+          runId,
+          architectureRunId: runId,
+          schemaId: 'strategic-decision-council',
+          executionMode: 'subagent_execution',
+          eventId: `${runId}:event:3`,
+          eventType: 'run_stopped',
+          sequence: 3,
+          messagePreview: 'Architecture run stopped by user.',
+        },
+      }),
+      auditRow({
+        id: 'audit-4',
+        createdAt: createdAt + 3,
+        label: 'architecture:strategic-decision-council:durable-cancelled-run',
+        type: 'tool_result',
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_runtime',
+          runId,
+          schemaId: 'strategic-decision-council',
+          executionMode: 'subagent_execution',
+          rootSessionId: `arch-${runId}-root`,
+          branchSessionIds: { analyst: `arch-${runId}-analyst` },
+          eventCount: 3,
+        },
+      }),
+    ]);
+
+    await expect(service.findRunDurable(runId)).resolves.toMatchObject({
+      id: runId,
+      status: 'cancelled',
+      rootSessionId: `arch-${runId}-root`,
+    });
+    await expect(service.getGraphDurable(runId)).resolves.toMatchObject({
+      runId,
+      status: 'cancelled',
+    });
+    await expect(service.getChatDurable(runId)).resolves.toMatchObject({
+      runId,
+      messages: expect.arrayContaining([
+        expect.objectContaining({ speaker: 'system', content: 'Architecture run stopped by user.' }),
+      ]),
+    });
+  });
+
+  it('REGRESSION: reconstructs a resumed run as running when newer audit activity exists after run_stopped', async () => {
+    const { service, audit } = createService();
+    const runId = 'durable-resumed-run';
+    const createdAt = 1_780_004_000_000;
+    audit.listEntries.mockResolvedValue([
+      auditRow({
+        id: 'audit-1',
+        createdAt,
+        label: 'architecture_event:run_created:runtime',
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_event',
+          runId,
+          architectureRunId: runId,
+          schemaId: 'strategic-decision-council',
+          executionMode: 'subagent_execution',
+          eventId: `${runId}:event:1`,
+          eventType: 'run_created',
+          sequence: 1,
+          messagePreview: 'Architecture run created for: Resume after stop.',
+        },
+      }),
+      auditRow({
+        id: 'audit-2',
+        createdAt: createdAt + 1,
+        label: 'architecture_event:run_stopped:runtime',
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_event',
+          runId,
+          architectureRunId: runId,
+          schemaId: 'strategic-decision-council',
+          executionMode: 'subagent_execution',
+          eventId: `${runId}:event:2`,
+          eventType: 'run_stopped',
+          sequence: 2,
+          messagePreview: 'Architecture run stopped by user.',
+        },
+      }),
+      auditRow({
+        id: 'audit-3',
+        createdAt: createdAt + 2,
+        label: 'architecture_event:participant_output:analyst',
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_event',
+          runId,
+          architectureRunId: runId,
+          schemaId: 'strategic-decision-council',
+          executionMode: 'subagent_execution',
+          eventId: `${runId}:event:3`,
+          eventType: 'participant_output',
+          sequence: 3,
+          nodeId: 'analyst',
+          roleSlotId: 'analyst',
+          messagePreview: 'Resume picked up the analyst branch again.',
+        },
+      }),
+      auditRow({
+        id: 'audit-4',
+        createdAt: createdAt + 3,
+        label: `architecture:strategic-decision-council:${runId}`,
+        type: 'tool_result',
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_runtime',
+          runId,
+          schemaId: 'strategic-decision-council',
+          executionMode: 'subagent_execution',
+          rootSessionId: `arch-${runId}-root`,
+          branchSessionIds: { analyst: `arch-${runId}-analyst` },
+          eventCount: 3,
+        },
+      }),
+    ]);
+
+    await expect(service.findRunDurable(runId)).resolves.toMatchObject({
+      id: runId,
+      status: 'running',
+      rootSessionId: `arch-${runId}-root`,
+    });
+  });
+
   it('prefers audit-event node state while overlaying persisted CLI child agents', async () => {
     const { service, audit, sessions } = createService();
     const runId = 'durable-cli-running-run';
