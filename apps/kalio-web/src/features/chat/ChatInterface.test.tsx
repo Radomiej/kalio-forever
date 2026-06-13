@@ -650,15 +650,16 @@ describe('ChatInterface event wiring', () => {
 
     await waitFor(() => {
       expect(mockStartGoalGuardAgentFlowRun).toHaveBeenCalledWith(
-      'Deliver with proof.',
-      expect.objectContaining({
-        parentSessionId: 'session-1',
-        projectPath: 'C:\\Projekty\\kalio-forever',
-        executionCwd: 'C:\\Projekty\\kalio-forever',
-        requireGoalMasterLoopProof: true,
-        requireImplementerWriteProof: true,
-      }),
-      'session-1',
+        'Deliver with proof.',
+        expect.objectContaining({
+          parentSessionId: 'session-1',
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+          requireGoalMasterLoopProof: true,
+          requireImplementerWriteProof: true,
+        }),
+        'session-1',
+        expect.any(Function),
       );
     });
     expect(mockStartArchitectureRun).not.toHaveBeenCalled();

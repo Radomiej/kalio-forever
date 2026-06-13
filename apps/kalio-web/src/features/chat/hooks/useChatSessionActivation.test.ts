@@ -332,4 +332,116 @@ describe('useChatSessionActivation', () => {
       expect(updateAgentTurn).toHaveBeenCalledWith('turn-live', { promptMessageId: 'user-1' }, 'session-1');
     });
   });
+
+  it('rehydrates architecture timeline metadata from a direct child session after reload', async () => {
+    useSessionStore.setState({
+      activeSessionId: 'session-1',
+      sessions: [
+        { id: 'session-1', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 1 },
+        {
+          id: 'arch-root',
+          personaId: 'default',
+          title: 'Architecture: Strategic Decision Council',
+          parentSessionId: 'session-1',
+          kind: 'agent-flow',
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureContext: { architectureRunId: 'run-live', displayLabel: 'Strategic Decision Council' },
+          },
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ],
+      messages: [],
+      sessionMessages: { 'session-1': [], 'arch-root': [] },
+      agentTurns: [],
+      sessionAgentTurns: { 'session-1': [], 'arch-root': [] },
+      activeTurnId: null,
+      sessionActiveTurnIds: { 'session-1': null, 'arch-root': null },
+      pendingMessage: null,
+      pendingRAAppId: null,
+    });
+    vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
+      if (url === '/api/sessions/session-1/messages') {
+        return {
+          data: [
+            {
+              id: 'user-1',
+              sessionId: 'session-1',
+              role: 'user',
+              content: 'Plan it.',
+              createdAt: 1,
+            },
+            {
+              id: 'assistant-final',
+              sessionId: 'session-1',
+              role: 'assistant',
+              content: 'Final recommendation.',
+              createdAt: 5,
+            },
+          ],
+        };
+      }
+      if (url === '/api/sessions/arch-root/messages') {
+        return {
+          data: [
+            {
+              id: 'arch-summary',
+              sessionId: 'arch-root',
+              role: 'assistant',
+              content: '',
+              architectureRun: {
+                runId: 'run-live',
+                schemaId: 'Strategic Decision Council',
+                status: 'running',
+                trace: [],
+                routeHops: [],
+                graphNodes: [
+                  { id: 'router', label: 'Router', kind: 'router', status: 'running', eventIds: ['event-router'] },
+                  { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
+                ],
+                graphEdges: [],
+              },
+              createdAt: 3,
+            },
+          ],
+        };
+      }
+      return { data: [] };
+    });
+
+    const setMessages = vi.fn();
+    const setAgentTurns = vi.fn();
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns,
+      setMessages,
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(setMessages).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'architecture-rehydrate:session-1:run-live',
+            architectureRun: expect.objectContaining({
+              runId: 'run-live',
+              status: 'running',
+            }),
+          }),
+        ]),
+        'session-1',
+      );
+    });
+    expect(setMessages).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'arch-summary', sessionId: 'arch-root' }),
+      ]),
+      'arch-root',
+    );
+    expect(setAgentTurns).toHaveBeenCalledWith(expect.any(Array), 'arch-root');
+  });
 });

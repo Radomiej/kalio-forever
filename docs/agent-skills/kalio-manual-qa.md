@@ -40,6 +40,44 @@ Test Kalio like a user, then support the conclusion with API/terminal evidence. 
 - Execution Graph must update live enough to inspect current state. Console warnings, stale nodes, or frozen graph interaction are QA failures.
 - Browser QA findings are not post-run notes. Feed failing Playwright Orchestrator evidence back into the `Dev/Implementer <-> Goal Guard` AgentFlow as structured resume context and require another implementation/review pass before final acceptance.
 
+## Creating A New Workflow For Future Agents
+
+Use this checklist when a future agent needs to add a new Kalio workflow instead of just testing an existing one.
+
+1. Start from the current product model, not an ad hoc prompt chain:
+   - Read `docs/sub-agentflow-target-architecture.md`.
+   - Use Architect as the authoring surface for schema-driven flows.
+   - Reuse an existing preset/variant when the target behavior is only a specialization of an existing flow.
+2. Define the workflow as explicit runtime stages, not one opaque "parallel agents" blob:
+   - stage 1: `Orchestrator` or `Router dispatch`,
+   - stage 2: role/participant fan-out,
+   - stage 3: `Router merge` or summarizer,
+   - stage 4: `Finalizer` or `Artifact`.
+   If a stage exists conceptually, represent it as a node that can be inspected in Chat and Execution Graph.
+3. Use node kinds deliberately:
+   - `Agent / Role` for bounded persona work,
+   - `Router` for routing, review, or guard decisions,
+   - `Parallel` for fan-out only,
+   - `Artifact` for the final output.
+   Do not model an orchestrator as a fake parallel group, and do not collapse merge/finalization into hidden prompt logic when the UI must expose them.
+4. Keep session and run lineage visible:
+   - the parent chat should launch one root child workflow session,
+   - branch sessions should sit under that root,
+   - parent observers must be able to see descendants live,
+   - a reload must reconstruct the same run from persisted sessions and run snapshots.
+5. Define expected statuses before implementation:
+   - graph/timeline/sidebar should support `pending`, `running`, `waiting`, `completed`, `blocked`, `failed`, `cancelled`,
+   - missing status is a bug; treat unknown child outcome as `waiting` or `failed`, not silent success.
+6. Save the variant with a durable name and keep the intended role model explicit. For top-level role patterns, prefer the reference model from `C:\Projekty\Agent-Architecture-Lab` or an existing Kalio architecture instead of inventing a new top-level taxonomy without need.
+7. Do not call the workflow ready until this FE-first gate passes:
+   - start it from Kalio FE,
+   - confirm the root conversation appears in Talk without refresh,
+   - confirm all expected child conversations appear in the sidebar live,
+   - confirm the timeline shows planned stages even while later nodes are still `pending`,
+   - confirm Execution Graph and chat bubble agree on statuses,
+   - reload during the run and verify the same workflow resumes with the same child visibility,
+   - finish with a terminal backend run state and visible final artifact text.
+
 ## Demo Repo Runs
 
 For `C:\Projekty\TurboProject2` and similar demo targets:

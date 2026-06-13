@@ -3,26 +3,21 @@ import { nanoid } from 'nanoid';
 import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
-import { backendHealth } from '../../../services/backendHealth';
 import { eventBus } from '../../../services/eventBus';
-import { apiClient } from '../../../services/apiClient';
 import { shouldRefreshVfsForToolResult } from '../ChatInterface.Parts';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
 import {
   canReleaseComposerAfterToolResult,
   createToolArgProgressHandlers,
-  handleConnectionStateEvent,
-  handleSessionStatusEvent,
   mergeRaAppNativeResultIntoMessages,
 } from './useChatSocketEvents.helpers';
 import {
   handleCliChildProgress,
-  handleCliChildSessionCreated,
   handleCliChildToolResult,
   isCliChildToolName,
   resolveCliToolName,
 } from './useChatSocketEvents.cliChild';
-import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
+import { registerConnectionRecoveryHandlers, registerSessionLifecycleHandlers } from './useChatSocketEvents.lifecycle';
 
 interface UseChatSocketEventsOptions {
   hasPendingChunksForSession: (sessionId: string | null) => boolean;
@@ -79,8 +74,9 @@ export function useChatSocketEvents({
     updateCLIChildProjection,
     rebuildCLIChildProjections,
     setQueuedDepth,
+    setSessionStatusSnapshot,
   } = useAgentStore();
-  const { addSession, updateSession } = useSessionStore();
+  const { addSession } = useSessionStore();
 
   useEffect(() => {
     if (!eventBus.connected) eventBus.connect();
@@ -393,35 +389,16 @@ export function useChatSocketEvents({
       handleCliChildProgress(cliChildDeps, payload);
     });
 
-    const offSessionStatus = eventBus.onSessionStatus((payload) => {
-      handleSessionStatusEvent(payload, {
-        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
-        hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
-        getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
-        setRecoveryNotice,
-        addActiveAgentLoop,
-        startAgentTurn,
-        setAwaitingFirstChunk,
-        setStreaming,
-      });
-    });
-
-    const offSessionCreated = eventBus.onSessionCreated((session) => {
-      if (!useSessionStore.getState().sessions.some((item) => item.id === session.id)) {
-        addSession(session);
-      } else {
-        updateSession(session.id, session);
-      }
-      eventBus.identifySession(session.id);
-      handleCliChildSessionCreated(cliChildDeps, session);
-    });
-
-    const offSessionUpdated = eventBus.onSessionUpdated?.((session) => {
-      updateSession(session.id, session);
-    });
-
-    const offQueued = eventBus.onQueued((payload) => {
-      setQueuedDepth(payload.sessionId, payload.queueLength);
+    const offSessionLifecycle = registerSessionLifecycleHandlers({
+      cliChildDeps,
+      addSession,
+      setRecoveryNotice,
+      addActiveAgentLoop,
+      startAgentTurn,
+      setAwaitingFirstChunk,
+      setStreaming,
+      setQueuedDepth,
+      setSessionStatusSnapshot,
     });
 
     const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
@@ -434,30 +411,18 @@ export function useChatSocketEvents({
       );
     });
 
-    const offConnectionState = eventBus.onConnectionState((state) => {
-      handleConnectionStateEvent(state, { setConnectionState, setRecoveryNotice });
-    });
-
-    const offReconnect = eventBus.onReconnect(() => {
-      backendHealth.reportSuccess();
-      handleSocketReconnect({
-        cliChild: cliChildDeps,
-        setStreaming,
-        clearToolArgProgressTracking,
-        clearToolActivities,
-        removeActiveAgentLoop,
-        setPendingConfirmation,
-        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
-        getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
-        setMessages,
-        setAgentTurns,
-        hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
-        fetchMessages: async (sessionId) => {
-          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
-          return response.data;
-        },
-        onContextInvalidated,
-      });
+    const offConnectionRecovery = registerConnectionRecoveryHandlers({
+      cliChildDeps,
+      setConnectionState,
+      setRecoveryNotice,
+      setStreaming,
+      clearToolArgProgressTracking,
+      clearToolActivities,
+      removeActiveAgentLoop,
+      setPendingConfirmation,
+      setMessages,
+      setAgentTurns,
+      onContextInvalidated,
     });
 
     return () => {
@@ -475,19 +440,14 @@ export function useChatSocketEvents({
       offContext();
       offToolResult();
       offCLIAgentProgress();
-      offSessionStatus();
-      offSessionCreated();
-      offSessionUpdated?.();
-      offQueued();
+      offSessionLifecycle();
       offRaAppNative();
-      offConnectionState();
-      offReconnect();
+      offConnectionRecovery();
     };
   }, [
     addActiveAgentLoop,
     addMessage,
     addSession,
-    updateSession,
     addToolActivity,
     appendChunk,
     appendCLIAgentChunk,
@@ -515,6 +475,7 @@ export function useChatSocketEvents({
     setPendingConfirmation,
     setPendingBudgetApproval,
     setQueuedDepth,
+    setSessionStatusSnapshot,
     setRecoveryNotice,
     setStreaming,
     setToolArgProgress,

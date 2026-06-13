@@ -295,3 +295,26 @@ describe('REGRESSION: session projections keep pending assistant state', () => {
     expect(useSessionStore.getState().activeTurnId).toBe('restoring-session-B');
   });
 });
+
+describe('REGRESSION: session lifecycle updates can arrive before session creation', () => {
+  beforeEach(resetStore);
+
+  it('upserts a missing session when lifecycle recovery applies an update first', () => {
+    useSessionStore.getState().updateSession('arch-branch-1', {
+      id: 'arch-branch-1',
+      personaId: 'default',
+      title: 'Architecture: Analyst',
+      parentSessionId: 'arch-root',
+      kind: 'subagent',
+      createdAt: 10,
+      updatedAt: 11,
+    });
+
+    expect(useSessionStore.getState().sessions).toContainEqual(expect.objectContaining({
+      id: 'arch-branch-1',
+      title: 'Architecture: Analyst',
+      parentSessionId: 'arch-root',
+      kind: 'subagent',
+    }));
+  });
+});

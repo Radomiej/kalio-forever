@@ -75,7 +75,7 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
     vi.mocked(eventBus.identifySession).mockClear();
     vi.mocked(apiClient.get).mockReset();
     vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
-    useAgentStore.setState({ queuedDepthBySession: {} });
+    useAgentStore.setState({ queuedDepthBySession: {}, sessionStatusSnapshots: {} });
     useSessionStore.setState({
       activeSessionId: 'session-1',
       sessions: [
@@ -160,5 +160,38 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
     });
 
     expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(0);
+  });
+
+  it('stores replayed inactive descendant session status for sidebar recovery', () => {
+    mountHook();
+
+    act(() => {
+      fire('session:status', {
+        sessionId: 'cli-child-1',
+        active: false,
+        queueLength: 0,
+        run: {
+          id: 'run-child',
+          sessionId: 'cli-child-1',
+          turnId: 'turn-child',
+          phase: 'completed',
+          status: 'completed',
+          retryCount: 0,
+          safeResume: true,
+          startedAt: 1,
+          updatedAt: 2,
+          lastHeartbeatAt: 2,
+          completedAt: 2,
+        },
+      });
+    });
+
+    expect(useAgentStore.getState().sessionStatusSnapshots['cli-child-1']).toMatchObject({
+      sessionId: 'cli-child-1',
+      active: false,
+      run: {
+        status: 'completed',
+      },
+    });
   });
 });

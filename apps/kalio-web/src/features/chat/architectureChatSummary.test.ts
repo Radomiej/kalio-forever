@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ArchitectureGraphProjection } from '@kalio/types';
 import {
   buildArchitectureRunChatTurnDrafts,
   buildArchitectureRunMetadata,
@@ -7,6 +8,11 @@ import {
   compactArchitectureTraceContent,
   findArchitectureRunInMessages,
 } from './architectureChatSummary';
+
+type ArchitectureMetadataWithGraph = ReturnType<typeof buildArchitectureRunMetadata> & {
+  graphNodes?: ArchitectureGraphProjection['nodes'];
+  graphEdges?: ArchitectureGraphProjection['edges'];
+};
 
 describe('buildArchitectureRunSummary', () => {
   it('projects a graph run into a flat chat-readable execution trace', () => {
@@ -523,6 +529,67 @@ describe('buildArchitectureRunMetadata', () => {
     expect(JSON.stringify(metadata.trace[0]?.routerOutput)).not.toContain('Act as a graph router');
     expect(JSON.stringify(metadata.trace[0]?.routerOutput)).not.toContain('[MockLLM]');
   });
+
+  it('preserves graph node statuses for in-flight timeline stages', () => {
+    const metadata = buildArchitectureRunMetadata({
+      run: {
+        id: 'run-live',
+        schemaId: 'strategic-decision-council',
+        prompt: 'Decide.',
+        status: 'running',
+        executionMode: 'subagent_execution',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+      graph: {
+        runId: 'run-live',
+        nodes: [
+          { id: 'orchestrator', label: 'Orchestrator', kind: 'router', status: 'running', eventIds: ['event-router'] },
+          { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'completed', eventIds: ['event-pragmatist'] },
+          { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
+          { id: 'synthesizer', label: 'Synthesizer', kind: 'router', status: 'pending', eventIds: [] },
+          { id: 'final-artifact', label: 'Final Artifact', kind: 'artifact', status: 'pending', eventIds: [] },
+        ],
+        edges: [
+          { id: 'edge-1', fromNodeId: 'orchestrator', toNodeId: 'pragmatist' },
+          { id: 'edge-2', fromNodeId: 'orchestrator', toNodeId: 'analyst' },
+          { id: 'edge-3', fromNodeId: 'pragmatist', toNodeId: 'synthesizer' },
+          { id: 'edge-4', fromNodeId: 'analyst', toNodeId: 'synthesizer' },
+          { id: 'edge-5', fromNodeId: 'synthesizer', toNodeId: 'final-artifact' },
+        ],
+        routeHops: [],
+      },
+      chat: {
+        runId: 'run-live',
+        messages: [
+          {
+            id: 'm1',
+            eventId: 'event-router',
+            speaker: 'router',
+            roleSlotId: 'orchestrator',
+            content: 'Orchestrator dispatched branches.',
+            createdAt: 1,
+            route: {
+              source: 'router',
+              fromNodeId: 'orchestrator',
+              selectedNodeIds: ['pragmatist', 'analyst'],
+              nextNodeId: 'pragmatist',
+            },
+          },
+        ],
+      },
+    }) as ArchitectureMetadataWithGraph;
+
+    expect(metadata.graphNodes?.map((node) => ({ id: node.id, status: node.status }))).toEqual([
+      { id: 'orchestrator', status: 'running' },
+      { id: 'pragmatist', status: 'completed' },
+      { id: 'analyst', status: 'pending' },
+      { id: 'synthesizer', status: 'pending' },
+      { id: 'final-artifact', status: 'pending' },
+    ]);
+    expect(metadata.graphEdges).toHaveLength(5);
+  });
 });
 
 describe('buildArchitectureRunChatTurnDrafts', () => {
@@ -913,6 +980,84 @@ describe('buildArchitectureRunTurnProjection', () => {
       parentSessionId: 'parent-session',
       result: 'Pragmatist answer',
     });
+  });
+
+  it('attaches graph metadata to branch-only tool call turns for reload recovery', () => {
+    const projection = buildArchitectureRunTurnProjection({
+      run: {
+        id: 'run-live',
+        schemaId: 'strategic-decision-council',
+        prompt: 'Decide.',
+        status: 'running',
+        executionMode: 'subagent_execution',
+        rootSessionId: 'root-1',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [
+        {
+          id: 'event-pragmatist',
+          runId: 'run-live',
+          sequence: 1,
+          type: 'participant_output',
+          message: 'Pragmatist answer',
+          nodeId: 'pragmatist',
+          roleSlotId: 'pragmatist',
+          createdAt: 3,
+        },
+      ],
+      graph: {
+        runId: 'run-live',
+        nodes: [
+          { id: 'parallel-deliberation', label: 'Parallel Deliberation', kind: 'parallel', status: 'running', eventIds: [] },
+          { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'completed', eventIds: ['event-pragmatist'] },
+          { id: 'innovator', label: 'Innovator', kind: 'role', status: 'pending', eventIds: [] },
+          { id: 'router', label: 'Router', kind: 'router', status: 'pending', eventIds: [] },
+          { id: 'final-artifact', label: 'Final Artifact', kind: 'artifact', status: 'pending', eventIds: [] },
+        ],
+        edges: [
+          { id: 'edge-1', fromNodeId: 'parallel-deliberation', toNodeId: 'pragmatist' },
+          { id: 'edge-2', fromNodeId: 'parallel-deliberation', toNodeId: 'innovator' },
+          { id: 'edge-3', fromNodeId: 'pragmatist', toNodeId: 'router' },
+          { id: 'edge-4', fromNodeId: 'innovator', toNodeId: 'router' },
+          { id: 'edge-5', fromNodeId: 'router', toNodeId: 'final-artifact' },
+        ],
+        routeHops: [],
+      },
+      chat: {
+        runId: 'run-live',
+        messages: [
+          {
+            id: 'm-pragmatist',
+            eventId: 'event-pragmatist',
+            speaker: 'participant',
+            roleSlotId: 'pragmatist',
+            content: 'Pragmatist answer',
+            createdAt: 3,
+            route: {
+              source: 'runtime_fallback',
+              fromNodeId: 'pragmatist',
+              selectedNodeIds: ['router'],
+              nextNodeId: 'router',
+            },
+          },
+        ],
+      },
+    }, 'parent-session');
+    const toolCallMessage = projection.messages.find((message) => message.id === 'architecture:run-live:tool-calls');
+
+    expect(toolCallMessage?.architectureRun?.trace.map((step) => step.nodeId)).toEqual(['pragmatist']);
+    expect((toolCallMessage?.architectureRun as ArchitectureMetadataWithGraph | undefined)?.graphNodes?.map((node) => node.id)).toEqual([
+      'parallel-deliberation',
+      'pragmatist',
+      'innovator',
+      'router',
+      'final-artifact',
+    ]);
+
+    const reloaded = findArchitectureRunInMessages(projection.messages) as ArchitectureMetadataWithGraph | null;
+    expect(reloaded?.runId).toBe('run-live');
+    expect(reloaded?.graphNodes?.find((node) => node.id === 'final-artifact')?.status).toBe('pending');
   });
 });
 

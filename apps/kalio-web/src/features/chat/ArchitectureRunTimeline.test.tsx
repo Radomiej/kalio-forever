@@ -1,7 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { ArchitectureChatRunSummary } from '@kalio/types';
+import type { ArchitectureChatRunSummary, ArchitectureGraphProjection } from '@kalio/types';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
+
+type ArchitectureRunWithGraph = ArchitectureChatRunSummary & {
+  graphNodes?: ArchitectureGraphProjection['nodes'];
+  graphEdges?: ArchitectureGraphProjection['edges'];
+};
 
 describe('ArchitectureRunTimeline', () => {
   it('surfaces router contract confidence, next action, and fallback status', () => {
@@ -121,5 +126,123 @@ describe('ArchitectureRunTimeline', () => {
     screen.getByTestId('architecture-route-router').click();
 
     expect(onOpenStep).toHaveBeenCalledWith({ eventId: 'run-3:event:1', nodeId: 'router' });
+  });
+
+  it('renders planned pending stages from graph nodes before the trace completes', () => {
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-live',
+      schemaId: 'Strategic Decision Council',
+      status: 'running',
+      routeHops: [],
+      graphNodes: [
+        { id: 'orchestrator', label: 'Orchestrator', kind: 'router', status: 'running', eventIds: ['run-live:event:1'] },
+        { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'completed', eventIds: ['run-live:event:2'] },
+        { id: 'innovator', label: 'Innovator', kind: 'role', status: 'running', eventIds: ['run-live:event:3'] },
+        { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'user-advocate', label: 'User Advocate', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'shadow', label: 'Shadow', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'synthesizer', label: 'Router merge', kind: 'router', status: 'pending', eventIds: [] },
+        { id: 'final-artifact', label: 'Finalizer', kind: 'artifact', status: 'pending', eventIds: [] },
+      ],
+      graphEdges: [
+        { id: 'e1', fromNodeId: 'orchestrator', toNodeId: 'pragmatist' },
+        { id: 'e2', fromNodeId: 'orchestrator', toNodeId: 'innovator' },
+        { id: 'e3', fromNodeId: 'orchestrator', toNodeId: 'analyst' },
+        { id: 'e4', fromNodeId: 'orchestrator', toNodeId: 'user-advocate' },
+        { id: 'e5', fromNodeId: 'orchestrator', toNodeId: 'shadow' },
+        { id: 'e6', fromNodeId: 'pragmatist', toNodeId: 'synthesizer' },
+        { id: 'e7', fromNodeId: 'innovator', toNodeId: 'synthesizer' },
+        { id: 'e8', fromNodeId: 'analyst', toNodeId: 'synthesizer' },
+        { id: 'e9', fromNodeId: 'user-advocate', toNodeId: 'synthesizer' },
+        { id: 'e10', fromNodeId: 'shadow', toNodeId: 'synthesizer' },
+        { id: 'e11', fromNodeId: 'synthesizer', toNodeId: 'final-artifact' },
+      ],
+      trace: [
+        {
+          speaker: 'router',
+          content: 'Orchestrator is dispatching the council.',
+          eventId: 'run-live:event:1',
+          nodeId: 'orchestrator',
+          nextNodeId: 'pragmatist',
+        },
+        {
+          speaker: 'participant',
+          content: 'Pragmatist answer.',
+          eventId: 'run-live:event:2',
+          nodeId: 'pragmatist',
+          nextNodeId: 'synthesizer',
+          stream: {
+            streamGroupId: 'architecture:run-live:pragmatist',
+            branchSessionId: 'arch-run-live-pragmatist',
+            status: 'completed',
+            chunkCount: 4,
+            text: 'Pragmatist answer.',
+          },
+        },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Router');
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Sub-agents 5');
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Finalizer');
+    expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('Parallel sub-agents');
+    expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('5');
+    expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('pending');
+    expect(screen.getAllByTestId('architecture-route-router')).toHaveLength(2);
+    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('pending');
+  });
+
+  it('renders graph-only pending stages before any trace messages exist', () => {
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-empty-trace',
+      schemaId: 'Strategic Decision Council',
+      status: 'running',
+      routeHops: [],
+      trace: [],
+      graphNodes: [
+        { id: 'parallel-deliberation', label: 'Parallel Deliberation', kind: 'parallel', status: 'running', eventIds: [] },
+        { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'innovator', label: 'Innovator', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'user-advocate', label: 'User Advocate', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'shadow', label: 'Shadow', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'router', label: 'Router', kind: 'router', status: 'pending', eventIds: [] },
+        { id: 'final-artifact', label: 'Final Artifact', kind: 'artifact', status: 'pending', eventIds: [] },
+      ],
+      graphEdges: [
+        { id: 'e1', fromNodeId: 'parallel-deliberation', toNodeId: 'pragmatist' },
+        { id: 'e2', fromNodeId: 'parallel-deliberation', toNodeId: 'innovator' },
+        { id: 'e3', fromNodeId: 'parallel-deliberation', toNodeId: 'analyst' },
+        { id: 'e4', fromNodeId: 'parallel-deliberation', toNodeId: 'user-advocate' },
+        { id: 'e5', fromNodeId: 'parallel-deliberation', toNodeId: 'shadow' },
+        { id: 'e6', fromNodeId: 'pragmatist', toNodeId: 'router' },
+        { id: 'e7', fromNodeId: 'innovator', toNodeId: 'router' },
+        { id: 'e8', fromNodeId: 'analyst', toNodeId: 'router' },
+        { id: 'e9', fromNodeId: 'user-advocate', toNodeId: 'router' },
+        { id: 'e10', fromNodeId: 'shadow', toNodeId: 'router' },
+        { id: 'e11', fromNodeId: 'router', toNodeId: 'final-artifact' },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('running / 8 graph steps')).toBeTruthy();
+    expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('5');
+    expect(screen.getAllByText('pending').length).toBeGreaterThanOrEqual(6);
+    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('pending');
   });
 });

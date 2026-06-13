@@ -198,7 +198,8 @@ function isRuntimeScaffoldLine(line: string): boolean {
 }
 
 function isSyntheticParallelMessage(content: string): boolean {
-  return /^.+ started \d+ outgoing paths?\.$/.test(content);
+  return /^.+ started \d+ outgoing paths?\.$/.test(content)
+    || /^.+ fanned out to .+\.$/.test(content);
 }
 
 function failureReasonFromEvent(event: ArchitectureExecutionEvent): string | null {

@@ -5,7 +5,8 @@ import {
   identifyCliChildrenOnReconnect,
   rebuildCliChildProjectionsFromHistory,
 } from './useChatSocketEvents.cliChild';
-import { buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
+import { buildTurnsFromHistory } from '../chatUtils';
+import { reloadSessionHistoryWithArchitectureProjection } from '../architectureReloadHydration';
 
 export interface SocketReconnectDeps {
   cliChild: CliChildSocketDeps;
@@ -38,16 +39,20 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
   deps.setPendingConfirmation(sid, null);
   identifyCliChildrenOnReconnect(deps.cliChild, sid);
 
-  deps.fetchMessages(sid)
-    .then((data) => {
-      if (deps.getActiveSessionId() !== sid) return;
-      const currentMessages = deps.getSessionMessages(sid);
-      const mergedMessages = mergeFetchedMessages(currentMessages, data);
-      deps.setMessages(mergedMessages, sid);
-      const projections = rebuildCliChildProjectionsFromHistory(deps.cliChild, sid, mergedMessages);
+  void reloadSessionHistoryWithArchitectureProjection({
+    sessionId: sid,
+    getActiveSessionId: deps.getActiveSessionId,
+    getSessionMessages: deps.getSessionMessages,
+    setMessages: deps.setMessages,
+    setAgentTurns: deps.setAgentTurns,
+    fetchMessages: deps.fetchMessages,
+  })
+    .then((hydratedMessages) => {
+      if (!hydratedMessages) return;
+      const projections = rebuildCliChildProjectionsFromHistory(deps.cliChild, sid, hydratedMessages);
       identifyCliChildProjections(deps.cliChild, projections, sid);
       if (!deps.hasActiveLoopForSession(sid)) {
-        deps.setAgentTurns(buildTurnsFromHistory(mergedMessages, sid), sid);
+        deps.setAgentTurns(buildTurnsFromHistory(hydratedMessages, sid), sid);
       }
       deps.onContextInvalidated?.();
     })

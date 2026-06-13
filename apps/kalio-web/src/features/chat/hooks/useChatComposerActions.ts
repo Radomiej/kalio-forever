@@ -228,6 +228,8 @@ export function useChatComposerActions({
       const contextGetter = typeof getContextForSession === 'function' ? getContextForSession : null;
       const activeToolNames = contextGetter ? (contextGetter(activeSessionId)?.activeToolNames ?? []) : [];
       const applyArchitectureProjection = (result: Awaited<ReturnType<typeof startArchitectureRun>>) => {
+        const projectionDone = (result.run.status !== 'queued' && result.run.status !== 'running')
+          || result.agentFlowStatus === 'waiting_on_orchestrator';
         const projection = buildArchitectureRunTurnProjection(result, activeSessionId);
         const currentMessages = getSessionMessages(activeSessionId)
           .filter((message) => message.id !== pendingAssistantMessageId)
@@ -238,7 +240,7 @@ export function useChatComposerActions({
           sessionId: activeSessionId,
           promptMessageId: userMessageId,
           items: projection.turnItems,
-          done: result.run.status !== 'queued' && result.run.status !== 'running',
+          done: projectionDone,
         };
         setAgentTurns(replaceArchitectureRunTurn({
           currentTurns: getSessionAgentTurns(activeSessionId),
@@ -252,6 +254,7 @@ export function useChatComposerActions({
           content,
           buildGoalGuardRunContext(activeSessionId, sourceFiles, activeToolNames, projectPath),
           activeSessionId,
+          applyArchitectureProjection,
         )
         : await startArchitectureRun(
           schemaId,

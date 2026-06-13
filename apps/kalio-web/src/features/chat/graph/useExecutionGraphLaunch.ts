@@ -248,6 +248,8 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
         console.error('[ExecutionGraphView] architecture VFS context check failed', err);
       }
       const applyArchitectureProjection = (result: Awaited<ReturnType<typeof startArchitectureRun>>) => {
+        const projectionDone = (result.run.status !== 'queued' && result.run.status !== 'running')
+          || result.agentFlowStatus === 'waiting_on_orchestrator';
         const projection = buildArchitectureRunTurnProjection(result, sessionWithScope.id);
         const currentMessages = getMessagesForSession(sessionWithScope.id)
           .filter((message) => message.id !== pendingAssistantMessageId)
@@ -258,7 +260,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
           sessionId: sessionWithScope.id,
           promptMessageId: userMessageId,
           items: projection.turnItems,
-          done: result.run.status !== 'queued' && result.run.status !== 'running',
+          done: projectionDone,
         };
         setAgentTurns(replaceArchitectureRunTurn({
           currentTurns: getAgentTurnsForSession(sessionWithScope.id),
@@ -273,6 +275,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
           content,
           buildGoalGuardRunContext(sessionWithScope.id, sourceFiles, activeToolNames, projectPath),
           sessionWithScope.id,
+          applyArchitectureProjection,
         )
         : await startArchitectureRun(
           schemaId,

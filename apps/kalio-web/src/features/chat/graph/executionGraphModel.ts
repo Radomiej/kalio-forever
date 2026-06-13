@@ -232,7 +232,9 @@ export function buildExecutionGraphModel({
             subagentResult.vfsMode === 'isolated' ? 'isolated VFS' : 'shared VFS',
             compactGraphText(subagentResult.result),
           ].filter(Boolean).join(' - '),
-          status: activeLoopSessionIds.has(subagentResult.childSessionId) ? 'running' : statusFromActivity(snapshot.activity, true),
+          status: activeLoopSessionIds.has(subagentResult.childSessionId)
+            ? 'running'
+            : statusFromActivity(snapshot.activity, true, snapshot.result, snapshot.toolName),
           column: branchColumn,
           row: subagentRow,
           sessionId: subagentResult.childSessionId,
@@ -295,7 +297,9 @@ export function buildExecutionGraphModel({
             cliAgentResult.workdir,
             compactGraphText(cliAgentResult.lastOutput),
           ].filter(Boolean).join(' - '),
-          status: activeLoopSessionIds.has(cliAgentResult.childSessionId) ? 'running' : statusFromActivity(snapshot.activity, true),
+          status: activeLoopSessionIds.has(cliAgentResult.childSessionId)
+            ? 'running'
+            : statusFromActivity(snapshot.activity, true, snapshot.result, snapshot.toolName),
           column: branchColumn,
           row: cliRow,
           sessionId: cliAgentResult.childSessionId,
@@ -374,7 +378,7 @@ export function buildExecutionGraphModel({
           title: artifact.label,
           subtitle: artifact.subtitle,
           detail: artifact.preview,
-          status: statusFromActivity(snapshot.activity, true),
+          status: statusFromActivity(snapshot.activity, true, snapshot.result, snapshot.toolName),
           column: branchColumn,
           row: branchStartRow,
           callId,
@@ -422,7 +426,7 @@ export function buildExecutionGraphModel({
           callId: item.callId,
           toolName: snapshot?.toolName ?? 'tool',
           args: snapshot?.args ?? {},
-          status: statusFromActivity(snapshot?.activity ?? null, snapshot?.result != null),
+          status: statusFromActivity(snapshot?.activity ?? null, snapshot?.result != null, snapshot?.result, snapshot?.toolName),
           result: snapshot?.result ?? null,
           confirmationRequired: snapshot?.activity?.status === 'awaiting_confirmation',
         };
@@ -481,7 +485,7 @@ export function buildExecutionGraphModel({
             : branchLabel
               ? undefined
               : visibleArgNames(snapshot?.args ?? {}) || undefined,
-          status: statusFromActivity(snapshot?.activity ?? null, snapshot?.result != null),
+          status: statusFromActivity(snapshot?.activity ?? null, snapshot?.result != null, snapshot?.result, snapshot?.toolName),
           column: baseColumn,
           row: toolRow,
           callId: item.callId,

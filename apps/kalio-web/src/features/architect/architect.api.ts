@@ -100,6 +100,74 @@ export async function stopGoalGuardAgentFlowRun(runId: string): Promise<AgentFlo
   return data;
 }
 
+const AGENT_FLOW_POLL_INTERVAL_MS = 1000;
+const AGENT_FLOW_POLL_MAX_ATTEMPTS = 180;
+
+type AgentFlowRunPollUpdate = (snapshot: AgentFlowRunSnapshot) => void | Promise<void>;
+
+interface AgentFlowRunPollOptions {
+  intervalMs?: number;
+  maxAttempts?: number;
+  shouldContinue?: () => boolean;
+}
+
+function isStableAgentFlowRunStatus(status: AgentFlowRunSnapshot['run']['status']): boolean {
+  return status === 'done'
+    || status === 'failed'
+    || status === 'blocked'
+    || status === 'cancelled'
+    || status === 'waiting_on_orchestrator';
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getAgentFlowRunSnapshot(runId: string): Promise<AgentFlowRunSnapshot> {
+  const { data } = await apiClient.get<AgentFlowRunSnapshot>(`/api/agent-flows/runs/${runId}`);
+  return data;
+}
+
+async function pollAgentFlowSnapshotFrom(
+  initialSnapshot: AgentFlowRunSnapshot,
+  onUpdate?: AgentFlowRunPollUpdate,
+  options: AgentFlowRunPollOptions = {},
+): Promise<AgentFlowRunSnapshot> {
+  const intervalMs = options.intervalMs ?? AGENT_FLOW_POLL_INTERVAL_MS;
+  const maxAttempts = options.maxAttempts ?? AGENT_FLOW_POLL_MAX_ATTEMPTS;
+  const shouldContinue = options.shouldContinue ?? (() => true);
+  let snapshot = initialSnapshot;
+  await onUpdate?.(snapshot);
+
+  for (let attempt = 0; attempt < maxAttempts && !isStableAgentFlowRunStatus(snapshot.run.status); attempt += 1) {
+    await wait(intervalMs);
+    if (!shouldContinue()) {
+      return snapshot;
+    }
+    snapshot = await getAgentFlowRunSnapshot(snapshot.run.id);
+    await onUpdate?.(snapshot);
+  }
+
+  return snapshot;
+}
+
+export async function pollAgentFlowRunUntilStable(
+  initialSnapshot: AgentFlowRunSnapshot,
+  onUpdate?: AgentFlowRunPollUpdate,
+  options?: AgentFlowRunPollOptions,
+): Promise<AgentFlowRunSnapshot> {
+  return pollAgentFlowSnapshotFrom(initialSnapshot, onUpdate, options);
+}
+
+export async function refreshAgentFlowRunUntilStable(
+  runId: string,
+  onUpdate?: AgentFlowRunPollUpdate,
+  options?: AgentFlowRunPollOptions,
+): Promise<AgentFlowRunSnapshot> {
+  const snapshot = await getAgentFlowRunSnapshot(runId);
+  return pollAgentFlowSnapshotFrom(snapshot, onUpdate, options);
+}
+
 async function pollArchitectureRunResult(
   initialRun: ArchitectureRun,
   onUpdate?: (result: ArchitectRunResult) => void,
@@ -128,6 +196,7 @@ export async function startGoalGuardAgentFlowRun(
   prompt: string,
   context?: Record<string, unknown>,
   parentSessionId = 'architect-ui',
+  onUpdate?: (result: ArchitectRunResult) => void,
 ): Promise<ArchitectRunResult> {
   const { data: snapshot } = await apiClient.post<AgentFlowRunSnapshot>('/api/agent-flows/runs', {
     flowId: 'goal_guard_delivery_loop',
@@ -138,7 +207,16 @@ export async function startGoalGuardAgentFlowRun(
     maxSteps: typeof context?.maxArchitectureSteps === 'number' ? context.maxArchitectureSteps : undefined,
     context,
   });
-  return getGoalGuardAgentFlowRunResult(snapshot, prompt, context);
+  if (!onUpdate) {
+    return getGoalGuardAgentFlowRunResult(snapshot, prompt, context);
+  }
+
+  let latestResult: ArchitectRunResult | null = null;
+  const finalSnapshot = await pollAgentFlowRunUntilStable(snapshot, async (nextSnapshot) => {
+    latestResult = await getGoalGuardAgentFlowRunResult(nextSnapshot, prompt, context);
+    onUpdate(latestResult);
+  });
+  return latestResult ?? getGoalGuardAgentFlowRunResult(finalSnapshot, prompt, context);
 }
 
 export async function getGoalGuardAgentFlowRunResult(
