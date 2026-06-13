@@ -469,4 +469,49 @@ describe('RaAppCreateTool', () => {
 
     expect(execute.mock.invocationCallOrder[0]).toBeLessThan(saveAsDraft.mock.invocationCallOrder[0]);
   });
+
+  it('normalizes generated app slugs to lowercase-safe ids before saving drafts', async () => {
+    const execute = vi.fn().mockResolvedValue({ status: 'ready', renderedContent: '<html></html>' });
+    const init = vi.fn().mockResolvedValue(undefined);
+    const saveAsDraft = vi.fn().mockResolvedValue({
+      slug: 'generated-ifj7wi6u-12345678',
+      name: 'Calculator',
+      source: 'user',
+      current: {
+        version: '1.0.0',
+        status: 'current',
+        zipPath: '/tmp/current.zip',
+        createdAt: 1,
+        meta: { id: 'generated-ifj7wi6u-12345678', name: 'Calculator', version: '1.0.0' },
+      },
+      history: [],
+    });
+    const raapp = {
+      execute,
+      init,
+      saveGeneratedApp: vi.fn(),
+    } as unknown as RAAppService;
+    const versioning = {
+      saveAsDraft,
+    } as unknown as RAAppVersioningService;
+    const tool = new RaAppCreateTool(raapp, versioning);
+
+    await tool.execute({
+      callId: 'call-1',
+      sessionId: 'iFJ7wi6u-53d01c1d',
+      toolName: 'raapp_create',
+      args: {
+        type: 'html',
+        content: '<html><head><title>Calculator</title></head></html>',
+        mode: 'interactive',
+        title: 'Calculator',
+      },
+    });
+
+    const generatedSlug = saveAsDraft.mock.calls[0]?.[0];
+    expect(typeof generatedSlug).toBe('string');
+    expect(generatedSlug).toMatch(/^generated-[a-z0-9-]+-[a-f0-9]{8}$/);
+    expect(generatedSlug).toBe(generatedSlug?.toLowerCase());
+    expect(generatedSlug).toContain('generated-ifj7wi6u-');
+  });
 });

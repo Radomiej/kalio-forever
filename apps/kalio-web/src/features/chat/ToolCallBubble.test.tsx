@@ -323,6 +323,24 @@ describe('HistoryToolCallBubble - CLI terminal output', () => {
   });
 });
 
+describe('HistoryToolCallBubble - persisted tool status', () => {
+  it('renders failed status for persisted error results after reload', () => {
+    render(
+      <HistoryToolCallBubble
+        toolName="raapp_create"
+        content={JSON.stringify({
+          status: 'error',
+          errorCode: 'TOOL_EXECUTION_FAILED',
+          errorMessage: 'Invalid RA-App slug "generated-iFJ7wi6u-53d01c1d".',
+        })}
+      />,
+    );
+
+    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(screen.getAllByText(/Invalid RA-App slug/)).toHaveLength(2);
+  });
+});
+
 describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
   it('exposes a stable canvas opener for sub-agent history results', () => {
     vi.mocked(apiClient.get).mockResolvedValueOnce({ data: [] } as never);
@@ -827,5 +845,107 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
       expect(screen.getByText('Goal Guard accepted durable AgentFlow evidence.')).toBeInTheDocument();
     });
     expect(apiClient.get).toHaveBeenCalledWith('/api/agent-flows/runs/flow-refresh');
+  });
+
+  it('keeps polling a durable run_sub_agentflow history block until the run is stable', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(apiClient.get)
+        .mockResolvedValueOnce({
+          data: {
+            run: {
+              id: 'flow-poll',
+              parentSessionId: 'session-1',
+              childSessionId: 'arch-flow-poll-root',
+              openChatSessionId: 'arch-flow-poll-root',
+              openGraphRunId: 'flow-poll',
+              flowDefinitionId: 'goal_guard_delivery_loop',
+              status: 'running',
+              startMode: 'durable',
+              returnMode: 'summary',
+              createdAt: 1,
+              updatedAt: 2,
+            },
+            result: {
+              flowRunId: 'flow-poll',
+              childSessionId: 'arch-flow-poll-root',
+              openChatSessionId: 'arch-flow-poll-root',
+              openGraphRunId: 'flow-poll',
+              status: 'running',
+              summary: 'Goal Guard is still running.',
+              decisions: [],
+              nextActions: ['Keep watching the durable run.'],
+              artifacts: [],
+            },
+            events: [],
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            run: {
+              id: 'flow-poll',
+              parentSessionId: 'session-1',
+              childSessionId: 'arch-flow-poll-root',
+              openChatSessionId: 'arch-flow-poll-root',
+              openGraphRunId: 'flow-poll',
+              flowDefinitionId: 'goal_guard_delivery_loop',
+              status: 'done',
+              startMode: 'durable',
+              returnMode: 'summary',
+              createdAt: 1,
+              updatedAt: 5,
+              finishedAt: 5,
+            },
+            result: {
+              flowRunId: 'flow-poll',
+              childSessionId: 'arch-flow-poll-root',
+              openChatSessionId: 'arch-flow-poll-root',
+              openGraphRunId: 'flow-poll',
+              status: 'done',
+              summary: 'Goal Guard accepted the final evidence.',
+              decisions: ['accepted after QA'],
+              nextActions: [],
+              artifacts: ['qa/proof.md'],
+            },
+            events: [],
+          },
+        });
+
+      render(
+        <HistoryToolCallBubble
+          toolName="run_sub_agentflow"
+          content={JSON.stringify({
+            flowRunId: 'flow-poll',
+            childSessionId: 'arch-flow-poll-root',
+            status: 'running',
+            summary: 'AgentFlow goal_guard_delivery_loop started.',
+            decisions: [],
+            nextActions: ['Open the child AgentFlow graph to monitor completion.'],
+            artifacts: [],
+            openChatSessionId: 'arch-flow-poll-root',
+            openGraphRunId: 'flow-poll',
+          })}
+          args={{ flowId: 'goal_guard_delivery_loop', goal: 'Build project' }}
+        />,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('sub-agentflow-result')).toHaveTextContent('Goal Guard is still running.');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId('sub-agentflow-result')).toHaveTextContent('done');
+      expect(screen.getByText('Goal Guard accepted the final evidence.')).toBeInTheDocument();
+      expect(apiClient.get).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

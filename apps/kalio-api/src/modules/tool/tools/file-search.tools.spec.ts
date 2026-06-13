@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GrepSearchTool, FileSearchTool } from './file-search.tools';
 import type { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
+import type { DrizzleService } from '../../../database/drizzle.service';
 import type { ToolCallRequest } from '@kalio/types';
 import * as nodefs from 'node:fs';
 import * as nodepath from 'node:path';
@@ -16,6 +17,22 @@ function makeRequest(toolName: string, args: Record<string, unknown> = {}): Tool
   return { callId: 'call-1', sessionId: 'sess-fs', toolName, args };
 }
 
+function makeDrizzleSessionLookup(
+  runtimeContext?: { architectureContext?: Record<string, unknown> } | null,
+): DrizzleService {
+  return {
+    db: {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => runtimeContext == null ? [] : [{ runtimeContext }],
+          }),
+        }),
+      }),
+    },
+  } as unknown as DrizzleService;
+}
+
 // ── GrepSearchTool ────────────────────────────────────────────────────────────
 
 describe('GrepSearchTool', () => {
@@ -28,7 +45,7 @@ describe('GrepSearchTool', () => {
       getRoots: vi.fn(),
       isAllowed: vi.fn().mockResolvedValue(true),
     };
-    tool = new GrepSearchTool(allowedPaths as AllowedPathsService);
+    tool = new GrepSearchTool(allowedPaths as AllowedPathsService, makeDrizzleSessionLookup());
   });
 
   describe('positive scenarios', () => {
@@ -139,6 +156,38 @@ describe('GrepSearchTool', () => {
         .map(([target]) => String(target).replace(/\\/g, '/'));
       expect(traversedDirs.some((target) => target.endsWith('/allowed/dist'))).toBe(false);
     });
+
+    it('prefers the session projectPath over global allowed roots', async () => {
+      allowedPaths = {
+        getRoots: vi.fn().mockResolvedValue(['/knowledge', '/project']),
+        isAllowed: vi.fn().mockResolvedValue(true),
+      };
+      tool = new GrepSearchTool(
+        allowedPaths as AllowedPathsService,
+        makeDrizzleSessionLookup({
+          architectureContext: { projectPath: '/project' },
+        }),
+      );
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.readdirSync).mockImplementation((dir) => {
+        if (dir === '/project') {
+          return [{ name: 'app.ts', isDirectory: () => false }] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        if (dir === '/knowledge') {
+          return [{ name: 'wrong.ts', isDirectory: () => false }] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        return [] as unknown as ReturnType<typeof nodefs.readdirSync>;
+      });
+      vi.mocked(nodefs.statSync).mockReturnValue({ size: 100 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('needle');
+
+      await tool.execute(makeRequest('grep_search', { query: 'needle' }));
+
+      const traversedDirs = (nodefs.readdirSync as ReturnType<typeof vi.fn>).mock.calls
+        .map(([target]) => String(target).replace(/\\/g, '/'));
+      expect(traversedDirs).toContain('/project');
+      expect(traversedDirs).not.toContain('/knowledge');
+    });
   });
 
   describe('edge cases', () => {
@@ -194,6 +243,32 @@ describe('GrepSearchTool', () => {
       const result = await tool.execute(makeRequest('grep_search', { query: 'x' }));
 
       expect(result.matches).toHaveLength(0);
+    });
+
+    it('skips unreadable directories instead of failing the whole search', async () => {
+      (allowedPaths.getRoots as ReturnType<typeof vi.fn>).mockResolvedValue(['/allowed']);
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.readdirSync).mockImplementation((dir) => {
+        const normalizedDir = String(dir).replace(/\\/g, '/');
+        if (normalizedDir === '/allowed') {
+          return [
+            { name: 'blocked', isDirectory: () => true },
+            { name: 'ok.ts', isDirectory: () => false },
+          ] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        if (normalizedDir.endsWith('/allowed/blocked')) {
+          throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+        }
+        return [] as unknown as ReturnType<typeof nodefs.readdirSync>;
+      });
+      vi.mocked(nodefs.statSync).mockReturnValue({ size: 20 } as ReturnType<typeof nodefs.statSync>);
+      vi.mocked(nodefs.readFileSync).mockReturnValue('needle');
+
+      const result = await tool.execute(makeRequest('grep_search', { query: 'needle' }));
+
+      expect(result.matches).toEqual([
+        { file: nodepath.join('/allowed', 'ok.ts'), line: 1, text: 'needle' },
+      ]);
     });
   });
 
@@ -268,7 +343,7 @@ describe('FileSearchTool', () => {
       getRoots: vi.fn(),
       isAllowed: vi.fn().mockResolvedValue(true),
     };
-    tool = new FileSearchTool(allowedPaths as AllowedPathsService);
+    tool = new FileSearchTool(allowedPaths as AllowedPathsService, makeDrizzleSessionLookup());
   });
 
   describe('positive scenarios', () => {
@@ -324,6 +399,36 @@ describe('FileSearchTool', () => {
         .map(([target]) => String(target).replace(/\\/g, '/'));
       expect(traversedDirs.some((target) => target.endsWith('/project/coverage'))).toBe(false);
     });
+
+    it('prefers the session projectPath over global allowed roots', async () => {
+      allowedPaths = {
+        getRoots: vi.fn().mockResolvedValue(['/knowledge', '/project']),
+        isAllowed: vi.fn().mockResolvedValue(true),
+      };
+      tool = new FileSearchTool(
+        allowedPaths as AllowedPathsService,
+        makeDrizzleSessionLookup({
+          architectureContext: { executionCwd: '/project' },
+        }),
+      );
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.readdirSync).mockImplementation((dir) => {
+        if (dir === '/project') {
+          return [{ name: 'keep.ts', isDirectory: () => false }] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        if (dir === '/knowledge') {
+          return [{ name: 'wrong.ts', isDirectory: () => false }] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        return [] as unknown as ReturnType<typeof nodefs.readdirSync>;
+      });
+
+      const result = await tool.execute(makeRequest('file_search', { pattern: '**/*.ts' }));
+
+      expect(result.files).toEqual([nodepath.join('/project', 'keep.ts')]);
+      const traversedDirs = (nodefs.readdirSync as ReturnType<typeof vi.fn>).mock.calls
+        .map(([target]) => String(target).replace(/\\/g, '/'));
+      expect(traversedDirs).not.toContain('/knowledge');
+    });
   });
 
   describe('edge cases', () => {
@@ -360,6 +465,28 @@ describe('FileSearchTool', () => {
       const result = await tool.execute(makeRequest('file_search', { pattern: '**/*' }));
 
       expect(result.files).toHaveLength(0);
+    });
+
+    it('skips unreadable directories instead of failing the whole search', async () => {
+      (allowedPaths.getRoots as ReturnType<typeof vi.fn>).mockResolvedValue(['/project']);
+      vi.mocked(nodefs.existsSync).mockReturnValue(true);
+      vi.mocked(nodefs.readdirSync).mockImplementation((dir) => {
+        const normalizedDir = String(dir).replace(/\\/g, '/');
+        if (normalizedDir === '/project') {
+          return [
+            { name: 'blocked', isDirectory: () => true },
+            { name: 'ok.ts', isDirectory: () => false },
+          ] as unknown as ReturnType<typeof nodefs.readdirSync>;
+        }
+        if (normalizedDir.endsWith('/project/blocked')) {
+          throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+        }
+        return [] as unknown as ReturnType<typeof nodefs.readdirSync>;
+      });
+
+      const result = await tool.execute(makeRequest('file_search', { pattern: '**/*.ts' }));
+
+      expect(result.files).toEqual([nodepath.join('/project', 'ok.ts')]);
     });
   });
 

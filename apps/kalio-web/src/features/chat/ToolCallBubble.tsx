@@ -17,7 +17,7 @@ import { CheckCircle2, XCircle, Loader2, ExternalLink, AlertTriangle } from 'luc
 import type { AgentFlowRunSnapshot, SubAgentFlowResult } from '@kalio/types';
 import type { ToolActivity } from '../../store/agentStore';
 import { useAgentStore } from '../../store/agentStore';
-import { apiClient } from '../../services/apiClient';
+import { refreshAgentFlowRunUntilStable } from '../architect/architect.api';
 
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
 import { TerminalOutputBlock } from './TerminalOutputBlock';
@@ -28,6 +28,7 @@ import {
   extractCLIAgentResult,
   extractCLIAgentSessionSnapshot,
   extractImageResult,
+  extractPersistedToolResultMeta,
   extractRAAppBlock,
   extractSubAgentFlowResult,
   extractSubagentResult,
@@ -71,6 +72,10 @@ function subAgentFlowResultFromSnapshot(snapshot: AgentFlowRunSnapshot): SubAgen
     openChatSessionId: snapshot.run.openChatSessionId,
     openGraphRunId: snapshot.run.openGraphRunId,
   };
+}
+
+function shouldPollSubAgentFlowResult(result: SubAgentFlowResult): boolean {
+  return result.status === 'queued' || result.status === 'running';
 }
 
 export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
@@ -273,12 +278,21 @@ export function HistoryToolCallBubble({
   const webSearchResult = toolName === 'web_search' ? extractWebSearchResult(parsed) : null;
   const subagentResult = isSubagent ? extractSubagentResult(parsed) : null;
   const subAgentFlowResult = isSubAgentFlow ? extractSubAgentFlowResult(parsed) : null;
+  const persistedToolResultMeta = extractPersistedToolResultMeta(parsed);
   const [refreshedSubAgentFlowResult, setRefreshedSubAgentFlowResult] = useState<SubAgentFlowResult | null>(null);
   const displayedSubAgentFlowResult = refreshedSubAgentFlowResult ?? subAgentFlowResult;
   const hasArgs = args != null && Object.keys(args).length > 0;
   const inferredDefaultOpen = showCliChildCard
     ? false
-    : (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || webSearchResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
+    : (raapp != null && !isAnswered)
+      || cliResult != null
+      || cliSessionSnapshot != null
+      || imageResult != null
+      || webSearchResult != null
+      || subagentResult != null
+      || displayedSubAgentFlowResult != null
+      || persistedToolResultMeta?.status === 'error'
+      || persistedToolResultMeta?.status === 'cancelled';
   const defaultOpen = defaultOpenOverride ?? inferredDefaultOpen;
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const open = isAnswered ? false : (manualOpen ?? defaultOpen);
@@ -286,18 +300,31 @@ export function HistoryToolCallBubble({
   const hasResult = !raapp && !cliResult && !cliSessionSnapshot && !imageResult && !webSearchResult && !subagentResult && !displayedSubAgentFlowResult && content.length > 0;
   const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || webSearchResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
   const agentFlowOpenGraphRunId = displayedSubAgentFlowResult?.openGraphRunId ?? displayedSubAgentFlowResult?.flowRunId;
+  const historyIcon = persistedToolResultMeta?.status === 'error'
+    ? <XCircle size={12} className="text-error shrink-0" />
+    : persistedToolResultMeta?.status === 'cancelled'
+      ? <XCircle size={12} className="text-base-content/40 shrink-0" />
+      : <CheckCircle2 size={12} className="text-success shrink-0" />;
+  const historyStatusBadge = persistedToolResultMeta?.status === 'error'
+    ? <span className="text-[10px] font-mono text-error/80 bg-error/10 rounded px-1">failed</span>
+    : persistedToolResultMeta?.status === 'cancelled'
+      ? <span className="text-[10px] font-mono text-base-content/55 bg-base-200/70 rounded px-1">cancelled</span>
+      : null;
 
   useEffect(() => {
-    if (!isSubAgentFlow || !subAgentFlowResult || subAgentFlowResult.status !== 'running') return;
+    if (!isSubAgentFlow || !subAgentFlowResult || !shouldPollSubAgentFlowResult(subAgentFlowResult)) return;
     const runId = subAgentFlowResult?.openGraphRunId ?? subAgentFlowResult?.flowRunId;
     if (!runId) return;
     let cancelled = false;
-    void apiClient.get<AgentFlowRunSnapshot>(`/api/agent-flows/runs/${runId}`)
-      .then((response) => {
+    void refreshAgentFlowRunUntilStable(
+      runId,
+      (snapshot) => {
         if (!cancelled) {
-          setRefreshedSubAgentFlowResult(subAgentFlowResultFromSnapshot(response.data));
+          setRefreshedSubAgentFlowResult(subAgentFlowResultFromSnapshot(snapshot));
         }
-      })
+      },
+      { shouldContinue: () => !cancelled },
+    )
       .catch((err: unknown) => {
         console.error('[ToolCallBubble] failed to refresh AgentFlow run', err instanceof Error ? err : new Error(String(err)));
       });
@@ -329,11 +356,12 @@ export function HistoryToolCallBubble({
       )}
       {(!showsCliChildCard || manualOpen) && (
       <Chip
-        icon={<CheckCircle2 size={12} className="text-success shrink-0" />}
+        icon={historyIcon}
         toolName={toolName}
         targetLabel={getToolTargetLabel(toolName, args)}
         badge={
           <>
+            {historyStatusBadge}
             {isAnswered && <span className="text-[10px] font-mono text-base-content/40 bg-base-200/60 rounded px-1">â†© answered</span>}
             {(isSubagent || cliSessionSnapshot != null || displayedSubAgentFlowResult != null) && (
               <button
@@ -383,6 +411,12 @@ export function HistoryToolCallBubble({
         {imageResult && <ImageResultRenderer data={imageResult} />}
         {webSearchResult && <WebSearchResultRenderer data={webSearchResult} />}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}
+        {persistedToolResultMeta?.errorMessage && (
+          <div className="text-xs text-error">{persistedToolResultMeta.errorMessage}</div>
+        )}
+        {persistedToolResultMeta?.status === 'cancelled' && !persistedToolResultMeta.errorMessage && (
+          <div className="text-xs text-base-content/50">Tool call was cancelled before it completed.</div>
+        )}
       </Chip>
       )}
       {raapp && isAnswered && (

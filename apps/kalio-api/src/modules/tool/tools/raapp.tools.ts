@@ -11,14 +11,14 @@ import type { RAAppMeta, SaveGeneratedAppInput } from '../../raapp/raapp.service
 import { RAAppSandboxService } from '../../raapp/raapp-sandbox.service';
 import { EffectsProcessorService } from '../../raapp/effects-processor.service';
 import { RAAppHITLService } from '../../raapp/raapp-hitl.service';
-import { RAAppVersioningService } from '../../raapp/raapp-versioning.service';
+import { deriveSlug, RAAppVersioningService } from '../../raapp/raapp-versioning.service';
 import { archiveDirectoryToZip } from '../../raapp/zip-archive.util';
 import { EntityStore } from '../../raapp/entity-store';
 import { applyRaAppOutputPatches } from '../../raapp/raapp-output-patches.util';
 
 function createGeneratedAppId(sessionId: string): string {
-  const sessionPart = sessionId.trim().slice(0, 8) || 'session';
-  return `generated-${sessionPart}-${randomUUID().slice(0, 8)}`;
+  const sessionPart = deriveSlug(sessionId.trim().slice(0, 8)) || 'session';
+  return `generated-${sessionPart}-${randomUUID().slice(0, 8).toLowerCase()}`;
 }
 
 async function buildGeneratedArchive(input: SaveGeneratedAppInput): Promise<{ appId: string; buffer: Buffer }> {
