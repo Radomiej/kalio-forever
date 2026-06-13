@@ -409,7 +409,12 @@ describe('SubagentRuntimeService nested subagents', () => {
       }),
     );
     expect(sessions.createWithId).not.toHaveBeenCalled();
-    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith('sub-existing', 'Refine the existing page');
+    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith(
+      'sub-existing',
+      'Refine the existing page',
+      undefined,
+      expect.objectContaining({ turnId: expect.any(String) }),
+    );
     expect(result.childSessionId).toBe('sub-existing');
     expect(result.result).toBe('follow-up done');
   });
@@ -675,6 +680,8 @@ describe('SubagentRuntimeService nested subagents', () => {
     expect(sessionManager.persistUserMessage).toHaveBeenCalledWith(
       expect.stringMatching(/^sub-/),
       expect.stringContaining('attachments/images/cat.png'),
+      undefined,
+      expect.objectContaining({ turnId: expect.any(String) }),
     );
   });
 
@@ -1016,6 +1023,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       expect.any(String),
       expect.any(String),
       expect.stringContaining('"output":"ok"'),
+      expect.objectContaining({ turnId: expect.any(String) }),
     );
     expect(persistedAssistantSnapshots[0]).toEqual({
       text: '',
@@ -1222,6 +1230,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       expect.stringMatching(/^sub-/),
       expect.any(String),
       expect.stringContaining('kalio-forever'),
+      expect.objectContaining({ turnId: expect.any(String) }),
     );
     expect(result.result).toBe('CLI result received.');
   });

@@ -295,6 +295,8 @@ export interface ChatMessage {
   sessionId: ID;
   role: MessageRole;
   content: string;
+  turnId?: ID;
+  promptMessageId?: ID;
   thinking?: string;          // reasoning content from models like MiMo / DeepSeek
   toolCalls?: LLMToolCall[];  // populated for assistant messages with tool use
   toolCallId?: string;        // populated for role='tool_result'

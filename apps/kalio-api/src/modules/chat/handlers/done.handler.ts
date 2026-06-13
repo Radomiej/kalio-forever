@@ -35,6 +35,7 @@ export class DoneHandler implements ChunkHandler<DoneChunk> {
       ctx.sessionId,
       ctx.messageId,
       ctx.state,
+      { turnId: ctx.turnId, promptMessageId: ctx.promptMessageId },
     );
   }
 }

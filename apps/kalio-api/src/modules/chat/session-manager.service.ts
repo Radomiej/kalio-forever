@@ -21,6 +21,16 @@ export class SessionManagerService {
     private readonly credentialsService: CredentialsService,
   ) {}
 
+  private buildTurnLink(
+    turnLink?: { turnId?: string; promptMessageId?: string },
+    defaultPromptMessageId?: string,
+  ): Pick<ChatMessage, 'turnId' | 'promptMessageId'> {
+    return {
+      turnId: turnLink?.turnId,
+      promptMessageId: turnLink?.promptMessageId ?? defaultPromptMessageId,
+    };
+  }
+
   /** Upserts the session row so FK constraints are satisfied before message inserts. */
   async ensureSession(sessionId: string, personaId: string): Promise<void> {
     await this.repo.ensureSession(sessionId, personaId);
@@ -100,12 +110,15 @@ export class SessionManagerService {
     sessionId: string,
     content: string,
     attachments?: ChatAttachment[],
+    turnLink?: { turnId?: string },
   ): Promise<ChatMessage> {
+    const messageId = nanoid();
     const msg: ChatMessage = {
-      id: nanoid(),
+      id: messageId,
       sessionId,
       role: 'user',
       content,
+      ...this.buildTurnLink(turnLink, messageId),
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
       createdAt: Date.now(),
     };
@@ -117,12 +130,14 @@ export class SessionManagerService {
     sessionId: string,
     messageId: string,
     state: TurnState,
+    turnLink?: { turnId?: string; promptMessageId?: string },
   ): Promise<void> {
     const msg: ChatMessage = {
       id: messageId,
       sessionId,
       role: 'assistant',
       content: state.text,
+      ...this.buildTurnLink(turnLink, messageId),
       thinking: state.thinking || undefined,
       toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
       createdAt: Date.now(),
@@ -134,12 +149,19 @@ export class SessionManagerService {
     await this.repo.saveMessage(message);
   }
 
-  async saveToolResult(sessionId: string, toolCallId: string, content: string): Promise<void> {
+  async saveToolResult(
+    sessionId: string,
+    toolCallId: string,
+    content: string,
+    turnLink?: { turnId?: string; promptMessageId?: string },
+  ): Promise<void> {
+    const messageId = nanoid();
     const msg: ChatMessage = {
-      id: nanoid(),
+      id: messageId,
       sessionId,
       role: 'tool_result',
       content,
+      ...this.buildTurnLink(turnLink, messageId),
       toolCallId,
       createdAt: Date.now(),
     };

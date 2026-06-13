@@ -53,6 +53,8 @@ export const messages = sqliteTable('messages', {
   sessionId:  text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
   role:       text('role', { enum: ['user', 'assistant', 'tool_result', 'system'] }).notNull(),
   content:    text('content').notNull(),
+  turnId:     text('turn_id'),
+  promptMessageId: text('prompt_message_id'),
   thinking:   text('thinking'),       // reasoning content from models like MiMo / DeepSeek
   toolCalls:  text('tool_calls', { mode: 'json' }).$type<LLMToolCall[] | null>(),
   toolCallId: text('tool_call_id'),  // for role='tool_result'

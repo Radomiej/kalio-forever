@@ -83,7 +83,17 @@ export function useChatSessionActivation({
           ? useSessionStore.getState().getSessionAgentTurns(activeSessionId).find((turn) => turn.id === activeTurnId)
           : null;
         if (activeTurn && !activeTurn.promptMessageId) {
-          updateAgentTurn(activeTurn.id, { promptMessageId: latestUserMessageId }, activeSessionId);
+          const persistedPromptMessageId = mergedMessages.find((message) =>
+            message.role === 'assistant'
+            && message.turnId === activeTurn.id
+            && message.promptMessageId,
+          )?.promptMessageId;
+          // TODO: legacy fallback - active recovered turns created before durable linkage still need latest-user backfill.
+          updateAgentTurn(
+            activeTurn.id,
+            { promptMessageId: persistedPromptMessageId ?? latestUserMessageId },
+            activeSessionId,
+          );
         }
       })
       .catch((err: unknown) => {

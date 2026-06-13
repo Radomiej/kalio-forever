@@ -51,16 +51,24 @@ describe('SessionManagerService', () => {
 
   describe('persistUserMessage', () => {
     it('saves a user message to the repo', async () => {
-      await service.persistUserMessage('sid', 'hello');
+      await service.persistUserMessage('sid', 'hello', undefined, { turnId: 'turn-1' });
       expect(repo.saveMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'sid', role: 'user', content: 'hello' }),
+        expect.objectContaining({
+          sessionId: 'sid',
+          role: 'user',
+          content: 'hello',
+          turnId: 'turn-1',
+          promptMessageId: expect.any(String),
+        }),
       );
     });
 
     it('returns a ChatMessage with generated id and createdAt', async () => {
-      const msg = await service.persistUserMessage('sid', 'test');
+      const msg = await service.persistUserMessage('sid', 'test', undefined, { turnId: 'turn-1' });
       expect(msg.id).toBeTruthy();
       expect(msg.createdAt).toBeGreaterThan(0);
+      expect(msg.turnId).toBe('turn-1');
+      expect(msg.promptMessageId).toBe(msg.id);
     });
   });
 
@@ -68,10 +76,19 @@ describe('SessionManagerService', () => {
     it('saves assistant message with text from state', async () => {
       const state = new TurnState();
       state.appendText('The answer is 42.');
-      await service.persistAssistantMessage('sid', 'mid-1', state);
+      await service.persistAssistantMessage('sid', 'mid-1', state, {
+        turnId: 'turn-1',
+        promptMessageId: 'user-1',
+      });
 
       expect(repo.saveMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'mid-1', role: 'assistant', content: 'The answer is 42.' }),
+        expect.objectContaining({
+          id: 'mid-1',
+          role: 'assistant',
+          content: 'The answer is 42.',
+          turnId: 'turn-1',
+          promptMessageId: 'user-1',
+        }),
       );
     });
 
@@ -276,7 +293,10 @@ describe('SessionManagerService', () => {
 
   describe('saveToolResult', () => {
     it('saves a tool_result message with correct fields', async () => {
-      await service.saveToolResult('sid-1', 'call-abc', '{"result":"ok"}');
+      await service.saveToolResult('sid-1', 'call-abc', '{"result":"ok"}', {
+        turnId: 'turn-1',
+        promptMessageId: 'user-1',
+      });
 
       expect(repo.saveMessage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -284,6 +304,8 @@ describe('SessionManagerService', () => {
           role: 'tool_result',
           content: '{"result":"ok"}',
           toolCallId: 'call-abc',
+          turnId: 'turn-1',
+          promptMessageId: 'user-1',
         }),
       );
     });

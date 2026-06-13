@@ -11,7 +11,12 @@ import { buildConversationTimeline, buildTurnsFromHistory, computeAnsweredCallId
 import type { ChatMessage } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
 
-function makeMsg(overrides: Partial<ChatMessage>): ChatMessage {
+type TestChatMessageOverrides = Partial<ChatMessage> & {
+  turnId?: string;
+  promptMessageId?: string;
+};
+
+function makeMsg(overrides: TestChatMessageOverrides): ChatMessage {
   return {
     id: 'msg-default',
     sessionId: 's1',
@@ -320,7 +325,24 @@ describe('buildTurnsFromHistory', () => {
     expect(kinds).toEqual(['thinking', 'text', 'tool', 'thinking', 'text']);
   });
 
-  it('REGRESSION: a rebuilt agent turn stays anchored to the user prompt that actually started it', () => {
+  it('REGRESSION: restored history prefers durable turn linkage over chronological user order', () => {
+    const msgs = [
+      makeMsg({ id: 'u1', role: 'user', content: 'first prompt', turnId: 'turn-1', promptMessageId: 'u1' }),
+      makeMsg({ id: 'u2', role: 'user', content: 'queued follow-up', turnId: 'turn-2', promptMessageId: 'u2' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: 'answer for first prompt', turnId: 'turn-1', promptMessageId: 'u1' }),
+    ];
+
+    const turns = buildTurnsFromHistory(msgs, 's1');
+    const timeline = buildConversationTimeline(msgs, turns).map((entry) =>
+      entry.kind === 'user_message' ? `user:${entry.message.id}` : `turn:${entry.turn.id}`,
+    );
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({ promptMessageId: 'u1' });
+    expect(timeline).toEqual(['user:u1', `turn:${turns[0].id}`, 'user:u2']);
+  });
+
+  it('LEGACY: chronological reconstruction still anchors ambiguous old history to the latest preceding user', () => {
     const msgs = [
       makeMsg({ id: 'u1', role: 'user', content: 'first prompt with no answer' }),
       makeMsg({ id: 'u2', role: 'user', content: 'second prompt that got the answer' }),
