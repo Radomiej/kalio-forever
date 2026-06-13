@@ -8,6 +8,8 @@ import type { ToolActivity } from '../../store/agentStore';
 import { findArchitectureRunInMessages } from './architectureChatSummary';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
 import { LiveToolCallBubble, HistoryToolCallBubble } from './ToolCallBubble';
+import { extractCLIAgentResult, extractCLIAgentSessionSnapshot, extractPersistedToolResultMeta } from './ToolCallBubble.parsers';
+import { isCliChildToolName, resolveCLIChildProjectionStatus, shouldRenderLiveCliChildStatus } from './cliChildProjection.model';
 import { eventBus } from '../../services/eventBus';
 
 interface Props {
@@ -60,6 +62,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     callIdToName: persistentCallIdToName,
     toolArgProgress,
     setCanvasFocus,
+    cliChildProjections,
     pendingBudgetApprovals,
     setPendingBudgetApproval,
   } = useAgentStore();
@@ -91,10 +94,21 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
   for (const a of toolActivities) toolArgsByCallId.set(a.callId, a.args);
 
   // Build tool result lookup by callId
-  const toolResultByCallId = new Map<string, { content: string; status: string }>();
+  const toolResultByCallId = new Map<string, { content: string; status: 'success' | 'error' | 'cancelled'; parsed: unknown }>();
   for (const msg of messages) {
     if (msg.role === 'tool_result' && msg.toolCallId) {
-      toolResultByCallId.set(msg.toolCallId, { content: msg.content, status: 'success' });
+      const parsed = (() => {
+        try {
+          return JSON.parse(msg.content) as unknown;
+        } catch {
+          return msg.content;
+        }
+      })();
+      toolResultByCallId.set(msg.toolCallId, {
+        content: msg.content,
+        status: extractPersistedToolResultMeta(parsed)?.status ?? 'success',
+        parsed,
+      });
     }
   }
 
@@ -179,10 +193,41 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
               
               // Check if this is a live (in-progress) tool or completed
               const liveActivity = toolActivities.find((a) => a.callId === callId);
+              const parsedToolResult = toolResult?.parsed;
+              const cliSnapshot = parsedToolResult !== undefined ? extractCLIAgentSessionSnapshot(parsedToolResult) : null;
+              const cliResult = parsedToolResult !== undefined ? extractCLIAgentResult(parsedToolResult) : null;
+              const cliProjection = Object.values(cliChildProjections).find((projection) => projection.parentCallId === callId);
+              const cliStatus = isCliChildToolName(toolName)
+                ? resolveCLIChildProjectionStatus({
+                    snapshotStatus: cliSnapshot?.status,
+                    liveProjectionStatus: cliProjection?.status,
+                    activityStatus: liveActivity?.status,
+                    resultStatus: toolResult?.status,
+                    cliResult,
+                  })
+                : null;
+              const shouldRenderCliAsLive = cliStatus ? shouldRenderLiveCliChildStatus(cliStatus) : false;
               
-              if (liveActivity && !toolResult) {
+              if (shouldRenderCliAsLive || (liveActivity && !toolResult)) {
                 // Live tool call (still running)
-                return <LiveToolCallBubble key={`${callId}-${idx}`} activity={liveActivity} />;
+                const syntheticLiveActivity = liveActivity ?? {
+                  callId,
+                  toolName,
+                  args: toolArgsByCallId.get(callId) ?? {},
+                  sessionId: turn.sessionId,
+                  status: 'running' as const,
+                  startedAt: 0,
+                  ...(parsedToolResult !== undefined
+                    ? {
+                        result: {
+                          callId,
+                          status: 'success' as const,
+                          data: parsedToolResult,
+                        },
+                      }
+                    : {}),
+                };
+                return <LiveToolCallBubble key={`${callId}-${idx}`} activity={syntheticLiveActivity} />;
               }
               
               // Completed tool call

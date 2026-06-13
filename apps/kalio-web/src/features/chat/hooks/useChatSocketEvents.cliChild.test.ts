@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useChatSocketEvents } from './useChatSocketEvents';
+import { rebuildCliChildProjectionsFromHistory } from './useChatSocketEvents.cliChild';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { eventBus } from '../../../services/eventBus';
@@ -182,6 +183,49 @@ describe('useChatSocketEvents CLI child projections', () => {
     });
   });
 
+  it('treats cancelled tool:result as terminal even when the snapshot still says running', () => {
+    useAgentStore.setState({
+      cliChildProjections: {
+        'cli-child-1': {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          parentCallId: 'call-cli-1',
+          agentId: 'codex',
+          status: 'running',
+          lastOutput: 'still running',
+          toolName: 'run_cli_agent',
+        },
+      },
+      callIdToName: {
+        'call-cli-1': 'run_cli_agent',
+      },
+    });
+    mountHook();
+
+    act(() => {
+      fire('tool:result', {
+        callId: 'call-cli-1',
+        sessionId: 'cli-child-1',
+        status: 'cancelled',
+        data: {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          workdir: 'C:/repo',
+          status: 'running',
+          lastPrompt: 'Long running task',
+          updatedAt: 123,
+          lastOutput: 'CLI agent stopped.',
+        },
+      });
+    });
+
+    expect(useAgentStore.getState().cliChildProjections['cli-child-1']).toMatchObject({
+      status: 'stopped',
+      lastOutput: 'CLI agent stopped.',
+    });
+  });
+
   it('updates CLI child projection to failed when an error tool:result carries the final snapshot', () => {
     useAgentStore.setState({
       cliChildProjections: {
@@ -225,6 +269,59 @@ describe('useChatSocketEvents CLI child projections', () => {
     expect(useAgentStore.getState().cliChildProjections['cli-child-1']).toMatchObject({
       status: 'failed',
       lastOutput: 'CLI process exited with code 1',
+    });
+  });
+
+  it('rebuilds a failed CLI child projection from persisted tool-result status metadata', () => {
+    useAgentStore.setState({
+      callIdToName: {
+        'call-cli-1': 'spawn_cli_agent',
+      },
+    });
+
+    const deps = {
+      upsertCLIChildProjection: vi.fn(),
+      updateCLIChildProjection: vi.fn(),
+      rebuildCLIChildProjections: (parentSessionId: string, projections: Array<unknown>) => {
+        void parentSessionId;
+        useAgentStore.getState().rebuildCLIChildProjections('session-1', projections as never);
+      },
+      appendCLIAgentChunk: vi.fn(),
+      registerCallId: vi.fn(),
+      getAgentState: () => useAgentStore.getState(),
+      getSessionState: () => useSessionStore.getState(),
+      identifySession: vi.fn(),
+    };
+
+    rebuildCliChildProjectionsFromHistory(deps, 'session-1', [
+      {
+        id: 'assistant-1',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex' } }],
+        createdAt: 1,
+      },
+      {
+        id: 'tool-1',
+        sessionId: 'session-1',
+        role: 'tool_result',
+        toolCallId: 'call-cli-1',
+        content: JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          status: 'running',
+          toolResultStatus: 'error',
+          lastOutput: 'Authentication required.',
+        }),
+        createdAt: 2,
+      },
+    ]);
+
+    expect(useAgentStore.getState().cliChildProjections['cli-child-1']).toMatchObject({
+      status: 'failed',
+      lastOutput: 'Authentication required.',
     });
   });
 

@@ -118,6 +118,9 @@ export class ToolDispatchService {
       return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      const errorCode = typeof (err as { code?: unknown })?.code === 'string'
+        ? (err as { code: string }).code
+        : 'TOOL_EXECUTION_FAILED';
       this.logger.error(
         `Tool [${toolName}] failed for session ${ctx.sessionId}: ${message}`,
         err instanceof Error ? err.stack : undefined,
@@ -125,7 +128,7 @@ export class ToolDispatchService {
       return this.withMeta({
         callId,
         status: 'error',
-        errorCode: 'TOOL_EXECUTION_FAILED',
+        errorCode,
         errorMessage: message,
       }, toolName, ctx);
     }

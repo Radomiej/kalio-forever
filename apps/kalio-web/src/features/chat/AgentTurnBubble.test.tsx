@@ -25,6 +25,16 @@ const mockAgentStoreState = {
   toolArgProgress: null as { toolName: string; totalChars: number; charsPerSec: number } | null,
   setCanvasOpen: vi.fn(),
   setCanvasFocus: vi.fn(),
+  cliChildProjections: {} as Record<string, {
+    childSessionId: string;
+    parentSessionId: string;
+    parentCallId: string;
+    agentId: string;
+    status: 'running' | 'completed' | 'failed' | 'stopped' | 'pending';
+    lastOutput: string;
+    toolName: string;
+    childTitle?: string;
+  }>,
   pendingBudgetApprovals: {} as Record<string, {
     requestId: string;
     sessionId: string;
@@ -40,6 +50,7 @@ vi.mock('../../store/agentStore', () => ({
     toolArgProgress: mockAgentStoreState.toolArgProgress,
     setCanvasOpen: mockAgentStoreState.setCanvasOpen,
     setCanvasFocus: mockAgentStoreState.setCanvasFocus,
+    cliChildProjections: mockAgentStoreState.cliChildProjections,
     pendingBudgetApprovals: mockAgentStoreState.pendingBudgetApprovals,
     setPendingBudgetApproval: mockAgentStoreState.setPendingBudgetApproval,
   }),
@@ -102,6 +113,7 @@ describe('AgentTurnBubble', () => {
     mockAgentStoreState.toolArgProgress = null;
     mockAgentStoreState.setCanvasOpen.mockClear();
     mockAgentStoreState.setCanvasFocus.mockClear();
+    mockAgentStoreState.cliChildProjections = {};
     mockAgentStoreState.pendingBudgetApprovals = {};
     mockAgentStoreState.setPendingBudgetApproval.mockClear();
   });
@@ -163,6 +175,34 @@ describe('AgentTurnBubble', () => {
     expect(screen.getByTestId('live-tool-tc-live')).toBeInTheDocument();
   });
 
+  it('renders a live CLI child bubble when the durable snapshot still reports running', () => {
+    mockMessages.push(
+      makeMsg({
+        id: 'msg-a',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'tc-cli', name: 'spawn_cli_agent', args: { agentId: 'codex', prompt: 'Inspect repo' } }],
+      }),
+      makeMsg({
+        id: 'msg-t',
+        role: 'tool_result',
+        toolCallId: 'tc-cli',
+        content: JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 's1',
+          agentId: 'codex',
+          status: 'running',
+          lastOutput: 'Scanning files...',
+        }),
+      }),
+    );
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-a' }, { kind: 'tool', callId: 'tc-cli' }], false)} toolActivities={[]} />);
+
+    expect(screen.getByTestId('live-tool-tc-cli')).toBeInTheDocument();
+    expect(screen.queryByTestId('history-tool-spawn_cli_agent')).not.toBeInTheDocument();
+  });
+
   it('skips live activities already present as tool_result messages', () => {
     mockMessages.push(
       makeMsg({ id: 'msg-a', role: 'assistant', content: 'Hello' }),
@@ -173,6 +213,66 @@ describe('AgentTurnBubble', () => {
     ];
     render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-a' }, { kind: 'tool', callId: 'tc-1' }])} toolActivities={activities} />);
     expect(screen.queryByTestId('live-tool-tc-1')).not.toBeInTheDocument();
+  });
+
+  it('prefers terminal CLI snapshots over stale running activity in conversation history', () => {
+    mockMessages.push(
+      makeMsg({
+        id: 'msg-a',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'tc-cli', name: 'spawn_cli_agent', args: { agentId: 'codex', prompt: 'Inspect repo' } }],
+      }),
+      makeMsg({
+        id: 'msg-t',
+        role: 'tool_result',
+        toolCallId: 'tc-cli',
+        content: JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 's1',
+          agentId: 'codex',
+          status: 'completed',
+          lastOutput: 'done',
+        }),
+      }),
+    );
+    const activities: ToolActivity[] = [
+      { callId: 'tc-cli', toolName: 'spawn_cli_agent', args: { agentId: 'codex', prompt: 'Inspect repo' }, status: 'running', startedAt: Date.now() },
+    ];
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-a' }, { kind: 'tool', callId: 'tc-cli' }])} toolActivities={activities} />);
+
+    expect(screen.queryByTestId('live-tool-tc-cli')).not.toBeInTheDocument();
+    expect(screen.getByTestId('history-tool-spawn_cli_agent')).toBeInTheDocument();
+  });
+
+  it('prefers persisted cancelled CLI tool status over a stale running snapshot after reload', () => {
+    mockMessages.push(
+      makeMsg({
+        id: 'msg-a',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'tc-cli', name: 'spawn_cli_agent', args: { agentId: 'codex', prompt: 'Inspect repo' } }],
+      }),
+      makeMsg({
+        id: 'msg-t',
+        role: 'tool_result',
+        toolCallId: 'tc-cli',
+        content: JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 's1',
+          agentId: 'codex',
+          status: 'running',
+          toolResultStatus: 'cancelled',
+          lastOutput: 'CLI agent stopped.',
+        }),
+      }),
+    );
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-a' }, { kind: 'tool', callId: 'tc-cli' }])} toolActivities={[]} />);
+
+    expect(screen.queryByTestId('live-tool-tc-cli')).not.toBeInTheDocument();
+    expect(screen.getByTestId('history-tool-spawn_cli_agent')).toBeInTheDocument();
   });
 
   it('shows streaming indicator when message is streaming with no content', () => {

@@ -5,6 +5,7 @@ import type { AllowedPathsService } from '../../allowed-paths/allowed-paths.serv
 import type { CLIAgentService } from '../../cli-agent/cli-agent.service';
 import type { CLIAgentSessionService } from '../../cli-agent/cli-agent-session.service';
 import type { RunCliAgentRequest } from '../../cli-agent/cli-agent.types';
+import { applySemanticCliOutcome } from '../../cli-agent/cli-agent-outcome';
 import type { ToolCallRequest } from '@kalio/types';
 import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 
@@ -16,7 +17,7 @@ function makeAllowedPaths(isAllowed: boolean): AllowedPathsService {
   return { isAllowed: vi.fn().mockResolvedValue(isAllowed) } as unknown as AllowedPathsService;
 }
 
-function makeCLIAgentService(result?: Partial<{ output: string; exitCode: number; durationMs: number; agentId: string }>): CLIAgentService {
+function makeCLIAgentService(result?: Partial<{ output: string; exitCode: number; durationMs: number; agentId: string; outcome: 'completed' | 'failed'; failureCode: string }>): CLIAgentService {
   const defaults = { output: '', exitCode: 0, durationMs: 100, agentId: 'copilot' };
   return {
     getAdapter: vi.fn().mockReturnValue({ displayName: 'Copilot CLI' }),
@@ -25,7 +26,7 @@ function makeCLIAgentService(result?: Partial<{ output: string; exitCode: number
       { id: 'gemini', displayName: 'Gemini CLI', available: true },
       { id: 'codex', displayName: 'Codex CLI', available: true },
     ]),
-    run: vi.fn().mockResolvedValue({ ...defaults, ...result }),
+    run: vi.fn().mockResolvedValue(applySemanticCliOutcome({ ...defaults, ...result })),
   } as unknown as CLIAgentService;
 }
 
@@ -185,6 +186,32 @@ describe('RunCliAgentTool', () => {
       expect.stringContaining('"exitCode":1'),
     );
     expect(cliAgentSessions.persistAssistantMessage).toHaveBeenCalledWith('cli-child-1', 'rate limit exceeded');
+  });
+
+  it('treats auth-required CLI output as failed even when the reported exit code is 0', async () => {
+    cliAgent = makeCLIAgentService({
+      output: 'Authentication required. Please run `codex login`.',
+      exitCode: 0,
+      durationMs: 2345,
+      agentId: 'codex',
+      outcome: 'failed',
+      failureCode: 'auth_required',
+    });
+    tool = new RunCliAgentTool(allowedPaths, cliAgent, cliAgentSessions);
+
+    await expect(
+      tool.execute(makeRequest({ prompt: 'do task', workdir: '/projects/app', agentId: 'codex' })),
+    ).rejects.toThrow('CLI_AGENT_AUTH_REQUIRED');
+
+    expect(cliAgentSessions.saveToolResult).toHaveBeenCalledWith(
+      'cli-child-1',
+      'call-cli',
+      expect.stringContaining('"toolResultErrorCode":"CLI_AGENT_AUTH_REQUIRED"'),
+    );
+    expect(cliAgentSessions.persistAssistantMessage).toHaveBeenCalledWith(
+      'cli-child-1',
+      'Authentication required. Please run `codex login`.',
+    );
   });
 
   it('creates a durable cli-agent child session, persists the prompt/result there, and returns childSessionId', async () => {

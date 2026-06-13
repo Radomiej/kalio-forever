@@ -27,6 +27,12 @@ export interface WebSearchResultData {
   results: WebSearchResultChunk[];
 }
 
+export interface PersistedToolResultMeta {
+  status: 'success' | 'error' | 'cancelled';
+  errorCode?: string;
+  errorMessage?: string;
+}
+
 export function extractRAAppBlock(data: unknown): RAAppBlock | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
@@ -114,6 +120,29 @@ export function extractImageResult(data: unknown): ImageResultData | null {
     return d as unknown as ImageResultData;
   }
   return null;
+}
+
+export function extractPersistedToolResultMeta(data: unknown): PersistedToolResultMeta | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  const status = d['toolResultStatus'] ?? d['status'];
+  if (status !== 'success' && status !== 'error' && status !== 'cancelled') {
+    return null;
+  }
+
+  return {
+    status,
+    errorCode: typeof d['toolResultErrorCode'] === 'string'
+      ? d['toolResultErrorCode']
+      : typeof d['errorCode'] === 'string'
+        ? d['errorCode']
+        : undefined,
+    errorMessage: typeof d['toolResultErrorMessage'] === 'string'
+      ? d['toolResultErrorMessage']
+      : typeof d['errorMessage'] === 'string'
+        ? d['errorMessage']
+        : undefined,
+  };
 }
 
 function isWebSearchResultChunk(data: unknown): data is WebSearchResultChunk {
