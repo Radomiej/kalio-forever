@@ -52,7 +52,7 @@ export function renderArchitectureRunProjection({
     detail: run.trace
       .map((step) => `${step.speaker}${step.nextNodeId ? ` -> ${step.nextNodeId}` : ''}`)
       .join(', '),
-    status: run.status === 'failed' || run.status === 'cancelled' ? 'error' : 'success',
+    status: architectureExecutionStatus(run.status),
     column: branchMaxColumn + 1,
     row: startRow,
     turnId: turn.id,
@@ -73,7 +73,7 @@ export function renderArchitectureRunProjection({
       title: architectureRouteTitle(traceStep, hop.source),
       subtitle: `${fromLabel} -> ${hop.toNodeId}`,
       detail: architectureRouteDetail(traceStep),
-      status: 'success',
+      status: architectureExecutionStatus(run.status, traceStep?.stream?.status),
       column: branchMaxColumn + 2 + layout.column,
       row: startRow + layout.row,
       turnId: turn.id,
@@ -106,6 +106,19 @@ export function renderArchitectureRunProjection({
       : architectureRunNodeId,
     maxRow: startRow + maxRouteRow,
   };
+}
+
+function architectureExecutionStatus(
+  runStatus: ArchitectureRun['status'],
+  streamStatus?: NonNullable<TraceStep['stream']>['status'],
+) {
+  if (runStatus === 'failed' || runStatus === 'cancelled' || streamStatus === 'failed') {
+    return 'error' as const;
+  }
+  if (streamStatus === 'started' || streamStatus === 'streaming' || runStatus === 'running') {
+    return 'running' as const;
+  }
+  return 'success' as const;
 }
 
 function architectureRouteLayout(

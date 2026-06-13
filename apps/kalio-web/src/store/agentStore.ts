@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AgentBudgetApprovalRequest, AgentRunContext, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
+import type { AgentBudgetApprovalRequest, AgentRunContext, SocketEvents, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
 import type { CLIChildProjection } from '../features/chat/cliChildProjection.model';
 
 export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled' | 'expired';
@@ -103,6 +103,10 @@ interface AgentState {
   /** Pending chat queue depth per session (from chat:queued) */
   queuedDepthBySession: Record<string, number>;
   setQueuedDepth: (sessionId: string, depth: number) => void;
+  /** Last backend runtime status replayed per session, including descendants after reconnect */
+  sessionStatusSnapshots: Record<string, SocketEvents['session:status']>;
+  setSessionStatusSnapshot: (snapshot: SocketEvents['session:status']) => void;
+  clearSessionStatusSnapshot: (sessionId: string) => void;
 }
 
 function upsertActivity(list: ToolActivity[], activity: ToolActivity): ToolActivity[] {
@@ -135,6 +139,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   cliAgentOutput: {},
   cliChildProjections: {},
   queuedDepthBySession: {},
+  sessionStatusSnapshots: {},
   toolArgProgress: null,
 
   setStreaming: (streaming, messageId = undefined) =>
@@ -405,4 +410,24 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
         [sessionId]: depth,
       },
     })),
+
+  setSessionStatusSnapshot: (snapshot) =>
+    set((s) => {
+      if (!snapshot.sessionId.trim()) {
+        return s;
+      }
+      return {
+        sessionStatusSnapshots: {
+          ...s.sessionStatusSnapshots,
+          [snapshot.sessionId]: snapshot,
+        },
+      };
+    }),
+
+  clearSessionStatusSnapshot: (sessionId) =>
+    set((s) => {
+      const next = { ...s.sessionStatusSnapshots };
+      delete next[sessionId];
+      return { sessionStatusSnapshots: next };
+    }),
 }));

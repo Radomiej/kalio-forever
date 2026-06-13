@@ -81,8 +81,11 @@ export function handleSessionStatusEvent(
     startAgentTurn: (turnId: string, sessionId: string) => void;
     setAwaitingFirstChunk: (value: boolean) => void;
     setStreaming: (value: boolean) => void;
+    setSessionStatusSnapshot: (snapshot: SocketEvents['session:status']) => void;
   },
 ): void {
+  deps.setSessionStatusSnapshot(payload);
+
   if (payload.run?.status === 'interrupted_needs_retry' && payload.sessionId === deps.getActiveSessionId()) {
     deps.setRecoveryNotice(
       payload.run.safeResume

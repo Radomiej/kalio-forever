@@ -2,18 +2,30 @@ import type {
   ArchitectureBranchStreamSummary,
   ArchitectureGraphProjection,
   ArchitectureChatRunSummary,
-  ArchitectureRouterInsight,
-  ArchitectureRouterOutput,
-  ArchitectureRouterRisk,
   ChatMessage,
   LLMToolCall,
   SubagentToolResult,
 } from '@kalio/types';
 import type { AgentTurnItem } from '../../store/sessionStore';
 import type { ArchitectRunResult } from '../architect/architect.types';
+import { sanitizeRouterOutput } from './architectureRouterOutput';
+import { streamFromEventData } from './architectureStreamSummary';
+import { parseSubagentToolResult } from './architectureSubagentToolResult';
+import { compactArchitectureTraceContent } from './architectureTraceContent';
+
+export { compactArchitectureTraceContent } from './architectureTraceContent';
 
 type TraceSpeaker = ArchitectureChatRunSummary['trace'][number]['speaker'];
 type ArchitectureRunChatMessage = ArchitectRunResult['chat']['messages'][number] & { speaker: TraceSpeaker };
+export type ArchitectureGraphNodeSummary = Pick<
+  ArchitectureGraphProjection['nodes'][number],
+  'id' | 'label' | 'kind' | 'behavior' | 'status' | 'eventIds' | 'incompleteReason'
+>;
+export type ArchitectureRunSummaryWithGraph = ArchitectureChatRunSummary & {
+  graphNodes?: ArchitectureGraphNodeSummary[];
+  graphEdges?: ArchitectureGraphProjection['edges'];
+  graphChildAgents?: ArchitectureGraphProjection['childAgents'];
+};
 
 export type ArchitectureChatTurnDraft = {
   content: string;
@@ -52,7 +64,7 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
       routerOutput: sanitizeRouterOutput(routerOutputByEventId.get(message.eventId)),
       stream: streamByEventId.get(message.eventId) ?? fallbackStreamForMessage(result, message),
     }));
-  return {
+  const metadata: ArchitectureRunSummaryWithGraph = {
     runId: result.run.id,
     schemaId: schemaLabel,
     status: result.run.status,
@@ -66,7 +78,19 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
       : undefined,
     trace,
     routeHops: result.graph.routeHops ?? [],
+    graphNodes: result.graph.nodes.map((node) => ({
+      id: node.id,
+      label: node.label,
+      kind: node.kind,
+      behavior: node.behavior,
+      status: node.status,
+      eventIds: [...node.eventIds],
+      incompleteReason: node.incompleteReason,
+    })),
+    graphEdges: result.graph.edges.map((edge) => ({ ...edge })),
+    graphChildAgents: result.graph.childAgents?.map((agent) => ({ ...agent })),
   };
+  return metadata;
 }
 
 export function findArchitectureRunInMessages(messages: ChatMessage[]): ArchitectureChatRunSummary | null {
@@ -177,31 +201,6 @@ function architectureEventSequence(eventId: string | undefined): number {
   return match ? Number.parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
 }
 
-function parseSubagentToolResult(content: string): SubagentToolResult | null {
-  try {
-    const parsed = JSON.parse(content);
-    if (!parsed || typeof parsed !== 'object') {
-      return null;
-    }
-    const candidate = parsed as Record<string, unknown>;
-    if (
-      typeof candidate['result'] !== 'string'
-      || typeof candidate['taskId'] !== 'string'
-      || typeof candidate['childSessionId'] !== 'string'
-      || typeof candidate['parentSessionId'] !== 'string'
-      || (candidate['vfsMode'] !== 'shared' && candidate['vfsMode'] !== 'isolated')
-      || typeof candidate['vfsSessionId'] !== 'string'
-      || !Array.isArray(candidate['copiedFiles'])
-      || typeof candidate['durationMs'] !== 'number'
-    ) {
-      return null;
-    }
-    return candidate as unknown as SubagentToolResult;
-  } catch {
-    return null;
-  }
-}
-
 function buildStreamByEventId(result: ArchitectRunResult): Map<string, ArchitectureBranchStreamSummary> {
   const streamByEventId = new Map<string, ArchitectureBranchStreamSummary>();
   for (const event of result.events) {
@@ -232,42 +231,6 @@ function buildIncompleteReasonByEventId(result: ArchitectRunResult): Map<string,
     }
   }
   return incompleteReasonByEventId;
-}
-
-function sanitizeRouterOutput(output: ArchitectureRouterOutput | undefined): ArchitectureRouterOutput | undefined {
-  if (!output) {
-    return undefined;
-  }
-  return {
-    ...output,
-    selectedStrategy: compactRouterField(output.selectedStrategy),
-    mergedDecision: compactRouterField(output.mergedDecision),
-    acceptedInputs: output.acceptedInputs.map(sanitizeRouterInsight),
-    rejectedInputs: output.rejectedInputs.map(sanitizeRouterInsight),
-    unresolvedConflicts: output.unresolvedConflicts.map(compactRouterField).filter(Boolean),
-    risks: output.risks.map(sanitizeRouterRisk),
-  };
-}
-
-function sanitizeRouterInsight(input: ArchitectureRouterInsight): ArchitectureRouterInsight {
-  return {
-    ...input,
-    insight: compactRouterField(input.insight),
-    whyAccepted: input.whyAccepted ? compactRouterField(input.whyAccepted) : undefined,
-    whyRejected: input.whyRejected ? compactRouterField(input.whyRejected) : undefined,
-  };
-}
-
-function sanitizeRouterRisk(risk: ArchitectureRouterRisk): ArchitectureRouterRisk {
-  return {
-    ...risk,
-    risk: compactRouterField(risk.risk),
-    mitigation: compactRouterField(risk.mitigation),
-  };
-}
-
-function compactRouterField(value: string): string {
-  return compactArchitectureTraceContent(value, 'router');
 }
 
 function resolveArchitectureSchemaLabel(result: ArchitectRunResult): string {
@@ -378,6 +341,7 @@ export function buildArchitectureRunTurnProjection(
       role: 'assistant',
       content: '',
       toolCalls,
+      architectureRun: textMessages.length === 0 ? metadata : undefined,
       createdAt: now,
     });
     turnItems.push(...toolCalls.map((call) => ({ kind: 'tool' as const, callId: call.id })));
@@ -518,112 +482,6 @@ function streamLine(stream: ArchitectureBranchStreamSummary | undefined): string
     : null;
 }
 
-export function compactArchitectureTraceContent(content: string, speaker: TraceSpeaker): string {
-  const cleaned = stripRuntimeScaffold(content);
-  if (cleaned) {
-    return cleaned;
-  }
-  if (speaker === 'router') {
-    return 'Router completed synthesis for the next graph node.';
-  }
-  if (speaker === 'finalizer') {
-    return 'Final answer produced from the routed graph outputs.';
-  }
-  return 'Branch completed its role-specific response.';
-}
-
-function stripRuntimeScaffold(content: string): string {
-  const normalized = content
-    .replace(/^\[MockLLM\]\s*Echo:\s*/i, '')
-    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, ' ')
-    .replace(/\r\n/g, '\n');
-  const lines = normalized.split('\n');
-  const kept: string[] = [];
-  let skippingIncoming = false;
-  let skipNextAvailableNodeLine = false;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) {
-      if (kept.length > 0 && kept.at(-1) !== '') {
-        kept.push('');
-      }
-      continue;
-    }
-
-    if (/^Incoming graph outputs:?$/i.test(line)) {
-      skippingIncoming = true;
-      continue;
-    }
-    if (/^Available next nodes:/i.test(line)) {
-      skippingIncoming = false;
-      skipNextAvailableNodeLine = true;
-      continue;
-    }
-    if (skipNextAvailableNodeLine) {
-      skipNextAvailableNodeLine = false;
-      continue;
-    }
-    if (skippingIncoming) {
-      continue;
-    }
-    if (isRuntimeScaffoldLine(line)) {
-      continue;
-    }
-    kept.push(rawLine.trimEnd());
-  }
-
-  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-}
-
-function isRuntimeScaffoldLine(line: string): boolean {
-  return /^Architecture:/i.test(line)
-    || /^Slot:/i.test(line)
-    || /^Node:/i.test(line)
-    || /^Task:/i.test(line)
-    || /^-\s*[-\w]+:\s+\[MockLLM\]/i.test(line)
-    || /^[-\w]+:\s+.*(?:started|completed|agent started|\[MockLLM\])/i.test(line)
-    || /^Return a concise role-specific contribution/i.test(line)
-    || /^Act as a graph router\./i.test(line)
-    || /^Produce the final user-facing answer/i.test(line);
-}
-
-function streamFromEventData(data: Record<string, unknown> | undefined): ArchitectureBranchStreamSummary | undefined {
-  const stream = data?.['stream'];
-  if (!isRecord(stream)) {
-    return undefined;
-  }
-  const streamGroupId = stream['streamGroupId'];
-  const branchSessionId = stream['branchSessionId'];
-  const status = stream['status'];
-  const chunkCount = stream['chunkCount'];
-  const text = stream['text'];
-  if (
-    typeof streamGroupId !== 'string'
-    || typeof branchSessionId !== 'string'
-    || !isStreamStatus(status)
-    || typeof chunkCount !== 'number'
-    || typeof text !== 'string'
-  ) {
-    return undefined;
-  }
-  return {
-    streamGroupId,
-    branchSessionId,
-    status,
-    chunkCount,
-    text,
-  };
-}
-
 function isSyntheticParallelMessage(content: string): boolean {
   return /^.+ started \d+ outgoing paths?\.$/.test(content);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isStreamStatus(value: unknown): value is ArchitectureBranchStreamSummary['status'] {
-  return value === 'started' || value === 'streaming' || value === 'completed' || value === 'failed';
 }

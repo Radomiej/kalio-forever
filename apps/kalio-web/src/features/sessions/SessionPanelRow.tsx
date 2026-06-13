@@ -1,8 +1,8 @@
 import type { Dispatch, MouseEvent, ReactNode, RefObject, SetStateAction } from 'react';
-import { AlertTriangle, Archive, BrainCircuit, Check, CheckCircle2, ChevronRight, GitBranch, Loader2, MessageSquare, Pencil, RotateCcw, TerminalSquare, Trash2, X, XCircle } from 'lucide-react';
-import type { ChatSession } from '@kalio/types';
+import { AlertTriangle, Archive, BrainCircuit, Check, CheckCircle2, ChevronRight, Circle, GitBranch, Loader2, MessageSquare, Pencil, RotateCcw, TerminalSquare, Trash2, X, XCircle } from 'lucide-react';
+import type { ChatSession, SocketEvents } from '@kalio/types';
 import { formatRelativeTime } from './session.utils';
-import { displayTitleForSession } from './sessionTreeDisplay';
+import { displayTitleForSession, sessionStatusSnapshotToRuntimeState, type SessionRuntimeState } from './sessionTreeDisplay';
 import type { SessionOriginFilter } from './sessionListModel';
 import type { AgentTurn } from '../../store/sessionStore';
 
@@ -73,7 +73,9 @@ type SessionPanelSessionItemProps = {
   pendingBudgetApprovals: Record<string, unknown>;
   activeLoopSessionIds: Set<string>;
   queuedDepthBySession: Record<string, number>;
+  sessionStatusSnapshots: Record<string, SocketEvents['session:status']>;
   sessionAgentTurns: Record<string, AgentTurn[]>;
+  architectureSessionRuntimeStates: Map<string, SessionRuntimeState>;
   renamingId: string | null;
   renameValue: string;
   renameRef: RefObject<HTMLInputElement | null>;
@@ -91,15 +93,15 @@ type SessionPanelSessionItemProps = {
   onToggleRootExpansion: (event: MouseEvent, id: string) => void;
 };
 
-type SessionRuntimeState = 'waiting' | 'running' | 'error' | 'done';
-
 function sessionRuntimeState(
   sessionId: string,
   pendingConfirmations: Record<string, unknown>,
   pendingBudgetApprovals: Record<string, unknown>,
   activeLoopSessionIds: Set<string>,
   queuedDepthBySession: Record<string, number>,
+  sessionStatusSnapshots: Record<string, SocketEvents['session:status']>,
   sessionAgentTurns: Record<string, AgentTurn[]>,
+  architectureSessionRuntimeStates: Map<string, SessionRuntimeState>,
 ): SessionRuntimeState | null {
   const safePendingConfirmations = pendingConfirmations ?? {};
   const safePendingBudgetApprovals = pendingBudgetApprovals ?? {};
@@ -111,6 +113,14 @@ function sessionRuntimeState(
   }
   if (safeActiveLoopSessionIds.has(sessionId) || (safeQueuedDepthBySession[sessionId] ?? 0) > 0) {
     return 'running';
+  }
+  const snapshotState = sessionStatusSnapshotToRuntimeState(sessionStatusSnapshots[sessionId]);
+  if (snapshotState) {
+    return snapshotState;
+  }
+  const architectureState = architectureSessionRuntimeStates.get(sessionId);
+  if (architectureState) {
+    return architectureState;
   }
   const lastTurn = safeSessionAgentTurns[sessionId]?.at(-1);
   if (lastTurn?.error) {
@@ -129,7 +139,9 @@ function countDescendantRuntimeStates(
   pendingBudgetApprovals: Record<string, unknown>,
   activeLoopSessionIds: Set<string>,
   queuedDepthBySession: Record<string, number>,
+  sessionStatusSnapshots: Record<string, SocketEvents['session:status']>,
   sessionAgentTurns: Record<string, AgentTurn[]>,
+  architectureSessionRuntimeStates: Map<string, SessionRuntimeState>,
 ): { running: number; waiting: number } {
   const safeChildSessionsByParent = childSessionsByParent ?? new Map<string, ChatSession[]>();
   const counts = { running: 0, waiting: 0 };
@@ -144,7 +156,9 @@ function countDescendantRuntimeStates(
       pendingBudgetApprovals,
       activeLoopSessionIds,
       queuedDepthBySession,
+      sessionStatusSnapshots,
       sessionAgentTurns,
+      architectureSessionRuntimeStates,
     );
     if (state === 'waiting') {
       counts.waiting += 1;
@@ -167,7 +181,9 @@ export function SessionPanelSessionItem({
   pendingBudgetApprovals,
   activeLoopSessionIds,
   queuedDepthBySession,
+  sessionStatusSnapshots,
   sessionAgentTurns,
+  architectureSessionRuntimeStates,
   renamingId,
   renameValue,
   renameRef,
@@ -196,7 +212,9 @@ export function SessionPanelSessionItem({
     pendingBudgetApprovals,
     activeLoopSessionIds,
     queuedDepthBySession,
+    sessionStatusSnapshots,
     sessionAgentTurns,
+    architectureSessionRuntimeStates,
   );
   const descendantStates = countDescendantRuntimeStates(
     session.id,
@@ -205,7 +223,9 @@ export function SessionPanelSessionItem({
     pendingBudgetApprovals,
     activeLoopSessionIds,
     queuedDepthBySession,
+    sessionStatusSnapshots,
     sessionAgentTurns,
+    architectureSessionRuntimeStates,
   );
   const activeDescendantLabel = descendantStates.waiting > 0
     ? `${descendantStates.waiting} waiting`
@@ -275,12 +295,28 @@ export function SessionPanelSessionItem({
                   data-testid={`session-pending-confirmation-${session.id}`}
                 />
               )}
+              {runtimeState === 'pending' && (
+                <Circle
+                  size={10}
+                  className="shrink-0 text-base-content/40"
+                  aria-label="Session pending"
+                  data-testid={`session-pending-${session.id}`}
+                />
+              )}
               {runtimeState === 'running' && (
                 <Loader2
                   size={10}
                   className="shrink-0 animate-spin text-sky-300"
                   aria-label="Session running"
                   data-testid={`session-running-${session.id}`}
+                />
+              )}
+              {runtimeState === 'stopped' && (
+                <XCircle
+                  size={10}
+                  className="shrink-0 text-base-content/45"
+                  aria-label="Session stopped"
+                  data-testid={`session-stopped-${session.id}`}
                 />
               )}
               {runtimeState === 'done' && (

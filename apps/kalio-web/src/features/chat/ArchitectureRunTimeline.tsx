@@ -1,20 +1,17 @@
-import { AlertTriangle, CheckCircle2, GitBranch, Loader2, Route, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Circle, GitBranch, Loader2, Route, ShieldCheck, XCircle } from 'lucide-react';
 import type { ArchitectureChatRunSummary } from '@kalio/types';
 import { compactArchitectureTraceContent } from './architectureChatSummary';
-
-type TraceStep = ArchitectureChatRunSummary['trace'][number];
-type TraceStage =
-  | { kind: 'step'; step: TraceStep }
-  | { kind: 'parallel'; steps: TraceStep[] };
-
-function nodeLabel(step: TraceStep): string {
-  const raw = step.nodeId ?? step.nextNodeId ?? step.speaker;
-  return raw
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
-    .join(' ');
-}
+import {
+  buildTimelineStages,
+  graphStepCount,
+  nodeLabel,
+  stageSegment,
+  statusForStep,
+  stepFocus,
+  type TimelineStatus,
+  type TraceStage,
+  type TraceStep,
+} from './ArchitectureRunTimeline.stages';
 
 function compact(step: TraceStep): string {
   return compactArchitectureTraceContent(step.content, step.speaker).replace(/\s+/g, ' ').trim();
@@ -40,57 +37,16 @@ function shortSummary(step: TraceStep, maxLength = 120): string {
   return `${summary.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
 }
 
-function routeSegmentLabel(step: TraceStep): string {
-  if (step.speaker === 'participant') return nodeLabel(step);
-  if (step.speaker === 'router') return 'Router';
-  if (step.speaker === 'finalizer') return 'Finalizer';
-  return nodeLabel(step);
-}
-
-function buildTraceStages(trace: TraceStep[]): TraceStage[] {
-  const stages: TraceStage[] = [];
-  let participantBuffer: TraceStep[] = [];
-
-  const flushParticipants = () => {
-    if (participantBuffer.length === 0) return;
-    if (participantBuffer.length === 1) {
-      const [step] = participantBuffer;
-      if (step) stages.push({ kind: 'step', step });
-    } else {
-      stages.push({ kind: 'parallel', steps: participantBuffer });
-    }
-    participantBuffer = [];
-  };
-
-  trace.forEach((step) => {
-    if (step.speaker === 'participant') {
-      participantBuffer.push(step);
-      return;
-    }
-    flushParticipants();
-    stages.push({ kind: 'step', step });
-  });
-
-  flushParticipants();
-  return stages;
-}
-
-function stageSegment(stage: TraceStage): { label: string; tone: string } {
-  if (stage.kind === 'parallel') {
-    return { label: `Sub-agents ${stage.steps.length}`, tone: 'text-sky-200 bg-sky-400/10 border-sky-400/20' };
+function StatusBadge({ status }: { status: TimelineStatus | null }) {
+  if (!status) {
+    return null;
   }
-  return { label: routeSegmentLabel(stage.step), tone: routeSegmentTone(stage.step) };
-}
-
-function routeSegmentTone(step: TraceStep): string {
-  if (step.speaker === 'participant') return 'text-sky-200 bg-sky-400/10 border-sky-400/20';
-  if (step.speaker === 'router') return 'text-amber-200 bg-amber-400/10 border-amber-400/20';
-  if (step.speaker === 'finalizer') return 'text-emerald-200 bg-emerald-400/10 border-emerald-400/20';
-  return 'text-base-content bg-base-100/50 border-base-content/20';
-}
-
-function stepFocus(step: TraceStep): { eventId?: string; nodeId?: string } {
-  return { eventId: step.eventId, nodeId: step.nodeId };
+  return (
+    <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded bg-base-100/80 px-1 text-[9px] font-mono text-base-content/80">
+      <TimelineStatusIcon status={status} />
+      {status}
+    </span>
+  );
 }
 
 function RouterStep({
@@ -103,6 +59,7 @@ function RouterStep({
   onOpenStep: (step: TraceStep) => void;
 }) {
   const routerOutput = step?.routerOutput;
+  const status = statusForStep(step);
   const contractIsFallback = routerOutput
     ? routerOutput.acceptedInputs.every((input) => /^Input from\s/i.test(input.insight))
     : false;
@@ -119,8 +76,9 @@ function RouterStep({
         <Route size={12} className="text-amber-300" />
         <span className="text-xs font-medium text-base-content">{label}</span>
         {step?.nextNodeId && (
-          <span className="ml-auto text-[10px] font-mono text-base-content/70">to {step.nextNodeId}</span>
+          <span className="text-[10px] font-mono text-base-content/70">to {step.nextNodeId}</span>
         )}
+        <StatusBadge status={status} />
       </div>
       {step?.content && (
         <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
@@ -169,6 +127,7 @@ function AgentStep({
   onOpenStep: (step: TraceStep) => void;
 }) {
   const branchSessionId = step.stream?.branchSessionId;
+  const status = statusForStep(step);
 
   return (
     <button
@@ -187,16 +146,13 @@ function AgentStep({
       <div className="flex items-center gap-2">
         <GitBranch size={12} className="text-sky-300" />
         <span className="truncate text-xs font-medium text-base-content">{nodeLabel(step)}</span>
-        {step.stream && (
-          <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded bg-base-100/80 px-1 text-[9px] font-mono text-base-content/80">
-            <StreamStatusIcon status={step.stream.status} warning={Boolean(step.incompleteReason)} />
-            {step.incompleteReason ? 'waiting' : step.stream.status}
-          </span>
-        )}
+        <StatusBadge status={status} />
       </div>
-      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
-        {shortSummary(step)}
-      </p>
+      {step.content && (
+        <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
+          {shortSummary(step)}
+        </p>
+      )}
     </button>
   );
 }
@@ -222,6 +178,7 @@ function ParallelBranches({
       <div className="grid gap-1.5 sm:grid-cols-2">
         {steps.map((step) => {
           const branchSessionId = step.stream?.branchSessionId;
+          const status = statusForStep(step);
           return (
           <button
             type="button"
@@ -239,16 +196,13 @@ function ParallelBranches({
           >
             <div className="flex min-w-0 items-center gap-1.5">
               <span className="truncate text-[11px] font-medium text-base-content">{nodeLabel(step)}</span>
-              {step.stream && (
-                <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded bg-base-100/80 px-1 text-[9px] font-mono text-base-content/80">
-                  <StreamStatusIcon status={step.stream.status} warning={Boolean(step.incompleteReason)} />
-                  {step.incompleteReason ? 'waiting' : step.stream.status}
-                </span>
-              )}
+              <StatusBadge status={status} />
             </div>
-            <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-base-content/50" title={compact(step)}>
-              {shortSummary(step, 92)}
-            </p>
+            {step.content && (
+              <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-base-content/50" title={compact(step)}>
+                {shortSummary(step, 92)}
+              </p>
+            )}
           </button>
           );
         })}
@@ -257,17 +211,18 @@ function ParallelBranches({
   );
 }
 
-function StreamStatusIcon({
+function TimelineStatusIcon({
   status,
-  warning,
 }: {
-  status: NonNullable<ArchitectureChatRunSummary['trace'][number]['stream']>['status'];
-  warning: boolean;
+  status: TimelineStatus;
 }) {
-  if (warning) {
+  if (status === 'pending') {
+    return <Circle size={10} className="text-base-content/40" />;
+  }
+  if (status === 'waiting') {
     return <AlertTriangle size={10} className="text-warning" />;
   }
-  if (status === 'started' || status === 'streaming') {
+  if (status === 'running') {
     return <Loader2 size={10} className="animate-spin text-sky-300" />;
   }
   if (status === 'completed') {
@@ -283,6 +238,7 @@ function FinalizerStep({
   step: TraceStep | undefined;
   onOpenStep: (step: TraceStep) => void;
 }) {
+  const status = statusForStep(step);
   return (
     <button
       type="button"
@@ -294,6 +250,7 @@ function FinalizerStep({
       <div className="flex items-center gap-2">
         <ShieldCheck size={12} className="text-emerald-300" />
         <span className="text-xs font-medium text-base-content">Finalizer</span>
+        <StatusBadge status={status} />
       </div>
       {step?.content && (
         <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
@@ -334,12 +291,15 @@ export function ArchitectureRunTimeline({
   onOpenBranch: (sessionId: string) => void;
   onOpenStep?: (focus: { eventId?: string; nodeId?: string }) => void;
 }) {
-  const routers = run.trace.filter((step) => step.speaker === 'router');
+  const stages = buildTimelineStages(run);
+  const routers = stages
+    .filter((stage): stage is Extract<TraceStage, { kind: 'step' }> => stage.kind === 'step' && stage.step.speaker === 'router')
+    .map((stage) => stage.step);
   const firstRouter = routers[0];
   const finalRouter = routers.at(-1);
   const hasMerge = Boolean(finalRouter && finalRouter !== firstRouter);
-  const stages = buildTraceStages(run.trace);
   const shellSegments = stages.map(stageSegment);
+  const stepCount = graphStepCount(run);
   const openStep = (step: TraceStep) => {
     onOpenStep?.(stepFocus(step));
   };
@@ -350,7 +310,7 @@ export function ArchitectureRunTimeline({
         <GitBranch size={13} className="text-sky-300" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-semibold text-base-content">{run.schemaId}</p>
-          <p className="text-[10px] font-mono text-base-content/75">{run.status} / {run.trace.length} graph steps</p>
+          <p className="text-[10px] font-mono text-base-content/75">{run.status} / {stepCount} graph steps</p>
         </div>
         <button
           type="button"

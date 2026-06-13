@@ -497,6 +497,7 @@ describe('ExecutionGraphView empty-session state', () => {
         executionCwd: 'C:\\Projekty\\kalio-forever',
       }),
       'new-graph-session',
+      expect.any(Function),
     ));
     expect(sessionState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'new-graph-session',
@@ -674,6 +675,72 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(await screen.findByTestId('graph-node-architecture-root:five-minds-debate')).toBeInTheDocument();
     expect(await screen.findByTestId('graph-node-architecture-root:pragmatist')).toBeInTheDocument();
     expect(screen.queryByText('No execution nodes yet for this session.')).toBeNull();
+  });
+
+  it('prefers the durable architecture graph over a prompt-only root session projection', async () => {
+    const messages = [
+      makeMessage({
+        id: 'prompt-architecture-root',
+        sessionId: 'arch-run-2-root',
+        role: 'user',
+        content: 'o czym jest ten projekt?',
+        createdAt: 1,
+      }),
+    ];
+    sessionState.activeSessionId = 'arch-run-2-root';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = {
+      'arch-run-2-root': messages,
+      'arch-run-2-pragmatist': [
+        makeMessage({
+          id: 'branch-2',
+          sessionId: 'arch-run-2-pragmatist',
+          role: 'assistant',
+          content: 'The project is a workflow chat runtime.',
+          createdAt: 3,
+        }),
+      ],
+    };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'arch-run-2-root');
+    sessionState.sessionAgentTurns = { 'arch-run-2-root': sessionState.agentTurns };
+    sessionState.sessions = [
+      { id: 'arch-run-2-root', personaId: 'default', title: 'Architecture root', kind: 'chat', createdAt: 1, updatedAt: 1 },
+      { id: 'arch-run-2-pragmatist', personaId: 'dev', title: 'Architecture Debate: Pragmatist', kind: 'subagent', parentSessionId: 'arch-run-2-root', createdAt: 2, updatedAt: 2 },
+    ];
+    apiGetMock.mockImplementation((url: string) => {
+      if (url === '/api/personas') {
+        return Promise.resolve({ data: [makePersona()] });
+      }
+      if (url === '/api/architecture-runs/run-2/graph') {
+        return Promise.resolve({
+          data: {
+            runId: 'run-2',
+            status: 'running',
+            nodes: [
+              { id: 'architecture-debate', label: 'Architecture Debate', kind: 'parallel', status: 'completed', eventIds: ['event-1'] },
+              { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'completed', eventIds: ['event-2'] },
+              { id: 'synthesizer', label: 'Synthesizer', kind: 'router', status: 'running', eventIds: ['event-3'] },
+            ],
+            edges: [
+              { id: 'debate-pragmatist', fromNodeId: 'architecture-debate', toNodeId: 'pragmatist' },
+              { id: 'pragmatist-synthesizer', fromNodeId: 'pragmatist', toNodeId: 'synthesizer' },
+            ],
+            routeHops: [
+              { eventId: 'event-1', source: 'parallel', fromNodeId: 'architecture-debate', toNodeId: 'pragmatist' },
+              { eventId: 'event-3', source: 'router', fromNodeId: 'pragmatist', toNodeId: 'synthesizer' },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    await renderExecutionGraphView();
+
+    expect(await screen.findByTestId('graph-node-architecture-root:architecture-debate')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-architecture-root:pragmatist')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-architecture-root:synthesizer')).toBeInTheDocument();
+    expect(screen.queryByTestId('graph-node-prompt:prompt-architecture-root')).toBeNull();
   });
 
   it('defaults graph cards to compact density and can reveal detailed tool metadata', async () => {

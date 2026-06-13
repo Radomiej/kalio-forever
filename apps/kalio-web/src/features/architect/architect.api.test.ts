@@ -563,6 +563,82 @@ describe('startGoalGuardAgentFlowRun', () => {
       context: { requireImplementerWriteProof: true },
     }));
   });
+
+  it('polls durable Goal Guard AgentFlow runs and emits projection updates when requested', async () => {
+    vi.useFakeTimers();
+    try {
+      apiPost.mockResolvedValueOnce({
+        data: {
+          run: {
+            id: 'agent-flow-poll',
+            parentSessionId: 'chat-session-1',
+            childSessionId: 'child-chat',
+            flowDefinitionId: 'goal_guard_delivery_loop',
+            status: 'running',
+            startMode: 'durable',
+            returnMode: 'summary',
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          events: [],
+        } satisfies AgentFlowRunSnapshot,
+      });
+      apiGet.mockImplementation((url: string) => {
+        if (url === '/api/agent-flows/runs/agent-flow-poll') {
+          return Promise.resolve({
+            data: {
+              run: {
+                id: 'agent-flow-poll',
+                parentSessionId: 'chat-session-1',
+                childSessionId: 'child-chat',
+                flowDefinitionId: 'goal_guard_delivery_loop',
+                status: 'done',
+                startMode: 'durable',
+                returnMode: 'summary',
+                createdAt: 1,
+                updatedAt: 5,
+                finishedAt: 5,
+              },
+              result: subAgentFlowResult({
+                flowRunId: 'agent-flow-poll',
+                childSessionId: 'child-chat',
+                status: 'done',
+                summary: 'Goal Guard completed.',
+              }),
+              events: [],
+            } satisfies AgentFlowRunSnapshot,
+          });
+        }
+        if (url === '/api/architecture-runs/agent-flow-poll/events') {
+          return Promise.resolve({ data: [] });
+        }
+        if (url === '/api/architecture-runs/agent-flow-poll/graph') {
+          return Promise.resolve({ data: { runId: 'agent-flow-poll', nodes: [], edges: [] } });
+        }
+        if (url === '/api/architecture-runs/agent-flow-poll/chat') {
+          return Promise.resolve({ data: { runId: 'agent-flow-poll', messages: [] } });
+        }
+        throw new Error(`Unexpected GET ${url}`);
+      });
+      const onUpdate = vi.fn();
+
+      const promise = startGoalGuardAgentFlowRun(
+        'Build from Talk.',
+        { requireImplementerWriteProof: true },
+        'chat-session-1',
+        onUpdate,
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      const result = await promise;
+
+      expect(apiGet).toHaveBeenCalledWith('/api/agent-flows/runs/agent-flow-poll');
+      expect(onUpdate.mock.calls.map(([update]) => update.agentFlowStatus)).toEqual(['running', 'done']);
+      expect(result.agentFlowStatus).toBe('done');
+      expect(result.agentFlowSummary).toBe('Goal Guard completed.');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('getGoalGuardAgentFlowRunResult', () => {
@@ -577,6 +653,7 @@ describe('getGoalGuardAgentFlowRunResult', () => {
     ['cancelled', 'failed'],
     ['queued', 'queued'],
     ['running', 'running'],
+    ['waiting_on_orchestrator', 'running'],
   ])('maps AgentFlow status "%s" to architecture status "%s"', async (agentFlowStatus, expected) => {
     apiGet.mockRejectedValue(new Error('architecture projection unavailable'));
 

@@ -36,6 +36,40 @@ function extractSubagentResult(data: unknown): SubagentToolResult | null {
   return candidate as unknown as SubagentToolResult;
 }
 
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function failedSubagentSessionId(activity: ToolActivity): string | null {
+  const data = recordValue(activity.result?.data);
+  if (typeof data?.['childSessionId'] === 'string') {
+    return data['childSessionId'];
+  }
+  if (typeof activity.result?.agentRun?.vfsSessionId === 'string') {
+    return activity.result.agentRun.vfsSessionId;
+  }
+  if (typeof activity.agentRun?.vfsSessionId === 'string') {
+    return activity.agentRun.vfsSessionId;
+  }
+  return null;
+}
+
+function failedSubagentSummary(activity: ToolActivity): string {
+  const data = recordValue(activity.result?.data);
+  const dataSummary = typeof data?.['result'] === 'string'
+    ? data['result']
+    : typeof data?.['message'] === 'string'
+      ? data['message']
+      : null;
+  return compactPreviewText(
+    activity.result?.errorMessage
+      ?? dataSummary
+      ?? 'Sub-agent branch failed before producing a final answer.',
+  );
+}
+
 function titleFromSessionId(sessionId: string): string {
   const role = sessionId.split('-').at(-1);
   if (!role || role.length < 3) {
@@ -93,6 +127,25 @@ export function buildSubagentPreviews(
         summary: compactPreviewText(result.result),
         status: existing?.status === 'running' ? 'running' : 'success',
         startedAt: existing?.startedAt,
+      });
+    });
+
+  toolActivities
+    .filter((activity) => activity.toolName === 'run_subagent' && activity.result?.status === 'error')
+    .forEach((activity) => {
+      const childSessionId = failedSubagentSessionId(activity);
+      if (!childSessionId) return;
+      const session = sessions.find((item) => item.id === childSessionId);
+      const existing = previews.get(childSessionId);
+      const fallbackLabel = titleFromSessionId(childSessionId);
+      previews.set(childSessionId, {
+        sessionId: childSessionId,
+        label: existing?.label ?? activity.agentRun?.label ?? activity.result?.agentRun?.label ?? fallbackLabel,
+        title: session?.title ?? existing?.title ?? `Sub-agent ${childSessionId.slice(0, 8)}`,
+        copiedFiles: existing?.copiedFiles ?? [],
+        summary: failedSubagentSummary(activity),
+        status: 'error',
+        startedAt: existing?.startedAt ?? activity.startedAt,
       });
     });
 

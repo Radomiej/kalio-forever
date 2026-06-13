@@ -3,11 +3,13 @@ import type { ChatSession, Persona } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
 import {
+  buildToolSnapshots,
   buildCopiedFileArtifact,
   buildTurnIdentity,
   extractArtifactFromData,
   extractCLIAgentSessionResult,
   extractSubagentContextPrompt,
+  getTurnStatus,
   statusFromActivity,
 } from './executionGraphModel.helpers';
 
@@ -97,6 +99,122 @@ describe('executionGraphModel.helpers', () => {
 
     expect(statusFromActivity(cancelled, false)).toBe('error');
     expect(statusFromActivity(expired, false)).toBe('error');
+  });
+
+  it('normalizes stale running CLI activities to terminal success when the snapshot is completed', () => {
+    const snapshots = buildToolSnapshots(
+      [
+        {
+          id: 'assistant-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex' } }],
+          createdAt: 1,
+        },
+        {
+          id: 'tool-1',
+          sessionId: 'session-1',
+          role: 'tool_result',
+          toolCallId: 'call-cli-1',
+          content: JSON.stringify({
+            childSessionId: 'cli-child-1',
+            agentId: 'codex',
+            status: 'completed',
+            lastOutput: 'done',
+          }),
+          createdAt: 2,
+        },
+      ],
+      [{
+        callId: 'call-cli-1',
+        toolName: 'spawn_cli_agent',
+        args: { agentId: 'codex' },
+        sessionId: 'session-1',
+        status: 'running',
+        startedAt: 1,
+      }],
+    );
+
+    const cliSnapshot = snapshots.get('call-cli-1');
+    expect(statusFromActivity(
+      cliSnapshot?.activity ?? null,
+      cliSnapshot?.result != null,
+      cliSnapshot?.result,
+      cliSnapshot?.toolName,
+    )).toBe('success');
+  });
+
+  it('keeps a completed turn running while a delegated CLI child snapshot is still running', () => {
+    const turn = makeTurn({
+      done: true,
+      items: [{ kind: 'tool', callId: 'call-cli-1' }],
+    });
+    const snapshots = buildToolSnapshots(
+      [
+        {
+          id: 'assistant-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex' } }],
+          createdAt: 1,
+        },
+        {
+          id: 'tool-1',
+          sessionId: 'session-1',
+          role: 'tool_result',
+          toolCallId: 'call-cli-1',
+          content: JSON.stringify({
+            childSessionId: 'cli-child-1',
+            agentId: 'codex',
+            status: 'running',
+            lastOutput: 'still working',
+            updatedAt: 2,
+          }),
+          createdAt: 2,
+        },
+      ],
+      [],
+    );
+
+    expect(getTurnStatus(turn, snapshots)).toBe('running');
+  });
+
+  it('keeps a completed turn failed when a delegated CLI child snapshot is failed after reload', () => {
+    const turn = makeTurn({
+      done: true,
+      items: [{ kind: 'tool', callId: 'call-cli-1' }],
+    });
+    const snapshots = buildToolSnapshots(
+      [
+        {
+          id: 'assistant-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex' } }],
+          createdAt: 1,
+        },
+        {
+          id: 'tool-1',
+          sessionId: 'session-1',
+          role: 'tool_result',
+          toolCallId: 'call-cli-1',
+          content: JSON.stringify({
+            childSessionId: 'cli-child-1',
+            agentId: 'codex',
+            status: 'failed',
+            lastOutput: 'Authentication required.',
+            updatedAt: 2,
+          }),
+          createdAt: 2,
+        },
+      ],
+      [],
+    );
+
+    expect(getTurnStatus(turn, snapshots)).toBe('error');
   });
 
   it('builds copied file artifacts with readable labels and byte previews', () => {

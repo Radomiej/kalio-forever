@@ -5,7 +5,8 @@ import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
 import { eventBus } from '../../../services/eventBus';
-import { buildCallIdToNameFromMessages, buildTurnsFromHistory, mergeFetchedMessages } from '../chatUtils';
+import { buildCallIdToNameFromMessages, buildTurnsFromHistory } from '../chatUtils';
+import { reloadSessionHistoryWithArchitectureProjection } from '../architectureReloadHydration';
 import { rebuildCLIChildProjectionsFromMessages } from '../cliChildProjection.model';
 
 interface UseChatSessionActivationParams {
@@ -34,26 +35,31 @@ export function useChatSessionActivation({
     setPendingConfirmation(activeSessionId, null);
     console.debug('[ChatInterface] session activated', activeSessionId);
 
-    apiClient
-      .get<ChatMessage[]>(`/api/sessions/${activeSessionId}/messages`)
-      .then((response) => {
-        const data = response.data;
-        if (useSessionStore.getState().activeSessionId !== activeSessionId) return;
-        const currentMessages = useSessionStore.getState().getSessionMessages(activeSessionId);
-        const mergedMessages = mergeFetchedMessages(currentMessages, data);
-        setMessages(mergedMessages);
+    void reloadSessionHistoryWithArchitectureProjection({
+      sessionId: activeSessionId,
+      getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+      getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
+      setMessages,
+      setAgentTurns,
+      fetchMessages: async (sessionId) => {
+        const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
+        return response.data;
+      },
+    })
+      .then((hydratedMessages) => {
+        if (!hydratedMessages) return;
         const {
           callIdToName: persistedCallIdToName,
           registerCallId,
           rebuildCLIChildProjections,
         } = useAgentStore.getState();
-        const callIdToName = buildCallIdToNameFromMessages(mergedMessages, persistedCallIdToName);
+        const callIdToName = buildCallIdToNameFromMessages(hydratedMessages, persistedCallIdToName);
         for (const [callId, name] of Object.entries(callIdToName)) {
           if (!persistedCallIdToName[callId]) {
             registerCallId(callId, name);
           }
         }
-        const projections = rebuildCLIChildProjectionsFromMessages(activeSessionId, mergedMessages, callIdToName);
+        const projections = rebuildCLIChildProjectionsFromMessages(activeSessionId, hydratedMessages, callIdToName);
         rebuildCLIChildProjections(
           activeSessionId,
           projections,
@@ -67,11 +73,11 @@ export function useChatSessionActivation({
         const hasActiveLoop = useAgentStore.getState().hasActiveLoopForSession(activeSessionId);
         const hasActiveTurn = Boolean(useSessionStore.getState().getSessionActiveTurnId(activeSessionId));
         if (!hasActiveLoop || !hasActiveTurn) {
-          setAgentTurns(buildTurnsFromHistory(mergedMessages, activeSessionId));
+          setAgentTurns(buildTurnsFromHistory(hydratedMessages, activeSessionId));
           return;
         }
 
-        const latestUserMessageId = [...mergedMessages]
+        const latestUserMessageId = [...hydratedMessages]
           .reverse()
           .find((message) => message.role === 'user')
           ?.id;
@@ -83,7 +89,7 @@ export function useChatSessionActivation({
           ? useSessionStore.getState().getSessionAgentTurns(activeSessionId).find((turn) => turn.id === activeTurnId)
           : null;
         if (activeTurn && !activeTurn.promptMessageId) {
-          const persistedPromptMessageId = mergedMessages.find((message) =>
+          const persistedPromptMessageId = hydratedMessages.find((message) =>
             message.role === 'assistant'
             && message.turnId === activeTurn.id
             && message.promptMessageId,

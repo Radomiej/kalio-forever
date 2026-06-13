@@ -322,7 +322,9 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     personas,
     collapseTools,
   });
-  const model = messageModel.nodes.length === 0 && architectureRootModel ? architectureRootModel : messageModel;
+  const model = architectureRootModel && messageModel.nodes.every((node) => node.kind === 'prompt')
+    ? architectureRootModel
+    : messageModel;
 
   const effectiveSelectedId = model.nodes.some((node) => node.id === selectedNodeId)
     ? selectedNodeId

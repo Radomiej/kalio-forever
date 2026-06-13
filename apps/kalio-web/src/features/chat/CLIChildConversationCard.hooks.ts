@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import type { CLIChildProjection } from './cliChildProjection.model';
-import { mergeCliOutput } from './cliChildProjection.model';
+import { mergeCliOutput, resolveCLIChildProjectionStatus } from './cliChildProjection.model';
 import { extractCLIAgentResult, extractCLIAgentSessionSnapshot } from './ToolCallBubble.parsers';
 import type { ToolActivity } from '../../store/agentStore';
 
@@ -52,22 +52,23 @@ export function useCLIChildCardState(params: {
     ?? storedProjection?.childSessionId;
 
   const childSession = sessions.find((session) => session.id === resolvedChildSessionId);
+  const activityStatus = params.activity?.status;
   const agentId = snapshot?.agentId
     ?? cliResult?.agentId
     ?? storedProjection?.agentId
     ?? (params.activity?.args['agentId'] as string | undefined)
     ?? 'copilot';
 
-  const status = snapshot
-    ? (snapshot.status === 'running' ? 'running' : snapshot.status === 'completed' ? 'completed' : snapshot.status === 'stopped' ? 'stopped' : snapshot.status === 'failed' ? 'failed' : 'pending')
-    : params.activity?.status === 'running'
-      ? 'running'
-      : storedProjection?.status
-        ?? (cliResult ? (cliResult.exitCode === 0 ? 'completed' : 'failed') : 'pending');
+  const status = resolveCLIChildProjectionStatus({
+    snapshotStatus: snapshot?.status,
+    liveProjectionStatus: storedProjection?.status,
+    activityStatus,
+    cliResult,
+  });
 
   const projection = useMemo((): CLIChildProjection | null => {
     if (!resolvedChildSessionId) {
-      if (params.activity?.status === 'running') {
+      if (activityStatus === 'running') {
         return {
           childSessionId: storedProjection?.childSessionId ?? `pending-${params.parentCallId}`,
           parentSessionId: params.parentSessionId,
@@ -106,6 +107,7 @@ export function useCLIChildCardState(params: {
     };
   }, [
     agentId,
+    activityStatus,
     childSession?.title,
     cliResult,
     liveOutput,

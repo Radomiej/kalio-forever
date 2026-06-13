@@ -129,6 +129,28 @@ describe('buildArchitectureParentChatMessages', () => {
     expect(finalText).toContain('Final answer produced from the routed graph outputs.');
   });
 
+  it('skips synthetic router fan-out text in parent chat projection', () => {
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'e-router-synth',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'router_decision',
+        nodeId: 'router',
+        message: 'Router fanned out to pragmatist, researcher, synthesizer.',
+        createdAt: 12,
+      },
+    ];
+
+    const messages = buildArchitectureParentChatMessages(makeSchema(), makeRun(), 'parent-1', events, 200);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      id: 'architecture:run-1:user',
+      role: 'user',
+    });
+  });
+
   it('includes a concise failure reason for failed architecture runs', () => {
     const events: ArchitectureExecutionEvent[] = [
       {

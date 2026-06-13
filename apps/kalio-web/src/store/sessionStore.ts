@@ -62,6 +62,14 @@ interface SessionState {
   removeLastAgentTurn: (sessionId?: string | null) => void;
 }
 
+function canMaterializeSession(id: string, patch: Partial<ChatSession>): patch is ChatSession {
+  return id.length > 0
+    && typeof patch.personaId === 'string'
+    && typeof patch.title === 'string'
+    && typeof patch.createdAt === 'number'
+    && typeof patch.updatedAt === 'number';
+}
+
 export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -368,9 +376,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }),
 
   updateSession: (id, patch) =>
-    set((s) => ({
-      sessions: s.sessions.map((sess) => (sess.id === id ? { ...sess, ...patch } : sess)),
-    })),
+    set((s) => {
+      const existing = s.sessions.find((sess) => sess.id === id);
+      if (existing) {
+        return {
+          sessions: s.sessions.map((sess) => (sess.id === id ? { ...sess, ...patch } : sess)),
+        };
+      }
+      if (!canMaterializeSession(id, patch)) {
+        return { sessions: s.sessions };
+      }
+      return {
+        sessions: [...s.sessions, { ...patch, id }],
+      };
+    }),
 
   setPendingMessage: (message) => set({ pendingMessage: message }),
   setPendingRAAppId: (id) => set({ pendingRAAppId: id }),

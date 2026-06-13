@@ -5,6 +5,7 @@ import { useAgentStore } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 import type { ChatSession, ChatMessage, Persona } from '@kalio/types';
 import { buildTurnsFromHistory } from '../chat/chatUtils';
+import { reloadSessionHistoryWithArchitectureProjection } from '../chat/architectureReloadHydration';
 import {
   SESSION_ORIGIN_FILTERS,
   buildSessionListEntries,
@@ -13,8 +14,10 @@ import {
   type SessionOriginFilter,
 } from './sessionListModel';
 import {
+  buildArchitectureSessionRuntimeStates,
   buildChildSessionsByParent,
   countSessionDescendants,
+  displayTitleForSession,
   hasExpandedAncestor,
 } from './sessionTreeDisplay';
 import { renderSessionChildRows, SessionPanelSessionItem } from './SessionPanelRow';
@@ -59,7 +62,9 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
   const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
   const queuedDepthBySession = useAgentStore((s) => s.queuedDepthBySession);
+  const sessionStatusSnapshots = useAgentStore((s) => s.sessionStatusSnapshots);
   const sessionAgentTurns = useSessionStore((s) => s.sessionAgentTurns);
+  const sessionMessages = useSessionStore((s) => s.sessionMessages);
   const [loading, setLoading] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -139,14 +144,22 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     persistActiveSessionId(id);
     onSelect?.();
     try {
-      const { data } = await apiClient.get<ChatMessage[]>(`/api/sessions/${id}/messages`);
-      // Discard stale result if user switched to another session while this fetch was in-flight
-      if (useSessionStore.getState().activeSessionId !== id) return;
-      setMessages(data);
+      const hydratedMessages = await reloadSessionHistoryWithArchitectureProjection({
+        sessionId: id,
+        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+        getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
+        setMessages,
+        setAgentTurns,
+        fetchMessages: async (sessionId) => {
+          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
+          return response.data;
+        },
+      });
+      if (!hydratedMessages) return;
       const hasActiveLoop = useAgentStore.getState().hasActiveLoopForSession?.(id) ?? false;
       const hasActiveTurn = Boolean(getSessionActiveTurnId(id));
       if (!hasActiveLoop || !hasActiveTurn) {
-        setAgentTurns(buildTurnsFromHistory(data, id), id);
+        setAgentTurns(buildTurnsFromHistory(hydratedMessages, id), id);
       }
     } catch (err) {
       console.error('[SessionPanel] load messages failed', err);
@@ -160,6 +173,10 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     .filter((session) => isVisibleSidebarSession(session, activeSessionId, originFilter, sessionById));
   const sessionListEntries = buildSessionListEntries(orderedSessions, activeSessionId, originFilter);
   const childSessionsByParent = buildChildSessionsByParent(orderedSessions);
+  const architectureSessionRuntimeStates = buildArchitectureSessionRuntimeStates(
+    orderedSessions,
+    sessionMessages ?? {},
+  );
   const descendantCountByParent = new Map<string, number>();
   const activeOriginFilter = SESSION_ORIGIN_FILTERS.find((filter) => filter.id === originFilter) ?? SESSION_ORIGIN_FILTERS[0];
 
@@ -175,6 +192,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       removeSession(id);
       useAgentStore.getState().setPendingConfirmation(id, null);
       useAgentStore.getState().setPendingBudgetApproval?.(id, null);
+      useAgentStore.getState().clearSessionStatusSnapshot(id);
     } catch (err) {
       console.error('[SessionPanel] delete failed', err);
     }
@@ -187,6 +205,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       removeSession(id);
       useAgentStore.getState().setPendingConfirmation(id, null);
       useAgentStore.getState().setPendingBudgetApproval?.(id, null);
+      useAgentStore.getState().clearSessionStatusSnapshot(id);
     } catch (err) {
       console.error('[SessionPanel] archive failed', err);
     }
@@ -309,6 +328,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         {sessionListEntries.map((entry) => {
           if (entry.type === 'root') {
             const root = entry.session;
+            const rootTitle = displayTitleForSession(root, childSessionsByParent);
             return (
               <div
                 key={`root-${root.id}`}
@@ -328,7 +348,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
                 data-session-id={root.id}
               >
                 <p className="break-words text-[10px] font-semibold uppercase tracking-[0.12em] text-base-content/60">
-                  {root.title || `Session ${root.id.slice(0, 6)}`}
+                  {rootTitle}
                 </p>
                 <p className="mt-0.5 text-[10px] text-base-content/60">{entry.childCount} child run{entry.childCount === 1 ? '' : 's'}</p>
               </div>
@@ -350,7 +370,9 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
             pendingBudgetApprovals,
             activeLoopSessionIds: new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId)),
             queuedDepthBySession: queuedDepthBySession ?? {},
+            sessionStatusSnapshots: sessionStatusSnapshots ?? {},
             sessionAgentTurns: sessionAgentTurns ?? {},
+            architectureSessionRuntimeStates,
             renamingId,
             renameValue,
             renameRef,
