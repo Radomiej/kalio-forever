@@ -930,11 +930,23 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
   }
 
   private statusFromEventSummary(events: Array<{ type: string; message: string }>): ArchitectureRun['status'] {
-    const stoppedByStepGuard = events.some((event) =>
-      event.type === 'router_decision'
-      && event.message.startsWith('Runtime stopped after ')
-      && (event.message.includes(' graph steps.') || event.message.includes('max node visits')));
-    return stoppedByStepGuard ? 'failed' : 'running';
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event?.type === 'run_stopped') {
+        return 'cancelled';
+      }
+      if (
+        event?.type === 'router_decision'
+        && event.message.startsWith('Runtime stopped after ')
+        && (event.message.includes(' graph steps.') || event.message.includes('max node visits'))
+      ) {
+        return 'failed';
+      }
+      if (event) {
+        return 'running';
+      }
+    }
+    return 'running';
   }
 
   private async reconstructEventsFromAudit(runId: string): Promise<ArchitectureExecutionEvent[]> {
@@ -1355,6 +1367,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
 
   private toSpeaker(event: ArchitectureExecutionEvent): ArchitectureChatProjection['messages'][number]['speaker'] {
     if (event.type === 'run_created') return 'system';
+    if (event.type === 'run_stopped') return 'system';
     if (event.type === 'router_decision') return 'router';
     if (event.type === 'router_output') return 'router';
     if (event.type === 'final_artifact') return 'finalizer';
@@ -1364,6 +1377,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
 
   private isChatProjectionEvent(event: ArchitectureExecutionEvent): boolean {
     return event.type === 'run_created'
+      || event.type === 'run_stopped'
       || event.type === 'participant_output'
       || event.type === 'router_decision'
       || event.type === 'final_artifact';
