@@ -226,9 +226,7 @@ describe('ExecutionGraphInspector', () => {
     expect(screen.queryByText(/"toolEvidence"/)).toBeNull();
   });
 
-  it('keeps architecture stream and branch internals behind details', () => {
-    const setActiveSession = vi.fn();
-
+  it('keeps architecture stream and branch internals behind details without exposing router chats as child sessions', () => {
     render(
       <ExecutionGraphInspector
         activeSessionId="arch-run-root"
@@ -267,7 +265,7 @@ describe('ExecutionGraphInspector', () => {
             },
           },
         }}
-        setActiveSession={setActiveSession}
+        setActiveSession={vi.fn()}
         setPendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
@@ -282,9 +280,7 @@ describe('ExecutionGraphInspector', () => {
     expect(screen.getByText('completed / 42 chunks')).toBeTruthy();
     expect(screen.getByText('Branch')).toBeTruthy();
     expect(screen.getAllByText('branch...7890').length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open child chat' }));
-    expect(setActiveSession).toHaveBeenCalledWith('branch-session-1234567890');
+    expect(screen.queryByRole('button', { name: 'Open child chat' })).toBeNull();
   });
 
   it('shows incomplete architecture evidence without expanding raw payload', () => {

@@ -49,6 +49,31 @@ function StatusBadge({ status }: { status: TimelineStatus | null }) {
   );
 }
 
+function branchSessionCandidates(runId: string, step: TraceStep): string[] {
+  const fromStream = step.stream?.branchSessionId;
+  if (fromStream) {
+    return [fromStream];
+  }
+  if (step.speaker !== 'participant' || !step.nodeId) {
+    return [];
+  }
+  const raw = step.nodeId;
+  const normalized = new Set([
+    raw,
+    raw.replace(/-/g, '_'),
+    raw.replace(/_/g, '-'),
+  ]);
+  return [...normalized].map((nodeId) => `arch-${runId}-${nodeId}`);
+}
+
+function resolveBranchSessionId(
+  runId: string,
+  step: TraceStep,
+  canOpenBranchSession: (sessionId: string | undefined) => boolean,
+): string | undefined {
+  return branchSessionCandidates(runId, step).find((sessionId) => canOpenBranchSession(sessionId));
+}
+
 function RouterStep({
   step,
   label,
@@ -118,18 +143,19 @@ function RouterStep({
 }
 
 function AgentStep({
+  runId,
   step,
   canOpenBranchSession,
   onOpenBranch,
   onOpenStep,
 }: {
+  runId: string;
   step: TraceStep;
   canOpenBranchSession: (sessionId: string | undefined) => boolean;
   onOpenBranch: (sessionId: string) => void;
   onOpenStep: (step: TraceStep) => void;
 }) {
-  const branchSessionId = step.stream?.branchSessionId;
-  const openableBranchSessionId = canOpenBranchSession(branchSessionId) ? branchSessionId : undefined;
+  const openableBranchSessionId = resolveBranchSessionId(runId, step, canOpenBranchSession);
   const status = statusForStep(step);
 
   return (
@@ -161,11 +187,13 @@ function AgentStep({
 }
 
 function ParallelBranches({
+  runId,
   steps,
   canOpenBranchSession,
   onOpenBranch,
   onOpenStep,
 }: {
+  runId: string;
   steps: TraceStep[];
   canOpenBranchSession: (sessionId: string | undefined) => boolean;
   onOpenBranch: (sessionId: string) => void;
@@ -182,8 +210,7 @@ function ParallelBranches({
       </div>
       <div className="grid gap-1.5 sm:grid-cols-2">
         {steps.map((step) => {
-          const branchSessionId = step.stream?.branchSessionId;
-          const openableBranchSessionId = canOpenBranchSession(branchSessionId) ? branchSessionId : undefined;
+          const openableBranchSessionId = resolveBranchSessionId(runId, step, canOpenBranchSession);
           const status = statusForStep(step);
           return (
           <button
@@ -305,7 +332,8 @@ export function ArchitectureRunTimeline({
     .map((stage) => stage.step);
   const firstRouter = routers[0];
   const finalRouter = routers.at(-1);
-  const hasMerge = Boolean(finalRouter && finalRouter !== firstRouter);
+  const hasParallelStage = stages.some((stage) => stage.kind === 'parallel');
+  const hasMerge = hasParallelStage && Boolean(finalRouter && finalRouter !== firstRouter);
   const shellSegments = stages.map(stageSegment);
   const stepCount = graphStepCount(run);
   const canOpenBranchSession = (sessionId: string | undefined) => (
@@ -343,6 +371,7 @@ export function ArchitectureRunTimeline({
             return (
               <ParallelBranches
                 key={`parallel-${index}`}
+                runId={run.runId}
                 steps={stage.steps}
                 canOpenBranchSession={canOpenBranchSession}
                 onOpenBranch={onOpenBranch}
@@ -356,6 +385,7 @@ export function ArchitectureRunTimeline({
               return (
                 <AgentStep
                   key={step.eventId ?? `${step.nodeId}-${index}`}
+                  runId={run.runId}
                   step={step}
                   canOpenBranchSession={canOpenBranchSession}
                   onOpenBranch={onOpenBranch}
@@ -364,7 +394,11 @@ export function ArchitectureRunTimeline({
               );
             }
             if (step.speaker === 'router') {
-              const label = step === firstRouter ? 'Router dispatch' : step === finalRouter && hasMerge ? 'Router merge' : nodeLabel(step);
+              const label = hasParallelStage && step === firstRouter
+                ? 'Router dispatch'
+                : step === finalRouter && hasMerge
+                  ? 'Router merge'
+                  : nodeLabel(step);
               return <RouterStep key={step.eventId ?? `${step.nodeId}-${index}`} step={step} label={label} onOpenStep={openStep} />;
             }
             if (step.speaker === 'finalizer') {

@@ -28,11 +28,39 @@ export function countSessionDescendants(
   return count;
 }
 
+export function visibleConversationTreeChildren(
+  sessionId: string,
+  childSessionsByParent: Map<string, ChatSession[]>,
+): ChatSession[] {
+  return (childSessionsByParent.get(sessionId) ?? []).flatMap((child) => (
+    isArchitectureWorkflowContainerSession(child)
+      ? visibleConversationTreeChildren(child.id, childSessionsByParent)
+      : [child]
+  ));
+}
+
+export function countVisibleConversationTreeDescendants(
+  sessionId: string,
+  childSessionsByParent: Map<string, ChatSession[]>,
+  cache = new Map<string, number>(),
+): number {
+  const cached = cache.get(sessionId);
+  if (cached !== undefined) return cached;
+  const count = visibleConversationTreeChildren(sessionId, childSessionsByParent)
+    .reduce((sum, child) => sum + 1 + countVisibleConversationTreeDescendants(child.id, childSessionsByParent, cache), 0);
+  cache.set(sessionId, count);
+  return count;
+}
+
 export function displayTitleForSession(
   session: ChatSession,
   childSessionsByParent: Map<string, ChatSession[]>,
 ): string {
   void childSessionsByParent;
+  const architectureLabel = architectureSessionDisplayLabel(session);
+  if (isArchitectureEnvelopeSession(session) && architectureLabel) {
+    return architectureLabel;
+  }
   const trimmedTitle = session.title.trim();
   return trimmedTitle || `Session ${session.id.slice(0, 6)}`;
 }
@@ -113,6 +141,84 @@ export function isTechnicalArchitectureSession(session: ChatSession): boolean {
   return isLegacyTechnicalArchitectureSession(session);
 }
 
+export function isPendingArchitecturePlaceholderSession(
+  session: ChatSession,
+  architectureSessionRuntimeStates: Map<string, SessionRuntimeState>,
+  sessionMessages: Record<string, ChatMessage[]>,
+): boolean {
+  if (!architectureRunIdForSession(session) || !architectureSlotIdForSession(session) || isTechnicalArchitectureSession(session)) {
+    return false;
+  }
+  if ((sessionMessages[session.id] ?? []).length > 0) {
+    return false;
+  }
+  const runtimeState = architectureSessionRuntimeStates.get(session.id);
+  if (runtimeState && runtimeState !== 'pending') {
+    return false;
+  }
+  // subagent_execution eagerly persists branch sessions for every slot. Keep the sidebar scoped
+  // to real conversations by hiding untouched pending placeholders until they show activity.
+  return session.updatedAt <= session.createdAt;
+}
+
+export function isArchitectureEnvelopeSession(session: ChatSession): boolean {
+  return Boolean(session.parentSessionId)
+    && Boolean(architectureRunIdForSession(session))
+    && architectureSlotIdForSession(session) === undefined;
+}
+
+export function isArchitectureWorkflowContainerSession(session: ChatSession): boolean {
+  if (!architectureRunIdForSession(session) || architectureSlotIdForSession(session) !== undefined) {
+    return false;
+  }
+  if (isArchitectureEnvelopeSession(session)) {
+    return true;
+  }
+
+  const runtimeKind = session.runtimeContext?.runtimeKind;
+  if (runtimeKind === 'agent-flow-branch') {
+    return true;
+  }
+  if (session.kind === 'agent-flow') {
+    return true;
+  }
+  if (session.id.startsWith('arch-')) {
+    return true;
+  }
+  return session.title.trim().toLowerCase().startsWith('architecture:');
+}
+
+export function normalizeConversationSessionId(
+  sessionId: string | null | undefined,
+  sessions: readonly ChatSession[] | Map<string, ChatSession>,
+): string | null {
+  if (!sessionId) {
+    return null;
+  }
+
+  const sessionById = sessions instanceof Map ? sessions : new Map(sessions.map((session) => [session.id, session]));
+  let currentId = sessionId;
+  let currentSession = sessionById.get(currentId);
+  const visited = new Set<string>();
+
+  while (
+    currentSession
+    && isArchitectureWorkflowContainerSession(currentSession)
+    && currentSession.parentSessionId
+    && !visited.has(currentSession.id)
+  ) {
+    const parentSession = sessionById.get(currentSession.parentSessionId);
+    if (!parentSession) {
+      break;
+    }
+    visited.add(currentSession.id);
+    currentId = parentSession.id;
+    currentSession = parentSession;
+  }
+
+  return currentId;
+}
+
 export function sessionStatusSnapshotToRuntimeState(
   snapshot: SocketEvents['session:status'] | undefined,
 ): SessionRuntimeState | null {
@@ -189,7 +295,7 @@ function fallbackArchitectureBranchState(
   return null;
 }
 
-function architectureRunIdForSession(session: ChatSession): string | undefined {
+export function architectureRunIdForSession(session: ChatSession): string | undefined {
   const runId = architectureContext(session)['architectureRunId'];
   if (typeof runId === 'string' && runId.trim().length > 0) {
     return runId.trim();
@@ -211,6 +317,16 @@ function architectureSlotTypeForSession(session: ChatSession): string | undefine
 function architectureContext(session: ChatSession): Record<string, unknown> {
   const context = session.runtimeContext?.architectureContext;
   return context && typeof context === 'object' && !Array.isArray(context) ? context : {};
+}
+
+function architectureSessionDisplayLabel(session: ChatSession): string | null {
+  const context = architectureContext(session);
+  const displayLabel = context['displayLabel'];
+  if (typeof displayLabel === 'string' && displayLabel.trim().length > 0) {
+    return displayLabel.trim();
+  }
+  const schemaName = context['schemaName'];
+  return typeof schemaName === 'string' && schemaName.trim().length > 0 ? schemaName.trim() : null;
 }
 
 function isLegacyTechnicalArchitectureSession(session: ChatSession): boolean {

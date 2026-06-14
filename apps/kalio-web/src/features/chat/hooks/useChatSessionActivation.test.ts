@@ -444,4 +444,126 @@ describe('useChatSessionActivation', () => {
     );
     expect(setAgentTurns).toHaveBeenCalledWith(expect.any(Array), 'arch-root');
   });
+
+  it('rebuilds workflow-envelope turns from hydrated history even when a live turn placeholder still exists', async () => {
+    useAgentStore.setState({
+      activeAgentLoops: {
+        'session-1': {
+          sessionId: 'session-1',
+          turnId: 'turn-live',
+          startedAt: 1,
+        },
+      },
+    });
+    useSessionStore.setState({
+      activeSessionId: 'session-1',
+      sessions: [
+        { id: 'session-1', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 1 },
+      ],
+      messages: [],
+      sessionMessages: { 'session-1': [] },
+      agentTurns: [{
+        id: 'turn-live',
+        sessionId: 'session-1',
+        items: [],
+        done: false,
+      }],
+      sessionAgentTurns: {
+        'session-1': [{
+          id: 'turn-live',
+          sessionId: 'session-1',
+          items: [],
+          done: false,
+        }],
+      },
+      activeTurnId: 'turn-live',
+      sessionActiveTurnIds: { 'session-1': 'turn-live' },
+      pendingMessage: null,
+      pendingRAAppId: null,
+    });
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [
+        {
+          id: 'user-1',
+          sessionId: 'session-1',
+          role: 'user',
+          content: 'Assess this repository.',
+          createdAt: 1,
+        },
+        {
+          id: 'assistant-tools',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '',
+          createdAt: 2,
+          toolCalls: [
+            {
+              id: 'architecture:run-live:event-pragmatist',
+              name: 'run_subagent',
+              args: {
+                architectureRunId: 'run-live',
+                schemaName: 'Strategic Decision Council',
+                nodeId: 'pragmatist',
+                childSessionId: 'arch-pragmatist',
+              },
+            },
+          ],
+        },
+        {
+          id: 'tool-result-1',
+          sessionId: 'session-1',
+          role: 'tool_result',
+          toolCallId: 'architecture:run-live:event-pragmatist',
+          content: JSON.stringify({
+            result: 'Pragmatist answer.',
+            taskId: 'run-live:event-pragmatist',
+            childSessionId: 'arch-pragmatist',
+            parentSessionId: 'session-1',
+            vfsMode: 'shared',
+            vfsSessionId: 'session-1',
+            copiedFiles: [],
+            durationMs: 0,
+          }),
+          createdAt: 3,
+        },
+        {
+          id: 'router-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '### Router\n\nRoute selected.',
+          createdAt: 4,
+        },
+        {
+          id: 'finalizer-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '### Finalizer\n\nFinal answer.',
+          createdAt: 5,
+        },
+      ],
+    });
+
+    const setAgentTurns = vi.fn();
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns,
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(setAgentTurns).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sessionId: 'session-1',
+            turnKind: 'workflow-envelope',
+          }),
+        ]),
+        'session-1',
+      );
+    });
+  });
 });

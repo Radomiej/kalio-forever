@@ -34,7 +34,7 @@ export function GraphInspectorActions({
     node.payload.kind === 'subagent'
     || node.payload.kind === 'cli-agent'
     || node.payload.kind === 'agent-flow'
-    || (node.payload.kind === 'architecture-run' && node.payload.route?.branchSessionId)
+    || (node.payload.kind === 'architecture-run' && node.payload.route?.branchSessionOpenable === true)
   )
     && node.sessionId
     && childSessionExists

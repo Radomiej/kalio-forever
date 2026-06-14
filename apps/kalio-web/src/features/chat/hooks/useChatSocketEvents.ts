@@ -43,6 +43,8 @@ export function useChatSocketEvents({
   onContextInvalidated,
 }: UseChatSocketEventsOptions): void {
   const {
+    setSessions,
+    setActiveSession,
     appendChunk,
     finalizeChunk,
     addMessage,
@@ -420,6 +422,8 @@ export function useChatSocketEvents({
       clearToolActivities,
       removeActiveAgentLoop,
       setPendingConfirmation,
+      setActiveSession,
+      setSessions,
       setMessages,
       setAgentTurns,
       onContextInvalidated,

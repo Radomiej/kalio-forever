@@ -1,8 +1,9 @@
-import type { ChatMessage, ChatSession } from '@kalio/types';
+import type { ChatMessage } from '@kalio/types';
 import { apiClient } from '../../services/apiClient';
 import { useSessionStore } from '../../store/sessionStore';
 import { findArchitectureRunInMessages } from './architectureChatSummary';
 import { buildTurnsFromHistory, mergeFetchedMessages } from './chatUtils';
+import { architectureRunIdForSession } from '../sessions/sessionTreeDisplay';
 
 type SetMessages = (messages: ChatMessage[], sessionId?: string | null) => void;
 type SetAgentTurns = (turns: ReturnType<typeof buildTurnsFromHistory>, sessionId?: string | null) => void;
@@ -12,11 +13,6 @@ function defaultFetchMessages(sessionId: string): Promise<ChatMessage[]> {
   return apiClient
     .get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`)
     .then((response) => response.data);
-}
-
-function architectureRunIdForSession(session: { runtimeContext?: ChatSession['runtimeContext'] | null }): string | null {
-  const runId = session.runtimeContext?.architectureContext?.['architectureRunId'];
-  return typeof runId === 'string' && runId.trim().length > 0 ? runId.trim() : null;
 }
 
 function buildReloadedArchitectureSummaryMessage(
@@ -46,6 +42,13 @@ function buildReloadedArchitectureSummaryMessage(
   };
 }
 
+function persistedArchitectureRunInMessages(
+  messages: ChatMessage[],
+): NonNullable<ReturnType<typeof findArchitectureRunInMessages>> | null {
+  const persisted = [...messages].reverse().find((message) => message.architectureRun)?.architectureRun;
+  return persisted ?? null;
+}
+
 export async function hydrateArchitectureProjectionFromDescendants(
   activeSessionId: string,
   mergedMessages: ChatMessage[],
@@ -54,8 +57,15 @@ export async function hydrateArchitectureProjectionFromDescendants(
   fetchMessages: FetchMessages = defaultFetchMessages,
   getActiveSessionId: () => string | null = () => useSessionStore.getState().activeSessionId,
 ): Promise<ChatMessage[]> {
-  if (findArchitectureRunInMessages(mergedMessages)) {
+  if (persistedArchitectureRunInMessages(mergedMessages)) {
     return mergedMessages;
+  }
+
+  const inferredSummary = findArchitectureRunInMessages(mergedMessages);
+  if (inferredSummary?.hostProjectionKind === 'workflow-envelope') {
+    const syntheticMessage = buildReloadedArchitectureSummaryMessage(activeSessionId, mergedMessages, inferredSummary);
+    const withoutPreviousSynthetic = mergedMessages.filter((message) => message.id !== syntheticMessage.id);
+    return [...withoutPreviousSynthetic, syntheticMessage].sort((left, right) => left.createdAt - right.createdAt);
   }
 
   const sessions = useSessionStore.getState().sessions;

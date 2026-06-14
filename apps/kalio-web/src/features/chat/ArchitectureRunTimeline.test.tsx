@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ArchitectureChatRunSummary, ArchitectureGraphProjection } from '@kalio/types';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
@@ -244,5 +244,36 @@ describe('ArchitectureRunTimeline', () => {
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('5');
     expect(screen.getAllByText('pending').length).toBeGreaterThanOrEqual(6);
     expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('pending');
+  });
+
+  it('treats precreated placeholder branch ids as non-openable when they are not in the known branch set', () => {
+    const onOpenBranch = vi.fn();
+    const onOpenStep = vi.fn();
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-placeholder',
+      schemaId: 'Strategic Decision Council',
+      status: 'running',
+      routeHops: [],
+      trace: [],
+      graphNodes: [
+        { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
+      ],
+      graphEdges: [],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={onOpenBranch}
+        onOpenStep={onOpenStep}
+        knownBranchSessionIds={new Set()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('architecture-route-agent'));
+
+    expect(onOpenBranch).not.toHaveBeenCalled();
+    expect(onOpenStep).toHaveBeenCalledWith({ eventId: undefined, nodeId: 'analyst' });
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, useRef, type ReactNode } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
@@ -6,6 +6,7 @@ import { apiClient } from '../../services/apiClient';
 import type { ChatSession, ChatMessage, Persona } from '@kalio/types';
 import { buildTurnsFromHistory } from '../chat/chatUtils';
 import { reloadSessionHistoryWithArchitectureProjection } from '../chat/architectureReloadHydration';
+import { hasWorkflowEnvelopeHistory, needsWorkflowEnvelopeRecovery } from '../chat/workflowEnvelopeRecovery';
 import {
   SESSION_ORIGIN_FILTERS,
   buildSessionListEntries,
@@ -14,36 +15,16 @@ import {
   type SessionOriginFilter,
 } from './sessionListModel';
 import {
-  isTechnicalArchitectureSession,
-  buildArchitectureSessionRuntimeStates,
   buildChildSessionsByParent,
-  countSessionDescendants,
+  countVisibleConversationTreeDescendants,
   displayTitleForSession,
   hasExpandedAncestor,
+  normalizeConversationSessionId,
 } from './sessionTreeDisplay';
+import { filterRenderableSessions } from './sessionRenderableFilter';
 import { renderSessionChildRows, SessionPanelSessionItem } from './SessionPanelRow';
 
 const LAST_ACTIVE_SESSION_STORAGE_KEY = 'kalio:last-active-session-id';
-
-function filterRenderableSessions(
-  orderedSessions: ChatSession[],
-  sessionMessages: Record<string, ChatMessage[]>,
-): {
-  renderableSessions: ChatSession[];
-  architectureSessionRuntimeStates: ReturnType<typeof buildArchitectureSessionRuntimeStates>;
-} {
-  const architectureSessionRuntimeStates = buildArchitectureSessionRuntimeStates(
-    orderedSessions,
-    sessionMessages,
-  );
-
-  return {
-    architectureSessionRuntimeStates,
-    // Sidebar should reflect persisted child sessions only. Planned graph nodes belong to the
-    // workflow timeline, not the conversation tree.
-    renderableSessions: orderedSessions.filter((session) => !isTechnicalArchitectureSession(session)),
-  };
-}
 
 function loadStoredActiveSessionId(): string | null {
   if (typeof window === 'undefined') {
@@ -92,16 +73,18 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const [originFilter, setOriginFilter] = useState<SessionOriginFilter>('all');
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [expandedRoots, setExpandedRoots] = useState<Set<string>>(() => new Set());
+  const architectureSessionRefreshRef = useRef<{ key: string; requestedAt: number } | null>(null);
   const renameRef = useRef<HTMLInputElement>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [archivedSessions, setArchivedSessions] = useState<ChatSession[]>([]);
   const newPersonaId = personas[0]?.id ?? 'default';
 
   useEffect(() => {
-    if (activeSessionId) {
-      persistActiveSessionId(activeSessionId);
+    if (!activeSessionId) {
+      return;
     }
-  }, [activeSessionId]);
+    persistActiveSessionId(normalizeConversationSessionId(activeSessionId, sessions));
+  }, [activeSessionId, sessions]);
 
   useEffect(() => {
     setLoading(true);
@@ -113,11 +96,12 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         const { renderableSessions } = filterRenderableSessions(
           orderedSessions,
           {},
+          {},
         );
         const sessionById = new Map(renderableSessions.map((session) => [session.id, session]));
         const selectableSessions = renderableSessions.filter((session) => isVisibleSidebarSession(session, null, 'all', sessionById));
         if (!useSessionStore.getState().activeSessionId && selectableSessions.length > 0) {
-          const storedSessionId = loadStoredActiveSessionId();
+          const storedSessionId = normalizeConversationSessionId(loadStoredActiveSessionId(), orderedSessions);
           const initialSessionId = storedSessionId && selectableSessions.some((session) => session.id === storedSessionId)
             ? storedSessionId
             : selectableSessions[0].id;
@@ -148,6 +132,36 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       .catch((err: unknown) => console.error('[SessionPanel] load archived sessions failed', err));
   }, [originFilter, sessions]);
 
+  const reloadSessionHistory = useCallback(async (sessionId: string) => {
+    try {
+      const hydratedMessages = await reloadSessionHistoryWithArchitectureProjection({
+        sessionId,
+        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+        getSessionMessages: (targetSessionId) => useSessionStore.getState().getSessionMessages(targetSessionId),
+        setMessages,
+        setAgentTurns,
+        fetchMessages: async (targetSessionId) => {
+          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${targetSessionId}/messages`);
+          return response.data;
+        },
+      });
+      if (!hydratedMessages) {
+        return null;
+      }
+
+      const hasActiveLoop = useAgentStore.getState().hasActiveLoopForSession?.(sessionId) ?? false;
+      const hasActiveTurn = Boolean(getSessionActiveTurnId(sessionId));
+      if (hasWorkflowEnvelopeHistory(hydratedMessages) || !hasActiveLoop || !hasActiveTurn) {
+        setAgentTurns(buildTurnsFromHistory(hydratedMessages, sessionId), sessionId);
+      }
+
+      return hydratedMessages;
+    } catch (err) {
+      console.error('[SessionPanel] load messages failed', err);
+      return null;
+    }
+  }, [getSessionActiveTurnId, setAgentTurns, setMessages]);
+
   const createSession = async () => {
     try {
       const { data } = await apiClient.post<ChatSession>('/api/sessions', {
@@ -164,32 +178,22 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     }
   };
 
-  const selectSession = async (id: string) => {
-    setActiveSession(id);
-    persistActiveSessionId(id);
+  const selectSession = useCallback(async (id: string) => {
+    const targetSessionId = normalizeConversationSessionId(id, useSessionStore.getState().sessions) ?? id;
+    setActiveSession(targetSessionId);
+    persistActiveSessionId(targetSessionId);
     onSelect?.();
-    try {
-      const hydratedMessages = await reloadSessionHistoryWithArchitectureProjection({
-        sessionId: id,
-        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
-        getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
-        setMessages,
-        setAgentTurns,
-        fetchMessages: async (sessionId) => {
-          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
-          return response.data;
-        },
-      });
-      if (!hydratedMessages) return;
-      const hasActiveLoop = useAgentStore.getState().hasActiveLoopForSession?.(id) ?? false;
-      const hasActiveTurn = Boolean(getSessionActiveTurnId(id));
-      if (!hasActiveLoop || !hasActiveTurn) {
-        setAgentTurns(buildTurnsFromHistory(hydratedMessages, id), id);
-      }
-    } catch (err) {
-      console.error('[SessionPanel] load messages failed', err);
+    await reloadSessionHistory(targetSessionId);
+  }, [onSelect, reloadSessionHistory, setActiveSession]);
+
+  useEffect(() => {
+    const normalizedActiveSessionId = normalizeConversationSessionId(activeSessionId, sessions);
+    if (!activeSessionId || !normalizedActiveSessionId || normalizedActiveSessionId === activeSessionId) {
+      return;
     }
-  };
+
+    void selectSession(normalizedActiveSessionId);
+  }, [activeSessionId, selectSession, sessions]);
 
   const sidebarSessions = originFilter === 'archived' ? archivedSessions : sessions;
   const orderedSessions = sortSessionsForSidebar(sidebarSessions);
@@ -197,6 +201,13 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const { renderableSessions, architectureSessionRuntimeStates } = filterRenderableSessions(
     orderedSessions,
     sessionMessages ?? {},
+    {
+      pendingConfirmations,
+      pendingBudgetApprovals,
+      activeLoopSessionIds,
+      queuedDepthBySession: queuedDepthBySession ?? {},
+      sessionStatusSnapshots: sessionStatusSnapshots ?? {},
+    },
   );
   const sessionById = new Map(renderableSessions.map((session) => [session.id, session]));
   const visibleSessions = renderableSessions
@@ -205,11 +216,76 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const childSessionsByParent = buildChildSessionsByParent(renderableSessions);
   const descendantCountByParent = new Map<string, number>();
   const activeOriginFilter = SESSION_ORIGIN_FILTERS.find((filter) => filter.id === originFilter) ?? SESSION_ORIGIN_FILTERS[0];
+  const activeSession = activeSessionId
+    ? sessions.find((session) => session.id === activeSessionId) ?? null
+    : null;
+  const activeSessionMessages = activeSessionId ? (sessionMessages[activeSessionId] ?? []) : [];
+  const activeRenderableDescendantCount = activeSessionId
+    ? countVisibleConversationTreeDescendants(activeSessionId, childSessionsByParent, descendantCountByParent)
+    : 0;
+  const activeWorkflowRecoveryNeeded = needsWorkflowEnvelopeRecovery({
+    session: activeSession,
+    messages: activeSessionMessages,
+    visibleDescendantCount: activeRenderableDescendantCount,
+  });
 
   const getPersonaName = (personaId: string): string | null => {
     const p = personas.find((p) => p.id === personaId);
     return p?.name ?? (personaId === 'default' ? null : personaId);
   };
+
+  useEffect(() => {
+    if (!activeSessionId || !activeWorkflowRecoveryNeeded) {
+      architectureSessionRefreshRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+    const reloadHostArchitecture = () => {
+      if (cancelled || inFlight) {
+        return;
+      }
+      inFlight = true;
+      const refreshKey = `${activeSessionId}:workflow-envelope`;
+      const requestedAt = architectureSessionRefreshRef.current?.key === refreshKey
+        ? architectureSessionRefreshRef.current.requestedAt
+        : 0;
+      if (Date.now() - requestedAt < 1_500) {
+        inFlight = false;
+        return;
+      }
+      architectureSessionRefreshRef.current = { key: refreshKey, requestedAt: Date.now() };
+      void apiClient
+        .get<ChatSession[]>('/api/sessions')
+        .then((response) => {
+          if (!cancelled) {
+            setSessions(response.data);
+          }
+        })
+        .catch((err: unknown) => {
+          console.error('[SessionPanel] architecture descendant refresh failed', err);
+        })
+        .finally(() => {
+          void reloadSessionHistory(activeSessionId).finally(() => {
+            inFlight = false;
+          });
+        });
+    };
+    const timer = window.setTimeout(reloadHostArchitecture, 350);
+    const interval = window.setInterval(reloadHostArchitecture, 1_500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, [
+    activeSessionId,
+    activeWorkflowRecoveryNeeded,
+    reloadSessionHistory,
+    setSessions,
+  ]);
 
   const deleteSession = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -387,7 +463,11 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
           }
           const children = childSessionsByParent.get(s.id) ?? [];
           const isExpanded = expandedRoots.has(s.id);
-          const childCount = countSessionDescendants(s.id, childSessionsByParent, descendantCountByParent);
+          const visibleChildConversationCount = countVisibleConversationTreeDescendants(
+            s.id,
+            childSessionsByParent,
+            descendantCountByParent,
+          );
           const itemProps = {
             activeSessionId,
             originFilter,
@@ -398,6 +478,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
             queuedDepthBySession: queuedDepthBySession ?? {},
             sessionStatusSnapshots: sessionStatusSnapshots ?? {},
             sessionAgentTurns: sessionAgentTurns ?? {},
+            sessionMessages: sessionMessages ?? {},
             architectureSessionRuntimeStates,
             renamingId,
             renameValue,
@@ -412,7 +493,12 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
             onRestoreSession: restoreSession,
             onToggleRootExpansion: toggleRootExpansion,
           };
-          if ((originFilter === 'all' || originFilter === 'user') && !s.parentSessionId && children.length > 0) {
+          if (
+            (originFilter === 'all' || originFilter === 'user')
+            && !s.parentSessionId
+            && children.length > 0
+            && visibleChildConversationCount > 0
+          ) {
             return (
               <div key={s.id}>
                 <SessionPanelSessionItem
@@ -420,7 +506,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
                   session={s}
                   depth={entry.depth}
                   personaName={getPersonaName(s.personaId)}
-                  childToggle={{ count: childCount, expanded: isExpanded }}
+                  childToggle={{ count: visibleChildConversationCount, expanded: isExpanded }}
                 />
                 {isExpanded && renderSessionChildRows({
                   ...itemProps,

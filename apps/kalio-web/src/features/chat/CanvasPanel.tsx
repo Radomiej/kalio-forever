@@ -6,7 +6,7 @@ import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { apiClient } from '../../services/apiClient';
 import { eventBus } from '../../services/eventBus';
-import type { ChatMessage } from '@kalio/types';
+import type { ChatMessage, ChatSession } from '@kalio/types';
 import { findArchitectureRunInMessages } from './architectureChatSummary';
 import { mergeFetchedMessages } from './chatUtils';
 import { ArchitectureRunCanvasSection } from './CanvasPanel.ArchitectureRun';
@@ -16,9 +16,43 @@ import { AgentFlowConversationCard, buildAgentFlowPreviews } from './CanvasPanel
 import { buildSubagentPreviews, SubagentConversationCard } from './CanvasPanel.Subagents';
 import { buildCliChildPreviews, CliChildConversationCanvasCard } from './CanvasPanel.CliChildren';
 import { SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
+import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
+
+function architectureRunIdForSession(session: ChatSession): string | null {
+  const parentToolCallId = session.parentToolCallId ?? session.runtimeContext?.parentToolCallId;
+  if (typeof parentToolCallId === 'string') {
+    const match = /^architecture:([^:]+):/.exec(parentToolCallId.trim());
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  const architectureContext = session.runtimeContext?.architectureContext;
+  if (architectureContext && typeof architectureContext === 'object' && !Array.isArray(architectureContext)) {
+    const runId = (architectureContext as Record<string, unknown>)['architectureRunId'];
+    if (typeof runId === 'string' && runId.trim().length > 0) {
+      return runId.trim();
+    }
+  }
+
+  return null;
+}
 
 export function CanvasPanel() {
-  const { toolActivities, isStreaming, canvasOpen, canvasFocus, setCanvasFocus, toggleCanvas, activeAgentLoops, cliChildProjections } = useAgentStore();
+  const {
+    toolActivities,
+    isStreaming,
+    canvasOpen,
+    canvasFocus,
+    setCanvasFocus,
+    toggleCanvas,
+    activeAgentLoops,
+    cliChildProjections,
+    pendingConfirmations,
+    pendingBudgetApprovals,
+    queuedDepthBySession,
+    sessionStatusSnapshots,
+  } = useAgentStore();
   const { messages, activeSessionId, sessions, sessionMessages, setActiveSession, getSessionMessages, setMessages } = useSessionStore();
   const [hydratedSubagentSessions, setHydratedSubagentSessions] = useState<Record<string, true>>({});
   const open = canvasOpen;
@@ -49,6 +83,44 @@ export function CanvasPanel() {
     () => findArchitectureRunInMessages(messages),
     [messages],
   );
+  const architecturePreviewSessionIds = useMemo(() => {
+    if (!architectureRun) {
+      return new Set<string>();
+    }
+
+    return new Set(
+      sessions
+        .filter((session) => architectureRunIdForSession(session) === architectureRun.runId)
+        .map((session) => session.id),
+    );
+  }, [architectureRun, sessions]);
+  const openableArchitectureBranchSessionIds = useMemo(() => {
+    const activeLoopSessionIds = new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId));
+    const { renderableSessions } = filterRenderableSessions(
+      sessions,
+      sessionMessages ?? {},
+      {
+        pendingConfirmations,
+        pendingBudgetApprovals,
+        activeLoopSessionIds,
+        queuedDepthBySession: queuedDepthBySession ?? {},
+        sessionStatusSnapshots: sessionStatusSnapshots ?? {},
+      },
+    );
+    return new Set(renderableSessions.map((session) => session.id));
+  }, [
+    activeAgentLoops,
+    pendingBudgetApprovals,
+    pendingConfirmations,
+    queuedDepthBySession,
+    sessionMessages,
+    sessionStatusSnapshots,
+    sessions,
+  ]);
+  const visibleSubagentPreviews = useMemo(
+    () => subagentPreviews.filter((preview) => !architecturePreviewSessionIds.has(preview.sessionId)),
+    [architecturePreviewSessionIds, subagentPreviews],
+  );
   const focusedSubAgentFlowResult = useMemo(
     () => findFocusedSubAgentFlowResult(
       messages,
@@ -61,7 +133,7 @@ export function CanvasPanel() {
     () => Array.from(
       new Set(
         [
-          ...subagentPreviews.map((preview) => preview.sessionId),
+          ...visibleSubagentPreviews.map((preview) => preview.sessionId),
           ...cliChildPreviews.map((preview) => preview.childSessionId),
           ...agentFlowPreviews.map((preview) => preview.sessionId),
           ...(focusedCanvasSessionId ? [focusedCanvasSessionId] : []),
@@ -69,7 +141,7 @@ export function CanvasPanel() {
           .filter((sessionId) => sessionId !== activeSessionId && knownSessionIds.has(sessionId)),
       ),
     ).sort(),
-    [activeSessionId, agentFlowPreviews, cliChildPreviews, focusedCanvasSessionId, knownSessionIds, subagentPreviews],
+    [activeSessionId, agentFlowPreviews, cliChildPreviews, focusedCanvasSessionId, knownSessionIds, visibleSubagentPreviews],
   );
   const childPreviewSessionKey = childPreviewSessionIds.join('|');
   const identifiedChildPreviewSessionIdsRef = useRef<Set<string>>(new Set());
@@ -93,7 +165,7 @@ export function CanvasPanel() {
     || visibleMasterActivities.length > 0
     || subagentActivities.length > 0
     || subagentLoops.length > 0
-    || subagentPreviews.length > 0
+    || visibleSubagentPreviews.length > 0
     || cliChildPreviews.length > 0
     || agentFlowPreviews.length > 0
     || open;
@@ -203,6 +275,7 @@ export function CanvasPanel() {
                 <ArchitectureRunCanvasSection
                   run={architectureRun}
                   sessions={sessions}
+                  knownBranchSessionIds={openableArchitectureBranchSessionIds}
                   onOpenSession={(sessionId) => setCanvasFocus({ kind: 'architecture-branch', sessionId })}
                   getBranchMessages={(sessionId) => getSessionMessages(sessionId)}
                   focused={canvasFocus?.kind === 'architecture-run' && canvasFocus.runId === architectureRun.runId}
@@ -250,11 +323,11 @@ export function CanvasPanel() {
                 </section>
               )}
 
-              {subagentPreviews.length > 0 && (
+              {visibleSubagentPreviews.length > 0 && (
                 <section data-testid="canvas-subagents-section">
                   <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">Sub-agents</p>
                   <div className="space-y-1.5">
-                    {subagentPreviews.map((preview) => (
+                    {visibleSubagentPreviews.map((preview) => (
                       <SubagentConversationCard
                         key={preview.sessionId}
                         preview={preview}
