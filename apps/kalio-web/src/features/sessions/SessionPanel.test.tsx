@@ -799,6 +799,65 @@ describe('SessionPanel', () => {
     expect(screen.getByText('Strategic Decision Council: Pragmatist')).toBeTruthy();
   });
 
+  it('hides legacy technical architecture sessions when only the id/title still marks them as router or finalizer', async () => {
+    const now = Date.now();
+    const architectureSessions: ChatSession[] = [
+      { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 5_000, updatedAt: now - 5_000 },
+      {
+        id: 'arch-legacy-root',
+        personaId: 'default',
+        title: 'Architecture: Legacy debate',
+        kind: 'chat',
+        parentSessionId: 'host',
+        createdAt: now - 4_000,
+        updatedAt: now - 4_000,
+      },
+      {
+        id: 'arch-legacy-orchestrator',
+        personaId: 'agent-orchestrator',
+        title: 'Architecture Debate: Orchestrator',
+        kind: 'subagent',
+        parentSessionId: 'arch-legacy-root',
+        createdAt: now - 3_000,
+        updatedAt: now - 3_000,
+      },
+      {
+        id: 'arch-legacy-finalizer',
+        personaId: 'agent-synthesizer',
+        title: 'Architecture Debate: Finalizer',
+        kind: 'subagent',
+        parentSessionId: 'arch-legacy-root',
+        createdAt: now - 2_000,
+        updatedAt: now - 2_000,
+      },
+      {
+        id: 'arch-legacy-analyst',
+        personaId: 'web-research',
+        title: 'Architecture Debate: Analyst',
+        kind: 'subagent',
+        parentSessionId: 'arch-legacy-root',
+        createdAt: now - 1_000,
+        updatedAt: now - 1_000,
+      },
+    ];
+    mockState.sessions = architectureSessions;
+    mockState.sessionMessages = {};
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: architectureSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
+
+    fireEvent.click(screen.getByTestId('toggle-session-children-host'));
+
+    expect(screen.queryByText('Architecture Debate: Orchestrator')).toBeNull();
+    expect(screen.queryByText('Architecture Debate: Finalizer')).toBeNull();
+    expect(screen.getByText('Architecture Debate: Analyst')).toBeTruthy();
+  });
+
   it('hides cli-agent child sessions from the default conversation list', async () => {
     const sessionsWithCliChild: ChatSession[] = [
       ...mockSessions,

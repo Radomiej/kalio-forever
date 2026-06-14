@@ -4,7 +4,7 @@ export type SessionRuntimeState = 'pending' | 'waiting' | 'running' | 'error' | 
 type ArchitectureRunWithGraph = NonNullable<ChatMessage['architectureRun']> & {
   graphNodes?: ArchitectureGraphProjection['nodes'];
 };
-const TECHNICAL_ARCHITECTURE_SLOT_IDS = new Set(['router', 'finalizer']);
+const TECHNICAL_ARCHITECTURE_SLOT_IDS = new Set(['router', 'finalizer', 'orchestrator']);
 const TECHNICAL_ARCHITECTURE_SLOT_TYPES = new Set(['router', 'finalizer']);
 
 export function buildChildSessionsByParent(sessions: ChatSession[]): Map<string, ChatSession[]> {
@@ -107,8 +107,10 @@ export function isTechnicalArchitectureSession(session: ChatSession): boolean {
     return true;
   }
   const slotId = architectureSlotIdForSession(session);
-  // TODO: legacy fallback - older persisted branch sessions may expose roleSlotId without roleSlotType.
-  return typeof slotId === 'string' && TECHNICAL_ARCHITECTURE_SLOT_IDS.has(slotId);
+  if (typeof slotId === 'string' && TECHNICAL_ARCHITECTURE_SLOT_IDS.has(normalizeArchitectureNodeKey(slotId))) {
+    return true;
+  }
+  return isLegacyTechnicalArchitectureSession(session);
 }
 
 export function sessionStatusSnapshotToRuntimeState(
@@ -209,6 +211,50 @@ function architectureSlotTypeForSession(session: ChatSession): string | undefine
 function architectureContext(session: ChatSession): Record<string, unknown> {
   const context = session.runtimeContext?.architectureContext;
   return context && typeof context === 'object' && !Array.isArray(context) ? context : {};
+}
+
+function isLegacyTechnicalArchitectureSession(session: ChatSession): boolean {
+  if (!looksLikeArchitectureBranchSession(session)) {
+    return false;
+  }
+  return technicalArchitectureSessionHints(session).some((hint) => TECHNICAL_ARCHITECTURE_SLOT_IDS.has(hint));
+}
+
+function looksLikeArchitectureBranchSession(session: ChatSession): boolean {
+  return session.kind === 'subagent'
+    && (
+      session.runtimeContext?.runtimeKind === 'agent-flow-branch'
+      || session.id.startsWith('arch-')
+      || session.parentSessionId?.startsWith('arch-') === true
+    );
+}
+
+function technicalArchitectureSessionHints(session: ChatSession): string[] {
+  const context = architectureContext(session);
+  return [
+    stringHint(session.runtimeContext?.architectureSlotId),
+    stringHint(context['displayLabel']),
+    stringHint(context['roleLabel']),
+    titleSuffixHint(session.title),
+    idSuffixHint(session.id),
+  ].filter((hint): hint is string => hint !== null);
+}
+
+function stringHint(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return null;
+  }
+  return normalizeArchitectureNodeKey(value);
+}
+
+function titleSuffixHint(title: string): string | null {
+  const suffix = title.split(':').at(-1)?.trim();
+  return suffix ? normalizeArchitectureNodeKey(suffix) : null;
+}
+
+function idSuffixHint(id: string): string | null {
+  const suffix = id.split('-').at(-1)?.trim();
+  return suffix ? normalizeArchitectureNodeKey(suffix) : null;
 }
 
 function architectureRunIdFromParentToolCall(parentToolCallId: string | undefined): string | undefined {
