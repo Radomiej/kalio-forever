@@ -340,7 +340,10 @@ export function App() {
               </div>
               <div className="flex-1 overflow-hidden">
                 {talkTab === 'conversations' && (
-                  <ConversationPanel onSelect={() => {}} viewSwitcher={talkViewSwitcher} />
+                  <ConversationPanel
+                    onSelect={() => setTalkView('conversation')}
+                    viewSwitcher={talkViewSwitcher}
+                  />
                 )}
                 {talkTab === 'agents' && (
                   <ConversationManagerPanel

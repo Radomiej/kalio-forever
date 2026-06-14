@@ -227,6 +227,9 @@ vi.mock('../../store/sessionStore', () => ({
       activeTurnId: mockActiveTurnId,
       activeSessionId: mockActiveSessionId,
       sessions: mockSessions,
+      streamingChunks: mockStreamingChunks,
+      thinkingChunks: mockThinkingChunks,
+      chunkSessionIds: mockChunkSessionIds,
       addMessage,
       addSession,
       appendChunk: vi.fn(),
@@ -340,6 +343,7 @@ vi.mock('./ChatInput', () => ({
     architectures?: Array<{ id: string; name: string }>;
     disabled: boolean;
     isStreaming?: boolean;
+    onStop?: () => void;
     onArchitectureChange?: (schemaId: string) => void;
     onArchitectureRun?: (content: string, schemaId: string) => void;
     onSend: (content: string, personaId: string) => void;
@@ -377,6 +381,11 @@ vi.mock('./ChatInput', () => ({
       >
         Send
       </button>
+      {props.isStreaming && props.onStop && (
+        <button data-testid="chat-stop-btn" onClick={props.onStop}>
+          Stop
+        </button>
+      )}
     </div>
   ),
 }));
@@ -451,6 +460,51 @@ describe('ChatInterface event wiring', () => {
 
     expect(screen.getByTestId('welcome-prompt-input')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-input')).toBeNull();
+  });
+
+  it('REGRESSION: sending the first prompt from the welcome screen shows a pending assistant state before the first chunk', async () => {
+    addMessage.mockImplementation((message: ChatMessage) => {
+      mockMessages = [...mockMessages, message];
+      getSessionMessages.mockReturnValue(mockMessages);
+    });
+
+    await renderChatInterface();
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId('welcome-prompt-input'), {
+        target: { value: 'What can you do?' },
+      });
+      fireEvent.click(screen.getByTestId('welcome-run-prompt'));
+      await flushReactEffects();
+    });
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      content: 'What can you do?',
+      personaId: 'p1',
+      interrupt: false,
+    });
+    expect(screen.queryByTestId('welcome-screen')).toBeNull();
+    expect(screen.getByTestId('pending-agent-bubble')).toBeInTheDocument();
+  });
+
+  it('REGRESSION: sending the first prompt from the welcome screen exposes the stop action before the first chunk', async () => {
+    addMessage.mockImplementation((message: ChatMessage) => {
+      mockMessages = [...mockMessages, message];
+      getSessionMessages.mockReturnValue(mockMessages);
+    });
+
+    await renderChatInterface();
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId('welcome-prompt-input'), {
+        target: { value: 'Inspect the repo.' },
+      });
+      fireEvent.click(screen.getByTestId('welcome-run-prompt'));
+      await flushReactEffects();
+    });
+
+    expect(screen.getByTestId('chat-stop-btn')).toBeInTheDocument();
   });
 
   it('REGRESSION: renders the welcome composer when the active session only has non-renderable messages', async () => {
@@ -1768,6 +1822,7 @@ describe('chat:error two-path dispatch', () => {
   });
 
   it('chat:error with active turn, hadContent=false and INTERRUPTED silently removes bubble', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     mockActiveTurnId = 'turn-abc';
     await renderChatInterface();
 
@@ -1780,6 +1835,8 @@ describe('chat:error two-path dispatch', () => {
 
     expect(removeLastAgentTurn).toHaveBeenCalledOnce();
     expect(markAgentTurnError).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith('[EventBus] chat:error', expect.anything());
+    consoleErrorSpy.mockRestore();
   });
 
   it('chat:error QUEUE_FULL with no active turn calls setStreaming(false) only (floating banner path)', async () => {

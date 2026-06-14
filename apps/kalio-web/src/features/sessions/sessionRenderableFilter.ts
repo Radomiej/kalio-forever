@@ -29,6 +29,10 @@ function isArchitectureBranchConversationSession(session: ChatSession): boolean 
   return Boolean(architectureSlotIdForSession(session));
 }
 
+function hasExplicitConversationBranchSurface(session: ChatSession): boolean {
+  return architectureSessionSurfaceForSession(session) === 'conversation-branch';
+}
+
 function hasLiveSessionActivity(
   sessionId: string,
   signals: RenderableSessionFilterSignals,
@@ -52,8 +56,13 @@ export function isRenderableConversationSession(
     return false;
   }
 
-  if (isArchitectureBranchConversationSession(session)) {
+  if (hasExplicitConversationBranchSurface(session)) {
     return true;
+  }
+
+  if (isArchitectureBranchConversationSession(session)) {
+    return !isPendingArchitecturePlaceholderSession(session, architectureSessionRuntimeStates, sessionMessages)
+      || hasLiveSessionActivity(session.id, signals);
   }
 
   return !isPendingArchitecturePlaceholderSession(session, architectureSessionRuntimeStates, sessionMessages)

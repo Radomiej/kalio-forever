@@ -27,8 +27,11 @@ import {
   type ChatConnectionState,
   ChatSessionHeader,
   ChatStatusBanners,
+  PendingAssistantBubble,
   ChatWelcomeScreen,
 } from './ChatInterface.Parts';
+import { resolveConversationShellState } from './conversationShellState';
+import { resolveLiveTurnState } from './liveTurnState';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
@@ -75,6 +78,10 @@ export function ChatInterface() {
   const {
     messages, activeSessionId, sessions, addMessage, setMessages,
     agentTurns, setAgentTurns, updateAgentTurn, updateSession,
+    getSessionActiveTurnId,
+    streamingChunks,
+    thinkingChunks,
+    chunkSessionIds,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const activeModel = useSettingsStore((s) => s.getEffectiveModel());
@@ -90,6 +97,7 @@ export function ChatInterface() {
     getToolActivitiesForSession,
     getContextForSession,
     queuedDepthBySession,
+    hasActiveLoopForSession,
   } = useAgentStore();
   const queuedDepth = activeSessionId ? (queuedDepthBySession?.[activeSessionId] ?? 0) : 0;
   const activeToolActivities = getToolActivitiesForSession(activeSessionId);
@@ -139,7 +147,28 @@ export function ChatInterface() {
 
   const answeredCallIds = computeAnsweredCallIds(messages);
   const conversationTimeline = buildConversationTimeline(messages, agentTurns);
-  const hasRenderableConversation = conversationTimeline.length > 0;
+  const liveTurnState = resolveLiveTurnState({
+    sessionId: activeSessionId,
+    sessionMessages: messages,
+    agentTurns,
+    activeTurnId: getSessionActiveTurnId(activeSessionId),
+    isStreaming,
+    awaitingFirstChunk,
+    hasActiveLoop: hasActiveLoopForSession(activeSessionId),
+    queuedDepth,
+    activeToolActivities,
+    streamingChunks,
+    thinkingChunks,
+    chunkSessionIds,
+  });
+  const conversationShellState = resolveConversationShellState({
+    activeSession,
+    activeSessionId,
+    conversationTimelineLength: conversationTimeline.length,
+    liveTurnState,
+  });
+  const hasRenderableConversation = conversationShellState.mode === 'timeline';
+  const composerBusy = liveTurnState.stoppable;
 
   const { tokenCount: fallbackTokenCount, compactMessages } = useContextUsage();
   const invalidateContextPreview = useCallback(() => {
@@ -147,7 +176,7 @@ export function ChatInterface() {
   }, []);
   const contextPreview = useContextPreview({
     sessionId: activeSessionId,
-    personaId: !hasRenderableConversation
+    personaId: conversationShellState.mode === 'launch-form'
       ? selectedPersonaId
       : activeSession?.personaId ?? null,
     draftUserMessage,
@@ -303,18 +332,16 @@ export function ChatInterface() {
     updateAgentTurn,
   });
 
-  const composerStreaming = isStreaming || awaitingFirstChunk || hasPendingChunksForSession(activeSessionId);
-
   useEffect(() => {
     if (
       recoveryNotice === 'Recovered missed stream events after reconnect.'
       && activeSessionId
-      && !hasRenderableConversation
-      && !composerStreaming
+      && conversationShellState.mode === 'launch-form'
+      && !composerBusy
     ) {
       setRecoveryNotice(null);
     }
-  }, [activeSessionId, composerStreaming, hasRenderableConversation, recoveryNotice]);
+  }, [activeSessionId, composerBusy, conversationShellState.mode, recoveryNotice]);
 
   const handleStop = () => {
     if (!activeSessionId) return;
@@ -408,12 +435,12 @@ export function ChatInterface() {
         onScroll={handleMessageListScroll}
       >
         <div className="flex w-full flex-col gap-1">
-          {!hasRenderableConversation && (
+          {(conversationShellState.mode === 'launch-form' || conversationShellState.mode === 'pending-child-session') && (
             <ChatWelcomeScreen
               activeSession={activeSession}
               activeSessionId={activeSessionId}
               architectures={architectures}
-              isStreaming={composerStreaming}
+              isStreaming={composerBusy}
               onArchitectureChange={setSelectedArchitectureId}
               onArchitectureRun={(content) => void handleComposerSend(content, selectedPersonaId)}
               onDraftChange={setDraftUserMessage}
@@ -442,12 +469,8 @@ export function ChatInterface() {
               )
           ))}
 
-          {composerStreaming && activeToolActivities.length === 0 && !hasRenderableConversation && (
-            <div className="flex justify-start">
-              <div className="bg-base-300 rounded-2xl px-4 py-2">
-                <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
-              </div>
-            </div>
+          {conversationShellState.mode !== 'pending-child-session' && liveTurnState.showPlaceholderBubble && (
+            <PendingAssistantBubble liveTurnState={liveTurnState} />
           )}
 
           <div ref={bottomRef} />
@@ -458,7 +481,7 @@ export function ChatInterface() {
         <ChatInput
           architectures={architectures}
           disabled={!activeSessionId}
-          isStreaming={composerStreaming}
+          isStreaming={composerBusy}
           queuedDepth={queuedDepth}
           onArchitectureChange={setSelectedArchitectureId}
           onArchitectureRun={(content) => void handleComposerSend(content, activeSession?.personaId ?? 'default')}

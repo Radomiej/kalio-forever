@@ -17,6 +17,7 @@ import { buildSubagentPreviews, SubagentConversationCard } from './CanvasPanel.S
 import { buildCliChildPreviews, CliChildConversationCanvasCard } from './CanvasPanel.CliChildren';
 import { SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
 import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
+import { resolveLiveTurnState } from './liveTurnState';
 
 function architectureRunIdForSession(session: ChatSession): string | null {
   const parentToolCallId = session.parentToolCallId ?? session.runtimeContext?.parentToolCallId;
@@ -41,7 +42,6 @@ function architectureRunIdForSession(session: ChatSession): string | null {
 export function CanvasPanel() {
   const {
     toolActivities,
-    isStreaming,
     canvasOpen,
     canvasFocus,
     setCanvasFocus,
@@ -52,8 +52,23 @@ export function CanvasPanel() {
     pendingBudgetApprovals,
     queuedDepthBySession,
     sessionStatusSnapshots,
+    getToolActivitiesForSession,
+    hasActiveLoopForSession,
   } = useAgentStore();
-  const { messages, activeSessionId, sessions, sessionMessages, setActiveSession, getSessionMessages, setMessages } = useSessionStore();
+  const {
+    messages,
+    activeSessionId,
+    sessions,
+    sessionMessages,
+    setActiveSession,
+    getSessionMessages,
+    setMessages,
+    agentTurns,
+    getSessionActiveTurnId,
+    streamingChunks,
+    thinkingChunks,
+    chunkSessionIds,
+  } = useSessionStore();
   const [hydratedSubagentSessions, setHydratedSubagentSessions] = useState<Record<string, true>>({});
   const open = canvasOpen;
   const knownSessionIds = useMemo(
@@ -156,12 +171,27 @@ export function CanvasPanel() {
     ),
     [toolActivities],
   );
+  const activeSessionLiveTurn = resolveLiveTurnState({
+    sessionId: activeSessionId,
+    sessionMessages: messages,
+    agentTurns,
+    activeTurnId: getSessionActiveTurnId(activeSessionId),
+    isStreaming: false,
+    awaitingFirstChunk: false,
+    hasActiveLoop: hasActiveLoopForSession(activeSessionId),
+    queuedDepth: activeSessionId ? (queuedDepthBySession[activeSessionId] ?? 0) : 0,
+    activeToolActivities: getToolActivitiesForSession(activeSessionId),
+    streamingChunks,
+    thinkingChunks,
+    chunkSessionIds,
+  });
+  const hasActiveSessionLiveTurn = activeSessionLiveTurn.phase !== 'idle';
   // Show toggle only when agent has activity or canvas is already open
   const visibleMasterActivities = masterActivities.filter((activity) => (
     (activity.toolName !== 'run_subagent' && activity.toolName !== 'run_sub_agentflow')
     || !previewToolCallIds.has(activity.callId)
   ));
-  const showToggle = isStreaming
+  const showToggle = hasActiveSessionLiveTurn
     || visibleMasterActivities.length > 0
     || subagentActivities.length > 0
     || subagentLoops.length > 0
@@ -250,11 +280,11 @@ export function CanvasPanel() {
             <div className="flex shrink-0 items-center gap-2 border-b border-base-300 bg-base-200 px-4 py-2">
               <Info size={14} className="text-base-content/50" />
               <span className="flex-1 text-sm font-semibold">Canvas</span>
-              {isStreaming && <Loader2 size={12} className="animate-spin text-info" />}
+              {hasActiveSessionLiveTurn && <Loader2 size={12} className="animate-spin text-info" />}
             </div>
 
             <div className="flex-1 space-y-4 overflow-y-auto p-3">
-              {isStreaming && (
+              {hasActiveSessionLiveTurn && (
                 <section>
                   <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">Live</p>
                   <ThinkingPreview />

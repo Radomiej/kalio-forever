@@ -42,6 +42,8 @@ interface MockAgentState {
   pendingBudgetApprovals: Record<string, unknown>;
   queuedDepthBySession: Record<string, number>;
   sessionStatusSnapshots: Record<string, unknown>;
+  getToolActivitiesForSession: (sessionId: string | null) => MockAgentState['toolActivities'];
+  hasActiveLoopForSession: (sessionId: string | null) => boolean;
 }
 
 interface MockSessionState {
@@ -49,9 +51,11 @@ interface MockSessionState {
   sessionMessages: Record<string, ChatMessage[]>;
   sessions: ChatSession[];
   activeSessionId: string;
+  agentTurns: Array<{ id: string; sessionId: string; done: boolean; items: [] }>;
   thinkingChunks: Record<string, string>;
   streamingChunks: Record<string, string>;
   chunkSessionIds: Record<string, string>;
+  getSessionActiveTurnId: (sessionId: string | null) => string | null;
   setActiveSession: ReturnType<typeof vi.fn>;
   getSessionMessages: (sessionId: string | null) => ChatMessage[];
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
@@ -112,6 +116,10 @@ const agentState: MockAgentState = {
   pendingBudgetApprovals: {},
   queuedDepthBySession: {},
   sessionStatusSnapshots: {},
+  getToolActivitiesForSession: () => agentState.toolActivities,
+  hasActiveLoopForSession: (sessionId) => (
+    sessionId ? Object.values(agentState.activeAgentLoops).some((loop) => loop.sessionId === sessionId) : false
+  ),
 };
 
 const sessionState: MockSessionState = {
@@ -124,9 +132,11 @@ const sessionState: MockSessionState = {
     { id: 'sub-session-1', personaId: 'default', title: 'Sub-agent: demo', kind: 'subagent', createdAt: 2, updatedAt: 2 },
   ],
   activeSessionId: 'session-1',
+  agentTurns: [],
   thinkingChunks: {},
   streamingChunks: {},
   chunkSessionIds: {},
+  getSessionActiveTurnId: () => null,
   setActiveSession: vi.fn(),
   getSessionMessages: (sessionId) => {
     if (!sessionId) return [];
@@ -252,6 +262,8 @@ describe('CanvasPanel subagent grouping', () => {
     sessionState.sessionMessages = {
       'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }],
     };
+    sessionState.agentTurns = [];
+    sessionState.getSessionActiveTurnId = () => null;
     mockApiGet.mockResolvedValue({
       data: [
         { id: 'u1', sessionId: 'sub-session-1', role: 'user', content: 'build a page', createdAt: 1 },
@@ -343,6 +355,16 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.getByText('vfs_write')).toBeDefined();
     expect(screen.queryByText('Tools (1)')).toBeNull();
     expect(screen.queryByText('run_subagent')).toBeNull();
+  });
+
+  it('derives live canvas state from the active session runtime without relying on the global streaming bit', () => {
+    agentState.isStreaming = false;
+    sessionState.agentTurns = [{ id: 'turn-1', sessionId: 'session-1', done: false, items: [] }];
+    sessionState.getSessionActiveTurnId = () => 'turn-1';
+
+    render(<CanvasPanel />);
+
+    expect(screen.getByText('Live')).toBeInTheDocument();
   });
 
   it('shows architecture run detail with branch open controls', () => {

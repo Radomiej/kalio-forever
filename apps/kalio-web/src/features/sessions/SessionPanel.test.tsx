@@ -42,6 +42,7 @@ const mockState: {
   sessionAgentTurns: Record<string, AgentTurn[]>;
   sessionMessages: Record<string, ChatMessage[]>;
   getSessionMessages: (sessionId: string | null) => ChatMessage[];
+  getSessionAgentTurns: (sessionId: string | null) => AgentTurn[];
   getSessionActiveTurnId: (sessionId: string | null) => string | null;
   removeSession: typeof mockRemoveSession;
   updateSession: typeof mockUpdateSession;
@@ -56,6 +57,7 @@ const mockState: {
   sessionAgentTurns: {},
   sessionMessages: {},
   getSessionMessages: (sessionId) => (sessionId ? (mockState.sessionMessages[sessionId] ?? []) : []),
+  getSessionAgentTurns: (sessionId) => (sessionId ? (mockState.sessionAgentTurns[sessionId] ?? []) : []),
   getSessionActiveTurnId: () => null,
   removeSession: mockRemoveSession,
   updateSession: mockUpdateSession,
@@ -1447,7 +1449,7 @@ describe('SessionPanel', () => {
     expect(subagentIndex).toBe(-1);
   });
 
-  it('keeps an explicitly active child session visible for direct branch inspection', async () => {
+  it('expands the parent when an active child session is selected', async () => {
     const orderedSessions: ChatSession[] = [
       { id: 'master', personaId: 'orchestrator', title: 'Main orchestration chat', createdAt: 1_000, updatedAt: 5_000 },
       { id: 'child-older', personaId: 'default', title: 'Sub-agent: older child', kind: 'subagent', parentSessionId: 'master', createdAt: 2_000, updatedAt: 6_000 },
@@ -1467,11 +1469,11 @@ describe('SessionPanel', () => {
 
     const orderedItems = screen.getAllByTestId('session-item').map((item) => item.textContent ?? '');
 
-    expect(orderedItems.slice(0, 2)).toEqual([
+    expect(orderedItems.slice(0, 3)).toEqual([
       expect.stringContaining('Main orchestration chat'),
       expect.stringContaining('Sub-agent: older child'),
+      expect.stringContaining('Sub-agent: newer child'),
     ]);
-    expect(orderedItems.some((text) => text.includes('Sub-agent: newer child'))).toBe(false);
   });
 
   it('does not render persona filter chips in the conversation list', async () => {
@@ -1809,7 +1811,7 @@ describe('SessionPanel', () => {
     await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1));
   });
 
-  it('restores the last active session from sessionStorage before falling back to recency', async () => {
+  it('restores the last active session from sessionStorage', async () => {
     mockState.activeSessionId = null;
     sessionStorage.setItem('kalio:last-active-session-id', 's1');
     mockApiGet.mockImplementation((url: string) => {
@@ -1823,6 +1825,83 @@ describe('SessionPanel', () => {
 
     await waitFor(() => expect(mockSetActiveSession).toHaveBeenCalledWith('s1'));
     expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/s1/messages');
+  });
+
+  it('does not auto-select the newest session when there is no stored active session', async () => {
+    mockState.activeSessionId = null;
+    sessionStorage.removeItem('kalio:last-active-session-id');
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
+    expect(mockSetActiveSession).not.toHaveBeenCalled();
+  });
+
+  it('auto-expands the visible host when an active workflow branch hangs under a hidden technical root', async () => {
+    const now = Date.now();
+    const workflowSessions: ChatSession[] = [
+      { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 5_000, updatedAt: now - 5_000 },
+      {
+        id: 'arch-root',
+        personaId: 'default',
+        title: 'Architecture: Strategic Decision Council',
+        kind: 'agent-flow',
+        parentSessionId: 'host',
+        createdAt: now - 4_000,
+        updatedAt: now - 4_000,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-root',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+            sessionSurface: 'technical-node',
+          },
+        },
+      },
+      {
+        id: 'branch',
+        personaId: 'web-research',
+        title: 'Strategic Decision Council: Analyst',
+        kind: 'subagent',
+        parentSessionId: 'arch-root',
+        createdAt: now - 3_000,
+        updatedAt: now - 2_000,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'analyst',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            roleSlotId: 'analyst',
+            displayLabel: 'Analyst',
+            sessionSurface: 'conversation-branch',
+          },
+        },
+      },
+    ];
+
+    mockState.sessions = workflowSessions;
+    mockState.activeSessionId = 'branch';
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: workflowSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(workflowSessions));
+    await waitFor(() => expect(screen.getByText('Strategic Decision Council: Analyst')).toBeTruthy());
+    const orderedItems = screen.getAllByTestId('session-item').map((item) => item.textContent ?? '');
+    expect(orderedItems).toEqual([
+      expect.stringContaining('Workflow host'),
+      expect.stringContaining('Strategic Decision Council: Analyst'),
+    ]);
   });
 
   it('rehydrates architecture timeline metadata when restoring the last active host session after reload', async () => {

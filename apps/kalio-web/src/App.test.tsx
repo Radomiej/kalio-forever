@@ -71,16 +71,53 @@ vi.mock('./features/chat/graph/ExecutionGraphView', () => ({
 }));
 
 vi.mock('./features/sessions/ConversationPanel', () => ({
-  ConversationPanel: ({ viewSwitcher }: { viewSwitcher?: React.ReactNode }) => (
+  ConversationPanel: ({
+    onSelect,
+    viewSwitcher,
+  }: {
+    onSelect?: () => void;
+    viewSwitcher?: React.ReactNode;
+  }) => (
     <div data-testid="conversation-panel">
       Conversations
+      <button
+        type="button"
+        data-testid="mock-select-conversation"
+        onClick={() => onSelect?.()}
+      >
+        Select conversation
+      </button>
       {viewSwitcher}
     </div>
   ),
 }));
 
 vi.mock('./features/sessions/ConversationManagerPanel', () => ({
-  ConversationManagerPanel: () => <div data-testid="conversation-manager-panel">Active</div>,
+  ConversationManagerPanel: ({
+    onNavigate,
+    onOpenSession,
+  }: {
+    onNavigate?: () => void;
+    onOpenSession?: (sessionId: string) => void;
+  }) => (
+    <div data-testid="conversation-manager-panel">
+      Active
+      <button
+        type="button"
+        data-testid="mock-open-agent-session"
+        onClick={() => onOpenSession?.('agent-child-1')}
+      >
+        Open agent session
+      </button>
+      <button
+        type="button"
+        data-testid="mock-navigate-conversations"
+        onClick={() => onNavigate?.()}
+      >
+        Go conversations
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('./features/persona/PersonaPanel', () => ({
@@ -421,6 +458,45 @@ describe('App view state persistence', () => {
     fireEvent.click(screen.getByTestId('mock-open-child-chat'));
 
     expect(setActiveSession).toHaveBeenCalledWith('cli-child-1');
+    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
+    expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
+  });
+
+  it('returns to the conversation view when the sidebar selects a conversation while graph is active', () => {
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
+      activeSection: 'talk',
+      talkTab: 'conversations',
+      talkView: 'graph',
+      toolsTab: 'native',
+      mindTab: 'memory',
+      selectedSkillId: null,
+    }));
+
+    render(<App />);
+
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-select-conversation'));
+
+    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
+    expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
+  });
+
+  it('opens agent-run sessions in the conversation view from the agent sidebar', () => {
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
+      activeSection: 'talk',
+      talkTab: 'agents',
+      talkView: 'graph',
+      toolsTab: 'native',
+      mindTab: 'memory',
+      selectedSkillId: null,
+    }));
+
+    render(<App />);
+
+    expect(screen.getByTestId('conversation-manager-panel')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-open-agent-session'));
+
+    expect(setActiveSession).toHaveBeenCalledWith('agent-child-1');
     expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
     expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
   });

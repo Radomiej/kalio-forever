@@ -177,6 +177,16 @@ describe('subagent run tracking', () => {
     expect(useAgentStore.getState().activeAgentLoops['subagent-run-1']).toBeUndefined();
   });
 
+  it('removes active loops by sessionId when terminal events do not carry agentRun metadata', () => {
+    const store = useAgentStore.getState();
+    store.addActiveAgentLoop('child-session', 'turn-1', subagentRun);
+
+    store.removeActiveAgentLoop('child-session');
+
+    expect(useAgentStore.getState().activeAgentLoops['subagent-run-1']).toBeUndefined();
+    expect(useAgentStore.getState().hasActiveLoopForSession('child-session')).toBe(false);
+  });
+
   it('opens canvas for subagent tool activity', () => {
     useAgentStore.getState().addToolActivity({
       callId: 'call-sub',

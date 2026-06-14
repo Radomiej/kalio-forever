@@ -154,7 +154,11 @@ export function useChatSocketEvents({
     });
 
     const offError = eventBus.onError((payload) => {
-      console.error('[EventBus] chat:error', payload);
+      if (payload.code === 'INTERRUPTED') {
+        console.debug('[EventBus] chat:error', payload);
+      } else {
+        console.error('[EventBus] chat:error', payload);
+      }
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
         setAwaitingFirstChunk(false);
       }

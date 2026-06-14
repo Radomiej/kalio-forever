@@ -1,6 +1,5 @@
-import type { ChatMessage } from '@kalio/types';
+import type { ChatMessage, ChatSession } from '@kalio/types';
 import { apiClient } from '../../services/apiClient';
-import { useSessionStore } from '../../store/sessionStore';
 import { findArchitectureRunInMessages } from './architectureChatSummary';
 import { buildTurnsFromHistory, mergeFetchedMessages } from './chatUtils';
 import { architectureRunIdForSession } from '../sessions/sessionTreeDisplay';
@@ -8,6 +7,8 @@ import { architectureRunIdForSession } from '../sessions/sessionTreeDisplay';
 type SetMessages = (messages: ChatMessage[], sessionId?: string | null) => void;
 type SetAgentTurns = (turns: ReturnType<typeof buildTurnsFromHistory>, sessionId?: string | null) => void;
 type FetchMessages = (sessionId: string) => Promise<ChatMessage[]>;
+type GetSessions = () => ChatSession[];
+type GetSessionMessages = (sessionId: string) => ChatMessage[];
 
 function defaultFetchMessages(sessionId: string): Promise<ChatMessage[]> {
   return apiClient
@@ -55,7 +56,9 @@ export async function hydrateArchitectureProjectionFromDescendants(
   setMessages: SetMessages,
   setAgentTurns: SetAgentTurns,
   fetchMessages: FetchMessages = defaultFetchMessages,
-  getActiveSessionId: () => string | null = () => useSessionStore.getState().activeSessionId,
+  getActiveSessionId: () => string | null = () => null,
+  getSessions: GetSessions = () => [],
+  getSessionMessages: GetSessionMessages = () => [],
 ): Promise<ChatMessage[]> {
   if (persistedArchitectureRunInMessages(mergedMessages)) {
     return mergedMessages;
@@ -68,8 +71,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
     return [...withoutPreviousSynthetic, syntheticMessage].sort((left, right) => left.createdAt - right.createdAt);
   }
 
-  const sessions = useSessionStore.getState().sessions;
-  const candidateSessions = sessions.filter((session) => (
+  const candidateSessions = getSessions().filter((session) => (
     session.parentSessionId === activeSessionId
     && architectureRunIdForSession(session)
   ));
@@ -79,7 +81,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
 
   let derivedSummary: ReturnType<typeof findArchitectureRunInMessages> = null;
   for (const session of candidateSessions) {
-    const currentChildMessages = useSessionStore.getState().sessionMessages[session.id] ?? [];
+    const currentChildMessages = getSessionMessages(session.id);
     const childMessages = currentChildMessages.length > 0
       ? currentChildMessages
       : mergeFetchedMessages(
@@ -108,6 +110,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
 export async function reloadSessionHistoryWithArchitectureProjection({
   sessionId,
   getActiveSessionId,
+  getSessions,
   getSessionMessages,
   setMessages,
   setAgentTurns,
@@ -115,6 +118,7 @@ export async function reloadSessionHistoryWithArchitectureProjection({
 }: {
   sessionId: string;
   getActiveSessionId?: () => string | null;
+  getSessions?: GetSessions;
   getSessionMessages: (sessionId: string) => ChatMessage[];
   setMessages: SetMessages;
   setAgentTurns: SetAgentTurns;
@@ -133,6 +137,8 @@ export async function reloadSessionHistoryWithArchitectureProjection({
     setAgentTurns,
     fetchMessages,
     getActiveSessionId,
+    getSessions,
+    getSessionMessages,
   );
   if (getActiveSessionId && getActiveSessionId() !== sessionId) {
     return null;

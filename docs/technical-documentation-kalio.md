@@ -741,6 +741,12 @@ Interfejs powinien pozostać czytelny przy długich sesjach, tool callach i prac
 
 - czytelna lista sesji posortowana od najnowszych,
 - widoczny status streamingu,
+- pusty host session zawsze renderuje `New Chat` launch form zamiast pustego shellu rozmowy albo pustego canvasu,
+- `New Chat` dla zwyklej rozmowy i workflow uzywa tego samego shell UX: selector trybu, persona/workflow, project path, prompt, quick prompts i przycisk uruchomienia,
+- po wyslaniu promptu UI natychmiast pokazuje optimistic assistant state nawet przed pierwszym tekstowym chunkiem,
+- uzytkownik musi widziec, ze agent nadal odpowiada takze w luce miedzy `agent:start` a pierwszym `chat:chunk`,
+- stop dla aktywnego turnu musi przechodzic w czytelny stan terminalny (`stopped`, `cancelled` albo blad), a nie w cichy zanik aktywnosci,
+- workflow i zwykly chat musza miec parzysty shell launch/hydration: ta sama logika pustego hosta, optimistic bubble i reconnect/reload,
 - oddzielne live tool activities od historii,
 - czytelny panel confirmation z nazwą narzędzia i argumentami,
 - możliwość podejrzenia inputu i outputu narzędzia,

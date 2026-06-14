@@ -14,6 +14,9 @@ type SessionStateShape = {
   sessions: ChatSession[];
   sessionMessages: Record<string, ChatMessage[]>;
   sessionAgentTurns: Record<string, AgentTurn[]>;
+  getSessionMessages: (sessionId: string | null) => ChatMessage[];
+  getSessionAgentTurns: (sessionId: string | null) => AgentTurn[];
+  getSessionActiveTurnId: (sessionId: string | null) => string | null;
   setActiveSession: ReturnType<typeof vi.fn>;
   addSession: ReturnType<typeof vi.fn>;
   setMessages: ReturnType<typeof vi.fn>;
@@ -65,6 +68,9 @@ const {
     sessions: [] as ChatSession[],
     sessionMessages: {} as Record<string, ChatMessage[]>,
     sessionAgentTurns: {} as Record<string, AgentTurn[]>,
+    getSessionMessages: (sessionId: string | null) => (sessionId ? (sessionState.sessionMessages[sessionId] ?? []) : []),
+    getSessionAgentTurns: (sessionId: string | null) => (sessionId ? (sessionState.sessionAgentTurns[sessionId] ?? []) : []),
+    getSessionActiveTurnId: () => null,
     setActiveSession: vi.fn(),
     addSession: vi.fn(),
     setMessages: vi.fn(),
@@ -314,6 +320,7 @@ describe('ExecutionGraphView empty-session state', () => {
       sessionId: 'new-graph-session',
       content: 'Start from graph',
       personaId: 'default',
+      interrupt: false,
     });
   });
 
@@ -339,6 +346,7 @@ describe('ExecutionGraphView empty-session state', () => {
       sessionId: 'new-graph-session',
       content: 'Start with the specialist',
       personaId: 'persona-child',
+      interrupt: false,
     });
   });
 
@@ -408,6 +416,7 @@ describe('ExecutionGraphView empty-session state', () => {
       sessionId: 'session-1',
       content: 'Start this graph session',
       personaId: 'default',
+      interrupt: false,
     });
   });
 

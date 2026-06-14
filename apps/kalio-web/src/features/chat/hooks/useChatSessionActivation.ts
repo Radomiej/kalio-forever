@@ -6,9 +6,8 @@ import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
 import { eventBus } from '../../../services/eventBus';
 import { buildCallIdToNameFromMessages, buildTurnsFromHistory } from '../chatUtils';
-import { reloadSessionHistoryWithArchitectureProjection } from '../architectureReloadHydration';
 import { rebuildCLIChildProjectionsFromMessages } from '../cliChildProjection.model';
-import { hasWorkflowEnvelopeHistory } from '../workflowEnvelopeRecovery';
+import { hydrateSessionHistoryIntoStore } from '../historyHydration';
 
 interface UseChatSessionActivationParams {
   activeSessionId: string | null;
@@ -36,12 +35,16 @@ export function useChatSessionActivation({
     setPendingConfirmation(activeSessionId, null);
     console.debug('[ChatInterface] session activated', activeSessionId);
 
-    void reloadSessionHistoryWithArchitectureProjection({
+    void hydrateSessionHistoryIntoStore({
       sessionId: activeSessionId,
       getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+      getSessions: () => useSessionStore.getState().sessions,
       getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
       setMessages,
       setAgentTurns,
+      getSessionAgentTurns: (sessionId) => useSessionStore.getState().getSessionAgentTurns(sessionId),
+      getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
+      hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
       fetchMessages: async (sessionId) => {
         const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
         return response.data;
@@ -71,13 +74,8 @@ export function useChatSessionActivation({
             eventBus.identifySession(projection.childSessionId);
           }
         });
-        const hasActiveLoop = useAgentStore.getState().hasActiveLoopForSession(activeSessionId);
-        const hasActiveTurn = Boolean(useSessionStore.getState().getSessionActiveTurnId(activeSessionId));
-        if (hasWorkflowEnvelopeHistory(hydratedMessages) || !hasActiveLoop || !hasActiveTurn) {
-          setAgentTurns(buildTurnsFromHistory(hydratedMessages, activeSessionId), activeSessionId);
-          return;
-        }
-
+        const currentTurns = useSessionStore.getState().getSessionAgentTurns(activeSessionId);
+        const activeTurnId = useSessionStore.getState().getSessionActiveTurnId(activeSessionId);
         const latestUserMessageId = [...hydratedMessages]
           .reverse()
           .find((message) => message.role === 'user')
@@ -85,9 +83,8 @@ export function useChatSessionActivation({
         if (!latestUserMessageId) {
           return;
         }
-        const activeTurnId = useSessionStore.getState().getSessionActiveTurnId(activeSessionId);
         const activeTurn = activeTurnId
-          ? useSessionStore.getState().getSessionAgentTurns(activeSessionId).find((turn) => turn.id === activeTurnId)
+          ? currentTurns.find((turn) => turn.id === activeTurnId)
           : null;
         if (activeTurn && !activeTurn.promptMessageId) {
           const persistedPromptMessageId = hydratedMessages.find((message) =>

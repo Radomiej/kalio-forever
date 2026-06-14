@@ -14,7 +14,22 @@ describe('eventBus', () => {
     await import('./eventBus');
 
     expect(kalioSdkMock).toHaveBeenCalledWith({
-      wsUrl: (import.meta.env['VITE_WS_URL'] as string | undefined) ?? window.location.origin,
+      wsUrl: (() => {
+        const configured = import.meta.env['VITE_WS_URL'] as string | undefined;
+        if (configured) {
+          return configured;
+        }
+
+        const backendPortByFrontendPort = new Map([
+          ['5188', '3016'],
+          ['5288', '3316'],
+          ['6188', '4016'],
+        ]);
+        const backendPort = backendPortByFrontendPort.get(window.location.port);
+        return backendPort
+          ? `${window.location.protocol}//${window.location.hostname}:${backendPort}`
+          : window.location.origin;
+      })(),
     });
   });
 });

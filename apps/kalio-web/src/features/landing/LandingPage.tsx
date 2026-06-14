@@ -5,9 +5,9 @@ import { QuickChatWidget } from './QuickChatWidget';
 import { HomeHitlInbox } from './HomeHitlInbox';
 import { useTileIcons } from './useTileIcons';
 import { useSessionStore } from '../../store/sessionStore';
-import { apiClient, getRAApps, getRAAppGroups } from '../../services/apiClient';
+import { getRAApps, getRAAppGroups } from '../../services/apiClient';
+import { createAndActivateHostSession } from '../chat/launch/sessionLaunchShared';
 import { bucketCatalogApps } from '../raapp/catalog.utils';
-import type { ChatSession } from '@kalio/types';
 
 interface TileItem {
   id: string;
@@ -41,6 +41,8 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
   const { icons, generating, generateIcon, removeIcon } = useTileIcons('raapp');
   const addSession = useSessionStore((s) => s.addSession);
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
+  const setMessages = useSessionStore((s) => s.setMessages);
+  const setAgentTurns = useSessionStore((s) => s.setAgentTurns);
   const setPendingMessage = useSessionStore((s) => s.setPendingMessage);
 
   useEffect(() => {
@@ -87,22 +89,24 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
 
   const handleTileClick = useCallback(async (tile: TileItem) => {
     try {
-      const { data } = await apiClient.post<ChatSession>('/api/sessions', {
+      const session = await createAndActivateHostSession({
         personaId: 'ra-apps',
         title: tile.name,
+        addSession,
+        setActiveSession,
+        setMessages,
+        setAgentTurns,
       });
-      console.debug('[Landing] RA-App tile session created', data.id, tile.id);
-      addSession(data);
+      console.debug('[Landing] RA-App tile session created', session.id, tile.id);
       const prompt = `Run the "${tile.name}" RA-App for me.${
         tile.description ? ` ${tile.description}` : ''
       } Launch it immediately.`;
       setPendingMessage(prompt);
-      setActiveSession(data.id);
       onNavigateToChat();
     } catch (err) {
       console.error('[Landing] failed to create session for tile', tile.id, err);
     }
-  }, [addSession, setActiveSession, setPendingMessage, onNavigateToChat]);
+  }, [addSession, onNavigateToChat, setActiveSession, setAgentTurns, setMessages, setPendingMessage]);
 
   const handleQuickChatSent = useCallback(() => {
     onNavigateToChat();

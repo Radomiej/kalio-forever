@@ -162,6 +162,40 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
     expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(0);
   });
 
+  it('clears a runId-keyed active loop when chat:error interrupts the session', () => {
+    const removeLastAgentTurn = vi.fn();
+    useSessionStore.setState({
+      getSessionActiveTurnId: () => 'turn-1',
+      removeLastAgentTurn,
+    });
+    mountHook();
+
+    act(() => {
+      fire('agent:start', {
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        agentRun: {
+          agentRunId: 'run-1',
+          kind: 'chat',
+        },
+      });
+    });
+
+    expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(true);
+
+    act(() => {
+      fire('chat:error', {
+        sessionId: 'session-1',
+        code: 'INTERRUPTED',
+        message: 'Turn interrupted by user',
+        hadContent: false,
+      });
+    });
+
+    expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(false);
+    expect(removeLastAgentTurn).toHaveBeenCalledWith('session-1');
+  });
+
   it('stores replayed inactive descendant session status for sidebar recovery', () => {
     mountHook();
 

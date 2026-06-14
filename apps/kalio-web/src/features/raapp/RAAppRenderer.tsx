@@ -9,6 +9,7 @@ import { RaAppHITLOverlay } from './RaAppHITLOverlay';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { eventBus } from '../../services/eventBus';
+import { resolveLiveTurnState } from '../chat/liveTurnState';
 
 interface RAAppRendererProps {
   block: RAAppBlock;
@@ -66,22 +67,59 @@ function safeParseJson(value: string): unknown | null {
 }
 
 export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) {
-  const isStreaming = useAgentStore((s) => s.isStreaming);
-  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const {
+    activeSessionId,
+    sessions,
+    messages,
+    agentTurns,
+    streamingChunks,
+    thinkingChunks,
+    chunkSessionIds,
+    getSessionActiveTurnId,
+  } = useSessionStore((state) => ({
+    activeSessionId: state.activeSessionId,
+    sessions: state.sessions,
+    messages: state.messages,
+    agentTurns: state.agentTurns,
+    streamingChunks: state.streamingChunks,
+    thinkingChunks: state.thinkingChunks,
+    chunkSessionIds: state.chunkSessionIds,
+    getSessionActiveTurnId: state.getSessionActiveTurnId,
+  }));
+  const { getToolActivitiesForSession, hasActiveLoopForSession, queuedDepthBySession } = useAgentStore((state) => ({
+    getToolActivitiesForSession: state.getToolActivitiesForSession,
+    hasActiveLoopForSession: state.hasActiveLoopForSession,
+    queuedDepthBySession: state.queuedDepthBySession,
+  }));
+  const activeSessionLiveTurn = resolveLiveTurnState({
+    sessionId: activeSessionId,
+    sessionMessages: messages,
+    agentTurns,
+    activeTurnId: getSessionActiveTurnId(activeSessionId),
+    isStreaming: false,
+    awaitingFirstChunk: false,
+    hasActiveLoop: hasActiveLoopForSession(activeSessionId),
+    queuedDepth: activeSessionId ? (queuedDepthBySession[activeSessionId] ?? 0) : 0,
+    activeToolActivities: getToolActivitiesForSession(activeSessionId),
+    streamingChunks,
+    thinkingChunks,
+    chunkSessionIds,
+  });
+  const shouldQueueGuiAction = activeSessionLiveTurn.phase !== 'idle';
 
   const handleGuiAction = useCallback(
     (action: string) => {
-      const { activeSessionId, sessions, addMessage, enqueueUserAction } = useSessionStore.getState();
       if (!activeSessionId) return;
       const session = sessions.find((s) => s.id === activeSessionId);
       if (!session) return;
 
-      // Queue action if agent is still streaming (prevents mid-stream widget clicks)
-      if (isStreaming) {
+      if (shouldQueueGuiAction) {
+        const { enqueueUserAction } = useSessionStore.getState();
         enqueueUserAction(action);
         return;
       }
 
+      const { addMessage } = useSessionStore.getState();
       const userMsg: ChatMessage = {
         id: nanoid(),
         sessionId: activeSessionId,
@@ -92,7 +130,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
       addMessage(userMsg);
       eventBus.sendMessage({ sessionId: activeSessionId, content: action, personaId: session.personaId });
     },
-    [isStreaming],
+    [activeSessionId, sessions, shouldQueueGuiAction],
   );
 
   if (result?.status === 'error') {
