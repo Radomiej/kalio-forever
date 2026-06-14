@@ -1,0 +1,6 @@
+id: launch-entrypoints
+language: TypeScript
+rule:
+  pattern: createAndActivateHostSession($$$ARGS)
+message: FE host-session creation should stay routed through the shared launch helper and remain narrowly owned.
+severity: info

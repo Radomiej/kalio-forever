@@ -268,6 +268,7 @@ export function ChatSessionHeader({
           className="btn btn-ghost btn-xs text-base-content/40 hover:text-base-content/70"
           onClick={onCopyChat}
           title="Copy chat to clipboard"
+          aria-label="Copy chat to clipboard"
         >
           {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
         </button>

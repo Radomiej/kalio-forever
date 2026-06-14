@@ -40,6 +40,8 @@ Domknac frontend do jednego, prostego modelu:
 - 2026-06-14: Serena audit znalazl dodatkowe ukryte heurystyki FE (`isStreaming` leaks i legacy branch fallback), co dalo dwa realne cleanupy ponad bazowy shell plan.
 - 2026-06-14: Focused FE gate po Serena cleanupie przeszedl: `sessionRenderableFilter`, `CanvasPanel`, `ConversationManagerPanel`, `RAAppRenderer`, `ChatInterface`, `liveTurnState`, plus `tsc --noEmit`.
 - 2026-06-14: Playwright MCP na aktualnym `5188` pozwolil odtworzyc `Talk -> New`, ale manifest nadal nie pokazal launch-form controls po kliknieciu `New`; to traktuje jako blocker do finalnego demo proofu, dopoki nie zrestartujemy albo nie potwierdzimy, ze hot-reload stack nie jest stale.
+- 2026-06-15: QA stack nie moze juz dotykac dev portow usera `3016/5188`; Serena memory dostala trwale przypomnienie, a dalszy proof idzie na losowych portach `stack-manager start --backend-port 0 --frontend-port 0`.
+- 2026-06-15: `ast-grep` pattern scans dzialaja poprawnie i dostaly repo rule pack `tools/ast-grep/fe-shell-audits/`; inline YAML wrapper MCP nadal wyglada na wadliwy, wiec file-based `scan --rule` zostaje fallbackiem do powtarzalnych auditow.
 
 ## Status Table
 

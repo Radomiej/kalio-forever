@@ -1,0 +1,7 @@
+id: direct-message-streaming-flag
+language: Tsx
+rule:
+  pattern: $MSG.streaming === true
+message: Avoid direct message.streaming checks in FE UI when live-turn helpers already define streaming semantics.
+severity: warning
+
