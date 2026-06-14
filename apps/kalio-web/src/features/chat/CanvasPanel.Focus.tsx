@@ -18,6 +18,10 @@ function sessionTitle(sessions: ChatSession[], focus: BranchCanvasFocus): string
     ?? focus.sessionId;
 }
 
+function hasRealBranchSession(sessions: ChatSession[], sessionId: string): boolean {
+  return sessions.some((session) => session.id === sessionId);
+}
+
 export function CanvasFocusSection({
   focus,
   sessions,
@@ -32,6 +36,7 @@ export function CanvasFocusSection({
   onOpenSession: (sessionId: string) => void;
 }) {
   const visibleMessages = visibleTranscript(transcript);
+  const hasSession = hasRealBranchSession(sessions, focus.sessionId);
 
   return (
     <section data-testid="canvas-focus-section">
@@ -55,15 +60,17 @@ export function CanvasFocusSection({
             <p className="truncate font-medium text-sky-300">{sessionTitle(sessions, focus)}</p>
             <p className="font-mono text-[10px] text-base-content/40">{focus.sessionId}</p>
           </div>
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs"
-            onClick={() => onOpenSession(focus.sessionId)}
-            data-testid={`canvas-focus-open-session-${focus.sessionId}`}
-          >
-            <ArrowUpRight size={10} />
-            Open
-          </button>
+          {hasSession && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              onClick={() => onOpenSession(focus.sessionId)}
+              data-testid={`canvas-focus-open-session-${focus.sessionId}`}
+            >
+              <ArrowUpRight size={10} />
+              Open
+            </button>
+          )}
         </div>
 
         {visibleMessages.length > 0 ? (
