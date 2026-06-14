@@ -111,13 +111,18 @@ export function handleSessionStatusEvent(
 export function handleConnectionStateEvent(
   state: { status: ChatConnectionState; recovered?: boolean },
   deps: {
+    getConnectionState: () => ChatConnectionState;
     setConnectionState: (value: ChatConnectionState) => void;
     setRecoveryNotice: (value: string) => void;
   },
 ): void {
+  const previousState = deps.getConnectionState();
   deps.setConnectionState(state.status);
   if (state.status === 'connected') {
-    if (state.recovered) {
+    if (
+      state.recovered
+      && (previousState === 'reconnecting' || previousState === 'disconnected')
+    ) {
       deps.setRecoveryNotice('Recovered missed stream events after reconnect.');
     }
     return;

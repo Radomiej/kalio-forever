@@ -289,6 +289,49 @@ describe('SessionManagerService', () => {
         { role: 'user', content: 'latest user prompt' },
       ]);
     });
+
+    it('merges host conversation history with branch-local history when historySessionId is provided', async () => {
+      const nextRepo: IMessageRepository = {
+        ensureSession: vi.fn().mockResolvedValue(undefined),
+        loadHistory: vi.fn(async (sessionId: string) => {
+          if (sessionId === 'host') {
+            return [
+              { id: 'host-user', sessionId: 'host', role: 'user' as const, content: 'Original host prompt', createdAt: 1 },
+              { id: 'host-assistant', sessionId: 'host', role: 'assistant' as const, content: 'Original host answer', createdAt: 2 },
+            ];
+          }
+          if (sessionId === 'branch') {
+            return [
+              { id: 'branch-user', sessionId: 'branch', role: 'user' as const, content: 'Branch objective', createdAt: 3 },
+            ];
+          }
+          return [];
+        }),
+        saveMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          SessionManagerService,
+          { provide: MESSAGE_REPOSITORY, useValue: nextRepo },
+          { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
+          { provide: CredentialsService, useValue: credentialsService },
+        ],
+      }).compile();
+      const mergedService = moduleRef.get(SessionManagerService);
+
+      const result = await mergedService.loadHistoryForLLM('branch', {
+        systemPrompt: 'system prompt',
+        toolMetas: [],
+        historySessionId: 'host',
+      });
+
+      expect(result.history).toEqual([
+        { role: 'system', content: 'system prompt' },
+        { role: 'user', content: 'Original host prompt' },
+        { role: 'assistant', content: 'Original host answer' },
+        { role: 'user', content: 'Branch objective' },
+      ]);
+    });
   });
 
   describe('saveToolResult', () => {

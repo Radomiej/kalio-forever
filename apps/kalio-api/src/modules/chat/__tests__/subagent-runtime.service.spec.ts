@@ -476,6 +476,8 @@ describe('SubagentRuntimeService nested subagents', () => {
       architectureContext: {
         architectureRunId: 'run-1',
         roleSlotId: 'implementer',
+        hostSessionId: 'host-chat',
+        historySessionId: 'host-chat',
         projectPath: 'C:\\Projekty\\kalio-forever',
       },
     });
@@ -490,8 +492,16 @@ describe('SubagentRuntimeService nested subagents', () => {
         architectureContext: expect.objectContaining({
           architectureRunId: 'run-1',
           roleSlotId: 'implementer',
+          hostSessionId: 'host-chat',
+          historySessionId: 'host-chat',
           projectPath: 'C:\\Projekty\\kalio-forever',
         }),
+      }),
+    );
+    expect(sessionManager.loadHistoryForLLM).toHaveBeenCalledWith(
+      'branch-implementer',
+      expect.objectContaining({
+        historySessionId: 'host-chat',
       }),
     );
   });

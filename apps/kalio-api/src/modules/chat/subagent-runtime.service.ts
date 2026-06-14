@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import type { AgentRunContext, SessionRuntimeContext, SubagentCopiedFile } from '@kalio/types';
+import type { AgentRunContext, ArchitectureRuntimeContext, SessionRuntimeContext, SubagentCopiedFile } from '@kalio/types';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import type { SubagentRuntimePort, RunSubagentRequest, RunSubagentResult } from '../tool/subagent-runtime.port';
 import { SessionManagerService } from './session-manager.service';
@@ -42,6 +42,26 @@ function runtimeContextsEqual(left: SessionRuntimeContext, right: SessionRuntime
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function resolveHistorySessionId(
+  runtimeKind: SessionRuntimeContext['runtimeKind'],
+  architectureContext: ArchitectureRuntimeContext | undefined,
+  parentSessionId: string,
+  childSessionId: string,
+): string {
+  if (runtimeKind !== 'agent-flow-branch') {
+    return childSessionId;
+  }
+  const historySessionId = architectureContext?.historySessionId;
+  if (typeof historySessionId === 'string' && historySessionId.trim().length > 0) {
+    return historySessionId.trim();
+  }
+  const hostSessionId = architectureContext?.hostSessionId;
+  if (typeof hostSessionId === 'string' && hostSessionId.trim().length > 0) {
+    return hostSessionId.trim();
+  }
+  return parentSessionId;
+}
+
 @Injectable()
 export class SubagentRuntimeService implements SubagentRuntimePort {
   private readonly logger = new Logger(SubagentRuntimeService.name);
@@ -73,6 +93,12 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     const subagentDepth = parentDepth + 1;
     const runtimeKind = request.auditContext?.architectureRunId ? 'agent-flow-branch' : 'subagent';
     const personaId = request.personaId ?? 'default';
+    const historySessionId = resolveHistorySessionId(
+      runtimeKind,
+      request.architectureContext,
+      request.parentSessionId,
+      childSessionId,
+    );
 
     const policyDecision = await this.toolPolicy.decide({
       runtimeKind,
@@ -230,6 +256,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         this.llmTurnRuntime.runAgentLoop({
           runtimeKind,
           sessionId: childSessionId,
+          historySessionId,
           turnId,
           promptMessageId,
           personaId,

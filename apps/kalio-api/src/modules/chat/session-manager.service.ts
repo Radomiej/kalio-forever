@@ -36,20 +36,47 @@ export class SessionManagerService {
     await this.repo.ensureSession(sessionId, personaId);
   }
 
-  async loadHistory(sessionId: string): Promise<ContextManagedLLMMessage[]> {
-    const messages = await this.repo.loadHistory(sessionId);
+  async loadHistory(
+    sessionId: string,
+    options?: { historySessionId?: string },
+  ): Promise<ContextManagedLLMMessage[]> {
+    const historySessionId = options?.historySessionId;
+    const sessionHistories = historySessionId && historySessionId !== sessionId
+      ? [
+          { sessionId: historySessionId, messages: await this.repo.loadHistory(historySessionId) },
+          { sessionId, messages: await this.repo.loadHistory(sessionId) },
+        ]
+      : [
+          { sessionId, messages: await this.repo.loadHistory(sessionId) },
+        ];
+    const orderedMessages = sessionHistories
+      .flatMap((history, sourceIndex) => history.messages.map((message, messageIndex) => ({
+        sessionId: history.sessionId,
+        sourceIndex,
+        messageIndex,
+        message,
+      })))
+      .sort((left, right) => {
+        if (left.message.createdAt !== right.message.createdAt) {
+          return left.message.createdAt - right.message.createdAt;
+        }
+        if (left.sourceIndex !== right.sourceIndex) {
+          return left.sourceIndex - right.sourceIndex;
+        }
+        return left.messageIndex - right.messageIndex;
+      });
     const out: ContextManagedLLMMessage[] = [];
-    for (const m of messages) {
-      out.push(...await this.toLLMMessages(sessionId, m));
+    for (const entry of orderedMessages) {
+      out.push(...await this.toLLMMessages(entry.sessionId, entry.message));
     }
     return out;
   }
 
   async loadHistoryForLLM(
     sessionId: string,
-    options: { systemPrompt: string; toolMetas: ToolMeta[] },
+    options: { systemPrompt: string; toolMetas: ToolMeta[]; historySessionId?: string },
   ): Promise<{ history: ContextManagedLLMMessage[]; unboundedHistoryCount: number; compacted: boolean }> {
-    const rawHistory = await this.loadHistory(sessionId);
+    const rawHistory = await this.loadHistory(sessionId, { historySessionId: options.historySessionId });
     const contextWindowSize = await this.credentialsService.getContextWindowSize();
     const prepared = prepareHistoryForLLM(
       rawHistory,
@@ -69,9 +96,9 @@ export class SessionManagerService {
 
   async loadPreviewHistoryForLLM(
     sessionId: string,
-    options: { systemPrompt: string; toolMetas: ToolMeta[]; draftUserMessage?: string; attachments?: ChatAttachment[] },
+    options: { systemPrompt: string; toolMetas: ToolMeta[]; historySessionId?: string; draftUserMessage?: string; attachments?: ChatAttachment[] },
   ): Promise<{ history: ContextManagedLLMMessage[]; unboundedHistoryCount: number; compacted: boolean; contextWindowSize: number }> {
-    const rawHistory = await this.loadHistory(sessionId);
+    const rawHistory = await this.loadHistory(sessionId, { historySessionId: options.historySessionId });
     const hasDraftText = typeof options.draftUserMessage === 'string' && options.draftUserMessage.length > 0;
     const hasDraftAttachments = Boolean(options.attachments && options.attachments.length > 0);
     const draftHistory = hasDraftText || hasDraftAttachments

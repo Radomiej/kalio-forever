@@ -36,6 +36,14 @@ import { reconstructDurableArchitectureGraph } from './architecture-durable-grap
 import { buildArchitectureParentChatMessages } from './architecture-parent-chat-projection';
 import { hydrateArchitectureRootVfs, type ArchitectureVfsHydrationResult } from './architecture-vfs-hydration';
 import { extractAllowanceContext } from '../agent-flow/agent-flow-launch-context';
+import {
+  createArchitectureBranchSessionRuntimeContext,
+  createArchitectureRootSessionRuntimeContext,
+  getArchitectureHistorySessionId,
+  getArchitectureHostSessionId,
+  getArchitectureParentSessionId,
+  getArchitectureParentToolCallId,
+} from './architecture-session-context';
 
 const ARCHITECTURE_PERSONA_ALIASES: Record<string, string> = {
   'persona.pragmatist': 'dev',
@@ -132,7 +140,7 @@ export class ArchitectureRuntimeService {
     const now = Date.now();
     const runId = nanoid();
     const rootSessionId = `arch-${runId}-root`;
-const branchSessionIds = await this.createBranchSessions(schema, runId, rootSessionId, normalizedDto);
+    const branchSessionIds = await this.createBranchSessions(schema, runId, rootSessionId, normalizedDto);
     const hydration = hydrateArchitectureRootVfs(this.vfs, rootSessionId, normalizedDto.context);
     const contextWithEvidence = await this.addCliAgentPreferencesToContext(
       this.addVfsEvidenceToContext(normalizedDto.context, rootSessionId, hydration),
@@ -201,7 +209,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
     if (!context) {
       return context;
     }
-    const parentSessionId = this.getParentSessionId(context);
+    const parentSessionId = getArchitectureParentSessionId(context);
     if (!parentSessionId) {
       return context;
     }
@@ -611,21 +619,21 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
     dto: CreateArchitectureRunDto,
   ): Promise<Record<string, string>> {
     const isAgentFlowRoot = this.isAgentFlowContext(dto.context);
+    const hostSessionId = getArchitectureHostSessionId(dto.context);
+    const historySessionId = getArchitectureHistorySessionId(dto.context);
     await this.sessions.createWithId(rootSessionId, {
       personaId: 'default',
       title: this.toRunSessionTitle(dto.prompt),
       kind: isAgentFlowRoot ? 'agent-flow' : 'chat',
-      parentSessionId: this.getParentSessionId(dto.context),
-      parentToolCallId: this.getParentToolCallId(dto.context),
-      runtimeContext: {
-        runtimeKind: isAgentFlowRoot ? 'agent-flow-branch' : 'chat',
-        architectureContext: {
-          architectureRunId: runId,
-          schemaId: schema.id,
-          schemaName: schema.name,
-          displayLabel: schema.name,
-        },
-      },
+      parentSessionId: getArchitectureParentSessionId(dto.context),
+      parentToolCallId: getArchitectureParentToolCallId(dto.context),
+      runtimeContext: createArchitectureRootSessionRuntimeContext({
+        runId,
+        schemaId: schema.id,
+        schemaName: schema.name,
+        hostSessionId,
+        historySessionId,
+      }),
     });
 
     const executableSlots = schema.roleSlots.filter((slot) => this.shouldCreateBranch(slot, schema, dto.executionMode));
@@ -638,20 +646,15 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
           title: `${schema.name}: ${slot.label}`,
           kind: 'subagent',
           parentSessionId: rootSessionId,
-          runtimeContext: {
-            runtimeKind: 'agent-flow-branch',
-            parentSessionId: rootSessionId,
-            architectureSlotId: slot.id,
-            architectureContext: {
-              architectureRunId: runId,
-              schemaId: schema.id,
-              schemaName: schema.name,
-              roleSlotId: slot.id,
-              roleSlotType: slot.slotType,
-              roleLabel: slot.label,
-              displayLabel: slot.label,
-            },
-          },
+          runtimeContext: createArchitectureBranchSessionRuntimeContext({
+            runId,
+            schemaId: schema.id,
+            schemaName: schema.name,
+            rootSessionId,
+            slot,
+            hostSessionId,
+            historySessionId,
+          }),
         });
         return [slot.id, sessionId] as const;
       }),
@@ -681,16 +684,6 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
     return ARCHITECTURE_PERSONA_ALIASES[personaId] ?? personaId;
   }
 
-  private getParentSessionId(context: Record<string, unknown> | undefined): string | undefined {
-    const parentSessionId = context?.['parentSessionId'];
-    return typeof parentSessionId === 'string' && parentSessionId.length > 0 ? parentSessionId : undefined;
-  }
-
-  private getParentToolCallId(context: Record<string, unknown> | undefined): string | undefined {
-    const parentToolCallId = context?.['parentToolCallId'];
-    return typeof parentToolCallId === 'string' && parentToolCallId.length > 0 ? parentToolCallId : undefined;
-  }
-
   private isAgentFlowContext(context: Record<string, unknown> | undefined): boolean {
     return this.isPlainRecord(context?.['subAgentFlow']);
   }
@@ -700,7 +693,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
     run: ArchitectureRun,
     events: ArchitectureExecutionEvent[],
   ): Promise<void> {
-    const projectionSessionId = this.getParentSessionId(run.context) ?? run.rootSessionId;
+    const projectionSessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId;
     if (!projectionSessionId) {
       return;
     }
@@ -749,7 +742,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
     auditEvents = true,
   ): void {
     if (!this.audit) return;
-    const sessionId = this.getParentSessionId(run.context) ?? run.rootSessionId;
+    const sessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId;
     void this.audit.log({
       sessionId,
       type: 'tool_result',
@@ -787,7 +780,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
   ): void {
     if (!this.audit) return;
     void this.audit.log({
-      sessionId: this.getParentSessionId(run.context) ?? run.rootSessionId,
+      sessionId: getArchitectureParentSessionId(run.context) ?? run.rootSessionId,
       type: 'architecture_event',
       label: `architecture_event:${event.type}:${event.nodeId ?? 'runtime'}`,
       data: {
@@ -824,7 +817,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
   ): void {
     if (!this.audit) return;
     void this.audit.log({
-      sessionId: this.getParentSessionId(run.context) ?? run.rootSessionId,
+      sessionId: getArchitectureParentSessionId(run.context) ?? run.rootSessionId,
       type: 'error',
       label: `architecture:error:${schema.id}:${run.id}`,
       data: {
@@ -848,7 +841,7 @@ const branchSessionIds = await this.createBranchSessions(schema, runId, rootSess
   ): void {
     if (!this.audit || !hydration) return;
     void this.audit.log({
-      sessionId: this.getParentSessionId(run.context) ?? run.rootSessionId,
+      sessionId: getArchitectureParentSessionId(run.context) ?? run.rootSessionId,
       type: 'tool_result',
       label: `architecture_hydration:${run.id}`,
       data: {

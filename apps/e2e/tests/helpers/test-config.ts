@@ -53,7 +53,7 @@ export async function selectSession(page: Page, sessionId: string, title: string
 			await page.reload();
 			const talkNav = page.getByTestId('nav-talk');
 			if (await talkNav.isVisible().catch(() => false)) {
-				await talkNav.click();
+				await talkNav.click({ force: true });
 			}
 		}
 	}

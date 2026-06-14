@@ -5,7 +5,6 @@ import { useAgentStore } from '../../store/agentStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
 import type { AgentTurn } from '../../store/sessionStore';
 import type { ToolActivity } from '../../store/agentStore';
-import { findArchitectureRunInMessages } from './architectureChatSummary';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
 import { LiveToolCallBubble, HistoryToolCallBubble } from './ToolCallBubble';
 import { extractCLIAgentResult, extractCLIAgentSessionSnapshot, extractPersistedToolResultMeta } from './ToolCallBubble.parsers';
@@ -14,6 +13,7 @@ import { deriveVisibleTurnItems } from './agentTurnVisibleItems';
 import { isMessageLiveStreaming } from './agentTurnStreaming';
 import { eventBus } from '../../services/eventBus';
 import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
+import { resolveWorkflowTurnProjection } from './workflowTurnProjection';
 
 interface Props {
   turn: AgentTurn;
@@ -119,8 +119,8 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     }
   }
 
-  const persistedArchitectureRun = [...messages].reverse().find((message) => message.architectureRun)?.architectureRun;
-  const architectureRun = persistedArchitectureRun ?? findArchitectureRunInMessages(messages);
+  const workflowTurnProjection = resolveWorkflowTurnProjection(turn, messages, toolArgsByCallId);
+  const architectureRun = workflowTurnProjection.architectureRun;
   const turnArchitectureRun = architectureRun && turn.items.some((item) => {
     if (item.kind === 'text') {
       return messages.some((message) => message.id === item.messageId && (message.architectureRun || /^###\s+(Router|Finalizer)\b/im.test(message.content)));
@@ -130,7 +130,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     }
     return false;
   })
-    ? persistedArchitectureRun || turn.done
+    ? workflowTurnProjection.persistedArchitectureMessage?.architectureRun || turn.done
       ? architectureRun
       : { ...architectureRun, status: 'running' as const }
     : null;
@@ -138,6 +138,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     ? finalAnswerForArchitectureRun(turnArchitectureRun)
     : null;
   const visibleItems = deriveVisibleTurnItems(turn.items, messages, streamingChunks, turn.done);
+  const turnBranchSessionIds = workflowTurnProjection.branchSessionIds;
   const knownBranchSessionIds = useMemo(() => {
     const activeLoopSessionIds = new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId));
     const { renderableSessions } = filterRenderableSessions(
@@ -151,7 +152,17 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
         sessionStatusSnapshots: sessionStatusSnapshots ?? {},
       },
     );
-    return new Set(renderableSessions.map((session) => session.id));
+    return new Set(
+      renderableSessions
+        .filter((session) => (
+          turnBranchSessionIds.has(session.id)
+          || (
+          activeLoopSessionIds.has(session.id)
+          || (sessionMessages?.[session.id]?.length ?? 0) > 0
+          )
+        ))
+        .map((session) => session.id),
+    );
   }, [
     activeAgentLoops,
     pendingBudgetApprovals,
@@ -160,6 +171,8 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     sessionMessages,
     sessionStatusSnapshots,
     sessions,
+    turnArchitectureRun,
+    turnBranchSessionIds,
   ]);
 
   return (
@@ -381,7 +394,7 @@ function isArchitectureTextOutput(content: string, hasRunMetadata: boolean): boo
 }
 
 function finalAnswerForArchitectureRun(
-  run: NonNullable<ReturnType<typeof findArchitectureRunInMessages>>,
+  run: NonNullable<ReturnType<typeof resolveWorkflowTurnProjection>['architectureRun']>,
 ): string | null {
   if (run.finalArtifact?.trim()) {
     return run.finalArtifact;

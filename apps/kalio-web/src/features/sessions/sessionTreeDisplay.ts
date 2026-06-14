@@ -1,4 +1,9 @@
 import type { ArchitectureGraphProjection, ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
+import {
+  architectureContextForSession,
+  architectureContextStringField,
+  architectureSessionSurfaceForSession,
+} from './architectureSessionContext';
 
 export type SessionRuntimeState = 'pending' | 'waiting' | 'running' | 'error' | 'done' | 'stopped';
 type ArchitectureRunWithGraph = NonNullable<ChatMessage['architectureRun']> & {
@@ -130,6 +135,13 @@ export function buildArchitectureSessionRuntimeStates(
 }
 
 export function isTechnicalArchitectureSession(session: ChatSession): boolean {
+  const sessionSurface = architectureSessionSurfaceForSession(session);
+  if (sessionSurface === 'technical-node') {
+    return true;
+  }
+  if (sessionSurface === 'conversation-branch') {
+    return false;
+  }
   const slotType = architectureSlotTypeForSession(session);
   if (typeof slotType === 'string' && TECHNICAL_ARCHITECTURE_SLOT_TYPES.has(slotType)) {
     return true;
@@ -162,12 +174,18 @@ export function isPendingArchitecturePlaceholderSession(
 }
 
 export function isArchitectureEnvelopeSession(session: ChatSession): boolean {
+  if (architectureSessionSurfaceForSession(session) === 'technical-node') {
+    return !architectureSlotIdForSession(session);
+  }
   return Boolean(session.parentSessionId)
     && Boolean(architectureRunIdForSession(session))
     && architectureSlotIdForSession(session) === undefined;
 }
 
 export function isArchitectureWorkflowContainerSession(session: ChatSession): boolean {
+  if (architectureSessionSurfaceForSession(session) === 'technical-node' && !architectureSlotIdForSession(session)) {
+    return true;
+  }
   if (!architectureRunIdForSession(session) || architectureSlotIdForSession(session) !== undefined) {
     return false;
   }
@@ -238,7 +256,7 @@ export function sessionStatusSnapshotToRuntimeState(
     return 'stopped';
   }
   if (snapshot.run?.status === 'interrupted_needs_retry') {
-    return 'waiting';
+    return 'stopped';
   }
   if (snapshot.active) {
     if (snapshot.run?.phase === 'queued') {
@@ -296,37 +314,25 @@ function fallbackArchitectureBranchState(
 }
 
 export function architectureRunIdForSession(session: ChatSession): string | undefined {
-  const runId = architectureContext(session)['architectureRunId'];
-  if (typeof runId === 'string' && runId.trim().length > 0) {
-    return runId.trim();
-  }
+  const runId = architectureContextStringField(session, 'architectureRunId');
+  if (runId) return runId;
   return architectureRunIdFromParentToolCall(session.parentToolCallId)
     ?? architectureRunIdFromParentToolCall(session.runtimeContext?.parentToolCallId);
 }
 
 export function architectureSlotIdForSession(session: ChatSession): string | undefined {
-  const slotId = session.runtimeContext?.architectureSlotId ?? architectureContext(session)['roleSlotId'];
+  const slotId = session.runtimeContext?.architectureSlotId ?? architectureContextStringField(session, 'roleSlotId');
   return typeof slotId === 'string' && slotId.trim().length > 0 ? slotId.trim() : undefined;
 }
 
 function architectureSlotTypeForSession(session: ChatSession): string | undefined {
-  const slotType = architectureContext(session)['roleSlotType'];
-  return typeof slotType === 'string' && slotType.trim().length > 0 ? slotType.trim() : undefined;
-}
-
-function architectureContext(session: ChatSession): Record<string, unknown> {
-  const context = session.runtimeContext?.architectureContext;
-  return context && typeof context === 'object' && !Array.isArray(context) ? context : {};
+  return architectureContextStringField(session, 'roleSlotType');
 }
 
 function architectureSessionDisplayLabel(session: ChatSession): string | null {
-  const context = architectureContext(session);
-  const displayLabel = context['displayLabel'];
-  if (typeof displayLabel === 'string' && displayLabel.trim().length > 0) {
-    return displayLabel.trim();
-  }
-  const schemaName = context['schemaName'];
-  return typeof schemaName === 'string' && schemaName.trim().length > 0 ? schemaName.trim() : null;
+  return architectureContextStringField(session, 'displayLabel')
+    ?? architectureContextStringField(session, 'schemaName')
+    ?? null;
 }
 
 function isLegacyTechnicalArchitectureSession(session: ChatSession): boolean {
@@ -346,11 +352,10 @@ function looksLikeArchitectureBranchSession(session: ChatSession): boolean {
 }
 
 function technicalArchitectureSessionHints(session: ChatSession): string[] {
-  const context = architectureContext(session);
   return [
     stringHint(session.runtimeContext?.architectureSlotId),
-    stringHint(context['displayLabel']),
-    stringHint(context['roleLabel']),
+    stringHint(architectureContextForSession(session)?.displayLabel),
+    stringHint(architectureContextForSession(session)?.roleLabel),
     titleSuffixHint(session.title),
     idSuffixHint(session.id),
   ].filter((hint): hint is string => hint !== null);

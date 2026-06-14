@@ -38,6 +38,7 @@ export class ContextPreviewService {
     const prepared = await this.sessionManager.loadPreviewHistoryForLLM(sessionId, {
       systemPrompt: assembled.effectiveSystemPrompt,
       toolMetas: assembled.toolMetas,
+      historySessionId: historySessionIdForRuntime(runtimeContext, sessionId),
       draftUserMessage: request.draftUserMessage,
       attachments: request.attachments,
     });
@@ -138,4 +139,11 @@ export class ContextPreviewService {
     }
     return content.filter((part) => part.type === 'image_url').length * IMAGE_PART_TOKENS;
   }
+}
+
+function historySessionIdForRuntime(runtimeContext: SessionRuntimeContext, sessionId: string): string {
+  const historySessionId = runtimeContext.architectureContext?.historySessionId;
+  return typeof historySessionId === 'string' && historySessionId.trim().length > 0
+    ? historySessionId.trim()
+    : sessionId;
 }

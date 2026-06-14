@@ -261,6 +261,70 @@ describe('AgentTurnBubble', () => {
     expect(markdowns[1]).toHaveTextContent('Updated final answer');
   });
 
+  it('REGRESSION: earlier workflow bubble keeps its own architecture run when a follow-up workflow starts', () => {
+    mockMessages.push(
+      makeMsg({
+        id: 'arch-old',
+        role: 'assistant',
+        content: 'old workflow',
+        architectureRun: {
+          runId: 'run-old',
+          schemaId: 'strategic-decision-council',
+          status: 'completed',
+          hostProjectionKind: 'workflow-envelope',
+          finalArtifact: 'Old final answer',
+          trace: [],
+          routeHops: [],
+        },
+      }),
+      makeMsg({
+        id: 'arch-new',
+        role: 'assistant',
+        content: 'new workflow',
+        architectureRun: {
+          runId: 'run-new',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          hostProjectionKind: 'workflow-envelope',
+          trace: [],
+          routeHops: [],
+        },
+      }),
+    );
+
+    render(
+      <>
+        <AgentTurnBubble
+          turn={{
+            id: 'turn-old',
+            sessionId: 's1',
+            promptMessageId: 'user-old',
+            turnKind: 'workflow-envelope',
+            items: [{ kind: 'text', messageId: 'arch-old' }],
+            done: true,
+          }}
+          toolActivities={[]}
+        />
+        <AgentTurnBubble
+          turn={{
+            id: 'turn-new',
+            sessionId: 's1',
+            promptMessageId: 'user-new',
+            turnKind: 'workflow-envelope',
+            items: [{ kind: 'text', messageId: 'arch-new' }],
+            done: false,
+          }}
+          toolActivities={[]}
+        />
+      </>,
+    );
+
+    const finalAnswers = screen.getAllByTestId('architecture-final-answer');
+    expect(finalAnswers).toHaveLength(1);
+    expect(finalAnswers[0]).toHaveTextContent('Old final answer');
+    expect(screen.getAllByText(/running/i).length).toBeGreaterThan(0);
+  });
+
   it('does not hide a later live streaming answer even if an earlier completed answer exists', () => {
     mockMessages.push(
       makeMsg({ id: 'msg-before-tool', content: 'Same final answer' }),

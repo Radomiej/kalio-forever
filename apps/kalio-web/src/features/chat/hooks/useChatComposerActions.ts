@@ -193,6 +193,18 @@ export function useChatComposerActions({
       },
       createdAt: Date.now(),
     });
+    const currentTurns = getSessionAgentTurns(activeSessionId);
+    setAgentTurns([
+      ...currentTurns,
+      {
+        id: `architecture-turn-${pendingAssistantMessageId}`,
+        sessionId: activeSessionId,
+        promptMessageId: userMessageId,
+        turnKind: 'workflow-envelope',
+        items: [{ kind: 'text', messageId: pendingAssistantMessageId }],
+        done: false,
+      },
+    ], activeSessionId);
     setStreaming(true);
     setAwaitingFirstChunk(true);
 
@@ -205,7 +217,6 @@ export function useChatComposerActions({
         content: assistantContent,
         createdAt: Date.now(),
       });
-      const currentTurns = getSessionAgentTurns(activeSessionId);
       const turn: AgentTurn = {
         id: `architecture-turn-${assistantMessageId}`,
         sessionId: activeSessionId,

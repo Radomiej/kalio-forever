@@ -1011,7 +1011,6 @@ describe('SessionPanel', () => {
     const toggle = screen.getByTestId('toggle-session-children-host');
     expect(toggle).toHaveTextContent('1');
     fireEvent.click(toggle);
-
     expect(screen.getByText('Strategic Decision Council: Innovator')).toBeTruthy();
     expect(screen.getByTestId('session-pending-arch-run-innovator')).toBeTruthy();
   });
@@ -1240,6 +1239,7 @@ describe('SessionPanel', () => {
 
     expect(screen.getByText('Strategic Decision Council: Pragmatist')).toBeTruthy();
     expect(screen.getByText('Strategic Decision Council: Innovator')).toBeTruthy();
+    expect(screen.getByTestId('session-done-arch-run-pragmatist')).toBeTruthy();
     expect(screen.getByTestId('session-pending-arch-run-innovator')).toBeTruthy();
     expect(screen.queryByText('Strategic Decision Council: Finalizer')).toBeNull();
   });
@@ -1980,6 +1980,73 @@ describe('SessionPanel', () => {
     expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/host/messages');
     expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/arch-root/messages');
     await waitFor(() => expect(sessionStorage.getItem('kalio:last-active-session-id')).toBe('host'));
+  });
+
+  it('restores a stored architecture branch selection on cold load instead of falling back to the first root chat', async () => {
+    const now = Date.now();
+    const architectureSessions: ChatSession[] = [
+      { id: 'host', personaId: 'default', title: 'Parent chat', createdAt: now - 5_000, updatedAt: now - 5_000 },
+      {
+        id: 'arch-root',
+        personaId: 'default',
+        title: 'Architecture: Strategic Decision Council',
+        kind: 'agent-flow',
+        parentSessionId: 'host',
+        runtimeContext: {
+          runtimeKind: 'chat',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+          },
+        },
+        createdAt: now - 4_000,
+        updatedAt: now - 4_000,
+      },
+      {
+        id: 'arch-analyst',
+        personaId: 'web-research',
+        title: 'Strategic Decision Council: Analyst',
+        kind: 'subagent',
+        parentSessionId: 'arch-root',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          parentToolCallId: 'architecture:run-live:analyst',
+          architectureSlotId: 'analyst',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            roleSlotId: 'analyst',
+            displayLabel: 'Analyst',
+          },
+        },
+        createdAt: now - 3_000,
+        updatedAt: now - 3_000,
+      },
+    ];
+
+    mockState.sessions = architectureSessions;
+    mockState.activeSessionId = null;
+    mockState.sessionMessages = { host: [], 'arch-root': [], 'arch-analyst': [] };
+    sessionStorage.setItem('kalio:last-active-session-id', 'arch-analyst');
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: architectureSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      if (url === '/api/sessions/arch-analyst/messages') {
+        return Promise.resolve({
+          data: [
+            { id: 'branch-user-1', sessionId: 'arch-analyst', role: 'user', content: 'Inspect repo.', createdAt: now - 2_000 },
+            { id: 'branch-assistant-1', sessionId: 'arch-analyst', role: 'assistant', content: 'Analyst answer.', createdAt: now - 1_000 },
+          ],
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+
+    await waitFor(() => expect(mockSetActiveSession).toHaveBeenCalledWith('arch-analyst'));
+    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/arch-analyst/messages');
+    await waitFor(() => expect(sessionStorage.getItem('kalio:last-active-session-id')).toBe('arch-analyst'));
   });
 
   it('rehydrates the active host timeline once real architecture descendants appear after an initial user-only reload', async () => {
