@@ -239,7 +239,12 @@ export function NewChatScreen({
         </div>
 
         <div className="mt-4 rounded-2xl border border-base-300/80 bg-base-200/70 p-3">
+          <label htmlFor={`${testIdPrefix}-prompt-input`} className="sr-only">
+            Prompt
+          </label>
           <textarea
+            id={`${testIdPrefix}-prompt-input`}
+            aria-label="Prompt"
             className="textarea textarea-ghost min-h-32 w-full resize-none text-sm leading-6 focus:outline-none"
             value={prompt}
             onChange={(event) => {

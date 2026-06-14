@@ -1,0 +1,7 @@
+id: shell-mode-conditional
+language: Tsx
+rule:
+  pattern: conversationShellState.mode === '$MODE'
+message: Direct shell-mode branching is a review hotspot. Prefer keeping shell decisions centralized in resolveConversationShellState.
+severity: info
+
