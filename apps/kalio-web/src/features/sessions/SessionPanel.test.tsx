@@ -96,6 +96,7 @@ const mockAgentState = vi.hoisted(() => ({
   activeAgentLoops: {} as Record<string, { sessionId: string }>,
   queuedDepthBySession: {} as Record<string, number>,
   sessionStatusSnapshots: {} as Record<string, import('@kalio/types').SocketEvents['session:status']>,
+  sessionToolActivities: {} as Record<string, import('../../store/agentStore').ToolActivity[]>,
   hasActiveLoopForSession: () => false,
   setPendingConfirmation: mockSetPendingConfirmation,
   setPendingBudgetApproval: mockSetPendingBudgetApproval,
@@ -110,6 +111,7 @@ vi.mock('../../store/agentStore', () => ({
       activeAgentLoops: Record<string, { sessionId: string }>;
       queuedDepthBySession: Record<string, number>;
       sessionStatusSnapshots: Record<string, import('@kalio/types').SocketEvents['session:status']>;
+      sessionToolActivities: Record<string, import('../../store/agentStore').ToolActivity[]>;
       hasActiveLoopForSession: (sessionId: string | null) => boolean;
       setPendingConfirmation: typeof mockSetPendingConfirmation;
       setPendingBudgetApproval: typeof mockSetPendingBudgetApproval;
@@ -168,6 +170,7 @@ describe('SessionPanel', () => {
     mockAgentState.activeAgentLoops = {};
     mockAgentState.queuedDepthBySession = {};
     mockAgentState.sessionStatusSnapshots = {};
+    mockAgentState.sessionToolActivities = {};
     mockAgentState.hasActiveLoopForSession = () => false;
     mockSetActiveSession.mockImplementation((id: string | null) => {
       mockState.activeSessionId = id;
@@ -230,7 +233,7 @@ describe('SessionPanel', () => {
     expect(screen.getByTestId('subagent-session-badge-sub-1')).toBeTruthy();
   });
 
-  it('does not show a child toggle when a workflow host only has technical or placeholder descendants', async () => {
+  it('does not show a child toggle when a workflow host only has technical descendants', async () => {
     const now = Date.now();
     const workflowSessions: ChatSession[] = [
       {
@@ -285,25 +288,6 @@ describe('SessionPanel', () => {
           },
         },
       },
-      {
-        id: 'arch-analyst',
-        personaId: 'web-research',
-        title: 'Strategic Decision Council: Analyst',
-        kind: 'subagent',
-        parentSessionId: 'arch-root',
-        createdAt: now - 2_000,
-        updatedAt: now - 2_000,
-        runtimeContext: {
-          runtimeKind: 'agent-flow-branch',
-          architectureSlotId: 'analyst',
-          parentToolCallId: 'architecture:run-live:analyst',
-          architectureContext: {
-            parentSessionId: 'host',
-            roleSlotId: 'analyst',
-            displayLabel: 'Analyst',
-          },
-        },
-      },
     ];
 
     mockState.sessions = workflowSessions;
@@ -323,7 +307,6 @@ describe('SessionPanel', () => {
             trace: [],
             graphNodes: [
               { id: 'router', label: 'Router', kind: 'router', status: 'running', eventIds: ['event-router'] },
-              { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
             ],
             graphEdges: [],
           } as ChatMessage['architectureRun'],
@@ -331,7 +314,6 @@ describe('SessionPanel', () => {
       ],
       'arch-root': [],
       'arch-router': [],
-      'arch-analyst': [],
     };
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/sessions') return Promise.resolve({ data: workflowSessions });
@@ -343,7 +325,6 @@ describe('SessionPanel', () => {
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(workflowSessions));
 
     expect(screen.queryByTestId('toggle-session-children-host')).toBeNull();
-    expect(screen.queryByText('Strategic Decision Council: Analyst')).toBeNull();
     expect(screen.queryByText('Strategic Decision Council: Router')).toBeNull();
   });
 
@@ -558,11 +539,11 @@ describe('SessionPanel', () => {
 
     fireEvent.click(screen.getByTestId('toggle-session-children-host'));
 
-    expect(screen.getByTestId('toggle-session-children-host')).toHaveTextContent('2');
+    expect(screen.getByTestId('toggle-session-children-host')).toHaveTextContent('4');
     expect(screen.queryByText('Strategic Decision Council')).toBeNull();
     expect(screen.getByTestId('session-done-arch-run-pragmatist')).toBeTruthy();
-    expect(screen.queryByText('Strategic Decision Council: Innovator')).toBeNull();
-    expect(screen.queryByText('Strategic Decision Council: Analyst')).toBeNull();
+    expect(screen.getByTestId('session-running-arch-run-innovator')).toBeTruthy();
+    expect(screen.getByTestId('session-pending-arch-run-analyst')).toBeTruthy();
     expect(screen.getByTestId('session-error-arch-run-shadow')).toBeTruthy();
   });
 
@@ -622,7 +603,7 @@ describe('SessionPanel', () => {
     expect(screen.getByText('1 chat')).toBeTruthy();
   });
 
-  it('keeps replayed backend branch status out of the tree until the branch has conversation evidence', async () => {
+  it('shows a replayed backend branch session immediately with its live waiting state', async () => {
     const now = Date.now();
     const architectureSessions: ChatSession[] = [
       { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 3000, updatedAt: now - 3000 },
@@ -685,12 +666,15 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
 
-    expect(screen.queryByTestId('toggle-session-children-host')).toBeNull();
-    expect(screen.queryByText('Strategic Decision Council: Analyst')).toBeNull();
-    expect(screen.queryByTestId('session-pending-confirmation-arch-run-analyst')).toBeNull();
+    const toggle = screen.getByTestId('toggle-session-children-host');
+    expect(toggle).toHaveTextContent('1');
+    fireEvent.click(toggle);
+
+    expect(screen.getByText('Strategic Decision Council: Analyst')).toBeTruthy();
+    expect(screen.getByTestId('session-pending-confirmation-arch-run-analyst')).toBeTruthy();
   });
 
-  it('keeps real architecture descendants neutral before reload metadata hydrates', async () => {
+  it('shows real architecture descendants as pending before reload metadata hydrates', async () => {
     const now = Date.now();
     const architectureSessions: ChatSession[] = [
       { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 3000, updatedAt: now - 3000 },
@@ -735,13 +719,15 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
 
-    expect(screen.queryByTestId('toggle-session-children-host')).toBeNull();
+    const toggle = screen.getByTestId('toggle-session-children-host');
+    expect(toggle).toHaveTextContent('1');
+    fireEvent.click(toggle);
     expect(screen.queryByTestId('session-pending-arch-run-root')).toBeNull();
-    expect(screen.queryByTestId('session-pending-arch-run-analyst')).toBeNull();
-    expect(screen.queryByTestId('session-descendant-activity-host')).toBeNull();
+    expect(screen.getByTestId('session-pending-arch-run-analyst')).toBeTruthy();
+    expect(screen.getByTestId('session-descendant-activity-host')).toHaveTextContent('1 pending');
   });
 
-  it('keeps the host row done when workflow descendants have no live status evidence yet', async () => {
+  it('shows the host row as pending when workflow descendants exist but only fallback status is available', async () => {
     const now = Date.now();
     const architectureSessions: ChatSession[] = [
       { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 3000, updatedAt: now - 3000 },
@@ -789,9 +775,8 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
 
-    expect(screen.getByTestId('session-done-host')).toBeTruthy();
-    expect(screen.queryByTestId('session-pending-host')).toBeNull();
-    expect(screen.queryByTestId('session-descendant-activity-host')).toBeNull();
+    expect(screen.getByTestId('session-pending-host')).toBeTruthy();
+    expect(screen.getByTestId('session-descendant-activity-host')).toHaveTextContent('1 pending');
   });
 
   it('keeps the host row running while workflow-envelope metadata still reports a live run', async () => {
@@ -863,7 +848,102 @@ describe('SessionPanel', () => {
     expect(screen.queryByTestId('session-done-host')).toBeNull();
   });
 
-  it('hides untouched pending architecture branches until they emit real activity', async () => {
+  it('auto-expands the active running workflow host and shows the latest branch tool activity', async () => {
+    const now = Date.now();
+    const architectureSessions: ChatSession[] = [
+      {
+        id: 'host',
+        personaId: 'default',
+        title: 'Workflow host',
+        createdAt: now - 4000,
+        updatedAt: now - 100,
+        runtimeContext: {
+          runtimeKind: 'chat',
+          architectureContext: {
+            schemaId: 'strategic-decision-council',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+          },
+        },
+      },
+      {
+        id: 'arch-run-root',
+        personaId: 'default',
+        title: 'Strategic Decision Council',
+        kind: 'agent-flow',
+        parentSessionId: 'host',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureContext: { architectureRunId: 'run-live', displayLabel: 'Strategic Decision Council' },
+        },
+        createdAt: now - 3000,
+        updatedAt: now - 100,
+      },
+      {
+        id: 'arch-run-implementer',
+        personaId: 'dev',
+        title: 'Goal Master Delivery Loop: Implementer',
+        kind: 'subagent',
+        parentSessionId: 'arch-run-root',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'implementer',
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'implementer', displayLabel: 'Implementer' },
+        },
+        createdAt: now - 2000,
+        updatedAt: now - 100,
+      },
+    ];
+    mockState.sessions = architectureSessions;
+    mockState.activeSessionId = 'host';
+    mockState.sessionMessages = {
+      host: [
+        {
+          id: 'workflow-live',
+          sessionId: 'host',
+          role: 'assistant',
+          content: '',
+          createdAt: now - 50,
+          architectureRun: {
+            runId: 'run-live',
+            schemaId: 'Goal Master Delivery Loop',
+            status: 'running',
+            hostProjectionKind: 'workflow-envelope',
+            trace: [],
+            routeHops: [],
+          } as ChatMessage['architectureRun'],
+        },
+      ],
+      'arch-run-implementer': [],
+    };
+    mockState.sessionAgentTurns = {
+      host: [{ id: 'host-turn', sessionId: 'host', turnKind: 'workflow-envelope', items: [], done: true }],
+    };
+    mockAgentState.sessionToolActivities = {
+      'arch-run-implementer': [{
+        callId: 'call-1',
+        toolName: 'fs_read',
+        args: {},
+        sessionId: 'arch-run-implementer',
+        status: 'running',
+        startedAt: now - 25,
+      }],
+    };
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: architectureSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
+
+    expect(screen.getByText('Goal Master Delivery Loop: Implementer')).toBeTruthy();
+    expect(screen.getByTestId('session-pending-arch-run-implementer')).toBeTruthy();
+    expect(screen.getByTestId('session-last-tool-arch-run-implementer')).toHaveTextContent('fs_read running');
+  });
+
+  it('shows pending architecture branches immediately when the backend already created real branch sessions', async () => {
     const now = Date.now();
     const architectureSessions: ChatSession[] = [
       { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 3000, updatedAt: now - 3000 },
@@ -928,8 +1008,12 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
 
-    expect(screen.queryByTestId('toggle-session-children-host')).toBeNull();
-    expect(screen.queryByText('Strategic Decision Council: Innovator')).toBeNull();
+    const toggle = screen.getByTestId('toggle-session-children-host');
+    expect(toggle).toHaveTextContent('1');
+    fireEvent.click(toggle);
+
+    expect(screen.getByText('Strategic Decision Council: Innovator')).toBeTruthy();
+    expect(screen.getByTestId('session-pending-arch-run-innovator')).toBeTruthy();
   });
 
   it('hides technical router and finalizer architecture sessions from the conversation tree', async () => {
@@ -1041,7 +1125,7 @@ describe('SessionPanel', () => {
     expect(screen.getByText('Strategic Decision Council: Pragmatist')).toBeTruthy();
   });
 
-  it('hides untouched pending architecture branch placeholders until the branch actually starts', async () => {
+  it('shows pending real architecture branches while still hiding technical nodes', async () => {
     const now = Date.now();
     const architectureSessions: ChatSession[] = [
       { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 5_000, updatedAt: now - 5_000 },
@@ -1151,11 +1235,12 @@ describe('SessionPanel', () => {
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
 
     const toggle = screen.getByTestId('toggle-session-children-host');
-    expect(toggle).toHaveTextContent('1');
+    expect(toggle).toHaveTextContent('2');
     fireEvent.click(toggle);
 
     expect(screen.getByText('Strategic Decision Council: Pragmatist')).toBeTruthy();
-    expect(screen.queryByText('Strategic Decision Council: Innovator')).toBeNull();
+    expect(screen.getByText('Strategic Decision Council: Innovator')).toBeTruthy();
+    expect(screen.getByTestId('session-pending-arch-run-innovator')).toBeTruthy();
     expect(screen.queryByText('Strategic Decision Council: Finalizer')).toBeNull();
   });
 

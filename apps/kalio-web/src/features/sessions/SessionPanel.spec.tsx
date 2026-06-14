@@ -17,6 +17,8 @@ let mockPendingConfirmations: Record<string, ToolConfirmationRequest> = {};
 let mockPendingBudgetApprovals: Record<string, AgentBudgetApprovalRequest> = {};
 let mockActiveAgentLoops: Record<string, { sessionId: string; turnId: string; startedAt: number }> = {};
 let mockQueuedDepthBySession: Record<string, number> = {};
+let mockSessionStatusSnapshots: Record<string, unknown> = {};
+let mockSessionToolActivities: Record<string, unknown[]> = {};
 type MockSessionRow = {
   id: string;
   title: string;
@@ -34,6 +36,8 @@ vi.mock('../../store/agentStore', () => ({
       pendingBudgetApprovals: mockPendingBudgetApprovals,
       activeAgentLoops: mockActiveAgentLoops,
       queuedDepthBySession: mockQueuedDepthBySession,
+      sessionStatusSnapshots: mockSessionStatusSnapshots,
+      sessionToolActivities: mockSessionToolActivities,
     }),
 }));
 
@@ -48,9 +52,12 @@ const mockSessionStoreState = {
   setActiveSession: mockSetActiveSession,
   addSession: vi.fn(),
   setMessages: vi.fn(),
+  setAgentTurns: vi.fn(),
+  getSessionActiveTurnId: vi.fn(() => null),
   removeSession: vi.fn(),
   updateSession: vi.fn(),
   sessionAgentTurns: {} as Record<string, unknown>,
+  sessionMessages: {} as Record<string, unknown>,
 };
 
 vi.mock('../../store/sessionStore', () => ({
@@ -79,11 +86,14 @@ beforeEach(() => {
   mockPendingBudgetApprovals = {};
   mockActiveAgentLoops = {};
   mockQueuedDepthBySession = {};
+  mockSessionStatusSnapshots = {};
+  mockSessionToolActivities = {};
   mockSessionStoreState.sessions = [
     { id: 'session-1', title: 'Chat One', personaId: 'default', createdAt: 0, updatedAt: 0 },
     { id: 'session-2', title: 'Chat Two', personaId: 'default', createdAt: 0, updatedAt: 0 },
   ];
   mockSessionStoreState.sessionAgentTurns = {};
+  mockSessionStoreState.sessionMessages = {};
   vi.clearAllMocks();
 });
 

@@ -16,46 +16,8 @@ type RenderableSessionFilterSignals = {
   sessionStatusSnapshots?: Record<string, SocketEvents['session:status']>;
 };
 
-function buildArchitectureBranchEvidenceSessionIds(
-  sessionMessages: Record<string, ChatMessage[]>,
-): Set<string> {
-  const branchSessionIds = new Set<string>();
-
-  Object.values(sessionMessages)
-    .flat()
-    .forEach((message) => {
-      message.architectureRun?.trace.forEach((step) => {
-        if (step.stream?.branchSessionId) {
-          branchSessionIds.add(step.stream.branchSessionId);
-        }
-      });
-
-      if (message.role !== 'tool_result') {
-        return;
-      }
-      try {
-        const parsed = JSON.parse(message.content) as Record<string, unknown>;
-        if (typeof parsed['childSessionId'] === 'string' && typeof parsed['result'] === 'string') {
-          branchSessionIds.add(parsed['childSessionId']);
-        }
-      } catch {
-        // Ignore non-JSON tool payloads.
-      }
-    });
-
-  return branchSessionIds;
-}
-
 function isArchitectureBranchConversationSession(session: ChatSession): boolean {
   return Boolean(architectureSlotIdForSession(session));
-}
-
-function hasArchitectureBranchConversationEvidence(
-  session: ChatSession,
-  sessionMessages: Record<string, ChatMessage[]>,
-  branchEvidenceSessionIds: ReadonlySet<string>,
-): boolean {
-  return (sessionMessages[session.id] ?? []).length > 0 || branchEvidenceSessionIds.has(session.id);
 }
 
 function hasLiveSessionActivity(
@@ -75,7 +37,6 @@ export function isRenderableConversationSession(
   session: ChatSession,
   sessionMessages: Record<string, ChatMessage[]>,
   architectureSessionRuntimeStates: Map<string, SessionRuntimeState>,
-  branchEvidenceSessionIds: ReadonlySet<string>,
   signals: RenderableSessionFilterSignals = {},
 ): boolean {
   if (isTechnicalArchitectureSession(session)) {
@@ -83,8 +44,7 @@ export function isRenderableConversationSession(
   }
 
   if (isArchitectureBranchConversationSession(session)) {
-    // Graph node status alone is not enough to promote a branch into the conversation tree.
-    return hasArchitectureBranchConversationEvidence(session, sessionMessages, branchEvidenceSessionIds);
+    return true;
   }
 
   return !isPendingArchitecturePlaceholderSession(session, architectureSessionRuntimeStates, sessionMessages)
@@ -103,18 +63,16 @@ export function filterRenderableSessions(
     orderedSessions,
     sessionMessages,
   );
-  const branchEvidenceSessionIds = buildArchitectureBranchEvidenceSessionIds(sessionMessages);
 
   return {
     architectureSessionRuntimeStates,
-    // Sidebar should reflect real child conversations only. Planned graph nodes and untouched
-    // branch placeholders belong to the workflow timeline, not the conversation tree.
+    // Sidebar should reflect real child conversations only. Planned graph nodes belong to the
+    // workflow timeline, but persisted non-technical child sessions should remain visible live.
     renderableSessions: orderedSessions.filter((session) => (
       isRenderableConversationSession(
         session,
         sessionMessages,
         architectureSessionRuntimeStates,
-        branchEvidenceSessionIds,
         signals,
       )
     )),

@@ -453,6 +453,23 @@ describe('ChatInterface event wiring', () => {
     expect(screen.queryByTestId('chat-input')).toBeNull();
   });
 
+  it('REGRESSION: renders the welcome composer when the active session only has non-renderable messages', async () => {
+    mockMessages = [
+      makeMsg({
+        id: 'tool-only',
+        role: 'tool_result',
+        content: '{"ok":true}',
+        toolCallId: 'call-tool-only',
+      }),
+    ];
+
+    await renderChatInterface();
+
+    expect(screen.getByTestId('welcome-prompt-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-input')).toBeNull();
+    expect(screen.queryByText('{"ok":true}')).toBeNull();
+  });
+
   it('hydrates architecture runs from the active session VFS when files are attached', () => {
     const files: VFSFile[] = [{
       sessionId: 'session-1',
@@ -814,6 +831,14 @@ describe('ChatInterface event wiring', () => {
 
     expect(screen.getByTestId('chat-connection-status')).toHaveTextContent('Reconnecting');
     expect(screen.getByTestId('chat-recovery-notice')).toHaveTextContent('Connection dropped');
+  });
+
+  it('clears the recovered reconnect banner on a fresh empty session surface', async () => {
+    await renderChatInterface();
+
+    await emitEvent('socket:connection_state', { status: 'connected', recovered: true });
+
+    expect(screen.queryByTestId('chat-recovery-notice')).toBeNull();
   });
 
   it('REGRESSION: tool:start creates a running activity in agentStore', async () => {
@@ -2076,6 +2101,7 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
     // With no active loop, setAgentTurns SHOULD be called with the history turns
     expect(setAgentTurns).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ done: true })]),
+      'session-1',
     );
 
       vi.mocked(apiClient.get).mockReset();
@@ -2117,6 +2143,7 @@ describe('REGRESSION: session history fetch does not overwrite live agent turn',
 
     expect(setAgentTurns).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ done: true })]),
+      'session-1',
     );
 
     vi.mocked(apiClient.get).mockReset();
