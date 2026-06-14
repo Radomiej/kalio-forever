@@ -110,6 +110,16 @@ export function CanvasPanel() {
   }, [activeSessionId, childPreviewSessionIds, childPreviewSessionKey]);
 
   useEffect(() => {
+    if (canvasFocus?.kind !== 'architecture-branch') {
+      return;
+    }
+    if (knownSessionIds.has(canvasFocus.sessionId)) {
+      return;
+    }
+    setCanvasFocus(null);
+  }, [canvasFocus, knownSessionIds, setCanvasFocus]);
+
+  useEffect(() => {
     let cancelled = false;
     const missingSessionIds = childPreviewSessionIds
       .filter((sessionId) => !hydratedSubagentSessions[sessionId] && sessionId !== activeSessionId && (sessionMessages[sessionId]?.length ?? 0) === 0);

@@ -482,11 +482,15 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.queryByTestId('architecture-run-transcript-branch-arch-run-missing-analyst')).not.toBeInTheDocument();
   });
 
-  it('shows a waiting state for a focused architecture branch before its transcript hydrates', () => {
+  it('shows a waiting state for a real focused architecture branch before its transcript hydrates', () => {
     agentState.toolActivities = [];
     agentState.activeAgentLoops = {};
-    agentState.canvasFocus = { kind: 'architecture-branch', sessionId: 'sub-session-missing', label: 'Shadow' };
+    agentState.canvasFocus = { kind: 'architecture-branch', sessionId: 'sub-session-waiting', label: 'Shadow' };
     mockApiGet.mockReturnValue(new Promise(() => undefined));
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      { id: 'sub-session-waiting', personaId: 'default', title: 'Shadow', kind: 'subagent', parentSessionId: 'session-1', createdAt: 2, updatedAt: 2 },
+    ];
     sessionState.sessionMessages = {
       'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'parent task', createdAt: 1 }],
     };
@@ -496,7 +500,27 @@ describe('CanvasPanel subagent grouping', () => {
 
     expect(screen.getByTestId('canvas-focus-section')).toHaveTextContent('Shadow');
     expect(screen.getByTestId('canvas-focus-empty')).toHaveTextContent('Waiting for branch transcript.');
+    expect(screen.getByTestId('canvas-focus-open-session-sub-session-waiting')).toBeInTheDocument();
     expect(sessionState.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it('clears focused architecture branch state when the branch session does not exist', async () => {
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-branch', sessionId: 'sub-session-missing', label: 'Shadow' };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+    ];
+    sessionState.sessionMessages = {
+      'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'parent task', createdAt: 1 }],
+    };
+    sessionState.messages = sessionState.sessionMessages['session-1'];
+
+    const view = render(<CanvasPanel />);
+
+    await waitFor(() => expect(agentState.setCanvasFocus).toHaveBeenCalledWith(null));
+    view.rerender(<CanvasPanel />);
+    expect(screen.queryByTestId('canvas-focus-section')).not.toBeInTheDocument();
   });
 
   it('shows a partial architecture run transcript without requiring finalization', () => {
