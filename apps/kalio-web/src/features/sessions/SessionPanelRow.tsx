@@ -9,6 +9,7 @@ import {
 } from './sessionTreeDisplay';
 import type { SessionOriginFilter } from './sessionListModel';
 import type { AgentTurn } from '../../store/sessionStore';
+import type { ToolActivity } from '../../store/agentStore';
 import { countDescendantRuntimeStates, descendantActivityState, sessionRuntimeState } from './sessionRowRuntimeState';
 
 const formatChildCount = (count: number): string => count > 99 ? '99+' : String(count);
@@ -68,6 +69,32 @@ type ChildToggle = {
   expanded: boolean;
 };
 
+function formatToolActivityStatus(status: ToolActivity['status']): string {
+  if (status === 'awaiting_confirmation') {
+    return 'waiting';
+  }
+  if (status === 'success') {
+    return 'done';
+  }
+  return status;
+}
+
+function latestSessionToolActivity(sessionToolActivities: Record<string, ToolActivity[]>, sessionId: string): ToolActivity | null {
+  const activities = sessionToolActivities[sessionId] ?? [];
+  if (activities.length === 0) {
+    return null;
+  }
+  const running = activities.find((activity) => activity.status === 'running' || activity.status === 'awaiting_confirmation');
+  if (running) {
+    return running;
+  }
+  return [...activities].sort((left, right) => {
+    const leftTime = left.finishedAt ?? left.startedAt;
+    const rightTime = right.finishedAt ?? right.startedAt;
+    return rightTime - leftTime;
+  })[0] ?? null;
+}
+
 type SessionPanelSessionItemProps = {
   session: ChatSession;
   depth: number;
@@ -81,6 +108,7 @@ type SessionPanelSessionItemProps = {
   sessionStatusSnapshots: Record<string, SocketEvents['session:status']>;
   sessionAgentTurns: Record<string, AgentTurn[]>;
   sessionMessages: Record<string, ChatMessage[]>;
+  sessionToolActivities: Record<string, ToolActivity[]>;
   architectureSessionRuntimeStates: Map<string, SessionRuntimeState>;
   renamingId: string | null;
   renameValue: string;
@@ -112,6 +140,7 @@ export function SessionPanelSessionItem({
   sessionStatusSnapshots,
   sessionAgentTurns,
   sessionMessages,
+  sessionToolActivities,
   architectureSessionRuntimeStates,
   renamingId,
   renameValue,
@@ -148,6 +177,7 @@ export function SessionPanelSessionItem({
     architectureSessionRuntimeStates,
   );
   const runtimeState = sessionRuntimeState(
+    session,
     session.id,
     pendingConfirmations,
     pendingBudgetApprovals,
@@ -158,6 +188,7 @@ export function SessionPanelSessionItem({
     sessionMessages,
     architectureSessionRuntimeStates,
   );
+  const latestToolActivity = latestSessionToolActivity(sessionToolActivities, session.id);
   const descendantState = descendantActivityState(descendantStates);
   const effectiveRuntimeState = descendantState && (runtimeState === null || runtimeState === 'done')
     ? descendantState
@@ -311,6 +342,15 @@ export function SessionPanelSessionItem({
                 {formatRelativeTime(session.updatedAt)}
               </span>
             </div>
+            {latestToolActivity && (
+              <div
+                className="truncate text-[10px] leading-none text-base-content/55"
+                data-testid={`session-last-tool-${session.id}`}
+                title={`${latestToolActivity.toolName} ${formatToolActivityStatus(latestToolActivity.status)}`}
+              >
+                {latestToolActivity.toolName} {formatToolActivityStatus(latestToolActivity.status)}
+              </div>
+            )}
           </div>
           <div className="flex min-w-0 shrink-0 items-start justify-end gap-1 pt-0.5">
             <button

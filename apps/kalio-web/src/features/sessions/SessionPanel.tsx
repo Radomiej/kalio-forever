@@ -7,6 +7,7 @@ import type { ChatSession, ChatMessage, Persona } from '@kalio/types';
 import { buildTurnsFromHistory } from '../chat/chatUtils';
 import { reloadSessionHistoryWithArchitectureProjection } from '../chat/architectureReloadHydration';
 import { hasWorkflowEnvelopeHistory, needsWorkflowEnvelopeRecovery } from '../chat/workflowEnvelopeRecovery';
+import { workflowEnvelopeRuntimeStateForSession } from './sessionWorkflowRuntimeState';
 import {
   SESSION_ORIGIN_FILTERS,
   buildSessionListEntries,
@@ -65,6 +66,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
   const queuedDepthBySession = useAgentStore((s) => s.queuedDepthBySession);
   const sessionStatusSnapshots = useAgentStore((s) => s.sessionStatusSnapshots);
+  const sessionToolActivities = useAgentStore((s) => s.sessionToolActivities);
   const sessionAgentTurns = useSessionStore((s) => s.sessionAgentTurns);
   const sessionMessages = useSessionStore((s) => s.sessionMessages);
   const [loading, setLoading] = useState(false);
@@ -74,6 +76,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [expandedRoots, setExpandedRoots] = useState<Set<string>>(() => new Set());
   const architectureSessionRefreshRef = useRef<{ key: string; requestedAt: number } | null>(null);
+  const collapsedWorkflowCountsRef = useRef(new Map<string, number>());
   const renameRef = useRef<HTMLInputElement>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [archivedSessions, setArchivedSessions] = useState<ChatSession[]>([]);
@@ -219,10 +222,17 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const activeSession = activeSessionId
     ? sessions.find((session) => session.id === activeSessionId) ?? null
     : null;
+  const activeHostSessionId = normalizeConversationSessionId(activeSessionId, sessions);
   const activeSessionMessages = activeSessionId ? (sessionMessages[activeSessionId] ?? []) : [];
   const activeRenderableDescendantCount = activeSessionId
     ? countVisibleConversationTreeDescendants(activeSessionId, childSessionsByParent, descendantCountByParent)
     : 0;
+  const activeWorkflowRuntimeState = activeSessionId
+    ? workflowEnvelopeRuntimeStateForSession(
+      sessionMessages[activeSessionId] ?? [],
+      sessionAgentTurns[activeSessionId] ?? [],
+    )
+    : null;
   const activeWorkflowRecoveryNeeded = needsWorkflowEnvelopeRecovery({
     session: activeSession,
     messages: activeSessionMessages,
@@ -233,6 +243,41 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     const p = personas.find((p) => p.id === personaId);
     return p?.name ?? (personaId === 'default' ? null : personaId);
   };
+
+  useEffect(() => {
+    if (
+      originFilter !== 'all'
+      && originFilter !== 'user'
+      || !activeSessionId
+      || !activeHostSessionId
+      || activeHostSessionId !== activeSessionId
+      || activeRenderableDescendantCount === 0
+      || (activeWorkflowRuntimeState !== 'running' && activeWorkflowRuntimeState !== 'pending')
+    ) {
+      return;
+    }
+
+    const collapsedAtCount = collapsedWorkflowCountsRef.current.get(activeHostSessionId);
+    if (collapsedAtCount !== undefined && activeRenderableDescendantCount <= collapsedAtCount) {
+      return;
+    }
+
+    setExpandedRoots((current) => {
+      if (current.has(activeHostSessionId)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(activeHostSessionId);
+      return next;
+    });
+    collapsedWorkflowCountsRef.current.delete(activeHostSessionId);
+  }, [
+    activeHostSessionId,
+    activeRenderableDescendantCount,
+    activeSessionId,
+    activeWorkflowRuntimeState,
+    originFilter,
+  ]);
 
   useEffect(() => {
     if (!activeSessionId || !activeWorkflowRecoveryNeeded) {
@@ -350,8 +395,10 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       const next = new Set(current);
       if (next.has(id)) {
         next.delete(id);
+        collapsedWorkflowCountsRef.current.set(id, countVisibleConversationTreeDescendants(id, childSessionsByParent));
       } else {
         next.add(id);
+        collapsedWorkflowCountsRef.current.delete(id);
       }
       return next;
     });
@@ -479,6 +526,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
             sessionStatusSnapshots: sessionStatusSnapshots ?? {},
             sessionAgentTurns: sessionAgentTurns ?? {},
             sessionMessages: sessionMessages ?? {},
+            sessionToolActivities: sessionToolActivities ?? {},
             architectureSessionRuntimeStates,
             renamingId,
             renameValue,

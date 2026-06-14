@@ -1,9 +1,17 @@
 import type { ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
-import { visibleConversationTreeChildren, sessionStatusSnapshotToRuntimeState, type SessionRuntimeState } from './sessionTreeDisplay';
+import {
+  architectureRunIdForSession,
+  architectureSlotIdForSession,
+  isTechnicalArchitectureSession,
+  visibleConversationTreeChildren,
+  sessionStatusSnapshotToRuntimeState,
+  type SessionRuntimeState,
+} from './sessionTreeDisplay';
 import { workflowEnvelopeRuntimeStateForSession } from './sessionWorkflowRuntimeState';
 
 export function sessionRuntimeState(
+  session: ChatSession | null,
   sessionId: string,
   pendingConfirmations: Record<string, unknown>,
   pendingBudgetApprovals: Record<string, unknown>,
@@ -48,6 +56,14 @@ export function sessionRuntimeState(
   if (lastTurn?.done) {
     return 'done';
   }
+  if (
+    session
+    && architectureRunIdForSession(session)
+    && architectureSlotIdForSession(session)
+    && !isTechnicalArchitectureSession(session)
+  ) {
+    return 'pending';
+  }
   return null;
 }
 
@@ -71,6 +87,7 @@ export function countDescendantRuntimeStates(
     const child = pending.shift();
     if (!child) break;
     const state = sessionRuntimeState(
+      child,
       child.id,
       pendingConfirmations,
       pendingBudgetApprovals,

@@ -56,19 +56,6 @@ describe('filterRenderableSessions', () => {
         },
       }),
       makeSession({
-        id: 'arch-analyst',
-        title: 'Strategic Decision Council: Analyst',
-        kind: 'subagent',
-        parentSessionId: 'arch-root',
-        createdAt: 12,
-        updatedAt: 12,
-        runtimeContext: {
-          runtimeKind: 'agent-flow-branch',
-          architectureSlotId: 'analyst',
-          architectureContext: { roleSlotId: 'analyst', displayLabel: 'Analyst' },
-        },
-      }),
-      makeSession({
         id: 'arch-router',
         title: 'Strategic Decision Council: Router',
         kind: 'subagent',
@@ -95,7 +82,7 @@ describe('filterRenderableSessions', () => {
     expect(renderableSessions.map((session) => session.id)).toEqual(['host', 'arch-root']);
   });
 
-  it('shows a branch only after host trace or tool-result evidence points at that branch session', () => {
+  it('shows a real branch session immediately even before transcript or host trace evidence exists', () => {
     const sessions: ChatSession[] = [
       makeSession({ id: 'host', title: 'Workflow host', updatedAt: 10 }),
       makeSession({
@@ -130,23 +117,8 @@ describe('filterRenderableSessions', () => {
     ];
 
     const sessionMessages: Record<string, ChatMessage[]> = {
-      host: [
-        makeArchitectureSummaryMessage([
-          {
-            speaker: 'participant',
-            content: 'Analyst branch started',
-            eventId: 'event-analyst',
-            nodeId: 'analyst',
-            stream: {
-              streamGroupId: 'run-live',
-              branchSessionId: 'arch-analyst',
-              status: 'started',
-              chunkCount: 0,
-              text: '',
-            },
-          },
-        ]),
-      ],
+      host: [makeArchitectureSummaryMessage([])],
+      'arch-analyst': [],
     };
 
     const { renderableSessions } = filterRenderableSessions(sessions, sessionMessages);

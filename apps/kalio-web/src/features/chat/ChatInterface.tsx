@@ -138,6 +138,8 @@ export function ChatInterface() {
   } = useLaunchPersonas(activeSession?.personaId);
 
   const answeredCallIds = computeAnsweredCallIds(messages);
+  const conversationTimeline = buildConversationTimeline(messages, agentTurns);
+  const hasRenderableConversation = conversationTimeline.length > 0;
 
   const { tokenCount: fallbackTokenCount, compactMessages } = useContextUsage();
   const invalidateContextPreview = useCallback(() => {
@@ -145,7 +147,7 @@ export function ChatInterface() {
   }, []);
   const contextPreview = useContextPreview({
     sessionId: activeSessionId,
-    personaId: messages.length === 0
+    personaId: !hasRenderableConversation
       ? selectedPersonaId
       : activeSession?.personaId ?? null,
     draftUserMessage,
@@ -303,6 +305,17 @@ export function ChatInterface() {
 
   const composerStreaming = isStreaming || awaitingFirstChunk || hasPendingChunksForSession(activeSessionId);
 
+  useEffect(() => {
+    if (
+      recoveryNotice === 'Recovered missed stream events after reconnect.'
+      && activeSessionId
+      && !hasRenderableConversation
+      && !composerStreaming
+    ) {
+      setRecoveryNotice(null);
+    }
+  }, [activeSessionId, composerStreaming, hasRenderableConversation, recoveryNotice]);
+
   const handleStop = () => {
     if (!activeSessionId) return;
     if (!eventBus.stopTurn(activeSessionId)) {
@@ -395,7 +408,7 @@ export function ChatInterface() {
         onScroll={handleMessageListScroll}
       >
         <div className="flex w-full flex-col gap-1">
-          {messages.length === 0 && (
+          {!hasRenderableConversation && (
             <ChatWelcomeScreen
               activeSession={activeSession}
               activeSessionId={activeSessionId}
@@ -416,7 +429,7 @@ export function ChatInterface() {
             />
           )}
 
-          {buildConversationTimeline(messages, agentTurns).map((entry) => (
+          {conversationTimeline.map((entry) => (
             entry.kind === 'user_message'
               ? <MessageBubble key={entry.message.id} message={entry.message} />
               : (
@@ -429,7 +442,7 @@ export function ChatInterface() {
               )
           ))}
 
-          {composerStreaming && activeToolActivities.length === 0 && messages.length === 0 && (
+          {composerStreaming && activeToolActivities.length === 0 && !hasRenderableConversation && (
             <div className="flex justify-start">
               <div className="bg-base-300 rounded-2xl px-4 py-2">
                 <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
@@ -441,7 +454,7 @@ export function ChatInterface() {
         </div>
       </div>
 
-      {messages.length > 0 && (
+      {hasRenderableConversation && (
         <ChatInput
           architectures={architectures}
           disabled={!activeSessionId}
