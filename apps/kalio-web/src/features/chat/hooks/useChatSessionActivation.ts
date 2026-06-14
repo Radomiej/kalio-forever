@@ -8,6 +8,7 @@ import { eventBus } from '../../../services/eventBus';
 import { buildCallIdToNameFromMessages, buildTurnsFromHistory } from '../chatUtils';
 import { reloadSessionHistoryWithArchitectureProjection } from '../architectureReloadHydration';
 import { rebuildCLIChildProjectionsFromMessages } from '../cliChildProjection.model';
+import { hasWorkflowEnvelopeHistory } from '../workflowEnvelopeRecovery';
 
 interface UseChatSessionActivationParams {
   activeSessionId: string | null;
@@ -72,8 +73,8 @@ export function useChatSessionActivation({
         });
         const hasActiveLoop = useAgentStore.getState().hasActiveLoopForSession(activeSessionId);
         const hasActiveTurn = Boolean(useSessionStore.getState().getSessionActiveTurnId(activeSessionId));
-        if (!hasActiveLoop || !hasActiveTurn) {
-          setAgentTurns(buildTurnsFromHistory(hydratedMessages, activeSessionId));
+        if (hasWorkflowEnvelopeHistory(hydratedMessages) || !hasActiveLoop || !hasActiveTurn) {
+          setAgentTurns(buildTurnsFromHistory(hydratedMessages, activeSessionId), activeSessionId);
           return;
         }
 

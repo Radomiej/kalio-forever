@@ -58,7 +58,7 @@ describe('buildArchitectureRootGraphModel', () => {
     expect(new Set(model.nodes.map((node) => node.row))).toEqual(new Set([0]));
   });
 
-  it('normalizes branch session ids and marks in-progress architecture graphs as running', () => {
+  it('keeps branch sessions only on real role nodes and marks in-progress architecture graphs as running', () => {
     const graph = {
       runId: 'run-42',
       schemaId: 'strategic-decision-council',
@@ -88,6 +88,15 @@ describe('buildArchitectureRootGraphModel', () => {
           createdAt: 1,
           updatedAt: 1,
         },
+        {
+          id: 'arch-run-42-materializer',
+          personaId: 'default',
+          title: 'Materializer branch',
+          kind: 'subagent',
+          parentSessionId: 'arch-run-42-root',
+          createdAt: 1,
+          updatedAt: 1,
+        },
       ],
       sessionMessages: {
         'arch-run-42-goal_master': [
@@ -99,14 +108,24 @@ describe('buildArchitectureRootGraphModel', () => {
             createdAt: 1,
           } as never,
         ],
+        'arch-run-42-materializer': [
+          {
+            id: 'branch-msg-2',
+            sessionId: 'arch-run-42-materializer',
+            role: 'assistant',
+            content: 'Materializer completed its branch.',
+            createdAt: 2,
+          } as never,
+        ],
       },
     });
 
     const routeNode = model.nodes.find((node) => node.id === 'architecture-root:goal_master');
+    const roleNode = model.nodes.find((node) => node.id === 'architecture-root:materializer');
 
     expect(routeNode).toMatchObject({
-      sessionId: 'arch-run-42-goal_master',
-      subtitle: 'router / pending / branch session',
+      sessionId: undefined,
+      subtitle: 'router / pending',
       status: 'idle',
       payload: expect.objectContaining({
         kind: 'architecture-run',
@@ -115,12 +134,24 @@ describe('buildArchitectureRootGraphModel', () => {
           status: 'running',
         }),
         route: expect.objectContaining({
-          branchSessionId: 'arch-run-42-goal_master',
+          branchSessionId: undefined,
           streamStatus: 'pending',
         }),
       }),
     });
-    expect(routeNode?.detail).toContain('1 branch messages loaded');
+    expect(routeNode?.detail).not.toContain('branch messages loaded');
+    expect(roleNode).toMatchObject({
+      sessionId: 'arch-run-42-materializer',
+      subtitle: 'role / completed / branch session',
+      status: 'success',
+      payload: expect.objectContaining({
+        route: expect.objectContaining({
+          branchSessionId: 'arch-run-42-materializer',
+          streamStatus: 'completed',
+        }),
+      }),
+    });
+    expect(roleNode?.detail).toContain('1 branch messages loaded');
   });
 
   it('normalizes incomplete tool evidence before exposing it on the architecture root graph', () => {

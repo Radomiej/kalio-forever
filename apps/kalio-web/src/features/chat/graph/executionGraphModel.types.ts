@@ -90,6 +90,7 @@ type ArchitectureRunPayload = {
     fromNodeId: string;
     toNodeId: string;
     eventId: string;
+    branchSessionOpenable?: boolean;
     streamStatus?: string;
     chunkCount?: number;
     branchSessionId?: string;

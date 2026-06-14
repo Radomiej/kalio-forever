@@ -16,6 +16,7 @@ let mockThinkingChunks: Record<string, string> = {};
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: () => ({
     sessions: mockSessions,
+    sessionMessages: { s1: mockMessages },
     streamingChunks: mockStreamingChunks,
     thinkingChunks: mockThinkingChunks,
     messages: mockMessages,
@@ -45,6 +46,10 @@ const mockAgentStoreState = {
     currentLimit: number;
     usedIterations: number;
   }>,
+  pendingConfirmations: {} as Record<string, unknown>,
+  activeAgentLoops: {} as Record<string, { sessionId: string }>,
+  queuedDepthBySession: {} as Record<string, number>,
+  sessionStatusSnapshots: {} as Record<string, unknown>,
   setPendingBudgetApproval: vi.fn(),
 };
 
@@ -56,6 +61,10 @@ vi.mock('../../store/agentStore', () => ({
     setCanvasFocus: mockAgentStoreState.setCanvasFocus,
     cliChildProjections: mockAgentStoreState.cliChildProjections,
     pendingBudgetApprovals: mockAgentStoreState.pendingBudgetApprovals,
+    pendingConfirmations: mockAgentStoreState.pendingConfirmations,
+    activeAgentLoops: mockAgentStoreState.activeAgentLoops,
+    queuedDepthBySession: mockAgentStoreState.queuedDepthBySession,
+    sessionStatusSnapshots: mockAgentStoreState.sessionStatusSnapshots,
     setPendingBudgetApproval: mockAgentStoreState.setPendingBudgetApproval,
   }),
 }));
@@ -122,6 +131,10 @@ describe('AgentTurnBubble', () => {
     mockAgentStoreState.setCanvasFocus.mockClear();
     mockAgentStoreState.cliChildProjections = {};
     mockAgentStoreState.pendingBudgetApprovals = {};
+    mockAgentStoreState.pendingConfirmations = {};
+    mockAgentStoreState.activeAgentLoops = {};
+    mockAgentStoreState.queuedDepthBySession = {};
+    mockAgentStoreState.sessionStatusSnapshots = {};
     mockAgentStoreState.setPendingBudgetApproval.mockClear();
   });
 
@@ -144,6 +157,7 @@ describe('AgentTurnBubble', () => {
     // Override session store mock for this test
     vi.doMock('../../store/sessionStore', () => ({
       useSessionStore: () => ({
+        sessionMessages: { s1: mockMessages },
         streamingChunks: {},
         thinkingChunks: { 'msg-1': 'I need to think about this...' },
         messages: mockMessages,
@@ -606,6 +620,66 @@ describe('AgentTurnBubble', () => {
     expect(mockAgentStoreState.setCanvasFocus).not.toHaveBeenCalledWith({
       kind: 'architecture-branch',
       sessionId: 'arch-run-missing-analyst',
+    });
+  });
+
+  it('does not open an untouched placeholder architecture branch that only exists as a precreated session row', () => {
+    mockSessions = [
+      { id: 's1', personaId: 'default', title: 'Main session', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'arch-run-live-analyst',
+        personaId: 'web-research',
+        title: 'Strategic Decision Council: Analyst',
+        kind: 'subagent',
+        parentSessionId: 'arch-run-live-root',
+        createdAt: 2,
+        updatedAt: 2,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'analyst',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            roleSlotId: 'analyst',
+            roleSlotType: 'participant',
+            displayLabel: 'Analyst',
+          },
+        },
+      },
+    ];
+    mockMessages.push(
+      makeMsg({
+        id: 'msg-arch-placeholder',
+        content: '### Finalizer',
+        architectureRun: {
+          runId: 'run-live',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          trace: [],
+          routeHops: [],
+          graphNodes: [
+            { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
+          ],
+          graphEdges: [],
+        } as NonNullable<ChatMessage['architectureRun']> & {
+          graphNodes: Array<{ id: string; label: string; kind: 'role'; status: 'pending'; eventIds: string[] }>;
+          graphEdges: [];
+        },
+      }),
+    );
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-arch-placeholder' }])} toolActivities={[]} />);
+
+    fireEvent.click(screen.getByTestId('architecture-route-agent'));
+
+    expect(mockAgentStoreState.setCanvasFocus).toHaveBeenCalledWith({
+      kind: 'architecture-run',
+      runId: 'run-live',
+      eventId: undefined,
+      nodeId: 'analyst',
+    });
+    expect(mockAgentStoreState.setCanvasFocus).not.toHaveBeenCalledWith({
+      kind: 'architecture-branch',
+      sessionId: 'arch-run-live-analyst',
     });
   });
 

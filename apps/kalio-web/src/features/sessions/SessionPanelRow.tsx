@@ -1,10 +1,15 @@
 import type { Dispatch, MouseEvent, ReactNode, RefObject, SetStateAction } from 'react';
 import { AlertTriangle, Archive, BrainCircuit, Check, CheckCircle2, ChevronRight, Circle, GitBranch, Loader2, MessageSquare, Pencil, RotateCcw, TerminalSquare, Trash2, X, XCircle } from 'lucide-react';
-import type { ChatSession, SocketEvents } from '@kalio/types';
+import type { ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
 import { formatRelativeTime } from './session.utils';
-import { displayTitleForSession, sessionStatusSnapshotToRuntimeState, type SessionRuntimeState } from './sessionTreeDisplay';
+import {
+  displayTitleForSession,
+  type SessionRuntimeState,
+  visibleConversationTreeChildren,
+} from './sessionTreeDisplay';
 import type { SessionOriginFilter } from './sessionListModel';
 import type { AgentTurn } from '../../store/sessionStore';
+import { countDescendantRuntimeStates, descendantActivityState, sessionRuntimeState } from './sessionRowRuntimeState';
 
 const formatChildCount = (count: number): string => count > 99 ? '99+' : String(count);
 
@@ -75,6 +80,7 @@ type SessionPanelSessionItemProps = {
   queuedDepthBySession: Record<string, number>;
   sessionStatusSnapshots: Record<string, SocketEvents['session:status']>;
   sessionAgentTurns: Record<string, AgentTurn[]>;
+  sessionMessages: Record<string, ChatMessage[]>;
   architectureSessionRuntimeStates: Map<string, SessionRuntimeState>;
   renamingId: string | null;
   renameValue: string;
@@ -93,101 +99,6 @@ type SessionPanelSessionItemProps = {
   onToggleRootExpansion: (event: MouseEvent, id: string) => void;
 };
 
-function sessionRuntimeState(
-  sessionId: string,
-  pendingConfirmations: Record<string, unknown>,
-  pendingBudgetApprovals: Record<string, unknown>,
-  activeLoopSessionIds: Set<string>,
-  queuedDepthBySession: Record<string, number>,
-  sessionStatusSnapshots: Record<string, SocketEvents['session:status']>,
-  sessionAgentTurns: Record<string, AgentTurn[]>,
-  architectureSessionRuntimeStates: Map<string, SessionRuntimeState>,
-): SessionRuntimeState | null {
-  const safePendingConfirmations = pendingConfirmations ?? {};
-  const safePendingBudgetApprovals = pendingBudgetApprovals ?? {};
-  const safeActiveLoopSessionIds = activeLoopSessionIds ?? new Set<string>();
-  const safeQueuedDepthBySession = queuedDepthBySession ?? {};
-  const safeSessionAgentTurns = sessionAgentTurns ?? {};
-  if (safePendingConfirmations[sessionId] || safePendingBudgetApprovals[sessionId]) {
-    return 'waiting';
-  }
-  if (safeActiveLoopSessionIds.has(sessionId) || (safeQueuedDepthBySession[sessionId] ?? 0) > 0) {
-    return 'running';
-  }
-  const snapshotState = sessionStatusSnapshotToRuntimeState(sessionStatusSnapshots[sessionId]);
-  if (snapshotState) {
-    return snapshotState;
-  }
-  const architectureState = architectureSessionRuntimeStates.get(sessionId);
-  if (architectureState) {
-    return architectureState;
-  }
-  const lastTurn = safeSessionAgentTurns[sessionId]?.at(-1);
-  if (lastTurn?.error) {
-    return 'error';
-  }
-  if (lastTurn?.done) {
-    return 'done';
-  }
-  return null;
-}
-
-function countDescendantRuntimeStates(
-  sessionId: string,
-  childSessionsByParent: Map<string, ChatSession[]>,
-  pendingConfirmations: Record<string, unknown>,
-  pendingBudgetApprovals: Record<string, unknown>,
-  activeLoopSessionIds: Set<string>,
-  queuedDepthBySession: Record<string, number>,
-  sessionStatusSnapshots: Record<string, SocketEvents['session:status']>,
-  sessionAgentTurns: Record<string, AgentTurn[]>,
-  architectureSessionRuntimeStates: Map<string, SessionRuntimeState>,
-): { pending: number; running: number; waiting: number } {
-  const safeChildSessionsByParent = childSessionsByParent ?? new Map<string, ChatSession[]>();
-  const counts = { pending: 0, running: 0, waiting: 0 };
-  const pending = [...(safeChildSessionsByParent.get(sessionId) ?? [])];
-
-  while (pending.length > 0) {
-    const child = pending.shift();
-    if (!child) break;
-    const state = sessionRuntimeState(
-      child.id,
-      pendingConfirmations,
-      pendingBudgetApprovals,
-      activeLoopSessionIds,
-      queuedDepthBySession,
-      sessionStatusSnapshots,
-      sessionAgentTurns,
-      architectureSessionRuntimeStates,
-    );
-    if (state === 'waiting') {
-      counts.waiting += 1;
-    } else if (state === 'running') {
-      counts.running += 1;
-    } else if (state === 'pending') {
-      counts.pending += 1;
-    }
-    pending.push(...(safeChildSessionsByParent.get(child.id) ?? []));
-  }
-
-  return counts;
-}
-
-function descendantActivityState(
-  counts: { pending: number; running: number; waiting: number },
-): SessionRuntimeState | null {
-  if (counts.waiting > 0) {
-    return 'waiting';
-  }
-  if (counts.running > 0) {
-    return 'running';
-  }
-  if (counts.pending > 0) {
-    return 'pending';
-  }
-  return null;
-}
-
 export function SessionPanelSessionItem({
   session,
   depth,
@@ -200,6 +111,7 @@ export function SessionPanelSessionItem({
   queuedDepthBySession,
   sessionStatusSnapshots,
   sessionAgentTurns,
+  sessionMessages,
   architectureSessionRuntimeStates,
   renamingId,
   renameValue,
@@ -232,6 +144,7 @@ export function SessionPanelSessionItem({
     queuedDepthBySession,
     sessionStatusSnapshots,
     sessionAgentTurns,
+    sessionMessages,
     architectureSessionRuntimeStates,
   );
   const runtimeState = sessionRuntimeState(
@@ -242,6 +155,7 @@ export function SessionPanelSessionItem({
     queuedDepthBySession,
     sessionStatusSnapshots,
     sessionAgentTurns,
+    sessionMessages,
     architectureSessionRuntimeStates,
   );
   const descendantState = descendantActivityState(descendantStates);
@@ -472,7 +386,7 @@ export function renderSessionChildRows({
   getPersonaName,
   ...itemProps
 }: RenderSessionChildRowsArgs): ReactNode[] {
-  return (childSessionsByParent.get(parentId) ?? []).flatMap((child) => [
+  return visibleConversationTreeChildren(parentId, childSessionsByParent).flatMap((child) => [
     <SessionPanelSessionItem
       key={child.id}
       {...itemProps}

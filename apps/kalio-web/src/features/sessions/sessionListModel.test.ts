@@ -69,13 +69,21 @@ describe('sessionListModel', () => {
     expect(entries.map((entry) => entry.session.id)).toEqual(['sub-1', 'sub-2']);
   });
 
-  it('shows orphaned AgentFlow roots whose synthetic parent is not loaded', () => {
+  it('hides orphaned workflow container sessions from the conversation list', () => {
     const sessions: ChatSession[] = [
       makeSession({
         id: 'arch-run-root',
         title: 'Architecture: Live proof',
         kind: 'agent-flow',
         parentSessionId: 'architect-ui',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+          },
+        },
         createdAt: 20,
         updatedAt: 20,
       }),
@@ -92,8 +100,47 @@ describe('sessionListModel', () => {
     const ordered = sortSessionsForSidebar(sessions);
     const entries = buildSessionListEntries(ordered, null, 'all');
 
-    expect(entries.map((entry) => entry.session.id)).toEqual(['arch-run-root']);
-    expect(entries[0]).toMatchObject({ type: 'session', depth: 0 });
+    expect(entries).toEqual([]);
+  });
+
+  it('keeps the user host visible while hiding workflow containers in the default list', () => {
+    const sessions: ChatSession[] = [
+      makeSession({ id: 'host', title: 'Workflow host', updatedAt: 30 }),
+      makeSession({
+        id: 'arch-run-root',
+        title: 'Architecture: Live proof',
+        kind: 'agent-flow',
+        parentSessionId: 'host',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+          },
+        },
+        createdAt: 31,
+        updatedAt: 31,
+      }),
+      makeSession({
+        id: 'arch-run-analyst',
+        title: 'Strategic Decision Council: Analyst',
+        kind: 'subagent',
+        parentSessionId: 'arch-run-root',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'analyst',
+          architectureContext: { roleSlotId: 'analyst', displayLabel: 'Analyst' },
+        },
+        createdAt: 32,
+        updatedAt: 32,
+      }),
+    ];
+
+    const ordered = sortSessionsForSidebar(sessions);
+    const entries = buildSessionListEntries(ordered, null, 'all');
+
+    expect(entries.map((entry) => entry.session.id)).toEqual(['host']);
   });
 
   it('keeps a loaded child conversation hidden until it becomes active', () => {

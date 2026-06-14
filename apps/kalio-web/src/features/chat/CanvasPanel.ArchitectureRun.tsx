@@ -1,12 +1,26 @@
-import { GitBranch, Route, ShieldCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Circle,
+  GitBranch,
+  Loader2,
+  Route,
+  ShieldCheck,
+  XCircle,
+} from 'lucide-react';
 import type { ArchitectureChatRunSummary, ChatMessage, ChatSession } from '@kalio/types';
 import { compactArchitectureTraceContent } from './architectureChatSummary';
+import {
+  buildTimelineStages,
+  graphStepCount,
+  nodeLabel,
+  statusForStep,
+  type TimelineStatus,
+  type TraceStage,
+  type TraceStep,
+} from './ArchitectureRunTimeline.stages';
 
-type TraceStep = ArchitectureChatRunSummary['trace'][number];
 type ArchitectureRunFocusedStep = { eventId?: string; nodeId?: string };
-type TraceStage =
-  | { kind: 'step'; step: TraceStep }
-  | { kind: 'parallel'; steps: TraceStep[] };
 
 function isFocusedTraceStep(step: TraceStep, focusedStep: ArchitectureRunFocusedStep | undefined): boolean {
   if (!focusedStep) {
@@ -18,19 +32,6 @@ function isFocusedTraceStep(step: TraceStep, focusedStep: ArchitectureRunFocused
   return Boolean(focusedStep.nodeId && step.nodeId === focusedStep.nodeId);
 }
 
-function roleLabel(step: TraceStep): string {
-  if (step.nodeId) {
-    return step.nodeId
-      .split(/[-_]/)
-      .filter(Boolean)
-      .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
-      .join(' ');
-  }
-  if (step.speaker === 'router') return 'Router';
-  if (step.speaker === 'finalizer') return 'Finalizer';
-  return 'Agent';
-}
-
 function compact(content: string): string {
   return content.replace(/\s+/g, ' ').trim();
 }
@@ -39,8 +40,13 @@ function findSessionTitle(sessions: ChatSession[], sessionId: string): string {
   return sessions.find((session) => session.id === sessionId)?.title ?? sessionId;
 }
 
-function hasBranchSession(sessions: ChatSession[], sessionId: string | undefined): sessionId is string {
-  return typeof sessionId === 'string' && sessions.some((session) => session.id === sessionId);
+function isKnownBranchSession(
+  sessionId: string | undefined,
+  knownBranchSessionIds: ReadonlySet<string> | undefined,
+): sessionId is string {
+  return typeof sessionId === 'string'
+    && sessionId.trim().length > 0
+    && (knownBranchSessionIds === undefined || knownBranchSessionIds.has(sessionId));
 }
 
 function visibleTranscript(messages: ChatMessage[]): ChatMessage[] {
@@ -51,69 +57,135 @@ function visibleTranscript(messages: ChatMessage[]): ChatMessage[] {
     .slice(-3);
 }
 
-function buildTraceStages(trace: TraceStep[]): TraceStage[] {
-  const stages: TraceStage[] = [];
-  let participantBuffer: TraceStep[] = [];
-
-  const flushParticipants = () => {
-    if (participantBuffer.length === 0) return;
-    if (participantBuffer.length === 1) {
-      const [step] = participantBuffer;
-      if (step) stages.push({ kind: 'step', step });
-    } else {
-      stages.push({ kind: 'parallel', steps: participantBuffer });
-    }
-    participantBuffer = [];
-  };
-
-  trace.forEach((step) => {
-    if (step.speaker === 'participant') {
-      participantBuffer.push(step);
-      return;
-    }
-    flushParticipants();
-    stages.push({ kind: 'step', step });
-  });
-
-  flushParticipants();
-  return stages;
+function isSameStep(
+  left: Pick<TraceStep, 'eventId' | 'nodeId'> | undefined,
+  right: Pick<TraceStep, 'eventId' | 'nodeId'> | undefined,
+): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  if (left.eventId && right.eventId) {
+    return left.eventId === right.eventId;
+  }
+  return Boolean(left.nodeId && right.nodeId && left.nodeId === right.nodeId);
 }
 
-function stageLabel(stage: TraceStage): string {
-  if (stage.kind === 'parallel') return 'Sub-agents';
-  if (stage.step.speaker === 'router') return 'Router';
-  if (stage.step.speaker === 'finalizer') return 'Finalizer';
-  return roleLabel(stage.step);
+function branchSessionCandidates(runId: string, step: TraceStep): string[] {
+  const fromStream = step.stream?.branchSessionId;
+  if (fromStream) {
+    return [fromStream];
+  }
+  if (step.speaker !== 'participant' || !step.nodeId) {
+    return [];
+  }
+  const raw = step.nodeId;
+  const normalized = new Set([
+    raw,
+    raw.replace(/-/g, '_'),
+    raw.replace(/_/g, '-'),
+  ]);
+  return [...normalized].map((nodeId) => `arch-${runId}-${nodeId}`);
+}
+
+function resolveBranchSessionId(
+  runId: string,
+  step: TraceStep,
+  knownBranchSessionIds: ReadonlySet<string> | undefined,
+): string | undefined {
+  return branchSessionCandidates(runId, step).find((sessionId) => isKnownBranchSession(sessionId, knownBranchSessionIds));
+}
+
+function TimelineStatusIcon({
+  status,
+}: {
+  status: TimelineStatus;
+}) {
+  if (status === 'pending') {
+    return <Circle size={10} className="text-base-content/40" />;
+  }
+  if (status === 'waiting') {
+    return <AlertTriangle size={10} className="text-warning" />;
+  }
+  if (status === 'running') {
+    return <Loader2 size={10} className="animate-spin text-sky-300" />;
+  }
+  if (status === 'completed') {
+    return <CheckCircle2 size={10} className="text-emerald-300" />;
+  }
+  return <XCircle size={10} className="text-rose-300" />;
+}
+
+function StatusBadge({ status }: { status: TimelineStatus | null }) {
+  if (!status) {
+    return null;
+  }
+  return (
+    <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded bg-base-100/80 px-1 text-[9px] font-mono text-base-content/80">
+      <TimelineStatusIcon status={status} />
+      {status}
+    </span>
+  );
+}
+
+function stepLabel(step: TraceStep, label?: string): string {
+  if (label) {
+    return label;
+  }
+  if (step.speaker === 'finalizer') {
+    return 'Finalizer';
+  }
+  return nodeLabel(step);
+}
+
+function routerLabel(
+  step: TraceStep,
+  firstRouter: TraceStep | undefined,
+  finalRouter: TraceStep | undefined,
+  hasParallelStage: boolean,
+  hasMerge: boolean,
+): string {
+  if (hasParallelStage && isSameStep(step, firstRouter)) {
+    return 'Router dispatch';
+  }
+  if (hasMerge && isSameStep(step, finalRouter)) {
+    return 'Router merge';
+  }
+  return stepLabel(step);
 }
 
 function ArchitectureTraceCard({
+  runId,
   step,
   sessions,
   onOpenSession,
   label,
   transcript = [],
   focused = false,
+  knownBranchSessionIds,
 }: {
+  runId: string;
   step: TraceStep;
   sessions: ChatSession[];
   onOpenSession: (sessionId: string) => void;
   label?: string;
   transcript?: ChatMessage[];
   focused?: boolean;
+  knownBranchSessionIds?: ReadonlySet<string>;
 }) {
-  const branchSessionId = step.stream?.branchSessionId;
-  const openableBranchSessionId = hasBranchSession(sessions, branchSessionId) ? branchSessionId : undefined;
+  const openableBranchSessionId = resolveBranchSessionId(runId, step, knownBranchSessionIds);
   const visibleMessages = visibleTranscript(transcript);
   const tone = step.speaker === 'participant'
     ? 'border-sky-500/20 bg-sky-500/5'
     : step.speaker === 'router'
       ? 'border-amber-500/20 bg-amber-500/5'
       : 'border-emerald-500/20 bg-emerald-500/5';
+  const status = statusForStep(step);
+  const stepTestId = step.eventId ?? step.nodeId ?? stepLabel(step).replace(/\s+/g, '-').toLowerCase();
 
   return (
     <div
       className={`rounded-xl border px-3 py-2 text-xs space-y-2 ${tone} ${focused ? 'ring-1 ring-sky-300/70 shadow-[0_0_0_1px_rgba(125,211,252,0.26)]' : ''}`}
-      data-testid={`architecture-run-step-${step.eventId ?? roleLabel(step)}`}
+      data-testid={`architecture-run-step-${stepTestId}`}
       data-focused-step={focused ? 'true' : 'false'}
     >
       <div className="flex items-start gap-2">
@@ -121,12 +193,13 @@ function ArchitectureTraceCard({
           {step.speaker === 'participant' ? <GitBranch size={11} /> : <Route size={11} />}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="font-medium text-base-content truncate">{label ?? roleLabel(step)}</p>
+          <p className="font-medium text-base-content truncate">{stepLabel(step, label)}</p>
           <p className="text-[10px] uppercase tracking-wide text-base-content/40">
             {step.speaker}
             {step.nextNodeId ? ` -> ${step.nextNodeId}` : ''}
           </p>
         </div>
+        <StatusBadge status={status} />
         {openableBranchSessionId && (
           <button
             type="button"
@@ -170,17 +243,21 @@ function ArchitectureTraceCard({
 }
 
 function ArchitectureParallelGroup({
+  runId,
   steps,
   sessions,
   onOpenSession,
   getBranchMessages,
   focusedStep,
+  knownBranchSessionIds,
 }: {
+  runId: string;
   steps: TraceStep[];
   sessions: ChatSession[];
   onOpenSession: (sessionId: string) => void;
   getBranchMessages: (sessionId: string) => ChatMessage[];
   focusedStep?: ArchitectureRunFocusedStep;
+  knownBranchSessionIds?: ReadonlySet<string>;
 }) {
   if (steps.length === 0) return null;
 
@@ -200,14 +277,21 @@ function ArchitectureParallelGroup({
       </div>
       <div className="space-y-1.5" data-testid="architecture-run-branches">
         {steps.map((step) => (
-          <ArchitectureTraceCard
-            key={step.eventId ?? `${step.nodeId}-${step.visitIndex ?? 0}`}
-            step={step}
-            sessions={sessions}
-            onOpenSession={onOpenSession}
-            transcript={step.stream?.branchSessionId ? getBranchMessages(step.stream.branchSessionId) : []}
-            focused={isFocusedTraceStep(step, focusedStep)}
-          />
+          (() => {
+            const branchSessionId = resolveBranchSessionId(runId, step, knownBranchSessionIds);
+            return (
+              <ArchitectureTraceCard
+                key={step.eventId ?? `${step.nodeId}-${step.visitIndex ?? 0}`}
+                runId={runId}
+                step={step}
+                sessions={sessions}
+                onOpenSession={onOpenSession}
+                transcript={branchSessionId ? getBranchMessages(branchSessionId) : []}
+                focused={isFocusedTraceStep(step, focusedStep)}
+                knownBranchSessionIds={knownBranchSessionIds}
+              />
+            );
+          })()
         ))}
       </div>
     </div>
@@ -223,17 +307,29 @@ function ArchitectureFlowSeparator() {
 }
 
 function ArchitectureSequentialFlow({
+  runId,
   stages,
   sessions,
   onOpenSession,
   getBranchMessages,
   focusedStep,
+  firstRouter,
+  finalRouter,
+  hasParallelStage,
+  hasMerge,
+  knownBranchSessionIds,
 }: {
+  runId: string;
   stages: TraceStage[];
   sessions: ChatSession[];
   onOpenSession: (sessionId: string) => void;
   getBranchMessages: (sessionId: string) => ChatMessage[];
   focusedStep?: ArchitectureRunFocusedStep;
+  firstRouter?: TraceStep;
+  finalRouter?: TraceStep;
+  hasParallelStage: boolean;
+  hasMerge: boolean;
+  knownBranchSessionIds?: ReadonlySet<string>;
 }) {
   return (
     <div className="space-y-1.5" data-testid="architecture-run-sequential-flow">
@@ -244,21 +340,34 @@ function ArchitectureSequentialFlow({
         >
           {stage.kind === 'parallel' ? (
             <ArchitectureParallelGroup
+              runId={runId}
               steps={stage.steps}
               sessions={sessions}
               onOpenSession={onOpenSession}
               getBranchMessages={getBranchMessages}
               focusedStep={focusedStep}
+              knownBranchSessionIds={knownBranchSessionIds}
             />
           ) : (
-            <ArchitectureTraceCard
-              step={stage.step}
-              sessions={sessions}
-              onOpenSession={onOpenSession}
-              label={stage.step.speaker === 'finalizer' ? 'Finalizer' : undefined}
-              transcript={stage.step.stream?.branchSessionId ? getBranchMessages(stage.step.stream.branchSessionId) : []}
-              focused={isFocusedTraceStep(stage.step, focusedStep)}
-            />
+            (() => {
+              const branchSessionId = resolveBranchSessionId(runId, stage.step, knownBranchSessionIds);
+              return (
+                <ArchitectureTraceCard
+                  runId={runId}
+                  step={stage.step}
+                  sessions={sessions}
+                  onOpenSession={onOpenSession}
+                  label={stage.step.speaker === 'router'
+                    ? routerLabel(stage.step, firstRouter, finalRouter, hasParallelStage, hasMerge)
+                    : stage.step.speaker === 'finalizer'
+                      ? 'Finalizer'
+                      : undefined}
+                  transcript={branchSessionId ? getBranchMessages(branchSessionId) : []}
+                  focused={isFocusedTraceStep(stage.step, focusedStep)}
+                  knownBranchSessionIds={knownBranchSessionIds}
+                />
+              );
+            })()
           )}
           {index < stages.length - 1 && <ArchitectureFlowSeparator />}
         </div>
@@ -268,16 +377,19 @@ function ArchitectureSequentialFlow({
 }
 
 function ArchitectureTranscriptEntry({
+  runId,
   step,
-  sessions,
   getBranchMessages,
+  label,
+  knownBranchSessionIds,
 }: {
+  runId: string;
   step: TraceStep;
-  sessions: ChatSession[];
   getBranchMessages: (sessionId: string) => ChatMessage[];
+  label?: string;
+  knownBranchSessionIds?: ReadonlySet<string>;
 }) {
-  const branchSessionId = step.stream?.branchSessionId;
-  const openableBranchSessionId = hasBranchSession(sessions, branchSessionId) ? branchSessionId : undefined;
+  const openableBranchSessionId = resolveBranchSessionId(runId, step, knownBranchSessionIds);
   const transcript = openableBranchSessionId ? visibleTranscript(getBranchMessages(openableBranchSessionId)) : [];
 
   return (
@@ -290,7 +402,7 @@ function ArchitectureTranscriptEntry({
         ) : (
           <ShieldCheck size={11} className="text-emerald-300" />
         )}
-        <p className="font-medium text-base-content">{roleLabel(step)}</p>
+        <p className="font-medium text-base-content">{stepLabel(step, label)}</p>
         <span className="ml-auto rounded bg-base-100/70 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-base-content/45">
           {step.speaker}
         </span>
@@ -322,6 +434,7 @@ export function ArchitectureRunCanvasSection({
   getBranchMessages,
   focused = false,
   focusedStep,
+  knownBranchSessionIds,
 }: {
   run: ArchitectureChatRunSummary;
   sessions: ChatSession[];
@@ -329,9 +442,22 @@ export function ArchitectureRunCanvasSection({
   getBranchMessages: (sessionId: string) => ChatMessage[];
   focused?: boolean;
   focusedStep?: ArchitectureRunFocusedStep;
+  knownBranchSessionIds?: ReadonlySet<string>;
 }) {
-  const stages = buildTraceStages(run.trace);
-  const routeText = stages.map(stageLabel).join(' -> ');
+  const stages = buildTimelineStages(run);
+  const stepCount = graphStepCount(run);
+  const routers = stages
+    .filter((stage): stage is Extract<TraceStage, { kind: 'step' }> => stage.kind === 'step' && stage.step.speaker === 'router')
+    .map((stage) => stage.step);
+  const firstRouter = routers[0];
+  const finalRouter = routers.at(-1);
+  const hasParallelStage = stages.some((stage) => stage.kind === 'parallel');
+  const hasMerge = hasParallelStage && Boolean(finalRouter && !isSameStep(finalRouter, firstRouter));
+  const routeText = stages.map((stage) => {
+    if (stage.kind === 'parallel') return 'Sub-agents';
+    if (stage.step.speaker === 'router') return 'Router';
+    return stepLabel(stage.step);
+  }).join(' -> ');
 
   return (
     <section
@@ -345,16 +471,22 @@ export function ArchitectureRunCanvasSection({
       </div>
       <div className="rounded-xl border border-base-300 bg-base-200/35 px-3 py-2 text-xs mb-2">
         <p className="font-medium text-base-content truncate">{run.schemaId}</p>
-        <p className="text-base-content/45 font-mono">{run.status} / {run.trace.length} steps</p>
+        <p className="text-base-content/45 font-mono">{run.status} / {stepCount} steps</p>
       </div>
 
       <div className="space-y-1.5" data-testid="architecture-run-flow">
         <ArchitectureSequentialFlow
+          runId={run.runId}
           stages={stages}
           sessions={sessions}
           onOpenSession={onOpenSession}
           getBranchMessages={getBranchMessages}
           focusedStep={focusedStep}
+          firstRouter={firstRouter}
+          finalRouter={finalRouter}
+          hasParallelStage={hasParallelStage}
+          hasMerge={hasMerge}
+          knownBranchSessionIds={knownBranchSessionIds}
         />
         <div className="hidden" data-testid="architecture-run-routing">{routeText}</div>
       </div>
@@ -364,9 +496,15 @@ export function ArchitectureRunCanvasSection({
         {run.trace.map((step, index) => (
           <ArchitectureTranscriptEntry
             key={step.eventId ?? `${step.speaker}-${step.nodeId ?? index}-${step.visitIndex ?? 0}`}
+            runId={run.runId}
             step={step}
-            sessions={sessions}
             getBranchMessages={getBranchMessages}
+            label={step.speaker === 'router'
+              ? routerLabel(step, firstRouter, finalRouter, hasParallelStage, hasMerge)
+              : step.speaker === 'finalizer'
+                ? 'Finalizer'
+                : undefined}
+            knownBranchSessionIds={knownBranchSessionIds}
           />
         ))}
       </div>

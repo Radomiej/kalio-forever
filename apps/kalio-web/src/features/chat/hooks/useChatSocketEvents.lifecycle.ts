@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@kalio/types';
+import type { ChatSession } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
@@ -79,6 +80,8 @@ export function registerConnectionRecoveryHandlers({
   clearToolActivities,
   removeActiveAgentLoop,
   setPendingConfirmation,
+  setActiveSession,
+  setSessions,
   setMessages,
   setAgentTurns,
   onContextInvalidated,
@@ -91,6 +94,8 @@ export function registerConnectionRecoveryHandlers({
   clearToolActivities: AgentStoreState['clearToolActivities'];
   removeActiveAgentLoop: AgentStoreState['removeActiveAgentLoop'];
   setPendingConfirmation: AgentStoreState['setPendingConfirmation'];
+  setActiveSession: SessionStoreState['setActiveSession'];
+  setSessions: SessionStoreState['setSessions'];
   setMessages: SessionStoreState['setMessages'];
   setAgentTurns: SessionStoreState['setAgentTurns'];
   onContextInvalidated: (() => void) | undefined;
@@ -108,11 +113,17 @@ export function registerConnectionRecoveryHandlers({
       clearToolActivities,
       removeActiveAgentLoop,
       setPendingConfirmation,
+      setActiveSession,
+      setSessions,
       getActiveSessionId: () => useSessionStore.getState().activeSessionId,
       getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
       setMessages,
       setAgentTurns,
       hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
+      fetchSessions: async () => {
+        const response = await apiClient.get<ChatSession[]>('/api/sessions');
+        return response.data;
+      },
       fetchMessages: async (sessionId) => {
         const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
         return response.data;

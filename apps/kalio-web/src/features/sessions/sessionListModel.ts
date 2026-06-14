@@ -1,4 +1,8 @@
 import type { ChatSession } from '@kalio/types';
+import {
+  isArchitectureEnvelopeSession,
+  isArchitectureWorkflowContainerSession,
+} from './sessionTreeDisplay';
 
 const ACTIVE_AGENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -115,6 +119,9 @@ export function isVisibleSidebarSession(
   filter: SessionOriginFilter,
   sessionById?: Map<string, ChatSession>,
 ): boolean {
+  if (isArchitectureWorkflowContainerSession(session)) {
+    return false;
+  }
   if (!matchesOriginFilter(session, filter)) return false;
   if (filter === 'archived') return isAgentStartedSession(session);
   if (filter === 'agent') return session.id === activeSessionId || Date.now() - session.updatedAt <= ACTIVE_AGENT_WINDOW_MS;
@@ -128,9 +135,12 @@ export function buildSessionListEntries(
 ): SessionListEntry[] {
   const sessionById = new Map(orderedSessions.map((session) => [session.id, session]));
   const visibleSessions = orderedSessions.filter((session) => isVisibleSidebarSession(session, activeSessionId, filter, sessionById));
+  const treeVisibleSessions = filter === 'agent'
+    ? visibleSessions.filter((session) => !isArchitectureEnvelopeSession(session))
+    : visibleSessions;
 
   if (filter !== 'agent') {
-    return visibleSessions.map((session) => ({
+    return treeVisibleSessions.map((session) => ({
       type: 'session',
       session,
       depth: getSessionDepth(session, sessionById),
@@ -140,10 +150,10 @@ export function buildSessionListEntries(
   const entries: SessionListEntry[] = [];
   let lastRootId: string | null = null;
 
-  visibleSessions.forEach((session) => {
+  treeVisibleSessions.forEach((session) => {
     const root = getRootSession(session, sessionById);
     if (root.id !== lastRootId) {
-      const childCount = visibleSessions.filter((candidate) => getRootSession(candidate, sessionById).id === root.id).length;
+      const childCount = treeVisibleSessions.filter((candidate) => candidate.id !== root.id && getRootSession(candidate, sessionById).id === root.id).length;
       entries.push({ type: 'root', session: root, childCount });
       lastRootId = root.id;
     }

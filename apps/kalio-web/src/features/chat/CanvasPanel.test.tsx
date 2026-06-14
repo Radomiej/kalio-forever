@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CanvasPanel } from './CanvasPanel';
 import type { ChatMessage, ChatSession, ToolResult } from '@kalio/types';
 import type { CLIChildProjection } from './cliChildProjection.model';
+import type { ArchitectureRunSummaryWithGraph } from './architectureChatSummary';
 
 interface MockAgentState {
   toolActivities: Array<{
@@ -37,6 +38,10 @@ interface MockAgentState {
   }>;
   cliAgentOutput: Record<string, string>;
   cliChildProjections: Record<string, CLIChildProjection>;
+  pendingConfirmations: Record<string, unknown>;
+  pendingBudgetApprovals: Record<string, unknown>;
+  queuedDepthBySession: Record<string, number>;
+  sessionStatusSnapshots: Record<string, unknown>;
 }
 
 interface MockSessionState {
@@ -103,6 +108,10 @@ const agentState: MockAgentState = {
   },
   cliAgentOutput: {},
   cliChildProjections: {},
+  pendingConfirmations: {},
+  pendingBudgetApprovals: {},
+  queuedDepthBySession: {},
+  sessionStatusSnapshots: {},
 };
 
 const sessionState: MockSessionState = {
@@ -231,6 +240,10 @@ describe('CanvasPanel subagent grouping', () => {
     };
     agentState.canvasFocus = null;
     agentState.setCanvasFocus.mockClear();
+    agentState.pendingConfirmations = {};
+    agentState.pendingBudgetApprovals = {};
+    agentState.queuedDepthBySession = {};
+    agentState.sessionStatusSnapshots = {};
     sessionState.sessions = [
       { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
       { id: 'sub-session-1', personaId: 'default', title: 'Sub-agent: demo', kind: 'subagent', createdAt: 2, updatedAt: 2 },
@@ -413,6 +426,198 @@ describe('CanvasPanel subagent grouping', () => {
     expect(agentState.setCanvasFocus).toHaveBeenCalledWith({ kind: 'architecture-branch', sessionId: 'sub-session-1' });
   });
 
+  it('does not duplicate architecture branch sessions in the generic sub-agents canvas section', () => {
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-run', runId: 'run-1' };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'arch-run-pragmatist',
+        personaId: 'default',
+        title: 'Strategic Decision Council: Pragmatist',
+        kind: 'subagent',
+        parentSessionId: 'arch-run-root',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          parentToolCallId: 'architecture:run-1:pragmatist',
+          architectureSlotId: 'pragmatist',
+        },
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ];
+    sessionState.messages = [
+      { id: 'user-1', sessionId: 'session-1', role: 'user', content: 'Assess the repo', createdAt: 1 },
+      {
+        id: 'assistant-tool-call',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{
+          id: 'architecture-call-1',
+          name: 'run_subagent',
+          args: {
+            architectureRunId: 'run-1',
+            schemaName: 'Strategic Decision Council',
+            nodeId: 'pragmatist',
+            childSessionId: 'arch-run-pragmatist',
+          },
+        }],
+        createdAt: 2,
+      },
+      {
+        id: 'tool-result-1',
+        sessionId: 'session-1',
+        role: 'tool_result',
+        toolCallId: 'architecture-call-1',
+        content: JSON.stringify({
+          result: 'Pragmatist branch result',
+          taskId: 'architecture:run-1:event:1',
+          childSessionId: 'arch-run-pragmatist',
+          parentSessionId: 'session-1',
+          vfsMode: 'shared',
+          vfsSessionId: 'arch-run-root',
+          copiedFiles: [],
+          durationMs: 20,
+        }),
+        createdAt: 3,
+      },
+      {
+        id: 'assistant-final',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: '### Finalizer',
+        createdAt: 4,
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          routeHops: [],
+          trace: [
+            {
+              speaker: 'participant',
+              content: 'Pragmatist branch result',
+              eventId: 'architecture:run-1:event:1',
+              nodeId: 'pragmatist',
+              stream: {
+                streamGroupId: 'architecture:run-1:pragmatist',
+                branchSessionId: 'arch-run-pragmatist',
+                status: 'completed',
+                chunkCount: 1,
+                text: 'Pragmatist branch result',
+              },
+            },
+          ],
+        },
+      },
+    ];
+    sessionState.sessionMessages = {
+      'session-1': sessionState.messages,
+      'arch-run-pragmatist': [
+        { id: 'branch-user', sessionId: 'arch-run-pragmatist', role: 'user', content: 'Pragmatist prompt', createdAt: 5 },
+        { id: 'branch-assistant', sessionId: 'arch-run-pragmatist', role: 'assistant', content: 'Pragmatist branch result', createdAt: 6 },
+      ],
+    };
+
+    render(<CanvasPanel />);
+
+    expect(screen.getByTestId('architecture-run-canvas-section')).toBeInTheDocument();
+    expect(screen.queryByTestId('canvas-subagents-section')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('canvas-subagent-card-arch-run-pragmatist')).not.toBeInTheDocument();
+    expect(screen.getByTestId('architecture-run-branch-transcript-arch-run-pragmatist')).toHaveTextContent('Pragmatist branch result');
+  });
+
+  it('renders planned architecture stages from graph metadata before trace messages exist for every step', () => {
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-run', runId: 'run-live-graph' };
+    const architectureRun: ArchitectureRunSummaryWithGraph = {
+      runId: 'run-live-graph',
+      schemaId: 'Strategic Decision Council',
+      status: 'running',
+      finalArtifact: undefined,
+      routeHops: [],
+      graphNodes: [
+        { id: 'orchestrator', label: 'Orchestrator', kind: 'router', status: 'running', eventIds: ['run-live-graph:event:1'] },
+        { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'completed', eventIds: ['run-live-graph:event:2'] },
+        { id: 'innovator', label: 'Innovator', kind: 'role', status: 'running', eventIds: [] },
+        { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'user-advocate', label: 'User Advocate', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'shadow', label: 'Shadow', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'synthesizer', label: 'Router merge', kind: 'router', status: 'pending', eventIds: [] },
+        { id: 'final-artifact', label: 'Finalizer', kind: 'artifact', status: 'pending', eventIds: [] },
+      ],
+      graphEdges: [
+        { id: 'e1', fromNodeId: 'orchestrator', toNodeId: 'pragmatist' },
+        { id: 'e2', fromNodeId: 'orchestrator', toNodeId: 'innovator' },
+        { id: 'e3', fromNodeId: 'orchestrator', toNodeId: 'analyst' },
+        { id: 'e4', fromNodeId: 'orchestrator', toNodeId: 'user-advocate' },
+        { id: 'e5', fromNodeId: 'orchestrator', toNodeId: 'shadow' },
+        { id: 'e6', fromNodeId: 'pragmatist', toNodeId: 'synthesizer' },
+        { id: 'e7', fromNodeId: 'innovator', toNodeId: 'synthesizer' },
+        { id: 'e8', fromNodeId: 'analyst', toNodeId: 'synthesizer' },
+        { id: 'e9', fromNodeId: 'user-advocate', toNodeId: 'synthesizer' },
+        { id: 'e10', fromNodeId: 'shadow', toNodeId: 'synthesizer' },
+        { id: 'e11', fromNodeId: 'synthesizer', toNodeId: 'final-artifact' },
+      ],
+      trace: [
+        {
+          speaker: 'router',
+          content: 'Orchestrator is dispatching the council.',
+          eventId: 'run-live-graph:event:1',
+          nodeId: 'orchestrator',
+          nextNodeId: 'pragmatist',
+        },
+        {
+          speaker: 'participant',
+          content: 'Pragmatist answer.',
+          eventId: 'run-live-graph:event:2',
+          nodeId: 'pragmatist',
+          nextNodeId: 'synthesizer',
+          stream: {
+            streamGroupId: 'architecture:run-live-graph:pragmatist',
+            branchSessionId: 'sub-session-1',
+            status: 'completed',
+            chunkCount: 4,
+            text: 'Pragmatist answer.',
+          },
+        },
+      ],
+    };
+    sessionState.messages = [
+      {
+        id: 'arch-graph-only',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: '### Finalizer',
+        createdAt: 3,
+        architectureRun,
+      },
+    ];
+    sessionState.sessionMessages = {
+      'session-1': sessionState.messages,
+      'sub-session-1': [
+        { id: 'branch-user', sessionId: 'sub-session-1', role: 'user', content: 'Pragmatist branch prompt', createdAt: 4 },
+        { id: 'branch-agent', sessionId: 'sub-session-1', role: 'assistant', content: 'Pragmatist branch transcript answer', createdAt: 5 },
+      ],
+    };
+
+    render(<CanvasPanel />);
+
+    expect(screen.getByText('running / 8 steps')).toBeInTheDocument();
+    expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Router dispatch');
+    expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Parallel sub-agents');
+    expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Router merge');
+    expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Finalizer');
+    expect(screen.getByTestId('architecture-run-branch-count')).toHaveTextContent('5');
+    expect(screen.getByTestId('architecture-run-branches')).toHaveTextContent('pending');
+    expect(screen.getByTestId('architecture-run-step-synthesizer')).toHaveTextContent('pending');
+    expect(screen.getByTestId('architecture-run-step-final-artifact')).toHaveTextContent('pending');
+    expect(screen.getByTestId('architecture-run-internal-transcript')).toHaveTextContent('Orchestrator is dispatching the council.');
+    expect(screen.getAllByTestId('architecture-run-transcript-entry')).toHaveLength(2);
+  });
+
   it('shows focused architecture branch transcript without switching the parent session', () => {
     agentState.toolActivities = [];
     agentState.activeAgentLoops = {};
@@ -480,6 +685,64 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.queryByTestId('architecture-open-branch-arch-run-missing-analyst')).not.toBeInTheDocument();
     expect(screen.queryByTestId('architecture-run-branch-transcript-arch-run-missing-analyst')).not.toBeInTheDocument();
     expect(screen.queryByTestId('architecture-run-transcript-branch-arch-run-missing-analyst')).not.toBeInTheDocument();
+  });
+
+  it('hides branch open controls for untouched placeholder architecture sessions that have no transcript or live activity', () => {
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-run', runId: 'run-placeholder' };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'arch-run-placeholder-analyst',
+        personaId: 'web-research',
+        title: 'Strategic Decision Council: Analyst',
+        kind: 'subagent',
+        parentSessionId: 'arch-run-placeholder-root',
+        createdAt: 2,
+        updatedAt: 2,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'analyst',
+          architectureContext: {
+            architectureRunId: 'run-placeholder',
+            roleSlotId: 'analyst',
+            roleSlotType: 'participant',
+            displayLabel: 'Analyst',
+          },
+        },
+      },
+    ];
+    sessionState.messages = [
+      {
+        id: 'arch-placeholder',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: '### Finalizer',
+        createdAt: 3,
+        architectureRun: {
+          runId: 'run-placeholder',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          trace: [],
+          routeHops: [],
+          graphNodes: [
+            { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
+          ],
+          graphEdges: [],
+        } as NonNullable<ChatMessage['architectureRun']> & {
+          graphNodes: Array<{ id: string; label: string; kind: 'role'; status: 'pending'; eventIds: string[] }>;
+          graphEdges: [];
+        },
+      },
+    ];
+    sessionState.sessionMessages = { 'session-1': sessionState.messages };
+
+    render(<CanvasPanel />);
+
+    expect(screen.queryByTestId('architecture-open-branch-arch-run-placeholder-analyst')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('architecture-run-branch-transcript-arch-run-placeholder-analyst')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('architecture-run-transcript-branch-arch-run-placeholder-analyst')).not.toBeInTheDocument();
   });
 
   it('shows a waiting state for a real focused architecture branch before its transcript hydrates', () => {

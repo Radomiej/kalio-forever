@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BrainCircuit, ChevronDown } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
@@ -13,6 +13,7 @@ import { isCliChildToolName, resolveCLIChildProjectionStatus, shouldRenderLiveCl
 import { deriveVisibleTurnItems } from './agentTurnVisibleItems';
 import { isMessageLiveStreaming } from './agentTurnStreaming';
 import { eventBus } from '../../services/eventBus';
+import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
 
 interface Props {
   turn: AgentTurn;
@@ -58,7 +59,7 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
 // ─── AgentTurnBubble ──────────────────────────────────────────────────────────
 
 export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props) {
-  const { messages, sessions, streamingChunks, thinkingChunks } = useSessionStore();
+  const { messages, sessions, sessionMessages, streamingChunks, thinkingChunks } = useSessionStore();
   const [submittedBudgetRequestId, setSubmittedBudgetRequestId] = useState<string | null>(null);
   const {
     callIdToName: persistentCallIdToName,
@@ -67,6 +68,10 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     cliChildProjections,
     pendingBudgetApprovals,
     setPendingBudgetApproval,
+    pendingConfirmations,
+    activeAgentLoops,
+    queuedDepthBySession,
+    sessionStatusSnapshots,
   } = useAgentStore();
   const pendingBudgetApproval = pendingBudgetApprovals[turn.sessionId];
 
@@ -133,7 +138,29 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     ? finalAnswerForArchitectureRun(turnArchitectureRun)
     : null;
   const visibleItems = deriveVisibleTurnItems(turn.items, messages, streamingChunks, turn.done);
-  const knownBranchSessionIds = new Set(sessions.map((session) => session.id));
+  const knownBranchSessionIds = useMemo(() => {
+    const activeLoopSessionIds = new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId));
+    const { renderableSessions } = filterRenderableSessions(
+      sessions,
+      sessionMessages ?? {},
+      {
+        pendingConfirmations,
+        pendingBudgetApprovals,
+        activeLoopSessionIds,
+        queuedDepthBySession: queuedDepthBySession ?? {},
+        sessionStatusSnapshots: sessionStatusSnapshots ?? {},
+      },
+    );
+    return new Set(renderableSessions.map((session) => session.id));
+  }, [
+    activeAgentLoops,
+    pendingBudgetApprovals,
+    pendingConfirmations,
+    queuedDepthBySession,
+    sessionMessages,
+    sessionStatusSnapshots,
+    sessions,
+  ]);
 
   return (
     <div data-testid="agent-turn-bubble" className="flex justify-start mb-2 w-full">

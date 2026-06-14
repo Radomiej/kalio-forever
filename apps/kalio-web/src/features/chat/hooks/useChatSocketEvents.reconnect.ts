@@ -1,4 +1,4 @@
-import type { ChatMessage } from '@kalio/types';
+import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { CliChildSocketDeps } from './useChatSocketEvents.cliChild';
 import {
   identifyCliChildProjections,
@@ -7,6 +7,8 @@ import {
 } from './useChatSocketEvents.cliChild';
 import { buildTurnsFromHistory } from '../chatUtils';
 import { reloadSessionHistoryWithArchitectureProjection } from '../architectureReloadHydration';
+import { hasWorkflowEnvelopeHistory } from '../workflowEnvelopeRecovery';
+import { normalizeConversationSessionId } from '../../sessions/sessionTreeDisplay';
 
 export interface SocketReconnectDeps {
   cliChild: CliChildSocketDeps;
@@ -15,12 +17,15 @@ export interface SocketReconnectDeps {
   clearToolActivities: (sessionId?: string) => void;
   removeActiveAgentLoop: (sessionId: string) => void;
   setPendingConfirmation: (sessionId: string, value: null) => void;
+  setActiveSession?: (sessionId: string) => void;
+  setSessions?: (sessions: ChatSession[]) => void;
   getActiveSessionId: () => string | null;
   getSessionMessages: (sessionId: string) => ChatMessage[];
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
   setAgentTurns: (turns: ReturnType<typeof buildTurnsFromHistory>, sessionId?: string | null) => void;
   hasActiveLoopForSession: (sessionId: string) => boolean;
   fetchMessages: (sessionId: string) => Promise<ChatMessage[]>;
+  fetchSessions?: () => Promise<ChatSession[]>;
   onContextInvalidated?: () => void;
 }
 
@@ -37,25 +42,59 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
   deps.clearToolActivities(sid);
   deps.removeActiveAgentLoop(sid);
   deps.setPendingConfirmation(sid, null);
-  identifyCliChildrenOnReconnect(deps.cliChild, sid);
 
-  void reloadSessionHistoryWithArchitectureProjection({
-    sessionId: sid,
-    getActiveSessionId: deps.getActiveSessionId,
-    getSessionMessages: deps.getSessionMessages,
-    setMessages: deps.setMessages,
-    setAgentTurns: deps.setAgentTurns,
-    fetchMessages: deps.fetchMessages,
-  })
-    .then((hydratedMessages) => {
-      if (!hydratedMessages) return;
-      const projections = rebuildCliChildProjectionsFromHistory(deps.cliChild, sid, hydratedMessages);
-      identifyCliChildProjections(deps.cliChild, projections, sid);
-      if (!deps.hasActiveLoopForSession(sid)) {
-        deps.setAgentTurns(buildTurnsFromHistory(hydratedMessages, sid), sid);
+  void (async () => {
+    let refreshedSessions: ChatSession[] | null = null;
+    if (deps.fetchSessions && deps.setSessions) {
+      try {
+        refreshedSessions = await deps.fetchSessions();
+        deps.setSessions(refreshedSessions);
+      } catch (err) {
+        console.error(
+          '[ChatInterface] reconnect session refresh failed',
+          err instanceof Error ? err : new Error(String(err)),
+        );
       }
-      deps.onContextInvalidated?.();
-    })
+    }
+
+    const currentSelection = deps.getActiveSessionId() ?? sid;
+    const reconnectedSessionId = refreshedSessions
+      ? normalizeConversationSessionId(currentSelection, refreshedSessions) ?? currentSelection
+      : currentSelection;
+
+    identifyCliChildrenOnReconnect(deps.cliChild, reconnectedSessionId);
+
+    if (reconnectedSessionId !== currentSelection) {
+      deps.setActiveSession?.(reconnectedSessionId);
+    }
+    if (reconnectedSessionId !== sid) {
+      deps.clearToolActivities(reconnectedSessionId);
+      deps.removeActiveAgentLoop(reconnectedSessionId);
+      deps.setPendingConfirmation(reconnectedSessionId, null);
+    }
+
+    const hydratedMessages = await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: reconnectedSessionId,
+      getActiveSessionId: () => {
+        const activeSessionId = deps.getActiveSessionId();
+        if (!activeSessionId || !refreshedSessions) {
+          return activeSessionId;
+        }
+        return normalizeConversationSessionId(activeSessionId, refreshedSessions) ?? activeSessionId;
+      },
+      getSessionMessages: deps.getSessionMessages,
+      setMessages: deps.setMessages,
+      setAgentTurns: deps.setAgentTurns,
+      fetchMessages: deps.fetchMessages,
+    });
+    if (!hydratedMessages) return;
+    const projections = rebuildCliChildProjectionsFromHistory(deps.cliChild, reconnectedSessionId, hydratedMessages);
+    identifyCliChildProjections(deps.cliChild, projections, reconnectedSessionId);
+    if (hasWorkflowEnvelopeHistory(hydratedMessages) || !deps.hasActiveLoopForSession(reconnectedSessionId)) {
+      deps.setAgentTurns(buildTurnsFromHistory(hydratedMessages, reconnectedSessionId), reconnectedSessionId);
+    }
+    deps.onContextInvalidated?.();
+  })()
     .catch((err: unknown) => {
       console.error('[ChatInterface] reconnect history reload failed', err instanceof Error ? err : new Error(String(err)));
     });

@@ -64,6 +64,7 @@ function toExecutionNode(input: {
   branchMessages: ChatMessage[];
 }): ExecutionGraphNode {
   const { node, graph, branchSessionId, branchMessages } = input;
+  const openableBranchSessionId = node.kind === 'role' ? branchSessionId : undefined;
   const toolEvidence = extractToolEvidence(node);
   const incompleteReason = extractIncompleteReason(node);
   const routeHops = graph.routeHops ?? [];
@@ -78,9 +79,9 @@ function toExecutionNode(input: {
       eventId,
       nodeId: node.id,
       nextNodeId: matchingHops.find((hop) => hop.fromNodeId === node.id)?.toNodeId,
-      stream: branchSessionId ? {
+      stream: openableBranchSessionId ? {
         streamGroupId: graph.runId,
-        branchSessionId,
+        branchSessionId: openableBranchSessionId,
         status: node.status === 'completed' ? 'completed' as const : 'started' as const,
         chunkCount: branchMessages.length,
         text: branchMessages.map((message) => message.content).filter(Boolean).join('\n'),
@@ -95,12 +96,12 @@ function toExecutionNode(input: {
     subtitle: [
       node.kind,
       node.status,
-      branchSessionId ? 'branch session' : undefined,
+      openableBranchSessionId ? 'branch session' : undefined,
     ].filter(Boolean).join(' / '),
     detail: [
       node.behavior?.mode?.replaceAll('_', ' '),
       incompleteReason ? 'incomplete' : undefined,
-      branchMessages.length > 0 ? `${branchMessages.length} branch messages loaded` : undefined,
+      openableBranchSessionId && branchMessages.length > 0 ? `${branchMessages.length} branch messages loaded` : undefined,
       node.eventIds.length > 0 ? `${node.eventIds.length} events` : undefined,
     ].filter(Boolean).join(' - '),
     status: executionStatusFromArchitectureStatus(graph.status, node.status),
@@ -110,7 +111,7 @@ function toExecutionNode(input: {
     y: 0,
     width: 260,
     height: 260,
-    sessionId: branchSessionId,
+    sessionId: openableBranchSessionId,
     payload: {
       kind: 'architecture-run',
       summary,
@@ -119,12 +120,13 @@ function toExecutionNode(input: {
         source: matchingHops[0].source,
         fromNodeId: matchingHops[0].fromNodeId,
         toNodeId: matchingHops[0].toNodeId,
-      branchSessionId,
-      chunkCount: branchMessages.length,
-      streamStatus: node.status,
-      contentPreview: branchMessages.find((message) => message.content.trim().length > 0)?.content,
-      incompleteReason,
-      toolEvidence,
+        branchSessionOpenable: Boolean(openableBranchSessionId),
+        branchSessionId: openableBranchSessionId,
+        chunkCount: branchMessages.length,
+        streamStatus: node.status,
+        contentPreview: branchMessages.find((message) => message.content.trim().length > 0)?.content,
+        incompleteReason,
+        toolEvidence,
       } : undefined,
     },
   };
