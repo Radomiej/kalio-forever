@@ -1,13 +1,13 @@
 import type { ChatMessage, ChatSession } from '@kalio/types';
+import type { AgentTurn } from '../../../store/sessionStore';
+import { useSessionStore } from '../../../store/sessionStore';
 import type { CliChildSocketDeps } from './useChatSocketEvents.cliChild';
 import {
   identifyCliChildProjections,
   identifyCliChildrenOnReconnect,
   rebuildCliChildProjectionsFromHistory,
 } from './useChatSocketEvents.cliChild';
-import { buildTurnsFromHistory } from '../chatUtils';
-import { reloadSessionHistoryWithArchitectureProjection } from '../architectureReloadHydration';
-import { hasWorkflowEnvelopeHistory } from '../workflowEnvelopeRecovery';
+import { hydrateSessionHistoryIntoStore } from '../historyHydration';
 import { normalizeConversationSessionId } from '../../sessions/sessionTreeDisplay';
 
 export interface SocketReconnectDeps {
@@ -22,7 +22,7 @@ export interface SocketReconnectDeps {
   getActiveSessionId: () => string | null;
   getSessionMessages: (sessionId: string) => ChatMessage[];
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
-  setAgentTurns: (turns: ReturnType<typeof buildTurnsFromHistory>, sessionId?: string | null) => void;
+  setAgentTurns: (turns: AgentTurn[], sessionId?: string | null) => void;
   hasActiveLoopForSession: (sessionId: string) => boolean;
   fetchMessages: (sessionId: string) => Promise<ChatMessage[]>;
   fetchSessions?: () => Promise<ChatSession[]>;
@@ -73,7 +73,7 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
       deps.setPendingConfirmation(reconnectedSessionId, null);
     }
 
-    const hydratedMessages = await reloadSessionHistoryWithArchitectureProjection({
+    const hydratedMessages = await hydrateSessionHistoryIntoStore({
       sessionId: reconnectedSessionId,
       getActiveSessionId: () => {
         const activeSessionId = deps.getActiveSessionId();
@@ -82,17 +82,18 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
         }
         return normalizeConversationSessionId(activeSessionId, refreshedSessions) ?? activeSessionId;
       },
+      getSessions: () => refreshedSessions ?? useSessionStore.getState().sessions,
       getSessionMessages: deps.getSessionMessages,
       setMessages: deps.setMessages,
       setAgentTurns: deps.setAgentTurns,
+      getSessionAgentTurns: (sessionId) => useSessionStore.getState().getSessionAgentTurns(sessionId),
+      getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
+      hasActiveLoopForSession: deps.hasActiveLoopForSession,
       fetchMessages: deps.fetchMessages,
     });
     if (!hydratedMessages) return;
     const projections = rebuildCliChildProjectionsFromHistory(deps.cliChild, reconnectedSessionId, hydratedMessages);
     identifyCliChildProjections(deps.cliChild, projections, reconnectedSessionId);
-    if (hasWorkflowEnvelopeHistory(hydratedMessages) || !deps.hasActiveLoopForSession(reconnectedSessionId)) {
-      deps.setAgentTurns(buildTurnsFromHistory(hydratedMessages, reconnectedSessionId), reconnectedSessionId);
-    }
     deps.onContextInvalidated?.();
   })()
     .catch((err: unknown) => {

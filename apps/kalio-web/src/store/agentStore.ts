@@ -323,8 +323,17 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
 
   removeActiveAgentLoop: (sessionId, agentRun) =>
     set((s) => {
-      const nextActiveAgentLoops = { ...s.activeAgentLoops };
-      delete nextActiveAgentLoops[agentRun?.agentRunId ?? sessionId];
+      const nextActiveAgentLoops = Object.fromEntries(
+        Object.entries(s.activeAgentLoops).filter(([key, loop]) => {
+          if (agentRun?.agentRunId && key === agentRun.agentRunId) {
+            return false;
+          }
+          if (key === sessionId) {
+            return false;
+          }
+          return loop.sessionId !== sessionId;
+        }),
+      );
       return { activeAgentLoops: nextActiveAgentLoops };
     }),
 

@@ -6,6 +6,8 @@ import type { RAAppGroup, RAAppSummary } from '@kalio/types';
 const {
   addSession,
   setActiveSession,
+  setMessages,
+  setAgentTurns,
   setPendingMessage,
   getRAApps,
   getRAAppGroups,
@@ -18,6 +20,8 @@ const {
 } = vi.hoisted(() => ({
   addSession: vi.fn(),
   setActiveSession: vi.fn(),
+  setMessages: vi.fn(),
+  setAgentTurns: vi.fn(),
   setPendingMessage: vi.fn(),
   getRAApps: vi.fn<() => Promise<RAAppSummary[]>>(),
   getRAAppGroups: vi.fn<() => Promise<RAAppGroup[]>>(),
@@ -72,6 +76,8 @@ vi.mock('../../store/sessionStore', () => ({
     sessions: Array<{ id: string; title: string; updatedAt: number }>;
     addSession: typeof addSession;
     setActiveSession: typeof setActiveSession;
+    setMessages: typeof setMessages;
+    setAgentTurns: typeof setAgentTurns;
     setPendingMessage: typeof setPendingMessage;
   }) => unknown) => selector({
     sessions: [
@@ -79,6 +85,8 @@ vi.mock('../../store/sessionStore', () => ({
     ],
     addSession,
     setActiveSession,
+    setMessages,
+    setAgentTurns,
     setPendingMessage,
   }),
 }));

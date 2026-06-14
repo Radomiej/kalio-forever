@@ -564,4 +564,133 @@ describe('handleSocketReconnect', () => {
       );
     });
   });
+
+  it('does not replace a live follow-up workflow turn on reconnect when hydrated history still lacks that prompt run', async () => {
+    useSessionStore.setState({
+      activeSessionId: 'session-1',
+      sessions: [
+        { id: 'session-1', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 4 },
+      ],
+      messages: [],
+      sessionMessages: { 'session-1': [] },
+      agentTurns: [
+        {
+          id: 'turn-old',
+          sessionId: 'session-1',
+          promptMessageId: 'user-1',
+          turnKind: 'workflow-envelope',
+          items: [{ kind: 'text', messageId: 'arch-old' }],
+          done: true,
+        },
+        {
+          id: 'turn-new',
+          sessionId: 'session-1',
+          promptMessageId: 'user-2',
+          turnKind: 'workflow-envelope',
+          items: [{ kind: 'text', messageId: 'architecture:user-2:pending' }],
+          done: false,
+        },
+      ],
+      sessionAgentTurns: {
+        'session-1': [
+          {
+            id: 'turn-old',
+            sessionId: 'session-1',
+            promptMessageId: 'user-1',
+            turnKind: 'workflow-envelope',
+            items: [{ kind: 'text', messageId: 'arch-old' }],
+            done: true,
+          },
+          {
+            id: 'turn-new',
+            sessionId: 'session-1',
+            promptMessageId: 'user-2',
+            turnKind: 'workflow-envelope',
+            items: [{ kind: 'text', messageId: 'architecture:user-2:pending' }],
+            done: false,
+          },
+        ],
+      },
+      activeTurnId: 'turn-new',
+      sessionActiveTurnIds: { 'session-1': 'turn-new' },
+      pendingMessage: null,
+      pendingRAAppId: null,
+    });
+
+    const setMessages = vi.fn((messages, sessionId?: string | null) => {
+      useSessionStore.getState().setMessages(messages, sessionId);
+    });
+    const setAgentTurns = vi.fn((turns, sessionId?: string | null) => {
+      useSessionStore.getState().setAgentTurns(turns, sessionId);
+    });
+
+    handleSocketReconnect({
+      cliChild: {
+        upsertCLIChildProjection: vi.fn(),
+        updateCLIChildProjection: vi.fn(),
+        rebuildCLIChildProjections: vi.fn(),
+        appendCLIAgentChunk: vi.fn(),
+        registerCallId: vi.fn(),
+        getAgentState: () => ({
+          callIdToName: {},
+          toolActivities: [],
+          cliChildProjections: {},
+          cliAgentOutput: {},
+        }),
+        getSessionState: () => ({
+          activeSessionId: useSessionStore.getState().activeSessionId,
+          sessions: useSessionStore.getState().sessions,
+        }),
+        identifySession: vi.fn(),
+      },
+      setStreaming: vi.fn(),
+      clearToolArgProgressTracking: vi.fn(),
+      clearToolActivities: vi.fn(),
+      removeActiveAgentLoop: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+      getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
+      setMessages,
+      setAgentTurns,
+      hasActiveLoopForSession: () => true,
+      fetchMessages: async () => [
+        {
+          id: 'user-1',
+          sessionId: 'session-1',
+          role: 'user',
+          content: 'First workflow prompt.',
+          createdAt: 1,
+        },
+        {
+          id: 'arch-old',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '',
+          createdAt: 2,
+          architectureRun: {
+            runId: 'run-old',
+            schemaId: 'strategic-decision-council',
+            status: 'completed',
+            hostProjectionKind: 'workflow-envelope',
+            finalArtifact: 'Old final answer',
+            trace: [],
+            routeHops: [],
+          },
+        },
+        {
+          id: 'user-2',
+          sessionId: 'session-1',
+          role: 'user',
+          content: 'Follow-up workflow prompt.',
+          createdAt: 3,
+        },
+      ],
+      onContextInvalidated: vi.fn(),
+    });
+
+    await waitFor(() => {
+      expect(setMessages).toHaveBeenCalled();
+    });
+    expect(setAgentTurns).not.toHaveBeenCalled();
+  });
 });

@@ -4,10 +4,10 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 import type { ChatSession, ChatMessage, Persona } from '@kalio/types';
-import { buildTurnsFromHistory } from '../chat/chatUtils';
-import { reloadSessionHistoryWithArchitectureProjection } from '../chat/architectureReloadHydration';
-import { hasWorkflowEnvelopeHistory, needsWorkflowEnvelopeRecovery } from '../chat/workflowEnvelopeRecovery';
+import { hydrateSessionHistoryIntoStore } from '../chat/historyHydration';
+import { needsWorkflowEnvelopeRecovery } from '../chat/workflowEnvelopeRecovery';
 import { workflowEnvelopeRuntimeStateForSession } from './sessionWorkflowRuntimeState';
+import { createAndActivateHostSession } from '../chat/launch/sessionLaunchShared';
 import {
   SESSION_ORIGIN_FILTERS,
   buildSessionListEntries,
@@ -21,6 +21,7 @@ import {
   displayTitleForSession,
   hasExpandedAncestor,
   normalizeConversationSessionId,
+  visibleConversationParentId,
 } from './sessionTreeDisplay';
 import { filterRenderableSessions } from './sessionRenderableFilter';
 import { renderSessionChildRows, SessionPanelSessionItem } from './SessionPanelRow';
@@ -55,9 +56,11 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     setSessions,
     setActiveSession,
     addSession,
+    getSessionMessages,
+    getSessionAgentTurns,
+    getSessionActiveTurnId,
     setMessages,
     setAgentTurns,
-    getSessionActiveTurnId,
     removeSession,
     updateSession,
   } = useSessionStore();
@@ -101,14 +104,11 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
           {},
           {},
         );
-        const sessionById = new Map(renderableSessions.map((session) => [session.id, session]));
-        const selectableSessions = renderableSessions.filter((session) => isVisibleSidebarSession(session, null, 'all', sessionById));
-        if (!useSessionStore.getState().activeSessionId && selectableSessions.length > 0) {
+        if (!useSessionStore.getState().activeSessionId) {
           const storedSessionId = normalizeConversationSessionId(loadStoredActiveSessionId(), orderedSessions);
-          const initialSessionId = storedSessionId && renderableSessions.some((session) => session.id === storedSessionId)
-            ? storedSessionId
-            : selectableSessions[0].id;
-          void selectSession(initialSessionId);
+          if (storedSessionId && renderableSessions.some((session) => session.id === storedSessionId)) {
+            void selectSession(storedSessionId);
+          }
         }
       })
       .catch((err: unknown) => console.error('[SessionPanel] load failed', err))
@@ -137,12 +137,16 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
 
   const reloadSessionHistory = useCallback(async (sessionId: string) => {
     try {
-      const hydratedMessages = await reloadSessionHistoryWithArchitectureProjection({
+      const hydratedMessages = await hydrateSessionHistoryIntoStore({
         sessionId,
         getActiveSessionId: () => useSessionStore.getState().activeSessionId,
-        getSessionMessages: (targetSessionId) => useSessionStore.getState().getSessionMessages(targetSessionId),
+        getSessions: () => sessions,
+        getSessionMessages,
         setMessages,
         setAgentTurns,
+        getSessionAgentTurns,
+        getSessionActiveTurnId,
+        hasActiveLoopForSession: (targetSessionId) => useAgentStore.getState().hasActiveLoopForSession(targetSessionId),
         fetchMessages: async (targetSessionId) => {
           const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${targetSessionId}/messages`);
           return response.data;
@@ -152,29 +156,23 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         return null;
       }
 
-      const hasActiveLoop = useAgentStore.getState().hasActiveLoopForSession?.(sessionId) ?? false;
-      const hasActiveTurn = Boolean(getSessionActiveTurnId(sessionId));
-      if (hasWorkflowEnvelopeHistory(hydratedMessages) || !hasActiveLoop || !hasActiveTurn) {
-        setAgentTurns(buildTurnsFromHistory(hydratedMessages, sessionId), sessionId);
-      }
-
       return hydratedMessages;
     } catch (err) {
       console.error('[SessionPanel] load messages failed', err);
       return null;
     }
-  }, [getSessionActiveTurnId, setAgentTurns, setMessages]);
+  }, [getSessionActiveTurnId, getSessionAgentTurns, getSessionMessages, sessions, setAgentTurns, setMessages]);
 
   const createSession = async () => {
     try {
-      const { data } = await apiClient.post<ChatSession>('/api/sessions', {
+      const session = await createAndActivateHostSession({
         personaId: newPersonaId,
-        title: 'New Chat',
+        addSession,
+        setActiveSession,
+        setMessages,
+        setAgentTurns,
       });
-      addSession(data);
-      setActiveSession(data.id);
-      persistActiveSessionId(data.id);
-      setMessages([]);
+      persistActiveSessionId(session.id);
       onSelect?.();
     } catch (err) {
       console.error('[SessionPanel] create failed', err);
@@ -200,6 +198,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
 
   const sidebarSessions = originFilter === 'archived' ? archivedSessions : sessions;
   const orderedSessions = sortSessionsForSidebar(sidebarSessions);
+  const allSessionById = new Map(orderedSessions.map((session) => [session.id, session]));
   const activeLoopSessionIds = new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId));
   const { renderableSessions, architectureSessionRuntimeStates } = filterRenderableSessions(
     orderedSessions,
@@ -213,10 +212,11 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     },
   );
   const sessionById = new Map(renderableSessions.map((session) => [session.id, session]));
+  const visibleSessionById = new Map(renderableSessions.map((session) => [session.id, session]));
   const visibleSessions = renderableSessions
     .filter((session) => isVisibleSidebarSession(session, activeSessionId, originFilter, sessionById));
   const sessionListEntries = buildSessionListEntries(renderableSessions, activeSessionId, originFilter);
-  const childSessionsByParent = buildChildSessionsByParent(renderableSessions);
+  const childSessionsByParent = buildChildSessionsByParent(orderedSessions);
   const descendantCountByParent = new Map<string, number>();
   const activeOriginFilter = SESSION_ORIGIN_FILTERS.find((filter) => filter.id === originFilter) ?? SESSION_ORIGIN_FILTERS[0];
   const activeSession = activeSessionId
@@ -278,6 +278,31 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     activeWorkflowRuntimeState,
     originFilter,
   ]);
+
+  useEffect(() => {
+    if ((originFilter !== 'all' && originFilter !== 'user') || !activeSessionId) {
+      return;
+    }
+
+    const activeVisibleSession = visibleSessionById.get(activeSessionId);
+    if (!activeVisibleSession) {
+      return;
+    }
+
+    const parentId = visibleConversationParentId(activeVisibleSession, allSessionById);
+    if (!parentId) {
+      return;
+    }
+
+    setExpandedRoots((current) => {
+      if (current.has(parentId)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(parentId);
+      return next;
+    });
+  }, [activeSessionId, allSessionById, originFilter, visibleSessionById]);
 
   useEffect(() => {
     if (!activeSessionId || !activeWorkflowRecoveryNeeded) {

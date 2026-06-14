@@ -38,7 +38,7 @@ export function visibleConversationTreeChildren(
   childSessionsByParent: Map<string, ChatSession[]>,
 ): ChatSession[] {
   return (childSessionsByParent.get(sessionId) ?? []).flatMap((child) => (
-    isArchitectureWorkflowContainerSession(child)
+    isArchitectureWorkflowContainerSession(child) || isTechnicalArchitectureSession(child)
       ? visibleConversationTreeChildren(child.id, childSessionsByParent)
       : [child]
   ));
@@ -84,6 +84,31 @@ export function hasExpandedAncestor(
     parentId = sessionById.get(parentId)?.parentSessionId;
   }
   return false;
+}
+
+export function visibleConversationParentId(
+  session: ChatSession,
+  sessionById: Map<string, ChatSession>,
+): string | null {
+  let parentId = session.parentSessionId;
+  const visited = new Set<string>();
+
+  while (parentId) {
+    if (visited.has(parentId)) {
+      return null;
+    }
+    visited.add(parentId);
+    const parent = sessionById.get(parentId);
+    if (!parent) {
+      return null;
+    }
+    if (!isArchitectureWorkflowContainerSession(parent)) {
+      return parent.id;
+    }
+    parentId = parent.parentSessionId;
+  }
+
+  return null;
 }
 
 export function buildArchitectureSessionRuntimeStates(

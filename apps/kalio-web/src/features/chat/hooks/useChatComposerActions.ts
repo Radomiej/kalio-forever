@@ -1,20 +1,11 @@
 import { useRef, type MutableRefObject } from 'react';
-import { nanoid } from 'nanoid';
-import type { ChatMessage, VFSFile } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
-import { useSessionStore, type AgentTurn } from '../../../store/sessionStore';
-import { getSessionVfsFiles } from '../../../services/apiClient';
-import { eventBus } from '../../../services/eventBus';
-import { buildArchitectureRunTurnProjection } from '../architectureChatSummary';
-import { replaceArchitectureRunTurn } from '../architectureTurnProjection';
-import { startArchitectureRun, startGoalGuardAgentFlowRun } from '../../architect/architect.api';
+import { useSessionStore } from '../../../store/sessionStore';
 import type { ArchitectSchema } from '../../architect/architect.types';
 import {
-  buildArchitectureRunContext,
-  buildGoalGuardRunContext,
-  persistArchitectureSessionRuntimeContext,
-  persistSessionLaunchRuntimeContext,
-} from '../launch/launchContext';
+  launchSingleChatPrompt,
+  launchWorkflowPrompt,
+} from '../launch/sessionLaunchShared';
 
 interface UseChatComposerActionsArgs {
   architectures: ArchitectSchema[];
@@ -61,236 +52,97 @@ export function useChatComposerActions({
     getContextForSession,
   } = useAgentStore();
 
+  const handleSend = async (content: string, personaId: string, options?: { interrupt?: boolean }) => {
+    if (!activeSessionId) {
+      return;
+    }
+
+    const session = sessions.find((item) => item.id === activeSessionId) ?? {
+      id: activeSessionId,
+      personaId: 'default',
+      title: 'New Chat',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    lastSentContentRef.current = content;
+
+    try {
+      await launchSingleChatPrompt({
+        session,
+        content,
+        personaId,
+        projectPath,
+        isStreaming,
+        hasActiveLoop: typeof hasActiveLoopForSession === 'function'
+          ? hasActiveLoopForSession(activeSessionId)
+          : false,
+        interrupt: options?.interrupt === true,
+        clearToolActivities,
+        setStreaming,
+        setAwaitingFirstChunk,
+        addMessage,
+        updateSession,
+        setError,
+        setRetryError,
+      });
+    } catch (err: unknown) {
+      console.error('[ChatInterface] session launch runtime context update failed', err instanceof Error ? err : new Error(String(err)));
+      setError('Failed to save project scope for this session.');
+    }
+  };
+
+  const handleArchitectureRun = async (content: string, schemaId: string) => {
+    if (!activeSessionId || isStreaming) {
+      return;
+    }
+
+    const session = sessions.find((item) => item.id === activeSessionId) ?? {
+      id: activeSessionId,
+      personaId: 'default',
+      title: 'New Chat',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    lastSentContentRef.current = content;
+    setDraftUserMessage('');
+    const activeToolNames = getContextForSession(activeSessionId)?.activeToolNames ?? [];
+
+    try {
+      await launchWorkflowPrompt({
+        session,
+        content,
+        schemaId,
+        architectures,
+        projectPath,
+        activeToolNames,
+        clearToolActivities,
+        setStreaming,
+        setAwaitingFirstChunk,
+        addMessage,
+        setMessages,
+        setAgentTurns,
+        getSessionMessages,
+        getSessionAgentTurns,
+        updateSession,
+        setError,
+        setRetryError,
+        onComplete: requestGeneratedTitleIfNeeded,
+      });
+    } catch (err: unknown) {
+      console.error('[ChatInterface] architecture launch runtime context update failed', err instanceof Error ? err : new Error(String(err)));
+      setError('Failed to save project scope for this session.');
+    }
+  };
+
   const handleComposerSend = (content: string, personaId: string, options?: { interrupt?: boolean }) => {
     if (selectedArchitectureId !== 'single-chat') {
       void handleArchitectureRun(content, selectedArchitectureId);
       return;
     }
+
     void handleSend(content, personaId, options);
-  };
-
-  const handleSend = async (content: string, personaId: string, options?: { interrupt?: boolean }) => {
-    if (!activeSessionId) return;
-    if (!eventBus.connected) {
-      setError('Backend connection is offline. Reconnect and retry this message.');
-      setRetryError('Connection is offline. Kalio will resync the session after reconnect.');
-      return;
-    }
-
-    setError(null);
-    setRetryError(null);
-    lastSentContentRef.current = content;
-    const isActiveTurn = hasActiveLoopForSession(activeSessionId) || isStreaming;
-    const shouldInterrupt = options?.interrupt === true;
-    if (!isActiveTurn || shouldInterrupt) {
-      clearToolActivities(activeSessionId);
-    }
-
-    const session = sessions.find((item) => item.id === activeSessionId);
-
-    try {
-      await persistSessionLaunchRuntimeContext(
-        activeSessionId,
-        projectPath,
-        session?.runtimeContext,
-        updateSession,
-      );
-    } catch (err: unknown) {
-      console.error('[ChatInterface] session launch runtime context update failed', err instanceof Error ? err : new Error(String(err)));
-      setError('Failed to save project scope for this session.');
-      return;
-    }
-
-    const userMsg: ChatMessage = {
-      id: nanoid(),
-      sessionId: activeSessionId,
-      role: 'user',
-      content,
-      createdAt: Date.now(),
-    };
-    addMessage(userMsg);
-
-    if (!isActiveTurn || shouldInterrupt) {
-      setAwaitingFirstChunk(true);
-      setStreaming(true);
-    }
-    console.debug('[ChatInterface] sendMessage', {
-      sessionId: activeSessionId,
-      content: content.slice(0, 60),
-      interrupt: shouldInterrupt,
-      queued: isActiveTurn && !shouldInterrupt,
-    });
-
-    const sent = eventBus.sendMessage({
-      sessionId: activeSessionId,
-      content,
-      personaId,
-      interrupt: shouldInterrupt,
-    });
-
-    if (!sent) {
-      setAwaitingFirstChunk(false);
-      setStreaming(false);
-      setError('Backend connection is offline. Reconnect and retry this message.');
-    }
-  };
-
-  const handleArchitectureRun = async (content: string, schemaId: string) => {
-    if (!activeSessionId) return;
-    if (isStreaming) return;
-    const schema = architectures.find((item) => item.id === schemaId);
-    if (!schema) {
-      setError('Selected architecture is no longer available. Refresh the registry and retry.');
-      return;
-    }
-
-    setError(null);
-    setRetryError(null);
-    lastSentContentRef.current = content;
-    setDraftUserMessage('');
-    clearToolActivities(activeSessionId);
-    const session = sessions.find((item) => item.id === activeSessionId);
-
-    try {
-      await persistArchitectureSessionRuntimeContext(
-        activeSessionId,
-        projectPath,
-        session?.runtimeContext,
-        {
-          schemaId: schema.id,
-          schemaName: schema.name,
-          displayLabel: schema.name,
-        },
-        updateSession,
-      );
-    } catch (err: unknown) {
-      console.error('[ChatInterface] architecture launch runtime context update failed', err instanceof Error ? err : new Error(String(err)));
-      setError('Failed to save project scope for this session.');
-      return;
-    }
-
-    const userMessageId = nanoid();
-    addMessage({
-      id: userMessageId,
-      sessionId: activeSessionId,
-      role: 'user',
-      content,
-      createdAt: Date.now(),
-    });
-    const pendingAssistantMessageId = `architecture:${userMessageId}:pending`;
-    addMessage({
-      id: pendingAssistantMessageId,
-      sessionId: activeSessionId,
-      role: 'assistant',
-      content: 'Architecture run is starting.',
-      architectureRun: {
-        runId: pendingAssistantMessageId,
-        schemaId,
-        status: 'running',
-        hostProjectionKind: 'workflow-envelope',
-        trace: [],
-        routeHops: [],
-      },
-      createdAt: Date.now(),
-    });
-    const currentTurns = getSessionAgentTurns(activeSessionId);
-    setAgentTurns([
-      ...currentTurns,
-      {
-        id: `architecture-turn-${pendingAssistantMessageId}`,
-        sessionId: activeSessionId,
-        promptMessageId: userMessageId,
-        turnKind: 'workflow-envelope',
-        items: [{ kind: 'text', messageId: pendingAssistantMessageId }],
-        done: false,
-      },
-    ], activeSessionId);
-    setStreaming(true);
-    setAwaitingFirstChunk(true);
-
-    const addArchitectureAssistantMessage = (assistantContent: string) => {
-      const assistantMessageId = nanoid();
-      addMessage({
-        id: assistantMessageId,
-        sessionId: activeSessionId,
-        role: 'assistant',
-        content: assistantContent,
-        createdAt: Date.now(),
-      });
-      const turn: AgentTurn = {
-        id: `architecture-turn-${assistantMessageId}`,
-        sessionId: activeSessionId,
-        promptMessageId: userMessageId,
-        items: [{ kind: 'text', messageId: assistantMessageId }],
-        done: true,
-      };
-      setAgentTurns([...currentTurns, turn], activeSessionId);
-    };
-
-    try {
-      let sourceFiles: VFSFile[] = [];
-      try {
-        sourceFiles = (await getSessionVfsFiles(activeSessionId)).files;
-      } catch (err: unknown) {
-        console.error('[ChatInterface] architecture VFS context check failed', err);
-      }
-      if (sourceFiles.length === 0) {
-        console.debug('[ChatInterface] architecture run has no attached session files');
-      }
-      const contextGetter = typeof getContextForSession === 'function' ? getContextForSession : null;
-      const activeToolNames = contextGetter ? (contextGetter(activeSessionId)?.activeToolNames ?? []) : [];
-      const applyArchitectureProjection = (result: Awaited<ReturnType<typeof startArchitectureRun>>) => {
-        const projectionDone = (result.run.status !== 'queued' && result.run.status !== 'running')
-          || result.agentFlowStatus === 'waiting_on_orchestrator';
-        const projection = buildArchitectureRunTurnProjection(result, activeSessionId);
-        const currentMessages = getSessionMessages(activeSessionId)
-          .filter((message) => message.id !== pendingAssistantMessageId)
-          .filter((message) => !message.id.startsWith(`architecture:${result.run.id}:`));
-        setMessages([...currentMessages, ...projection.messages], activeSessionId);
-        const nextTurn: AgentTurn = {
-          id: `architecture-turn-${result.run.id}`,
-          sessionId: activeSessionId,
-          promptMessageId: userMessageId,
-          turnKind: projection.turnKind,
-          items: projection.turnItems,
-          done: projectionDone,
-        };
-        setAgentTurns(replaceArchitectureRunTurn({
-          currentTurns: getSessionAgentTurns(activeSessionId),
-          promptMessageId: userMessageId,
-          runId: result.run.id,
-          nextTurn,
-        }), activeSessionId);
-      };
-      const result = schemaId === 'goal-master-delivery-loop'
-        ? await startGoalGuardAgentFlowRun(
-          content,
-          buildGoalGuardRunContext(activeSessionId, sourceFiles, activeToolNames, projectPath),
-          activeSessionId,
-          applyArchitectureProjection,
-        )
-        : await startArchitectureRun(
-          schemaId,
-          content,
-          {},
-          'subagent_execution',
-          undefined,
-          buildArchitectureRunContext(activeSessionId, sourceFiles, activeToolNames, projectPath),
-          applyArchitectureProjection,
-        );
-      applyArchitectureProjection(result);
-      requestGeneratedTitleIfNeeded(activeSessionId);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to run selected architecture';
-      setError(message);
-      const currentMessages = getSessionMessages(activeSessionId)
-        .filter((item) => item.id !== pendingAssistantMessageId);
-      setMessages(currentMessages, activeSessionId);
-      addArchitectureAssistantMessage(`Architecture run failed: ${message}`);
-    } finally {
-      setAwaitingFirstChunk(false);
-      setStreaming(false);
-    }
   };
 
   handleSendRef.current = handleComposerSend;

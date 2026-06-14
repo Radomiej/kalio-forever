@@ -4,6 +4,7 @@ import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
 import { buildTurnsFromHistory } from '../chatUtils';
+import { hydrateSessionHistoryIntoStore } from '../historyHydration';
 import {
   buildExecutionGraphModel,
 } from './executionGraphModel';
@@ -36,6 +37,9 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     sessions,
     sessionMessages,
     sessionAgentTurns,
+    getSessionMessages,
+    getSessionAgentTurns,
+    getSessionActiveTurnId,
     setActiveSession,
     setMessages,
     setAgentTurns,
@@ -81,21 +85,40 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     }
 
     let cancelled = false;
-    apiClient
-      .get<ChatMessage[]>(`/api/sessions/${activeSessionId}/messages`)
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-        setMessages(response.data, activeSessionId);
-        setAgentTurns(buildTurnsFromHistory(response.data, activeSessionId), activeSessionId);
-      })
-      .catch((err: unknown) => console.error('[ExecutionGraphView] session history load failed', err));
+    void hydrateSessionHistoryIntoStore({
+      sessionId: activeSessionId,
+      getActiveSessionId: () => activeSessionId,
+      getSessions: () => sessions,
+      getSessionMessages,
+      setMessages,
+      setAgentTurns,
+      getSessionAgentTurns,
+      getSessionActiveTurnId,
+      hasActiveLoopForSession,
+      fetchMessages: async (sessionId) => {
+        const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
+        return response.data;
+      },
+    }).catch((err: unknown) => {
+      if (!cancelled) {
+        console.error('[ExecutionGraphView] session history load failed', err);
+      }
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [activeSessionId, messages, sessionMessages, setAgentTurns, setMessages]);
+  }, [
+    activeSessionId,
+    getSessionActiveTurnId,
+    getSessionAgentTurns,
+    getSessionMessages,
+    messages,
+    sessionMessages,
+    sessions,
+    setAgentTurns,
+    setMessages,
+  ]);
 
   useEffect(() => {
     const handleMouseMove = (event: globalThis.MouseEvent) => {
@@ -150,6 +173,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
   };
 
   const runningLoops = Object.values(activeAgentLoops);
+  const hasActiveLoopForSession = (sessionId: string) => runningLoops.some((loop) => loop.sessionId === sessionId);
   const runningToolActivities = toolActivities.filter((activity) => isLiveTool(activity));
   const sessionTitleById = new Map(sessions.map((session) => [session.id, session.title]));
   const activeArchitectureRunId = architectureRunIdFromRootSession(activeSessionId);
@@ -208,22 +232,39 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
 
     let cancelled = false;
     branchSessionIds.forEach((sessionId) => {
-      apiClient
-        .get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`)
-        .then((response) => {
-          if (cancelled) {
-            return;
-          }
-          setMessages(response.data, sessionId);
-          setAgentTurns(buildTurnsFromHistory(response.data, sessionId), sessionId);
-        })
-        .catch((err: unknown) => console.error('[ExecutionGraphView] branch history load failed', err));
+      void hydrateSessionHistoryIntoStore({
+        sessionId,
+        getSessions: () => sessions,
+        getSessionMessages,
+        setMessages,
+        setAgentTurns,
+        getSessionAgentTurns,
+        getSessionActiveTurnId,
+        hasActiveLoopForSession,
+        fetchMessages: async (targetSessionId) => {
+          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${targetSessionId}/messages`);
+          return response.data;
+        },
+      }).catch((err: unknown) => {
+        if (!cancelled) {
+          console.error('[ExecutionGraphView] branch history load failed', err);
+        }
+      });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [focusedGraph.messages, sessionMessages, sessions, setAgentTurns, setMessages]);
+  }, [
+    focusedGraph.messages,
+    getSessionActiveTurnId,
+    getSessionAgentTurns,
+    getSessionMessages,
+    sessionMessages,
+    sessions,
+    setAgentTurns,
+    setMessages,
+  ]);
 
   useEffect(() => {
     if (!activeSessionId || !activeArchitectureRunId) {
@@ -240,22 +281,40 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
 
     let cancelled = false;
     branchSessionIds.forEach((sessionId) => {
-      apiClient
-        .get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`)
-        .then((response) => {
-          if (cancelled) {
-            return;
-          }
-          setMessages(response.data, sessionId);
-          setAgentTurns(buildTurnsFromHistory(response.data, sessionId), sessionId);
-        })
-        .catch((err: unknown) => console.error('[ExecutionGraphView] architecture branch history load failed', err));
+      void hydrateSessionHistoryIntoStore({
+        sessionId,
+        getSessions: () => sessions,
+        getSessionMessages,
+        setMessages,
+        setAgentTurns,
+        getSessionAgentTurns,
+        getSessionActiveTurnId,
+        hasActiveLoopForSession,
+        fetchMessages: async (targetSessionId) => {
+          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${targetSessionId}/messages`);
+          return response.data;
+        },
+      }).catch((err: unknown) => {
+        if (!cancelled) {
+          console.error('[ExecutionGraphView] architecture branch history load failed', err);
+        }
+      });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [activeArchitectureRunId, activeSessionId, sessions, sessionMessages, setAgentTurns, setMessages]);
+  }, [
+    activeArchitectureRunId,
+    activeSessionId,
+    getSessionActiveTurnId,
+    getSessionAgentTurns,
+    getSessionMessages,
+    sessionMessages,
+    sessions,
+    setAgentTurns,
+    setMessages,
+  ]);
 
   const header = (
     <ExecutionGraphHeader

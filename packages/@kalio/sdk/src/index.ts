@@ -1,4 +1,4 @@
-import { io, Socket } from 'socket.io-client';
+﻿import { io, Socket } from 'socket.io-client';
 import type {
   SocketEvents,
   LLMStreamChunk,
@@ -75,7 +75,7 @@ export class KalioSDK {
     this.toolCallCount = 0; // Reset counter for new message
     this.thinkingAccum = '';
     this.inThinking = false;
-    console.groupCollapsed(`[Thread] ▶ SEND sessionId=${payload.sessionId}`);
+    console.groupCollapsed(`[Thread] â–¶ SEND sessionId=${payload.sessionId}`);
     console.log('content:', payload.content.slice(0, 80) + (payload.content.length > 80 ? '...' : ''));
     console.log('personaId:', payload.personaId);
     console.groupEnd();
@@ -87,7 +87,7 @@ export class KalioSDK {
     if (!this.socket.connected) {
       return false;
     }
-    console.log(`[Thread] ⏹ STOP sessionId=${sessionId}`);
+    console.log(`[Thread] âŹą STOP sessionId=${sessionId}`);
     this.socket.emit('chat:stop', { sessionId });
     return true;
   }
@@ -114,7 +114,7 @@ export class KalioSDK {
 
   onRaAppNativeResult(handler: RaAppNativeResultHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['raapp:native_result']) => {
-      console.groupCollapsed(`[Thread] 🔄 RAAPP NATIVE RESULT toolCallId=${payload.toolCallId}`);
+      console.groupCollapsed(`[Thread] đź”„ RAAPP NATIVE RESULT toolCallId=${payload.toolCallId}`);
       console.log('results:', payload.results);
       console.groupEnd();
       handler(payload);
@@ -132,7 +132,7 @@ export class KalioSDK {
         this.thinkingAccum += delta;
         if (delta.includes('</think>')) {
           const thinkMatch = this.thinkingAccum.match(/<think>([\s\S]*?)<\/think>/);
-          console.groupCollapsed('[Thread] 🧠 THINKING');
+          console.groupCollapsed('[Thread] đź§  THINKING');
           console.log(thinkMatch ? thinkMatch[1] : this.thinkingAccum);
           console.groupEnd();
           this.thinkingAccum = '';
@@ -147,7 +147,7 @@ export class KalioSDK {
 
   onComplete(handler: CompleteHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['chat:complete']) => {
-      console.groupCollapsed(`[Thread] ✅ COMPLETE sessionId=${payload.sessionId} messageId=${payload.messageId}`);
+      console.groupCollapsed(`[Thread] âś… COMPLETE sessionId=${payload.sessionId} messageId=${payload.messageId}`);
       console.groupEnd();
       handler(payload);
     };
@@ -157,7 +157,12 @@ export class KalioSDK {
 
   onError(handler: ErrorHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['chat:error']) => {
-      console.error('[Thread] ❌ ERROR:', payload);
+      if (payload.code === 'INTERRUPTED') {
+        console.groupCollapsed('[Thread] INTERRUPTED:', payload);
+        console.groupEnd();
+      } else {
+        console.error('[Thread] âťŚ ERROR:', payload);
+      }
       handler(payload);
     };
     this.socket.on('chat:error', wrappedHandler);
@@ -166,7 +171,7 @@ export class KalioSDK {
 
   onToolConfirmation(handler: ConfirmationHandler): () => void {
     const wrappedHandler = (req: ToolConfirmationRequest) => {
-      console.groupCollapsed(`[Thread] ⚠️ CONFIRMATION REQUIRED: ${req.toolName}`);
+      console.groupCollapsed(`[Thread] âš ď¸Ź CONFIRMATION REQUIRED: ${req.toolName}`);
       console.log('callId:', req.toolCallId);
       console.log('args:', req.args);
       console.log('timeout:', req.timeoutMs, 'ms');
@@ -179,7 +184,7 @@ export class KalioSDK {
 
   onToolConfirmationInvalidated(handler: ConfirmationInvalidatedHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['tool:confirmation_invalidated']) => {
-      console.groupCollapsed(`[Thread] ℹ️ CONFIRMATION INVALIDATED: ${payload.requestId} → ${payload.reason}`);
+      console.groupCollapsed(`[Thread] â„ąď¸Ź CONFIRMATION INVALIDATED: ${payload.requestId} â†’ ${payload.reason}`);
       if (payload.message) {
         console.log('message:', payload.message);
       }
@@ -193,7 +198,7 @@ export class KalioSDK {
   onToolStart(handler: ToolStartHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['tool:start']) => {
       this.toolCallCount++;
-      console.groupCollapsed(`[Thread] 🔧 TOOL CALL #${this.toolCallCount}: ${payload.toolName}`);
+      console.groupCollapsed(`[Thread] đź”§ TOOL CALL #${this.toolCallCount}: ${payload.toolName}`);
       console.log('callId:', payload.callId);
       console.log('args:', payload.args);
       console.groupEnd();
@@ -205,9 +210,9 @@ export class KalioSDK {
 
   onToolResult(handler: ToolResultHandler): () => void {
     const wrappedHandler = (result: ToolResult) => {
-      const isError = result.status !== 'success';
+      const isError = result.status === 'error';
       const logFn = isError ? console.error : console.groupCollapsed;
-      logFn(`[Thread] ${isError ? '❌' : '✅'} TOOL RESULT: ${result.callId} → ${result.status}`);
+      logFn(`[Thread] ${isError ? 'âťŚ' : 'âś…'} TOOL RESULT: ${result.callId} â†’ ${result.status}`);
       if (result.data !== undefined) {
         console.log('output:', result.data);
       }
@@ -225,7 +230,7 @@ export class KalioSDK {
 
   onSessionCreated(handler: SessionCreatedHandler): () => void {
     const wrappedHandler = (session: ChatSession) => {
-      console.log('[Thread] 📝 SESSION CREATED:', session.id, session.title);
+      console.log('[Thread] đź“ť SESSION CREATED:', session.id, session.title);
       handler(session);
     };
     this.socket.on('session:created', wrappedHandler);
@@ -263,7 +268,7 @@ export class KalioSDK {
 
   onContext(handler: ContextHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['chat:context']) => {
-      console.groupCollapsed('[Thread] 🎯 CONTEXT');
+      console.groupCollapsed('[Thread] đźŽŻ CONTEXT');
       console.log('systemPrompt:', payload.systemPrompt.slice(0, 100) + '...');
       console.log('toolNames:', payload.toolNames);
       console.groupEnd();
@@ -275,7 +280,7 @@ export class KalioSDK {
 
   onAgentStart(handler: AgentStartHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['agent:start']) => {
-      console.groupCollapsed(`[Thread] ▶️ AGENT START sessionId=${payload.sessionId} turnId=${payload.turnId}`);
+      console.groupCollapsed(`[Thread] â–¶ď¸Ź AGENT START sessionId=${payload.sessionId} turnId=${payload.turnId}`);
       console.groupEnd();
       handler(payload);
     };
@@ -285,7 +290,7 @@ export class KalioSDK {
 
   onAgentDone(handler: AgentDoneHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['agent:done']) => {
-      console.groupCollapsed(`[Thread] ✅ AGENT DONE sessionId=${payload.sessionId} turnId=${payload.turnId}`);
+      console.groupCollapsed(`[Thread] âś… AGENT DONE sessionId=${payload.sessionId} turnId=${payload.turnId}`);
       console.groupEnd();
       handler(payload);
     };
@@ -369,3 +374,4 @@ export class KalioSDK {
     this.socket.emit('session:identify', { sessionId });
   }
 }
+

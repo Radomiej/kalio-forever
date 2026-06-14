@@ -4,7 +4,6 @@ import type { ChatSession } from '@kalio/types';
 import type { LlmActivity, ToolActivity } from '../../store/agentStore';
 
 type AgentStateShape = {
-  isStreaming: boolean;
   pendingConfirmations: Record<string, {
     requestId: string;
     toolCallId: string;
@@ -32,7 +31,6 @@ type SessionStateShape = {
 const { stopTurn, agentState, sessionState } = vi.hoisted(() => ({
   stopTurn: vi.fn(),
   agentState: {
-    isStreaming: false as boolean,
     pendingConfirmations: {} as Record<string, {
       requestId: string;
       toolCallId: string;
@@ -107,7 +105,6 @@ function makeToolActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
 describe('ConversationManagerPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    agentState.isStreaming = false;
     agentState.pendingConfirmations = {};
     agentState.toolActivities = [];
     agentState.llmActivities = [];
@@ -179,7 +176,6 @@ describe('ConversationManagerPanel', () => {
   });
 
   it('splits running and finished tool rows and shows llm activity counts', () => {
-    agentState.isStreaming = true;
     agentState.toolActivities = [
       makeToolActivity({ callId: 'call-running', toolName: 'web_search', status: 'running' }),
       makeToolActivity({
@@ -203,6 +199,13 @@ describe('ConversationManagerPanel', () => {
     expect(screen.getByText('Generating title')).toBeInTheDocument();
     expect(screen.getByText('Summarizing results')).toBeInTheDocument();
     expect(screen.getByText('Retry failed')).toBeInTheDocument();
+  });
+
+  it('does not report a running agent from a stale global streaming flag alone', () => {
+    render(<ConversationManagerPanel />);
+
+    expect(screen.getByText(/No active agent runs/i)).toBeInTheDocument();
+    expect(screen.queryByText('Agent running')).not.toBeInTheDocument();
   });
 
   it('lets the user remove inactive finished activity from the active panel', () => {

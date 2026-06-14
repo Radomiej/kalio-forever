@@ -143,7 +143,7 @@ describe('sessionListModel', () => {
     expect(entries.map((entry) => entry.session.id)).toEqual(['host']);
   });
 
-  it('keeps a loaded child conversation hidden until it becomes active', () => {
+  it('keeps a loaded child conversation out of the flat list even when it is active', () => {
     const sessions: ChatSession[] = [
       makeSession({ id: 'root', title: 'Root chat', updatedAt: 10 }),
       makeSession({
@@ -161,7 +161,47 @@ describe('sessionListModel', () => {
     expect(buildSessionListEntries(ordered, null, 'all').map((entry) => entry.session.id)).toEqual(['root']);
 
     const activeEntries = buildSessionListEntries(ordered, 'child', 'all');
-    expect(activeEntries.map((entry) => entry.session.id)).toEqual(['root', 'child']);
-    expect(activeEntries[1]).toMatchObject({ type: 'session', depth: 1 });
+    expect(activeEntries.map((entry) => entry.session.id)).toEqual(['root']);
+  });
+
+  it('keeps workflow branch conversations attached to the visible host instead of flattening them', () => {
+    const sessions: ChatSession[] = [
+      makeSession({ id: 'host', title: 'Workflow host', updatedAt: 10 }),
+      makeSession({
+        id: 'arch-root',
+        title: 'Architecture: Workflow root',
+        kind: 'agent-flow',
+        parentSessionId: 'host',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-root',
+          architectureContext: {
+            architectureRunId: 'run-1',
+            sessionSurface: 'technical-node',
+          },
+        },
+        createdAt: 11,
+        updatedAt: 11,
+      }),
+      makeSession({
+        id: 'branch',
+        title: 'Strategic Decision Council: Analyst',
+        kind: 'subagent',
+        parentSessionId: 'arch-root',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'analyst',
+          architectureContext: {
+            architectureRunId: 'run-1',
+            sessionSurface: 'conversation-branch',
+          },
+        },
+        createdAt: 12,
+        updatedAt: 12,
+      }),
+    ];
+
+    const ordered = sortSessionsForSidebar(sessions);
+
+    expect(buildSessionListEntries(ordered, 'branch', 'all').map((entry) => entry.session.id)).toEqual(['host']);
   });
 });

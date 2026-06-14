@@ -2,6 +2,7 @@ import type { ChatSession } from '@kalio/types';
 import {
   isArchitectureEnvelopeSession,
   isArchitectureWorkflowContainerSession,
+  visibleConversationParentId,
 } from './sessionTreeDisplay';
 
 const ACTIVE_AGENT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -109,8 +110,10 @@ function matchesOriginFilter(session: ChatSession, filter: SessionOriginFilter):
 }
 
 function hasLoadedParent(session: ChatSession, sessionById?: Map<string, ChatSession>): boolean {
-  if (!session.parentSessionId) return false;
-  return sessionById?.has(session.parentSessionId) ?? true;
+  if (!sessionById) {
+    return Boolean(session.parentSessionId);
+  }
+  return visibleConversationParentId(session, sessionById) !== null;
 }
 
 export function isVisibleSidebarSession(
@@ -139,8 +142,18 @@ export function buildSessionListEntries(
     ? visibleSessions.filter((session) => !isArchitectureEnvelopeSession(session))
     : visibleSessions;
 
-  if (filter !== 'agent') {
+  if (filter === 'archived') {
     return treeVisibleSessions.map((session) => ({
+      type: 'session',
+      session,
+      depth: getSessionDepth(session, sessionById),
+    }));
+  }
+
+  if (filter !== 'agent') {
+    return treeVisibleSessions
+      .filter((session) => !session.parentSessionId)
+      .map((session) => ({
       type: 'session',
       session,
       depth: getSessionDepth(session, sessionById),

@@ -566,4 +566,114 @@ describe('useChatSessionActivation', () => {
       );
     });
   });
+
+  it('does not wipe a live follow-up workflow turn when hydrated history still only contains the previous completed run', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [
+        {
+          id: 'user-1',
+          sessionId: 'session-1',
+          role: 'user',
+          content: 'First workflow prompt.',
+          createdAt: 1,
+        },
+        {
+          id: 'arch-old',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: '',
+          createdAt: 2,
+          architectureRun: {
+            runId: 'run-old',
+            schemaId: 'strategic-decision-council',
+            status: 'completed',
+            hostProjectionKind: 'workflow-envelope',
+            finalArtifact: 'Old final answer',
+            trace: [],
+            routeHops: [],
+          },
+        },
+        {
+          id: 'user-2',
+          sessionId: 'session-1',
+          role: 'user',
+          content: 'Follow-up workflow prompt.',
+          createdAt: 3,
+        },
+      ],
+    });
+    useAgentStore.setState({
+      activeAgentLoops: {
+        'session-1': {
+          sessionId: 'session-1',
+          turnId: 'turn-new',
+          startedAt: 4,
+        },
+      },
+    });
+    useSessionStore.setState({
+      activeSessionId: 'session-1',
+      sessions: [{ id: 'session-1', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 4 }],
+      messages: [],
+      sessionMessages: { 'session-1': [] },
+      agentTurns: [
+        {
+          id: 'turn-old',
+          sessionId: 'session-1',
+          promptMessageId: 'user-1',
+          turnKind: 'workflow-envelope',
+          items: [{ kind: 'text', messageId: 'arch-old' }],
+          done: true,
+        },
+        {
+          id: 'turn-new',
+          sessionId: 'session-1',
+          promptMessageId: 'user-2',
+          turnKind: 'workflow-envelope',
+          items: [{ kind: 'text', messageId: 'architecture:user-2:pending' }],
+          done: false,
+        },
+      ],
+      sessionAgentTurns: {
+        'session-1': [
+          {
+            id: 'turn-old',
+            sessionId: 'session-1',
+            promptMessageId: 'user-1',
+            turnKind: 'workflow-envelope',
+            items: [{ kind: 'text', messageId: 'arch-old' }],
+            done: true,
+          },
+          {
+            id: 'turn-new',
+            sessionId: 'session-1',
+            promptMessageId: 'user-2',
+            turnKind: 'workflow-envelope',
+            items: [{ kind: 'text', messageId: 'architecture:user-2:pending' }],
+            done: false,
+          },
+        ],
+      },
+      activeTurnId: 'turn-new',
+      sessionActiveTurnIds: { 'session-1': 'turn-new' },
+      pendingMessage: null,
+      pendingRAAppId: null,
+    });
+
+    const setAgentTurns = vi.fn();
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns,
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+    });
+    expect(setAgentTurns).not.toHaveBeenCalled();
+  });
 });

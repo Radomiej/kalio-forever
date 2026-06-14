@@ -7,6 +7,7 @@ import { TokenBadge } from './TokenBadge';
 import type { ArchitectSchema } from '../architect/architect.types';
 import { NewChatScreen } from './launch/NewChatScreen';
 import { findArchitectureRunInMessages } from './architectureChatSummary';
+import type { LiveTurnState } from './liveTurnState';
 
 export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -360,5 +361,63 @@ export function ChatWelcomeScreen({
         />
       )}
     </>
+  );
+}
+
+interface PendingAssistantBubbleProps {
+  liveTurnState: LiveTurnState;
+}
+
+function liveTurnStatusLabel(liveTurnState: LiveTurnState): string {
+  switch (liveTurnState.phase) {
+    case 'thinking':
+      return 'thinking';
+    case 'streaming_text':
+      return 'responding';
+    case 'running_tool':
+      return liveTurnState.toolName ? `${liveTurnState.toolName} running` : 'tool running';
+    case 'queued_followup':
+      return liveTurnState.queuedDepth > 0 ? `queued ${liveTurnState.queuedDepth}` : 'queued';
+    case 'pending':
+    default:
+      return 'pending';
+  }
+}
+
+function liveTurnBody(liveTurnState: LiveTurnState): string {
+  if (liveTurnState.previewText?.trim()) {
+    return liveTurnState.previewText.trim();
+  }
+
+  switch (liveTurnState.phase) {
+    case 'thinking':
+      return 'Kalio is thinking before the first visible answer.';
+    case 'running_tool':
+      return liveTurnState.toolName
+        ? `Kalio is using ${liveTurnState.toolName}.`
+        : 'Kalio is running a tool.';
+    case 'queued_followup':
+      return 'Kalio is finishing the current turn before processing the queued follow-up.';
+    case 'streaming_text':
+      return 'Kalio is streaming a partial answer.';
+    case 'pending':
+    default:
+      return 'Kalio is responding.';
+  }
+}
+
+export function PendingAssistantBubble({ liveTurnState }: PendingAssistantBubbleProps) {
+  return (
+    <div className="flex justify-start" data-testid="pending-agent-bubble">
+      <div className="max-w-[min(42rem,92%)] rounded-2xl border border-sky-500/20 bg-base-300/85 px-4 py-3 text-sm text-base-content shadow-sm">
+        <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-sky-300/90">
+          <span className="loading loading-dots loading-xs" />
+          <span data-testid="pending-agent-phase">{liveTurnStatusLabel(liveTurnState)}</span>
+        </div>
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-base-content/80">
+          {liveTurnBody(liveTurnState)}
+        </p>
+      </div>
+    </div>
   );
 }

@@ -10,7 +10,6 @@ export function ConversationManagerPanel({
   onNavigate,
   onOpenSession,
 }: { onNavigate?: () => void; onOpenSession?: (sessionId: string) => void }) {
-  const isStreaming = useAgentStore((s) => s.isStreaming);
   const toolActivities = useAgentStore((s) => s.toolActivities);
   const llmActivities = useAgentStore((s) => s.llmActivities);
   const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
@@ -26,11 +25,13 @@ export function ConversationManagerPanel({
   const done = toolActivities.filter(
     (a) => a.status !== 'running' && a.status !== 'awaiting_confirmation',
   );
+  const hasRunningLlmActivity = llmActivities.some((activity) => activity.status === 'running');
+  const hasLiveRuntime = runningLoops.length > 0 || hasRunningLlmActivity;
   const inactiveLlmCount = llmActivities.filter((a) => a.status !== 'running').length;
   const inactiveCount = done.length + inactiveLlmCount;
 
   const isEmpty = runningLoops.length === 0
-    && !isStreaming
+    && !hasRunningLlmActivity
     && toolActivities.length === 0
     && llmActivities.length === 0
     && pendingConfirmationCount === 0;
@@ -88,7 +89,7 @@ export function ConversationManagerPanel({
 
       {/* Status bar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-base-300 shrink-0">
-        {isStreaming ? (
+        {hasLiveRuntime ? (
           <>
             <Zap size={12} className="text-sky-400 animate-pulse" />
             <span className="text-xs text-sky-400 font-medium">Agent running</span>
