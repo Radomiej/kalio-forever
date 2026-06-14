@@ -247,6 +247,30 @@ describe('ArchitectureRuntimeService', () => {
       kind: 'agent-flow',
       parentSessionId: 'parent-chat',
       parentToolCallId: 'call-agentflow-root',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-root',
+        architectureContext: {
+          architectureRunId: run.id,
+          hostSessionId: 'parent-chat',
+          historySessionId: 'parent-chat',
+          sessionSurface: 'technical-node',
+        },
+      },
+    });
+    expect(sessions.created.find((entry) => entry.id === run.branchSessionIds?.['pragmatist'])?.dto).toMatchObject({
+      parentSessionId: run.rootSessionId,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        parentSessionId: run.rootSessionId,
+        architectureSlotId: 'pragmatist',
+        architectureContext: {
+          architectureRunId: run.id,
+          roleSlotId: 'pragmatist',
+          hostSessionId: 'parent-chat',
+          historySessionId: 'parent-chat',
+          sessionSurface: 'conversation-branch',
+        },
+      },
     });
   });
 

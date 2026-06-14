@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { SocketIoAdapter } from './adapters/socket-io.adapter';
+import { normalizeCorsOrigins } from './cors-origins';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 
@@ -18,8 +19,8 @@ async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
   app.useWebSocketAdapter(new SocketIoAdapter(app));
 
-  const corsOrigins = (process.env['CORS_ORIGIN'] ?? '*').split(',').map((s) => s.trim());
-  app.enableCors({ origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins });
+  const corsOrigins = normalizeCorsOrigins(process.env['CORS_ORIGIN']);
+  app.enableCors({ origin: corsOrigins === '*' ? '*' : corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins });
   app.setGlobalPrefix('api');
 
   // Health check — intentionally outside the 'api' prefix so it stays at /health,

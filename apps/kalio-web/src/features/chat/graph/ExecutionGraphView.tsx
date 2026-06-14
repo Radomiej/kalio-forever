@@ -332,8 +332,13 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     ? selectedNodeId
     : null;
   const selectedNode = model.nodes.find((node) => node.id === effectiveSelectedId) ?? null;
-  const selectedConfirmation = selectedNode?.payload.kind === 'tool' && selectedNode.payload.confirmationRequired
-    ? pendingConfirmations[selectedNode.sessionId ?? activeSessionId ?? ''] ?? null
+  const selectedNodeRequiresConfirmation = selectedNode?.payload.kind === 'tool'
+    ? selectedNode.payload.confirmationRequired
+    : selectedNode?.payload.kind === 'tool-group'
+      ? selectedNode.payload.tools.some((tool) => tool.confirmationRequired)
+      : false;
+  const selectedConfirmation = selectedNodeRequiresConfirmation
+    ? pendingConfirmations[selectedNode?.sessionId ?? activeSessionId ?? ''] ?? null
     : null;
 
   if (model.nodes.length === 0) {

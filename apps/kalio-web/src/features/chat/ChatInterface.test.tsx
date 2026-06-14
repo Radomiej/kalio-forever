@@ -481,6 +481,9 @@ describe('ChatInterface event wiring', () => {
 
     expect(buildArchitectureRunContext('session-1', files, ['vfs_read', 'fs_read'])).toEqual({
       parentSessionId: 'session-1',
+      hostSessionId: 'session-1',
+      historySessionId: 'session-1',
+      sessionSurface: 'host-envelope',
       launchAllowedToolNames: ['vfs_read', 'fs_read'],
       hydrateFromSessionId: 'session-1',
       hydrateTargetPrefix: 'project',
@@ -491,6 +494,9 @@ describe('ChatInterface event wiring', () => {
   it('keeps prompt-only architecture runs explicit when no VFS files are attached', () => {
     expect(buildArchitectureRunContext('session-1', [], ['vfs_read'])).toEqual({
       parentSessionId: 'session-1',
+      hostSessionId: 'session-1',
+      historySessionId: 'session-1',
+      sessionSurface: 'host-envelope',
       launchAllowedToolNames: ['vfs_read'],
     });
   });
@@ -498,6 +504,9 @@ describe('ChatInterface event wiring', () => {
   it('includes the selected project path in architecture launch context', () => {
     expect(buildArchitectureRunContext('session-1', [], ['vfs_read'], 'C:\\Projekty\\kalio-forever')).toEqual({
       parentSessionId: 'session-1',
+      hostSessionId: 'session-1',
+      historySessionId: 'session-1',
+      sessionSurface: 'host-envelope',
       projectPath: 'C:\\Projekty\\kalio-forever',
       executionCwd: 'C:\\Projekty\\kalio-forever',
       launchAllowedToolNames: ['vfs_read'],
@@ -588,6 +597,47 @@ describe('ChatInterface event wiring', () => {
         expect.any(Function),
       );
     });
+  });
+
+  it('REGRESSION: seeds a pending workflow turn immediately before the architecture run resolves', async () => {
+    mockGetArchitectureSchemas.mockResolvedValue([
+      {
+        id: 'strategic-decision-council',
+        name: 'Strategic Decision Council',
+        version: '0.1.0',
+        description: '',
+        nodes: [],
+        edges: [],
+        roleSlots: [],
+      },
+    ]);
+    mockStartArchitectureRun.mockImplementation(() => new Promise(() => {}));
+    setAgentTurns.mockClear();
+
+    await renderChatInterface();
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('welcome-mode-workflow'));
+      fireEvent.change(await screen.findByTestId('welcome-architecture-select'), {
+        target: { value: 'strategic-decision-council' },
+      });
+      fireEvent.change(await screen.findByTestId('welcome-prompt-input'), {
+        target: { value: 'Follow up workflow.' },
+      });
+      fireEvent.click(await screen.findByTestId('welcome-run-prompt'));
+      await flushReactEffects();
+    });
+
+    expect(mockStartArchitectureRun).toHaveBeenCalled();
+    expect(setAgentTurns).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          turnKind: 'workflow-envelope',
+          done: false,
+          items: [expect.objectContaining({ kind: 'text' })],
+        }),
+      ]),
+      'session-1',
+    );
   });
 
   it('fail-first: does not start architecture run while streaming and keeps composer draft', async () => {
@@ -833,12 +883,28 @@ describe('ChatInterface event wiring', () => {
     expect(screen.getByTestId('chat-recovery-notice')).toHaveTextContent('Connection dropped');
   });
 
-  it('clears the recovered reconnect banner on a fresh empty session surface', async () => {
+  it('does not show the recovered reconnect banner on an initial recovered connect', async () => {
     await renderChatInterface();
 
     await emitEvent('socket:connection_state', { status: 'connected', recovered: true });
 
     expect(screen.queryByTestId('chat-recovery-notice')).toBeNull();
+  });
+
+  it('shows the recovered reconnect banner only after a real reconnect transition', async () => {
+    mockMessages = [
+      { id: 'u1', sessionId: 'session-1', role: 'user', content: 'Hello', createdAt: 1 },
+      { id: 'a1', sessionId: 'session-1', role: 'assistant', content: 'Hi', createdAt: 2 },
+    ];
+    getSessionMessages.mockReturnValue(mockMessages);
+    await renderChatInterface();
+
+    await emitEvent('socket:connection_state', { status: 'reconnecting' });
+    await emitEvent('socket:connection_state', { status: 'connected', recovered: true });
+
+    expect(screen.getByTestId('chat-recovery-notice')).toHaveTextContent(
+      'Recovered missed stream events after reconnect.',
+    );
   });
 
   it('REGRESSION: tool:start creates a running activity in agentStore', async () => {

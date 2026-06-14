@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
+import { architectureSessionSurfaceForSession } from './architectureSessionContext';
 import {
   architectureSlotIdForSession,
   buildArchitectureSessionRuntimeStates,
@@ -17,6 +18,14 @@ type RenderableSessionFilterSignals = {
 };
 
 function isArchitectureBranchConversationSession(session: ChatSession): boolean {
+  const sessionSurface = architectureSessionSurfaceForSession(session);
+  if (sessionSurface === 'conversation-branch') {
+    return true;
+  }
+  if (sessionSurface === 'technical-node') {
+    return false;
+  }
+  // TODO: legacy fallback - older persisted workflow sessions do not yet stamp sessionSurface.
   return Boolean(architectureSlotIdForSession(session));
 }
 
@@ -67,7 +76,7 @@ export function filterRenderableSessions(
   return {
     architectureSessionRuntimeStates,
     // Sidebar should reflect real child conversations only. Planned graph nodes belong to the
-    // workflow timeline, but persisted non-technical child sessions should remain visible live.
+    // workflow timeline, but persisted non-technical child sessions remain visible immediately.
     renderableSessions: orderedSessions.filter((session) => (
       isRenderableConversationSession(
         session,

@@ -1,35 +1,19 @@
 import type { ChatMessage } from '@kalio/types';
 import type { AgentTurn } from '../../../store/sessionStore';
+import { resolveWorkflowTurnProjection } from '../workflowTurnProjection';
 
 export function findWorkflowEnvelopeArchitectureMessage(
   turn: AgentTurn,
   messages: ChatMessage[],
-  messageById: ReadonlyMap<string, ChatMessage>,
+  toolArgsByCallId: ReadonlyMap<string, Record<string, unknown>>,
   finalMessage: ChatMessage | null,
 ): ChatMessage | null {
-  if (finalMessage?.architectureRun) {
+  const projection = resolveWorkflowTurnProjection(turn, messages, toolArgsByCallId);
+  if (
+    finalMessage?.architectureRun
+    && (!projection.architectureRunId || finalMessage.architectureRun.runId === projection.architectureRunId)
+  ) {
     return finalMessage;
   }
-
-  for (const item of turn.items) {
-    if (item.kind === 'text') {
-      const message = messageById.get(item.messageId);
-      if (message?.architectureRun) {
-        return message;
-      }
-    }
-
-    if (item.kind === 'tool') {
-      const message = messages.find((candidate) => (
-        candidate.role === 'assistant'
-        && candidate.architectureRun
-        && candidate.toolCalls?.some((toolCall) => toolCall.id === item.callId)
-      ));
-      if (message) {
-        return message;
-      }
-    }
-  }
-
-  return null;
+  return projection.persistedArchitectureMessage;
 }

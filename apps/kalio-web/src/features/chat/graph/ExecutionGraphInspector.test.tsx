@@ -117,6 +117,49 @@ describe('ExecutionGraphInspector', () => {
     expect(screen.getByText('Node Properties')).toBeTruthy();
   });
 
+  it('opens the confirmation owner conversation from inspector actions', () => {
+    const onOpenSessionInConversation = vi.fn();
+
+    render(
+      <ExecutionGraphInspector
+        activeSessionId="session-1"
+        inspectorWidth={360}
+        selectedConfirmation={{
+          requestId: 'req-1',
+          toolCallId: 'call-1',
+          sessionId: 'child-session-1',
+          toolName: 'vfs_delete',
+          args: { path: 'draft.txt' },
+          timeoutMs: 0,
+        }}
+        selectedNode={makeNode({
+          kind: 'tool',
+          toolName: 'vfs_delete',
+          args: { path: 'draft.txt' },
+          activity: {
+            callId: 'call-1',
+            toolName: 'vfs_delete',
+            args: { path: 'draft.txt' },
+            status: 'awaiting_confirmation',
+            startedAt: 1,
+          } as never,
+          result: null,
+          confirmationRequired: true,
+        })}
+        onOpenSessionInConversation={onOpenSessionInConversation}
+        setActiveSession={vi.fn()}
+        setPendingConfirmation={vi.fn()}
+        setPendingMessage={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open conversation' }));
+
+    expect(onOpenSessionInConversation).toHaveBeenCalledWith('child-session-1');
+    expect(screen.getByRole('button', { name: 'Accept tool request' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel tool request' })).toBeInTheDocument();
+  });
+
   it('keeps the inspector collapsed across node selection changes until the user expands it', () => {
     const firstNode = makeNode({
       kind: 'turn',

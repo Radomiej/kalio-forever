@@ -73,6 +73,8 @@ export function registerSessionLifecycleHandlers({
 
 export function registerConnectionRecoveryHandlers({
   cliChildDeps,
+  getConnectionState,
+  setConnectionStateRef,
   setConnectionState,
   setRecoveryNotice,
   setStreaming,
@@ -87,6 +89,8 @@ export function registerConnectionRecoveryHandlers({
   onContextInvalidated,
 }: {
   cliChildDeps: CliChildDeps;
+  getConnectionState: () => ChatConnectionState;
+  setConnectionStateRef: (value: ChatConnectionState) => void;
   setConnectionState: (value: ChatConnectionState) => void;
   setRecoveryNotice: (value: string | null) => void;
   setStreaming: AgentStoreState['setStreaming'];
@@ -101,7 +105,14 @@ export function registerConnectionRecoveryHandlers({
   onContextInvalidated: (() => void) | undefined;
 }): () => void {
   const offConnectionState = eventBus.onConnectionState((state) => {
-    handleConnectionStateEvent(state, { setConnectionState, setRecoveryNotice });
+    handleConnectionStateEvent(state, {
+      getConnectionState,
+      setConnectionState: (value) => {
+        setConnectionStateRef(value);
+        setConnectionState(value);
+      },
+      setRecoveryNotice,
+    });
   });
 
   const offReconnect = eventBus.onReconnect(() => {

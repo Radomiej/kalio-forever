@@ -498,7 +498,7 @@ describe('App view state persistence', () => {
     });
   });
 
-  it('skips re-identifying the active session on reconnect because chat already replays it', () => {
+  it('re-identifies the active session on reconnect so HITL replay restores pending approvals', () => {
     sessionStoreState.activeSessionId = 'session-1';
 
     render(<App />);
@@ -507,9 +507,9 @@ describe('App view state persistence', () => {
     reconnectHandlers[0]?.();
 
     return waitFor(() => {
+      expect(identifySession).toHaveBeenCalledWith('session-1');
       expect(identifySession).toHaveBeenCalledWith('session-2');
-      expect(identifySession).not.toHaveBeenCalledWith('session-1');
-      expect(identifySession).toHaveBeenCalledTimes(1);
+      expect(identifySession).toHaveBeenCalledTimes(2);
     });
   });
 

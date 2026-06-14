@@ -111,4 +111,50 @@ describe('LLMTurnRuntimeService', () => {
       { turnId: 'turn-1', promptMessageId: 'user-1' },
     );
   });
+
+  it('loads branch history from an explicit historySessionId when provided', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([
+        { type: 'text_delta', delta: 'branch answer' },
+        { type: 'done' },
+      ])),
+    };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }],
+        unboundedHistoryCount: 1,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      {
+        process: vi.fn(async (chunk: InternalLLMChunk, ctx: { state: { appendText: (delta: string) => void } }) => {
+          if (chunk.type === 'text_delta') ctx.state.appendText(chunk.delta);
+        }),
+      } as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      { dispatch: vi.fn() } as unknown as ToolDispatchService,
+    );
+
+    await runtime.runAgentLoop({
+      runtimeKind: 'agent-flow-branch',
+      sessionId: 'branch-session',
+      historySessionId: 'host-session',
+      turnId: 'turn-2',
+      promptMessageId: 'user-2',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [],
+      abortSignal: new AbortController().signal,
+      emit: vi.fn() as EmitFn,
+      maxIterations: 2,
+    });
+
+    expect(sessionManager.loadHistoryForLLM).toHaveBeenCalledWith('branch-session', {
+      systemPrompt: 'prompt',
+      toolMetas: [],
+      historySessionId: 'host-session',
+    });
+  });
 });

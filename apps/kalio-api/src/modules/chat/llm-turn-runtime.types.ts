@@ -14,6 +14,7 @@ export interface LLMAgentLoopCallbacks {
 export interface LLMAgentLoopRequest {
   runtimeKind: LLMRuntimeKind;
   sessionId: string;
+  historySessionId?: string;
   turnId?: string;
   promptMessageId?: string;
   personaId: string;

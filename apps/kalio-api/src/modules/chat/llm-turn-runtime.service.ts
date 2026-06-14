@@ -86,6 +86,7 @@ export class LLMTurnRuntimeService {
       const { history, unboundedHistoryCount } = await this.sessionManager.loadHistoryForLLM(request.sessionId, {
         systemPrompt: request.effectiveSystemPrompt,
         toolMetas: request.toolMetas,
+        ...(request.historySessionId ? { historySessionId: request.historySessionId } : {}),
       });
 
       if (history.length !== unboundedHistoryCount) {

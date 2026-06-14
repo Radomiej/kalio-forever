@@ -972,6 +972,128 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(agentState.setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
   });
 
+  it('keeps awaiting-confirmation actions reachable from a collapsed tool group', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Delete draft file', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [
+          { id: 'call-read-1', name: 'vfs_read', args: { path: 'draft.txt' } },
+          { id: 'call-delete-1', name: 'vfs_delete', args: { path: 'draft.txt' } },
+        ],
+      }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [
+      {
+        callId: 'call-read-1',
+        toolName: 'vfs_read',
+        args: { path: 'draft.txt' },
+        sessionId: 'session-1',
+        status: 'success',
+        startedAt: 2,
+        finishedAt: 3,
+        result: { callId: 'call-read-1', status: 'success', data: { ok: true } },
+      },
+      {
+        callId: 'call-delete-1',
+        toolName: 'vfs_delete',
+        args: { path: 'draft.txt' },
+        sessionId: 'session-1',
+        status: 'awaiting_confirmation',
+        startedAt: 3,
+      },
+    ];
+    agentState.pendingConfirmations = {
+      'session-1': {
+        requestId: 'req-1',
+        toolCallId: 'call-delete-1',
+        sessionId: 'session-1',
+        toolName: 'vfs_delete',
+        args: { path: 'draft.txt' },
+        timeoutMs: 0,
+      },
+    };
+
+    await renderExecutionGraphView();
+
+    fireEvent.click(screen.getByTestId(`graph-node-tool-group:${sessionState.agentTurns[0]?.id}`));
+    expect(await screen.findByRole('button', { name: 'Accept tool request' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel tool request' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Accept tool request' }));
+
+    expect(confirmToolMock).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
+    expect(agentState.setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+  });
+
+  it('does not show confirmation actions for a collapsed tool group when no grouped tool needs approval', async () => {
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Inspect the draft file', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [
+          { id: 'call-read-1', name: 'vfs_read', args: { path: 'draft.txt' } },
+          { id: 'call-list-1', name: 'vfs_list', args: { path: '.' } },
+        ],
+      }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = messages;
+    sessionState.sessionMessages = { 'session-1': messages };
+    sessionState.agentTurns = buildTurnsFromHistory(messages, 'session-1');
+    sessionState.sessionAgentTurns = { 'session-1': sessionState.agentTurns };
+    agentState.toolActivities = [
+      {
+        callId: 'call-read-1',
+        toolName: 'vfs_read',
+        args: { path: 'draft.txt' },
+        sessionId: 'session-1',
+        status: 'success',
+        startedAt: 2,
+        finishedAt: 3,
+        result: { callId: 'call-read-1', status: 'success', data: { content: 'draft' } },
+      },
+      {
+        callId: 'call-list-1',
+        toolName: 'vfs_list',
+        args: { path: '.' },
+        sessionId: 'session-1',
+        status: 'success',
+        startedAt: 3,
+        finishedAt: 4,
+        result: { callId: 'call-list-1', status: 'success', data: { entries: [] } },
+      },
+    ];
+    agentState.pendingConfirmations = {
+      'session-1': {
+        requestId: 'req-unrelated',
+        toolCallId: 'call-delete-elsewhere',
+        sessionId: 'session-1',
+        toolName: 'vfs_delete',
+        args: { path: 'other.txt' },
+        timeoutMs: 0,
+      },
+    };
+
+    await renderExecutionGraphView();
+
+    fireEvent.click(screen.getByTestId(`graph-node-tool-group:${sessionState.agentTurns[0]?.id}`));
+
+    expect(screen.queryByRole('button', { name: 'Accept tool request' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cancel tool request' })).toBeNull();
+  });
+
   it('expands individual tools when zoomed in and groups them when zoomed out', async () => {
     const messages = [
       makeMessage({ id: 'u1', role: 'user', content: 'Build graph layout', createdAt: 1 }),

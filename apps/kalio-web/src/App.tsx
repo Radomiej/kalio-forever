@@ -145,8 +145,10 @@ export function App() {
           const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, sessionsFromApi);
           setSessions(mergedSessions);
           const activeSessionId = useSessionStore.getState().activeSessionId;
+          if (activeSessionId) {
+            identifyHitlSession(activeSessionId);
+          }
           rootReplaySessions(mergedSessions)
-            .filter((session) => session.id !== activeSessionId)
             .forEach((session) => identifyHitlSession(session.id));
         })
         .catch((err: unknown) => {
@@ -341,7 +343,10 @@ export function App() {
                   <ConversationPanel onSelect={() => {}} viewSwitcher={talkViewSwitcher} />
                 )}
                 {talkTab === 'agents' && (
-                  <ConversationManagerPanel onNavigate={() => setTalkTab('conversations')} />
+                  <ConversationManagerPanel
+                    onNavigate={() => setTalkTab('conversations')}
+                    onOpenSession={openSessionInConversation}
+                  />
                 )}
               </div>
             </div>

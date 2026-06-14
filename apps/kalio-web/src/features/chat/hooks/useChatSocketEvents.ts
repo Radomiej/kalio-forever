@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { nanoid } from 'nanoid';
 import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
@@ -42,6 +42,7 @@ export function useChatSocketEvents({
   toolArgProgressSeenRef,
   onContextInvalidated,
 }: UseChatSocketEventsOptions): void {
+  const connectionStateRef = useRef<ChatConnectionState>(eventBus.connected ? 'connected' : 'connecting');
   const {
     setSessions,
     setActiveSession,
@@ -415,6 +416,10 @@ export function useChatSocketEvents({
 
     const offConnectionRecovery = registerConnectionRecoveryHandlers({
       cliChildDeps,
+      getConnectionState: () => connectionStateRef.current,
+      setConnectionStateRef: (value) => {
+        connectionStateRef.current = value;
+      },
       setConnectionState,
       setRecoveryNotice,
       setStreaming,

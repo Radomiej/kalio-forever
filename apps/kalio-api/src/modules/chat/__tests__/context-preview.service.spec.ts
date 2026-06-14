@@ -256,4 +256,79 @@ describe('ContextPreviewService', () => {
     expect(preview.runtimeProfileSource).toBe('request');
     expect(preview.messages.at(-1)).toMatchObject({ role: 'user', content: 'runtime draft', source: 'draft' });
   });
+
+  it('loads preview history from the workflow host session when runtime context provides historySessionId', async () => {
+    const repo = {
+      ensureSession: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn(async (sessionId: string) => {
+        if (sessionId === 'host-session') {
+          return [
+            { id: 'u1', sessionId: 'host-session', role: 'user' as const, content: 'Host objective', createdAt: 1 },
+            { id: 'a1', sessionId: 'host-session', role: 'assistant' as const, content: 'Host answer', createdAt: 2 },
+          ];
+        }
+        if (sessionId === 'branch-session') {
+          return [
+            { id: 'u2', sessionId: 'branch-session', role: 'user' as const, content: 'Branch follow-up', createdAt: 3 },
+          ];
+        }
+        return [];
+      }),
+      saveMessage: vi.fn().mockResolvedValue(undefined),
+    } satisfies IMessageRepository;
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ContextPreviewService,
+        {
+          provide: ContextAssemblyService,
+          useFactory: (personaService: PersonaService, skillsService: SkillsService, toolDispatch: ToolDispatchService) =>
+            makeContextAssembly(personaService, toolDispatch, skillsService),
+          inject: [PersonaService, SkillsService, ToolDispatchService],
+        },
+        SessionManagerService,
+        { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'branch-session', personaId: 'persona-1', title: 'Branch', createdAt: 1, updatedAt: 1 }) } },
+        { provide: MESSAGE_REPOSITORY, useValue: repo },
+        { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
+        { provide: CredentialsService, useValue: { getContextWindowSize: vi.fn().mockResolvedValue(32000) } },
+        {
+          provide: PersonaService,
+          useValue: {
+            getSessionConfig: vi.fn().mockResolvedValue({
+              systemPrompt: 'Workflow preview prompt.',
+              model: 'mimo-v2.5',
+              skillIds: [],
+              allowedTools: [],
+              mcpPolicy: 'allow_all',
+              kv: {},
+            }),
+          },
+        },
+        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
+        { provide: ToolDispatchService, useValue: { getToolMetas: vi.fn().mockReturnValue([]) } },
+      ],
+    }).compile();
+
+    const service = moduleRef.get(ContextPreviewService);
+    const preview = await service.buildPreview('branch-session', {
+      target: 'runtime',
+      personaId: 'persona-1',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureContext: {
+          historySessionId: 'host-session',
+        },
+      },
+      draftUserMessage: 'Draft branch request',
+    });
+
+    expect(repo.loadHistory).toHaveBeenNthCalledWith(1, 'host-session');
+    expect(repo.loadHistory).toHaveBeenNthCalledWith(2, 'branch-session');
+    expect(preview.messages.map((message) => [message.role, message.content, message.source])).toEqual([
+      ['system', expect.any(String), 'system_prompt'],
+      ['user', 'Host objective', 'history'],
+      ['assistant', 'Host answer', 'history'],
+      ['user', 'Branch follow-up', 'history'],
+      ['user', 'Draft branch request', 'draft'],
+    ]);
+  });
 });

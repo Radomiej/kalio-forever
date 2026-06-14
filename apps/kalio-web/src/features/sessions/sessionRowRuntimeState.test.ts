@@ -27,6 +27,7 @@ describe('sessionRuntimeState', () => {
           architectureRunId: 'run-live',
           roleSlotId: 'analyst',
           displayLabel: 'Analyst',
+          sessionSurface: 'conversation-branch',
         },
       },
     });
@@ -58,6 +59,7 @@ describe('sessionRuntimeState', () => {
           architectureRunId: 'run-live',
           roleSlotId: 'analyst',
           displayLabel: 'Analyst',
+          sessionSurface: 'conversation-branch',
         },
       },
     });
@@ -93,5 +95,40 @@ describe('sessionRuntimeState', () => {
       {},
       new Map(),
     )).toBe('running');
+  });
+
+  it('treats interrupted_needs_retry as stopped when there is no live HITL request', () => {
+    const session = createSession({ id: 'session-retry', title: 'Retry needed' });
+
+    expect(sessionRuntimeState(
+      session,
+      session.id,
+      {},
+      {},
+      new Set(),
+      {},
+      {
+        [session.id]: {
+          sessionId: session.id,
+          active: false,
+          queueLength: 0,
+          run: {
+            id: 'run-1',
+            sessionId: session.id,
+            turnId: 'turn-1',
+            phase: 'llm_streaming',
+            status: 'interrupted_needs_retry',
+            retryCount: 0,
+            safeResume: true,
+            startedAt: 1,
+            updatedAt: 2,
+            lastHeartbeatAt: 3,
+          },
+        },
+      },
+      {},
+      {},
+      new Map(),
+    )).toBe('stopped');
   });
 });

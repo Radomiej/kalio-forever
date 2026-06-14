@@ -4,16 +4,22 @@ import type { LlmActivity } from '../../store/agentStore';
 import { ToolActivityRow } from '../chat/ToolActivityRow';
 import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
+import { HomeHitlInbox } from '../landing/HomeHitlInbox';
 
-export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => void }) {
+export function ConversationManagerPanel({
+  onNavigate,
+  onOpenSession,
+}: { onNavigate?: () => void; onOpenSession?: (sessionId: string) => void }) {
   const isStreaming = useAgentStore((s) => s.isStreaming);
   const toolActivities = useAgentStore((s) => s.toolActivities);
   const llmActivities = useAgentStore((s) => s.llmActivities);
   const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
+  const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const clearInactiveActivities = useAgentStore((s) => s.clearInactiveActivities);
   const sessions = useSessionStore((s) => s.sessions);
 
   const runningLoops = Object.values(activeAgentLoops);
+  const pendingConfirmationCount = Object.keys(pendingConfirmations).length;
   const active = toolActivities.filter(
     (a) => a.status === 'running' || a.status === 'awaiting_confirmation',
   );
@@ -23,7 +29,11 @@ export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => vo
   const inactiveLlmCount = llmActivities.filter((a) => a.status !== 'running').length;
   const inactiveCount = done.length + inactiveLlmCount;
 
-  const isEmpty = runningLoops.length === 0 && !isStreaming && toolActivities.length === 0 && llmActivities.length === 0;
+  const isEmpty = runningLoops.length === 0
+    && !isStreaming
+    && toolActivities.length === 0
+    && llmActivities.length === 0
+    && pendingConfirmationCount === 0;
 
   if (isEmpty) {
     return (
@@ -37,6 +47,12 @@ export function ConversationManagerPanel({ onNavigate }: { onNavigate?: () => vo
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {pendingConfirmationCount > 0 && (
+        <div className="shrink-0 px-2 pt-2">
+          <HomeHitlInbox onOpenSession={onOpenSession ?? onNavigate ?? (() => undefined)} />
+        </div>
+      )}
+
       {/* Active LLM sessions */}
       {runningLoops.length > 0 && (
         <div className="px-2 pt-2 pb-1 flex flex-col gap-1 shrink-0">

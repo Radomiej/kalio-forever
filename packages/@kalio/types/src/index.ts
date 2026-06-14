@@ -63,6 +63,25 @@ export interface ArchitectureSlotToolPolicy {
   applyCliDescriptionPreferences?: boolean;
 }
 
+export type WorkflowSessionSurface = 'host-envelope' | 'conversation-branch' | 'technical-node';
+
+export interface ArchitectureRuntimeContext extends Record<string, unknown> {
+  parentSessionId?: ID;
+  parentToolCallId?: ID;
+  architectureRunId?: ID;
+  hostSessionId?: ID;
+  historySessionId?: ID;
+  sessionSurface?: WorkflowSessionSurface;
+  schemaId?: string;
+  schemaName?: string;
+  displayLabel?: string;
+  roleSlotId?: ID;
+  roleSlotType?: string;
+  roleLabel?: string;
+  projectPath?: string;
+  executionCwd?: string;
+}
+
 export interface SessionRuntimeContext {
   runtimeKind: SessionRuntimeKind;
   parentSessionId?: ID;
@@ -75,7 +94,7 @@ export interface SessionRuntimeContext {
   toolPolicyProfile?: ToolPolicyProfile;
   architectureSlotId?: ID;
   architectureSlotPolicy?: ArchitectureSlotToolPolicy;
-  architectureContext?: Record<string, unknown>;
+  architectureContext?: ArchitectureRuntimeContext;
 }
 
 type ContextPreviewBase = {

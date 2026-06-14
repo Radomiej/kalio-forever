@@ -132,6 +132,22 @@ export function GraphInspectorActions({
         <>
           <button
             type="button"
+            className="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-sm font-medium transition-colors hover:bg-base-200"
+            onClick={() => {
+              if (onOpenSessionInConversation) {
+                onOpenSessionInConversation(selectedConfirmation.sessionId);
+                return;
+              }
+              setActiveSession(selectedConfirmation.sessionId);
+            }}
+          >
+            <span className="flex items-center justify-center gap-2">
+              <ExternalLink size={14} />
+              Open conversation
+            </span>
+          </button>
+          <button
+            type="button"
             aria-label="Accept tool request"
             className="w-full rounded-xl bg-emerald-500/85 hover:bg-emerald-500 text-white px-4 py-3 text-sm font-medium transition-colors"
             onClick={() => {

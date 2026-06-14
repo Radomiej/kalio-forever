@@ -1,8 +1,8 @@
 import type { ChatMessage } from '@kalio/types';
 import type { AgentTurn } from '../../../store/sessionStore';
-import { findArchitectureRunInMessages } from '../architectureChatSummary';
-import { architectureRunContainsMessage, renderArchitectureRunProjection } from './executionGraphArchitectureRun';
+import { renderArchitectureRunProjection } from './executionGraphArchitectureRun';
 import { findWorkflowEnvelopeArchitectureMessage } from './executionGraphWorkflowEnvelope';
+import { resolveWorkflowTurnProjection } from '../workflowTurnProjection';
 import {
   buildCopiedFileArtifact,
   buildToolCycleLabel,
@@ -67,7 +67,17 @@ export function buildExecutionGraphModel({
   const toolSnapshots = buildToolSnapshots(uniqueMessages(allSessionMessages), toolActivities);
   const promptMessages = messages.filter((message) => message.role === 'user');
   const messageById = new Map(messages.map((message) => [message.id, message]));
-  const architectureRunFromHistory = findArchitectureRunInMessages(messages);
+  const toolArgsByCallId = new Map<string, Record<string, unknown>>();
+  for (const message of messages) {
+    if (message.role === 'assistant' && message.toolCalls) {
+      for (const toolCall of message.toolCalls) {
+        toolArgsByCallId.set(toolCall.id, toolCall.args);
+      }
+    }
+  }
+  for (const activity of toolActivities) {
+    toolArgsByCallId.set(activity.callId, activity.args);
+  }
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
   const personaById = new Map(personas.map((persona) => [persona.id, persona]));
   const activeLoopSessionIds = new Set(Object.values(activeAgentLoops).map((loop) => loop.sessionId));
@@ -146,10 +156,11 @@ export function buildExecutionGraphModel({
   ): number => {
     const turnToolItems = turn.items.filter((item): item is Extract<AgentTurn['items'][number], { kind: 'tool' }> => item.kind === 'tool');
     const finalMessage = getFinalAnswerMessage(turn, messageById);
+    const workflowTurnProjection = resolveWorkflowTurnProjection(turn, messages, toolArgsByCallId);
     const turnIdentity = buildTurnIdentity(turn, sessionById, personaById);
     const thinkingPreviews = thinkingPreviewsForTurn(turn);
     const workflowEnvelopeMessage = turn.turnKind === 'workflow-envelope'
-      ? findWorkflowEnvelopeArchitectureMessage(turn, messages, messageById, finalMessage)
+      ? findWorkflowEnvelopeArchitectureMessage(turn, messages, toolArgsByCallId, finalMessage)
       : null;
     const isWorkflowEnvelope = turn.turnKind === 'workflow-envelope' && workflowEnvelopeMessage !== null;
     const graphToolItems = isWorkflowEnvelope ? [] : turnToolItems;
@@ -531,9 +542,7 @@ export function buildExecutionGraphModel({
         .reduce((value, node) => Math.max(value, node.column), turnSourceColumn);
       const turnArchitectureRun = finalRenderableMessage.architectureRun
         ? null
-        : architectureRunFromHistory && architectureRunContainsMessage(architectureRunFromHistory, finalRenderableMessage)
-          ? architectureRunFromHistory
-          : null;
+        : workflowTurnProjection.architectureRun;
       const architectureProjection = renderArchitectureRunProjection({
         addEdge,
         addNode,

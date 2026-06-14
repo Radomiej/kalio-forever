@@ -1,4 +1,4 @@
-import type { ChatSession, SessionRuntimeContext, VFSFile } from '@kalio/types';
+import type { ArchitectureRuntimeContext, ChatSession, SessionRuntimeContext, VFSFile } from '@kalio/types';
 import { apiClient } from '../../../services/apiClient';
 
 type ArchitectureSessionLabel = {
@@ -148,9 +148,14 @@ export function buildArchitectureRunContext(
   files: VFSFile[],
   activeToolNames: string[] = [],
   projectPath = '',
-): Record<string, unknown> {
+): ArchitectureRuntimeContext {
   const projectScope = buildLaunchProjectScope(projectPath);
-  const context: Record<string, unknown> = { parentSessionId: sessionId };
+  const context: ArchitectureRuntimeContext = {
+    parentSessionId: sessionId,
+    hostSessionId: sessionId,
+    historySessionId: sessionId,
+    sessionSurface: 'host-envelope',
+  };
   if (projectScope) {
     Object.assign(context, projectScope);
   }

@@ -105,7 +105,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         const selectableSessions = renderableSessions.filter((session) => isVisibleSidebarSession(session, null, 'all', sessionById));
         if (!useSessionStore.getState().activeSessionId && selectableSessions.length > 0) {
           const storedSessionId = normalizeConversationSessionId(loadStoredActiveSessionId(), orderedSessions);
-          const initialSessionId = storedSessionId && selectableSessions.some((session) => session.id === storedSessionId)
+          const initialSessionId = storedSessionId && renderableSessions.some((session) => session.id === storedSessionId)
             ? storedSessionId
             : selectableSessions[0].id;
           void selectSession(initialSessionId);

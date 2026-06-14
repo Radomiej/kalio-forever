@@ -5,8 +5,18 @@ import type { LlmActivity, ToolActivity } from '../../store/agentStore';
 
 type AgentStateShape = {
   isStreaming: boolean;
+  pendingConfirmations: Record<string, {
+    requestId: string;
+    toolCallId: string;
+    sessionId: string;
+    toolName: string;
+    args: Record<string, unknown>;
+    timeoutMs: number;
+    agentRun?: { label?: string };
+  }>;
   toolActivities: ToolActivity[];
   llmActivities: LlmActivity[];
+  sessionToolActivities: Record<string, ToolActivity[]>;
   activeAgentLoops: Record<string, {
     sessionId: string;
     turnId: string;
@@ -23,8 +33,18 @@ const { stopTurn, agentState, sessionState } = vi.hoisted(() => ({
   stopTurn: vi.fn(),
   agentState: {
     isStreaming: false as boolean,
+    pendingConfirmations: {} as Record<string, {
+      requestId: string;
+      toolCallId: string;
+      sessionId: string;
+      toolName: string;
+      args: Record<string, unknown>;
+      timeoutMs: number;
+      agentRun?: { label?: string };
+    }>,
     toolActivities: [] as ToolActivity[],
     llmActivities: [] as LlmActivity[],
+    sessionToolActivities: {} as Record<string, ToolActivity[]>,
     activeAgentLoops: {} as Record<string, {
       sessionId: string;
       turnId: string;
@@ -48,6 +68,8 @@ vi.mock('../../store/sessionStore', () => ({
 vi.mock('../../services/eventBus', () => ({
   eventBus: {
     stopTurn,
+    confirmTool: vi.fn(),
+    cancelTool: vi.fn(),
   },
 }));
 
@@ -86,8 +108,10 @@ describe('ConversationManagerPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     agentState.isStreaming = false;
+    agentState.pendingConfirmations = {};
     agentState.toolActivities = [];
     agentState.llmActivities = [];
+    agentState.sessionToolActivities = {};
     agentState.activeAgentLoops = {};
     agentState.clearInactiveActivities = vi.fn();
     sessionState.sessions = [];
@@ -101,6 +125,40 @@ describe('ConversationManagerPanel', () => {
     expect(screen.getByText(/No active agent runs/i)).toBeInTheDocument();
     fireEvent.click(screen.getByText(/Go to chat/i));
     expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders pending HITL confirmations and opens the owning conversation', async () => {
+    const onOpenSession = vi.fn();
+    agentState.pendingConfirmations = {
+      'session-hitl': {
+        requestId: 'req-open',
+        toolCallId: 'call-open',
+        sessionId: 'session-hitl',
+        toolName: 'fs_write',
+        args: { filePath: 'README.md' },
+        timeoutMs: 0,
+        agentRun: { label: 'Implementer' },
+      },
+    };
+    agentState.sessionToolActivities = {
+      'session-hitl': [
+        {
+          callId: 'call-open',
+          toolName: 'fs_write',
+          args: { filePath: 'README.md' },
+          status: 'awaiting_confirmation',
+          startedAt: 1,
+        },
+      ],
+    };
+    sessionState.sessions = [makeSession('session-hitl', 'Agent delivery run')];
+
+    render(<ConversationManagerPanel onOpenSession={onOpenSession} />);
+
+    expect(screen.getByTestId('home-hitl-inbox')).toBeInTheDocument();
+    expect(screen.getByText('Agent delivery run')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('home-hitl-open-req-open'));
+    expect(onOpenSession).toHaveBeenCalledWith('session-hitl');
   });
 
   it('renders running loops using the session title and stops them through the event bus', () => {
