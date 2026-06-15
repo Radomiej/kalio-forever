@@ -21,6 +21,7 @@ export interface LiveTurnState {
   toolName: string | null;
   queuedDepth: number;
   showPlaceholderBubble: boolean;
+  workflowActive: boolean;
 }
 
 interface ResolveLiveTurnStateArgs {
@@ -29,6 +30,7 @@ interface ResolveLiveTurnStateArgs {
   agentTurns: AgentTurn[];
   activeTurnId: string | null;
   isStreaming: boolean;
+  streamingSessionId: string | null;
   awaitingFirstChunk: boolean;
   hasActiveLoop: boolean;
   queuedDepth: number;
@@ -91,20 +93,17 @@ function hasMaterializedIncompleteTurn(
   ));
 }
 
-function hasPendingTurn(agentTurns: AgentTurn[], activeTurnId: string | null): boolean {
-  if (activeTurnId) {
-    return agentTurns.some((turn) => turn.id === activeTurnId);
-  }
-
-  return agentTurns.some((turn) => !turn.done);
+function hasActiveWorkflowEnvelopeTurn(agentTurns: AgentTurn[]): boolean {
+  return agentTurns.some((turn) => turn.turnKind === 'workflow-envelope' && !turn.done);
 }
 
 export function resolveLiveTurnState({
   sessionId,
   sessionMessages,
   agentTurns,
-  activeTurnId,
+  activeTurnId: _activeTurnId,
   isStreaming,
+  streamingSessionId,
   awaitingFirstChunk,
   hasActiveLoop,
   queuedDepth,
@@ -118,12 +117,13 @@ export function resolveLiveTurnState({
       sessionId: null,
       phase: 'idle',
       stoppable: false,
-      previewText: null,
-      toolName: null,
-      queuedDepth: 0,
-      showPlaceholderBubble: false,
-    };
-  }
+    previewText: null,
+    toolName: null,
+    queuedDepth: 0,
+    showPlaceholderBubble: false,
+    workflowActive: false,
+  };
+}
 
   const streamingMessageIds = sessionChunkIds(sessionId, chunkSessionIds, streamingChunks);
   const thinkingMessageIds = sessionChunkIds(sessionId, chunkSessionIds, thinkingChunks);
@@ -132,16 +132,17 @@ export function resolveLiveTurnState({
   const runningTool = [...activeToolActivities].reverse().find((activity) => (
     activity.status === 'running' || activity.status === 'awaiting_confirmation'
   )) ?? null;
-  const pendingTurn = hasPendingTurn(agentTurns, activeTurnId);
+  const workflowActive = hasActiveWorkflowEnvelopeTurn(agentTurns);
+  const isStreamingForSession = isStreaming && (!streamingSessionId || streamingSessionId === sessionId);
   const liveSignal = (
     awaitingFirstChunk
     || hasActiveLoop
-    || isStreaming
+    || isStreamingForSession
     || queuedDepth > 0
     || runningTool !== null
     || latestStreamingPreview !== null
     || latestThinkingPreview !== null
-    || pendingTurn
+    || workflowActive
   );
 
   if (!liveSignal) {
@@ -153,6 +154,7 @@ export function resolveLiveTurnState({
       toolName: null,
       queuedDepth,
       showPlaceholderBubble: false,
+      workflowActive: false,
     };
   }
 
@@ -173,6 +175,7 @@ export function resolveLiveTurnState({
     previewText: latestStreamingPreview ?? latestThinkingPreview,
     toolName: runningTool?.toolName ?? null,
     queuedDepth,
-    showPlaceholderBubble: !hasMaterializedIncompleteTurn(agentTurns, sessionMessages),
+    showPlaceholderBubble: workflowActive || !hasMaterializedIncompleteTurn(agentTurns, sessionMessages),
+    workflowActive,
   };
 }

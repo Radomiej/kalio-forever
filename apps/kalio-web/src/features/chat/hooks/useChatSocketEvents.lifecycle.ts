@@ -23,7 +23,8 @@ export function registerSessionLifecycleHandlers({
   setAwaitingFirstChunk,
   setStreaming,
   setQueuedDepth,
-  setSessionStatusSnapshot,
+  recordSessionStatusSnapshot,
+  clearBufferedSessionStatusSnapshots,
 }: {
   cliChildDeps: CliChildDeps;
   addSession: SessionStoreState['addSession'];
@@ -33,11 +34,13 @@ export function registerSessionLifecycleHandlers({
   setAwaitingFirstChunk: (value: boolean) => void;
   setStreaming: AgentStoreState['setStreaming'];
   setQueuedDepth: AgentStoreState['setQueuedDepth'];
-  setSessionStatusSnapshot: AgentStoreState['setSessionStatusSnapshot'];
+  recordSessionStatusSnapshot: AgentStoreState['recordSessionStatusSnapshot'];
+  clearBufferedSessionStatusSnapshots: AgentStoreState['clearBufferedSessionStatusSnapshots'];
 }): () => void {
   const offSessionStatus = eventBus.onSessionStatus((payload) => {
     handleSessionStatusEvent(payload, {
       getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+      isSessionHydrated: (sessionId) => useSessionStore.getState().isSessionHydrated(sessionId),
       hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
       getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
       setRecoveryNotice,
@@ -45,7 +48,8 @@ export function registerSessionLifecycleHandlers({
       startAgentTurn,
       setAwaitingFirstChunk,
       setStreaming,
-      setSessionStatusSnapshot,
+      recordSessionStatusSnapshot,
+      clearBufferedSessionStatusSnapshots,
     });
   });
 
@@ -78,6 +82,7 @@ export function registerConnectionRecoveryHandlers({
   setConnectionState,
   setRecoveryNotice,
   setStreaming,
+  setAwaitingFirstChunk,
   clearToolArgProgressTracking,
   clearToolActivities,
   removeActiveAgentLoop,
@@ -94,6 +99,7 @@ export function registerConnectionRecoveryHandlers({
   setConnectionState: (value: ChatConnectionState) => void;
   setRecoveryNotice: (value: string | null) => void;
   setStreaming: AgentStoreState['setStreaming'];
+  setAwaitingFirstChunk: (value: boolean) => void;
   clearToolArgProgressTracking: (sessionId?: string | null) => void;
   clearToolActivities: AgentStoreState['clearToolActivities'];
   removeActiveAgentLoop: AgentStoreState['removeActiveAgentLoop'];
@@ -120,6 +126,7 @@ export function registerConnectionRecoveryHandlers({
     handleSocketReconnect({
       cliChild: cliChildDeps,
       setStreaming,
+      setAwaitingFirstChunk,
       clearToolArgProgressTracking,
       clearToolActivities,
       removeActiveAgentLoop,

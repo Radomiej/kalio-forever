@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { waitFor } from '@testing-library/react';
 import type { ChatMessage } from '@kalio/types';
+import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
 
@@ -692,5 +693,76 @@ describe('handleSocketReconnect', () => {
       expect(setMessages).toHaveBeenCalled();
     });
     expect(setAgentTurns).not.toHaveBeenCalled();
+  });
+
+  it('clears awaitingFirstChunk during reconnect recovery before replaying a live snapshot', async () => {
+    const setAwaitingFirstChunk = vi.fn();
+    const setStreaming = vi.fn();
+
+    useAgentStore.setState({
+      sessionStatusSnapshots: {
+        'session-1': {
+          sessionId: 'session-1',
+          active: true,
+          turnId: 'turn-live',
+          queueLength: 0,
+          run: {
+            id: 'run-live',
+            sessionId: 'session-1',
+            turnId: 'turn-live',
+            phase: 'llm_streaming',
+            status: 'active',
+            retryCount: 0,
+            safeResume: true,
+            startedAt: 100,
+            updatedAt: 200,
+            lastHeartbeatAt: 200,
+          },
+        },
+      },
+      bufferedSessionStatusSnapshots: {},
+    });
+
+    handleSocketReconnect({
+      cliChild: {
+        upsertCLIChildProjection: vi.fn(),
+        updateCLIChildProjection: vi.fn(),
+        rebuildCLIChildProjections: vi.fn(),
+        appendCLIAgentChunk: vi.fn(),
+        registerCallId: vi.fn(),
+        getAgentState: () => ({
+          callIdToName: {},
+          toolActivities: [],
+          cliChildProjections: {},
+          cliAgentOutput: {},
+        }),
+        getSessionState: () => ({
+          activeSessionId: useSessionStore.getState().activeSessionId,
+          sessions: useSessionStore.getState().sessions,
+        }),
+        identifySession: vi.fn(),
+      },
+      setStreaming,
+      setAwaitingFirstChunk,
+      clearToolArgProgressTracking: vi.fn(),
+      clearToolActivities: vi.fn(),
+      removeActiveAgentLoop: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+      getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
+      setMessages: vi.fn((messages, sessionId?: string | null) => {
+        useSessionStore.getState().setMessages(messages, sessionId);
+      }),
+      setAgentTurns: vi.fn((turns, sessionId?: string | null) => {
+        useSessionStore.getState().setAgentTurns(turns, sessionId);
+      }),
+      hasActiveLoopForSession: () => false,
+      fetchMessages: async () => [],
+    });
+
+    await waitFor(() => {
+      expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
+    });
+    expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-1');
   });
 });

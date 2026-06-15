@@ -77,7 +77,8 @@ export function useChatSocketEvents({
     updateCLIChildProjection,
     rebuildCLIChildProjections,
     setQueuedDepth,
-    setSessionStatusSnapshot,
+    recordSessionStatusSnapshot,
+    clearBufferedSessionStatusSnapshots,
   } = useAgentStore();
   const { addSession } = useSessionStore();
 
@@ -130,9 +131,7 @@ export function useChatSocketEvents({
           setAwaitingFirstChunk(false);
         }
         finalizeChunk(chunk.messageId);
-        if (chunk.sessionId === useSessionStore.getState().activeSessionId) {
-          setStreaming(false);
-        }
+        setStreaming(false, undefined, chunk.sessionId);
       }
     });
 
@@ -146,8 +145,8 @@ export function useChatSocketEvents({
       ids.forEach((id) => {
         if (!chunkSessionIds[id] || chunkSessionIds[id] === payload.sessionId) finalizeChunk(id);
       });
+      setStreaming(false, undefined, payload.sessionId);
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
-        setStreaming(false);
         requestGeneratedTitleIfNeeded(payload.sessionId);
       }
       onContextInvalidated?.();
@@ -162,8 +161,8 @@ export function useChatSocketEvents({
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
         setAwaitingFirstChunk(false);
       }
-      setStreaming(false);
       const { activeSessionId: currentActiveSessionId, getSessionActiveTurnId } = useSessionStore.getState();
+      setStreaming(false, undefined, payload.sessionId ?? currentActiveSessionId);
       const targetSessionId = payload.sessionId ?? currentActiveSessionId;
       if (targetSessionId) {
         clearToolArgProgressTracking(targetSessionId);
@@ -316,7 +315,7 @@ export function useChatSocketEvents({
       setQueuedDepth(payload.sessionId, 0);
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
         setAwaitingFirstChunk(true);
-        setStreaming(true);
+        setStreaming(true, undefined, payload.sessionId);
       }
     });
 
@@ -328,9 +327,9 @@ export function useChatSocketEvents({
         flushThinkingChunks(payload.sessionId);
         flushStreamingChunks(payload.sessionId);
       }
+      setStreaming(false, undefined, payload.sessionId);
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {
         setAwaitingFirstChunk(false);
-        setStreaming(false);
       }
       setPendingConfirmation(payload.sessionId, null);
       setPendingBudgetApproval?.(payload.sessionId, null);
@@ -388,7 +387,7 @@ export function useChatSocketEvents({
           hasPendingChunks: hasPendingChunksForSession(resultSessionId),
         })
       ) {
-        setStreaming(false);
+        setStreaming(false, undefined, resultSessionId);
       }
     });
 
@@ -405,7 +404,8 @@ export function useChatSocketEvents({
       setAwaitingFirstChunk,
       setStreaming,
       setQueuedDepth,
-      setSessionStatusSnapshot,
+      recordSessionStatusSnapshot,
+      clearBufferedSessionStatusSnapshots,
     });
 
     const offRaAppNative = eventBus.onRaAppNativeResult((payload) => {
@@ -427,6 +427,7 @@ export function useChatSocketEvents({
       setConnectionState,
       setRecoveryNotice,
       setStreaming,
+      setAwaitingFirstChunk,
       clearToolArgProgressTracking,
       clearToolActivities,
       removeActiveAgentLoop,
@@ -488,7 +489,8 @@ export function useChatSocketEvents({
     setPendingConfirmation,
     setPendingBudgetApproval,
     setQueuedDepth,
-    setSessionStatusSnapshot,
+    recordSessionStatusSnapshot,
+    clearBufferedSessionStatusSnapshots,
     setRecoveryNotice,
     setStreaming,
     setToolArgProgress,
