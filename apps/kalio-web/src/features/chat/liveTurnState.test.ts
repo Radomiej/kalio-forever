@@ -32,6 +32,7 @@ describe('resolveLiveTurnState', () => {
       agentTurns: [],
       activeTurnId: null,
       isStreaming: true,
+      streamingSessionId: 'session-1',
       awaitingFirstChunk: true,
       hasActiveLoop: false,
       queuedDepth: 0,
@@ -53,6 +54,7 @@ describe('resolveLiveTurnState', () => {
       agentTurns: [],
       activeTurnId: null,
       isStreaming: true,
+      streamingSessionId: 'session-1',
       awaitingFirstChunk: false,
       hasActiveLoop: true,
       queuedDepth: 0,
@@ -73,6 +75,7 @@ describe('resolveLiveTurnState', () => {
       agentTurns: [],
       activeTurnId: null,
       isStreaming: true,
+      streamingSessionId: 'session-1',
       awaitingFirstChunk: false,
       hasActiveLoop: true,
       queuedDepth: 0,
@@ -93,6 +96,7 @@ describe('resolveLiveTurnState', () => {
       agentTurns: [],
       activeTurnId: null,
       isStreaming: true,
+      streamingSessionId: 'session-1',
       awaitingFirstChunk: false,
       hasActiveLoop: true,
       queuedDepth: 0,
@@ -120,6 +124,7 @@ describe('resolveLiveTurnState', () => {
       agentTurns: [turn({ items: [{ kind: 'tool', callId: 'call-1' }] })],
       activeTurnId: 'turn-1',
       isStreaming: true,
+      streamingSessionId: 'session-1',
       awaitingFirstChunk: false,
       hasActiveLoop: true,
       queuedDepth: 0,
@@ -147,6 +152,7 @@ describe('resolveLiveTurnState', () => {
       agentTurns: [turn({ items: [{ kind: 'text', messageId: 'assistant-1' }] })],
       activeTurnId: 'turn-1',
       isStreaming: true,
+      streamingSessionId: 'session-1',
       awaitingFirstChunk: false,
       hasActiveLoop: true,
       queuedDepth: 0,
@@ -167,6 +173,7 @@ describe('resolveLiveTurnState', () => {
       agentTurns: [turn({ done: true })],
       activeTurnId: null,
       isStreaming: false,
+      streamingSessionId: null,
       awaitingFirstChunk: false,
       hasActiveLoop: false,
       queuedDepth: 0,
@@ -179,5 +186,84 @@ describe('resolveLiveTurnState', () => {
     expect(state.phase).toBe('idle');
     expect(state.stoppable).toBe(false);
     expect(state.showPlaceholderBubble).toBe(false);
+  });
+
+  it('does not treat a stale hydrated activeTurnId without runtime activity as a live turn', () => {
+    const state = resolveLiveTurnState({
+      sessionId: 'session-1',
+      sessionMessages: [],
+      agentTurns: [turn({ done: false })],
+      activeTurnId: 'turn-1',
+      isStreaming: false,
+      streamingSessionId: null,
+      awaitingFirstChunk: false,
+      hasActiveLoop: false,
+      queuedDepth: 0,
+      activeToolActivities: [],
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+    });
+
+    expect(state.phase).toBe('idle');
+    expect(state.stoppable).toBe(false);
+    expect(state.showPlaceholderBubble).toBe(false);
+  });
+
+  it('ignores streaming that belongs to another session', () => {
+    const state = resolveLiveTurnState({
+      sessionId: 'session-2',
+      sessionMessages: [],
+      agentTurns: [],
+      activeTurnId: null,
+      isStreaming: true,
+      streamingSessionId: 'session-1',
+      awaitingFirstChunk: false,
+      hasActiveLoop: false,
+      queuedDepth: 0,
+      activeToolActivities: [],
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+    });
+
+    expect(state.phase).toBe('idle');
+    expect(state.showPlaceholderBubble).toBe(false);
+  });
+
+  it('keeps the placeholder visible for a running workflow envelope turn', () => {
+    const state = resolveLiveTurnState({
+      sessionId: 'session-1',
+      sessionMessages: [message({
+        id: 'assistant-1',
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          trace: [],
+          routeHops: [],
+          hostProjectionKind: 'workflow-envelope',
+        },
+      })],
+      agentTurns: [turn({
+        turnKind: 'workflow-envelope',
+        items: [{ kind: 'text', messageId: 'assistant-1' }],
+        done: false,
+      })],
+      activeTurnId: 'turn-1',
+      isStreaming: false,
+      streamingSessionId: null,
+      awaitingFirstChunk: false,
+      hasActiveLoop: false,
+      queuedDepth: 0,
+      activeToolActivities: [],
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+    });
+
+    expect(state.phase).toBe('pending');
+    expect(state.workflowActive).toBe(true);
+    expect(state.showPlaceholderBubble).toBe(true);
   });
 });

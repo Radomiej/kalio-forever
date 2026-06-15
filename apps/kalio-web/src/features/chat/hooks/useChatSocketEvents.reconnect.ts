@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { AgentTurn } from '../../../store/sessionStore';
+import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import type { CliChildSocketDeps } from './useChatSocketEvents.cliChild';
 import {
@@ -7,12 +8,17 @@ import {
   identifyCliChildrenOnReconnect,
   rebuildCliChildProjectionsFromHistory,
 } from './useChatSocketEvents.cliChild';
-import { hydrateSessionHistoryIntoStore } from '../historyHydration';
+import { hydrateActiveConversationSession } from '../activeConversationSession';
 import { normalizeConversationSessionId } from '../../sessions/sessionTreeDisplay';
+import {
+  materializeLiveTurnFromSessionStatusSnapshot,
+  selectReplayableSessionStatusSnapshot,
+} from './useChatSocketEvents.helpers';
 
 export interface SocketReconnectDeps {
   cliChild: CliChildSocketDeps;
-  setStreaming: (value: boolean) => void;
+  setStreaming: (value: boolean, messageId?: string, sessionId?: string | null) => void;
+  setAwaitingFirstChunk?: (value: boolean) => void;
   clearToolArgProgressTracking: (sessionId?: string | null) => void;
   clearToolActivities: (sessionId?: string) => void;
   removeActiveAgentLoop: (sessionId: string) => void;
@@ -30,7 +36,8 @@ export interface SocketReconnectDeps {
 }
 
 export function handleSocketReconnect(deps: SocketReconnectDeps): void {
-  deps.setStreaming(false);
+  deps.setStreaming(false, undefined, deps.getActiveSessionId());
+  deps.setAwaitingFirstChunk?.(false);
   deps.clearToolArgProgressTracking();
 
   const sid = deps.getActiveSessionId();
@@ -73,7 +80,8 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
       deps.setPendingConfirmation(reconnectedSessionId, null);
     }
 
-    const hydratedMessages = await hydrateSessionHistoryIntoStore({
+    const hydratedMessages = await hydrateActiveConversationSession({
+      mode: 'reconnect',
       sessionId: reconnectedSessionId,
       getActiveSessionId: () => {
         const activeSessionId = deps.getActiveSessionId();
@@ -94,6 +102,20 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
     if (!hydratedMessages) return;
     const projections = rebuildCliChildProjectionsFromHistory(deps.cliChild, reconnectedSessionId, hydratedMessages);
     identifyCliChildProjections(deps.cliChild, projections, reconnectedSessionId);
+    const agentState = useAgentStore.getState();
+    materializeLiveTurnFromSessionStatusSnapshot(
+      selectReplayableSessionStatusSnapshot(
+        agentState.consumeBufferedSessionStatusSnapshots(reconnectedSessionId),
+        agentState.sessionStatusSnapshots[reconnectedSessionId],
+      ),
+      {
+        hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
+        getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
+        addActiveAgentLoop: (sessionId, turnId) => useAgentStore.getState().addActiveAgentLoop(sessionId, turnId),
+        startAgentTurn: (turnId, sessionId) => useSessionStore.getState().startAgentTurn(turnId, sessionId),
+        setAwaitingFirstChunk: deps.setAwaitingFirstChunk,
+      },
+    );
     deps.onContextInvalidated?.();
   })()
     .catch((err: unknown) => {

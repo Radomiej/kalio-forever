@@ -119,9 +119,13 @@ const appendCLIAgentChunk = vi.fn();
 const clearCLIAgentOutput = vi.fn();
 const setToolArgProgress = vi.fn();
 const setSessionStatusSnapshot = vi.fn();
+const recordSessionStatusSnapshot = vi.fn();
+const clearBufferedSessionStatusSnapshots = vi.fn();
+const consumeBufferedSessionStatusSnapshots = vi.fn(() => []);
 
 const agentStoreState = {
   isStreaming: false,
+  streamingSessionId: null as string | null,
   pendingConfirmations: {} as Record<string, unknown>,
   toolArgProgress: null as { toolName: string; totalChars: number; charsPerSec: number } | null,
   toolActivities: [] as Array<{
@@ -140,6 +144,8 @@ const agentStoreState = {
   activeAgentLoops: {} as Record<string, { sessionId: string; turnId: string; startedAt: number }>,
   cliChildProjections: {} as Record<string, unknown>,
   queuedDepthBySession: {} as Record<string, number>,
+  sessionStatusSnapshots: {} as Record<string, unknown>,
+  bufferedSessionStatusSnapshots: {} as Record<string, unknown>,
   cliAgentOutput: {} as Record<string, string>,
   setStreaming,
   setPendingConfirmation,
@@ -168,6 +174,9 @@ const agentStoreState = {
   appendCLIAgentChunk,
   clearCLIAgentOutput,
   setSessionStatusSnapshot,
+  recordSessionStatusSnapshot,
+  clearBufferedSessionStatusSnapshots,
+  consumeBufferedSessionStatusSnapshots,
   upsertCLIChildProjection: vi.fn(),
   updateCLIChildProjection: vi.fn(),
   rebuildCLIChildProjections: vi.fn(),
@@ -214,6 +223,7 @@ let mockPendingMessage: string | null = null;
 let mockStreamingChunks: Record<string, string> = {};
 let mockThinkingChunks: Record<string, string> = {};
 let mockChunkSessionIds: Record<string, string> = {};
+let mockHydratedSessionIds: Record<string, boolean> = {};
 let mockMessages: ChatMessage[] = [];
 let mockSessions = createMockSessions();
 const mockSetPendingMessage = vi.fn();
@@ -250,6 +260,10 @@ vi.mock('../../store/sessionStore', () => ({
       removeLastAgentTurn,
       flushThinkingChunks: vi.fn(),
       flushStreamingChunks,
+      isSessionHydrated: (sessionId: string | null) => (sessionId ? mockHydratedSessionIds[sessionId] === true : false),
+      markSessionHydrated: (sessionId: string) => {
+        mockHydratedSessionIds[sessionId] = true;
+      },
     }),
     {
       getState: () => ({
@@ -276,6 +290,10 @@ vi.mock('../../store/sessionStore', () => ({
         flushStreamingChunks,
         getSessionActiveTurnId: () => mockActiveTurnId,
         getSessionAgentTurns: () => [],
+        isSessionHydrated: (sessionId: string | null) => (sessionId ? mockHydratedSessionIds[sessionId] === true : false),
+        markSessionHydrated: (sessionId: string) => {
+          mockHydratedSessionIds[sessionId] = true;
+        },
         markAgentTurnError,
         removeLastAgentTurn,
       }),
@@ -414,6 +432,7 @@ beforeEach(() => {
   mockStreamingChunks = {};
   mockThinkingChunks = {};
   mockChunkSessionIds = {};
+  mockHydratedSessionIds = {};
   mockMessages = [];
   mockSessions = createMockSessions();
   settingsStoreState.conversationTitleSettings = {
@@ -421,8 +440,11 @@ beforeEach(() => {
     renameEveryReplies: 3,
   };
   agentStoreState.isStreaming = false;
+  agentStoreState.streamingSessionId = null;
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
+  agentStoreState.sessionStatusSnapshots = {};
+  agentStoreState.bufferedSessionStatusSnapshots = {};
   getSessionMessages.mockReturnValue(mockMessages);
   vi.clearAllMocks();
   mockSendMessage.mockReturnValue(true);
@@ -522,6 +544,20 @@ describe('ChatInterface event wiring', () => {
     expect(screen.getByTestId('welcome-prompt-input')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-input')).toBeNull();
     expect(screen.queryByText('{"ok":true}')).toBeNull();
+  });
+
+  it('REGRESSION: an unrelated streaming session does not hide the new-chat launch form', async () => {
+    mockActiveSessionId = 'session-2';
+    agentStoreState.isStreaming = true;
+    agentStoreState.streamingSessionId = 'session-1';
+    getSessionMessages.mockImplementation(((sessionId: string | null) => (
+      sessionId === 'session-2' ? [] : mockMessages
+    )) as typeof getSessionMessages);
+
+    await renderChatInterface();
+
+    expect(screen.getByTestId('welcome-prompt-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('pending-agent-bubble')).toBeNull();
   });
 
   it('hydrates architecture runs from the active session VFS when files are attached', () => {
@@ -709,6 +745,7 @@ describe('ChatInterface event wiring', () => {
     mockMessages = [{ id: 'u1', role: 'user', content: 'hello', sessionId: 'session-1', createdAt: 1 }];
     getSessionMessages.mockReturnValue(mockMessages);
     agentStoreState.isStreaming = true;
+    agentStoreState.streamingSessionId = 'session-1';
     mockStartArchitectureRun.mockClear();
 
     await renderChatInterface();
@@ -856,7 +893,7 @@ describe('ChatInterface event wiring', () => {
 
     expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-restored');
     expect(startAgentTurn).toHaveBeenCalledWith('turn-restored', 'session-1');
-    expect(setStreaming).toHaveBeenCalledWith(true);
+    expect(setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
   });
 
   it('merges raapp:native_result into the target session even when it is not active', async () => {
@@ -1017,7 +1054,7 @@ describe('ChatInterface event wiring', () => {
       sessionId: 'session-1',
     });
 
-    expect(setStreaming).toHaveBeenCalledWith(false);
+    expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-1');
   });
 
   it('first tool:result during an active loop does not unlock composer streaming state', async () => {
@@ -1054,7 +1091,7 @@ describe('ChatInterface event wiring', () => {
       sessionId: 'session-1',
     });
 
-    expect(setStreaming).not.toHaveBeenCalledWith(false);
+    expect(setStreaming).not.toHaveBeenCalledWith(false, undefined, 'session-1');
   });
 
   it('tool:result error/abort for the active session unlocks composer streaming state', async () => {
@@ -1069,7 +1106,7 @@ describe('ChatInterface event wiring', () => {
       sessionId: 'session-1',
     });
 
-    expect(setStreaming).toHaveBeenCalledWith(false);
+    expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-1');
   });
 
   it('tool:confirmation_required creates an awaiting_confirmation activity', async () => {
@@ -1407,7 +1444,7 @@ describe('ChatInterface event wiring', () => {
     }));
   });
 
-  it('ignores chat:complete streaming state changes from a different session', async () => {
+  it('chat:complete clears streaming for a background session that owned the live stream', async () => {
     mockActiveSessionId = 'session-1';
     await renderChatInterface();
     setStreaming.mockClear();
@@ -1417,7 +1454,7 @@ describe('ChatInterface event wiring', () => {
       messageId: 'msg-background',
     });
 
-    expect(setStreaming).not.toHaveBeenCalled();
+    expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-2');
   });
 
   it('REGRESSION: first completed turn still triggers title generation after optimistic preview title', async () => {
@@ -1853,7 +1890,7 @@ describe('chat:error two-path dispatch', () => {
     // Neither turn action should be called — floating banner handles it
     expect(markAgentTurnError).not.toHaveBeenCalled();
     expect(removeLastAgentTurn).not.toHaveBeenCalled();
-    expect(setStreaming).toHaveBeenCalledWith(false);
+    expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-1');
   });
 
   it('REGRESSION: chat:error clears pending confirmation and settles active tool activities for the errored session', async () => {
@@ -2324,7 +2361,17 @@ describe('REGRESSION: pendingConfirmations cleared on agent:done', () => {
 
     await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
 
-    expect(setStreaming).toHaveBeenCalledWith(false);
+    expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-1');
+  });
+
+  it('agent:done also clears streaming for a background session that finishes off-screen', async () => {
+    mockActiveSessionId = 'session-1';
+    await renderChatInterface();
+    setStreaming.mockClear();
+
+    await emitEvent('agent:done', { sessionId: 'session-2', turnId: 'turn-done' });
+
+    expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-2');
   });
 
   it('agent:done flushes pending chunks and stops streaming when chat:complete never arrived', async () => {
@@ -2338,6 +2385,6 @@ describe('REGRESSION: pendingConfirmations cleared on agent:done', () => {
     await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
 
     expect(flushStreamingChunks).toHaveBeenCalledWith('session-1');
-    expect(setStreaming).toHaveBeenCalledWith(false);
+    expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-1');
   });
 });
