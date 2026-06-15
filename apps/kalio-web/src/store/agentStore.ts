@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { AgentBudgetApprovalRequest, AgentRunContext, SocketEvents, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
 import type { CLIChildProjection } from '../features/chat/cliChildProjection.model';
+import { areSessionStatusSnapshotsEquivalent } from './sessionStatusSnapshot';
 
 export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled' | 'expired';
 
@@ -35,6 +36,7 @@ export interface LlmActivity {
 interface AgentState {
   isStreaming: boolean;
   streamingMessageId: string | undefined;
+  streamingSessionId: string | null;
   /** Pending tool confirmations keyed by sessionId — one per session at most */
   pendingConfirmations: Record<string, ToolConfirmationRequest>;
   pendingBudgetApprovals: Record<string, AgentBudgetApprovalRequest>;
@@ -67,7 +69,7 @@ interface AgentState {
   /** Progress of the LLM writing tool call arguments — null when no tool is being written */
   toolArgProgress: { toolName: string; totalChars: number; charsPerSec: number } | null;
 
-  setStreaming: (streaming: boolean, messageId?: string) => void;
+  setStreaming: (streaming: boolean, messageId?: string, sessionId?: string | null) => void;
   setPendingConfirmation: (sessionId: string, req: ToolConfirmationRequest | null) => void;
   setPendingBudgetApproval: (sessionId: string, req: AgentBudgetApprovalRequest | null) => void;
   setAvailableTools: (tools: ToolMeta[]) => void;
@@ -105,7 +107,12 @@ interface AgentState {
   setQueuedDepth: (sessionId: string, depth: number) => void;
   /** Last backend runtime status replayed per session, including descendants after reconnect */
   sessionStatusSnapshots: Record<string, SocketEvents['session:status']>;
+  /** Ordered status snapshots received before the session view is ready to replay them */
+  bufferedSessionStatusSnapshots: Record<string, SocketEvents['session:status'][]>;
   setSessionStatusSnapshot: (snapshot: SocketEvents['session:status']) => void;
+  recordSessionStatusSnapshot: (snapshot: SocketEvents['session:status']) => void;
+  consumeBufferedSessionStatusSnapshots: (sessionId: string) => SocketEvents['session:status'][];
+  clearBufferedSessionStatusSnapshots: (sessionId: string) => void;
   clearSessionStatusSnapshot: (sessionId: string) => void;
 }
 
@@ -122,6 +129,7 @@ function upsertActivity(list: ToolActivity[], activity: ToolActivity): ToolActiv
 export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   isStreaming: false,
   streamingMessageId: undefined,
+  streamingSessionId: null,
   pendingConfirmations: {},
   pendingBudgetApprovals: {},
   availableTools: [],
@@ -140,10 +148,29 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   cliChildProjections: {},
   queuedDepthBySession: {},
   sessionStatusSnapshots: {},
+  bufferedSessionStatusSnapshots: {},
   toolArgProgress: null,
 
-  setStreaming: (streaming, messageId = undefined) =>
-    set({ isStreaming: streaming, streamingMessageId: messageId }),
+  setStreaming: (streaming, messageId = undefined, sessionId = null) =>
+    set((state) => {
+      if (streaming) {
+        return {
+          isStreaming: true,
+          streamingMessageId: messageId,
+          streamingSessionId: sessionId,
+        };
+      }
+
+      if (sessionId && state.streamingSessionId && state.streamingSessionId !== sessionId) {
+        return state;
+      }
+
+      return {
+        isStreaming: false,
+        streamingMessageId: undefined,
+        streamingSessionId: null,
+      };
+    }),
   setPendingConfirmation: (sessionId, req) =>
     set((s) => {
       if (!sessionId.trim()) {
@@ -425,12 +452,62 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
       if (!snapshot.sessionId.trim()) {
         return s;
       }
+      if (areSessionStatusSnapshotsEquivalent(s.sessionStatusSnapshots[snapshot.sessionId], snapshot)) {
+        return s;
+      }
       return {
         sessionStatusSnapshots: {
           ...s.sessionStatusSnapshots,
           [snapshot.sessionId]: snapshot,
         },
       };
+    }),
+
+  recordSessionStatusSnapshot: (snapshot) => {
+    if (!snapshot.sessionId.trim()) {
+      return;
+    }
+
+    get().setSessionStatusSnapshot(snapshot);
+    set((s) => {
+      const currentBuffer = s.bufferedSessionStatusSnapshots[snapshot.sessionId] ?? [];
+      const previousBufferedSnapshot = currentBuffer[currentBuffer.length - 1];
+      if (areSessionStatusSnapshotsEquivalent(previousBufferedSnapshot, snapshot)) {
+        return s;
+      }
+      return {
+        bufferedSessionStatusSnapshots: {
+          ...s.bufferedSessionStatusSnapshots,
+          [snapshot.sessionId]: [...currentBuffer, snapshot],
+        },
+      };
+    });
+  },
+
+  consumeBufferedSessionStatusSnapshots: (sessionId) => {
+    if (!sessionId.trim()) {
+      return [];
+    }
+
+    const buffered = get().bufferedSessionStatusSnapshots[sessionId] ?? [];
+    if (buffered.length === 0) {
+      return [];
+    }
+
+    set((s) => {
+      const next = { ...s.bufferedSessionStatusSnapshots };
+      delete next[sessionId];
+      return { bufferedSessionStatusSnapshots: next };
+    });
+
+    return buffered;
+  },
+
+  clearBufferedSessionStatusSnapshots: (sessionId) =>
+    set((s) => {
+      const next = { ...s.bufferedSessionStatusSnapshots };
+      delete next[sessionId];
+      return { bufferedSessionStatusSnapshots: next };
     }),
 
   clearSessionStatusSnapshot: (sessionId) =>

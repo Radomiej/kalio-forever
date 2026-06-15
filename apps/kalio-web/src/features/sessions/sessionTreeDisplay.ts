@@ -44,6 +44,14 @@ export function visibleConversationTreeChildren(
   ));
 }
 
+export function hasVisibleWorkflowConversationDescendant(
+  sessionId: string,
+  childSessionsByParent: Map<string, ChatSession[]>,
+): boolean {
+  return visibleConversationTreeChildren(sessionId, childSessionsByParent)
+    .some((child) => isWorkflowConversationSession(child));
+}
+
 export function countVisibleConversationTreeDescendants(
   sessionId: string,
   childSessionsByParent: Map<string, ChatSession[]>,
@@ -102,7 +110,7 @@ export function visibleConversationParentId(
     if (!parent) {
       return null;
     }
-    if (!isArchitectureWorkflowContainerSession(parent)) {
+    if (!isArchitectureWorkflowContainerSession(parent) && !isTechnicalArchitectureSession(parent)) {
       return parent.id;
     }
     parentId = parent.parentSessionId;
@@ -229,6 +237,17 @@ export function isArchitectureWorkflowContainerSession(session: ChatSession): bo
     return true;
   }
   return session.title.trim().toLowerCase().startsWith('architecture:');
+}
+
+function isWorkflowConversationSession(session: ChatSession): boolean {
+  const sessionSurface = architectureSessionSurfaceForSession(session);
+  if (sessionSurface === 'conversation-branch') {
+    return true;
+  }
+  if (sessionSurface === 'technical-node') {
+    return false;
+  }
+  return Boolean(architectureRunIdForSession(session)) && !isTechnicalArchitectureSession(session);
 }
 
 export function normalizeConversationSessionId(

@@ -23,9 +23,12 @@ docs/audit/*.json
 docs/audit/*.md
 .playwright-mcp/
 .tmp/
+.serena/
+outputs/
 *.tsbuildinfo
 *.log
 kalio-*.png
 .windsurf/
 tmp/runtime-report/
 docs/sessions/
+apps/output/

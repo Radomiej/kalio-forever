@@ -4,6 +4,7 @@ import {
   displayTitleForSession,
   isPendingArchitecturePlaceholderSession,
   normalizeConversationSessionId,
+  visibleConversationParentId,
 } from './sessionTreeDisplay';
 
 function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
@@ -87,6 +88,64 @@ describe('displayTitleForSession', () => {
 
     expect(normalizeConversationSessionId(envelope.id, [host, envelope, branch])).toBe(host.id);
     expect(normalizeConversationSessionId(branch.id, [host, envelope, branch])).toBe(branch.id);
+  });
+
+  it('skips workflow containers and technical nodes when resolving a visible parent', () => {
+    const host = createSession({ id: 'host', title: 'Workflow host' });
+    const container = createSession({
+      id: 'arch-root',
+      title: 'Architecture: Strategic Decision Council',
+      parentSessionId: host.id,
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          schemaName: 'Strategic Decision Council',
+          displayLabel: 'Strategic Decision Council',
+          sessionSurface: 'technical-node',
+        },
+      },
+    });
+    const router = createSession({
+      id: 'arch-router',
+      title: 'Strategic Decision Council: Router',
+      parentSessionId: container.id,
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'router',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'router',
+          roleSlotType: 'router',
+          displayLabel: 'Router',
+          sessionSurface: 'technical-node',
+        },
+      },
+    });
+    const branch = createSession({
+      id: 'arch-analyst',
+      title: 'Strategic Decision Council: Analyst',
+      parentSessionId: router.id,
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'analyst',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'analyst',
+          displayLabel: 'Analyst',
+          sessionSurface: 'conversation-branch',
+        },
+      },
+    });
+
+    expect(visibleConversationParentId(branch, new Map([
+      [host.id, host],
+      [container.id, container],
+      [router.id, router],
+      [branch.id, branch],
+    ]))).toBe(host.id);
   });
 
   it('treats untouched pending architecture branches as sidebar placeholders', () => {

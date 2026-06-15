@@ -67,36 +67,24 @@ function safeParseJson(value: string): unknown | null {
 }
 
 export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) {
-  const {
-    activeSessionId,
-    sessions,
-    messages,
-    agentTurns,
-    streamingChunks,
-    thinkingChunks,
-    chunkSessionIds,
-    getSessionActiveTurnId,
-  } = useSessionStore((state) => ({
-    activeSessionId: state.activeSessionId,
-    sessions: state.sessions,
-    messages: state.messages,
-    agentTurns: state.agentTurns,
-    streamingChunks: state.streamingChunks,
-    thinkingChunks: state.thinkingChunks,
-    chunkSessionIds: state.chunkSessionIds,
-    getSessionActiveTurnId: state.getSessionActiveTurnId,
-  }));
-  const { getToolActivitiesForSession, hasActiveLoopForSession, queuedDepthBySession } = useAgentStore((state) => ({
-    getToolActivitiesForSession: state.getToolActivitiesForSession,
-    hasActiveLoopForSession: state.hasActiveLoopForSession,
-    queuedDepthBySession: state.queuedDepthBySession,
-  }));
+  const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const sessions = useSessionStore((state) => state.sessions);
+  const messages = useSessionStore((state) => state.messages);
+  const agentTurns = useSessionStore((state) => state.agentTurns);
+  const streamingChunks = useSessionStore((state) => state.streamingChunks);
+  const thinkingChunks = useSessionStore((state) => state.thinkingChunks);
+  const chunkSessionIds = useSessionStore((state) => state.chunkSessionIds);
+  const getSessionActiveTurnId = useSessionStore((state) => state.getSessionActiveTurnId);
+  const getToolActivitiesForSession = useAgentStore((state) => state.getToolActivitiesForSession);
+  const hasActiveLoopForSession = useAgentStore((state) => state.hasActiveLoopForSession);
+  const queuedDepthBySession = useAgentStore((state) => state.queuedDepthBySession);
   const activeSessionLiveTurn = resolveLiveTurnState({
     sessionId: activeSessionId,
     sessionMessages: messages,
     agentTurns,
     activeTurnId: getSessionActiveTurnId(activeSessionId),
     isStreaming: false,
+    streamingSessionId: null,
     awaitingFirstChunk: false,
     hasActiveLoop: hasActiveLoopForSession(activeSessionId),
     queuedDepth: activeSessionId ? (queuedDepthBySession[activeSessionId] ?? 0) : 0,

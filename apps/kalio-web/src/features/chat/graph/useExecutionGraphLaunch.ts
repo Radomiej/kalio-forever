@@ -11,10 +11,10 @@ import {
   persistSessionLaunchPersona,
 } from '../launch/launchContext';
 import {
-  createAndActivateHostSession,
   launchSingleChatPrompt,
   launchWorkflowPrompt,
 } from '../launch/sessionLaunchShared';
+import { createAndActivateEmptyHostSession } from '../activeConversationSession';
 import { useLaunchPersonas } from '../launch/useLaunchPersonas';
 
 export interface ExecutionGraphLaunchState {
@@ -49,11 +49,13 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
   } = useSessionStore();
   const {
     isStreaming,
+    streamingSessionId,
     clearToolActivities,
     getContextForSession,
     setStreaming,
     hasActiveLoopForSession,
   } = useAgentStore();
+  const isStreamingForActiveSession = isStreaming && streamingSessionId === activeSessionId;
   const [architectures, setArchitectures] = useState<ArchitectSchema[]>([]);
   const [selectedArchitectureId, setSelectedArchitectureId] = useState('single-chat');
   const [projectPath, setProjectPath] = useState('');
@@ -108,20 +110,21 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
       return activeSession;
     }
 
-    if (isStreaming || creatingGraphSession) {
+    if (isStreamingForActiveSession || creatingGraphSession) {
       return null;
     }
 
     setCreatingGraphSession(true);
     setEmptyPromptError(null);
     try {
-      return await createAndActivateHostSession({
+      return await createAndActivateEmptyHostSession({
         personaId,
         runtimeContext: buildSessionLaunchRuntimeContext(undefined, projectPath) ?? undefined,
         addSession,
         setActiveSession,
         setMessages,
         setAgentTurns,
+        reason: 'graph',
       });
     } catch (err) {
       setEmptyPromptError(err instanceof Error ? err.message : 'Failed to create a graph chat.');
@@ -139,7 +142,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
         content,
         personaId,
         projectPath,
-        isStreaming,
+        isStreaming: isStreamingForActiveSession,
         hasActiveLoop: typeof hasActiveLoopForSession === 'function'
           ? hasActiveLoopForSession(session.id)
           : false,
@@ -157,7 +160,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
   };
 
   const runGraphArchitecturePrompt = async (session: ChatSession, content: string, schemaId: string, isFirstMessage: boolean) => {
-    if (isStreaming || creatingGraphSession) {
+    if (isStreamingForActiveSession || creatingGraphSession) {
       return;
     }
 
@@ -216,7 +219,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
     architectures,
     creatingGraphSession,
     emptyPromptError,
-    isBusy: isStreaming || creatingGraphSession,
+    isBusy: isStreamingForActiveSession || creatingGraphSession,
     personas,
     projectPath,
     selectedPersonaId,

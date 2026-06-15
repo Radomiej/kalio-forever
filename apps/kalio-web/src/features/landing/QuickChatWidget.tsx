@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { Send } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
-import { createAndActivateHostSession } from '../chat/launch/sessionLaunchShared';
+import { createAndActivateEmptyHostSession } from '../chat/activeConversationSession';
 
 interface QuickChatWidgetProps {
   /** Called after the message is dispatched so the parent can switch views */
@@ -22,12 +22,13 @@ export function QuickChatWidget({ onMessageSent }: QuickChatWidgetProps) {
     if (!trimmed) return;
 
     try {
-      const session = await createAndActivateHostSession({
+      const session = await createAndActivateEmptyHostSession({
         personaId: 'default',
         addSession,
         setActiveSession,
         setMessages,
         setAgentTurns,
+        reason: 'quick-chat',
       });
       console.debug('[QuickChat] session created', session.id);
       // Store message before navigating so ChatInterface auto-sends it

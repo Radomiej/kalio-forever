@@ -17,248 +17,187 @@ Primary source-of-truth areas:
 
 ## Reading map
 
-- `chat-streaming-tools-architecture.md` - main chat hot path, per-session queueing, live FE state
+- `chat-streaming-tools-architecture.md` - chat hot path, per-session queueing, live FE state
 - `tool-architecture.md` - native tool registry, dispatch, HITL, MCP merge
 - `mcp-architecture.md` - external tool discovery and persona filtering
-- `design-tools-architecture-current.md` - final design/prototype workflow: VFS-first preview vs RA-App publish lane
+- `architecture-runtime-stack.md` - architecture runtime and stream boundary
+- `agentflow-architecture-and-workflow.md` - current AgentFlow and architect workflow
+- `sub-agentflow-target-architecture.md` - target nested flow delegation model (`sub_agentflow`)
+- `frontend-model-current.md` - FE state ownership and relation model
+- `UI-Flow.md` - shell navigation and screen transitions
 - `raapp-design-current.md` - inline RA-App rendering, catalog, approvals, iframe bridge
 - `cli-agent-module-architecture.md` - CLI coding-agent adapter stack
-- `sub-agentflow-target-architecture.md` - target nested flow delegation model (`sub_agentflow`) for child graph runs
+- `database-schema-diagram.md` - persistence ERD
 
-## Core runtime entities
+## Core runtime models
 
-| Entity | Source of truth | What it means in practice |
+### Session and turn model
+
+| Model | Source of truth | What it means in practice |
 | --- | --- | --- |
-| `ChatSession` | SQLite row plus session-owned files | The isolation unit. Chat history, queueing, aborts, VFS, KV state, tool approvals, and sub-agent parentage all hang off `sessionId`. |
-| `ChatMessage` | SQLite row, mirrored into `sessionStore` | Durable history item. Roles are `user`, `assistant`, `tool_result`, `system`; assistant `thinking` is also persisted and later re-exposed as backend-only `reasoningContent` when building LLM context. |
-| `AgentTurn` | Frontend state in `sessionStore` | Live rendering bracket between `agent:start` and `agent:done`. Rebuilt from message history after reconnect or reload. |
-| `ToolActivity` | Frontend state in `agentStore` | Live per-call UI state: running, awaiting confirmation, success, error, cancelled. Not durable by itself. |
-| `AgentRunContext` | Shared wire contract in `@kalio/types` | Labels a run as `master` or `subagent`, carries parent linkage, and tells the UI whether a tool/event belongs to a child run. |
+| `ChatSession` | SQLite row plus session-owned files | Isolation unit for chat, tool approvals, VFS, KV, and parent/child lineage. `kind` now distinguishes `chat`, `subagent`, `cli-agent`, and `agent-flow`. |
+| `ChatMessage` | SQLite row, mirrored into FE session state | Durable history item. Roles are `user`, `assistant`, `tool_result`, `system`; assistant `thinking` is stored and reused when building managed LLM context. |
+| `ChatRun` | SQLite row in `chat_runs` | Turn-level execution ledger: phase, status, provider/model, retry count, heartbeat, and completion timestamps. |
+| `SessionRuntimeContext` | `ChatSession.runtimeContext` | Runtime metadata bridge. Carries architecture launch scope, model override, tool policy, and session surface. |
+| `AgentRunContext` | Shared wire contract in `@kalio/types` | Labels a run as `master` or `subagent` and carries parent session, parent turn, and parent tool call linkage. |
 | `ToolResult` | Wire result from `ToolDispatchService` | Runtime result of one tool call. Non-cancelled results are also persisted as `tool_result` messages. |
-| `SubagentToolResult` | Tool payload plus child session history | Summary returned to the parent chat after a child session run. The child itself is still a normal session with its own history. |
-| `RAAppBlock` | Tool payload rendered in chat | Inline app block returned by a tool result. Separate from the long-lived RA-App catalog on disk. |
-| `MCPServer` / `MCPTool` | DB rows plus live runtime handles | Dynamic external tool providers. The runtime handle set is separate from the persisted server config rows. |
+| `SubagentToolResult` | Tool payload plus child session history | Summary returned to the parent chat after a child session run. The child itself remains a normal session. |
 
-## System topology
+### Architecture and AgentFlow model
 
-```mermaid
-flowchart LR
-    subgraph Frontend[Frontend]
-        App[App shell]
-        ChatUI[ChatInterface]
-        Canvas[CanvasPanel]
-        SessionsUI[Conversation panels]
-        RAAppUI[RAAppManager and renderers]
-        SessionStore[sessionStore]
-        AgentStore[agentStore]
-        SDK[KalioSDK / eventBus]
-    end
+| Model | Source of truth | What it means in practice |
+| --- | --- | --- |
+| `ArchitectureSchema` | `architecture` module registry and `@kalio/types` | Current graph schema with role slots, nodes, edges, router policy, context policy, and output schema. |
+| `ArchitectureRun` | in-memory runtime state plus audit-backed recovery | Graph runtime execution record: prompt, execution mode, root session, branch sessions, status, and completion timestamps. |
+| `ArchitectureExecutionEvent` | runtime events plus `audit_log` recovery rows | Canonical runtime event emitted by the architecture engine for graph and chat projections. |
+| `ArchitectureGraphProjection` | computed graph projection | FE-facing graph model with nodes, edges, route hops, and child agent projections. |
+| `ArchitectureChatRunSummary` | chat projection summary | FE-facing summary embedded in `ChatMessage.architectureRun` for talk and canvas views. |
+| `AgentFlowDefinition` | `AgentFlowModule` facade over architecture runtime | Product-level flow definition with id, version, entry node, optional orchestrator metadata, max iterations, nodes, and edges. Phases live on `AgentFlowNode` and runtime phase progress lives on `agent_flow_runs`. |
+| `AgentFlowRun` | `agent_flow_runs` | Durable nested-flow run record with child session, status, return mode, phases, visit counts, checkpoint, and summary. |
+| `AgentFlowTraceItem` | `agent_flow_events` | Durable trace item for nested flow execution and resume handling. |
+| `AgentFlowRunSnapshot` | API snapshot model | Bundles a run, optional result, and ordered trace events for FE and API consumers. |
+| `SubAgentFlowResult` | nested flow result payload | Parent-facing summary payload with trace preview, child session id, and optional graph links. |
 
-    subgraph Shared[Shared boundary]
-        Types[Kalio Types package]
-        SDKPkg[Kalio SDK package]
-    end
+### Configuration and policy model
 
-    subgraph Backend[Backend]
-        Gateway[ChatGateway]
-        Pipeline[SessionPipelineService]
-        Chat[ChatService]
-        Stream[StreamProcessorService]
-        SessionMgr[SessionManagerService]
-        Dispatch[ToolDispatchService]
-        Registry[ToolRegistryService]
-        SubagentRuntime[SubagentRuntimeService]
-        MCP[MCPService]
-        RAApp[RAAppService + RAAppVersioningService]
-        Image[ImageGenerationService]
-        CLIAgent[CLIAgentService]
-        VFS[VFSService]
-    end
+| Model | Source of truth | What it means in practice |
+| --- | --- | --- |
+| `Persona` | `personas` table | Persona system prompt, default model, allowed tools, skills, MCP policy, avatar settings, and max tool attempts. |
+| `PersonaKV` | `persona_kv` table | Key-value store scoped to one persona. |
+| `Skill` | `skills` table | Prompt snippet injected into persona/system prompt composition. |
+| `Credential` | `credentials` table | LLM provider key, base URL, and model configuration. |
+| `EmbeddingCredential` | `embedding_credentials` table | Embedding provider config and vector dimensions. |
+| `MCPServer` | `mcp_servers` table | External MCP server lifecycle, discovery, and live status. |
+| `AllowedPath` | `allowed_paths` table | Host filesystem allowlist for `fs_*` tools. |
+| `RaappPendingApproval` | `raapp_pending_approvals` table | Pending native-effect approvals that must be confirmed or cancelled. |
+| `AuditLog` | `audit_log` table | Append-only runtime audit record. |
+| `AuditLogArchive` | `audit_log_archive` table | Archived audit rows after retention or rotation. |
 
-    subgraph Storage[Persistence]
-        DB[SQLite via Drizzle]
-        SessionFiles[WORKSPACE_ROOT sessions per session]
-        SessionKV[Per-session _kv.json]
-        RAApps[RA_APPS_PATH catalog]
-        CLIConfig[User CLI agent config files]
-    end
-
-    App --> ChatUI
-    App --> SessionsUI
-    App --> Canvas
-    App --> RAAppUI
-    ChatUI --> SessionStore
-    ChatUI --> AgentStore
-    Canvas --> SessionStore
-    Canvas --> AgentStore
-    RAAppUI --> SessionStore
-    ChatUI --> SDK
-    Canvas --> SDK
-    SDK --> Gateway
-
-    Types --> SDKPkg
-    Types --> Chat
-    Types --> Dispatch
-    SDKPkg --> SDK
-
-    Gateway --> Pipeline
-    Pipeline --> Chat
-    Chat --> Stream
-    Chat --> SessionMgr
-    Chat --> Dispatch
-    Dispatch --> Registry
-    Dispatch --> MCP
-    Dispatch --> SubagentRuntime
-    Dispatch --> RAApp
-    Dispatch --> Image
-    Dispatch --> CLIAgent
-    Dispatch --> VFS
-
-    SessionMgr --> DB
-    Chat --> DB
-    MCP --> DB
-    VFS --> SessionFiles
-    VFS --> SessionKV
-    RAApp --> RAApps
-    CLIAgent --> CLIConfig
-```
-
-## Main turn lifecycle
-
-```mermaid
-sequenceDiagram
-    participant FE as ChatInterface
-    participant SDK as KalioSDK
-    participant GW as ChatGateway
-    participant Pipe as SessionPipelineService
-    participant Chat as ChatService
-    participant DB as SessionManagerService
-    participant LLM as ILLMSource
-    participant Stream as StreamProcessorService
-    participant Tools as ToolDispatchService
-
-    FE->>SDK: sendMessage(sessionId, personaId, content)
-    SDK->>GW: chat:send
-    GW->>GW: subscribe socket to sessionId
-    GW->>Pipe: submit(payload, emit)
-
-    alt active turn exists for the same session
-        Pipe-->>FE: chat:queued
-    else session is idle
-        Pipe->>Chat: handleTurn(...)
-        Chat-->>FE: agent:start
-        Chat->>DB: ensureSession()
-        Chat->>DB: persistUserMessage()
-        Chat->>Tools: getToolMetas()
-        Chat-->>FE: chat:context(systemPrompt, toolNames)
-
-        loop each LLM iteration
-            Chat->>DB: loadHistoryForLLM(sessionId, { systemPrompt, toolMetas })
-            Chat->>LLM: stream(messages, tools)
-            loop each stream chunk
-                LLM-->>Chat: chunk
-                Chat->>Stream: process(chunk, ctx)
-                Stream-->>FE: chat:chunk
-            end
-
-            alt tool calls were emitted
-                loop each tool call
-                    Chat-->>FE: tool:start
-                    Chat->>Tools: dispatch(callId, toolName, args)
-                    Tools-->>FE: tool:confirmation_required (if needed)
-                    Tools-->>Chat: ToolResult
-                    Chat-->>FE: tool:result
-                    Chat->>DB: saveToolResult() for non-cancelled results
-                end
-            else no tool calls left
-                Chat-->>FE: chat:complete
-            end
-        end
-
-        Chat-->>FE: agent:done
-    end
-```
-
-Key details that matter for the real runtime:
-
-- `chat:complete` and `agent:done` are different. `chat:complete` means the turn produced a final assistant answer. `agent:done` means the live turn bracket is closed in the UI, including error and interrupt cases.
-- `tool_result` messages are durable history. `ToolActivity` rows are live UI state and can be cleared or rebuilt.
-- `ChatService` reloads managed history on every LLM iteration so the next call sees newly persisted tool results in canonical order.
-- `SessionManagerService.loadHistoryForLLM(...)` is the single backend context boundary for both `ChatService` and `SubagentRuntimeService`. It prepends the active system prompt, sanitizes oversized `tool_result` payloads, counts assistant reasoning, and compacts history against the configured context window before the provider sees it.
-- `OpenAICompatibleProvider` now stays a thin subclass of `BaseOpenAICompatibleProvider`, so OpenAI-style providers reuse one serializer/parser path instead of drifting into separate request-shaping behavior.
-
-## Session-scoped isolation and fan-out
-
-```mermaid
-flowchart TD
-    SessionId[sessionId] --> GatewayMaps[ChatGateway socketSessions and sessionSubscribers]
-    SessionId --> Queue[SessionPipelineService mutex and queue per session]
-    SessionId --> AbortMap[ChatService abort controller per session]
-    SessionId --> History[SQLite sessions and messages rows]
-    SessionId --> VFSDir[Session VFS directory]
-    SessionId --> KVFile[Session KV file]
-
-    ChildSession[Child sub-agent session] --> GatewayMaps
-    ChildSession --> Queue
-    ChildSession --> History
-    ChildSession --> VFSDir
-
-    Canvas[CanvasPanel] -->|session:identify child session| GatewayMaps
-    GatewayMaps --> Fanout[chat:chunk, tool:*, agent:* fan-out to subscribers]
-```
-
-What this means:
-
-- Different sessions do not block each other. Queueing and interrupts are keyed by session.
-- A child sub-agent is not a special stream format. It is another session that reuses the same event contract.
-- A child sub-agent also reuses the same managed LLM context path as the parent chat; it does not bypass compaction or provider normalization.
-- Canvas previewing of child chats works because the frontend explicitly identifies those child sessions to the gateway and subscribes to their normal session events.
-
-## Backend module map
+## Bounded Context Map
 
 | Module | Role in the current system |
 | --- | --- |
-| `chat` | WebSocket gateway, per-session queueing, stream processing, history persistence, turn lifecycle, sub-agent runtime |
-| `tool` | Native tool registry plus tool implementations and sub-agent tool adapters |
-| `vfs` | Session-scoped file storage and copy helpers |
-| `mcp` | External MCP server lifecycle, discovery, paging, restart, status broadcasting |
-| `raapp` | Inline app execution, sandboxing, approval workflow, stored catalog, versioning |
+| `chat` | WebSocket gateway, per-session queueing, stream processing, history persistence, turn lifecycle, sub-agent runtime, and chat_runs bookkeeping |
+| `tool` | Native tool registry, dispatch, confirmation policy, and sub-agent tool adapters |
+| `architecture` | Schema registry, graph runtime, execution events, and graph/chat projections |
+| `agent-flow` | Durable nested-flow facade over architecture runtime with run repository and trace snapshot APIs |
+| `vfs` | Session-scoped file storage, serve-path bridge, and copy helpers |
+| `mcp` | External MCP server lifecycle, discovery, paging, restart, and status broadcasting |
+| `raapp` | Inline app execution, sandboxing, approval workflow, stored catalog, and versioning |
 | `image` | Image provider config plus generation/edit pipeline writing into session VFS |
 | `cli-agent` | Adapter-based external coding-agent execution with progress streaming |
 | `persona` | Persona CRUD and per-session config lookup |
 | `skills` | Skill prompts injected into the effective system prompt |
 | `memory` | Long-term memory ingestion and retrieval for personas |
 | `credentials` | LLM config, timeout settings, max tool attempts, encrypted secrets |
+| `allowed-paths` | Filesystem allowlist for host-path tools |
+| `search` | Web search provider integration |
+| `hitl` | Approval policy, notification, and decision services |
+| `relay` | External command ingress, including Telegram and other relay adapters |
 | `llm` | Provider abstraction and callback-to-async-stream adapter used by chat runtime |
-| `agent-loop` | Separate autonomous/background loop surface; not the main chat hot path |
 
-## Frontend module map
+## Runtime Relation Map
 
-| Area | Current responsibility |
-| --- | --- |
-| `features/chat` | Socket event wiring, message rendering, tool chips, canvas, token/context indicators, RA-App/image/sub-agent result rendering |
-| `store/sessionStore.ts` | Per-session durable-ish UI state: messages, live chunks, agent turns, active turn IDs |
-| `store/agentStore.ts` | Live runtime UI state: tool activities, confirmations, contexts, active loops, CLI output, canvas open state |
-| `features/sessions` | Session list, conversation switching, active manager panels |
-| `features/raapp` | Catalog UI, inline renderers, iframe bridge, GUI DSL renderer |
-| `features/mcp` | Server admin UI and status display |
-| `features/settings` | LLM, timeout, image, and CLI-agent configuration UI |
-| `features/tools` | Native tool browsing and discovery UI |
-| `features/memory`, `features/skills`, `features/persona` | Higher-level model management surfaces |
+```mermaid
+flowchart LR
+    subgraph Contracts["@kalio/types"]
+        Types[chat, session, tool, architecture, agent-flow contracts]
+    end
 
-## Storage model
+    subgraph ChatCtx[Chat bounded context]
+        Gateway[ChatGateway]
+        Pipeline[SessionPipelineService]
+        ChatSvc[ChatService]
+        Stream[StreamProcessorService]
+        SessionMgr[SessionManagerService]
+    end
+
+    subgraph ToolCtx[Tool bounded context]
+        Dispatch[ToolDispatchService]
+        Registry[ToolRegistryService]
+    end
+
+    subgraph RuntimeCtx[Orchestration runtimes]
+        ArchRegistry[ArchitectureRegistryService]
+        ArchRuntime[ArchitectureRuntimeService]
+        AFRuntime[AgentFlowRuntimeService]
+        AFRepo[AgentFlowRunRepository]
+    end
+
+    subgraph Integrations[Integrations]
+        VFS[VFSService]
+        MCP[MCPService]
+        RAApp[RAAppService]
+        CLI[CLIAgentService]
+        Image[ImageModule]
+        Search[SearchModule]
+        Hitl[HitlModule]
+        Allowed[AllowedPathsModule]
+        Relay[RelayModule]
+    end
+
+    subgraph Storage[Storage]
+        DB[(SQLite tables)]
+        Files[(session files, RA-App catalog, user config)]
+    end
+
+    Types --> ChatSvc
+    Types --> Dispatch
+    Types --> ArchRuntime
+    Types --> AFRuntime
+
+    Gateway --> Pipeline --> ChatSvc --> Stream
+    ChatSvc --> SessionMgr
+    ChatSvc --> Dispatch
+
+    Dispatch --> Registry
+    Dispatch --> VFS
+    Dispatch --> MCP
+    Dispatch --> RAApp
+    Dispatch --> CLI
+    Dispatch --> Image
+    Dispatch --> Search
+    Dispatch --> Hitl
+    Dispatch --> Allowed
+
+    ArchRegistry --> ArchRuntime
+    ArchRuntime --> ChatSvc
+    ArchRuntime --> Dispatch
+    ArchRuntime --> VFS
+    ArchRuntime --> CLI
+
+    AFRuntime --> ArchRuntime
+    AFRepo --> DB
+
+    ChatSvc --> DB
+    SessionMgr --> DB
+    ArchRuntime --> DB
+    VFS --> Files
+    RAApp --> Files
+```
+
+## Storage Model
 
 ```mermaid
 flowchart LR
     subgraph DB[SQLite]
+        Personas[personas]
+        PersonaKV[persona_kv]
         Sessions[sessions]
         Messages[messages]
-        Personas[personas]
-        Skills[skills]
-        MCPServers[mcp_servers]
-        Settings[app_settings]
+        ChatRuns[chat_runs]
+        AgentFlowRuns[agent_flow_runs]
+        AgentFlowEvents[agent_flow_events]
+        AppSettings[app_settings]
         Credentials[credentials]
+        EmbeddingCredentials[embedding_credentials]
+        MCPServers[mcp_servers]
+        Skills[skills]
+        ToolOverrides[tool_overrides]
+        AllowedPaths[allowed_paths]
+        RaappApprovals[raapp_pending_approvals]
         Audit[audit_log]
+        AuditArchive[audit_log_archive]
     end
 
     subgraph Files[File-backed state]
@@ -268,27 +207,42 @@ flowchart LR
         CLIAgentConfig[CLI agent config json]
     end
 
+    Personas --> PersonaKV
     Personas --> Sessions
     Sessions --> Messages
+    Sessions --> ChatRuns
+    Sessions --> RaappApprovals
+    Sessions --> AgentFlowRuns
+    AgentFlowRuns --> AgentFlowEvents
+    Audit --> AuditArchive
     Sessions --> SessionFiles
     Sessions --> SessionKV
-    MCPServers --> Settings
-    Settings --> RAAppCatalog
-    Credentials --> Settings
 ```
 
 Important distinctions:
 
 - Session VFS and session KV are file-backed and isolated by `sessionId`.
+- `session.kind` now distinguishes `chat`, `subagent`, `cli-agent`, and `agent-flow`.
+- `runtimeContext` is the launch bridge used by the shell and runtime when starting architecture or agent-flow sessions.
 - RA-Apps are not stored in session VFS. They live in a separate catalog path controlled by `RA_APPS_PATH`.
 - CLI-agent adapter config is user-machine state, not session state and not DB state.
+- `chat_runs` is the turn ledger; `agent_flow_runs` is the nested-flow ledger.
+- `ArchitectureRun` and `ArchitectureExecutionEvent` are runtime/projection models, not dedicated tables.
+- Durable architecture recovery comes from `audit_log` rows plus session message projections, not from a separate `architecture_runs` table.
 
-## Current design rules
+## Current Flow Snapshots
 
-- Session is the isolation primitive. There is no separate workspace identity in the chat, tool, or VFS contract.
-- `@kalio/types` is the only BE-FE contract boundary. Live behavior can change, but the wire shape should be described there.
-- Child sub-agents are normal sessions with parent linkage, not a second protocol.
-- `sessionStore` owns message and turn rendering state; `agentStore` owns ephemeral activity state.
-- MCP tools are discovered dynamically and then filtered by persona policy plus explicit `allowedTools` names.
+- Chat hot path: `chat:send` -> `SessionPipelineService` -> `ChatService` -> `chat:chunk` / `tool:*` -> `chat:complete` -> `agent:done`.
+- Architecture runtime: schema selection -> graph runtime -> root session + branch sessions -> execution events -> graph and chat projections.
+- AgentFlow runtime: `run_sub_agentflow` -> child session -> durable `agent_flow_runs` / `agent_flow_events` -> result snapshot and resume cursor.
+
+## Current Design Rules
+
+- Session is still the isolation primitive.
+- `@kalio/types` is the only BE-FE contract boundary.
+- Child sub-agents and child agent-flows are normal sessions with parent linkage, not a second protocol.
+- `sessionStore` and `agentStore` are FE concerns; backend truth stays in SQLite, runtime services, and file-backed session state.
+- MCP tools are discovered dynamically and then filtered by persona policy plus explicit allowed tool names.
 - Persistent or destructive tool effects should go through HITL confirmation, ideally via `ConfirmedTool`.
-- Inline RA-App results and catalog RA-Apps are related but separate concepts and should be documented separately.
+- `ArchitectureModule` is the current graph runtime. `AgentFlowModule` is the durable facade over it.
+- FE model and relation details live in `frontend-model-current.md`; this file stays focused on backend state and boundaries.

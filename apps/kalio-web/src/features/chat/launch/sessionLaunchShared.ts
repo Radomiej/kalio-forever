@@ -4,7 +4,7 @@ import { apiClient, getSessionVfsFiles } from '../../../services/apiClient';
 import { eventBus } from '../../../services/eventBus';
 import type { AgentTurn } from '../../../store/sessionStore';
 import { buildArchitectureRunTurnProjection } from '../architectureChatSummary';
-import { replaceArchitectureRunTurn } from '../architectureTurnProjection';
+import { resolveArchitectureRunTurnUpdate } from '../architectureTurnProjection';
 import {
   startArchitectureRun,
   startGoalGuardAgentFlowRun,
@@ -37,7 +37,7 @@ interface LaunchSingleChatPromptParams {
   hasActiveLoop: boolean;
   interrupt?: boolean;
   clearToolActivities: (sessionId?: string) => void;
-  setStreaming: (streaming: boolean) => void;
+  setStreaming: (streaming: boolean, messageId?: string, sessionId?: string | null) => void;
   setAwaitingFirstChunk?: (value: boolean) => void;
   addMessage: (message: ChatMessage) => void;
   updateSession: (id: string, patch: Partial<ChatSession>) => void;
@@ -54,7 +54,7 @@ interface LaunchWorkflowPromptParams {
   projectPath: string;
   activeToolNames: string[];
   clearToolActivities: (sessionId?: string) => void;
-  setStreaming: (streaming: boolean) => void;
+  setStreaming: (streaming: boolean, messageId?: string, sessionId?: string | null) => void;
   setAwaitingFirstChunk?: (value: boolean) => void;
   addMessage: (message: ChatMessage) => void;
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
@@ -198,7 +198,7 @@ export async function launchSingleChatPrompt({
 
   if (!isActiveTurn || interrupt) {
     setAwaitingFirstChunk?.(true);
-    setStreaming(true);
+    setStreaming(true, undefined, session.id);
   }
 
   const sent = eventBus.sendMessage({
@@ -210,7 +210,7 @@ export async function launchSingleChatPrompt({
 
   if (!sent) {
     setAwaitingFirstChunk?.(false);
-    setStreaming(false);
+    setStreaming(false, undefined, session.id);
     setError('Backend connection is offline. Reconnect and retry this message.');
     return false;
   }
@@ -286,31 +286,22 @@ export async function launchWorkflowPrompt({
     currentTurns: getSessionAgentTurns(sessionWithScope.id),
     setAgentTurns,
   });
-  setStreaming(true);
+  setStreaming(true, undefined, sessionWithScope.id);
   setAwaitingFirstChunk?.(true);
 
   const applyArchitectureProjection = (result: Awaited<ReturnType<typeof startArchitectureRun>>) => {
-    const projectionDone = (result.run.status !== 'queued' && result.run.status !== 'running')
-      || result.agentFlowStatus === 'waiting_on_orchestrator';
     const projection = buildArchitectureRunTurnProjection(result, sessionWithScope.id);
-    const currentMessages = getSessionMessages(sessionWithScope.id)
-      .filter((message) => message.id !== pendingAssistantMessageId)
-      .filter((message) => !message.id.startsWith(`architecture:${result.run.id}:`));
-    setMessages([...currentMessages, ...projection.messages], sessionWithScope.id);
-    const nextTurn: AgentTurn = {
-      id: `architecture-turn-${result.run.id}`,
-      sessionId: sessionWithScope.id,
-      promptMessageId: userMessageId,
-      turnKind: projection.turnKind,
-      items: projection.turnItems,
-      done: projectionDone,
-    };
-    setAgentTurns(replaceArchitectureRunTurn({
+    const resolvedProjection = resolveArchitectureRunTurnUpdate({
+      currentMessages: getSessionMessages(sessionWithScope.id),
       currentTurns: getSessionAgentTurns(sessionWithScope.id),
+      pendingAssistantMessageId,
       promptMessageId: userMessageId,
-      runId: result.run.id,
-      nextTurn,
-    }), sessionWithScope.id);
+      projection,
+      result,
+      sessionId: sessionWithScope.id,
+    });
+    setMessages(resolvedProjection.messages, sessionWithScope.id);
+    setAgentTurns(resolvedProjection.turns, sessionWithScope.id);
   };
 
   const addFailureAssistantMessage = (message: string) => {
@@ -365,6 +356,6 @@ export async function launchWorkflowPrompt({
     return false;
   } finally {
     setAwaitingFirstChunk?.(false);
-    setStreaming(false);
+    setStreaming(false, undefined, sessionWithScope.id);
   }
 }

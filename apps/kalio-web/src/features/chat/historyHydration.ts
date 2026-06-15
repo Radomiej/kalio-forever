@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatSession, ID } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
+import { useSessionStore } from '../../store/sessionStore';
 import { buildTurnsFromHistory } from './chatUtils';
 import { reloadSessionHistoryWithArchitectureProjection } from './architectureReloadHydration';
 import { shouldReplaceTurnsFromHydratedHistory } from './turnHydrationPolicy';
@@ -45,6 +46,8 @@ export async function hydrateSessionHistoryIntoStore({
   if (!hydratedMessages) {
     return null;
   }
+
+  useSessionStore.getState().markSessionHydrated(sessionId);
 
   const currentTurns = getSessionAgentTurns(sessionId);
   const activeTurnId = getSessionActiveTurnId(sessionId);

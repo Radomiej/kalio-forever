@@ -159,21 +159,59 @@ test.describe('Architecture chat turn projection', () => {
           .filter((sessionId): sessionId is string => Boolean(sessionId))
       ));
       expect(new Set(branchSessionIds).size).toBe(5);
+      const sessionsResponse = await request.get(`${API_BASE}/sessions`);
+      expect(sessionsResponse.ok()).toBeTruthy();
+      const persistedSessions = await sessionsResponse.json() as Array<{
+        id: string;
+        parentSessionId?: string;
+        title: string;
+      }>;
+      const sessionById = new Map(persistedSessions.map((candidate) => [candidate.id, candidate]));
+      const isCurrentWorkflowDescendant = (candidate: { id: string; parentSessionId?: string }): boolean => {
+        let currentParentId = candidate.parentSessionId;
+        const visited = new Set<string>();
+        while (currentParentId) {
+          if (visited.has(currentParentId)) return false;
+          if (currentParentId === session.id) return true;
+          visited.add(currentParentId);
+          currentParentId = sessionById.get(currentParentId)?.parentSessionId;
+        }
+        return false;
+      };
+      const currentWorkflowTechnicalSessionIds = persistedSessions
+        .filter((candidate) => isCurrentWorkflowDescendant(candidate))
+        .filter((candidate) => /: (router|finalizer)$/i.test(candidate.title))
+        .map((candidate) => candidate.id);
 
-      const visibleSessionCountBeforeExpand = await page.getByTestId('session-item').count();
-      const childToggle = page.getByTestId(`toggle-session-children-${session.id}`);
-      await expect(childToggle).toBeVisible({ timeout: 30_000 });
-      await childToggle.click();
+      const sessionPanel = page.getByTestId('session-panel');
       await expect
-        .poll(async () => page.getByTestId('session-item').count(), { timeout: 10_000 })
-        .toBeGreaterThan(visibleSessionCountBeforeExpand);
+        .poll(async () => {
+          let visibleBranchRows = 0;
+          for (const branchSessionId of branchSessionIds) {
+            if (await sessionPanel.locator(`[data-testid="session-item"][data-session-id="${branchSessionId}"]`).count() > 0) {
+              visibleBranchRows += 1;
+            }
+          }
+          return visibleBranchRows;
+        }, { timeout: 30_000 })
+        .toBeGreaterThan(0);
+
+      const childToggle = page.getByTestId(`toggle-session-children-${session.id}`);
+      if (await childToggle.count() > 0) {
+        const visibleSessionCountBeforeExpand = await page.getByTestId('session-item').count();
+        await childToggle.click();
+        await expect
+          .poll(async () => page.getByTestId('session-item').count(), { timeout: 10_000 })
+          .toBeGreaterThanOrEqual(visibleSessionCountBeforeExpand);
+      }
 
       await page.getByTestId('session-origin-filter-trigger').click();
       await page.getByTestId('session-origin-filter-agent').click();
-      const sessionPanel = page.getByTestId('session-panel');
-      await expect(sessionPanel.locator(`[data-testid="session-tree-root"][data-session-id="${session.id}"]`)).toContainText('5 child runs');
       for (const branchSessionId of branchSessionIds) {
         await expect(sessionPanel.locator(`[data-testid="session-item"][data-session-id="${branchSessionId}"]`)).toBeVisible();
+      }
+      for (const technicalSessionId of currentWorkflowTechnicalSessionIds) {
+        await expect(sessionPanel.locator(`[data-testid="session-item"][data-session-id="${technicalSessionId}"]`)).toHaveCount(0);
       }
 
       const agentFilterScreenshotPath = testInfo.outputPath('architecture-agent-filter-proof.png');

@@ -70,21 +70,64 @@ export function canReleaseComposerAfterToolResult({
   return !hasActiveLoop && !hasActiveTool && !hasPendingChunks;
 }
 
+interface LiveSessionStatusMaterializationDeps {
+  hasActiveLoopForSession: (sessionId: string) => boolean;
+  getSessionActiveTurnId: (sessionId: string) => string | null;
+  addActiveAgentLoop: (sessionId: string, turnId: string) => void;
+  startAgentTurn: (turnId: string, sessionId: string) => void;
+  setAwaitingFirstChunk?: (value: boolean) => void;
+  setStreaming?: (value: boolean, messageId?: string, sessionId?: string | null) => void;
+}
+
+export function materializeLiveTurnFromSessionStatusSnapshot(
+  snapshot: SocketEvents['session:status'] | undefined,
+  deps: LiveSessionStatusMaterializationDeps,
+): void {
+  if (!snapshot?.active || !snapshot.turnId) {
+    return;
+  }
+
+  if (!deps.hasActiveLoopForSession(snapshot.sessionId)) {
+    deps.addActiveAgentLoop(snapshot.sessionId, snapshot.turnId);
+  }
+  if (deps.getSessionActiveTurnId(snapshot.sessionId) !== snapshot.turnId) {
+    deps.startAgentTurn(snapshot.turnId, snapshot.sessionId);
+  }
+  deps.setAwaitingFirstChunk?.(false);
+  deps.setStreaming?.(true, undefined, snapshot.sessionId);
+}
+
+export function selectReplayableSessionStatusSnapshot(
+  bufferedSnapshots: SocketEvents['session:status'][],
+  latestSnapshot: SocketEvents['session:status'] | undefined,
+): SocketEvents['session:status'] | undefined {
+  const orderedSnapshots = bufferedSnapshots.length > 0
+    ? bufferedSnapshots
+    : (latestSnapshot ? [latestSnapshot] : []);
+  const finalSnapshot = orderedSnapshots[orderedSnapshots.length - 1];
+  if (!finalSnapshot?.active || !finalSnapshot.turnId) {
+    return undefined;
+  }
+  return finalSnapshot;
+}
+
 export function handleSessionStatusEvent(
   payload: SocketEvents['session:status'],
   deps: {
     getActiveSessionId: () => string | null;
+    isSessionHydrated: (sessionId: string) => boolean;
     hasActiveLoopForSession: (sessionId: string) => boolean;
     getSessionActiveTurnId: (sessionId: string) => string | null;
     setRecoveryNotice: (value: string) => void;
     addActiveAgentLoop: (sessionId: string, turnId: string) => void;
     startAgentTurn: (turnId: string, sessionId: string) => void;
     setAwaitingFirstChunk: (value: boolean) => void;
-    setStreaming: (value: boolean) => void;
-    setSessionStatusSnapshot: (snapshot: SocketEvents['session:status']) => void;
+    setStreaming: (value: boolean, messageId?: string, sessionId?: string | null) => void;
+    recordSessionStatusSnapshot: (snapshot: SocketEvents['session:status']) => void;
+    clearBufferedSessionStatusSnapshots: (sessionId: string) => void;
   },
 ): void {
-  deps.setSessionStatusSnapshot(payload);
+  deps.recordSessionStatusSnapshot(payload);
 
   if (payload.run?.status === 'interrupted_needs_retry' && payload.sessionId === deps.getActiveSessionId()) {
     deps.setRecoveryNotice(
@@ -94,17 +137,12 @@ export function handleSessionStatusEvent(
     );
   }
 
-  if (!payload.active || !payload.turnId) return;
-
-  if (!deps.hasActiveLoopForSession(payload.sessionId)) {
-    deps.addActiveAgentLoop(payload.sessionId, payload.turnId);
-  }
-  if (!deps.getSessionActiveTurnId(payload.sessionId)) {
-    deps.startAgentTurn(payload.turnId, payload.sessionId);
-  }
-  if (payload.sessionId === deps.getActiveSessionId()) {
-    deps.setAwaitingFirstChunk(false);
-    deps.setStreaming(true);
+  if (
+    payload.sessionId === deps.getActiveSessionId()
+    && deps.isSessionHydrated(payload.sessionId)
+  ) {
+    deps.clearBufferedSessionStatusSnapshots(payload.sessionId);
+    materializeLiveTurnFromSessionStatusSnapshot(payload, deps);
   }
 }
 

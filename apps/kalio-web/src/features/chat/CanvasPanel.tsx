@@ -18,6 +18,7 @@ import { buildCliChildPreviews, CliChildConversationCanvasCard } from './CanvasP
 import { SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
 import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
 import { resolveLiveTurnState } from './liveTurnState';
+import { activateConversationSession } from './activeConversationSession';
 
 function architectureRunIdForSession(session: ChatSession): string | null {
   const parentToolCallId = session.parentToolCallId ?? session.runtimeContext?.parentToolCallId;
@@ -177,6 +178,7 @@ export function CanvasPanel() {
     agentTurns,
     activeTurnId: getSessionActiveTurnId(activeSessionId),
     isStreaming: false,
+    streamingSessionId: null,
     awaitingFirstChunk: false,
     hasActiveLoop: hasActiveLoopForSession(activeSessionId),
     queuedDepth: activeSessionId ? (queuedDepthBySession[activeSessionId] ?? 0) : 0,
@@ -297,7 +299,14 @@ export function CanvasPanel() {
                   sessions={sessions}
                   transcript={getSessionMessages(canvasFocus.sessionId)}
                   onClear={() => setCanvasFocus(null)}
-                  onOpenSession={(sessionId) => setActiveSession(sessionId)}
+                  onOpenSession={(sessionId) => {
+                    void activateConversationSession({
+                      sessionId,
+                      sessions,
+                      setActiveSession,
+                      reason: 'canvas',
+                    });
+                  }}
                 />
               )}
 
@@ -330,7 +339,14 @@ export function CanvasPanel() {
                       <AgentFlowConversationCard
                         key={preview.flowRunId}
                         preview={preview}
-                        onOpenChat={() => setActiveSession(preview.sessionId)}
+                        onOpenChat={() => {
+                          void activateConversationSession({
+                            sessionId: preview.sessionId,
+                            sessions,
+                            setActiveSession,
+                            reason: 'canvas',
+                          });
+                        }}
                         onOpenGraph={() => setCanvasFocus({ kind: 'architecture-run', runId: preview.graphRunId })}
                       />
                     ))}
@@ -346,7 +362,14 @@ export function CanvasPanel() {
                       <CliChildConversationCanvasCard
                         key={preview.childSessionId}
                         preview={preview}
-                        onOpen={() => setActiveSession(preview.childSessionId)}
+                        onOpen={() => {
+                          void activateConversationSession({
+                            sessionId: preview.childSessionId,
+                            sessions,
+                            setActiveSession,
+                            reason: 'canvas',
+                          });
+                        }}
                       />
                     ))}
                   </div>
@@ -362,7 +385,14 @@ export function CanvasPanel() {
                         key={preview.sessionId}
                         preview={preview}
                         transcript={getSessionMessages(preview.sessionId)}
-                        onOpen={() => setActiveSession(preview.sessionId)}
+                        onOpen={() => {
+                          void activateConversationSession({
+                            sessionId: preview.sessionId,
+                            sessions,
+                            setActiveSession,
+                            reason: 'canvas',
+                          });
+                        }}
                       />
                     ))}
                   </div>

@@ -46,11 +46,13 @@ export function useChatComposerActions({
   } = useSessionStore();
   const {
     isStreaming,
+    streamingSessionId,
     clearToolActivities,
     setStreaming,
     hasActiveLoopForSession,
     getContextForSession,
   } = useAgentStore();
+  const isStreamingForActiveSession = isStreaming && streamingSessionId === activeSessionId;
 
   const handleSend = async (content: string, personaId: string, options?: { interrupt?: boolean }) => {
     if (!activeSessionId) {
@@ -73,7 +75,7 @@ export function useChatComposerActions({
         content,
         personaId,
         projectPath,
-        isStreaming,
+        isStreaming: isStreamingForActiveSession,
         hasActiveLoop: typeof hasActiveLoopForSession === 'function'
           ? hasActiveLoopForSession(activeSessionId)
           : false,
@@ -93,7 +95,7 @@ export function useChatComposerActions({
   };
 
   const handleArchitectureRun = async (content: string, schemaId: string) => {
-    if (!activeSessionId || isStreaming) {
+    if (!activeSessionId || isStreamingForActiveSession) {
       return;
     }
 

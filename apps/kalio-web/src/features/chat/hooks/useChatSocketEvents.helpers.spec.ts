@@ -3,6 +3,7 @@ import type { RefObject } from 'react';
 import {
   canReleaseComposerAfterToolResult,
   createToolArgProgressHandlers,
+  handleSessionStatusEvent,
 } from './useChatSocketEvents.helpers';
 
 describe('useChatSocketEvents helpers', () => {
@@ -120,5 +121,73 @@ describe('useChatSocketEvents helpers', () => {
       hasActiveTool: false,
       hasPendingChunks: true,
     })).toBe(false);
+  });
+
+  it('stores inactive session status snapshots without materializing a synthetic live turn', () => {
+    const deps = {
+      getActiveSessionId: () => 'session-active',
+      isSessionHydrated: vi.fn(() => true),
+      hasActiveLoopForSession: vi.fn(() => false),
+      getSessionActiveTurnId: vi.fn(() => null),
+      setRecoveryNotice: vi.fn(),
+      addActiveAgentLoop: vi.fn(),
+      startAgentTurn: vi.fn(),
+      setAwaitingFirstChunk: vi.fn(),
+      setStreaming: vi.fn(),
+      recordSessionStatusSnapshot: vi.fn(),
+      clearBufferedSessionStatusSnapshots: vi.fn(),
+    };
+
+    handleSessionStatusEvent({
+      sessionId: 'session-child',
+      active: true,
+      turnId: 'turn-child-1',
+      queueLength: 0,
+    }, deps);
+
+    expect(deps.recordSessionStatusSnapshot).toHaveBeenCalledWith({
+      sessionId: 'session-child',
+      active: true,
+      turnId: 'turn-child-1',
+      queueLength: 0,
+    });
+    expect(deps.addActiveAgentLoop).not.toHaveBeenCalled();
+    expect(deps.startAgentTurn).not.toHaveBeenCalled();
+    expect(deps.setAwaitingFirstChunk).not.toHaveBeenCalled();
+    expect(deps.setStreaming).not.toHaveBeenCalled();
+  });
+
+  it('buffers an active-session status snapshot until that conversation has been hydrated', () => {
+    const deps = {
+      getActiveSessionId: () => 'session-active',
+      isSessionHydrated: vi.fn(() => false),
+      hasActiveLoopForSession: vi.fn(() => false),
+      getSessionActiveTurnId: vi.fn(() => null),
+      setRecoveryNotice: vi.fn(),
+      addActiveAgentLoop: vi.fn(),
+      startAgentTurn: vi.fn(),
+      setAwaitingFirstChunk: vi.fn(),
+      setStreaming: vi.fn(),
+      recordSessionStatusSnapshot: vi.fn(),
+      clearBufferedSessionStatusSnapshots: vi.fn(),
+    };
+
+    handleSessionStatusEvent({
+      sessionId: 'session-active',
+      active: true,
+      turnId: 'turn-active-1',
+      queueLength: 0,
+    }, deps);
+
+    expect(deps.recordSessionStatusSnapshot).toHaveBeenCalledWith({
+      sessionId: 'session-active',
+      active: true,
+      turnId: 'turn-active-1',
+      queueLength: 0,
+    });
+    expect(deps.addActiveAgentLoop).not.toHaveBeenCalled();
+    expect(deps.startAgentTurn).not.toHaveBeenCalled();
+    expect(deps.setAwaitingFirstChunk).not.toHaveBeenCalled();
+    expect(deps.setStreaming).not.toHaveBeenCalled();
   });
 });

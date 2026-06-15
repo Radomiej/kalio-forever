@@ -433,7 +433,9 @@ If you're contributing code or using an AI coding agent, start with [CONTRIBUTIN
 | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Community expectations, moderation scope, and reporting path |
 | [scripts/code-audit/README.md](./scripts/code-audit/README.md) | What the automated audit checks and how to run it |
 | [docs/sessions/](./docs/sessions/) | Chronological engineering session logs and implementation decisions |
-| [docs/application-architecture-current.md](./docs/application-architecture-current.md) | Current top-level runtime model across backend, frontend, storage, and session isolation |
+| [docs/application-architecture-current.md](./docs/application-architecture-current.md) | Current top-level runtime model across backend, storage, and runtime boundaries |
+| [docs/frontend-model-current.md](./docs/frontend-model-current.md) | FE state ownership, store relations, and projection model |
+| [docs/UI-Flow.md](./docs/UI-Flow.md) | Current shell navigation and interaction flow |
 | [docs/architecture-runtime-stack.md](./docs/architecture-runtime-stack.md) | Architecture Registry, Architecture Runtime, branch execution, and graph/chat projections |
 | [docs/chat-streaming-tools-architecture.md](./docs/chat-streaming-tools-architecture.md) | LLM streaming + tool dispatch deep-dive |
 | [docs/mcp-architecture.md](./docs/mcp-architecture.md) | MCP integration: discovery, lifecycle, per-persona policy |

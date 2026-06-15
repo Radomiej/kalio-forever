@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useAgentStore } from './agentStore';
-import type { AgentRunContext, ToolConfirmationRequest } from '@kalio/types';
+import type { AgentRunContext, SocketEvents, ToolConfirmationRequest } from '@kalio/types';
 
 function makeReq(sessionId: string, callId = 'call-1'): ToolConfirmationRequest {
   return {
@@ -13,6 +13,30 @@ function makeReq(sessionId: string, callId = 'call-1'): ToolConfirmationRequest 
     toolName: 'vfs_write',
     args: { path: '/tmp/file', content: 'hello' },
     timeoutMs: 30000,
+  };
+}
+
+function makeSessionStatusSnapshot(
+  overrides: Partial<SocketEvents['session:status']> = {},
+): SocketEvents['session:status'] {
+  return {
+    sessionId: 'session-A',
+    active: true,
+    turnId: 'turn-1',
+    queueLength: 0,
+    run: {
+      id: 'run-1',
+      sessionId: 'session-A',
+      turnId: 'turn-1',
+      phase: 'llm_streaming',
+      status: 'active',
+      retryCount: 0,
+      safeResume: true,
+      startedAt: 100,
+      updatedAt: 200,
+      lastHeartbeatAt: 200,
+    },
+    ...overrides,
   };
 }
 
@@ -85,6 +109,111 @@ describe('pendingConfirmations — per-session map', () => {
     const state = useAgentStore.getState();
     expect(state.pendingConfirmations['session-B']).toEqual(reqB);
     expect(Object.keys(state.pendingConfirmations)).toHaveLength(1);
+  });
+});
+
+describe('sessionStatusSnapshots — dedupe noisy heartbeat updates', () => {
+  beforeEach(() => {
+    useAgentStore.setState({ sessionStatusSnapshots: {}, bufferedSessionStatusSnapshots: {} });
+  });
+
+  it('ignores snapshots that only differ by heartbeat timestamps', () => {
+    const store = useAgentStore.getState();
+    const first = makeSessionStatusSnapshot();
+    const noisyHeartbeat = makeSessionStatusSnapshot({
+      run: {
+        ...first.run!,
+        updatedAt: 999,
+        lastHeartbeatAt: 999,
+      },
+    });
+
+    store.setSessionStatusSnapshot(first);
+    const storedBefore = useAgentStore.getState().sessionStatusSnapshots['session-A'];
+    store.setSessionStatusSnapshot(noisyHeartbeat);
+    const storedAfter = useAgentStore.getState().sessionStatusSnapshots['session-A'];
+
+    expect(storedAfter).toBe(storedBefore);
+    expect(storedAfter?.run?.updatedAt).toBe(200);
+  });
+
+  it('keeps meaningful status transitions', () => {
+    const store = useAgentStore.getState();
+    const first = makeSessionStatusSnapshot();
+    const completed = makeSessionStatusSnapshot({
+      active: false,
+      run: {
+        ...first.run!,
+        phase: 'completed',
+        status: 'completed',
+        completedAt: 500,
+      },
+    });
+
+    store.setSessionStatusSnapshot(first);
+    store.setSessionStatusSnapshot(completed);
+
+    expect(useAgentStore.getState().sessionStatusSnapshots['session-A']).toEqual(completed);
+  });
+
+  it('buffers meaningful status transitions in order and drains them once', () => {
+    const store = useAgentStore.getState();
+    const first = makeSessionStatusSnapshot();
+    const noisyHeartbeat = makeSessionStatusSnapshot({
+      run: {
+        ...first.run!,
+        updatedAt: 999,
+        lastHeartbeatAt: 999,
+      },
+    });
+    const completed = makeSessionStatusSnapshot({
+      active: false,
+      run: {
+        ...first.run!,
+        phase: 'completed',
+        status: 'completed',
+        completedAt: 500,
+      },
+    });
+
+    store.recordSessionStatusSnapshot(first);
+    store.recordSessionStatusSnapshot(noisyHeartbeat);
+    store.recordSessionStatusSnapshot(completed);
+
+    expect(store.consumeBufferedSessionStatusSnapshots('session-A')).toEqual([first, completed]);
+    expect(store.consumeBufferedSessionStatusSnapshots('session-A')).toEqual([]);
+  });
+});
+
+describe('session-scoped streaming isolation', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      isStreaming: false,
+      streamingMessageId: undefined,
+      streamingSessionId: null,
+    });
+  });
+
+  it('does not clear streaming when another session stops', () => {
+    const store = useAgentStore.getState();
+
+    store.setStreaming(true, undefined, 'session-A');
+    store.setStreaming(false, undefined, 'session-B');
+
+    const state = useAgentStore.getState();
+    expect(state.isStreaming).toBe(true);
+    expect(state.streamingSessionId).toBe('session-A');
+  });
+
+  it('clears streaming when the matching session stops', () => {
+    const store = useAgentStore.getState();
+
+    store.setStreaming(true, undefined, 'session-A');
+    store.setStreaming(false, undefined, 'session-A');
+
+    const state = useAgentStore.getState();
+    expect(state.isStreaming).toBe(false);
+    expect(state.streamingSessionId).toBeNull();
   });
 });
 
