@@ -3,51 +3,30 @@ import { ChevronDown, Plus } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
-import type { ChatSession, ChatMessage, Persona } from '@kalio/types';
-import { hydrateSessionHistoryIntoStore } from '../chat/historyHydration';
+import type { ChatSession, Persona } from '@kalio/types';
+import {
+  activateConversationSession,
+  createAndActivateEmptyHostSession,
+  hydrateActiveConversationSession,
+  loadStoredActiveConversationSessionId,
+  persistActiveConversationSessionId,
+} from '../chat/activeConversationSession';
 import { needsWorkflowEnvelopeRecovery } from '../chat/workflowEnvelopeRecovery';
-import { workflowEnvelopeRuntimeStateForSession } from './sessionWorkflowRuntimeState';
-import { createAndActivateHostSession } from '../chat/launch/sessionLaunchShared';
 import {
   SESSION_ORIGIN_FILTERS,
-  buildSessionListEntries,
-  isVisibleSidebarSession,
   sortSessionsForSidebar,
   type SessionOriginFilter,
 } from './sessionListModel';
 import {
-  buildChildSessionsByParent,
   countVisibleConversationTreeDescendants,
   displayTitleForSession,
+  hasVisibleWorkflowConversationDescendant,
   hasExpandedAncestor,
   normalizeConversationSessionId,
   visibleConversationParentId,
 } from './sessionTreeDisplay';
-import { filterRenderableSessions } from './sessionRenderableFilter';
 import { renderSessionChildRows, SessionPanelSessionItem } from './SessionPanelRow';
-
-const LAST_ACTIVE_SESSION_STORAGE_KEY = 'kalio:last-active-session-id';
-
-function loadStoredActiveSessionId(): string | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  return window.sessionStorage.getItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
-}
-
-function persistActiveSessionId(sessionId: string | null): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  if (sessionId) {
-    window.sessionStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, sessionId);
-    return;
-  }
-
-  window.sessionStorage.removeItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
-}
+import { buildConversationTreeModel } from './conversationTreeModel';
 
 export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void; viewSwitcher?: ReactNode } = {}) {
   const {
@@ -89,7 +68,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     if (!activeSessionId) {
       return;
     }
-    persistActiveSessionId(normalizeConversationSessionId(activeSessionId, sessions));
+    persistActiveConversationSessionId(normalizeConversationSessionId(activeSessionId, sessions));
   }, [activeSessionId, sessions]);
 
   useEffect(() => {
@@ -99,14 +78,9 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       .then((r) => {
         setSessions(r.data);
         const orderedSessions = sortSessionsForSidebar(r.data);
-        const { renderableSessions } = filterRenderableSessions(
-          orderedSessions,
-          {},
-          {},
-        );
-        if (!useSessionStore.getState().activeSessionId) {
-          const storedSessionId = normalizeConversationSessionId(loadStoredActiveSessionId(), orderedSessions);
-          if (storedSessionId && renderableSessions.some((session) => session.id === storedSessionId)) {
+        if (!activeSessionId) {
+          const storedSessionId = normalizeConversationSessionId(loadStoredActiveConversationSessionId(), orderedSessions);
+          if (storedSessionId && orderedSessions.some((session) => session.id === storedSessionId)) {
             void selectSession(storedSessionId);
           }
         }
@@ -129,17 +103,18 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     apiClient
       .get<ChatSession[]>('/api/sessions?includeArchived=true')
       .then((r) => {
-        const visibleIds = new Set(useSessionStore.getState().sessions.map((session) => session.id));
+        const visibleIds = new Set(sessions.map((session) => session.id));
         setArchivedSessions(r.data.filter((session) => !visibleIds.has(session.id)));
       })
       .catch((err: unknown) => console.error('[SessionPanel] load archived sessions failed', err));
   }, [originFilter, sessions]);
 
-  const reloadSessionHistory = useCallback(async (sessionId: string) => {
+  const reloadSessionHistory = useCallback(async (sessionId: string, activeSessionIdForHydration: string = sessionId) => {
     try {
-      const hydratedMessages = await hydrateSessionHistoryIntoStore({
+      const hydratedMessages = await hydrateActiveConversationSession({
+        mode: 'reload',
         sessionId,
-        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+        getActiveSessionId: () => activeSessionIdForHydration,
         getSessions: () => sessions,
         getSessionMessages,
         setMessages,
@@ -147,10 +122,6 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         getSessionAgentTurns,
         getSessionActiveTurnId,
         hasActiveLoopForSession: (targetSessionId) => useAgentStore.getState().hasActiveLoopForSession(targetSessionId),
-        fetchMessages: async (targetSessionId) => {
-          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${targetSessionId}/messages`);
-          return response.data;
-        },
       });
       if (!hydratedMessages) {
         return null;
@@ -165,14 +136,14 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
 
   const createSession = async () => {
     try {
-      const session = await createAndActivateHostSession({
+      await createAndActivateEmptyHostSession({
         personaId: newPersonaId,
         addSession,
         setActiveSession,
         setMessages,
         setAgentTurns,
+        reason: 'select',
       });
-      persistActiveSessionId(session.id);
       onSelect?.();
     } catch (err) {
       console.error('[SessionPanel] create failed', err);
@@ -180,11 +151,16 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   };
 
   const selectSession = useCallback(async (id: string) => {
-    const targetSessionId = normalizeConversationSessionId(id, useSessionStore.getState().sessions) ?? id;
-    setActiveSession(targetSessionId);
-    persistActiveSessionId(targetSessionId);
-    onSelect?.();
-    await reloadSessionHistory(targetSessionId);
+    await activateConversationSession({
+      sessionId: id,
+      sessions,
+      setActiveSession,
+      reason: 'select',
+      onActivated: async (targetSessionId) => {
+        onSelect?.();
+        await reloadSessionHistory(targetSessionId, targetSessionId);
+      },
+    });
   }, [onSelect, reloadSessionHistory, setActiveSession]);
 
   useEffect(() => {
@@ -197,47 +173,44 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   }, [activeSessionId, selectSession, sessions]);
 
   const sidebarSessions = originFilter === 'archived' ? archivedSessions : sessions;
-  const orderedSessions = sortSessionsForSidebar(sidebarSessions);
-  const allSessionById = new Map(orderedSessions.map((session) => [session.id, session]));
-  const activeLoopSessionIds = new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId));
-  const { renderableSessions, architectureSessionRuntimeStates } = filterRenderableSessions(
-    orderedSessions,
-    sessionMessages ?? {},
-    {
-      pendingConfirmations,
-      pendingBudgetApprovals,
-      activeLoopSessionIds,
-      queuedDepthBySession: queuedDepthBySession ?? {},
-      sessionStatusSnapshots: sessionStatusSnapshots ?? {},
-    },
-  );
-  const sessionById = new Map(renderableSessions.map((session) => [session.id, session]));
-  const visibleSessionById = new Map(renderableSessions.map((session) => [session.id, session]));
-  const visibleSessions = renderableSessions
-    .filter((session) => isVisibleSidebarSession(session, activeSessionId, originFilter, sessionById));
-  const sessionListEntries = buildSessionListEntries(renderableSessions, activeSessionId, originFilter);
-  const childSessionsByParent = buildChildSessionsByParent(orderedSessions);
-  const descendantCountByParent = new Map<string, number>();
+  const {
+    allSessionById,
+    activeLoopSessionIds,
+    architectureSessionRuntimeStates,
+    sessionById,
+    visibleSessionById,
+    visibleSessions,
+    sessionListEntries,
+    childSessionsByParent,
+    descendantCountByParent,
+    activeHostSessionId,
+    activeRenderableDescendantCount,
+  } = buildConversationTreeModel({
+    activeSessionId,
+    originFilter,
+    pendingBudgetApprovals,
+    pendingConfirmations,
+    queuedDepthBySession: queuedDepthBySession ?? {},
+    sessionAgentTurns: sessionAgentTurns ?? {},
+    sessionMessages: sessionMessages ?? {},
+    sessionStatusSnapshots: sessionStatusSnapshots ?? {},
+    sidebarSessions,
+    activeAgentLoops: activeAgentLoops ?? {},
+  });
   const activeOriginFilter = SESSION_ORIGIN_FILTERS.find((filter) => filter.id === originFilter) ?? SESSION_ORIGIN_FILTERS[0];
-  const activeSession = activeSessionId
-    ? sessions.find((session) => session.id === activeSessionId) ?? null
+  const activeWorkflowHostSessionId = activeHostSessionId ?? activeSessionId;
+  const activeWorkflowHostSession = activeWorkflowHostSessionId
+    ? sessions.find((session) => session.id === activeWorkflowHostSessionId) ?? null
     : null;
-  const activeHostSessionId = normalizeConversationSessionId(activeSessionId, sessions);
-  const activeSessionMessages = activeSessionId ? (sessionMessages[activeSessionId] ?? []) : [];
-  const activeRenderableDescendantCount = activeSessionId
-    ? countVisibleConversationTreeDescendants(activeSessionId, childSessionsByParent, descendantCountByParent)
-    : 0;
-  const activeWorkflowRuntimeState = activeSessionId
-    ? workflowEnvelopeRuntimeStateForSession(
-      sessionMessages[activeSessionId] ?? [],
-      sessionAgentTurns[activeSessionId] ?? [],
-    )
-    : null;
+  const activeWorkflowHostMessages = activeWorkflowHostSessionId ? (sessionMessages[activeWorkflowHostSessionId] ?? []) : [];
   const activeWorkflowRecoveryNeeded = needsWorkflowEnvelopeRecovery({
-    session: activeSession,
-    messages: activeSessionMessages,
+    session: activeWorkflowHostSession,
+    messages: activeWorkflowHostMessages,
     visibleDescendantCount: activeRenderableDescendantCount,
   });
+  const activeHasWorkflowConversationDescendants = activeHostSessionId
+    ? hasVisibleWorkflowConversationDescendant(activeHostSessionId, childSessionsByParent)
+    : false;
 
   const getPersonaName = (personaId: string): string | null => {
     const p = personas.find((p) => p.id === personaId);
@@ -245,15 +218,17 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   };
 
   useEffect(() => {
-    if (
-      originFilter !== 'all'
-      && originFilter !== 'user'
-      || !activeSessionId
-      || !activeHostSessionId
-      || activeHostSessionId !== activeSessionId
-      || activeRenderableDescendantCount === 0
-      || (activeWorkflowRuntimeState !== 'running' && activeWorkflowRuntimeState !== 'pending')
-    ) {
+    const shouldAutoExpandActiveHost = (
+      (originFilter === 'all' || originFilter === 'user')
+      && Boolean(activeHostSessionId)
+      && activeRenderableDescendantCount > 0
+      && (
+        activeHasWorkflowConversationDescendants
+        || activeWorkflowRecoveryNeeded
+        || (activeSessionId !== null && activeHostSessionId !== activeSessionId)
+      )
+    );
+    if (!shouldAutoExpandActiveHost || !activeHostSessionId) {
       return;
     }
 
@@ -273,10 +248,11 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     collapsedWorkflowCountsRef.current.delete(activeHostSessionId);
   }, [
     activeHostSessionId,
+    activeHasWorkflowConversationDescendants,
     activeRenderableDescendantCount,
     activeSessionId,
-    activeWorkflowRuntimeState,
     originFilter,
+    activeWorkflowRecoveryNeeded,
   ]);
 
   useEffect(() => {
@@ -305,7 +281,8 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   }, [activeSessionId, allSessionById, originFilter, visibleSessionById]);
 
   useEffect(() => {
-    if (!activeSessionId || !activeWorkflowRecoveryNeeded) {
+    const recoverySessionId = activeWorkflowHostSessionId ?? activeSessionId;
+    if (!recoverySessionId || !activeWorkflowRecoveryNeeded) {
       architectureSessionRefreshRef.current = null;
       return;
     }
@@ -317,7 +294,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         return;
       }
       inFlight = true;
-      const refreshKey = `${activeSessionId}:workflow-envelope`;
+      const refreshKey = `${recoverySessionId}:workflow-envelope`;
       const requestedAt = architectureSessionRefreshRef.current?.key === refreshKey
         ? architectureSessionRefreshRef.current.requestedAt
         : 0;
@@ -337,7 +314,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
           console.error('[SessionPanel] architecture descendant refresh failed', err);
         })
         .finally(() => {
-          void reloadSessionHistory(activeSessionId).finally(() => {
+          void reloadSessionHistory(recoverySessionId).finally(() => {
             inFlight = false;
           });
         });
@@ -351,6 +328,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       window.clearInterval(interval);
     };
   }, [
+    activeWorkflowHostSessionId,
     activeSessionId,
     activeWorkflowRecoveryNeeded,
     reloadSessionHistory,

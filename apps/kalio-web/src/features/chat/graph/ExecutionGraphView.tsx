@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import type { ArchitectureGraphProjection, ChatMessage } from '@kalio/types';
+import type { ArchitectureGraphProjection } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
 import { buildTurnsFromHistory } from '../chatUtils';
-import { hydrateSessionHistoryIntoStore } from '../historyHydration';
+import { hydrateActiveConversationSession } from '../activeConversationSession';
 import {
   buildExecutionGraphModel,
 } from './executionGraphModel';
@@ -85,7 +85,8 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     }
 
     let cancelled = false;
-    void hydrateSessionHistoryIntoStore({
+    void hydrateActiveConversationSession({
+      mode: 'reload',
       sessionId: activeSessionId,
       getActiveSessionId: () => activeSessionId,
       getSessions: () => sessions,
@@ -95,10 +96,6 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
       getSessionAgentTurns,
       getSessionActiveTurnId,
       hasActiveLoopForSession,
-      fetchMessages: async (sessionId) => {
-        const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
-        return response.data;
-      },
     }).catch((err: unknown) => {
       if (!cancelled) {
         console.error('[ExecutionGraphView] session history load failed', err);
@@ -232,19 +229,17 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
 
     let cancelled = false;
     branchSessionIds.forEach((sessionId) => {
-      void hydrateSessionHistoryIntoStore({
+      void hydrateActiveConversationSession({
+        mode: 'reload',
         sessionId,
         getSessions: () => sessions,
+        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
         getSessionMessages,
         setMessages,
         setAgentTurns,
         getSessionAgentTurns,
         getSessionActiveTurnId,
         hasActiveLoopForSession,
-        fetchMessages: async (targetSessionId) => {
-          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${targetSessionId}/messages`);
-          return response.data;
-        },
       }).catch((err: unknown) => {
         if (!cancelled) {
           console.error('[ExecutionGraphView] branch history load failed', err);
@@ -281,19 +276,17 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
 
     let cancelled = false;
     branchSessionIds.forEach((sessionId) => {
-      void hydrateSessionHistoryIntoStore({
+      void hydrateActiveConversationSession({
+        mode: 'reload',
         sessionId,
         getSessions: () => sessions,
+        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
         getSessionMessages,
         setMessages,
         setAgentTurns,
         getSessionAgentTurns,
         getSessionActiveTurnId,
         hasActiveLoopForSession,
-        fetchMessages: async (targetSessionId) => {
-          const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${targetSessionId}/messages`);
-          return response.data;
-        },
       }).catch((err: unknown) => {
         if (!cancelled) {
           console.error('[ExecutionGraphView] architecture branch history load failed', err);

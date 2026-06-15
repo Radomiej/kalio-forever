@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import type { ChatMessage } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
-import { replaceArchitectureRunTurn } from './architectureTurnProjection';
+import type { ArchitectRunResult } from '../architect/architect.types';
+import {
+  replaceArchitectureRunTurn,
+  resolveArchitectureRunTurnUpdate,
+} from './architectureTurnProjection';
 
 function makeTurn(overrides: Partial<AgentTurn> = {}): AgentTurn {
   return {
@@ -93,5 +98,154 @@ describe('replaceArchitectureRunTurn', () => {
     });
 
     expect(turns).toEqual([keepTurn, nextTurn]);
+  });
+});
+
+function makeResult(runId: string, status: ArchitectRunResult['run']['status'] = 'running'): ArchitectRunResult {
+  return {
+    run: {
+      id: runId,
+      schemaId: 'strategic-decision-council',
+      prompt: 'Assess repo',
+      executionMode: 'subagent_execution',
+      status,
+      createdAt: 1,
+      updatedAt: 2,
+      rootSessionId: 'host',
+    },
+    agentFlowStatus: status === 'running' ? 'running' : 'done',
+    events: [],
+    graph: { runId, nodes: [], edges: [], routeHops: [] },
+    chat: { runId, messages: [] },
+  };
+}
+
+describe('resolveArchitectureRunTurnUpdate', () => {
+  it('replaces only the current workflow run projection and keeps prior run bubbles intact', () => {
+    const currentMessages: ChatMessage[] = [
+      {
+        id: 'architecture:run-old:text:event-1',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: 'Previous workflow result',
+        createdAt: 1,
+      },
+      {
+        id: 'architecture:user-2:pending',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: 'Architecture run is starting.',
+        createdAt: 2,
+      },
+      {
+        id: 'architecture:run-new:text:event-stale',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: 'Stale current run projection',
+        createdAt: 3,
+      },
+    ];
+    const currentTurns: AgentTurn[] = [
+      makeTurn({
+        id: 'architecture-turn-run-old',
+        promptMessageId: 'user-1',
+        items: [{ kind: 'text', messageId: 'architecture:run-old:text:event-1' }],
+      }),
+      makeTurn({
+        id: 'architecture-turn-run-new-stale',
+        promptMessageId: 'user-2',
+        items: [{ kind: 'text', messageId: 'architecture:run-new:text:event-stale' }],
+        done: false,
+      }),
+    ];
+
+    const resolved = resolveArchitectureRunTurnUpdate({
+      currentMessages,
+      currentTurns,
+      pendingAssistantMessageId: 'architecture:user-2:pending',
+      promptMessageId: 'user-2',
+      projection: {
+        turnKind: 'workflow-envelope',
+        turnItems: [{ kind: 'text', messageId: 'architecture:run-new:text:event-1' }],
+        messages: [
+          {
+            id: 'architecture:run-new:text:event-1',
+            sessionId: 'session-1',
+            role: 'assistant',
+            content: 'Current workflow result',
+            createdAt: 4,
+          },
+        ],
+      },
+      result: makeResult('run-new'),
+      sessionId: 'session-1',
+    });
+
+    expect(resolved.messages.map((message) => message.id)).toEqual([
+      'architecture:run-old:text:event-1',
+      'architecture:run-new:text:event-1',
+    ]);
+    expect(resolved.turns.map((turn) => turn.id)).toEqual([
+      'architecture-turn-run-old',
+      'architecture-turn-run-new',
+    ]);
+    expect(resolved.nextTurn.promptMessageId).toBe('user-2');
+    expect(resolved.nextTurn.done).toBe(false);
+  });
+
+  it('marks the synthetic workflow turn done for terminal runs', () => {
+    const resolved = resolveArchitectureRunTurnUpdate({
+      currentMessages: [],
+      currentTurns: [],
+      pendingAssistantMessageId: 'architecture:user-2:pending',
+      promptMessageId: 'user-2',
+      projection: {
+        turnKind: 'workflow-envelope',
+        turnItems: [{ kind: 'text', messageId: 'architecture:run-done:text:event-1' }],
+        messages: [
+          {
+            id: 'architecture:run-done:text:event-1',
+            sessionId: 'session-1',
+            role: 'assistant',
+            content: 'Workflow completed',
+            createdAt: 4,
+          },
+        ],
+      },
+      result: makeResult('run-done', 'completed'),
+      sessionId: 'session-1',
+    });
+
+    expect(resolved.nextTurn.done).toBe(true);
+    expect(resolved.turns).toEqual([resolved.nextTurn]);
+  });
+
+  it('marks the local workflow turn done when waiting_on_orchestrator takes over', () => {
+    const waitingResult = makeResult('run-waiting', 'running');
+    waitingResult.agentFlowStatus = 'waiting_on_orchestrator';
+
+    const resolved = resolveArchitectureRunTurnUpdate({
+      currentMessages: [],
+      currentTurns: [],
+      pendingAssistantMessageId: 'architecture:user-3:pending',
+      promptMessageId: 'user-3',
+      projection: {
+        turnKind: 'workflow-envelope',
+        turnItems: [{ kind: 'text', messageId: 'architecture:run-waiting:text:event-1' }],
+        messages: [
+          {
+            id: 'architecture:run-waiting:text:event-1',
+            sessionId: 'session-1',
+            role: 'assistant',
+            content: 'Workflow waiting on orchestrator',
+            createdAt: 5,
+          },
+        ],
+      },
+      result: waitingResult,
+      sessionId: 'session-1',
+    });
+
+    expect(resolved.nextTurn.done).toBe(true);
   });
 });

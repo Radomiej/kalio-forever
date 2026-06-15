@@ -89,6 +89,7 @@ export function ChatInterface() {
   const setConversationTitleSettings = useSettingsStore((state) => state.setConversationTitleSettings);
   const {
     isStreaming,
+    streamingSessionId,
     setPendingConfirmation,
     setToolArgProgress,
     clearToolActivities,
@@ -99,6 +100,7 @@ export function ChatInterface() {
     queuedDepthBySession,
     hasActiveLoopForSession,
   } = useAgentStore();
+  const isStreamingForActiveSession = isStreaming && streamingSessionId === activeSessionId;
   const queuedDepth = activeSessionId ? (queuedDepthBySession?.[activeSessionId] ?? 0) : 0;
   const activeToolActivities = getToolActivitiesForSession(activeSessionId);
   const activeContext = getContextForSession(activeSessionId);
@@ -152,7 +154,8 @@ export function ChatInterface() {
     sessionMessages: messages,
     agentTurns,
     activeTurnId: getSessionActiveTurnId(activeSessionId),
-    isStreaming,
+    isStreaming: isStreamingForActiveSession,
+    streamingSessionId,
     awaitingFirstChunk,
     hasActiveLoop: hasActiveLoopForSession(activeSessionId),
     queuedDepth,
@@ -276,13 +279,13 @@ export function ChatInterface() {
   };
 
   // Flush queued RA-App user actions when agent finishes streaming
-  const prevStreamingRef = useRef(isStreaming);
+  const prevStreamingRef = useRef(isStreamingForActiveSession);
   useEffect(() => {
-    if (prevStreamingRef.current && !isStreaming) {
+    if (prevStreamingRef.current && !isStreamingForActiveSession) {
       const { dequeueUserAction, activeSessionId: sid, sessions } = useSessionStore.getState();
       if (!eventBus.connected) {
         setRecoveryNotice('Queued action is waiting for backend reconnect.');
-        prevStreamingRef.current = isStreaming;
+        prevStreamingRef.current = isStreamingForActiveSession;
         return;
       }
       let action = dequeueUserAction();
@@ -304,8 +307,8 @@ export function ChatInterface() {
         action = dequeueUserAction();
       }
     }
-    prevStreamingRef.current = isStreaming;
-  }, [isStreaming, addMessage]);
+    prevStreamingRef.current = isStreamingForActiveSession;
+  }, [isStreamingForActiveSession, addMessage]);
 
   const {
     handleComposerSend,

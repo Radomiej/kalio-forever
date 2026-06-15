@@ -4,6 +4,7 @@ import type { ToolConfirmationRequest } from '@kalio/types';
 import { eventBus } from '../../../services/eventBus';
 import { useSessionStore } from '../../../store/sessionStore';
 import type { ExecutionGraphNode } from './executionGraphModel';
+import { activateConversationSession } from '../activeConversationSession';
 
 interface GraphInspectorActionsProps {
   node: ExecutionGraphNode;
@@ -27,9 +28,18 @@ export function GraphInspectorActions({
   setPendingConfirmation,
 }: GraphInspectorActionsProps) {
   const [cliActionNotice, setCliActionNotice] = useState<string | null>(null);
+  const sessions = useSessionStore((state) => state.sessions);
   const childSessionExists = useSessionStore((state) => (
     node.sessionId != null && state.sessions.some((session) => session.id === node.sessionId)
   ));
+  const openConversation = (sessionId: string, reason: 'canvas' | 'confirmation') => {
+    void activateConversationSession({
+      sessionId,
+      sessions,
+      setActiveSession: (nextSessionId) => setActiveSession(nextSessionId),
+      reason,
+    });
+  };
   const isChildSessionNode = (
     node.payload.kind === 'subagent'
     || node.payload.kind === 'cli-agent'
@@ -60,7 +70,7 @@ export function GraphInspectorActions({
               onOpenSessionInConversation(node.sessionId);
               return;
             }
-            setActiveSession(node.sessionId);
+            openConversation(node.sessionId, 'canvas');
           }}
         >
           <span className="flex items-center justify-center gap-2">
@@ -83,7 +93,7 @@ export function GraphInspectorActions({
                 onOpenSessionInConversation(node.sessionId);
                 return;
               }
-              setActiveSession(node.sessionId);
+              openConversation(node.sessionId, 'canvas');
             }}
           >
             <span className="flex items-center justify-center gap-2">
@@ -119,7 +129,7 @@ export function GraphInspectorActions({
           className="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-sm font-medium transition-colors hover:bg-base-200"
           onClick={() => {
             if (!node.sessionId) return;
-            setActiveSession(node.sessionId);
+            openConversation(node.sessionId, 'canvas');
           }}
         >
           <span className="flex items-center justify-center gap-2">
@@ -138,7 +148,7 @@ export function GraphInspectorActions({
                 onOpenSessionInConversation(selectedConfirmation.sessionId);
                 return;
               }
-              setActiveSession(selectedConfirmation.sessionId);
+              openConversation(selectedConfirmation.sessionId, 'confirmation');
             }}
           >
             <span className="flex items-center justify-center gap-2">

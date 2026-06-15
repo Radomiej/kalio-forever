@@ -11,6 +11,7 @@ function resetStore() {
     activeSessionId: null,
     messages: [],
     sessionMessages: {},
+    hydratedSessionIds: {},
     streamingChunks: {},
     thinkingChunks: {},
     chunkSessionIds: {},
@@ -18,6 +19,7 @@ function resetStore() {
   useAgentStore.setState({
     isStreaming: false,
     streamingMessageId: undefined,
+    streamingSessionId: null,
   });
 }
 
@@ -31,6 +33,18 @@ describe('sessionStore — AgentTurn actions', () => {
       const activeTurnId = useSessionStore.getState().getSessionActiveTurnId('s1');
       expect(agentTurns).toHaveLength(1);
       expect(agentTurns[0]).toMatchObject({ id: 't1', sessionId: 's1', items: [], done: false });
+      expect(activeTurnId).toBe('t1');
+    });
+
+    it('reuses an existing turnId instead of appending a duplicate turn', () => {
+      useSessionStore.getState().startAgentTurn('t1', 's1');
+      useSessionStore.getState().startAgentTurn('t1', 's1');
+
+      const agentTurns = useSessionStore.getState().getSessionAgentTurns('s1');
+      const activeTurnId = useSessionStore.getState().getSessionActiveTurnId('s1');
+
+      expect(agentTurns).toHaveLength(1);
+      expect(agentTurns[0]).toMatchObject({ id: 't1', sessionId: 's1', done: false });
       expect(activeTurnId).toBe('t1');
     });
   });
@@ -202,12 +216,14 @@ describe('REGRESSION: setActiveSession clears in-flight agent state', () => {
     useAgentStore.setState({
       isStreaming: true,
       streamingMessageId: 'msg-streaming',
+      streamingSessionId: 'session-A',
     });
 
     useSessionStore.getState().setActiveSession('session-B');
 
     expect(useAgentStore.getState().isStreaming).toBe(false);
     expect(useAgentStore.getState().streamingMessageId).toBeUndefined();
+    expect(useAgentStore.getState().streamingSessionId).toBeNull();
   });
 });
 

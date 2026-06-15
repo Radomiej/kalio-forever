@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SessionPanel } from './SessionPanel';
 import { formatRelativeTime } from './session.utils';
@@ -34,6 +34,7 @@ const mockPersonas: Persona[] = [
 const mockState: {
   sessions: ChatSession[];
   activeSessionId: string | null;
+  hydratedSessionIds: Record<string, true>;
   setSessions: typeof mockSetSessions;
   setActiveSession: typeof mockSetActiveSession;
   addSession: typeof mockAddSession;
@@ -44,11 +45,14 @@ const mockState: {
   getSessionMessages: (sessionId: string | null) => ChatMessage[];
   getSessionAgentTurns: (sessionId: string | null) => AgentTurn[];
   getSessionActiveTurnId: (sessionId: string | null) => string | null;
+  isSessionHydrated: (sessionId: string | null) => boolean;
+  markSessionHydrated: (sessionId: string | null) => void;
   removeSession: typeof mockRemoveSession;
   updateSession: typeof mockUpdateSession;
 } = {
   sessions: mockSessions,
   activeSessionId: 's1',
+  hydratedSessionIds: {},
   setSessions: mockSetSessions,
   setActiveSession: mockSetActiveSession,
   addSession: mockAddSession,
@@ -59,6 +63,13 @@ const mockState: {
   getSessionMessages: (sessionId) => (sessionId ? (mockState.sessionMessages[sessionId] ?? []) : []),
   getSessionAgentTurns: (sessionId) => (sessionId ? (mockState.sessionAgentTurns[sessionId] ?? []) : []),
   getSessionActiveTurnId: () => null,
+  isSessionHydrated: (sessionId) => (sessionId ? mockState.hydratedSessionIds[sessionId] === true : false),
+  markSessionHydrated: (sessionId) => {
+    if (!sessionId) {
+      return;
+    }
+    mockState.hydratedSessionIds[sessionId] = true;
+  },
   removeSession: mockRemoveSession,
   updateSession: mockUpdateSession,
 };
@@ -165,6 +176,7 @@ describe('SessionPanel', () => {
     sessionStorage.clear();
     mockState.sessions = mockSessions;
     mockState.activeSessionId = 's1';
+    mockState.hydratedSessionIds = {};
     mockState.sessionAgentTurns = {};
     mockState.sessionMessages = {};
     mockAgentState.pendingConfirmations = {};
@@ -182,6 +194,10 @@ describe('SessionPanel', () => {
       if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
       return Promise.resolve({ data: [] });
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('renders session titles', async () => {
@@ -209,6 +225,89 @@ describe('SessionPanel', () => {
   it('shows relative timestamps', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(screen.getAllByText('2m ago').length).toBeGreaterThan(0));
+  });
+
+  it('hydrates workflow recovery from the host session when a branch conversation is active', async () => {
+    vi.useFakeTimers();
+    const hostSession: ChatSession = {
+      id: 'host-1',
+      personaId: 'default',
+      title: 'Workflow host',
+      createdAt: 1,
+      updatedAt: 100,
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          schemaId: 'strategic-decision-council',
+          schemaName: 'Strategic Decision Council',
+          hostSessionId: 'host-1',
+          historySessionId: 'host-1',
+          sessionSurface: 'host-envelope',
+        },
+      },
+    };
+    const rootSession: ChatSession = {
+      id: 'arch-root-1',
+      personaId: 'default',
+      title: 'Architecture root',
+      createdAt: 2,
+      updatedAt: 100,
+      parentSessionId: 'host-1',
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          schemaId: 'strategic-decision-council',
+          schemaName: 'Strategic Decision Council',
+          hostSessionId: 'host-1',
+          historySessionId: 'host-1',
+          sessionSurface: 'technical-node',
+        },
+      },
+    };
+    const branchSession: ChatSession = {
+      id: 'branch-1',
+      personaId: 'default',
+      title: 'Strategic Decision Council: Analyst',
+      createdAt: 3,
+      updatedAt: 100,
+      parentSessionId: 'arch-root-1',
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          schemaId: 'strategic-decision-council',
+          schemaName: 'Strategic Decision Council',
+          hostSessionId: 'host-1',
+          historySessionId: 'host-1',
+          sessionSurface: 'conversation-branch',
+        },
+      },
+    };
+    const hostMessages: ChatMessage[] = [
+      { id: 'user-1', sessionId: 'host-1', role: 'user', content: 'Assess repo', createdAt: 10 },
+    ];
+
+    mockState.sessions = [hostSession, rootSession, branchSession];
+    mockState.activeSessionId = 'branch-1';
+    mockState.sessionMessages = {
+      'host-1': hostMessages,
+      'branch-1': [],
+    };
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: mockState.sessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      if (url === '/api/sessions/host-1/messages') return Promise.resolve({ data: hostMessages });
+      if (url === '/api/sessions/branch-1/messages') return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions');
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/host-1/messages');
+    expect(mockApiGet).not.toHaveBeenCalledWith('/api/sessions/branch-1/messages');
   });
 
   it('hides child subagent sessions from the default conversation list', async () => {
@@ -1902,6 +2001,100 @@ describe('SessionPanel', () => {
       expect.stringContaining('Workflow host'),
       expect.stringContaining('Strategic Decision Council: Analyst'),
     ]);
+  });
+
+  it('auto-expands the active workflow host when terminal workflow metadata already has real branch sessions', async () => {
+    const now = Date.now();
+    const workflowSessions: ChatSession[] = [
+      { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 5_000, updatedAt: now - 5_000 },
+      {
+        id: 'arch-root',
+        personaId: 'default',
+        title: 'Architecture: Strategic Decision Council',
+        kind: 'agent-flow',
+        parentSessionId: 'host',
+        createdAt: now - 4_000,
+        updatedAt: now - 4_000,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-root',
+          architectureContext: {
+            architectureRunId: 'run-done',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+            sessionSurface: 'technical-node',
+          },
+        },
+      },
+      {
+        id: 'branch-pragmatist',
+        personaId: 'dev',
+        title: 'Strategic Decision Council: Pragmatist',
+        kind: 'subagent',
+        parentSessionId: 'arch-root',
+        createdAt: now - 3_000,
+        updatedAt: now - 2_000,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'pragmatist',
+          architectureContext: {
+            architectureRunId: 'run-done',
+            roleSlotId: 'pragmatist',
+            displayLabel: 'Pragmatist',
+            sessionSurface: 'conversation-branch',
+          },
+        },
+      },
+    ];
+
+    mockState.sessions = workflowSessions;
+    mockState.activeSessionId = 'host';
+    mockState.sessionMessages = {
+      host: [
+        {
+          id: 'workflow-summary',
+          sessionId: 'host',
+          role: 'assistant',
+          content: '',
+          createdAt: now - 1_000,
+          architectureRun: {
+            runId: 'run-done',
+            schemaId: 'Strategic Decision Council',
+            status: 'completed',
+            routeHops: [],
+            trace: [
+              {
+                speaker: 'participant',
+                content: 'Completed branch output',
+                eventId: 'event-pragmatist',
+                nodeId: 'pragmatist',
+                stream: {
+                  streamGroupId: 'run-done',
+                  branchSessionId: 'branch-pragmatist',
+                  status: 'completed',
+                  chunkCount: 1,
+                  text: 'Completed branch output',
+                },
+              },
+            ],
+            graphNodes: [
+              { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'completed', eventIds: ['event-pragmatist'] },
+            ],
+            graphEdges: [],
+          } as ChatMessage['architectureRun'],
+        },
+      ],
+    };
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: workflowSessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(workflowSessions));
+    await waitFor(() => expect(screen.getByText('Strategic Decision Council: Pragmatist')).toBeTruthy());
+    expect(screen.getByTestId('toggle-session-children-host')).toHaveTextContent('1');
   });
 
   it('rehydrates architecture timeline metadata when restoring the last active host session after reload', async () => {

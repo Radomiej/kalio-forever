@@ -422,7 +422,8 @@ describe('buildExecutionGraphModel', () => {
       expect.objectContaining({
         id: 'architecture-run:a2',
         kind: 'architecture-run',
-        subtitle: 'five-minds-council / completed',
+        title: 'Architecture run',
+        status: 'success',
       }),
       expect.objectContaining({
         id: 'architecture-route:a2:0',
@@ -436,7 +437,7 @@ describe('buildExecutionGraphModel', () => {
     ]));
     expect(model.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({ sourceId: 'architecture-run:a2', targetId: 'architecture-route:a2:0' }),
-      expect.objectContaining({ sourceId: 'architecture-route:a2:1', targetId: expect.stringContaining('final:') }),
+      expect.objectContaining({ sourceId: 'architecture-route:a2:0', targetId: expect.stringContaining('final:') }),
     ]));
     expect(model.nodes.filter((node) => node.id.startsWith('architecture-run:'))).toHaveLength(1);
   });

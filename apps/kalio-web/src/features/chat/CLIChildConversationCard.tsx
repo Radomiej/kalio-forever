@@ -5,6 +5,7 @@ import { useAgentStore } from '../../store/agentStore';
 import type { CLIChildProjectionStatus } from './cliChildProjection.model';
 import { useCLIChildCardState } from './CLIChildConversationCard.hooks';
 import type { ToolActivity } from '../../store/agentStore';
+import { activateConversationSession } from './activeConversationSession';
 
 const CLI_FOLLOW_UP_MESSAGE = 'Continue from the current task. Share a concise status update and your next concrete step.';
 
@@ -37,6 +38,7 @@ export function CLIChildConversationCard({
 }) {
   const setActiveSession = useSessionStore((state) => state.setActiveSession);
   const setPendingMessage = useSessionStore((state) => state.setPendingMessage);
+  const sessions = useSessionStore((state) => state.sessions);
   const setCanvasOpen = useAgentStore((state) => state.setCanvasOpen);
   const { projection, liveOutput, childTitle, status } = useCLIChildCardState({
     activity,
@@ -77,12 +79,22 @@ export function CLIChildConversationCard({
     : projection.lastOutput.slice(-4000);
 
   const openChildChat = () => {
-    setActiveSession(projection.childSessionId);
+    void activateConversationSession({
+      sessionId: projection.childSessionId,
+      sessions,
+      setActiveSession,
+      reason: 'cli-child',
+    });
   };
 
   const steerChild = () => {
     setPendingMessage(CLI_FOLLOW_UP_MESSAGE);
-    setActiveSession(projection.childSessionId);
+    void activateConversationSession({
+      sessionId: projection.childSessionId,
+      sessions,
+      setActiveSession,
+      reason: 'cli-child',
+    });
   };
 
   const stopChild = () => {

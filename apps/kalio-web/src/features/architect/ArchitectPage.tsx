@@ -46,6 +46,7 @@ import {
 } from './ArchitectPage.graph';
 import { layoutGraphNodes } from './ArchitectGraphLayout';
 import { useSessionStore } from '../../store/sessionStore';
+import { activateConversationSession } from '../chat/activeConversationSession';
 
 function isStrategicDecisionCouncilBaseSchema(schemaId: string): boolean {
   return schemaId === 'strategic-decision-council';
@@ -391,7 +392,12 @@ export function ArchitectPage() {
     const nextSessions = await getArchitectSessions();
     setSessions(nextSessions);
     if (rootSessionId && nextSessions.some((session) => session.id === rootSessionId)) {
-      setActiveSession(rootSessionId);
+      void activateConversationSession({
+        sessionId: rootSessionId,
+        sessions: nextSessions,
+        setActiveSession,
+        reason: 'graph',
+      });
     }
   }, [setActiveSession, setSessions]);
 

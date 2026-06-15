@@ -190,7 +190,11 @@ export function SessionPanelSessionItem({
   );
   const latestToolActivity = latestSessionToolActivity(sessionToolActivities, session.id);
   const descendantState = descendantActivityState(descendantStates);
-  const effectiveRuntimeState = descendantState && (runtimeState === null || runtimeState === 'done')
+  const effectiveRuntimeState = descendantState && (
+    runtimeState === null
+    || runtimeState === 'done'
+    || runtimeState === 'pending'
+  )
     ? descendantState
     : runtimeState;
   const activeDescendantLabel = descendantStates.waiting > 0
@@ -239,8 +243,8 @@ export function SessionPanelSessionItem({
         </form>
       ) : (
         <div className="flex flex-1 min-w-0 items-start gap-2">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <div className="flex items-center gap-1.5 min-w-0">
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <div className="flex min-w-0 items-start gap-1.5">
               <span
                 className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border ${sessionKind.iconClassName}`}
                 data-testid={`session-kind-icon-${session.id}`}
@@ -255,56 +259,58 @@ export function SessionPanelSessionItem({
               >
                 {displayTitle}
               </span>
-              {effectiveRuntimeState === 'waiting' && (
-                <AlertTriangle
-                  size={10}
-                  className="text-warning shrink-0"
-                  aria-label="Awaiting confirmation"
-                  data-testid={`session-pending-confirmation-${session.id}`}
-                />
-              )}
-              {effectiveRuntimeState === 'pending' && (
-                <Circle
-                  size={10}
-                  className="shrink-0 text-base-content/40"
-                  aria-label="Session pending"
-                  data-testid={`session-pending-${session.id}`}
-                />
-              )}
-              {effectiveRuntimeState === 'running' && (
-                <Loader2
-                  size={10}
-                  className="shrink-0 animate-spin text-sky-300"
-                  aria-label="Session running"
-                  data-testid={`session-running-${session.id}`}
-                />
-              )}
-              {effectiveRuntimeState === 'stopped' && (
-                <XCircle
-                  size={10}
-                  className="shrink-0 text-base-content/45"
-                  aria-label="Session stopped"
-                  data-testid={`session-stopped-${session.id}`}
-                />
-              )}
-              {effectiveRuntimeState === 'done' && (
-                <CheckCircle2
-                  size={10}
-                  className="shrink-0 text-emerald-300"
-                  aria-label="Session completed"
-                  data-testid={`session-done-${session.id}`}
-                />
-              )}
-              {effectiveRuntimeState === 'error' && (
-                <XCircle
-                  size={10}
-                  className="shrink-0 text-rose-300"
-                  aria-label="Session failed"
-                  data-testid={`session-error-${session.id}`}
-                />
-              )}
+              <div className="flex shrink-0 items-center gap-1">
+                {effectiveRuntimeState === 'waiting' && (
+                  <AlertTriangle
+                    size={10}
+                    className="text-warning shrink-0"
+                    aria-label="Awaiting confirmation"
+                    data-testid={`session-pending-confirmation-${session.id}`}
+                  />
+                )}
+                {effectiveRuntimeState === 'pending' && (
+                  <Circle
+                    size={10}
+                    className="shrink-0 text-base-content/40"
+                    aria-label="Session pending"
+                    data-testid={`session-pending-${session.id}`}
+                  />
+                )}
+                {effectiveRuntimeState === 'running' && (
+                  <Loader2
+                    size={10}
+                    className="shrink-0 animate-spin text-sky-300"
+                    aria-label="Session running"
+                    data-testid={`session-running-${session.id}`}
+                  />
+                )}
+                {effectiveRuntimeState === 'stopped' && (
+                  <XCircle
+                    size={10}
+                    className="shrink-0 text-base-content/45"
+                    aria-label="Session stopped"
+                    data-testid={`session-stopped-${session.id}`}
+                  />
+                )}
+                {effectiveRuntimeState === 'done' && (
+                  <CheckCircle2
+                    size={10}
+                    className="shrink-0 text-emerald-300"
+                    aria-label="Session completed"
+                    data-testid={`session-done-${session.id}`}
+                  />
+                )}
+                {effectiveRuntimeState === 'error' && (
+                  <XCircle
+                    size={10}
+                    className="shrink-0 text-rose-300"
+                    aria-label="Session failed"
+                    data-testid={`session-error-${session.id}`}
+                  />
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 min-w-0">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               {session.kind !== 'chat' && (
                 <span
                   className={`text-[9px] rounded px-1 py-0.5 leading-none shrink-0 ${sessionKind.badgeClassName}`}
@@ -314,13 +320,13 @@ export function SessionPanelSessionItem({
                 </span>
               )}
               {personaName && (
-                <span className="text-[10px] text-base-content/65 bg-base-300/50 rounded px-1 py-0.5 leading-none truncate max-w-[7rem]">
+                <span className="max-w-full break-words rounded bg-base-300/50 px-1 py-0.5 text-[10px] leading-none text-base-content/65">
                   {personaName}
                 </span>
               )}
               {architectureLabel && (
                 <span
-                  className="text-[9px] rounded border border-sky-500/20 bg-sky-500/10 px-1 py-0.5 leading-none text-sky-200 truncate max-w-[8rem]"
+                  className="max-w-full break-words rounded border border-sky-500/20 bg-sky-500/10 px-1 py-0.5 text-[9px] leading-none text-sky-200"
                   data-testid={`session-architecture-label-${session.id}`}
                 >
                   {architectureLabel}
@@ -328,7 +334,7 @@ export function SessionPanelSessionItem({
               )}
               {activeDescendantLabel && (
                 <span
-                  className={`text-[9px] rounded border px-1 py-0.5 leading-none truncate max-w-[7rem] ${
+                  className={`max-w-full break-words rounded border px-1 py-0.5 text-[9px] leading-none ${
                     descendantStates.waiting > 0
                       ? 'border-warning/30 bg-warning/10 text-warning'
                       : 'border-sky-500/20 bg-sky-500/10 text-sky-200'
@@ -338,17 +344,19 @@ export function SessionPanelSessionItem({
                   {activeDescendantLabel}
                 </span>
               )}
-              <span className="text-[10px] text-base-content/60 leading-none ml-auto shrink-0">
+              <span className="ml-auto shrink-0 text-[10px] leading-none text-base-content/60">
                 {formatRelativeTime(session.updatedAt)}
               </span>
             </div>
             {latestToolActivity && (
               <div
-                className="truncate text-[10px] leading-none text-base-content/55"
+                className="min-w-0 text-[10px] leading-none text-base-content/55"
                 data-testid={`session-last-tool-${session.id}`}
                 title={`${latestToolActivity.toolName} ${formatToolActivityStatus(latestToolActivity.status)}`}
               >
-                {latestToolActivity.toolName} {formatToolActivityStatus(latestToolActivity.status)}
+                <span className="break-words">
+                  {latestToolActivity.toolName} {formatToolActivityStatus(latestToolActivity.status)}
+                </span>
               </div>
             )}
           </div>

@@ -17,6 +17,7 @@ interface SessionState {
   activeSessionId: string | null;
   messages: ChatMessage[];
   sessionMessages: Record<string, ChatMessage[]>;
+  hydratedSessionIds: Record<string, true>;
   streamingChunks: Record<string, string>;    // messageId → accumulated answer delta
   thinkingChunks: Record<string, string>;     // messageId → accumulated thinking delta
   chunkSessionIds: Record<string, string>;    // messageId → sessionId (cross-session isolation)
@@ -37,6 +38,8 @@ interface SessionState {
   getSessionMessages: (sessionId: string | null) => ChatMessage[];
   getSessionAgentTurns: (sessionId: string | null) => AgentTurn[];
   getSessionActiveTurnId: (sessionId: string | null) => ID | null;
+  isSessionHydrated: (sessionId: string | null) => boolean;
+  markSessionHydrated: (sessionId: string | null) => void;
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
   addMessage: (message: ChatMessage) => void;
   appendChunk: (messageId: string, delta: string, thinking?: boolean, chunkSessionId?: string) => void;
@@ -75,6 +78,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   activeSessionId: null,
   messages: [],
   sessionMessages: {},
+  hydratedSessionIds: {},
   streamingChunks: {},
   thinkingChunks: {},
   chunkSessionIds: {},
@@ -110,12 +114,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   getSessionMessages: (sessionId) => resolveSessionSlice(get(), sessionId).messages,
   getSessionAgentTurns: (sessionId) => resolveSessionSlice(get(), sessionId).agentTurns,
   getSessionActiveTurnId: (sessionId) => resolveSessionSlice(get(), sessionId).activeTurnId,
+  isSessionHydrated: (sessionId) => (sessionId ? get().hydratedSessionIds[sessionId] === true : false),
+  markSessionHydrated: (sessionId) =>
+    set((s) => {
+      if (!sessionId || s.hydratedSessionIds[sessionId]) {
+        return s;
+      }
+      return {
+        hydratedSessionIds: {
+          ...s.hydratedSessionIds,
+          [sessionId]: true,
+        },
+      };
+    }),
   setActiveSession: (id) => {
     // No-op if this session is already active — avoids wiping messages/agentTurns
     // when the same session is re-selected (e.g. user clicks an already-active session
     // or auto-select fires for a session that's already loaded).
     if (get().activeSessionId === id) return;
-    useAgentStore.getState().setStreaming(false);
+    useAgentStore.getState().setStreaming(false, undefined, get().activeSessionId);
     const slice = resolveSessionSlice(get(), id);
     set({
       activeSessionId: id,
@@ -359,6 +376,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((s) => {
       const nextSessionMessages = { ...s.sessionMessages };
       delete nextSessionMessages[id];
+      const nextHydratedSessionIds = { ...s.hydratedSessionIds };
+      delete nextHydratedSessionIds[id];
       const nextSessionAgentTurns = { ...s.sessionAgentTurns };
       delete nextSessionAgentTurns[id];
       const nextSessionActiveTurnIds = { ...s.sessionActiveTurnIds };
@@ -370,6 +389,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         agentTurns: s.activeSessionId === id ? [] : s.agentTurns,
         activeTurnId: s.activeSessionId === id ? null : s.activeTurnId,
         sessionMessages: nextSessionMessages,
+        hydratedSessionIds: nextHydratedSessionIds,
         sessionAgentTurns: nextSessionAgentTurns,
         sessionActiveTurnIds: nextSessionActiveTurnIds,
       };
@@ -409,13 +429,26 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   // Agent turn management — unified chronological rendering per user prompt
   startAgentTurn: (turnId, sessionId, agentRun) =>
     set((s) => {
+      const existingTurns = getStoredSessionTurns(s, sessionId);
+      const existingTurn = existingTurns.find((turn) => turn.id === turnId) ?? null;
       const promptMessageId = [...getStoredSessionMessages(s, sessionId)]
         .reverse()
         .find((message) => message.role === 'user')?.id;
-      const nextSessionTurns = [
-        ...getStoredSessionTurns(s, sessionId),
-        { id: turnId, sessionId, promptMessageId, agentRun, items: [], done: false },
-      ];
+      const nextSessionTurns = existingTurn
+        ? existingTurns.map((turn) => (
+          turn.id === turnId
+            ? {
+                ...turn,
+                done: false,
+                agentRun: agentRun ?? turn.agentRun,
+                promptMessageId: turn.promptMessageId ?? promptMessageId,
+              }
+            : turn
+        ))
+        : [
+            ...existingTurns,
+            { id: turnId, sessionId, promptMessageId, agentRun, items: [], done: false },
+          ];
       return {
         sessionAgentTurns: {
           ...s.sessionAgentTurns,
@@ -501,6 +534,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((s) => {
       const targetSessionId = sessionId ?? s.activeSessionId;
       if (!targetSessionId) return { agentTurns: turns, activeTurnId: null };
+      const nextActiveTurnId = [...turns].reverse().find((turn) => !turn.done)?.id ?? null;
       return {
         sessionAgentTurns: {
           ...s.sessionAgentTurns,
@@ -508,10 +542,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         },
         sessionActiveTurnIds: {
           ...s.sessionActiveTurnIds,
-          [targetSessionId]: null,
+          [targetSessionId]: nextActiveTurnId,
         },
         agentTurns: targetSessionId === s.activeSessionId ? turns : s.agentTurns,
-        activeTurnId: targetSessionId === s.activeSessionId ? null : s.activeTurnId,
+        activeTurnId: targetSessionId === s.activeSessionId ? nextActiveTurnId : s.activeTurnId,
       };
     }),
 

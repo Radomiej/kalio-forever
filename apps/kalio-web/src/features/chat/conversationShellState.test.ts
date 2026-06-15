@@ -23,6 +23,7 @@ function liveTurnState(overrides: Partial<LiveTurnState> = {}): LiveTurnState {
     toolName: null,
     queuedDepth: 0,
     showPlaceholderBubble: false,
+    workflowActive: false,
     ...overrides,
   };
 }

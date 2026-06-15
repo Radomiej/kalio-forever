@@ -1,7 +1,6 @@
 import type { ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
 import { architectureSessionSurfaceForSession } from './architectureSessionContext';
 import {
-  architectureSlotIdForSession,
   buildArchitectureSessionRuntimeStates,
   isPendingArchitecturePlaceholderSession,
   isTechnicalArchitectureSession,
@@ -19,18 +18,7 @@ type RenderableSessionFilterSignals = {
 
 function isArchitectureBranchConversationSession(session: ChatSession): boolean {
   const sessionSurface = architectureSessionSurfaceForSession(session);
-  if (sessionSurface === 'conversation-branch') {
-    return true;
-  }
-  if (sessionSurface === 'technical-node') {
-    return false;
-  }
-  // TODO: legacy fallback - older persisted workflow sessions do not yet stamp sessionSurface.
-  return Boolean(architectureSlotIdForSession(session));
-}
-
-function hasExplicitConversationBranchSurface(session: ChatSession): boolean {
-  return architectureSessionSurfaceForSession(session) === 'conversation-branch';
+  return sessionSurface === 'conversation-branch';
 }
 
 function hasLiveSessionActivity(
@@ -56,13 +44,8 @@ export function isRenderableConversationSession(
     return false;
   }
 
-  if (hasExplicitConversationBranchSurface(session)) {
-    return true;
-  }
-
   if (isArchitectureBranchConversationSession(session)) {
-    return !isPendingArchitecturePlaceholderSession(session, architectureSessionRuntimeStates, sessionMessages)
-      || hasLiveSessionActivity(session.id, signals);
+    return true;
   }
 
   return !isPendingArchitecturePlaceholderSession(session, architectureSessionRuntimeStates, sessionMessages)

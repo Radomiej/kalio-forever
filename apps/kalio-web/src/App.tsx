@@ -37,6 +37,7 @@ import { apiClient } from './services/apiClient';
 import { eventBus } from './services/eventBus';
 import { useSettingsStore } from './features/settings/settingsStore';
 import type { ChatSession } from '@kalio/types';
+import { activateConversationSession } from './features/chat/activeConversationSession';
 
 const TALK_VIEW_OPTIONS: ReadonlyArray<{ id: TalkView; label: string; icon: React.ReactNode }> = [
   { id: 'conversation', label: 'Conversation', icon: <MessageSquare size={14} /> },
@@ -200,7 +201,12 @@ export function App() {
     setActiveSection('talk');
   };
   const openSessionInConversation = (sessionId: string) => {
-    setActiveSession(sessionId);
+    void activateConversationSession({
+      sessionId,
+      sessions,
+      setActiveSession,
+      reason: 'app-open',
+    });
     setTalkTab('conversations');
     setTalkView('conversation');
     setActiveSection('talk');

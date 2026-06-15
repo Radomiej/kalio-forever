@@ -390,6 +390,10 @@ function liveTurnBody(liveTurnState: LiveTurnState): string {
     return liveTurnState.previewText.trim();
   }
 
+  if (liveTurnState.workflowActive) {
+    return 'Kalio is coordinating the workflow.';
+  }
+
   switch (liveTurnState.phase) {
     case 'thinking':
       return 'Kalio is thinking before the first visible answer.';

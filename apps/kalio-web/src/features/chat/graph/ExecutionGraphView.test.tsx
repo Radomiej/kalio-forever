@@ -24,6 +24,9 @@ type SessionStateShape = {
   setPendingMessage: ReturnType<typeof vi.fn>;
   addMessage: ReturnType<typeof vi.fn>;
   updateSession: ReturnType<typeof vi.fn>;
+  hydratedSessionIds: Record<string, boolean>;
+  markSessionHydrated: ReturnType<typeof vi.fn>;
+  isSessionHydrated: (sessionId: string) => boolean;
 };
 
 type AgentLoopShape = {
@@ -42,9 +45,12 @@ type AgentStateShape = {
   activeAgentLoops: Record<string, AgentLoopShape>;
   pendingConfirmations: Record<string, ToolConfirmationRequest>;
   isStreaming: boolean;
+  streamingSessionId: string | null;
   clearToolActivities: ReturnType<typeof vi.fn>;
   setPendingConfirmation: ReturnType<typeof vi.fn>;
   setStreaming: ReturnType<typeof vi.fn>;
+  getContextForSession: (sessionId: string | null) => { systemPrompt: string | null; activeToolNames: string[] };
+  hasActiveLoopForSession: (sessionId: string) => boolean;
 };
 
 const {
@@ -78,15 +84,24 @@ const {
     setPendingMessage: vi.fn(),
     addMessage: vi.fn(),
     updateSession: vi.fn(),
+    hydratedSessionIds: {} as Record<string, boolean>,
+    markSessionHydrated: vi.fn((sessionId: string) => {
+      sessionState.hydratedSessionIds[sessionId] = true;
+    }),
+    isSessionHydrated: (sessionId: string) => Boolean(sessionState.hydratedSessionIds[sessionId]),
   },
   agentState: {
     toolActivities: [] as ToolActivity[],
     activeAgentLoops: {} as Record<string, AgentLoopShape>,
     pendingConfirmations: {} as Record<string, ToolConfirmationRequest>,
     isStreaming: false,
+    streamingSessionId: null as string | null,
     clearToolActivities: vi.fn(),
     setPendingConfirmation: vi.fn(),
     setStreaming: vi.fn(),
+    getContextForSession: () => ({ systemPrompt: null, activeToolNames: [] }),
+    hasActiveLoopForSession: (sessionId: string) =>
+      Object.values(agentState.activeAgentLoops).some((loop) => loop.sessionId === sessionId),
   },
   apiGetMock: vi.fn(),
   getSessionVfsFilesMock: vi.fn().mockResolvedValue({ files: [] }),
@@ -100,13 +115,17 @@ const {
   sendMessageMock: vi.fn(),
 }));
 
-vi.mock('../../../store/sessionStore', () => ({
-  useSessionStore: (selector?: (state: SessionStateShape) => unknown) => selector ? selector(sessionState) : sessionState,
-}));
+vi.mock('../../../store/sessionStore', () => {
+  const useSessionStore = (selector?: (state: SessionStateShape) => unknown) => selector ? selector(sessionState) : sessionState;
+  useSessionStore.getState = () => sessionState;
+  return { useSessionStore };
+});
 
-vi.mock('../../../store/agentStore', () => ({
-  useAgentStore: (selector?: (state: AgentStateShape) => unknown) => selector ? selector(agentState) : agentState,
-}));
+vi.mock('../../../store/agentStore', () => {
+  const useAgentStore = (selector?: (state: AgentStateShape) => unknown) => selector ? selector(agentState) : agentState;
+  useAgentStore.getState = () => agentState;
+  return { useAgentStore };
+});
 
 vi.mock('../../../services/apiClient', () => ({
   apiClient: {
@@ -220,6 +239,8 @@ describe('ExecutionGraphView empty-session state', () => {
     sessionState.setPendingMessage.mockReset();
     sessionState.addMessage.mockReset();
     sessionState.updateSession.mockReset();
+    sessionState.hydratedSessionIds = {};
+    sessionState.markSessionHydrated.mockReset();
     apiGetMock.mockResolvedValue({ data: [makePersona(), makePersona({ id: 'persona-child', name: 'UX Designer', model: 'claude-sonnet-4.6' })] });
     apiPostMock.mockReset();
     apiPatchMock.mockReset();
@@ -273,6 +294,7 @@ describe('ExecutionGraphView empty-session state', () => {
     };
     agentState.pendingConfirmations = {};
     agentState.isStreaming = false;
+    agentState.streamingSessionId = null;
     agentState.clearToolActivities.mockReset();
     agentState.setPendingConfirmation.mockReset();
     agentState.setStreaming.mockReset();
@@ -411,7 +433,7 @@ describe('ExecutionGraphView empty-session state', () => {
       content: 'Start this graph session',
     }));
     expect(agentState.clearToolActivities).toHaveBeenCalledWith('session-1');
-    expect(agentState.setStreaming).toHaveBeenCalledWith(true);
+    expect(agentState.setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
     expect(sendMessageMock).toHaveBeenCalledWith({
       sessionId: 'session-1',
       content: 'Start this graph session',

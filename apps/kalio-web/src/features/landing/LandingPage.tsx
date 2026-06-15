@@ -6,7 +6,7 @@ import { HomeHitlInbox } from './HomeHitlInbox';
 import { useTileIcons } from './useTileIcons';
 import { useSessionStore } from '../../store/sessionStore';
 import { getRAApps, getRAAppGroups } from '../../services/apiClient';
-import { createAndActivateHostSession } from '../chat/launch/sessionLaunchShared';
+import { createAndActivateEmptyHostSession } from '../chat/activeConversationSession';
 import { bucketCatalogApps } from '../raapp/catalog.utils';
 
 interface TileItem {
@@ -89,13 +89,14 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
 
   const handleTileClick = useCallback(async (tile: TileItem) => {
     try {
-      const session = await createAndActivateHostSession({
+      const session = await createAndActivateEmptyHostSession({
         personaId: 'ra-apps',
         title: tile.name,
         addSession,
         setActiveSession,
         setMessages,
         setAgentTurns,
+        reason: 'landing',
       });
       console.debug('[Landing] RA-App tile session created', session.id, tile.id);
       const prompt = `Run the "${tile.name}" RA-App for me.${

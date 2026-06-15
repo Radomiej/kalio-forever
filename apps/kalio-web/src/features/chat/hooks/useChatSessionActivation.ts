@@ -3,11 +3,14 @@ import type { MutableRefObject } from 'react';
 import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
-import { apiClient } from '../../../services/apiClient';
 import { eventBus } from '../../../services/eventBus';
 import { buildCallIdToNameFromMessages, buildTurnsFromHistory } from '../chatUtils';
 import { rebuildCLIChildProjectionsFromMessages } from '../cliChildProjection.model';
-import { hydrateSessionHistoryIntoStore } from '../historyHydration';
+import { hydrateActiveConversationSession } from '../activeConversationSession';
+import {
+  materializeLiveTurnFromSessionStatusSnapshot,
+  selectReplayableSessionStatusSnapshot,
+} from './useChatSocketEvents.helpers';
 
 interface UseChatSessionActivationParams {
   activeSessionId: string | null;
@@ -35,7 +38,8 @@ export function useChatSessionActivation({
     setPendingConfirmation(activeSessionId, null);
     console.debug('[ChatInterface] session activated', activeSessionId);
 
-    void hydrateSessionHistoryIntoStore({
+    void hydrateActiveConversationSession({
+      mode: 'select',
       sessionId: activeSessionId,
       getActiveSessionId: () => useSessionStore.getState().activeSessionId,
       getSessions: () => useSessionStore.getState().sessions,
@@ -45,10 +49,6 @@ export function useChatSessionActivation({
       getSessionAgentTurns: (sessionId) => useSessionStore.getState().getSessionAgentTurns(sessionId),
       getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
       hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
-      fetchMessages: async (sessionId) => {
-        const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
-        return response.data;
-      },
     })
       .then((hydratedMessages) => {
         if (!hydratedMessages) return;
@@ -99,6 +99,19 @@ export function useChatSessionActivation({
             activeSessionId,
           );
         }
+        const agentState = useAgentStore.getState();
+        materializeLiveTurnFromSessionStatusSnapshot(
+          selectReplayableSessionStatusSnapshot(
+            agentState.consumeBufferedSessionStatusSnapshots(activeSessionId),
+            agentState.sessionStatusSnapshots[activeSessionId],
+          ),
+          {
+            hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
+            getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
+            addActiveAgentLoop: (sessionId, turnId) => useAgentStore.getState().addActiveAgentLoop(sessionId, turnId),
+            startAgentTurn: (turnId, sessionId) => useSessionStore.getState().startAgentTurn(turnId, sessionId),
+          },
+        );
       })
       .catch((err: unknown) => {
         console.error('[ChatInterface] failed to load message history', err instanceof Error ? err : new Error(String(err)));

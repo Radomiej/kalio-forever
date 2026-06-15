@@ -120,7 +120,7 @@ export function isVisibleSidebarSession(
   session: ChatSession,
   activeSessionId: string | null,
   filter: SessionOriginFilter,
-  sessionById?: Map<string, ChatSession>,
+  allSessionById?: Map<string, ChatSession>,
 ): boolean {
   if (isArchitectureWorkflowContainerSession(session)) {
     return false;
@@ -128,16 +128,19 @@ export function isVisibleSidebarSession(
   if (!matchesOriginFilter(session, filter)) return false;
   if (filter === 'archived') return isAgentStartedSession(session);
   if (filter === 'agent') return session.id === activeSessionId || Date.now() - session.updatedAt <= ACTIVE_AGENT_WINDOW_MS;
-  return !hasLoadedParent(session, sessionById) || session.id === activeSessionId;
+  return !hasLoadedParent(session, allSessionById) || session.id === activeSessionId;
 }
 
 export function buildSessionListEntries(
   orderedSessions: ChatSession[],
   activeSessionId: string | null,
   filter: SessionOriginFilter,
+  allSessionByIdOverride?: Map<string, ChatSession>,
 ): SessionListEntry[] {
-  const sessionById = new Map(orderedSessions.map((session) => [session.id, session]));
-  const visibleSessions = orderedSessions.filter((session) => isVisibleSidebarSession(session, activeSessionId, filter, sessionById));
+  const sessionById = allSessionByIdOverride ?? new Map(orderedSessions.map((session) => [session.id, session]));
+  const visibleSessions = orderedSessions.filter((session) => (
+    isVisibleSidebarSession(session, activeSessionId, filter, sessionById)
+  ));
   const treeVisibleSessions = filter === 'agent'
     ? visibleSessions.filter((session) => !isArchitectureEnvelopeSession(session))
     : visibleSessions;
