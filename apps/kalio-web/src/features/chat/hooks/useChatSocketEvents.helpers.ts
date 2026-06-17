@@ -2,6 +2,11 @@ import type { RefObject } from 'react';
 import type { ChatMessage, SocketEvents } from '@kalio/types';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
 
+export interface ReconnectUiState {
+  hasConnectedOnce: boolean;
+  hadRealDisconnect: boolean;
+}
+
 type ToolArgProgress = { toolName: string; totalChars: number; charsPerSec: number };
 
 interface ToolArgProgressHandlersOptions {
@@ -150,22 +155,47 @@ export function handleConnectionStateEvent(
   state: { status: ChatConnectionState; recovered?: boolean },
   deps: {
     getConnectionState: () => ChatConnectionState;
+    getReconnectUiState: () => ReconnectUiState;
+    setReconnectUiState: (value: ReconnectUiState) => void;
     setConnectionState: (value: ChatConnectionState) => void;
     setRecoveryNotice: (value: string) => void;
   },
 ): void {
   const previousState = deps.getConnectionState();
+  const reconnectUiState = deps.getReconnectUiState();
+  let nextReconnectUiState = reconnectUiState;
+
   deps.setConnectionState(state.status);
+
   if (state.status === 'connected') {
     if (
       state.recovered
+      && reconnectUiState.hasConnectedOnce
+      && reconnectUiState.hadRealDisconnect
       && (previousState === 'reconnecting' || previousState === 'disconnected')
     ) {
       deps.setRecoveryNotice('Recovered missed stream events after reconnect.');
     }
+    nextReconnectUiState = {
+      hasConnectedOnce: true,
+      hadRealDisconnect: false,
+    };
+    deps.setReconnectUiState(nextReconnectUiState);
     return;
   }
-  if (state.status === 'reconnecting') {
+
+  if (
+    (state.status === 'reconnecting' || state.status === 'disconnected')
+    && reconnectUiState.hasConnectedOnce
+  ) {
+    nextReconnectUiState = {
+      hasConnectedOnce: true,
+      hadRealDisconnect: true,
+    };
+    deps.setReconnectUiState(nextReconnectUiState);
+  }
+
+  if (state.status === 'reconnecting' && reconnectUiState.hasConnectedOnce) {
     deps.setRecoveryNotice('Connection dropped. Reconnecting and preserving this session.');
   }
 }

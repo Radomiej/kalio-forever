@@ -32,6 +32,7 @@ import {
 } from './ChatInterface.Parts';
 import { resolveConversationShellState } from './conversationShellState';
 import { resolveLiveTurnState } from './liveTurnState';
+import { resolveRenderableConversationProjection } from './conversationTranscriptProjection';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
@@ -147,8 +148,16 @@ export function ChatInterface() {
     setSelectedPersonaId,
   } = useLaunchPersonas(activeSession?.personaId);
 
-  const answeredCallIds = computeAnsweredCallIds(messages);
-  const conversationTimeline = buildConversationTimeline(messages, agentTurns);
+  const renderableConversationProjection = resolveRenderableConversationProjection({
+    session: activeSession,
+    messages,
+    agentTurns,
+  });
+  const answeredCallIds = computeAnsweredCallIds(renderableConversationProjection.messages);
+  const conversationTimeline = buildConversationTimeline(
+    renderableConversationProjection.messages,
+    renderableConversationProjection.agentTurns,
+  );
   const liveTurnState = resolveLiveTurnState({
     sessionId: activeSessionId,
     sessionMessages: messages,
@@ -468,6 +477,7 @@ export function ChatInterface() {
                   turn={entry.turn}
                   toolActivities={activeToolActivities}
                   answeredCallIds={answeredCallIds}
+                  renderedMessages={renderableConversationProjection.messages}
                 />
               )
           ))}

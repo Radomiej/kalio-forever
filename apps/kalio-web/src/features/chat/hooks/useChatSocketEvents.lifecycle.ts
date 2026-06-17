@@ -6,7 +6,7 @@ import { apiClient } from '../../../services/apiClient';
 import { backendHealth } from '../../../services/backendHealth';
 import { eventBus } from '../../../services/eventBus';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
-import { handleSessionStatusEvent, handleConnectionStateEvent } from './useChatSocketEvents.helpers';
+import { handleSessionStatusEvent, handleConnectionStateEvent, type ReconnectUiState } from './useChatSocketEvents.helpers';
 import { handleCliChildSessionCreated } from './useChatSocketEvents.cliChild';
 import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
 
@@ -78,6 +78,8 @@ export function registerSessionLifecycleHandlers({
 export function registerConnectionRecoveryHandlers({
   cliChildDeps,
   getConnectionState,
+  getReconnectUiState,
+  setReconnectUiStateRef,
   setConnectionStateRef,
   setConnectionState,
   setRecoveryNotice,
@@ -95,6 +97,8 @@ export function registerConnectionRecoveryHandlers({
 }: {
   cliChildDeps: CliChildDeps;
   getConnectionState: () => ChatConnectionState;
+  getReconnectUiState: () => ReconnectUiState;
+  setReconnectUiStateRef: (value: ReconnectUiState) => void;
   setConnectionStateRef: (value: ChatConnectionState) => void;
   setConnectionState: (value: ChatConnectionState) => void;
   setRecoveryNotice: (value: string | null) => void;
@@ -113,6 +117,8 @@ export function registerConnectionRecoveryHandlers({
   const offConnectionState = eventBus.onConnectionState((state) => {
     handleConnectionStateEvent(state, {
       getConnectionState,
+      getReconnectUiState,
+      setReconnectUiState: setReconnectUiStateRef,
       setConnectionState: (value) => {
         setConnectionStateRef(value);
         setConnectionState(value);
