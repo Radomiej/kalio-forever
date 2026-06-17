@@ -10,6 +10,7 @@ import {
   canReleaseComposerAfterToolResult,
   createToolArgProgressHandlers,
   mergeRaAppNativeResultIntoMessages,
+  type ReconnectUiState,
 } from './useChatSocketEvents.helpers';
 import {
   handleCliChildProgress,
@@ -43,6 +44,10 @@ export function useChatSocketEvents({
   onContextInvalidated,
 }: UseChatSocketEventsOptions): void {
   const connectionStateRef = useRef<ChatConnectionState>(eventBus.connected ? 'connected' : 'connecting');
+  const reconnectUiStateRef = useRef<ReconnectUiState>({
+    hasConnectedOnce: eventBus.connected,
+    hadRealDisconnect: false,
+  });
   const {
     setSessions,
     setActiveSession,
@@ -421,6 +426,10 @@ export function useChatSocketEvents({
     const offConnectionRecovery = registerConnectionRecoveryHandlers({
       cliChildDeps,
       getConnectionState: () => connectionStateRef.current,
+      getReconnectUiState: () => reconnectUiStateRef.current,
+      setReconnectUiStateRef: (value) => {
+        reconnectUiStateRef.current = value;
+      },
       setConnectionStateRef: (value) => {
         connectionStateRef.current = value;
       },

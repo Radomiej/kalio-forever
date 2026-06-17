@@ -14,11 +14,13 @@ import { isMessageLiveStreaming } from './agentTurnStreaming';
 import { eventBus } from '../../services/eventBus';
 import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
 import { resolveWorkflowTurnProjection } from './workflowTurnProjection';
+import type { ChatMessage } from '@kalio/types';
 
 interface Props {
   turn: AgentTurn;
   toolActivities: ToolActivity[];
   answeredCallIds?: Set<string>;
+  renderedMessages?: ChatMessage[];
 }
 
 // ─── ThinkingBlock ────────────────────────────────────────────────────────────
@@ -58,8 +60,9 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
 
 // ─── AgentTurnBubble ──────────────────────────────────────────────────────────
 
-export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props) {
+export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, renderedMessages }: Props) {
   const { messages, sessions, sessionMessages, streamingChunks, thinkingChunks } = useSessionStore();
+  const turnMessages = renderedMessages ?? messages;
   const [submittedBudgetRequestId, setSubmittedBudgetRequestId] = useState<string | null>(null);
   const {
     callIdToName: persistentCallIdToName,
@@ -83,7 +86,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
 
   // Build callId → toolName from all available sources
   const toolCallIdToName = new Map<string, string>(Object.entries(persistentCallIdToName));
-  for (const msg of messages) {
+  for (const msg of turnMessages) {
     if (msg.role === 'assistant' && msg.toolCalls) {
       for (const tc of msg.toolCalls) toolCallIdToName.set(tc.id, tc.name);
     }
@@ -92,7 +95,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
 
   // Build callId → args from assistant messages (for HistoryToolCallBubble)
   const toolArgsByCallId = new Map<string, Record<string, unknown>>();
-  for (const msg of messages) {
+  for (const msg of turnMessages) {
     if (msg.role === 'assistant' && msg.toolCalls) {
       for (const tc of msg.toolCalls) toolArgsByCallId.set(tc.id, tc.args);
     }
@@ -102,7 +105,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
 
   // Build tool result lookup by callId
   const toolResultByCallId = new Map<string, { content: string; status: 'success' | 'error' | 'cancelled'; parsed: unknown }>();
-  for (const msg of messages) {
+  for (const msg of turnMessages) {
     if (msg.role === 'tool_result' && msg.toolCallId) {
       const parsed = (() => {
         try {
@@ -119,11 +122,11 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
     }
   }
 
-  const workflowTurnProjection = resolveWorkflowTurnProjection(turn, messages, toolArgsByCallId);
+  const workflowTurnProjection = resolveWorkflowTurnProjection(turn, turnMessages, toolArgsByCallId);
   const architectureRun = workflowTurnProjection.architectureRun;
   const turnArchitectureRun = architectureRun && turn.items.some((item) => {
     if (item.kind === 'text') {
-      return messages.some((message) => message.id === item.messageId && (message.architectureRun || /^###\s+(Router|Finalizer)\b/im.test(message.content)));
+      return turnMessages.some((message) => message.id === item.messageId && (message.architectureRun || /^###\s+(Router|Finalizer)\b/im.test(message.content)));
     }
     if (item.kind === 'tool') {
       return toolCallIdToName.get(item.callId) === 'run_subagent';
@@ -137,7 +140,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
   const architectureFinalAnswer = turnArchitectureRun
     ? finalAnswerForArchitectureRun(turnArchitectureRun)
     : null;
-  const visibleItems = deriveVisibleTurnItems(turn.items, messages, streamingChunks, turn.done);
+  const visibleItems = deriveVisibleTurnItems(turn.items, turnMessages, streamingChunks, turn.done);
   const turnBranchSessionIds = workflowTurnProjection.branchSessionIds;
   const knownBranchSessionIds = useMemo(() => {
     const activeLoopSessionIds = new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId));
@@ -291,7 +294,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
 
             if (item.kind === 'thinking') {
               const messageId = item.messageId;
-              const msg = messages.find((m) => m.id === messageId);
+              const msg = turnMessages.find((m) => m.id === messageId);
               // Prefer live chunk (streaming); fall back to persisted msg.thinking for history
               const thinkingContent = thinkingChunks[messageId] ?? msg?.thinking ?? '';
               if (!thinkingContent) return null;
@@ -301,7 +304,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds }: Props
 
             // text item
             const messageId = item.messageId;
-            const msg = messages.find((m) => m.id === messageId);
+            const msg = turnMessages.find((m) => m.id === messageId);
             if (!msg) return null;
             if (turnArchitectureRun && isArchitectureTextOutput(msg.content, msg.architectureRun != null)) {
               return null;

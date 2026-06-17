@@ -3,7 +3,7 @@ import type { ArchitectureChatRunSummary } from '@kalio/types';
 type TraceSpeaker = ArchitectureChatRunSummary['trace'][number]['speaker'];
 
 export function compactArchitectureTraceContent(content: string, speaker: TraceSpeaker): string {
-  const cleaned = stripRuntimeScaffold(content);
+  const cleaned = stripArchitectureRuntimeScaffold(content);
   if (cleaned) {
     return cleaned;
   }
@@ -16,7 +16,7 @@ export function compactArchitectureTraceContent(content: string, speaker: TraceS
   return 'Branch completed its role-specific response.';
 }
 
-function stripRuntimeScaffold(content: string): string {
+export function stripArchitectureRuntimeScaffold(content: string): string {
   const normalized = content
     .replace(/^\[MockLLM\]\s*Echo:\s*/i, '')
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, ' ')

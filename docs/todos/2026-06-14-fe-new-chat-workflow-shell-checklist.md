@@ -53,6 +53,10 @@ Domknac frontend do jednego, prostego modelu:
 - 2026-06-15: Broad FE gate passed after the placeholder cleanup: `vitest run src/features/chat src/features/sessions` => `63` files / `685` tests green.
 - 2026-06-15: Targeted random-port E2E smoke passed on a fresh Playwright stack: `ac-14-session-creation.spec.ts`, `ac-01-streaming.spec.ts`, and `architecture-follow-up-stability.spec.ts` all green, covering `New`, live single-chat streaming, and workflow follow-up/reload stability.
 - 2026-06-15: In-app Browser bootstrap failed in this workstation session because the local browser runtime sandbox could not spawn (`CreateProcessAsUserW failed: 5`), so final QA fell back to isolated Playwright stack + real E2E instead of the Browser plugin.
+- 2026-06-15: Reconnect notice semantics are now gated by one FE lifecycle helper instead of `ChatInterface` local heuristics. `Recovered missed stream events after reconnect.` only appears after a real `connected -> reconnecting/disconnected -> connected(recovered)` transition, and startup/HMR reconnect noise no longer qualifies.
+- 2026-06-15: Branch conversation transcript now goes through an explicit `conversation-branch` projection. Raw architecture scaffold (`Architecture:`, `Slot:`, `Task:`, `Incoming graph outputs:`) is stripped or hidden before render, while timeline/canvas still keep the full runtime projection.
+- 2026-06-15: Fresh focused FE gate passed for the reconnect+branch-transcript cleanup: `useChatSocketEvents.helpers.test.ts`, `conversationTranscriptProjection.test.ts`, `ChatInterface.test.tsx`, `useChatSocketEvents.reconnect.test.ts`, plus `tsc --noEmit`.
+- 2026-06-15: Manual smoke on the isolated QA stack confirmed no false reconnect banner on fresh open. Manual smoke on user dev `5188` still showed stale reconnect/branch behavior, which strongly suggests that local hot-reload stack was not on the latest frontend bundle rather than the current repo code regressing again.
 
 ## Status Table
 

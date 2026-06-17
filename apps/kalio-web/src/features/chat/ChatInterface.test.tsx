@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { buildArchitectureRunContext, ChatInterface } from './ChatInterface';
 import { computeAnsweredCallIds } from './chatUtils';
-import type { ChatMessage, VFSFile } from '@kalio/types';
+import type { ChatMessage, ChatSession, VFSFile } from '@kalio/types';
 import { apiClient } from '../../services/apiClient';
 
 // jsdom does not implement scrollIntoView
@@ -201,14 +201,14 @@ const addTurnItem = vi.fn();
 const clearAgentTurns = vi.fn();
 const clearPendingChunks = vi.fn();
 const flushStreamingChunks = vi.fn();
-const getSessionMessages = vi.fn(() => [] as ChatMessage[]);
+const getSessionMessages = vi.fn((_sessionId: string | null) => [] as ChatMessage[]);
 const updateSession = vi.fn((sessionId: string, patch: { title?: string; personaId?: string }) => {
   mockSessions = mockSessions.map((session) =>
     session.id === sessionId ? { ...session, ...patch } : session,
   );
 });
 
-function createMockSessions() {
+function createMockSessions(): ChatSession[] {
   return [
     { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
     { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
@@ -996,6 +996,54 @@ describe('ChatInterface event wiring', () => {
     expect(screen.getByTestId('chat-recovery-notice')).toHaveTextContent(
       'Recovered missed stream events after reconnect.',
     );
+  });
+
+  it('shows pending child session shell instead of raw workflow scaffold transcript', async () => {
+    mockActiveSessionId = 'branch-1';
+    mockSessions = [
+      ...createMockSessions(),
+      {
+        id: 'branch-1',
+        title: 'Strategic Decision Council: Analyst',
+        personaId: 'default',
+        parentSessionId: 'host-1',
+        createdAt: 1,
+        updatedAt: 1,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureContext: {
+            hostSessionId: 'host-1',
+            historySessionId: 'host-1',
+            sessionSurface: 'conversation-branch',
+          },
+        },
+      },
+    ];
+    mockMessages = [
+      {
+        id: 'branch-user-1',
+        sessionId: 'branch-1',
+        role: 'user',
+        content: 'Architecture: Strategic Decision Council v0.1.0\nSlot: Analyst (participant)\nTask: Assess repo.',
+        createdAt: 1,
+      },
+      {
+        id: 'branch-assistant-1',
+        sessionId: 'branch-1',
+        role: 'assistant',
+        content: '[MockLLM] Echo: Architecture: Strategic Decision Council v0.1.0\nSlot: Analyst (participant)\nTask: Assess repo.',
+        createdAt: 2,
+      },
+    ];
+    getSessionMessages.mockImplementation((sessionId: string | null) =>
+      sessionId === 'branch-1' ? mockMessages : [],
+    );
+
+    await renderChatInterface();
+
+    expect(screen.getByTestId('pending-child-session-screen')).toBeTruthy();
+    expect(screen.queryByText('Architecture: Strategic Decision Council v0.1.0')).toBeNull();
+    expect(screen.queryByText('Slot: Analyst (participant)')).toBeNull();
   });
 
   it('REGRESSION: tool:start creates a running activity in agentStore', async () => {
