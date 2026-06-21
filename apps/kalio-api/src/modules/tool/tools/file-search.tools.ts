@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import {
   readdirSync, readFileSync, statSync, existsSync, type Dirent,
 } from 'node:fs';
-import { join, relative } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { SessionRuntimeContext } from '@kalio/types';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
@@ -36,12 +36,58 @@ function walkDir(dir: string, maxDepth: number, depth = 0): string[] {
   return results;
 }
 
+function walkPath(targetPath: string, maxDepth: number): string[] {
+  try {
+    readdirSync(targetPath, { withFileTypes: true });
+    return walkDir(targetPath, maxDepth);
+  } catch {
+    try {
+      const stat = statSync(targetPath);
+      if (stat.isFile()) {
+        return [targetPath];
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function optionalStringArg(args: ToolCallRequest['args'], key: 'path' | 'workdir'): string | null {
+  const value = args[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function resolveExplicitScopePath(
+  rawPath: string,
+  sessionScopedRoot: string | null,
+): string | null {
+  if (isAbsolute(rawPath)) {
+    return resolve(rawPath);
+  }
+  if (!sessionScopedRoot) {
+    return null;
+  }
+  return resolve(sessionScopedRoot, rawPath);
+}
+
 async function resolveScopedRoots(
   request: ToolCallRequest,
   allowedPaths: AllowedPathsService,
   drizzle: DrizzleService,
 ): Promise<string[]> {
   const scopedRoot = await resolveSessionScopedRoot(request.sessionId, drizzle);
+  const explicitScope = optionalStringArg(request.args, 'path') ?? optionalStringArg(request.args, 'workdir');
+  if (explicitScope) {
+    const resolvedExplicitScope = resolveExplicitScopePath(explicitScope, scopedRoot);
+    if (!resolvedExplicitScope) {
+      throw new Error('INVALID_SEARCH_SCOPE: relative path/workdir requires a session-scoped project root.');
+    }
+    if (!await allowedPaths.isAllowed(resolvedExplicitScope)) {
+      throw new Error(`ACCESS_DENIED: search scope is outside allowed roots: ${resolvedExplicitScope}`);
+    }
+    return [resolvedExplicitScope];
+  }
   if (scopedRoot && await allowedPaths.isAllowed(scopedRoot)) {
     return [scopedRoot];
   }
@@ -84,6 +130,8 @@ function normalizeLaunchScopePath(runtimeContext: SessionRuntimeContext | null |
       query: { type: 'string', description: 'Text or regex pattern to search for.' },
       isRegexp: { type: 'boolean', description: 'If true, treat query as a regex. Default: false.' },
       includePattern: { type: 'string', description: 'Glob pattern to filter files (e.g. "**/*.ts"). Default: all files.' },
+      path: { type: 'string', description: 'Optional explicit absolute path or session-scoped relative path to narrow the search.' },
+      workdir: { type: 'string', description: 'Optional explicit absolute workdir or session-scoped relative path to narrow the search.' },
       maxResults: { type: 'integer', description: 'Maximum number of results to return. Default: 50.' },
     },
   },
@@ -119,12 +167,12 @@ export class GrepSearchTool {
 
     for (const root of roots) {
       if (!existsSync(root)) continue;
-      const allFiles = walkDir(root, 10);
+      const allFiles = walkPath(root, 10);
 
       for (const absPath of allFiles) {
         if (matches.length >= maxResults) break;
         if (!(await this.allowedPaths.isAllowed(absPath))) continue;
-        const relPath = relative(root, absPath);
+        const relPath = relative(root, absPath) || absPath.split(/[\\/]/).at(-1) || absPath;
         if (globRe && !globRe.test(relPath) && !globRe.test(absPath)) continue;
 
         let content: string;
@@ -158,6 +206,8 @@ export class GrepSearchTool {
     required: ['pattern'],
     properties: {
       pattern: { type: 'string', description: 'Glob pattern to match (e.g. "**/*.ts", "src/**/*.json").' },
+      path: { type: 'string', description: 'Optional explicit absolute path or session-scoped relative path to narrow the search.' },
+      workdir: { type: 'string', description: 'Optional explicit absolute workdir or session-scoped relative path to narrow the search.' },
       maxResults: { type: 'integer', description: 'Maximum number of results. Default: 100.' },
     },
   },
@@ -183,12 +233,12 @@ export class FileSearchTool {
 
     for (const root of roots) {
       if (!existsSync(root)) continue;
-      const allFiles = walkDir(root, 10);
+      const allFiles = walkPath(root, 10);
 
       for (const absPath of allFiles) {
         if (matched.length >= maxResults) break;
         if (!(await this.allowedPaths.isAllowed(absPath))) continue;
-        const relPath = relative(root, absPath);
+        const relPath = relative(root, absPath) || absPath.split(/[\\/]/).at(-1) || absPath;
         if (globRe.test(relPath) || globRe.test(absPath)) {
           matched.push(absPath);
         }

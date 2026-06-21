@@ -2,23 +2,31 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ChatSession } from '@kalio/types';
 
-const { addSession, setActiveSession, setMessages, setAgentTurns, setPendingMessage, apiPost } = vi.hoisted(() => ({
+const { addSession, setActiveSession, setMessages, setAgentTurns, setPendingMessage, markSessionHydrated, apiPost } = vi.hoisted(() => ({
   addSession: vi.fn(),
   setActiveSession: vi.fn(),
   setMessages: vi.fn(),
   setAgentTurns: vi.fn(),
   setPendingMessage: vi.fn(),
+  markSessionHydrated: vi.fn(),
   apiPost: vi.fn(),
 }));
 
 vi.mock('../../store/sessionStore', () => ({
-  useSessionStore: (selector: (state: {
-    addSession: typeof addSession;
-    setActiveSession: typeof setActiveSession;
-    setMessages: typeof setMessages;
-    setAgentTurns: typeof setAgentTurns;
-    setPendingMessage: typeof setPendingMessage;
-  }) => unknown) => selector({ addSession, setActiveSession, setMessages, setAgentTurns, setPendingMessage }),
+  useSessionStore: Object.assign(
+    (selector: (state: {
+      addSession: typeof addSession;
+      setActiveSession: typeof setActiveSession;
+      setMessages: typeof setMessages;
+      setAgentTurns: typeof setAgentTurns;
+      setPendingMessage: typeof setPendingMessage;
+    }) => unknown) => selector({ addSession, setActiveSession, setMessages, setAgentTurns, setPendingMessage }),
+    {
+      getState: () => ({
+        markSessionHydrated,
+      }),
+    },
+  ),
 }));
 
 vi.mock('../../services/apiClient', () => ({
@@ -73,6 +81,7 @@ describe('QuickChatWidget', () => {
     });
 
     expect(addSession).toHaveBeenCalledWith(makeSession());
+    expect(markSessionHydrated).toHaveBeenCalledWith('session-1');
     expect(setPendingMessage).toHaveBeenCalledWith('hello Kalio');
     expect(setActiveSession).toHaveBeenCalledWith('session-1');
     expect(onMessageSent).toHaveBeenCalledTimes(1);

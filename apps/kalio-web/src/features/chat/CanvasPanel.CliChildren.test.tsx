@@ -55,4 +55,39 @@ describe('buildCliChildPreviews', () => {
 
     expect(previews).toEqual([]);
   });
+
+  it('prefers runtime child execution status over stale stored canvas projection state', () => {
+    const previews = buildCliChildPreviews(
+      'session-1',
+      {
+        'cli-child-a': {
+          ...projections['cli-child-a'],
+          status: 'stopped',
+          lastOutput: 'stored output',
+          toolName: 'spawn_cli_agent',
+        },
+      },
+      [{
+        id: 'child-exec-a',
+        kind: 'cli_agent',
+        parentSessionId: 'session-1',
+        childSessionId: 'cli-child-a',
+        parentToolCallId: 'call-a',
+        label: 'copilot',
+        status: 'running',
+        lastOutput: 'runtime output',
+        updatedAt: 1,
+      }],
+      new Map([['cli-child-a', 'copilot CLI']]),
+    );
+
+    expect(previews).toHaveLength(1);
+    expect(previews[0]).toMatchObject({
+      childSessionId: 'cli-child-a',
+      status: 'running',
+      lastOutput: 'runtime output',
+      toolName: 'spawn_cli_agent',
+      childTitle: 'copilot CLI',
+    });
+  });
 });

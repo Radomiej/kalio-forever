@@ -6,8 +6,8 @@
  * - awaiting_confirmation with no matching store entry renders only the icon (other session)
  * - args collapsed by default, shows truncated preview
  * - expand toggle reveals full scrollable args list
- * - Confirm button calls eventBus.confirmTool + setPendingConfirmation(sessionId, null)
- * - Cancel button calls eventBus.cancelTool + setPendingConfirmation(sessionId, null)
+ * - Confirm button calls eventBus.confirmTool + removePendingConfirmation(sessionId, requestId)
+ * - Cancel button calls eventBus.cancelTool + removePendingConfirmation(sessionId, requestId)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
@@ -18,10 +18,11 @@ import type { ToolConfirmationRequest } from '@kalio/types';
 // ── mocks ─────────────────────────────────────────────────────────────────────
 
 const mockSetPendingConfirmation = vi.fn();
+const mockRemovePendingConfirmation = vi.fn();
 const mockUpdateToolActivity = vi.fn();
 const mockSetCanvasOpen = vi.fn();
 const mockSetCanvasFocus = vi.fn();
-let mockPendingConfirmations: Record<string, ToolConfirmationRequest> = {};
+let mockPendingConfirmations: Record<string, ToolConfirmationRequest | ToolConfirmationRequest[]> = {};
 let mockActiveSessionId = 'session-1';
 let mockToolActivities: ToolActivity[] = [];
 let mockToolArgProgress: { toolName: string; totalChars: number; charsPerSec: number } | null = null;
@@ -37,6 +38,7 @@ vi.mock('../../store/agentStore', () => ({
       toolActivities: mockToolActivities,
       toolArgProgress: mockToolArgProgress,
       setPendingConfirmation: mockSetPendingConfirmation,
+      removePendingConfirmation: mockRemovePendingConfirmation,
       updateToolActivity: mockUpdateToolActivity,
       setCanvasOpen: mockSetCanvasOpen,
       setCanvasFocus: mockSetCanvasFocus,
@@ -108,6 +110,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockSetCanvasOpen.mockClear();
   mockSetCanvasFocus.mockClear();
+  mockRemovePendingConfirmation.mockClear();
   mockApiGet.mockResolvedValue({ data: [] });
 });
 
@@ -123,7 +126,7 @@ async function renderAndFlush(ui: React.ReactElement): Promise<void> {
 
 describe('LiveToolCallBubble — awaiting_confirmation', () => {
   it('renders Confirm and Cancel buttons when confirmation matches active session', () => {
-    mockPendingConfirmations = { 'session-1': makeConfirmation() };
+    mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
 
     render(<LiveToolCallBubble activity={makeActivity()} />);
 
@@ -132,7 +135,7 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
   });
 
   it('renders AlertTriangle icon with awaiting confirmation badge', () => {
-    mockPendingConfirmations = { 'session-1': makeConfirmation() };
+    mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
 
     render(<LiveToolCallBubble activity={makeActivity()} />);
 
@@ -149,7 +152,7 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
   });
 
   it('does NOT render action buttons when confirmation is for a different callId', () => {
-    mockPendingConfirmations = { 'session-1': makeConfirmation('session-1', 'call-OTHER') };
+    mockPendingConfirmations = { 'session-1': [makeConfirmation('session-1', 'call-OTHER')] };
 
     render(<LiveToolCallBubble activity={makeActivity({ callId: 'call-1' })} />);
 
@@ -157,7 +160,7 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
   });
 
   it('args are collapsed by default — shows truncated preview, not full list', () => {
-    mockPendingConfirmations = { 'session-1': makeConfirmation() };
+    mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
 
     render(<LiveToolCallBubble activity={makeActivity()} />);
 
@@ -166,7 +169,7 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
   });
 
   it('clicking expand toggle shows scrollable args container', () => {
-    mockPendingConfirmations = { 'session-1': makeConfirmation() };
+    mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
 
     render(<LiveToolCallBubble activity={makeActivity()} />);
 
@@ -178,32 +181,32 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
   });
 
   it('Confirm button calls eventBus.confirmTool and clears confirmation from store', () => {
-    mockPendingConfirmations = { 'session-1': makeConfirmation() };
+    mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
 
     render(<LiveToolCallBubble activity={makeActivity()} />);
 
     act(() => { fireEvent.click(screen.getByTestId('confirmation-confirm-btn')); });
 
     expect(mockConfirmTool).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
-    expect(mockSetPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+    expect(mockRemovePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-1');
     expect(mockUpdateToolActivity).toHaveBeenCalledWith('call-1', expect.objectContaining({ status: 'running' }));
   });
 
   it('Cancel button calls eventBus.cancelTool and clears confirmation from store', () => {
-    mockPendingConfirmations = { 'session-1': makeConfirmation() };
+    mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
 
     render(<LiveToolCallBubble activity={makeActivity()} />);
 
     act(() => { fireEvent.click(screen.getByTestId('confirmation-cancel-btn')); });
 
     expect(mockCancelTool).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
-    expect(mockSetPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+    expect(mockRemovePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-1');
     expect(mockUpdateToolActivity).toHaveBeenCalledWith('call-1', expect.objectContaining({ status: 'cancelled' }));
   });
 
   it('REGRESSION: child-session confirmation can be approved from the master view when callId matches', () => {
     mockActiveSessionId = 'master-session';
-    mockPendingConfirmations = { 'child-session': makeConfirmation('child-session', 'call-1') };
+    mockPendingConfirmations = { 'child-session': [makeConfirmation('child-session', 'call-1')] };
 
     render(
       <LiveToolCallBubble
@@ -225,11 +228,11 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
     act(() => { fireEvent.click(screen.getByTestId('confirmation-confirm-btn')); });
 
     expect(mockConfirmTool).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'child-session' });
-    expect(mockSetPendingConfirmation).toHaveBeenCalledWith('child-session', null);
+    expect(mockRemovePendingConfirmation).toHaveBeenCalledWith('child-session', 'req-1');
   });
 
   it('activity with no args renders no preview and no toggle', () => {
-    mockPendingConfirmations = { 'session-1': makeConfirmation() };
+    mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
 
     render(<LiveToolCallBubble activity={makeActivity({ args: {} })} />);
 
@@ -238,7 +241,7 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
   });
 
   it('REGRESSION: awaiting confirmation keeps showing synthetic Preparing progress when no arg chunks were streamed', () => {
-    mockPendingConfirmations = { 'session-1': makeConfirmation() };
+    mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
     mockToolArgProgress = { toolName: 'vfs_write', totalChars: 0, charsPerSec: 0 };
 
     render(<LiveToolCallBubble activity={makeActivity()} />);
@@ -316,7 +319,7 @@ describe('HistoryToolCallBubble — run_sub_agentflow', () => {
 describe('LiveToolCallBubble — run_subagent', () => {
   it('REGRESSION: renders child pending approvals inside the master subagent bubble', () => {
     mockActiveSessionId = 'master-session';
-    mockPendingConfirmations = { 'child-session': makeConfirmation('child-session', 'child-call-1') };
+    mockPendingConfirmations = { 'child-session': [makeConfirmation('child-session', 'child-call-1')] };
     mockToolActivities = [
       makeActivity({
         callId: 'parent-call-1',

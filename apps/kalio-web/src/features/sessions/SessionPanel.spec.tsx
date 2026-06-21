@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { SessionPanel } from './SessionPanel';
-import type { AgentBudgetApprovalRequest, ToolConfirmationRequest } from '@kalio/types';
+import type { AgentBudgetApprovalRequest, RuntimeActivitySnapshot, ToolConfirmationRequest } from '@kalio/types';
 
 // ── mocks ─────────────────────────────────────────────────────────────────────
 
@@ -18,6 +18,7 @@ let mockPendingBudgetApprovals: Record<string, AgentBudgetApprovalRequest> = {};
 let mockActiveAgentLoops: Record<string, { sessionId: string; turnId: string; startedAt: number }> = {};
 let mockQueuedDepthBySession: Record<string, number> = {};
 let mockSessionStatusSnapshots: Record<string, unknown> = {};
+let mockRuntimeActivitySnapshots: Record<string, RuntimeActivitySnapshot> = {};
 let mockSessionToolActivities: Record<string, unknown[]> = {};
 type MockSessionRow = {
   id: string;
@@ -37,6 +38,7 @@ vi.mock('../../store/agentStore', () => ({
       activeAgentLoops: mockActiveAgentLoops,
       queuedDepthBySession: mockQueuedDepthBySession,
       sessionStatusSnapshots: mockSessionStatusSnapshots,
+      runtimeActivitySnapshots: mockRuntimeActivitySnapshots,
       sessionToolActivities: mockSessionToolActivities,
     }),
 }));
@@ -87,6 +89,7 @@ beforeEach(() => {
   mockActiveAgentLoops = {};
   mockQueuedDepthBySession = {};
   mockSessionStatusSnapshots = {};
+  mockRuntimeActivitySnapshots = {};
   mockSessionToolActivities = {};
   mockSessionStoreState.sessions = [
     { id: 'session-1', title: 'Chat One', personaId: 'default', createdAt: 0, updatedAt: 0 },
@@ -153,11 +156,17 @@ describe('SessionPanel — pending confirmation indicator', () => {
   });
 
   it('shows running icon for an active session loop', async () => {
-    mockActiveAgentLoops = {
-      loop1: {
+    mockRuntimeActivitySnapshots = {
+      'session-2': {
         sessionId: 'session-2',
+        active: true,
         turnId: 'turn-1',
-        startedAt: 1,
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [],
+        toolActivities: [],
+        childExecutions: [],
+        updatedAt: 1,
       },
     };
 

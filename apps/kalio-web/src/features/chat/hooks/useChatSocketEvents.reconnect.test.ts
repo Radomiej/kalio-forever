@@ -32,7 +32,6 @@ describe('handleSocketReconnect', () => {
       activeTurnId: null,
       sessionActiveTurnIds: { 'session-1': null, 'arch-root': null },
       pendingMessage: null,
-      pendingRAAppId: null,
     });
   });
 
@@ -210,7 +209,6 @@ describe('handleSocketReconnect', () => {
       activeTurnId: null,
       sessionActiveTurnIds: { 'session-1': null, 'arch-root': null },
       pendingMessage: null,
-      pendingRAAppId: null,
     });
 
     const setActiveSession = vi.fn((sessionId: string) => {
@@ -452,7 +450,6 @@ describe('handleSocketReconnect', () => {
       activeTurnId: null,
       sessionActiveTurnIds: { 'session-1': null },
       pendingMessage: null,
-      pendingRAAppId: null,
     });
 
     const setMessages = vi.fn((messages, sessionId?: string | null) => {
@@ -615,7 +612,6 @@ describe('handleSocketReconnect', () => {
       activeTurnId: 'turn-new',
       sessionActiveTurnIds: { 'session-1': 'turn-new' },
       pendingMessage: null,
-      pendingRAAppId: null,
     });
 
     const setMessages = vi.fn((messages, sessionId?: string | null) => {
@@ -695,17 +691,22 @@ describe('handleSocketReconnect', () => {
     expect(setAgentTurns).not.toHaveBeenCalled();
   });
 
-  it('clears awaitingFirstChunk during reconnect recovery before replaying a live snapshot', async () => {
+  it('clears awaitingFirstChunk during reconnect recovery before replaying a live runtime snapshot', async () => {
     const setAwaitingFirstChunk = vi.fn();
     const setStreaming = vi.fn();
 
     useAgentStore.setState({
-      sessionStatusSnapshots: {
+      runtimeActivitySnapshots: {
         'session-1': {
           sessionId: 'session-1',
           active: true,
           turnId: 'turn-live',
           queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [],
+          updatedAt: 200,
           run: {
             id: 'run-live',
             sessionId: 'session-1',
@@ -718,6 +719,14 @@ describe('handleSocketReconnect', () => {
             updatedAt: 200,
             lastHeartbeatAt: 200,
           },
+        },
+      },
+      sessionStatusSnapshots: {
+        'session-1': {
+          sessionId: 'session-1',
+          active: false,
+          turnId: 'turn-stale',
+          queueLength: 0,
         },
       },
       bufferedSessionStatusSnapshots: {},
@@ -764,5 +773,6 @@ describe('handleSocketReconnect', () => {
       expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
     });
     expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-1');
+    expect(useSessionStore.getState().getSessionActiveTurnId('session-1')).toBe('turn-live');
   });
 });

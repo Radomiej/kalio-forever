@@ -103,4 +103,74 @@ describe('buildConversationTreeModel', () => {
       },
     ]);
   });
+
+  it('treats runtime-only reconnect snapshots as live conversation activity', () => {
+    const host = makeSession({
+      id: 'host',
+      title: 'Workflow host',
+      updatedAt: 20,
+    });
+    const branch = makeSession({
+      id: 'branch-analyst',
+      title: 'Strategic Decision Council: Analyst',
+      kind: 'subagent',
+      parentSessionId: 'host',
+      createdAt: 22,
+      updatedAt: 22,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'analyst',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          sessionSurface: 'conversation-branch',
+          roleSlotId: 'analyst',
+          displayLabel: 'Analyst',
+        },
+      },
+    });
+
+    const model = buildConversationTreeModel({
+      activeSessionId: host.id,
+      originFilter: 'all',
+      pendingBudgetApprovals: {},
+      pendingConfirmations: {},
+      queuedDepthBySession: {},
+      sessionAgentTurns: {},
+      sessionMessages: {
+        [host.id]: [],
+        [branch.id]: [],
+      },
+      sessionStatusSnapshots: {},
+      runtimeActivitySnapshots: {
+        [branch.id]: {
+          sessionId: branch.id,
+          active: true,
+          turnId: 'turn-1',
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [],
+          updatedAt: 22,
+          run: {
+            id: 'run-1',
+            sessionId: branch.id,
+            turnId: 'turn-1',
+            phase: 'tool_running',
+            status: 'active',
+            retryCount: 0,
+            safeResume: true,
+            startedAt: 21,
+            updatedAt: 22,
+            lastHeartbeatAt: 22,
+          },
+        },
+      },
+      sidebarSessions: [host, branch],
+      activeAgentLoops: {},
+    });
+
+    expect(model.renderableSessions.map((session) => session.id)).toEqual([host.id, branch.id]);
+    expect(model.activeLoopSessionIds.has(branch.id)).toBe(true);
+  });
 });

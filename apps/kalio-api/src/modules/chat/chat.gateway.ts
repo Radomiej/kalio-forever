@@ -25,6 +25,12 @@ import {
 } from '../cli-agent/cli-agent-session-runtime.port';
 import { findAgentFlowSnapshotsForSessions, isActiveAgentFlowSnapshot } from './chat.gateway.agentflow-stop';
 import { emitSessionLifecycleEventToSubscribers } from './chat.gateway.lifecycle';
+import {
+  buildRuntimeActivitySnapshot,
+  buildRuntimeActivitySnapshotBatch,
+  collectRuntimeSnapshotSessionTree,
+  type RuntimeSnapshotSessionTree,
+} from './chat.runtime-snapshot';
 
 @UseFilters(WsExceptionFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -94,14 +100,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
     };
 
-    replayPendingConfirmations(payload.sessionId);
-    client.emit('session:status', await this.pipeline.getSessionStatusWithRun(payload.sessionId));
+    const sessionTree = await this.collectRuntimeSnapshotSessionTree(payload.sessionId);
+    const statusesBySessionId: Record<string, SocketEvents['session:status']> = {};
 
-    const descendantSessionIds = await this.collectDescendantSessionIds(payload.sessionId);
-    for (const sessionId of descendantSessionIds) {
-      this.subscribeSocketToSession(client.id, sessionId);
+    for (const sessionId of sessionTree.sessionIds) {
+      if (sessionId !== payload.sessionId) {
+        this.subscribeSocketToSession(client.id, sessionId);
+      }
       replayPendingConfirmations(sessionId);
-      client.emit('session:status', await this.pipeline.getSessionStatusWithRun(sessionId));
+      const status = await this.pipeline.getSessionStatusWithRun(sessionId);
+      statusesBySessionId[sessionId] = status;
+      client.emit('session:status', status);
+    }
+
+    const snapshotBatch = await this.buildRuntimeActivitySnapshots(payload.sessionId, sessionTree, statusesBySessionId);
+    for (const sessionId of snapshotBatch.sessionIds) {
+      client.emit('session:runtime_snapshot', snapshotBatch.snapshotsBySessionId[sessionId]);
     }
 
     this.logger.log(`Session re-identified: ${payload.sessionId} for socket ${client.id}`);
@@ -131,16 +145,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    await this.stopCliAgentSessionIfNeeded(client.id, payload.sessionId);
+    const sessionTree = await this.collectRuntimeSnapshotSessionTree(payload.sessionId);
+    const descendantSessionIds = sessionTree.descendantIdsBySessionId[payload.sessionId] ?? [];
 
-    this.pipeline.stop(payload.sessionId);
-
-    const descendantSessionIds = await this.collectDescendantSessionIds(payload.sessionId);
-    for (const sessionId of descendantSessionIds) {
+    for (const sessionId of sessionTree.sessionIds) {
       await this.stopCliAgentSessionIfNeeded(client.id, sessionId);
-      this.pipeline.stop(sessionId);
+      await this.pipeline.stopAndDrain(sessionId);
     }
     await this.stopAgentFlowRunsForSessions([payload.sessionId, ...descendantSessionIds]);
+
+    const snapshotBatch = await this.buildRuntimeActivitySnapshots(payload.sessionId, sessionTree);
+    for (const sessionId of snapshotBatch.sessionIds) {
+      client.emit('session:runtime_snapshot', snapshotBatch.snapshotsBySessionId[sessionId]);
+    }
   }
 
   @SubscribeMessage('tool:confirm')
@@ -326,25 +343,44 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return typeof candidate.sessionId === 'string' ? candidate.sessionId : undefined;
   }
 
-  private async collectDescendantSessionIds(rootSessionId: string): Promise<string[]> {
-    const descendantSessionIds: string[] = [];
-    const pending = [rootSessionId];
-    const seen = new Set<string>(pending);
+  private collectRuntimeSnapshotSessionTree(rootSessionId: string): Promise<RuntimeSnapshotSessionTree> {
+    return collectRuntimeSnapshotSessionTree(rootSessionId, this.sessionsService);
+  }
 
-    while (pending.length > 0) {
-      const currentSessionId = pending.shift();
-      if (!currentSessionId) break;
+  private buildRuntimeActivitySnapshot(
+    sessionId: string,
+    status?: SocketEvents['session:status'],
+  ): Promise<SocketEvents['session:runtime_snapshot']> {
+    return buildRuntimeActivitySnapshot({
+      sessionId,
+      status,
+      pipeline: this.pipeline,
+      toolDispatch: this.toolDispatch,
+      agentBudgetApprovals: this.agentBudgetApprovals,
+      sessionsService: this.sessionsService,
+      agentFlowRuntime: this.getAgentFlowRuntime(),
+      cliAgentSessionRuntime: this.getCliAgentSessionRuntime(),
+      logger: this.logger,
+    });
+  }
 
-      const children = await this.sessionsService.listChildren(currentSessionId);
-      children.forEach((child) => {
-        if (seen.has(child.id)) return;
-        seen.add(child.id);
-        descendantSessionIds.push(child.id);
-        pending.push(child.id);
-      });
-    }
-
-    return descendantSessionIds;
+  private buildRuntimeActivitySnapshots(
+    rootSessionId: string,
+    sessionTree?: RuntimeSnapshotSessionTree,
+    statusesBySessionId?: Record<string, SocketEvents['session:status']>,
+  ) {
+    return buildRuntimeActivitySnapshotBatch({
+      rootSessionId,
+      sessionTree,
+      statusesBySessionId,
+      pipeline: this.pipeline,
+      toolDispatch: this.toolDispatch,
+      agentBudgetApprovals: this.agentBudgetApprovals,
+      sessionsService: this.sessionsService,
+      agentFlowRuntime: this.getAgentFlowRuntime(),
+      cliAgentSessionRuntime: this.getCliAgentSessionRuntime(),
+      logger: this.logger,
+    });
   }
 
   private emitSessionLifecycleEvent<K extends 'session:created' | 'session:updated'>(

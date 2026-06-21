@@ -14,6 +14,7 @@ vi.mock('../../services/eventBus', () => ({
 describe('CLIChildConversationCard', () => {
   beforeEach(() => {
     useAgentStore.setState({
+      runtimeActivitySnapshots: {},
       cliChildProjections: {
         'cli-child-1': {
           childSessionId: 'cli-child-1',
@@ -104,5 +105,46 @@ describe('CLIChildConversationCard', () => {
     expect(screen.queryByTestId('cli-child-open-cli-child-1')).not.toBeInTheDocument();
     expect(screen.queryByTestId('cli-child-followup-cli-child-1')).not.toBeInTheDocument();
     expect(screen.getByTestId('cli-child-stop-cli-child-1')).toBeInTheDocument();
+  });
+
+  it('renders a runtime-snapshot child even when the legacy projection store is empty', () => {
+    useAgentStore.setState({
+      runtimeActivitySnapshots: {
+        'parent-1': {
+          sessionId: 'parent-1',
+          active: true,
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [{
+            id: 'child-exec-1',
+            kind: 'cli_agent',
+            parentSessionId: 'parent-1',
+            childSessionId: 'cli-child-1',
+            parentToolCallId: 'call-1',
+            label: 'codex',
+            status: 'running',
+            lastOutput: 'runtime tail',
+            updatedAt: 1,
+          }],
+          updatedAt: 1,
+        },
+      },
+      cliChildProjections: {},
+      cliAgentOutput: {},
+    });
+
+    render(
+      <CLIChildConversationCard
+        toolName="spawn_cli_agent"
+        parentSessionId="parent-1"
+        parentCallId="call-1"
+      />,
+    );
+
+    expect(screen.getByTestId('cli-child-card-cli-child-1')).toBeInTheDocument();
+    expect(screen.getByTestId('cli-child-status-cli-child-1')).toHaveTextContent('running');
+    expect(screen.getByTestId('cli-child-output-cli-child-1')).toHaveTextContent('runtime tail');
   });
 });

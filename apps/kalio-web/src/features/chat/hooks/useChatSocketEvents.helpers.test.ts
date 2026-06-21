@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { handleConnectionStateEvent, type ReconnectUiState } from './useChatSocketEvents.helpers';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  handleConnectionStateEvent,
+  materializeLiveTurnFromHydratedRuntimeState,
+  type ReconnectUiState,
+} from './useChatSocketEvents.helpers';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
 
 function runConnectionEventSequence(
@@ -76,5 +80,87 @@ describe('handleConnectionStateEvent', () => {
     );
 
     expect(result.notices).toEqual([]);
+  });
+});
+
+describe('materializeLiveTurnFromHydratedRuntimeState', () => {
+  it('does not revive a buffered live turn when the runtime snapshot is present but inactive', () => {
+    const addActiveAgentLoop = vi.fn();
+    const startAgentTurn = vi.fn();
+    const setAwaitingFirstChunk = vi.fn();
+    const setStreaming = vi.fn();
+
+    materializeLiveTurnFromHydratedRuntimeState(
+      {
+        runtimeSnapshot: {
+          sessionId: 'session-1',
+          active: false,
+          turnId: 'turn-stale',
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [],
+          updatedAt: 10,
+        },
+        bufferedSessionStatusSnapshots: [
+          {
+            sessionId: 'session-1',
+            active: true,
+            turnId: 'turn-buffered',
+            queueLength: 0,
+          },
+        ],
+        latestSessionStatusSnapshot: undefined,
+      },
+      {
+        hasActiveLoopForSession: () => false,
+        getSessionActiveTurnId: () => null,
+        addActiveAgentLoop,
+        startAgentTurn,
+        setAwaitingFirstChunk,
+        setStreaming,
+      },
+    );
+
+    expect(addActiveAgentLoop).not.toHaveBeenCalled();
+    expect(startAgentTurn).not.toHaveBeenCalled();
+    expect(setAwaitingFirstChunk).not.toHaveBeenCalled();
+    expect(setStreaming).not.toHaveBeenCalled();
+  });
+
+  it('falls back to buffered session status when the runtime snapshot is missing', () => {
+    const addActiveAgentLoop = vi.fn();
+    const startAgentTurn = vi.fn();
+    const setAwaitingFirstChunk = vi.fn();
+    const setStreaming = vi.fn();
+
+    materializeLiveTurnFromHydratedRuntimeState(
+      {
+        runtimeSnapshot: undefined,
+        bufferedSessionStatusSnapshots: [
+          {
+            sessionId: 'session-1',
+            active: true,
+            turnId: 'turn-buffered',
+            queueLength: 0,
+          },
+        ],
+        latestSessionStatusSnapshot: undefined,
+      },
+      {
+        hasActiveLoopForSession: () => false,
+        getSessionActiveTurnId: () => null,
+        addActiveAgentLoop,
+        startAgentTurn,
+        setAwaitingFirstChunk,
+        setStreaming,
+      },
+    );
+
+    expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-buffered');
+    expect(startAgentTurn).toHaveBeenCalledWith('turn-buffered', 'session-1');
+    expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
+    expect(setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
   });
 });

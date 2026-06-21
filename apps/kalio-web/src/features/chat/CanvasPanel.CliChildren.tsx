@@ -1,4 +1,9 @@
-import type { CLIChildProjection } from './cliChildProjection.model';
+import type { RuntimeChildExecution } from '@kalio/types';
+import {
+  type CLIChildProjection,
+  mergeCLIChildProjectionSources,
+  projectionFromRuntimeChildExecution,
+} from './cliChildProjection.model';
 import { CLIChildConversationCard } from './CLIChildConversationCard';
 
 export interface CliChildCanvasPreview extends CLIChildProjection {
@@ -8,14 +13,37 @@ export interface CliChildCanvasPreview extends CLIChildProjection {
 export function buildCliChildPreviews(
   parentSessionId: string | null,
   projections: Record<string, CLIChildProjection>,
-  sessionTitles: Map<string, string>,
+  childExecutionsOrSessionTitles: RuntimeChildExecution[] | Map<string, string>,
+  sessionTitlesArg?: Map<string, string>,
 ): CliChildCanvasPreview[] {
   if (!parentSessionId) return [];
-  return Object.values(projections)
-    .filter((projection) => (
-      projection.parentSessionId === parentSessionId
-      && sessionTitles.has(projection.childSessionId)
-    ))
+  // TODO: legacy fallback - preserve older helper call sites/tests that passed sessionTitles as the third arg.
+  const childExecutions = Array.isArray(childExecutionsOrSessionTitles) ? childExecutionsOrSessionTitles : [];
+  const sessionTitles = childExecutionsOrSessionTitles instanceof Map
+    ? childExecutionsOrSessionTitles
+    : (sessionTitlesArg ?? new Map<string, string>());
+  const merged = new Map<string, CLIChildProjection>();
+  childExecutions
+    .map((execution) => projectionFromRuntimeChildExecution(execution))
+    .filter((projection): projection is CLIChildProjection => projection !== null)
+    .filter((projection) => projection.parentSessionId === parentSessionId)
+    .forEach((projection) => {
+      merged.set(projection.childSessionId, projection);
+    });
+  Object.values(projections)
+    .filter((projection) => projection.parentSessionId === parentSessionId)
+    .forEach((projection) => {
+      merged.set(
+        projection.childSessionId,
+        mergeCLIChildProjectionSources({
+          runtimeProjection: merged.get(projection.childSessionId),
+          storedProjection: projection,
+        }) ?? projection,
+      );
+    });
+
+  return [...merged.values()]
+    .filter((projection) => sessionTitles.has(projection.childSessionId))
     .map((projection) => ({
       ...projection,
       childTitle: sessionTitles.get(projection.childSessionId) ?? projection.childTitle ?? `${projection.agentId} CLI`,

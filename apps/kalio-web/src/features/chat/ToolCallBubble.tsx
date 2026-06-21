@@ -39,6 +39,7 @@ import { SubagentResultBlock, CLIAgentSessionStatusBlock, SubAgentFlowResultBloc
 import { getToolTargetLabel } from './toolTargetLabel';
 import { CLIChildConversationCard } from './CLIChildConversationCard';
 import { isCliChildDelegationTool } from './cliChildProjection.model';
+import { useCLIChildProjection } from './CLIChildConversationCard.hooks';
 import { useSessionStore } from '../../store/sessionStore';
 
 export { extractRAAppBlock } from './ToolCallBubble.parsers';
@@ -82,9 +83,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const elapsed = activity.finishedAt != null ? activity.finishedAt - activity.startedAt : null;
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
-  const cliProjection = useAgentStore((s) => (
-    Object.values(s.cliChildProjections).find((item) => item.parentCallId === activity.callId)
-  ));
+  const cliProjection = useCLIChildProjection(undefined, activity.callId);
   const toolActivities = useAgentStore((s) => s.toolActivities);
   const descendantActivities = useMemo(
     () =>
@@ -254,6 +253,7 @@ export function HistoryToolCallBubble({
 }) {
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
   const setCanvasFocus = useAgentStore((s) => s.setCanvasFocus);
+  const setActiveSession = useSessionStore((s) => s.setActiveSession);
   const isSubagent = toolName === 'run_subagent';
   const isCliAgent = toolName === 'run_cli_agent';
   const isSubAgentFlow = toolName === 'run_sub_agentflow';
@@ -300,6 +300,7 @@ export function HistoryToolCallBubble({
   const hasResult = !raapp && !cliResult && !cliSessionSnapshot && !imageResult && !webSearchResult && !subagentResult && !displayedSubAgentFlowResult && content.length > 0;
   const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || webSearchResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
   const agentFlowOpenGraphRunId = displayedSubAgentFlowResult?.openGraphRunId ?? displayedSubAgentFlowResult?.flowRunId;
+  const agentFlowOpenChatSessionId = displayedSubAgentFlowResult?.openChatSessionId ?? displayedSubAgentFlowResult?.childSessionId;
   const historyIcon = persistedToolResultMeta?.status === 'error'
     ? <XCircle size={12} className="text-error shrink-0" />
     : persistedToolResultMeta?.status === 'cancelled'
@@ -342,6 +343,13 @@ export function HistoryToolCallBubble({
     setCanvasOpen(true);
   };
 
+  const handleOpenAgentFlowChat = () => {
+    if (agentFlowOpenChatSessionId) {
+      setActiveSession(agentFlowOpenChatSessionId);
+    }
+    handleOpenInCanvas();
+  };
+
   return (
     <>
       {showsCliChildCard && (
@@ -363,6 +371,19 @@ export function HistoryToolCallBubble({
           <>
             {historyStatusBadge}
             {isAnswered && <span className="text-[10px] font-mono text-base-content/40 bg-base-200/60 rounded px-1">â†© answered</span>}
+            {displayedSubAgentFlowResult != null && agentFlowOpenChatSessionId && (
+              <button
+                className="ml-1 text-[10px] text-sky-400/60 hover:text-sky-400 flex items-center gap-0.5"
+                title="Open child chat"
+                data-testid="open-agentflow-chat"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenAgentFlowChat();
+                }}
+              >
+                <ExternalLink size={9} />
+              </button>
+            )}
             {(isSubagent || cliSessionSnapshot != null || displayedSubAgentFlowResult != null) && (
               <button
                 className="ml-1 text-[10px] text-sky-400/60 hover:text-sky-400 flex items-center gap-0.5"

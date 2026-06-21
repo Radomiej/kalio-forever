@@ -1,4 +1,11 @@
-import type { ChatMessage, ChatSession, CLIAgentResult, CLIAgentSessionSnapshot } from '@kalio/types';
+import type {
+  ChatMessage,
+  ChatSession,
+  CLIAgentResult,
+  CLIAgentSessionSnapshot,
+  RuntimeActivitySnapshot,
+  RuntimeChildExecution,
+} from '@kalio/types';
 import type { ToolActivityStatus } from '../../store/agentStore';
 import { extractCLIAgentResult, extractCLIAgentSessionSnapshot, extractPersistedToolResultMeta } from './ToolCallBubble.parsers';
 
@@ -56,6 +63,14 @@ export function mapSnapshotStatus(status: string | undefined): CLIChildProjectio
   if (status === 'completed') return 'completed';
   if (status === 'failed') return 'failed';
   if (status === 'stopped') return 'stopped';
+  return 'pending';
+}
+
+export function mapRuntimeChildExecutionStatus(status: RuntimeChildExecution['status']): CLIChildProjectionStatus {
+  if (status === 'completed') return 'completed';
+  if (status === 'failed' || status === 'blocked') return 'failed';
+  if (status === 'cancelled' || status === 'stopped') return 'stopped';
+  if (status === 'running') return 'running';
   return 'pending';
 }
 
@@ -174,6 +189,108 @@ export function projectionFromToolResult(
   }
 
   return null;
+}
+
+export function projectionFromRuntimeChildExecution(
+  execution: RuntimeChildExecution,
+  fallbackToolName = 'run_cli_agent',
+): CLIChildProjection | null {
+  if (execution.kind !== 'cli_agent' || !execution.parentToolCallId) {
+    return null;
+  }
+
+  return {
+    childSessionId: execution.childSessionId,
+    parentSessionId: execution.parentSessionId,
+    parentCallId: execution.parentToolCallId,
+    agentId: execution.label ?? 'copilot',
+    status: mapRuntimeChildExecutionStatus(execution.status),
+    lastOutput: execution.lastOutput ?? '',
+    toolName: fallbackToolName,
+  };
+}
+
+export function projectionFromRuntimeSnapshots(
+  snapshots: Record<string, RuntimeActivitySnapshot> | null | undefined,
+  params: { childSessionId?: string; parentCallId?: string },
+): CLIChildProjection | null {
+  for (const snapshot of Object.values(snapshots ?? {})) {
+    for (const execution of snapshot.childExecutions) {
+      const projection = projectionFromRuntimeChildExecution(execution);
+      if (!projection) {
+        continue;
+      }
+      if (params.childSessionId && projection.childSessionId === params.childSessionId) {
+        return projection;
+      }
+      if (params.parentCallId && projection.parentCallId === params.parentCallId) {
+        return projection;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function findStoredCLIChildProjection(
+  projections: Record<string, CLIChildProjection> | null | undefined,
+  params: { childSessionId?: string; parentCallId?: string },
+): CLIChildProjection | null {
+  if (params.childSessionId) {
+    const direct = projections?.[params.childSessionId];
+    if (direct) {
+      return direct;
+    }
+  }
+
+  if (!params.parentCallId) {
+    return null;
+  }
+
+  return Object.values(projections ?? {}).find((item) => item.parentCallId === params.parentCallId) ?? null;
+}
+
+export function mergeCLIChildProjectionSources(params: {
+  runtimeProjection?: CLIChildProjection | null;
+  storedProjection?: CLIChildProjection | null;
+}): CLIChildProjection | null {
+  const runtimeProjection = params.runtimeProjection ?? null;
+  const storedProjection = params.storedProjection ?? null;
+
+  if (!runtimeProjection) {
+    return storedProjection;
+  }
+
+  if (!storedProjection) {
+    return runtimeProjection;
+  }
+
+  return {
+    childSessionId: runtimeProjection.childSessionId,
+    parentSessionId: runtimeProjection.parentSessionId || storedProjection.parentSessionId,
+    parentCallId: runtimeProjection.parentCallId || storedProjection.parentCallId,
+    agentId: runtimeProjection.agentId !== 'copilot'
+      ? runtimeProjection.agentId
+      : storedProjection.agentId || runtimeProjection.agentId,
+    status: runtimeProjection.status,
+    lastOutput: runtimeProjection.lastOutput.trim().length > 0
+      ? runtimeProjection.lastOutput
+      : storedProjection.lastOutput,
+    childTitle: storedProjection.childTitle ?? runtimeProjection.childTitle,
+    toolName: storedProjection.toolName || runtimeProjection.toolName,
+  };
+}
+
+export function selectCLIChildProjectionFromSources(params: {
+  runtimeActivitySnapshots: Record<string, RuntimeActivitySnapshot> | null | undefined;
+  cliChildProjections: Record<string, CLIChildProjection> | null | undefined;
+  childSessionId?: string;
+  parentCallId?: string;
+}): CLIChildProjection | null {
+  return mergeCLIChildProjectionSources({
+    runtimeProjection: projectionFromRuntimeSnapshots(params.runtimeActivitySnapshots, params),
+    storedProjection: findStoredCLIChildProjection(params.cliChildProjections, params),
+  });
 }
 
 export function rebuildCLIChildProjectionsFromMessages(

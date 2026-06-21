@@ -53,6 +53,7 @@ describe('ChatService', () => {
   };
   let sessionsService: {
     get: ReturnType<typeof vi.fn>;
+    updateRuntimeContext: ReturnType<typeof vi.fn>;
   };
   let auditService: Partial<AuditService>;
   let emit: ReturnType<typeof vi.fn>;
@@ -98,6 +99,7 @@ describe('ChatService', () => {
         createdAt: 1,
         updatedAt: 1,
       }),
+      updateRuntimeContext: vi.fn().mockResolvedValue(undefined),
     };
     auditService = {
       log: vi.fn().mockResolvedValue('audit-id'),
@@ -828,6 +830,44 @@ describe('ChatService', () => {
       'tc-cancelled',
       expect.stringContaining('Tool fs_write was not approved.'),
       expect.objectContaining({ turnId: expect.any(String), promptMessageId: 'u1' }),
+    );
+  });
+
+  it('forces the first run_raapp call to the session-selected app id and clears the pending launch context', async () => {
+    sessionsService.get.mockResolvedValue({
+      id: 'sid',
+      personaId: 'ra-apps',
+      title: 'TicTacToe',
+      kind: 'chat',
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          raAppLaunchId: 'tictactoe',
+          raAppLaunchName: 'TicTacToe',
+          raAppLaunchSource: 'home_tile',
+        },
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const llmSource = makeLLMSource([
+      { type: 'tool_call', callId: 'call-1', name: 'run_raapp', args: { id: 'generated-bad-id' } },
+      { type: 'done' },
+    ]);
+    await buildService(llmSource);
+
+    await service.handleTurn('sid', 'Run it', 'ra-apps', emit as EmitFn);
+
+    expect(toolDispatch.dispatch).toHaveBeenCalledWith(
+      'call-1',
+      'run_raapp',
+      { id: 'tictactoe' },
+      expect.any(Object),
+      expect.any(Array),
+    );
+    expect(sessionsService.updateRuntimeContext).toHaveBeenCalledWith(
+      'sid',
+      expect.objectContaining({ runtimeKind: 'chat', architectureContext: undefined }),
     );
   });
 

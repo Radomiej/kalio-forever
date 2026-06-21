@@ -8,13 +8,23 @@ import type { ToolActivity } from '../../store/agentStore';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
 import { LiveToolCallBubble, HistoryToolCallBubble } from './ToolCallBubble';
 import { extractCLIAgentResult, extractCLIAgentSessionSnapshot, extractPersistedToolResultMeta } from './ToolCallBubble.parsers';
-import { isCliChildToolName, resolveCLIChildProjectionStatus, shouldRenderLiveCliChildStatus } from './cliChildProjection.model';
+import {
+  isCliChildToolName,
+  resolveCLIChildProjectionStatus,
+  selectCLIChildProjectionFromSources,
+  shouldRenderLiveCliChildStatus,
+} from './cliChildProjection.model';
 import { deriveVisibleTurnItems } from './agentTurnVisibleItems';
 import { isMessageLiveStreaming } from './agentTurnStreaming';
 import { eventBus } from '../../services/eventBus';
 import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
 import { resolveWorkflowTurnProjection } from './workflowTurnProjection';
 import type { ChatMessage } from '@kalio/types';
+import {
+  mergeRuntimeQueuedDepthBySession,
+  mergeRuntimeSessionStatusSnapshots,
+  selectLiveSessionIds,
+} from '../../store/agentRuntimeSelectors';
 
 interface Props {
   turn: AgentTurn;
@@ -70,19 +80,19 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
     setCanvasFocus,
     cliChildProjections,
     pendingBudgetApprovals,
-    setPendingBudgetApproval,
+    removePendingBudgetApproval,
     pendingConfirmations,
-    activeAgentLoops,
     queuedDepthBySession,
     sessionStatusSnapshots,
+    runtimeActivitySnapshots,
   } = useAgentStore();
-  const pendingBudgetApproval = pendingBudgetApprovals[turn.sessionId];
+  const pendingBudgetApprovalsForTurn = pendingBudgetApprovals[turn.sessionId] ?? [];
 
   useEffect(() => {
-    if (!pendingBudgetApproval || pendingBudgetApproval.requestId !== submittedBudgetRequestId) {
+    if (!pendingBudgetApprovalsForTurn.some((request) => request.requestId === submittedBudgetRequestId)) {
       setSubmittedBudgetRequestId(null);
     }
-  }, [pendingBudgetApproval, submittedBudgetRequestId]);
+  }, [pendingBudgetApprovalsForTurn, submittedBudgetRequestId]);
 
   // Build callId → toolName from all available sources
   const toolCallIdToName = new Map<string, string>(Object.entries(persistentCallIdToName));
@@ -143,16 +153,27 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
   const visibleItems = deriveVisibleTurnItems(turn.items, turnMessages, streamingChunks, turn.done);
   const turnBranchSessionIds = workflowTurnProjection.branchSessionIds;
   const knownBranchSessionIds = useMemo(() => {
-    const activeLoopSessionIds = new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId));
+    const effectiveQueuedDepthBySession = mergeRuntimeQueuedDepthBySession(
+      queuedDepthBySession,
+      runtimeActivitySnapshots,
+    );
+    const effectiveSessionStatusSnapshots = mergeRuntimeSessionStatusSnapshots(
+      sessionStatusSnapshots,
+      runtimeActivitySnapshots,
+    );
+    const liveSessionIds = selectLiveSessionIds({
+      sessionStatusSnapshots,
+      runtimeActivitySnapshots,
+    });
     const { renderableSessions } = filterRenderableSessions(
       sessions,
       sessionMessages ?? {},
       {
         pendingConfirmations,
         pendingBudgetApprovals,
-        activeLoopSessionIds,
-        queuedDepthBySession: queuedDepthBySession ?? {},
-        sessionStatusSnapshots: sessionStatusSnapshots ?? {},
+        activeLoopSessionIds: liveSessionIds,
+        queuedDepthBySession: effectiveQueuedDepthBySession,
+        sessionStatusSnapshots: effectiveSessionStatusSnapshots,
       },
     );
     return new Set(
@@ -160,17 +181,17 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
         .filter((session) => (
           turnBranchSessionIds.has(session.id)
           || (
-          activeLoopSessionIds.has(session.id)
+          liveSessionIds.has(session.id)
           || (sessionMessages?.[session.id]?.length ?? 0) > 0
           )
         ))
         .map((session) => session.id),
     );
   }, [
-    activeAgentLoops,
     pendingBudgetApprovals,
     pendingConfirmations,
     queuedDepthBySession,
+    runtimeActivitySnapshots,
     sessionMessages,
     sessionStatusSnapshots,
     sessions,
@@ -244,7 +265,11 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
               const parsedToolResult = toolResult?.parsed;
               const cliSnapshot = parsedToolResult !== undefined ? extractCLIAgentSessionSnapshot(parsedToolResult) : null;
               const cliResult = parsedToolResult !== undefined ? extractCLIAgentResult(parsedToolResult) : null;
-              const cliProjection = Object.values(cliChildProjections).find((projection) => projection.parentCallId === callId);
+              const cliProjection = selectCLIChildProjectionFromSources({
+                runtimeActivitySnapshots,
+                cliChildProjections,
+                parentCallId: callId,
+              });
               const cliStatus = isCliChildToolName(toolName)
                 ? resolveCLIChildProjectionStatus({
                     snapshotStatus: cliSnapshot?.status,
@@ -340,44 +365,52 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
               </span>
             </div>
           )}
-          {pendingBudgetApproval && !turn.done && (
-            <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning/85" data-testid="turn-budget-approval">
-              <div className="font-medium">
-                Agent reached tool loop limit {pendingBudgetApproval.usedIterations}/{pendingBudgetApproval.currentLimit}
-              </div>
-              <div className="mt-1 text-warning/70">
-                Continue with more tool requests for this run.
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {[
-                  ['block', 'Block'],
-                  ['allow_one', '+1'],
-                  ['allow_ten', '+10'],
-                  ['allow_unlimited', 'Unlimited'],
-                ].map(([decision, label]) => (
-                  <button
-                    key={decision}
-                    className={`btn btn-xs ${decision === 'block' ? 'btn-ghost' : 'btn-warning'}`}
-                    onClick={() => {
-                      if (submittedBudgetRequestId === pendingBudgetApproval.requestId) {
-                        return;
-                      }
-                      setSubmittedBudgetRequestId(pendingBudgetApproval.requestId);
-                      eventBus.approveAgentBudget({
-                        requestId: pendingBudgetApproval.requestId,
-                        sessionId: pendingBudgetApproval.sessionId,
-                        decision: decision as 'block' | 'allow_one' | 'allow_ten' | 'allow_unlimited',
-                      });
-                      if (decision === 'block') {
-                        setPendingBudgetApproval(pendingBudgetApproval.sessionId, null);
-                      }
-                    }}
-                    disabled={submittedBudgetRequestId === pendingBudgetApproval.requestId}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+          {pendingBudgetApprovalsForTurn.length > 0 && !turn.done && (
+            <div className="space-y-2">
+              {pendingBudgetApprovalsForTurn.map((pendingBudgetApproval) => (
+                <div
+                  key={pendingBudgetApproval.requestId}
+                  className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning/85"
+                  data-testid="turn-budget-approval"
+                >
+                  <div className="font-medium">
+                    Agent reached tool loop limit {pendingBudgetApproval.usedIterations}/{pendingBudgetApproval.currentLimit}
+                  </div>
+                  <div className="mt-1 text-warning/70">
+                    Continue with more tool requests for this run.
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {[
+                      ['block', 'Block'],
+                      ['allow_one', '+1'],
+                      ['allow_ten', '+10'],
+                      ['allow_unlimited', 'Unlimited'],
+                    ].map(([decision, label]) => (
+                      <button
+                        key={decision}
+                        className={`btn btn-xs ${decision === 'block' ? 'btn-ghost' : 'btn-warning'}`}
+                        onClick={() => {
+                          if (submittedBudgetRequestId === pendingBudgetApproval.requestId) {
+                            return;
+                          }
+                          setSubmittedBudgetRequestId(pendingBudgetApproval.requestId);
+                          eventBus.approveAgentBudget({
+                            requestId: pendingBudgetApproval.requestId,
+                            sessionId: pendingBudgetApproval.sessionId,
+                            decision: decision as 'block' | 'allow_one' | 'allow_ten' | 'allow_unlimited',
+                          });
+                          if (decision === 'block') {
+                            removePendingBudgetApproval(pendingBudgetApproval.sessionId, pendingBudgetApproval.requestId);
+                          }
+                        }}
+                        disabled={submittedBudgetRequestId === pendingBudgetApproval.requestId}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

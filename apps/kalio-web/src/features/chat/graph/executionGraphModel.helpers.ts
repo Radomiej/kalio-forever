@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatSession, CLIAgentSessionSnapshot, Persona, SubagentCopiedFile, SubagentToolResult } from '@kalio/types';
+import type { RuntimeChildExecution } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
 import { extractCLIAgentResult, extractPersistedToolResultMeta } from '../ToolCallBubble.parsers';
@@ -13,6 +14,21 @@ export const BOARD_PADDING_X = 28;
 export const BOARD_PADDING_Y = 28;
 
 export type ExecutionGraphNodeStatus = 'idle' | 'running' | 'success' | 'error';
+
+export function statusFromRuntimeChildExecution(
+  status: RuntimeChildExecution['status'],
+): ExecutionGraphNodeStatus {
+  if (status === 'running' || status === 'waiting') {
+    return 'running';
+  }
+  if (status === 'completed') {
+    return 'success';
+  }
+  if (status === 'failed' || status === 'blocked' || status === 'stopped' || status === 'cancelled') {
+    return 'error';
+  }
+  return 'idle';
+}
 export type ExecutionGraphArtifactKind = 'file' | 'image' | 'raapp';
 
 export interface ExecutionGraphArtifact {

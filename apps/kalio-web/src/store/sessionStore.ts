@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AgentRunContext, ChatSession, ChatMessage, ID } from '@kalio/types';
+import type { AgentRunContext, ChatSession, ChatMessage, ID, RAAppLaunchIntent } from '@kalio/types';
 import { useAgentStore } from './agentStore';
 import type { AgentTurn, AgentTurnItem } from './sessionStore.helpers';
 import {
@@ -22,7 +22,7 @@ interface SessionState {
   thinkingChunks: Record<string, string>;     // messageId → accumulated thinking delta
   chunkSessionIds: Record<string, string>;    // messageId → sessionId (cross-session isolation)
   pendingMessage: string | null;
-  pendingRAAppId: string | null;
+  pendingRAAppLaunchIntent: RAAppLaunchIntent | null;
   pendingUserActions: string[];
 
   // Agent turns (unified chronological rendering)
@@ -50,7 +50,7 @@ interface SessionState {
   removeSession: (id: string) => void;
   updateSession: (id: string, patch: Partial<ChatSession>) => void;
   setPendingMessage: (message: string | null) => void;
-  setPendingRAAppId: (id: string | null) => void;
+  setPendingRAAppLaunchIntent: (intent: RAAppLaunchIntent | null) => void;
   enqueueUserAction: (payload: string) => void;
   dequeueUserAction: () => string | undefined;
 
@@ -83,7 +83,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   thinkingChunks: {},
   chunkSessionIds: {},
   pendingMessage: null,
-  pendingRAAppId: null,
+  pendingRAAppLaunchIntent: null,
   pendingUserActions: [],
 
   // Agent turns
@@ -412,7 +412,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }),
 
   setPendingMessage: (message) => set({ pendingMessage: message }),
-  setPendingRAAppId: (id) => set({ pendingRAAppId: id }),
+  setPendingRAAppLaunchIntent: (intent) => set({ pendingRAAppLaunchIntent: intent }),
   enqueueUserAction: (payload: string) =>
     set((s) => ({
       pendingUserActions: [...s.pendingUserActions, payload],

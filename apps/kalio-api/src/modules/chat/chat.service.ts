@@ -11,6 +11,7 @@ import { LLMTurnRuntimeService } from './llm-turn-runtime.service';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { TurnState } from './turn-state';
 import { SessionsService } from './sessions.service';
+import { readPendingRAAppLaunchIntent, stripPendingRAAppLaunchRuntimeContext } from './raapp-launch-intent';
 
 type ChatErrorCode = import('@kalio/types').SocketEvents['chat:error']['code'];
 
@@ -88,6 +89,8 @@ export class ChatService {
         runtimeKind: 'chat' as const,
         systemPromptProfile: 'default-chat' as const,
       };
+      const pendingRAAppLaunchIntent = readPendingRAAppLaunchIntent(sessionId, personaId, runtimeContext);
+      let consumedPendingRAAppLaunchIntent = false;
 
       if (!this.contextAssembly) {
         throw new Error('ContextAssemblyService is required for chat turns');
@@ -122,6 +125,27 @@ export class ChatService {
         maxEmptyNoToolRetries,
         firstMessageId,
         auditDomain: 'chat',
+        transformToolCall: pendingRAAppLaunchIntent
+          ? (toolCall) => {
+              if (consumedPendingRAAppLaunchIntent || toolCall.name !== 'run_raapp') {
+                return toolCall;
+              }
+              consumedPendingRAAppLaunchIntent = true;
+              const requestedId = typeof toolCall.args['id'] === 'string' ? toolCall.args['id'].trim() : '';
+              if (requestedId && requestedId !== pendingRAAppLaunchIntent.appId) {
+                this.logger.warn(
+                  `Overriding run_raapp target for session ${sessionId} from "${requestedId}" to "${pendingRAAppLaunchIntent.appId}"`,
+                );
+              }
+              return {
+                ...toolCall,
+                args: {
+                  ...toolCall.args,
+                  id: pendingRAAppLaunchIntent.appId,
+                },
+              };
+            }
+          : undefined,
         callbacks: {
           onBeforeIteration: async () => {
             await checkpointRun('llm_streaming');
@@ -164,6 +188,12 @@ export class ChatService {
           },
         },
       });
+      if (consumedPendingRAAppLaunchIntent) {
+        await this.sessions.updateRuntimeContext(
+          sessionId,
+          stripPendingRAAppLaunchRuntimeContext(runtimeContext),
+        );
+      }
 
       if (controller.signal.aborted) {
         if (runId) await this.runJournal?.interrupt(runId, 'Turn interrupted by user');

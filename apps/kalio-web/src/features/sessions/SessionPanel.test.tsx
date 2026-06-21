@@ -109,6 +109,7 @@ const mockAgentState = vi.hoisted(() => ({
   activeAgentLoops: {} as Record<string, { sessionId: string }>,
   queuedDepthBySession: {} as Record<string, number>,
   sessionStatusSnapshots: {} as Record<string, import('@kalio/types').SocketEvents['session:status']>,
+  runtimeActivitySnapshots: {} as Record<string, import('@kalio/types').RuntimeActivitySnapshot>,
   sessionToolActivities: {} as Record<string, import('../../store/agentStore').ToolActivity[]>,
   hasActiveLoopForSession: () => false,
   setPendingConfirmation: mockSetPendingConfirmation,
@@ -124,6 +125,7 @@ vi.mock('../../store/agentStore', () => ({
       activeAgentLoops: Record<string, { sessionId: string }>;
       queuedDepthBySession: Record<string, number>;
       sessionStatusSnapshots: Record<string, import('@kalio/types').SocketEvents['session:status']>;
+      runtimeActivitySnapshots: Record<string, import('@kalio/types').RuntimeActivitySnapshot>;
       sessionToolActivities: Record<string, import('../../store/agentStore').ToolActivity[]>;
       hasActiveLoopForSession: (sessionId: string | null) => boolean;
       setPendingConfirmation: typeof mockSetPendingConfirmation;
@@ -184,6 +186,7 @@ describe('SessionPanel', () => {
     mockAgentState.activeAgentLoops = {};
     mockAgentState.queuedDepthBySession = {};
     mockAgentState.sessionStatusSnapshots = {};
+    mockAgentState.runtimeActivitySnapshots = {};
     mockAgentState.sessionToolActivities = {};
     mockAgentState.hasActiveLoopForSession = () => false;
     mockSetActiveSession.mockImplementation((id: string | null) => {

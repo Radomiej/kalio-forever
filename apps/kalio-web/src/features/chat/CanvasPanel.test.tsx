@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CanvasPanel } from './CanvasPanel';
-import type { ChatMessage, ChatSession, ToolResult } from '@kalio/types';
+import type { ChatMessage, ChatSession, RuntimeActivitySnapshot, ToolResult } from '@kalio/types';
 import type { CLIChildProjection } from './cliChildProjection.model';
 import type { ArchitectureRunSummaryWithGraph } from './architectureChatSummary';
 
@@ -42,6 +42,8 @@ interface MockAgentState {
   pendingBudgetApprovals: Record<string, unknown>;
   queuedDepthBySession: Record<string, number>;
   sessionStatusSnapshots: Record<string, unknown>;
+  runtimeActivitySnapshots: Record<string, RuntimeActivitySnapshot>;
+  getRuntimeActivitySnapshot: (sessionId: string | null) => RuntimeActivitySnapshot | null;
   getToolActivitiesForSession: (sessionId: string | null) => MockAgentState['toolActivities'];
   hasActiveLoopForSession: (sessionId: string | null) => boolean;
 }
@@ -116,10 +118,24 @@ const agentState: MockAgentState = {
   pendingBudgetApprovals: {},
   queuedDepthBySession: {},
   sessionStatusSnapshots: {},
-  getToolActivitiesForSession: () => agentState.toolActivities,
-  hasActiveLoopForSession: (sessionId) => (
-    sessionId ? Object.values(agentState.activeAgentLoops).some((loop) => loop.sessionId === sessionId) : false
+  runtimeActivitySnapshots: {},
+  getRuntimeActivitySnapshot: (sessionId) => (
+    sessionId ? agentState.runtimeActivitySnapshots[sessionId] ?? null : null
   ),
+  getToolActivitiesForSession: () => agentState.toolActivities,
+  hasActiveLoopForSession: (sessionId) => {
+    if (!sessionId) return false;
+    if (Object.values(agentState.activeAgentLoops).some((loop) => loop.sessionId === sessionId)) {
+      return true;
+    }
+    const snapshot = agentState.runtimeActivitySnapshots[sessionId];
+    if (snapshot?.run?.status === 'active') {
+      return true;
+    }
+    return snapshot?.childExecutions.some((execution) => (
+      execution.status === 'running' || execution.status === 'waiting'
+    )) ?? false;
+  },
 };
 
 const sessionState: MockSessionState = {
@@ -254,6 +270,7 @@ describe('CanvasPanel subagent grouping', () => {
     agentState.pendingBudgetApprovals = {};
     agentState.queuedDepthBySession = {};
     agentState.sessionStatusSnapshots = {};
+    agentState.runtimeActivitySnapshots = {};
     sessionState.sessions = [
       { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
       { id: 'sub-session-1', personaId: 'default', title: 'Sub-agent: demo', kind: 'subagent', createdAt: 2, updatedAt: 2 },
@@ -343,6 +360,28 @@ describe('CanvasPanel subagent grouping', () => {
       { id: 'u1', sessionId: 'sub-session-1', role: 'user', content: 'build a page', createdAt: 1 },
       { id: 'a1', sessionId: 'sub-session-1', role: 'assistant', content: 'created index.html', createdAt: 2 },
     ];
+    agentState.runtimeActivitySnapshots = {
+      'session-1': {
+        sessionId: 'session-1',
+        active: true,
+        turnId: 'turn-1',
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [],
+        toolActivities: [],
+        childExecutions: [{
+          id: 'sub-runtime-1',
+          kind: 'subagent',
+          parentSessionId: 'session-1',
+          childSessionId: 'sub-session-1',
+          parentToolCallId: 'master-call',
+          label: 'Designer sub-agent',
+          status: 'running',
+          updatedAt: 2,
+        }],
+        updatedAt: 2,
+      },
+    };
 
     render(<CanvasPanel />);
 
@@ -361,6 +400,31 @@ describe('CanvasPanel subagent grouping', () => {
     agentState.isStreaming = false;
     sessionState.agentTurns = [{ id: 'turn-1', sessionId: 'session-1', done: false, items: [] }];
     sessionState.getSessionActiveTurnId = () => 'turn-1';
+    agentState.runtimeActivitySnapshots = {
+      'session-1': {
+        sessionId: 'session-1',
+        active: true,
+        turnId: 'turn-1',
+        queueLength: 0,
+        run: {
+          id: 'run-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          phase: 'tool_running',
+          status: 'active',
+          retryCount: 0,
+          safeResume: true,
+          startedAt: 100,
+          updatedAt: 200,
+          lastHeartbeatAt: 200,
+        },
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [],
+        toolActivities: [],
+        childExecutions: [],
+        updatedAt: 200,
+      },
+    };
 
     render(<CanvasPanel />);
 
@@ -1254,6 +1318,7 @@ describe('CanvasPanel CLI children section', () => {
     vi.clearAllMocks();
     agentState.toolActivities = [];
     agentState.activeAgentLoops = {};
+    agentState.runtimeActivitySnapshots = {};
     sessionState.messages = [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }];
     sessionState.sessionMessages = {
       'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'hello', createdAt: 1 }],

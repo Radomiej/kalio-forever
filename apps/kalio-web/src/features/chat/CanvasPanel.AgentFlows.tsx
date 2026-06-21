@@ -1,5 +1,5 @@
-import { BrainCircuit } from 'lucide-react';
-import type { ChatMessage, ChatSession, SubAgentFlowResult } from '@kalio/types';
+import { BrainCircuit, Loader2 } from 'lucide-react';
+import type { ChatMessage, ChatSession, RuntimeChildExecution, SubAgentFlowResult } from '@kalio/types';
 import type { ToolActivity } from '../../store/agentStore';
 import { SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
 import { extractSubAgentFlowResult } from './ToolCallBubble.parsers';
@@ -9,7 +9,9 @@ export interface AgentFlowCanvasPreview {
   sessionId: string;
   graphRunId: string;
   title: string;
-  result: SubAgentFlowResult;
+  result: SubAgentFlowResult | null;
+  status: RuntimeChildExecution['status'] | 'completed';
+  label: string;
   updatedAt: number;
 }
 
@@ -35,6 +37,8 @@ function previewFromResult(result: SubAgentFlowResult, sessions: ChatSession[]):
     graphRunId,
     title: session.title,
     result,
+    status: 'completed',
+    label: 'AgentFlow',
     updatedAt: session.updatedAt,
   };
 }
@@ -43,6 +47,7 @@ export function buildAgentFlowPreviews(
   messages: ChatMessage[],
   toolActivities: ToolActivity[],
   sessions: ChatSession[],
+  childExecutions: RuntimeChildExecution[] = [],
 ): AgentFlowCanvasPreview[] {
   const previews = new Map<string, AgentFlowCanvasPreview>();
 
@@ -63,6 +68,25 @@ export function buildAgentFlowPreviews(
       const preview = previewFromResult(result, sessions);
       if (!preview) return;
       previews.set(result.flowRunId, preview);
+    });
+
+  childExecutions
+    .filter((execution) => execution.kind === 'agent_flow' && execution.flowRunId)
+    .forEach((execution) => {
+      const session = sessions.find((item) => item.id === execution.childSessionId);
+      if (!session) {
+        return;
+      }
+      previews.set(execution.flowRunId!, {
+        flowRunId: execution.flowRunId!,
+        sessionId: execution.childSessionId,
+        graphRunId: execution.flowRunId!,
+        title: session.title,
+        result: previews.get(execution.flowRunId!)?.result ?? null,
+        status: execution.status,
+        label: execution.label ?? 'AgentFlow',
+        updatedAt: execution.updatedAt,
+      });
     });
 
   return [...previews.values()].sort((left, right) => right.updatedAt - left.updatedAt);
@@ -86,9 +110,21 @@ export function AgentFlowConversationCard({
       <div className="flex items-start gap-2">
         <BrainCircuit size={12} className="text-violet-300 mt-0.5 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="text-violet-200 truncate">AgentFlow</p>
+          <p className="text-violet-200 truncate">{preview.label}</p>
           <p className="text-base-content/55 truncate">{preview.title}</p>
         </div>
+        <span
+          className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] ${
+            preview.status === 'running' || preview.status === 'waiting'
+              ? 'border-info/30 bg-info/10 text-info'
+              : preview.status === 'failed' || preview.status === 'blocked' || preview.status === 'cancelled'
+                ? 'border-error/30 bg-error/10 text-error'
+                : 'border-success/25 bg-success/10 text-success'
+          }`}
+        >
+          {(preview.status === 'running' || preview.status === 'waiting') && <Loader2 size={10} className="animate-spin" />}
+          {preview.status}
+        </span>
         <button
           className="btn btn-ghost btn-xs"
           onClick={onOpenChat}
@@ -106,7 +142,7 @@ export function AgentFlowConversationCard({
           Graph
         </button>
       </div>
-      <SubAgentFlowResultBlock result={preview.result} />
+      {preview.result && <SubAgentFlowResultBlock result={preview.result} />}
     </div>
   );
 }

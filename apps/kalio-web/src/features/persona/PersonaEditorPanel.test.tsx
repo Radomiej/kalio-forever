@@ -4,10 +4,6 @@ import userEvent from '@testing-library/user-event';
 import type { Persona } from '@kalio/types';
 import { PersonaEditorPanel } from './PersonaEditorPanel';
 
-vi.mock('boring-avatars', () => ({
-  default: ({ name }: { name: string }) => <svg data-testid="boring-avatar">{name}</svg>,
-}));
-
 vi.mock('./PersonaToolPicker', () => ({
   PersonaToolPicker: () => <div data-testid="persona-tool-picker" />,
 }));

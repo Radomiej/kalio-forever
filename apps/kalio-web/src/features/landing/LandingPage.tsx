@@ -8,6 +8,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { getRAApps, getRAAppGroups } from '../../services/apiClient';
 import { createAndActivateEmptyHostSession } from '../chat/activeConversationSession';
 import { bucketCatalogApps } from '../raapp/catalog.utils';
+import { buildRAAppLaunchRuntimeContext } from '../raapp/raappLaunchRuntimeContext';
 
 interface TileItem {
   id: string;
@@ -43,7 +44,7 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
   const setMessages = useSessionStore((s) => s.setMessages);
   const setAgentTurns = useSessionStore((s) => s.setAgentTurns);
-  const setPendingMessage = useSessionStore((s) => s.setPendingMessage);
+  const setPendingRAAppLaunchIntent = useSessionStore((s) => s.setPendingRAAppLaunchIntent);
 
   useEffect(() => {
     Promise.all([
@@ -92,6 +93,7 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
       const session = await createAndActivateEmptyHostSession({
         personaId: 'ra-apps',
         title: tile.name,
+        runtimeContext: buildRAAppLaunchRuntimeContext(tile.id, tile.name, 'home_tile'),
         addSession,
         setActiveSession,
         setMessages,
@@ -102,12 +104,23 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
       const prompt = `Run the "${tile.name}" RA-App for me.${
         tile.description ? ` ${tile.description}` : ''
       } Launch it immediately.`;
-      setPendingMessage(prompt);
+      setPendingRAAppLaunchIntent({
+        targetSessionId: session.id,
+        appId: tile.id,
+        appName: tile.name,
+        personaId: 'ra-apps',
+        prompt,
+        source: 'home_tile',
+      });
+      if (onOpenSessionInChat) {
+        onOpenSessionInChat(session.id);
+        return;
+      }
       onNavigateToChat();
     } catch (err) {
       console.error('[Landing] failed to create session for tile', tile.id, err);
     }
-  }, [addSession, onNavigateToChat, setActiveSession, setAgentTurns, setMessages, setPendingMessage]);
+  }, [addSession, onNavigateToChat, onOpenSessionInChat, setActiveSession, setAgentTurns, setMessages, setPendingRAAppLaunchIntent]);
 
   const handleQuickChatSent = useCallback(() => {
     onNavigateToChat();

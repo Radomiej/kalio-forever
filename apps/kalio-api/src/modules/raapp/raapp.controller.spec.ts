@@ -92,6 +92,17 @@ describe('RAAppController', () => {
       expect(result.description).toBe('');
       expect(result.tags).toEqual([]);
     });
+
+    it('filters out apps without renderable catalog content', () => {
+      mockService.getAll.mockReturnValue([
+        makeApp({ id: 'good-app' }),
+        makeApp({ id: 'broken-app', htmlContent: null, guiContent: null }),
+      ]);
+
+      const result = controller.list();
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('good-app');
+    });
   });
 
   describe('getOne()', () => {
@@ -157,8 +168,15 @@ describe('RAAppController', () => {
 
   describe('listGroups()', () => {
     it('returns all groups from versioning service', () => {
-      const group = { slug: 'my-app', displayName: 'My App', currentVersion: null, draft: null, history: [] };
+      const group = {
+        slug: 'my-app',
+        name: 'My App',
+        source: 'user',
+        current: { meta: { id: 'my-app', name: 'My App', version: '1.0.0' } },
+        history: [],
+      };
       mockVersioningService.getGroups.mockReturnValue([group]);
+      mockService.getById.mockReturnValue(makeApp({ id: 'my-app' }));
       const result = controller.listGroups();
       expect(result).toHaveLength(1);
       expect(result[0].slug).toBe('my-app');
@@ -167,6 +185,37 @@ describe('RAAppController', () => {
     it('returns empty array when no groups', () => {
       mockVersioningService.getGroups.mockReturnValue([]);
       expect(controller.listGroups()).toEqual([]);
+    });
+
+    it('filters out groups whose current app has no renderable catalog content', () => {
+      const visibleGroup = {
+        slug: 'visible-app',
+        name: 'Visible App',
+        source: 'user',
+        current: { meta: { id: 'visible-app', name: 'Visible App', version: '1.0.0' } },
+        history: [],
+      };
+      const hiddenGroup = {
+        slug: 'broken-app',
+        name: 'Broken App',
+        source: 'user',
+        current: { meta: { id: 'broken-app', name: 'Broken App', version: '1.0.0' } },
+        history: [],
+      };
+      mockVersioningService.getGroups.mockReturnValue([visibleGroup, hiddenGroup]);
+      mockService.getById.mockImplementation((id: string) => {
+        if (id === 'visible-app') {
+          return makeApp({ id: 'visible-app' });
+        }
+        if (id === 'broken-app') {
+          return makeApp({ id: 'broken-app', htmlContent: null, guiContent: null });
+        }
+        return undefined;
+      });
+
+      const result = controller.listGroups();
+      expect(result).toHaveLength(1);
+      expect(result[0].slug).toBe('visible-app');
     });
   });
 

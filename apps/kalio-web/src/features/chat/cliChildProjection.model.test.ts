@@ -6,6 +6,7 @@ import {
   projectionFromToolResult,
   rebuildCLIChildProjectionsFromMessages,
   resolveCLIChildProjectionStatus,
+  selectCLIChildProjectionFromSources,
 } from './cliChildProjection.model';
 
 describe('cliChildProjection.model', () => {
@@ -184,6 +185,55 @@ describe('cliChildProjection.model', () => {
       childSessionId: 'cli-child-1',
       status: 'stopped',
       lastOutput: 'CLI agent stopped.',
+    });
+  });
+
+  it('prefers runtime child execution status while preserving stored metadata fallbacks', () => {
+    const projection = selectCLIChildProjectionFromSources({
+      runtimeActivitySnapshots: {
+        'parent-1': {
+          sessionId: 'parent-1',
+          active: true,
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [{
+            id: 'child-exec-1',
+            kind: 'cli_agent',
+            parentSessionId: 'parent-1',
+            childSessionId: 'cli-child-1',
+            parentToolCallId: 'call-1',
+            label: 'copilot',
+            status: 'running',
+            lastOutput: 'runtime tail',
+            updatedAt: 1,
+          }],
+          updatedAt: 1,
+        },
+      },
+      cliChildProjections: {
+        'cli-child-1': {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'parent-1',
+          parentCallId: 'call-1',
+          agentId: 'codex',
+          status: 'failed',
+          lastOutput: 'stored tail',
+          childTitle: 'codex CLI',
+          toolName: 'spawn_cli_agent',
+        },
+      },
+      parentCallId: 'call-1',
+    });
+
+    expect(projection).toMatchObject({
+      childSessionId: 'cli-child-1',
+      agentId: 'codex',
+      status: 'running',
+      lastOutput: 'runtime tail',
+      childTitle: 'codex CLI',
+      toolName: 'spawn_cli_agent',
     });
   });
 });

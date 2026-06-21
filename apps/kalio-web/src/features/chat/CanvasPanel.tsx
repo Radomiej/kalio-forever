@@ -19,6 +19,12 @@ import { SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
 import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
 import { resolveLiveTurnState } from './liveTurnState';
 import { activateConversationSession } from './activeConversationSession';
+import {
+  mergeRuntimeQueuedDepthBySession,
+  mergeRuntimeSessionStatusSnapshots,
+  selectLiveSessionIds,
+  selectQueuedDepth,
+} from '../../store/agentRuntimeSelectors';
 
 function architectureRunIdForSession(session: ChatSession): string | null {
   const parentToolCallId = session.parentToolCallId ?? session.runtimeContext?.parentToolCallId;
@@ -42,17 +48,17 @@ function architectureRunIdForSession(session: ChatSession): string | null {
 
 export function CanvasPanel() {
   const {
-    toolActivities,
     canvasOpen,
     canvasFocus,
     setCanvasFocus,
     toggleCanvas,
-    activeAgentLoops,
     cliChildProjections,
     pendingConfirmations,
     pendingBudgetApprovals,
     queuedDepthBySession,
     sessionStatusSnapshots,
+    runtimeActivitySnapshots,
+    getRuntimeActivitySnapshot,
     getToolActivitiesForSession,
     hasActiveLoopForSession,
   } = useAgentStore();
@@ -76,24 +82,26 @@ export function CanvasPanel() {
     () => new Set(sessions.map((session) => session.id)),
     [sessions],
   );
-  const subagentLoops = Object.values(activeAgentLoops).filter((loop) => loop.agentRun?.agentType === 'subagent');
-  const masterActivities = toolActivities.filter((activity) => activity.agentRun?.agentType !== 'subagent');
-  const subagentActivities = toolActivities.filter((activity) => activity.agentRun?.agentType === 'subagent');
+  const activeRuntimeSnapshot = getRuntimeActivitySnapshot(activeSessionId);
+  const activeSessionToolActivities = getToolActivitiesForSession(activeSessionId);
+  const activeChildExecutions = activeRuntimeSnapshot?.childExecutions ?? [];
+  const masterActivities = activeSessionToolActivities.filter((activity) => activity.agentRun?.agentType !== 'subagent');
+  const subagentActivities = activeSessionToolActivities.filter((activity) => activity.agentRun?.agentType === 'subagent');
   const subagentPreviews = useMemo(
-    () => buildSubagentPreviews(messages, toolActivities, activeAgentLoops, sessions),
-    [activeAgentLoops, messages, sessions, toolActivities],
+    () => buildSubagentPreviews(messages, activeSessionToolActivities, sessions, activeChildExecutions),
+    [activeChildExecutions, activeSessionToolActivities, messages, sessions],
   );
   const agentFlowPreviews = useMemo(
-    () => buildAgentFlowPreviews(messages, toolActivities, sessions),
-    [messages, sessions, toolActivities],
+    () => buildAgentFlowPreviews(messages, activeSessionToolActivities, sessions, activeChildExecutions),
+    [activeChildExecutions, activeSessionToolActivities, messages, sessions],
   );
   const sessionTitleMap = useMemo(
     () => new Map(sessions.map((session) => [session.id, session.title])),
     [sessions],
   );
   const cliChildPreviews = useMemo(
-    () => buildCliChildPreviews(activeSessionId, cliChildProjections, sessionTitleMap),
-    [activeSessionId, cliChildProjections, sessionTitleMap],
+    () => buildCliChildPreviews(activeSessionId, cliChildProjections, activeChildExecutions, sessionTitleMap),
+    [activeChildExecutions, activeSessionId, cliChildProjections, sessionTitleMap],
   );
   const architectureRun = useMemo(
     () => findArchitectureRunInMessages(messages),
@@ -111,24 +119,35 @@ export function CanvasPanel() {
     );
   }, [architectureRun, sessions]);
   const openableArchitectureBranchSessionIds = useMemo(() => {
-    const activeLoopSessionIds = new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId));
+    const effectiveQueuedDepthBySession = mergeRuntimeQueuedDepthBySession(
+      queuedDepthBySession,
+      runtimeActivitySnapshots,
+    );
+    const effectiveSessionStatusSnapshots = mergeRuntimeSessionStatusSnapshots(
+      sessionStatusSnapshots,
+      runtimeActivitySnapshots,
+    );
+    const liveSessionIds = selectLiveSessionIds({
+      sessionStatusSnapshots,
+      runtimeActivitySnapshots,
+    });
     const { renderableSessions } = filterRenderableSessions(
       sessions,
       sessionMessages ?? {},
       {
         pendingConfirmations,
         pendingBudgetApprovals,
-        activeLoopSessionIds,
-        queuedDepthBySession: queuedDepthBySession ?? {},
-        sessionStatusSnapshots: sessionStatusSnapshots ?? {},
+        activeLoopSessionIds: liveSessionIds,
+        queuedDepthBySession: effectiveQueuedDepthBySession,
+        sessionStatusSnapshots: effectiveSessionStatusSnapshots,
       },
     );
     return new Set(renderableSessions.map((session) => session.id));
   }, [
-    activeAgentLoops,
     pendingBudgetApprovals,
     pendingConfirmations,
     queuedDepthBySession,
+    runtimeActivitySnapshots,
     sessionMessages,
     sessionStatusSnapshots,
     sessions,
@@ -163,14 +182,14 @@ export function CanvasPanel() {
   const identifiedChildPreviewSessionIdsRef = useRef<Set<string>>(new Set());
   const previewToolCallIds = useMemo(
     () => new Set(
-      toolActivities
+      activeSessionToolActivities
         .filter((activity) => (
           (activity.toolName === 'run_subagent' || activity.toolName === 'run_sub_agentflow')
           && activity.result?.status === 'success'
         ))
         .map((activity) => activity.callId),
     ),
-    [toolActivities],
+    [activeSessionToolActivities],
   );
   const activeSessionLiveTurn = resolveLiveTurnState({
     sessionId: activeSessionId,
@@ -181,7 +200,11 @@ export function CanvasPanel() {
     streamingSessionId: null,
     awaitingFirstChunk: false,
     hasActiveLoop: hasActiveLoopForSession(activeSessionId),
-    queuedDepth: activeSessionId ? (queuedDepthBySession[activeSessionId] ?? 0) : 0,
+    queuedDepth: selectQueuedDepth({
+      sessionId: activeSessionId,
+      queuedDepthBySession,
+      runtimeActivitySnapshots,
+    }),
     activeToolActivities: getToolActivitiesForSession(activeSessionId),
     streamingChunks,
     thinkingChunks,
@@ -196,7 +219,6 @@ export function CanvasPanel() {
   const showToggle = hasActiveSessionLiveTurn
     || visibleMasterActivities.length > 0
     || subagentActivities.length > 0
-    || subagentLoops.length > 0
     || visibleSubagentPreviews.length > 0
     || cliChildPreviews.length > 0
     || agentFlowPreviews.length > 0

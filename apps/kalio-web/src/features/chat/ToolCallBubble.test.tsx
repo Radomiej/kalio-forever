@@ -11,6 +11,7 @@ import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
 import { HistoryToolCallBubble, LiveToolCallBubble } from './ToolCallBubble';
 import type { ToolActivity } from '../../store/agentStore';
 import { useAgentStore } from '../../store/agentStore';
+import { useSessionStore } from '../../store/sessionStore';
 import { apiClient } from '../../services/apiClient';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -42,6 +43,14 @@ const GUI_TOOL_RESULT = JSON.stringify({
 });
 
 const NON_RAAPP_RESULT = JSON.stringify({ status: 'ok', items: [] });
+const realSessionActions = {
+  setActiveSession: useSessionStore.getState().setActiveSession,
+  setPendingMessage: useSessionStore.getState().setPendingMessage,
+};
+const realCanvasActions = {
+  setCanvasOpen: useAgentStore.getState().setCanvasOpen,
+  setCanvasFocus: useAgentStore.getState().setCanvasFocus,
+};
 
 function makeActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
   return {
@@ -57,6 +66,21 @@ function makeActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
 beforeEach(() => {
   vi.mocked(apiClient.get).mockReset();
   vi.mocked(apiClient.get).mockRejectedValue(new Error('unexpected apiClient.get call'));
+  useSessionStore.setState({
+    activeSessionId: null,
+    sessions: [],
+    setActiveSession: realSessionActions.setActiveSession,
+    setPendingMessage: realSessionActions.setPendingMessage,
+  });
+  useAgentStore.setState({
+    runtimeActivitySnapshots: {},
+    cliChildProjections: {},
+    cliAgentOutput: {},
+    canvasOpen: false,
+    canvasFocus: null,
+    setCanvasOpen: realCanvasActions.setCanvasOpen,
+    setCanvasFocus: realCanvasActions.setCanvasFocus,
+  });
 });
 
 // ── LiveToolCallBubble tests ──────────────────────────────────────────────────
@@ -179,11 +203,102 @@ describe('LiveToolCallBubble — status indicator only (no widget)', () => {
     expect(screen.queryByText(/"childSessionId": "cli-child-1"/)).not.toBeInTheDocument();
     expect(screen.queryByText('spawn_cli_agent')).not.toBeInTheDocument();
   });
+
+  it('uses runtime child executions as the primary live CLI card source when no stored projection exists', () => {
+    useAgentStore.setState({
+      runtimeActivitySnapshots: {
+        'session-1': {
+          sessionId: 'session-1',
+          active: true,
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [{
+            id: 'child-exec-1',
+            kind: 'cli_agent',
+            parentSessionId: 'session-1',
+            childSessionId: 'cli-child-runtime',
+            parentToolCallId: 'call-cli-runtime',
+            label: 'codex',
+            status: 'running',
+            lastOutput: 'runtime output',
+            updatedAt: 1,
+          }],
+          updatedAt: 1,
+        },
+      },
+      cliChildProjections: {},
+      cliAgentOutput: {},
+    });
+    useSessionStore.setState({
+      activeSessionId: 'session-1',
+      sessions: [{
+        id: 'cli-child-runtime',
+        personaId: 'default',
+        title: 'codex CLI',
+        kind: 'cli-agent',
+        parentSessionId: 'session-1',
+        parentToolCallId: 'call-cli-runtime',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    });
+
+    render(<LiveToolCallBubble activity={makeActivity({
+      callId: 'call-cli-runtime',
+      toolName: 'spawn_cli_agent',
+      args: { prompt: 'Inspect the repository', agentId: 'codex' },
+      status: 'running',
+    })} />);
+
+    expect(screen.getByTestId('cli-child-card-cli-child-runtime')).toBeInTheDocument();
+    expect(screen.getByTestId('cli-child-status-cli-child-runtime')).toHaveTextContent('running');
+    expect(screen.getByTestId('cli-child-output-cli-child-runtime')).toHaveTextContent('runtime output');
+    expect(screen.queryByText('spawn_cli_agent')).not.toBeInTheDocument();
+  });
 });
 
 // ── HistoryToolCallBubble args display ────────────────────────────────────────
 
 describe('HistoryToolCallBubble — tool input args display', () => {
+  it('REGRESSION: run_sub_agentflow result opens child chat and graph focus from the same bubble', () => {
+    useSessionStore.setState({
+      activeSessionId: 'parent-session',
+      sessions: [
+        { id: 'parent-session', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 1 },
+        { id: 'flow-child-1', personaId: 'default', title: 'Goal Master', createdAt: 1, updatedAt: 1 },
+      ],
+    });
+    useAgentStore.setState({ canvasOpen: false, canvasFocus: null });
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_sub_agentflow"
+        content={JSON.stringify({
+          flowRunId: 'flow-run-1',
+          parentSessionId: 'parent-session',
+          parentToolCallId: 'call-flow-1',
+          childSessionId: 'flow-child-1',
+          openChatSessionId: 'flow-child-1',
+          openGraphRunId: 'flow-run-1',
+          status: 'done',
+          summary: 'Goal Master accepted the result.',
+          decisions: [],
+          nextActions: [],
+          artifacts: [],
+          tracePreview: [],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('open-agentflow-chat'));
+
+    expect(useSessionStore.getState().activeSessionId).toBe('flow-child-1');
+    expect(useAgentStore.getState().canvasOpen).toBe(true);
+    expect(useAgentStore.getState().canvasFocus).toEqual({ kind: 'architecture-run', runId: 'flow-run-1' });
+  });
+
   it('shows the target path for history VFS reads in the collapsed chip', () => {
     render(
       <HistoryToolCallBubble

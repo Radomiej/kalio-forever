@@ -199,10 +199,13 @@ test.describe('Architecture chat turn projection', () => {
       const childToggle = page.getByTestId(`toggle-session-children-${session.id}`);
       if (await childToggle.count() > 0) {
         const visibleSessionCountBeforeExpand = await page.getByTestId('session-item').count();
-        await childToggle.click();
-        await expect
-          .poll(async () => page.getByTestId('session-item').count(), { timeout: 10_000 })
-          .toBeGreaterThanOrEqual(visibleSessionCountBeforeExpand);
+        const alreadyExpanded = visibleSessionCountBeforeExpand > 1;
+        if (!alreadyExpanded) {
+          await childToggle.click();
+          await expect
+            .poll(async () => page.getByTestId('session-item').count(), { timeout: 10_000 })
+            .toBeGreaterThanOrEqual(visibleSessionCountBeforeExpand + 1);
+        }
       }
 
       await page.getByTestId('session-origin-filter-trigger').click();
@@ -229,10 +232,12 @@ test.describe('Architecture chat turn projection', () => {
       const screenshotPath = testInfo.outputPath('architecture-sidebar-children-proof.png');
       await page.screenshot({ path: screenshotPath, fullPage: true });
 
-      const firstTimelineBranch = page.locator('[data-testid="architecture-route-agent"][data-session-id]').first();
-      const timelineChildSessionId = await firstTimelineBranch.getAttribute('data-session-id');
-      if (!timelineChildSessionId) throw new Error('Missing child session id on inline architecture timeline branch');
-      await firstTimelineBranch.click();
+      const timelineChildSessionId = branchSessionIds[0];
+      expect(timelineChildSessionId).toBeTruthy();
+      if (!timelineChildSessionId) {
+        throw new Error('Missing child session id for architecture branch proof');
+      }
+      await page.getByTestId(`architecture-open-branch-${timelineChildSessionId}`).first().click();
       await expect(page.getByTestId('canvas-focus-section')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('canvas-focus-section')).toContainText(timelineChildSessionId);
       await expect(page.getByTestId('canvas-focus-section')).toContainText('Architecture: Strategic Decision Council v0.1.0', { timeout: 10_000 });

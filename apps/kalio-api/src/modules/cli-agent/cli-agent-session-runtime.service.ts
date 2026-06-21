@@ -213,7 +213,7 @@ export class CLIAgentSessionRuntimeService {
     const callId = `cli-run-${nanoid()}`;
     const turnId = `cli-turn-${callId}`;
     const promptForAgent = appendAcceptanceInstructions(params.prompt, params.acceptanceHints);
-    const effectivePrompt = this.buildPromptFromHistory(params.history, promptForAgent);
+    const effectivePrompt = this.buildPromptFromHistory(params.history, promptForAgent, params.workdir);
 
     await this.sessions.persistUserMessage(params.childSessionId, params.prompt);
     await this.sessions.persistAssistantToolCallMessage(params.childSessionId, callId, {
@@ -620,7 +620,11 @@ export class CLIAgentSessionRuntimeService {
     }
   }
 
-  private buildPromptFromHistory(history: ChatMessage[], nextPrompt: string): string {
+  private buildPromptFromHistory(history: ChatMessage[], nextPrompt: string, workdir: string): string {
+    const workdirContext = [
+      `Working directory: ${workdir}`,
+      'Treat this directory as the default scope for file reads, searches, edits, and commands unless the instruction explicitly narrows it.',
+    ].join('\n');
     const visibleHistory = history
       .filter((message) => message.role !== 'system')
       .slice(-HISTORY_MESSAGE_LIMIT)
@@ -628,11 +632,12 @@ export class CLIAgentSessionRuntimeService {
       .filter((message): message is string => message !== null);
 
     if (visibleHistory.length === 0) {
-      return nextPrompt;
+      return [workdirContext, nextPrompt].join('\n\n');
     }
 
     return [
       'You are continuing an existing Kalio CLI child session. The repository state may already reflect earlier work.',
+      workdirContext,
       'Recent session history:',
       ...visibleHistory,
       `New instruction: ${nextPrompt}`,

@@ -25,6 +25,11 @@ vi.mock('../../services/apiClient', () => ({
 }));
 
 const setPendingMessage = vi.fn();
+const setPendingRAAppLaunchIntent = vi.fn();
+const addSession = vi.fn();
+const setActiveSession = vi.fn();
+const setMessages = vi.fn();
+const setAgentTurns = vi.fn();
 
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: Object.assign(
@@ -32,16 +37,33 @@ vi.mock('../../store/sessionStore', () => ({
       selector: (state: {
         activeSessionId: string;
         messages: Array<{ id: string; role: string; content: string }>;
+        addSession: typeof addSession;
+        setActiveSession: typeof setActiveSession;
+        setMessages: typeof setMessages;
+        setAgentTurns: typeof setAgentTurns;
+        setPendingMessage: typeof setPendingMessage;
+        setPendingRAAppLaunchIntent: typeof setPendingRAAppLaunchIntent;
       }) => unknown,
     ) => selector({
       activeSessionId: 'session-1',
       messages: [],
+      addSession,
+      setActiveSession,
+      setMessages,
+      setAgentTurns,
+      setPendingMessage,
+      setPendingRAAppLaunchIntent,
     }),
     {
       getState: () => ({
         activeSessionId: 'session-1',
         messages: [],
+        addSession,
+        setActiveSession,
+        setMessages,
+        setAgentTurns,
         setPendingMessage,
+        setPendingRAAppLaunchIntent,
       }),
     },
   ),

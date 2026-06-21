@@ -4,10 +4,11 @@
  */
 import { Play } from 'lucide-react';
 import type { RAAppSummary } from '@kalio/types';
+import type { CatalogRunTarget } from '../RAAppManager.Views';
 
 export interface RAAppCoreCardProps {
   app: RAAppSummary;
-  onRun: (name: string) => void;
+  onRun: (target: CatalogRunTarget) => void;
 }
 
 export function RAAppCoreCard({ app, onRun }: RAAppCoreCardProps) {
@@ -36,7 +37,7 @@ export function RAAppCoreCard({ app, onRun }: RAAppCoreCardProps) {
       <div className="pt-1 border-t border-base-300">
         <button
           className="btn btn-xs btn-primary w-full gap-1"
-          onClick={() => onRun(app.name)}
+          onClick={() => onRun({ id: app.id, name: app.name, description: app.description })}
           data-testid={`raapp-catalog-run-${app.id}`}
         >
           <Play size={10} />

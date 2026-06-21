@@ -3,13 +3,12 @@ import type { MutableRefObject } from 'react';
 import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
-import { eventBus } from '../../../services/eventBus';
+import { identifyWatchedSession } from '../../../services/sessionWatchRegistry';
 import { buildCallIdToNameFromMessages, buildTurnsFromHistory } from '../chatUtils';
 import { rebuildCLIChildProjectionsFromMessages } from '../cliChildProjection.model';
 import { hydrateActiveConversationSession } from '../activeConversationSession';
 import {
-  materializeLiveTurnFromSessionStatusSnapshot,
-  selectReplayableSessionStatusSnapshot,
+  materializeLiveTurnFromHydratedRuntimeState,
 } from './useChatSocketEvents.helpers';
 
 interface UseChatSessionActivationParams {
@@ -22,6 +21,20 @@ interface UseChatSessionActivationParams {
   updateAgentTurn: (turnId: string, patch: Partial<{ promptMessageId: string }>, sessionId?: string | null) => void;
 }
 
+function buildDeterministicRaAppLaunchPrompt(launchIntent: {
+  appId: string;
+  prompt: string;
+}): string {
+  const basePrompt = launchIntent.prompt.trim();
+  const exactRunInstruction =
+    `Use run_raapp with the exact id "${launchIntent.appId}" now. ` +
+    'Do not choose a different RA-App id unless this exact id is missing.';
+
+  return basePrompt.length > 0
+    ? `${basePrompt}\n\n${exactRunInstruction}`
+    : exactRunInstruction;
+}
+
 export function useChatSessionActivation({
   activeSessionId,
   clearToolActivities,
@@ -31,6 +44,9 @@ export function useChatSessionActivation({
   setPendingConfirmation,
   updateAgentTurn,
 }: UseChatSessionActivationParams) {
+  const pendingMessage = useSessionStore((state) => state.pendingMessage);
+  const pendingRAAppLaunchIntent = useSessionStore((state) => state.pendingRAAppLaunchIntent);
+
   useEffect(() => {
     if (!activeSessionId) return;
 
@@ -71,7 +87,7 @@ export function useChatSessionActivation({
         const knownSessionIds = new Set(useSessionStore.getState().sessions.map((session) => session.id));
         projections.forEach((projection) => {
           if (!knownSessionIds.has(projection.childSessionId) && projection.childSessionId !== activeSessionId) {
-            eventBus.identifySession(projection.childSessionId);
+            identifyWatchedSession(projection.childSessionId, 'session-activation-child', { sticky: true });
           }
         });
         const currentTurns = useSessionStore.getState().getSessionAgentTurns(activeSessionId);
@@ -100,11 +116,12 @@ export function useChatSessionActivation({
           );
         }
         const agentState = useAgentStore.getState();
-        materializeLiveTurnFromSessionStatusSnapshot(
-          selectReplayableSessionStatusSnapshot(
-            agentState.consumeBufferedSessionStatusSnapshots(activeSessionId),
-            agentState.sessionStatusSnapshots[activeSessionId],
-          ),
+        materializeLiveTurnFromHydratedRuntimeState(
+          {
+            runtimeSnapshot: agentState.getRuntimeActivitySnapshot(activeSessionId),
+            bufferedSessionStatusSnapshots: agentState.consumeBufferedSessionStatusSnapshots(activeSessionId),
+            latestSessionStatusSnapshot: agentState.sessionStatusSnapshots[activeSessionId],
+          },
           {
             hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
             getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
@@ -116,21 +133,27 @@ export function useChatSessionActivation({
       .catch((err: unknown) => {
         console.error('[ChatInterface] failed to load message history', err instanceof Error ? err : new Error(String(err)));
       });
+  }, [activeSessionId, clearToolActivities, setAgentTurns, setMessages, setPendingConfirmation, updateAgentTurn]);
+
+  useEffect(() => {
+    if (!activeSessionId) return;
 
     const {
-      pendingMessage,
-      pendingRAAppId,
       setPendingMessage,
-      setPendingRAAppId,
+      setPendingRAAppLaunchIntent,
       sessions,
     } = useSessionStore.getState();
-    const toSend = pendingMessage
-      ?? (pendingRAAppId ? `Use the ${sessions.find((session) => session.id === activeSessionId)?.title ?? pendingRAAppId} tool` : null);
+    const launchIntent = pendingRAAppLaunchIntent?.targetSessionId === activeSessionId
+      ? pendingRAAppLaunchIntent
+      : null;
+    const toSend = launchIntent
+      ? buildDeterministicRaAppLaunchPrompt(launchIntent)
+      : pendingMessage;
     if (!toSend) return;
 
     setPendingMessage(null);
-    setPendingRAAppId(null);
+    setPendingRAAppLaunchIntent(null);
     const pendingSession = sessions.find((session) => session.id === activeSessionId);
-    handleSendRef.current(toSend, pendingSession?.personaId ?? 'default');
-  }, [activeSessionId, clearToolActivities, handleSendRef, setAgentTurns, setMessages, setPendingConfirmation, updateAgentTurn]);
+    handleSendRef.current(toSend, launchIntent?.personaId ?? pendingSession?.personaId ?? 'default');
+  }, [activeSessionId, handleSendRef, pendingMessage, pendingRAAppLaunchIntent]);
 }

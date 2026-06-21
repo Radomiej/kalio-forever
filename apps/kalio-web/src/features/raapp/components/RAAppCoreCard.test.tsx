@@ -36,6 +36,10 @@ describe('RAAppCoreCard', () => {
     fireEvent.click(screen.getByTestId('raapp-catalog-run-generated-cats'));
 
     expect(onRun).toHaveBeenCalledTimes(1);
-    expect(onRun).toHaveBeenCalledWith('Koci Dashboard');
+    expect(onRun).toHaveBeenCalledWith({
+      id: 'generated-cats',
+      name: 'Koci Dashboard',
+      description: 'Opis aplikacji o kotach',
+    });
   });
 });

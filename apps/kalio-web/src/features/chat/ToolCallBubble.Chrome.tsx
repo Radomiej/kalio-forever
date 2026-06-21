@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { AlertTriangle, ChevronDown } from 'lucide-react';
 import type { ToolActivity } from '../../store/agentStore';
 import { useAgentStore } from '../../store/agentStore';
+import { selectPendingConfirmationByToolCallId } from '../../store/agentRuntimeSelectors';
 import { eventBus } from '../../services/eventBus';
 import { getToolTargetLabel } from './toolTargetLabel';
 
@@ -83,9 +84,12 @@ export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity 
   const [argsOpen, setArgsOpen] = useState(false);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const toolArgProgress = useAgentStore((s) => s.toolArgProgress);
-  const setPendingConfirmation = useAgentStore((s) => s.setPendingConfirmation);
+  const removePendingConfirmation = useAgentStore((s) => s.removePendingConfirmation);
   const updateToolActivity = useAgentStore((s) => s.updateToolActivity);
-  const confirmation = Object.values(pendingConfirmations).find((pending) => pending.toolCallId === activity.callId);
+  const confirmation = selectPendingConfirmationByToolCallId({
+    toolCallId: activity.callId,
+    pendingConfirmations,
+  });
   const matchingToolProgress = toolArgProgress?.toolName === activity.toolName ? toolArgProgress : null;
 
   const isMatch = confirmation != null;
@@ -100,14 +104,14 @@ export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity 
     if (!confirmation) return;
     updateToolActivity(activity.callId, { status: 'running', startedAt: Date.now() });
     eventBus.confirmTool({ requestId: confirmation.requestId, sessionId: confirmation.sessionId });
-    setPendingConfirmation(confirmation.sessionId, null);
+    removePendingConfirmation(confirmation.sessionId, confirmation.requestId);
   };
 
   const handleCancel = () => {
     if (!confirmation) return;
     updateToolActivity(activity.callId, { status: 'cancelled', finishedAt: Date.now() });
     eventBus.cancelTool({ requestId: confirmation.requestId, sessionId: confirmation.sessionId });
-    setPendingConfirmation(confirmation.sessionId, null);
+    removePendingConfirmation(confirmation.sessionId, confirmation.requestId);
   };
 
   return (

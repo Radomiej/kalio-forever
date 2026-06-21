@@ -18,6 +18,7 @@ import type { Response } from 'express';
 import type { RAAppSummary, RAAppGroup } from '@kalio/types';
 import { RAAppService } from './raapp.service';
 import { RAAppVersioningService, RAAPP_RELEASE_NOT_FOUND_CODE, deriveSlug } from './raapp-versioning.service';
+import type { LoadedRAApp } from './raapp.service';
 
 @Controller('ra-apps')
 export class RAAppController {
@@ -28,7 +29,9 @@ export class RAAppController {
 
   @Get()
   list(): RAAppSummary[] {
-    return this.raAppService.getAll().map((app) => ({
+    return this.raAppService.getAll()
+      .filter((app) => hasRenderableCatalogContent(app))
+      .map((app) => ({
       id: app.id,
       name: app.meta.name,
       description: app.meta.description ?? '',
@@ -48,7 +51,10 @@ export class RAAppController {
 
   @Get('groups')
   listGroups(): RAAppGroup[] {
-    return this.versioningService.getGroups();
+    return this.versioningService.getGroups().filter((group) => {
+      const currentApp = this.raAppService.getById(group.current.meta.id);
+      return hasRenderableCatalogContent(currentApp);
+    });
   }
 
   @Get('groups/:slug')
@@ -191,4 +197,8 @@ export class RAAppController {
     if (!body?.name) throw new BadRequestException('name is required');
     return { slug: deriveSlug(body.name) };
   }
+}
+
+function hasRenderableCatalogContent(app: LoadedRAApp | null | undefined): boolean {
+  return Boolean(app && (app.htmlContent || app.guiContent));
 }

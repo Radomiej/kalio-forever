@@ -7,7 +7,7 @@ export interface GraphNodeMetadataItem {
   tone: 'default' | 'accent' | 'warning';
 }
 
-type GraphNodePresentationInput = Pick<ExecutionGraphNode, 'kind' | 'title' | 'subtitle' | 'detail' | 'payload' | 'column'>;
+type GraphNodePresentationInput = Pick<ExecutionGraphNode, 'kind' | 'title' | 'subtitle' | 'detail' | 'payload' | 'column' | 'status'>;
 
 interface GraphNodeSizingProfile {
   baseHeight: number;
@@ -364,7 +364,7 @@ export function getGraphNodeMetadata(node: GraphNodePresentationInput): GraphNod
         items.push({ label: 'Model', value: node.payload.modelLabel, tone: 'accent' });
       }
 
-      items.push({ label: 'VFS', value: node.payload.result.vfsMode, tone: 'default' });
+      items.push({ label: 'VFS', value: node.payload.result?.vfsMode ?? 'live runtime', tone: 'default' });
       items.push({ label: 'Files', value: String(node.payload.copiedFiles.length), tone: 'default' });
 
       return items;
@@ -388,9 +388,13 @@ export function getGraphNodeMetadata(node: GraphNodePresentationInput): GraphNod
     }
     case 'agent-flow':
       return [
-        { label: 'Status', value: node.payload.result.status, tone: node.payload.result.status === 'running' ? 'warning' : 'accent' },
+        {
+          label: 'Status',
+          value: node.payload.result?.status ?? (node.status === 'running' ? 'running' : node.status === 'success' ? 'done' : 'live runtime'),
+          tone: node.payload.result?.status === 'running' || node.status === 'running' ? 'warning' : 'accent',
+        },
         { label: 'Graph', value: node.payload.graphRunId, tone: 'accent' },
-        { label: 'Events', value: String(node.payload.result.tracePreview?.length ?? 0), tone: 'default' },
+        { label: 'Events', value: String(node.payload.result?.tracePreview?.length ?? 0), tone: 'default' },
       ];
     case 'tool-result':
       return [

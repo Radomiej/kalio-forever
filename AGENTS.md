@@ -185,6 +185,11 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - Native tool classes should stay thin; domain logic belongs in services, not in tool handlers.
 - Error handling pattern: Never use empty catch. Always log errors with context and rethrow or handle explicitly.
 - Testing pattern and framework: Vitest for unit/integration, Playwright for E2E. Mock LLM with `MockLLMProvider` in tests.
+- Backend is the durable runtime source of truth; frontend state for chat/appflow/runtime must stay rebuildable from backend snapshots after F5/reconnect.
+- Prefer extending shared runtime contracts and selectors over adding panel-local state channels, duplicated truth maps, or one-off socket event handling.
+- Treat CLI agents, subagents, and AgentFlow children as one child-execution model whenever the UI/runtime needs shared lifecycle handling.
+- For chat/appflow changes, verify FE-first parity across Talk, Session Panel, Canvas, and Execution Graph instead of proving behavior only through API polling.
+- For architecture/runtime work, load `kalio-architecture-runtime-guard`; keep the repo copy aligned at `docs/agent-skills/kalio-architecture-runtime-guard.md`.
 - For critical architecture/runtime work, keep bug-hunter agents running by default: two backend-focused hunters, one frontend-focused hunter, plus one coverage guardian tracking meaningful 80%+ FE/BE coverage. Scope them to disjoint files, require real regression evidence, and do not accept coverage-only or mock-only tests that miss user-visible behavior.
 - **File size hard limit: 500 LOC.** Any file approaching this must be split before adding more code.
   - React components: extract sub-components to co-located files (`ComponentName.SubPart.tsx` or `components/` subfolder)
@@ -237,6 +242,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - On Windows, always use system Node (`C:\Program Files\nodejs\node.exe`) for `node`/`pnpm`/`npm` installs and rebuilds; never Cursor's bundled Node 22 — prepend that directory to PATH when the agent shell resolves the wrong `node`.
 - Keep `docs/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/post-mvp-plans.md`.
 - Whenever a compatibility fallback is added, include a `TODO: legacy fallback` code comment with the reason.
+- For architecture/runtime/appflow changes, prove reconnect/F5 hydration, stop/follow-up drain, queue state, and child-session visibility from the FE before calling the slice release-ready.
 
 ---
 

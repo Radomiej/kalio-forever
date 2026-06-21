@@ -39,6 +39,7 @@ describe('ChatGateway', () => {
     pipeline = {
       submit: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
+      stopAndDrain: vi.fn().mockResolvedValue(undefined),
       abortAll: vi.fn(),
       getSessionStatus: vi.fn().mockReturnValue({ sessionId: 'session-1', active: false, queueLength: 0 }),
       getSessionStatusWithRun: vi.fn().mockResolvedValue({ sessionId: 'session-1', active: false, queueLength: 0 }),
@@ -174,7 +175,43 @@ describe('ChatGateway', () => {
 
     await gateway.handleChatStop(client as never, { sessionId: 'child-session' });
 
-    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('child-session');
+    expect((pipeline.stopAndDrain as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('child-session');
+  });
+
+  it('REGRESSION: chat:stop drains the root and descendant sessions before reporting terminal status', async () => {
+    (sessions.listChildren as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([{ id: 'child-session' }])
+      .mockResolvedValueOnce([]);
+
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+
+    expect(pipeline.stopAndDrain).toHaveBeenCalledWith('session-1');
+    expect(pipeline.stopAndDrain).toHaveBeenCalledWith('child-session');
+    expect(pipeline.stop).not.toHaveBeenCalled();
+    expect(client.emit).toHaveBeenCalledWith(
+      'session:runtime_snapshot',
+      expect.objectContaining({
+        sessionId: 'session-1',
+        active: false,
+      }),
+    );
+  });
+
+  it('uses one collected session tree during chat:stop instead of rebuilding descendants per snapshot', async () => {
+    (sessions.listChildren as ReturnType<typeof vi.fn>)
+      .mockImplementation(async (sessionId: string) => (
+        sessionId === 'session-1' ? [{ id: 'child-session' }] : []
+      ));
+    (pipeline.getSessionStatusWithRun as ReturnType<typeof vi.fn>).mockImplementation(async (sessionId: string) => ({
+      sessionId,
+      active: false,
+      queueLength: 0,
+    }));
+
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+
+    expect(sessions.listChildren).toHaveBeenCalledTimes(2);
+    expect(pipeline.getSessionStatusWithRun).toHaveBeenCalledTimes(2);
   });
 
   it('does not delegate chat:stop to CLI runtime for non-cli-agent sessions', async () => {
@@ -263,7 +300,7 @@ describe('ChatGateway', () => {
       'cli-child-1',
       expect.any(Function),
     );
-    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('cli-child-1');
+    expect((pipeline.stopAndDrain as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('cli-child-1');
   });
 
   it('falls back to ModuleRef for CLI runtime lookup when the constructor token is absent', async () => {
@@ -485,8 +522,8 @@ describe('ChatGateway', () => {
 
     await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
 
-    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'session-1');
-    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'child-session');
+    expect((pipeline.stopAndDrain as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'session-1');
+    expect((pipeline.stopAndDrain as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'child-session');
   });
 
   it('REGRESSION: stopping a parent session delegates descendant cli-agent children through the CLI runtime', async () => {
@@ -544,8 +581,8 @@ describe('ChatGateway', () => {
       'cli-child-1',
       expect.any(Function),
     );
-    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'session-1');
-    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'cli-child-1');
+    expect((pipeline.stopAndDrain as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(1, 'session-1');
+    expect((pipeline.stopAndDrain as ReturnType<typeof vi.fn>)).toHaveBeenNthCalledWith(2, 'cli-child-1');
     expect(client.emit).toHaveBeenCalledWith(
       'tool:result',
       expect.objectContaining({
@@ -597,7 +634,7 @@ describe('ChatGateway', () => {
       'cli-child-1',
       expect.any(Function),
     );
-    expect((pipeline.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('cli-child-1');
+    expect((pipeline.stopAndDrain as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('cli-child-1');
   });
 
   it('REGRESSION: stopping a parent session cascades to active AgentFlow runs', async () => {
@@ -746,6 +783,63 @@ describe('ChatGateway', () => {
       });
     });
 
+    it('REGRESSION: emits a rebuildable runtime snapshot for a re-identified session', async () => {
+      const pending: ToolConfirmationRequest = {
+        requestId: 'req-1',
+        toolCallId: 'call-1',
+        sessionId: 'session-2',
+        toolName: 'image_generate',
+        args: { filename: 'coffee-hero.png' },
+        timeoutMs: 600000,
+      };
+      (pipeline.getSessionStatusWithRun as ReturnType<typeof vi.fn>).mockResolvedValue({
+        sessionId: 'session-2',
+        active: true,
+        turnId: 'turn-live',
+        queueLength: 2,
+      });
+      (toolDispatch.getPendingConfirmations as ReturnType<typeof vi.fn>).mockReturnValue([pending]);
+
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
+
+      expect(client.emit).toHaveBeenCalledWith(
+        'session:runtime_snapshot',
+        expect.objectContaining({
+          sessionId: 'session-2',
+          active: true,
+          turnId: 'turn-live',
+          queueLength: 2,
+          pendingConfirmations: [pending],
+          pendingBudgetApprovals: [],
+          toolActivities: [
+            expect.objectContaining({
+              callId: 'call-1',
+              sessionId: 'session-2',
+              toolName: 'image_generate',
+              status: 'pending_confirmation',
+            }),
+          ],
+          childExecutions: [],
+        }),
+      );
+    });
+
+    it('re-identify uses one descendant traversal for status and snapshot replay', async () => {
+      (sessions.listChildren as ReturnType<typeof vi.fn>).mockImplementation(async (sessionId: string) => (
+        sessionId === 'session-1' ? [{ id: 'child-session' }] : []
+      ));
+      (pipeline.getSessionStatusWithRun as ReturnType<typeof vi.fn>).mockImplementation(async (sessionId: string) => ({
+        sessionId,
+        active: sessionId === 'session-1',
+        queueLength: 0,
+      }));
+
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-1' });
+
+      expect(sessions.listChildren).toHaveBeenCalledTimes(2);
+      expect(pipeline.getSessionStatusWithRun).toHaveBeenCalledTimes(2);
+    });
+
     it('REGRESSION: re-identifying the master session replays child confirmations and lets the socket confirm them', async () => {
       const pending: ToolConfirmationRequest = {
         requestId: 'req-child',
@@ -755,9 +849,9 @@ describe('ChatGateway', () => {
         args: { filename: 'coffee-hero.png' },
         timeoutMs: 600000,
       };
-      (sessions.listChildren as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce([{ id: 'child-session' }])
-        .mockResolvedValueOnce([]);
+      (sessions.listChildren as ReturnType<typeof vi.fn>).mockImplementation(async (sessionId: string) => (
+        sessionId === 'session-1' ? [{ id: 'child-session' }] : []
+      ));
       (toolDispatch.getPendingConfirmations as ReturnType<typeof vi.fn>).mockImplementation((sessionId: string) => {
         if (sessionId === 'child-session') {
           return [pending];
@@ -767,7 +861,7 @@ describe('ChatGateway', () => {
 
       await gateway.handleSessionIdentify(client as never, { sessionId: 'session-1' });
 
-      expect(client.emit).toHaveBeenCalledWith('tool:confirmation_required', pending);
+      expect(client.emit.mock.calls).toContainEqual(['tool:confirmation_required', pending]);
 
       const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
       handleToolConfirm(client as never, { requestId: 'req-child', sessionId: 'child-session' });

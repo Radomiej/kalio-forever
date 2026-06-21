@@ -118,7 +118,7 @@ interface ExecutionGraphInspectorProps {
   selectedNode: ExecutionGraphNode | null;
   onOpenSessionInConversation?: (sessionId: string) => void;
   setActiveSession: (sessionId: string | null) => void;
-  setPendingConfirmation: (sessionId: string, confirmation: ToolConfirmationRequest | null) => void;
+  removePendingConfirmation: (sessionId: string, requestId: string) => void;
   setPendingMessage: (message: string | null) => void;
 }
 
@@ -129,7 +129,7 @@ export function ExecutionGraphInspector({
   selectedNode,
   onOpenSessionInConversation,
   setActiveSession,
-  setPendingConfirmation,
+  removePendingConfirmation,
   setPendingMessage,
 }: ExecutionGraphInspectorProps) {
   const [showRawData, setShowRawData] = useState(false);
@@ -307,7 +307,7 @@ export function ExecutionGraphInspector({
                     <InspectorRow label="Persona" value={selectedNode.payload.actorLabel} />
                     <InspectorRow label="Model" value={selectedNode.payload.modelLabel} />
                     <InspectorTextRow label="Context" value={selectedNode.payload.inputPrompt} />
-                    <InspectorRow label="Mode" value={selectedNode.payload.result.vfsMode ?? 'shared'} />
+                    <InspectorRow label="Mode" value={selectedNode.payload.result?.vfsMode ?? 'live runtime'} />
                     <InspectorRow label="Artifacts" value={`${selectedNode.payload.copiedFiles.length} file(s)`} />
                   </>
                 ) : (
@@ -387,7 +387,7 @@ export function ExecutionGraphInspector({
             selectedConfirmation={selectedConfirmation}
             setActiveSession={setActiveSession}
             onOpenSessionInConversation={onOpenSessionInConversation}
-            setPendingConfirmation={setPendingConfirmation}
+            removePendingConfirmation={removePendingConfirmation}
             setPendingMessage={setPendingMessage}
           />
 

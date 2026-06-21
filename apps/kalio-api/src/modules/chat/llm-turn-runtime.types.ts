@@ -33,6 +33,8 @@ export interface LLMAgentLoopRequest {
   firstMessageId?: string;
   messageIdPrefix?: string;
   callbacks?: LLMAgentLoopCallbacks;
+  transformToolCall?: (toolCall: { id: string; name: string; args: Record<string, unknown> }) =>
+    { id: string; name: string; args: Record<string, unknown> };
 }
 
 export interface LLMAgentLoopResult {

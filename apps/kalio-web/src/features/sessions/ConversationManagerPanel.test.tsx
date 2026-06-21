@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { ChatSession } from '@kalio/types';
+import type { ChatSession, RuntimeActivitySnapshot } from '@kalio/types';
 import type { LlmActivity, ToolActivity } from '../../store/agentStore';
 
 type AgentStateShape = {
-  pendingConfirmations: Record<string, {
+  pendingConfirmations: Record<string, Array<{
     requestId: string;
     toolCallId: string;
     sessionId: string;
@@ -12,7 +12,7 @@ type AgentStateShape = {
     args: Record<string, unknown>;
     timeoutMs: number;
     agentRun?: { label?: string };
-  }>;
+  }>>;
   toolActivities: ToolActivity[];
   llmActivities: LlmActivity[];
   sessionToolActivities: Record<string, ToolActivity[]>;
@@ -21,6 +21,7 @@ type AgentStateShape = {
     turnId: string;
     startedAt: number;
   }>;
+  runtimeActivitySnapshots: Record<string, RuntimeActivitySnapshot>;
   clearInactiveActivities: () => void;
 };
 
@@ -31,7 +32,7 @@ type SessionStateShape = {
 const { stopTurn, agentState, sessionState } = vi.hoisted(() => ({
   stopTurn: vi.fn(),
   agentState: {
-    pendingConfirmations: {} as Record<string, {
+    pendingConfirmations: {} as Record<string, Array<{
       requestId: string;
       toolCallId: string;
       sessionId: string;
@@ -39,7 +40,7 @@ const { stopTurn, agentState, sessionState } = vi.hoisted(() => ({
       args: Record<string, unknown>;
       timeoutMs: number;
       agentRun?: { label?: string };
-    }>,
+    }>>,
     toolActivities: [] as ToolActivity[],
     llmActivities: [] as LlmActivity[],
     sessionToolActivities: {} as Record<string, ToolActivity[]>,
@@ -48,6 +49,7 @@ const { stopTurn, agentState, sessionState } = vi.hoisted(() => ({
       turnId: string;
       startedAt: number;
     }>,
+    runtimeActivitySnapshots: {} as Record<string, RuntimeActivitySnapshot>,
     clearInactiveActivities: vi.fn(),
   } satisfies AgentStateShape,
   sessionState: {
@@ -110,6 +112,7 @@ describe('ConversationManagerPanel', () => {
     agentState.llmActivities = [];
     agentState.sessionToolActivities = {};
     agentState.activeAgentLoops = {};
+    agentState.runtimeActivitySnapshots = {};
     agentState.clearInactiveActivities = vi.fn();
     sessionState.sessions = [];
   });
@@ -127,7 +130,7 @@ describe('ConversationManagerPanel', () => {
   it('renders pending HITL confirmations and opens the owning conversation', async () => {
     const onOpenSession = vi.fn();
     agentState.pendingConfirmations = {
-      'session-hitl': {
+      'session-hitl': [{
         requestId: 'req-open',
         toolCallId: 'call-open',
         sessionId: 'session-hitl',
@@ -135,7 +138,7 @@ describe('ConversationManagerPanel', () => {
         args: { filePath: 'README.md' },
         timeoutMs: 0,
         agentRun: { label: 'Implementer' },
-      },
+      }],
     };
     agentState.sessionToolActivities = {
       'session-hitl': [
@@ -160,11 +163,17 @@ describe('ConversationManagerPanel', () => {
 
   it('renders running loops using the session title and stops them through the event bus', () => {
     sessionState.sessions = [makeSession('session-1', 'Cats Session')];
-    agentState.activeAgentLoops = {
+    agentState.runtimeActivitySnapshots = {
       'session-1': {
         sessionId: 'session-1',
+        active: true,
         turnId: 'turn-1',
-        startedAt: 1,
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [],
+        toolActivities: [],
+        childExecutions: [],
+        updatedAt: 1,
       },
     };
 

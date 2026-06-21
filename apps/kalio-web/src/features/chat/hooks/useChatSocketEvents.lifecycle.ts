@@ -5,6 +5,7 @@ import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
 import { backendHealth } from '../../../services/backendHealth';
 import { eventBus } from '../../../services/eventBus';
+import { identifyWatchedSession } from '../../../services/sessionWatchRegistry';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
 import { handleSessionStatusEvent, handleConnectionStateEvent, type ReconnectUiState } from './useChatSocketEvents.helpers';
 import { handleCliChildSessionCreated } from './useChatSocketEvents.cliChild';
@@ -24,6 +25,7 @@ export function registerSessionLifecycleHandlers({
   setStreaming,
   setQueuedDepth,
   recordSessionStatusSnapshot,
+  setRuntimeActivitySnapshot,
   clearBufferedSessionStatusSnapshots,
 }: {
   cliChildDeps: CliChildDeps;
@@ -35,6 +37,7 @@ export function registerSessionLifecycleHandlers({
   setStreaming: AgentStoreState['setStreaming'];
   setQueuedDepth: AgentStoreState['setQueuedDepth'];
   recordSessionStatusSnapshot: AgentStoreState['recordSessionStatusSnapshot'];
+  setRuntimeActivitySnapshot: AgentStoreState['setRuntimeActivitySnapshot'];
   clearBufferedSessionStatusSnapshots: AgentStoreState['clearBufferedSessionStatusSnapshots'];
 }): () => void {
   const offSessionStatus = eventBus.onSessionStatus((payload) => {
@@ -53,9 +56,13 @@ export function registerSessionLifecycleHandlers({
     });
   });
 
+  const offRuntimeSnapshot = eventBus.onRuntimeActivitySnapshot((payload) => {
+    setRuntimeActivitySnapshot(payload);
+  });
+
   const offSessionCreated = eventBus.onSessionCreated((session) => {
     addSession(session);
-    eventBus.identifySession(session.id);
+    identifyWatchedSession(session.id, 'session-created', { sticky: true });
     handleCliChildSessionCreated(cliChildDeps, session);
   });
 
@@ -69,6 +76,7 @@ export function registerSessionLifecycleHandlers({
 
   return () => {
     offSessionStatus();
+    offRuntimeSnapshot();
     offSessionCreated();
     offSessionUpdated?.();
     offQueued();

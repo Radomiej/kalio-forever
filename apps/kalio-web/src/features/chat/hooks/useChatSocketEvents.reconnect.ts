@@ -11,8 +11,7 @@ import {
 import { hydrateActiveConversationSession } from '../activeConversationSession';
 import { normalizeConversationSessionId } from '../../sessions/sessionTreeDisplay';
 import {
-  materializeLiveTurnFromSessionStatusSnapshot,
-  selectReplayableSessionStatusSnapshot,
+  materializeLiveTurnFromHydratedRuntimeState,
 } from './useChatSocketEvents.helpers';
 
 export interface SocketReconnectDeps {
@@ -103,11 +102,12 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
     const projections = rebuildCliChildProjectionsFromHistory(deps.cliChild, reconnectedSessionId, hydratedMessages);
     identifyCliChildProjections(deps.cliChild, projections, reconnectedSessionId);
     const agentState = useAgentStore.getState();
-    materializeLiveTurnFromSessionStatusSnapshot(
-      selectReplayableSessionStatusSnapshot(
-        agentState.consumeBufferedSessionStatusSnapshots(reconnectedSessionId),
-        agentState.sessionStatusSnapshots[reconnectedSessionId],
-      ),
+    materializeLiveTurnFromHydratedRuntimeState(
+      {
+        runtimeSnapshot: agentState.getRuntimeActivitySnapshot(reconnectedSessionId),
+        bufferedSessionStatusSnapshots: agentState.consumeBufferedSessionStatusSnapshots(reconnectedSessionId),
+        latestSessionStatusSnapshot: agentState.sessionStatusSnapshots[reconnectedSessionId],
+      },
       {
         hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
         getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
