@@ -5,6 +5,7 @@ import type {
   ChildExecutionKind,
   CLIAgentSessionSnapshot,
   Persona,
+  RuntimeChildExecution,
   SubAgentFlowResult,
   SubagentCopiedFile,
   SubagentToolResult,
@@ -66,7 +67,7 @@ type ToolGroupPayload = {
 type SubagentPayload = {
   kind: 'subagent';
   childExecutionKind: Extract<ChildExecutionKind, 'sub_agent'>;
-  result: SubagentToolResult;
+  result: SubagentToolResult | null;
   transcript: ChatMessage[];
   copiedFiles: SubagentCopiedFile[];
   actorLabel: string | null;
@@ -108,7 +109,7 @@ type ArchitectureRunPayload = {
 type AgentFlowPayload = {
   kind: 'agent-flow';
   childExecutionKind: Extract<ChildExecutionKind, 'sub_agentflow'>;
-  result: SubAgentFlowResult;
+  result: SubAgentFlowResult | null;
   childSessionId: string;
   graphRunId: string;
   inputPrompt: string | null;
@@ -184,6 +185,7 @@ export interface BuildExecutionGraphModelInput {
   turns: AgentTurn[];
   toolActivities: ToolActivity[];
   activeAgentLoops: Record<string, ActiveAgentLoop>;
+  childExecutions?: RuntimeChildExecution[];
   sessions: ChatSession[];
   sessionMessages: Record<string, ChatMessage[]>;
   sessionAgentTurns?: Record<string, AgentTurn[]>;

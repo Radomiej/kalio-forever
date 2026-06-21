@@ -111,11 +111,15 @@ export class ContextAssemblyService {
     const launchScopePrompt = buildLaunchScopePrompt(
       toolPolicyRequest.architectureContext ?? toolPolicyRequest.sessionRuntimeContext?.architectureContext,
     );
+    const raAppLaunchPrompt = buildRaAppLaunchPrompt(
+      toolPolicyRequest.architectureContext ?? toolPolicyRequest.sessionRuntimeContext?.architectureContext,
+    );
 
     if (profile.runtimeKind === 'chat') {
       const effectiveSystemPrompt = joinPromptSections([
         systemPrompt,
         launchScopePrompt,
+        raAppLaunchPrompt,
         buildSkillsSection(activeSkills),
         buildToolsSection(toolPolicy.tools, { includeCount: true }),
       ]);
@@ -199,4 +203,24 @@ function normalizeLaunchScopePath(architectureContext: Record<string, unknown> |
     return executionCwd.trim();
   }
   return '';
+}
+
+function buildRaAppLaunchPrompt(architectureContext: Record<string, unknown> | undefined): string {
+  const appId = typeof architectureContext?.['raAppLaunchId'] === 'string'
+    ? architectureContext['raAppLaunchId'].trim()
+    : '';
+  if (!appId) {
+    return '';
+  }
+
+  const appName = typeof architectureContext?.['raAppLaunchName'] === 'string'
+    ? architectureContext['raAppLaunchName'].trim()
+    : '';
+
+  return [
+    '## RA-App launch',
+    `The user already selected the stored RA-App ${appName ? `"${appName}"` : 'for this turn'}.`,
+    `Use run_raapp with the exact id "${appId}" on the first launch call in this session.`,
+    'Do not switch to another RA-App id unless this exact id is unavailable.',
+  ].join('\n');
 }

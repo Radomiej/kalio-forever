@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionsController } from './sessions.controller';
 import type { ChatSession, ChatMessage } from '@kalio/types';
+import type { RuntimeWatchTarget } from './session-runtime-watchlist.service';
 
 const mockSession: ChatSession = {
   id: 'sess-1',
@@ -71,19 +72,36 @@ function makeSessionPipeline() {
   };
 }
 
+function makeRuntimeWatchlist() {
+  const targets: RuntimeWatchTarget[] = [
+    { sessionId: 'sess-1', reasons: ['active'] },
+  ];
+  return {
+    list: vi.fn().mockResolvedValue(targets),
+  };
+}
+
 describe('SessionsController', () => {
   let controller: SessionsController;
   let svc: ReturnType<typeof makeService>;
   let runJournal: ReturnType<typeof makeRunJournal>;
   let contextPreview: ReturnType<typeof makeContextPreviewService>;
   let sessionPipeline: ReturnType<typeof makeSessionPipeline>;
+  let runtimeWatchlist: ReturnType<typeof makeRuntimeWatchlist>;
 
   beforeEach(() => {
     svc = makeService();
     runJournal = makeRunJournal();
     contextPreview = makeContextPreviewService();
     sessionPipeline = makeSessionPipeline();
-    controller = new SessionsController(svc as never, runJournal as never, contextPreview as never, sessionPipeline as never);
+    runtimeWatchlist = makeRuntimeWatchlist();
+    controller = new SessionsController(
+      svc as never,
+      runJournal as never,
+      contextPreview as never,
+      sessionPipeline as never,
+      runtimeWatchlist as never,
+    );
   });
 
   describe('list()', () => {
@@ -105,6 +123,14 @@ describe('SessionsController', () => {
       const result = await controller.create(dto);
       expect(svc.create).toHaveBeenCalledWith(dto);
       expect(result).toEqual(mockSession);
+    });
+  });
+
+  describe('listRuntimeWatchTargets()', () => {
+    it('returns the minimal runtime watchlist for replay hydration', async () => {
+      const result = await controller.listRuntimeWatchTargets();
+      expect(runtimeWatchlist.list).toHaveBeenCalledWith();
+      expect(result).toEqual([{ sessionId: 'sess-1', reasons: ['active'] }]);
     });
   });
 

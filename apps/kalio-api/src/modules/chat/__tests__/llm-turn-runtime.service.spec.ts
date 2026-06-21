@@ -112,6 +112,74 @@ describe('LLMTurnRuntimeService', () => {
     );
   });
 
+  it('applies transformToolCall before emit, dispatch, and persistence', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([
+        { type: 'tool_call', callId: 'call-1', name: 'run_raapp', args: { id: 'wrong-id' } },
+        { type: 'done' },
+      ])),
+    };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }],
+        unboundedHistoryCount: 1,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const processor = {
+      process: vi.fn(async (chunk: InternalLLMChunk, ctx: StreamContext) => {
+        if (chunk.type === 'tool_call') {
+          ctx.state.addToolCall({ id: chunk.callId, name: chunk.name, args: chunk.args });
+        }
+      }),
+    } satisfies Pick<StreamProcessorService, 'process'>;
+    const toolDispatch = {
+      dispatch: vi.fn().mockResolvedValue({ callId: 'call-1', status: 'success', data: { ok: true } }),
+    } satisfies Pick<ToolDispatchService, 'dispatch'>;
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      processor as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      toolDispatch as unknown as ToolDispatchService,
+    );
+    const emit = vi.fn() as EmitFn;
+
+    await runtime.runAgentLoop({
+      runtimeKind: 'chat',
+      sessionId: 'sid',
+      turnId: 'turn-1',
+      promptMessageId: 'user-1',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [],
+      abortSignal: new AbortController().signal,
+      emit,
+      maxIterations: 1,
+      transformToolCall: (toolCall) => ({
+        ...toolCall,
+        args: { ...toolCall.args, id: 'right-id' },
+      }),
+    });
+
+    expect(emit).toHaveBeenCalledWith('tool:start', expect.objectContaining({
+      toolName: 'run_raapp',
+      args: { id: 'right-id' },
+    }));
+    expect(toolDispatch.dispatch).toHaveBeenCalledWith(
+      'call-1',
+      'run_raapp',
+      { id: 'right-id' },
+      expect.any(Object),
+      [],
+    );
+    expect(sessionManager.saveToolResult).toHaveBeenCalledWith(
+      'sid',
+      'call-1',
+      JSON.stringify({ ok: true }),
+      { turnId: 'turn-1', promptMessageId: 'user-1' },
+    );
+  });
+
   it('loads branch history from an explicit historySessionId when provided', async () => {
     const llmSource: ILLMSource = {
       stream: vi.fn(() => streamFrom([

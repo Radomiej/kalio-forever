@@ -72,7 +72,7 @@ describe('ExecutionGraphInspector', () => {
         selectedConfirmation={null}
         selectedNode={makePromptNode()}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -102,7 +102,7 @@ describe('ExecutionGraphInspector', () => {
         selectedConfirmation={null}
         selectedNode={makePromptNode()}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -148,7 +148,7 @@ describe('ExecutionGraphInspector', () => {
         })}
         onOpenSessionInConversation={onOpenSessionInConversation}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -187,7 +187,7 @@ describe('ExecutionGraphInspector', () => {
         selectedConfirmation={null}
         selectedNode={firstNode}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -203,7 +203,7 @@ describe('ExecutionGraphInspector', () => {
         selectedConfirmation={null}
         selectedNode={secondNode}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -257,7 +257,7 @@ describe('ExecutionGraphInspector', () => {
           },
         }}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -309,7 +309,7 @@ describe('ExecutionGraphInspector', () => {
           },
         }}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -363,7 +363,7 @@ describe('ExecutionGraphInspector', () => {
           },
         }}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -414,7 +414,7 @@ describe('ExecutionGraphInspector', () => {
           },
         }}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -470,7 +470,7 @@ describe('ExecutionGraphInspector', () => {
         }}
         onOpenSessionInConversation={undefined}
         setActiveSession={setActiveSession}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -509,7 +509,7 @@ describe('ExecutionGraphInspector', () => {
           },
         }}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -560,7 +560,7 @@ describe('ExecutionGraphInspector', () => {
         }}
         onOpenSessionInConversation={undefined}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -593,7 +593,7 @@ describe('ExecutionGraphInspector', () => {
           modelLabel: 'mimo-v2.5',
         })}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -627,7 +627,7 @@ describe('ExecutionGraphInspector', () => {
           inputPrompt: 'Review the graph layout',
         })}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );
@@ -762,7 +762,7 @@ describe('ExecutionGraphInspector', () => {
         selectedConfirmation={null}
         selectedNode={selectedNode}
         setActiveSession={vi.fn()}
-        setPendingConfirmation={vi.fn()}
+        removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
     );

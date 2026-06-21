@@ -194,13 +194,13 @@ export type LLMProviderType =
 /** Controls which MCP tools a persona can access. */
 export type MCPPolicy = 'allow_all' | 'deny_all' | 'allow_list';
 
-/** boring-avatars theme variant persisted on Persona records. */
+/** Deterministic avatar variant persisted on Persona records. */
 export type AvatarVariant = 'marble' | 'beam' | 'pixel' | 'sunset' | 'ring' | 'bauhaus';
 
 /** Stable palette identifier; hex colors are resolved client-side from this key. */
 export type AvatarPaletteKey = 'ocean' | 'sunset' | 'forest' | 'violet' | 'ember' | 'slate' | 'candy' | 'mono';
 
-/** Persistent boring-avatars token stored on Persona (no raw color arrays). */
+/** Persistent deterministic avatar token stored on Persona (no raw color arrays). */
 export interface PersonaAvatarToken {
   avatarSeed: string;
   avatarVariant: AvatarVariant;
@@ -909,6 +909,76 @@ export interface ChatRunSnapshot {
 }
 
 // ─── Socket.IO Event Map ──────────────────────────────────────────────────────
+export type RuntimeToolActivityStatus = 'pending_confirmation' | 'running' | 'success' | 'error' | 'cancelled';
+
+export interface RuntimeToolActivity {
+  callId: ID;
+  sessionId: ID;
+  toolName: string;
+  args: Record<string, unknown>;
+  status: RuntimeToolActivityStatus;
+  startedAt?: Timestamp;
+  finishedAt?: Timestamp;
+  result?: ToolResult;
+}
+
+export type RuntimeChildExecutionKind = 'cli_agent' | 'subagent' | 'agent_flow';
+export type RuntimeChildExecutionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped' | 'blocked' | 'cancelled' | 'waiting';
+
+export interface RuntimeChildExecution {
+  id: ID;
+  kind: RuntimeChildExecutionKind;
+  parentSessionId: ID;
+  childSessionId: ID;
+  parentToolCallId?: ID;
+  flowRunId?: ID;
+  cliRunId?: ID;
+  label?: string;
+  status: RuntimeChildExecutionStatus;
+  lastOutput?: string;
+  updatedAt: Timestamp;
+}
+
+export type RuntimeActivityEventType =
+  | 'snapshot'
+  | 'agent_started'
+  | 'agent_done'
+  | 'tool_started'
+  | 'tool_finished'
+  | 'child_updated';
+
+export interface RuntimeActivityEvent {
+  type: RuntimeActivityEventType;
+  sessionId: ID;
+  turnId?: ID;
+  tool?: RuntimeToolActivity;
+  child?: RuntimeChildExecution;
+  at: Timestamp;
+}
+
+export interface RAAppLaunchIntent {
+  targetSessionId: ID;
+  appId: ID;
+  appName: string;
+  personaId: ID;
+  prompt: string;
+  source: 'home_tile' | 'raapp_manager' | 'quick_chat' | 'composer' | 'execution_graph';
+}
+
+export interface RuntimeActivitySnapshot {
+  sessionId: ID;
+  active: boolean;
+  turnId?: ID;
+  queueLength: number;
+  run?: ChatRunSnapshot;
+  pendingConfirmations: ToolConfirmationRequest[];
+  pendingBudgetApprovals: AgentBudgetApprovalRequest[];
+  toolActivities: RuntimeToolActivity[];
+  childExecutions: RuntimeChildExecution[];
+  raAppLaunchIntent?: RAAppLaunchIntent;
+  updatedAt: Timestamp;
+}
+
 // COMPLETE contract between FE and BE. All Socket.IO events defined here.
 export interface SocketEvents {
   // Chat — client → server
@@ -991,6 +1061,7 @@ export interface SocketEvents {
   'session:created': ChatSession;
   'session:updated': ChatSession;
   'session:status': { sessionId: ID; active: boolean; turnId?: ID; queueLength: number; run?: ChatRunSnapshot };
+  'session:runtime_snapshot': RuntimeActivitySnapshot;
 
   // Session re-registration — client → server (sent after reconnect)
   'session:identify': { sessionId: ID };

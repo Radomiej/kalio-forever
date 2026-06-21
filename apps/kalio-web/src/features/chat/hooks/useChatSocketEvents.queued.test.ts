@@ -43,6 +43,7 @@ vi.mock('../../../services/eventBus', () => ({
     onCLIAgentProgress: (handler: (...args: unknown[]) => void) => capture('cli_agent:progress', handler),
     onToolArgProgress: (handler: (...args: unknown[]) => void) => capture('tool:arg_progress', handler),
     onSessionStatus: (handler: (...args: unknown[]) => void) => capture('session:status', handler),
+    onRuntimeActivitySnapshot: (handler: (...args: unknown[]) => void) => capture('session:runtime_snapshot', handler),
     onQueued: (handler: (...args: unknown[]) => void) => capture('chat:queued', handler),
     onReconnect: (handler: (...args: unknown[]) => void) => capture('socket:reconnect', handler),
     onConnectionState: (handler: (...args: unknown[]) => void) => capture('socket:connection_state', handler),

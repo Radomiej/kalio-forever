@@ -2,7 +2,15 @@ import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { Eye, FolderOpen, Package, RefreshCw, Upload } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { bucketCatalogApps } from './catalog.utils';
-import { CatalogView, PreviewPane, SessionView, WorkView, type FoundRAApp, type WorkDraft } from './RAAppManager.Views';
+import {
+  CatalogView,
+  PreviewPane,
+  SessionView,
+  WorkView,
+  type CatalogRunTarget,
+  type FoundRAApp,
+  type WorkDraft,
+} from './RAAppManager.Views';
 import {
   getRAApps,
   getRAAppGroups,
@@ -15,6 +23,8 @@ import {
   deleteRAAppGroup,
 } from '../../services/apiClient';
 import type { RAAppBlock, RAAppSummary, RAAppGroup, VFSFile } from '@kalio/types';
+import { createAndActivateEmptyHostSession } from '../chat/activeConversationSession';
+import { buildRAAppLaunchRuntimeContext } from './raappLaunchRuntimeContext';
 
 type RAAppSource = 'catalog' | 'work' | 'session';
 
@@ -58,6 +68,12 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
 
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const messages = useSessionStore((s) => s.messages);
+  const addSession = useSessionStore((s) => s.addSession);
+  const setActiveSession = useSessionStore((s) => s.setActiveSession);
+  const setMessages = useSessionStore((s) => s.setMessages);
+  const setAgentTurns = useSessionStore((s) => s.setAgentTurns);
+  const setPendingMessage = useSessionStore((s) => s.setPendingMessage);
+  const setPendingRAAppLaunchIntent = useSessionStore((s) => s.setPendingRAAppLaunchIntent);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [workFiles, setWorkFiles] = useState<VFSFile[]>([]);
   const [workLoading, setWorkLoading] = useState(false);
@@ -176,19 +192,39 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
   };
 
   const handleRun = useCallback(
-    (name: string) => {
-      const { setPendingMessage } = useSessionStore.getState();
-      setPendingMessage(`Run the "${name}" RA-App for me. Launch it immediately.`);
-      onRunWithAgent();
+    async (target: CatalogRunTarget) => {
+      try {
+        const session = await createAndActivateEmptyHostSession({
+          personaId: 'ra-apps',
+          title: target.name,
+          runtimeContext: buildRAAppLaunchRuntimeContext(target.id, target.name, 'raapp_manager'),
+          addSession,
+          setActiveSession,
+          setMessages,
+          setAgentTurns,
+          reason: 'app-open',
+        });
+        const prompt = `Run the "${target.name}" RA-App for me.${target.description ? ` ${target.description}` : ''} Launch it immediately.`;
+        setPendingRAAppLaunchIntent({
+          targetSessionId: session.id,
+          appId: target.id,
+          appName: target.name,
+          personaId: 'ra-apps',
+          prompt,
+          source: 'raapp_manager',
+        });
+        onRunWithAgent();
+      } catch (err) {
+        console.error('[RAAppManager] failed to create session for RA-App run', err);
+      }
     },
-    [onRunWithAgent],
+    [addSession, onRunWithAgent, setActiveSession, setAgentTurns, setMessages, setPendingRAAppLaunchIntent],
   );
 
   const handleWorkAction = useCallback((message: string) => {
-    const { setPendingMessage } = useSessionStore.getState();
     setPendingMessage(message);
     onRunWithAgent();
-  }, [onRunWithAgent]);
+  }, [onRunWithAgent, setPendingMessage]);
 
   const catalogCount = groups.length + coreApps.length + userStandaloneApps.length;
 

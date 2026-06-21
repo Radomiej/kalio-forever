@@ -35,7 +35,7 @@ describe('buildSubagentPreviews', () => {
       },
     ];
 
-    expect(buildSubagentPreviews([], toolActivities, {}, sessions)).toEqual([
+    expect(buildSubagentPreviews([], toolActivities, sessions)).toEqual([
       expect.objectContaining({
         sessionId: 'sub-failed',
         title: 'Sub-agent: failed reviewer',
@@ -68,6 +68,83 @@ describe('buildSubagentPreviews', () => {
       },
     ];
 
-    expect(buildSubagentPreviews([], toolActivities, {}, [])).toEqual([]);
+    expect(buildSubagentPreviews([], toolActivities, [])).toEqual([]);
+  });
+
+  it('prefers runtime child execution status over stale durable tool state', () => {
+    const sessions: ChatSession[] = [
+      {
+        id: 'sub-runtime',
+        personaId: 'default',
+        title: 'Sub-agent: runtime reviewer',
+        kind: 'subagent',
+        parentSessionId: 'session-1',
+        createdAt: 1,
+        updatedAt: 3,
+      },
+    ];
+
+    const previews = buildSubagentPreviews(
+      [],
+      [],
+      sessions,
+      [{
+        id: 'child-exec-1',
+        kind: 'subagent',
+        parentSessionId: 'session-1',
+        childSessionId: 'sub-runtime',
+        parentToolCallId: 'call-1',
+        label: 'Runtime reviewer',
+        status: 'completed',
+        updatedAt: 3,
+      }],
+    );
+
+    expect(previews).toEqual([
+      expect.objectContaining({
+        sessionId: 'sub-runtime',
+        label: 'Runtime reviewer',
+        status: 'success',
+      }),
+    ]);
+  });
+
+  it('shows runtime-only sub-agent previews even before durable tool results land', () => {
+    const sessions: ChatSession[] = [
+      {
+        id: 'sub-runtime-only',
+        personaId: 'default',
+        title: 'Sub-agent: runtime only',
+        kind: 'subagent',
+        parentSessionId: 'session-1',
+        createdAt: 1,
+        updatedAt: 4,
+      },
+    ];
+
+    const previews = buildSubagentPreviews(
+      [],
+      [],
+      sessions,
+      [{
+        id: 'child-exec-2',
+        kind: 'subagent',
+        parentSessionId: 'session-1',
+        childSessionId: 'sub-runtime-only',
+        parentToolCallId: 'call-2',
+        label: 'Runtime only',
+        status: 'running',
+        updatedAt: 4,
+      }],
+    );
+
+    expect(previews).toEqual([
+      expect.objectContaining({
+        sessionId: 'sub-runtime-only',
+        label: 'Runtime only',
+        status: 'running',
+        summary: null,
+      }),
+    ]);
   });
 });

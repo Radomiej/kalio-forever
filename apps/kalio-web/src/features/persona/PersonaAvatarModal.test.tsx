@@ -3,10 +3,6 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PersonaAvatarModal } from './PersonaAvatarModal';
 
-vi.mock('boring-avatars', () => ({
-  default: ({ name }: { name: string }) => <svg data-testid="boring-avatar">{name}</svg>,
-}));
-
 const SELECTED = {
   avatarSeed: 'planner',
   avatarVariant: 'marble' as const,
@@ -27,10 +23,10 @@ describe('PersonaAvatarModal', () => {
     );
 
     expect(screen.getByTestId('persona-avatar-modal')).toBeInTheDocument();
-    expect(screen.getAllByTestId('boring-avatar')).toHaveLength(24);
+    expect(screen.getAllByTestId('persona-avatar')).toHaveLength(24);
 
     await user.click(screen.getByTestId('persona-avatar-load-more-btn'));
-    expect(screen.getAllByTestId('boring-avatar')).toHaveLength(48);
+    expect(screen.getAllByTestId('persona-avatar')).toHaveLength(48);
   });
 
   it('selects avatar candidate and closes via callback', async () => {

@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import type { ChatMessage, SocketEvents } from '@kalio/types';
+import type { ChatMessage, RuntimeActivitySnapshot, SocketEvents } from '@kalio/types';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
 
 export interface ReconnectUiState {
@@ -84,6 +84,21 @@ interface LiveSessionStatusMaterializationDeps {
   setStreaming?: (value: boolean, messageId?: string, sessionId?: string | null) => void;
 }
 
+function materializeLiveTurn(
+  sessionId: string,
+  turnId: string,
+  deps: LiveSessionStatusMaterializationDeps,
+): void {
+  if (!deps.hasActiveLoopForSession(sessionId)) {
+    deps.addActiveAgentLoop(sessionId, turnId);
+  }
+  if (deps.getSessionActiveTurnId(sessionId) !== turnId) {
+    deps.startAgentTurn(turnId, sessionId);
+  }
+  deps.setAwaitingFirstChunk?.(false);
+  deps.setStreaming?.(true, undefined, sessionId);
+}
+
 export function materializeLiveTurnFromSessionStatusSnapshot(
   snapshot: SocketEvents['session:status'] | undefined,
   deps: LiveSessionStatusMaterializationDeps,
@@ -92,14 +107,18 @@ export function materializeLiveTurnFromSessionStatusSnapshot(
     return;
   }
 
-  if (!deps.hasActiveLoopForSession(snapshot.sessionId)) {
-    deps.addActiveAgentLoop(snapshot.sessionId, snapshot.turnId);
+  materializeLiveTurn(snapshot.sessionId, snapshot.turnId, deps);
+}
+
+export function materializeLiveTurnFromRuntimeActivitySnapshot(
+  snapshot: RuntimeActivitySnapshot | null | undefined,
+  deps: LiveSessionStatusMaterializationDeps,
+): void {
+  if (!snapshot?.active || !snapshot.turnId) {
+    return;
   }
-  if (deps.getSessionActiveTurnId(snapshot.sessionId) !== snapshot.turnId) {
-    deps.startAgentTurn(snapshot.turnId, snapshot.sessionId);
-  }
-  deps.setAwaitingFirstChunk?.(false);
-  deps.setStreaming?.(true, undefined, snapshot.sessionId);
+
+  materializeLiveTurn(snapshot.sessionId, snapshot.turnId, deps);
 }
 
 export function selectReplayableSessionStatusSnapshot(
@@ -114,6 +133,28 @@ export function selectReplayableSessionStatusSnapshot(
     return undefined;
   }
   return finalSnapshot;
+}
+
+export function materializeLiveTurnFromHydratedRuntimeState(
+  params: {
+    runtimeSnapshot: RuntimeActivitySnapshot | null | undefined;
+    bufferedSessionStatusSnapshots: SocketEvents['session:status'][];
+    latestSessionStatusSnapshot: SocketEvents['session:status'] | undefined;
+  },
+  deps: LiveSessionStatusMaterializationDeps,
+): void {
+  if (params.runtimeSnapshot) {
+    materializeLiveTurnFromRuntimeActivitySnapshot(params.runtimeSnapshot, deps);
+    return;
+  }
+
+  materializeLiveTurnFromSessionStatusSnapshot(
+    selectReplayableSessionStatusSnapshot(
+      params.bufferedSessionStatusSnapshots,
+      params.latestSessionStatusSnapshot,
+    ),
+    deps,
+  );
 }
 
 export function handleSessionStatusEvent(

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
@@ -19,14 +19,17 @@ import {
 } from './sessionListModel';
 import {
   countVisibleConversationTreeDescendants,
-  displayTitleForSession,
   hasVisibleWorkflowConversationDescendant,
-  hasExpandedAncestor,
   normalizeConversationSessionId,
   visibleConversationParentId,
 } from './sessionTreeDisplay';
-import { renderSessionChildRows, SessionPanelSessionItem } from './SessionPanelRow';
 import { buildConversationTreeModel } from './conversationTreeModel';
+import { SessionPanelList } from './SessionPanelList';
+import {
+  mergeRuntimeQueuedDepthBySession,
+  mergeRuntimeSessionStatusSnapshots,
+} from '../../store/agentRuntimeSelectors';
+import { loadConversationSessions } from '../../services/sessionBootstrap';
 
 export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void; viewSwitcher?: ReactNode } = {}) {
   const {
@@ -45,9 +48,9 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   } = useSessionStore();
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
-  const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
   const queuedDepthBySession = useAgentStore((s) => s.queuedDepthBySession);
   const sessionStatusSnapshots = useAgentStore((s) => s.sessionStatusSnapshots);
+  const runtimeActivitySnapshots = useAgentStore((s) => s.runtimeActivitySnapshots);
   const sessionToolActivities = useAgentStore((s) => s.sessionToolActivities);
   const sessionAgentTurns = useSessionStore((s) => s.sessionAgentTurns);
   const sessionMessages = useSessionStore((s) => s.sessionMessages);
@@ -73,11 +76,10 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
 
   useEffect(() => {
     setLoading(true);
-    apiClient
-      .get<ChatSession[]>('/api/sessions')
-      .then((r) => {
-        setSessions(r.data);
-        const orderedSessions = sortSessionsForSidebar(r.data);
+    loadConversationSessions()
+      .then((loadedSessions) => {
+        setSessions(loadedSessions);
+        const orderedSessions = sortSessionsForSidebar(loadedSessions);
         if (!activeSessionId) {
           const storedSessionId = normalizeConversationSessionId(loadStoredActiveConversationSessionId(), orderedSessions);
           if (storedSessionId && orderedSessions.some((session) => session.id === storedSessionId)) {
@@ -173,6 +175,14 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   }, [activeSessionId, selectSession, sessions]);
 
   const sidebarSessions = originFilter === 'archived' ? archivedSessions : sessions;
+  const effectiveSessionStatusSnapshots = useMemo(
+    () => mergeRuntimeSessionStatusSnapshots(sessionStatusSnapshots, runtimeActivitySnapshots),
+    [runtimeActivitySnapshots, sessionStatusSnapshots],
+  );
+  const effectiveQueuedDepthBySession = useMemo(
+    () => mergeRuntimeQueuedDepthBySession(queuedDepthBySession, runtimeActivitySnapshots),
+    [queuedDepthBySession, runtimeActivitySnapshots],
+  );
   const {
     allSessionById,
     activeLoopSessionIds,
@@ -190,12 +200,12 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     originFilter,
     pendingBudgetApprovals,
     pendingConfirmations,
-    queuedDepthBySession: queuedDepthBySession ?? {},
+    queuedDepthBySession: effectiveQueuedDepthBySession,
     sessionAgentTurns: sessionAgentTurns ?? {},
     sessionMessages: sessionMessages ?? {},
     sessionStatusSnapshots: sessionStatusSnapshots ?? {},
+    runtimeActivitySnapshots: runtimeActivitySnapshots ?? {},
     sidebarSessions,
-    activeAgentLoops: activeAgentLoops ?? {},
   });
   const activeOriginFilter = SESSION_ORIGIN_FILTERS.find((filter) => filter.id === originFilter) ?? SESSION_ORIGIN_FILTERS[0];
   const activeWorkflowHostSessionId = activeHostSessionId ?? activeSessionId;
@@ -407,6 +417,33 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     });
   };
 
+  const itemProps = {
+    activeSessionId,
+    originFilter,
+    childSessionsByParent,
+    pendingConfirmations,
+    pendingBudgetApprovals,
+    activeLoopSessionIds,
+    queuedDepthBySession: effectiveQueuedDepthBySession,
+    sessionStatusSnapshots: effectiveSessionStatusSnapshots,
+    sessionAgentTurns: sessionAgentTurns ?? {},
+    sessionMessages: sessionMessages ?? {},
+    sessionToolActivities: sessionToolActivities ?? {},
+    architectureSessionRuntimeStates,
+    renamingId,
+    renameValue,
+    renameRef,
+    onSelectSession: selectSession,
+    onStartRename: startRename,
+    onCommitRename: commitRename,
+    onCancelRename: () => setRenamingId(null),
+    onRenameValueChange: setRenameValue,
+    onDeleteSession: deleteSession,
+    onArchiveSession: archiveSession,
+    onRestoreSession: restoreSession,
+    onToggleRootExpansion: toggleRootExpansion,
+  };
+
   return (
     <div data-testid="session-panel" className="flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -470,115 +507,24 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
           </div>
         )}
       </div>
-
-      <div className="flex-1 overflow-y-auto">
-        {visibleSessions.length === 0 && !loading && (
+      <SessionPanelList
+        activeSessionId={activeSessionId}
+        childSessionsByParent={childSessionsByParent}
+        descendantCountByParent={descendantCountByParent}
+        emptyState={(
           <div className="text-xs text-base-content/40 text-center py-6">
             {originFilter === 'archived' ? 'No archived agent runs' : 'No conversations yet'}
           </div>
         )}
-        {sessionListEntries.map((entry) => {
-          if (entry.type === 'root') {
-            const root = entry.session;
-            const rootTitle = displayTitleForSession(root, childSessionsByParent);
-            return (
-              <div
-                key={`root-${root.id}`}
-                className={`sticky top-0 z-10 cursor-pointer border-b border-base-300/60 bg-base-100/95 px-3 py-2 transition-colors hover:bg-base-200/70 ${
-                  activeSessionId === root.id ? 'border-l-2 border-l-sky-500 bg-sky-500/10' : ''
-                }`}
-                onClick={() => void selectSession(root.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    void selectSession(root.id);
-                  }
-                }}
-                role="button"
-                tabIndex={0}
-                data-testid="session-tree-root"
-                data-session-id={root.id}
-              >
-                <p className="break-words text-[10px] font-semibold uppercase tracking-[0.12em] text-base-content/60">
-                  {rootTitle}
-                </p>
-                <p className="mt-0.5 text-[10px] text-base-content/60">{entry.childCount} child run{entry.childCount === 1 ? '' : 's'}</p>
-              </div>
-            );
-          }
-
-          const s = entry.session;
-          if ((originFilter === 'all' || originFilter === 'user') && s.parentSessionId && hasExpandedAncestor(s, sessionById, expandedRoots)) {
-            return null;
-          }
-          const children = childSessionsByParent.get(s.id) ?? [];
-          const isExpanded = expandedRoots.has(s.id);
-          const visibleChildConversationCount = countVisibleConversationTreeDescendants(
-            s.id,
-            childSessionsByParent,
-            descendantCountByParent,
-          );
-          const itemProps = {
-            activeSessionId,
-            originFilter,
-            childSessionsByParent,
-            pendingConfirmations,
-            pendingBudgetApprovals,
-            activeLoopSessionIds,
-            queuedDepthBySession: queuedDepthBySession ?? {},
-            sessionStatusSnapshots: sessionStatusSnapshots ?? {},
-            sessionAgentTurns: sessionAgentTurns ?? {},
-            sessionMessages: sessionMessages ?? {},
-            sessionToolActivities: sessionToolActivities ?? {},
-            architectureSessionRuntimeStates,
-            renamingId,
-            renameValue,
-            renameRef,
-            onSelectSession: selectSession,
-            onStartRename: startRename,
-            onCommitRename: commitRename,
-            onCancelRename: () => setRenamingId(null),
-            onRenameValueChange: setRenameValue,
-            onDeleteSession: deleteSession,
-            onArchiveSession: archiveSession,
-            onRestoreSession: restoreSession,
-            onToggleRootExpansion: toggleRootExpansion,
-          };
-          if (
-            (originFilter === 'all' || originFilter === 'user')
-            && !s.parentSessionId
-            && children.length > 0
-            && visibleChildConversationCount > 0
-          ) {
-            return (
-              <div key={s.id}>
-                <SessionPanelSessionItem
-                  {...itemProps}
-                  session={s}
-                  depth={entry.depth}
-                  personaName={getPersonaName(s.personaId)}
-                  childToggle={{ count: visibleChildConversationCount, expanded: isExpanded }}
-                />
-                {isExpanded && renderSessionChildRows({
-                  ...itemProps,
-                  parentId: s.id,
-                  depth: entry.depth + 1,
-                  getPersonaName,
-                })}
-              </div>
-            );
-          }
-          return (
-            <SessionPanelSessionItem
-              key={s.id}
-              {...itemProps}
-              session={s}
-              depth={entry.depth}
-              personaName={getPersonaName(s.personaId)}
-            />
-          );
-        })}
-      </div>
+        expandedRoots={expandedRoots}
+        getPersonaName={getPersonaName}
+        itemProps={itemProps}
+        loading={loading}
+        originFilter={originFilter}
+        sessionById={sessionById}
+        sessionListEntries={sessionListEntries}
+        visibleSessionsCount={visibleSessions.length}
+      />
     </div>
   );
 }

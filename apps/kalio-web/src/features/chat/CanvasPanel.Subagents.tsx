@@ -1,5 +1,11 @@
 import { BrainCircuit, FolderTree, Loader2, MessageSquareText } from 'lucide-react';
-import type { ChatMessage, ChatSession, SubagentCopiedFile, SubagentToolResult } from '@kalio/types';
+import type {
+  ChatMessage,
+  ChatSession,
+  RuntimeChildExecution,
+  SubagentCopiedFile,
+  SubagentToolResult,
+} from '@kalio/types';
 import type { ToolActivity } from '../../store/agentStore';
 import { compactArchitectureTraceContent } from './architectureChatSummary';
 
@@ -13,12 +19,18 @@ export interface SubagentCanvasPreview {
   startedAt?: number;
 }
 
-type ActiveAgentLoop = {
-  sessionId: string;
-  turnId: string;
-  startedAt?: number;
-  agentRun?: ToolActivity['agentRun'];
-};
+function mapRuntimeSubagentStatus(status: RuntimeChildExecution['status']): SubagentCanvasPreview['status'] {
+  if (status === 'running' || status === 'waiting') {
+    return 'running';
+  }
+  if (status === 'completed') {
+    return 'success';
+  }
+  if (status === 'failed' || status === 'blocked' || status === 'stopped' || status === 'cancelled') {
+    return 'error';
+  }
+  return 'idle';
+}
 
 function extractSubagentResultFromMessage(message: ChatMessage): SubagentToolResult | null {
   if (message.role !== 'tool_result') return null;
@@ -90,26 +102,30 @@ function compactPreviewText(content: string): string {
 export function buildSubagentPreviews(
   messages: ChatMessage[],
   toolActivities: ToolActivity[],
-  activeAgentLoops: Record<string, ActiveAgentLoop>,
   sessions: ChatSession[],
+  childExecutions: RuntimeChildExecution[] = [],
 ): SubagentCanvasPreview[] {
   const previews = new Map<string, SubagentCanvasPreview>();
   const sessionsById = new Map(sessions.map((session) => [session.id, session]));
   const sessionUpdatedAt = new Map(sessions.map((session) => [session.id, session.updatedAt]));
+  const runtimeStatusBySessionId = new Map<string, SubagentCanvasPreview['status']>();
 
-  Object.values(activeAgentLoops)
-    .filter((loop) => loop.agentRun?.agentType === 'subagent')
-    .forEach((loop) => {
-      const session = sessionsById.get(loop.sessionId);
+  childExecutions
+    .filter((execution) => execution.kind === 'subagent')
+    .forEach((execution) => {
+      const session = sessionsById.get(execution.childSessionId);
       if (!session) return;
-      previews.set(loop.sessionId, {
-        sessionId: loop.sessionId,
-        label: loop.agentRun?.label ?? 'Sub-agent',
+      const runtimeStatus = mapRuntimeSubagentStatus(execution.status);
+      runtimeStatusBySessionId.set(execution.childSessionId, runtimeStatus);
+      const existing = previews.get(execution.childSessionId);
+      previews.set(execution.childSessionId, {
+        sessionId: execution.childSessionId,
+        label: existing?.label ?? execution.label ?? titleFromSessionId(execution.childSessionId),
         title: session.title,
-        copiedFiles: [],
-        summary: null,
-        status: 'running',
-        startedAt: loop.startedAt,
+        copiedFiles: existing?.copiedFiles ?? [],
+        summary: existing?.summary ?? null,
+        status: runtimeStatus,
+        startedAt: existing?.startedAt ?? execution.updatedAt,
       });
     });
 
@@ -128,7 +144,7 @@ export function buildSubagentPreviews(
         title: session.title,
         copiedFiles: result.copiedFiles,
         summary: compactPreviewText(result.result),
-        status: existing?.status === 'running' ? 'running' : 'success',
+        status: runtimeStatusBySessionId.get(result.childSessionId) ?? 'success',
         startedAt: existing?.startedAt,
       });
     });
@@ -148,7 +164,7 @@ export function buildSubagentPreviews(
         title: session.title,
         copiedFiles: existing?.copiedFiles ?? [],
         summary: failedSubagentSummary(activity),
-        status: 'error',
+        status: runtimeStatusBySessionId.get(childSessionId) ?? 'error',
         startedAt: existing?.startedAt ?? activity.startedAt,
       });
     });
@@ -167,7 +183,7 @@ export function buildSubagentPreviews(
         title: session.title,
         copiedFiles: existing?.copiedFiles.length ? existing.copiedFiles : result.copiedFiles,
         summary: existing?.summary ?? compactPreviewText(result.result),
-        status: existing?.status ?? 'success',
+        status: runtimeStatusBySessionId.get(result.childSessionId) ?? 'success',
         startedAt: existing?.startedAt,
       });
     });

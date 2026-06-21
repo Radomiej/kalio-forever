@@ -5,6 +5,7 @@ import { ToolActivityRow } from '../chat/ToolActivityRow';
 import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
 import { HomeHitlInbox } from '../landing/HomeHitlInbox';
+import { selectPendingApprovalCount, selectRunningLoops } from '../../store/agentRuntimeSelectors';
 
 export function ConversationManagerPanel({
   onNavigate,
@@ -12,13 +13,17 @@ export function ConversationManagerPanel({
 }: { onNavigate?: () => void; onOpenSession?: (sessionId: string) => void }) {
   const toolActivities = useAgentStore((s) => s.toolActivities);
   const llmActivities = useAgentStore((s) => s.llmActivities);
-  const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
+  const runtimeActivitySnapshots = useAgentStore((s) => s.runtimeActivitySnapshots);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
+  const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
   const clearInactiveActivities = useAgentStore((s) => s.clearInactiveActivities);
   const sessions = useSessionStore((s) => s.sessions);
 
-  const runningLoops = Object.values(activeAgentLoops);
-  const pendingConfirmationCount = Object.keys(pendingConfirmations).length;
+  const runningLoops = selectRunningLoops({ runtimeActivitySnapshots });
+  const pendingConfirmationCount = selectPendingApprovalCount({
+    pendingConfirmations,
+    pendingBudgetApprovals,
+  });
   const active = toolActivities.filter(
     (a) => a.status === 'running' || a.status === 'awaiting_confirmation',
   );

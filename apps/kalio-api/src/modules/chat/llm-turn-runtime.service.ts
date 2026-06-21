@@ -161,20 +161,23 @@ export class LLMTurnRuntimeService {
         emptyNoToolRetries = 0;
         for (const toolCall of state.toolCalls) {
           if (request.abortSignal.aborted) break;
+          const effectiveToolCall = request.transformToolCall
+            ? request.transformToolCall(toolCall)
+            : toolCall;
           await request.callbacks?.onToolPending?.();
-          request.emit('tool:start', this.toolStartPayload(request, toolCall) as SocketEvents['tool:start']);
+          request.emit('tool:start', this.toolStartPayload(request, effectiveToolCall) as SocketEvents['tool:start']);
           await request.callbacks?.onToolRunning?.();
           await this.audit?.log({
             sessionId: request.sessionId,
             type: 'tool_call',
-            label: toolCall.name,
-            data: this.buildToolCallAuditData(request, toolCall),
+            label: effectiveToolCall.name,
+            data: this.buildToolCallAuditData(request, effectiveToolCall),
           });
           const toolStartedAt = performance.now();
           const result = await this.toolDispatch.dispatch(
-            toolCall.id,
-            toolCall.name,
-            toolCall.args,
+            effectiveToolCall.id,
+            effectiveToolCall.name,
+            effectiveToolCall.args,
             ctx,
             request.toolMetas,
           );
@@ -182,18 +185,18 @@ export class LLMTurnRuntimeService {
           await this.audit?.log({
             sessionId: request.sessionId,
             type: 'tool_result',
-            label: toolCall.name,
-            data: this.buildToolResultAuditData(request, toolCall, result),
+            label: effectiveToolCall.name,
+            data: this.buildToolResultAuditData(request, effectiveToolCall, result),
             durationMs: Math.round(performance.now() - toolStartedAt),
           });
-          if (toolCall.name === 'escalate' && result.status === 'success') {
+          if (effectiveToolCall.name === 'escalate' && result.status === 'success') {
             const message = (result.data as Record<string, unknown>)?.['message'];
             if (typeof message === 'string') {
               request.callbacks?.onEscalation?.(message);
             }
           }
-          const content = serializeToolResultContent(toolCall.name, result);
-          await this.sessionManager.saveToolResult(request.sessionId, toolCall.id, content, {
+          const content = serializeToolResultContent(effectiveToolCall.name, result);
+          await this.sessionManager.saveToolResult(request.sessionId, effectiveToolCall.id, content, {
             turnId: request.turnId,
             promptMessageId: request.promptMessageId,
           });

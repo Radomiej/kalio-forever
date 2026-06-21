@@ -9,12 +9,15 @@ const {
   setMessages,
   setAgentTurns,
   setPendingMessage,
+  setPendingRAAppLaunchIntent,
+  markSessionHydrated,
   getRAApps,
   getRAAppGroups,
   apiPost,
   confirmTool,
   cancelTool,
   setPendingConfirmation,
+  removePendingConfirmation,
   updateToolActivity,
   agentStoreState,
 } = vi.hoisted(() => ({
@@ -23,15 +26,18 @@ const {
   setMessages: vi.fn(),
   setAgentTurns: vi.fn(),
   setPendingMessage: vi.fn(),
+  setPendingRAAppLaunchIntent: vi.fn(),
+  markSessionHydrated: vi.fn(),
   getRAApps: vi.fn<() => Promise<RAAppSummary[]>>(),
   getRAAppGroups: vi.fn<() => Promise<RAAppGroup[]>>(),
   apiPost: vi.fn(),
   confirmTool: vi.fn(),
   cancelTool: vi.fn(),
   setPendingConfirmation: vi.fn(),
+  removePendingConfirmation: vi.fn(),
   updateToolActivity: vi.fn(),
   agentStoreState: {
-    pendingConfirmations: {} as Record<string, {
+    pendingConfirmations: {} as Record<string, Array<{
       requestId: string;
       toolCallId: string;
       sessionId: string;
@@ -39,7 +45,7 @@ const {
       args: Record<string, unknown>;
       timeoutMs: number;
       agentRun?: { label?: string };
-    }>,
+    }>>,
     sessionToolActivities: {} as Record<string, Array<{
       callId: string;
       toolName: string;
@@ -71,15 +77,8 @@ vi.mock('./useTileIcons', () => ({
   }),
 }));
 
-vi.mock('../../store/sessionStore', () => ({
-  useSessionStore: (selector: (state: {
-    sessions: Array<{ id: string; title: string; updatedAt: number }>;
-    addSession: typeof addSession;
-    setActiveSession: typeof setActiveSession;
-    setMessages: typeof setMessages;
-    setAgentTurns: typeof setAgentTurns;
-    setPendingMessage: typeof setPendingMessage;
-  }) => unknown) => selector({
+vi.mock('../../store/sessionStore', () => {
+  const state = {
     sessions: [
       { id: 'session-hitl', title: 'Agent delivery run', updatedAt: 1 },
     ],
@@ -88,19 +87,26 @@ vi.mock('../../store/sessionStore', () => ({
     setMessages,
     setAgentTurns,
     setPendingMessage,
-  }),
-}));
+    setPendingRAAppLaunchIntent,
+    markSessionHydrated,
+  };
+  const useSessionStore = (selector: (store: typeof state) => unknown) => selector(state);
+  useSessionStore.getState = () => state;
+  return { useSessionStore };
+});
 
 vi.mock('../../store/agentStore', () => ({
   useAgentStore: (selector: (state: {
     pendingConfirmations: typeof agentStoreState.pendingConfirmations;
     sessionToolActivities: typeof agentStoreState.sessionToolActivities;
     setPendingConfirmation: typeof setPendingConfirmation;
+    removePendingConfirmation: typeof removePendingConfirmation;
     updateToolActivity: typeof updateToolActivity;
   }) => unknown) => selector({
     pendingConfirmations: agentStoreState.pendingConfirmations,
     sessionToolActivities: agentStoreState.sessionToolActivities,
     setPendingConfirmation,
+    removePendingConfirmation,
     updateToolActivity,
   }),
 }));
@@ -186,7 +192,57 @@ describe('LandingPage', () => {
     expect(await screen.findByTestId('tile-standalone-user')).toBeInTheDocument();
   });
 
-  it('opens chat flow after tile click and sets pending run prompt', async () => {
+  it('opens the created session in chat after tile click and sets typed RA-App launch intent', async () => {
+    const onNavigateToChat = vi.fn();
+    const onOpenSessionInChat = vi.fn();
+
+    getRAApps.mockResolvedValue([
+      makeSummary('standalone-user', 'user', 'Cat Notes'),
+    ]);
+    getRAAppGroups.mockResolvedValue([]);
+    apiPost.mockResolvedValue({
+      data: {
+        id: 'session-cat-1',
+        title: 'Cat Notes',
+      },
+    });
+
+    render(<LandingPage onNavigateToChat={onNavigateToChat} onOpenSessionInChat={onOpenSessionInChat} />);
+
+    const tile = await screen.findByTestId('tile-standalone-user');
+    fireEvent.click(tile);
+
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith('/api/sessions', {
+        personaId: 'ra-apps',
+        title: 'Cat Notes',
+        runtimeContext: {
+          runtimeKind: 'chat',
+          architectureContext: {
+            raAppLaunchId: 'standalone-user',
+            raAppLaunchName: 'Cat Notes',
+            raAppLaunchSource: 'home_tile',
+          },
+        },
+      });
+    });
+
+    expect(addSession).toHaveBeenCalledTimes(1);
+    expect(setActiveSession).toHaveBeenCalledWith('session-cat-1');
+    expect(setPendingMessage).not.toHaveBeenCalled();
+    expect(setPendingRAAppLaunchIntent).toHaveBeenCalledWith({
+      targetSessionId: 'session-cat-1',
+      appId: 'standalone-user',
+      appName: 'Cat Notes',
+      personaId: 'ra-apps',
+      prompt: 'Run the "Cat Notes" RA-App for me. Launch it immediately.',
+      source: 'home_tile',
+    });
+    expect(onOpenSessionInChat).toHaveBeenCalledWith('session-cat-1');
+    expect(onNavigateToChat).not.toHaveBeenCalled();
+  });
+
+  it('falls back to plain chat navigation when session-open callback is unavailable', async () => {
     const onNavigateToChat = vi.fn();
 
     getRAApps.mockResolvedValue([
@@ -202,20 +258,11 @@ describe('LandingPage', () => {
 
     render(<LandingPage onNavigateToChat={onNavigateToChat} />);
 
-    const tile = await screen.findByTestId('tile-standalone-user');
-    fireEvent.click(tile);
+    fireEvent.click(await screen.findByTestId('tile-standalone-user'));
 
     await waitFor(() => {
-      expect(apiPost).toHaveBeenCalledWith('/api/sessions', {
-        personaId: 'ra-apps',
-        title: 'Cat Notes',
-      });
+      expect(onNavigateToChat).toHaveBeenCalledTimes(1);
     });
-
-    expect(addSession).toHaveBeenCalledTimes(1);
-    expect(setActiveSession).toHaveBeenCalledWith('session-cat-1');
-    expect(setPendingMessage).toHaveBeenCalledWith('Run the "Cat Notes" RA-App for me. Launch it immediately.');
-    expect(onNavigateToChat).toHaveBeenCalledTimes(1);
   });
 
   it('still shows grouped current apps when flat list endpoint fails', async () => {
@@ -312,7 +359,7 @@ describe('LandingPage', () => {
     getRAApps.mockResolvedValue([]);
     getRAAppGroups.mockResolvedValue([]);
     agentStoreState.pendingConfirmations = {
-      'session-hitl': {
+      'session-hitl': [{
         requestId: 'req-approve',
         toolCallId: 'call-approve',
         sessionId: 'session-hitl',
@@ -320,7 +367,7 @@ describe('LandingPage', () => {
         args: { filePath: 'README.md', content: 'Updated' },
         timeoutMs: 0,
         agentRun: { label: 'Implementer' },
-      },
+      }],
     };
     agentStoreState.sessionToolActivities = {
       'session-hitl': [
@@ -355,21 +402,21 @@ describe('LandingPage', () => {
       sessionId: 'session-hitl',
       message: 'Looks safe, continue.',
     });
-    expect(setPendingConfirmation).toHaveBeenCalledWith('session-hitl', null);
+    expect(removePendingConfirmation).toHaveBeenCalledWith('session-hitl', 'req-approve');
   });
 
   it('rejects a pending tool from Home and sends the rejection note to the agent', async () => {
     getRAApps.mockResolvedValue([]);
     getRAAppGroups.mockResolvedValue([]);
     agentStoreState.pendingConfirmations = {
-      'session-hitl': {
+      'session-hitl': [{
         requestId: 'req-reject',
         toolCallId: 'call-reject',
         sessionId: 'session-hitl',
         toolName: 'terminal_spawn',
         args: { command: 'pnpm build' },
         timeoutMs: 600000,
-      },
+      }],
     };
 
     render(<LandingPage onNavigateToChat={() => undefined} />);
@@ -389,6 +436,6 @@ describe('LandingPage', () => {
       sessionId: 'session-hitl',
       message: 'Do not run commands; explain the plan instead.',
     });
-    expect(setPendingConfirmation).toHaveBeenCalledWith('session-hitl', null);
+    expect(removePendingConfirmation).toHaveBeenCalledWith('session-hitl', 'req-reject');
   });
 });

@@ -2,7 +2,11 @@ import { useMemo } from 'react';
 import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import type { CLIChildProjection } from './cliChildProjection.model';
-import { mergeCliOutput, resolveCLIChildProjectionStatus } from './cliChildProjection.model';
+import {
+  mergeCliOutput,
+  selectCLIChildProjectionFromSources,
+  resolveCLIChildProjectionStatus,
+} from './cliChildProjection.model';
 import { extractCLIAgentResult, extractCLIAgentSessionSnapshot } from './ToolCallBubble.parsers';
 import type { ToolActivity } from '../../store/agentStore';
 
@@ -10,14 +14,15 @@ export function useCLIChildProjection(
   childSessionId: string | undefined,
   parentCallId: string | undefined,
 ): CLIChildProjection | null {
-  const projection = useAgentStore((state) => (
-    childSessionId ? state.cliChildProjections[childSessionId] : undefined
-  ));
-  const byCallId = useAgentStore((state) => {
-    if (!parentCallId) return undefined;
-    return Object.values(state.cliChildProjections).find((item) => item.parentCallId === parentCallId);
-  });
-  return projection ?? byCallId ?? null;
+  const runtimeActivitySnapshots = useAgentStore((state) => state.runtimeActivitySnapshots);
+  const cliChildProjections = useAgentStore((state) => state.cliChildProjections);
+
+  return useMemo(() => selectCLIChildProjectionFromSources({
+    runtimeActivitySnapshots,
+    cliChildProjections,
+    childSessionId,
+    parentCallId,
+  }), [childSessionId, cliChildProjections, parentCallId, runtimeActivitySnapshots]);
 }
 
 export function useCLIChildLiveOutput(parentCallId: string | undefined): string {
@@ -41,7 +46,7 @@ export function useCLIChildCardState(params: {
   status: CLIChildProjection['status'];
 } {
   const sessions = useSessionStore((state) => state.sessions);
-  const storedProjection = useCLIChildProjection(params.childSessionId, params.parentCallId);
+  const projectionState = useCLIChildProjection(params.childSessionId, params.parentCallId);
   const liveOutput = useCLIChildLiveOutput(params.parentCallId);
 
   const snapshot = params.resultData != null ? extractCLIAgentSessionSnapshot(params.resultData) : null;
@@ -49,19 +54,19 @@ export function useCLIChildCardState(params: {
   const resolvedChildSessionId = params.childSessionId
     ?? snapshot?.childSessionId
     ?? cliResult?.childSessionId
-    ?? storedProjection?.childSessionId;
+    ?? projectionState?.childSessionId;
 
   const childSession = sessions.find((session) => session.id === resolvedChildSessionId);
   const activityStatus = params.activity?.status;
   const agentId = snapshot?.agentId
     ?? cliResult?.agentId
-    ?? storedProjection?.agentId
+    ?? projectionState?.agentId
     ?? (params.activity?.args['agentId'] as string | undefined)
     ?? 'copilot';
 
   const status = resolveCLIChildProjectionStatus({
     snapshotStatus: snapshot?.status,
-    liveProjectionStatus: storedProjection?.status,
+    liveProjectionStatus: projectionState?.status,
     activityStatus,
     cliResult,
   });
@@ -70,17 +75,17 @@ export function useCLIChildCardState(params: {
     if (!resolvedChildSessionId) {
       if (activityStatus === 'running') {
         return {
-          childSessionId: storedProjection?.childSessionId ?? `pending-${params.parentCallId}`,
+          childSessionId: projectionState?.childSessionId ?? `pending-${params.parentCallId}`,
           parentSessionId: params.parentSessionId,
           parentCallId: params.parentCallId,
           agentId,
           status: 'running',
           lastOutput: liveOutput,
-          childTitle: childSession?.title ?? storedProjection?.childTitle,
+          childTitle: childSession?.title ?? projectionState?.childTitle,
           toolName: params.toolName,
         };
       }
-      return storedProjection;
+      return projectionState;
     }
     return {
       childSessionId: resolvedChildSessionId,
@@ -89,7 +94,7 @@ export function useCLIChildCardState(params: {
       agentId,
       status,
       lastOutput: mergeCliOutput(
-        storedProjection ?? {
+        projectionState ?? {
           childSessionId: resolvedChildSessionId,
           parentSessionId: params.parentSessionId,
           parentCallId: params.parentCallId,
@@ -102,7 +107,7 @@ export function useCLIChildCardState(params: {
         snapshot,
         cliResult,
       ),
-      childTitle: childSession?.title ?? storedProjection?.childTitle,
+      childTitle: childSession?.title ?? projectionState?.childTitle,
       toolName: params.toolName,
     };
   }, [
@@ -117,7 +122,7 @@ export function useCLIChildCardState(params: {
     resolvedChildSessionId,
     snapshot,
     status,
-    storedProjection,
+    projectionState,
   ]);
 
   return {

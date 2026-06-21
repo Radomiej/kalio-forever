@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage, ChatSession, Persona, ToolConfirmationRequest } from '@kalio/types';
+import type { ChatMessage, ChatSession, Persona, RuntimeActivitySnapshot, ToolConfirmationRequest } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
 import { buildTurnsFromHistory } from '../chatUtils';
@@ -43,11 +43,12 @@ type AgentLoopShape = {
 type AgentStateShape = {
   toolActivities: ToolActivity[];
   activeAgentLoops: Record<string, AgentLoopShape>;
-  pendingConfirmations: Record<string, ToolConfirmationRequest>;
+  runtimeActivitySnapshots: Record<string, RuntimeActivitySnapshot>;
+  pendingConfirmations: Record<string, ToolConfirmationRequest[]>;
   isStreaming: boolean;
   streamingSessionId: string | null;
   clearToolActivities: ReturnType<typeof vi.fn>;
-  setPendingConfirmation: ReturnType<typeof vi.fn>;
+  removePendingConfirmation: ReturnType<typeof vi.fn>;
   setStreaming: ReturnType<typeof vi.fn>;
   getContextForSession: (sessionId: string | null) => { systemPrompt: string | null; activeToolNames: string[] };
   hasActiveLoopForSession: (sessionId: string) => boolean;
@@ -93,11 +94,12 @@ const {
   agentState: {
     toolActivities: [] as ToolActivity[],
     activeAgentLoops: {} as Record<string, AgentLoopShape>,
-    pendingConfirmations: {} as Record<string, ToolConfirmationRequest>,
+    runtimeActivitySnapshots: {} as Record<string, RuntimeActivitySnapshot>,
+    pendingConfirmations: {} as Record<string, ToolConfirmationRequest[]>,
     isStreaming: false,
     streamingSessionId: null as string | null,
     clearToolActivities: vi.fn(),
-    setPendingConfirmation: vi.fn(),
+    removePendingConfirmation: vi.fn(),
     setStreaming: vi.fn(),
     getContextForSession: () => ({ systemPrompt: null, activeToolNames: [] }),
     hasActiveLoopForSession: (sessionId: string) =>
@@ -232,6 +234,7 @@ describe('ExecutionGraphView empty-session state', () => {
       },
     ];
     sessionState.sessionMessages = {};
+    agentState.runtimeActivitySnapshots = {};
     sessionState.setActiveSession.mockReset();
     sessionState.addSession.mockReset();
     sessionState.setMessages.mockReset();
@@ -296,7 +299,7 @@ describe('ExecutionGraphView empty-session state', () => {
     agentState.isStreaming = false;
     agentState.streamingSessionId = null;
     agentState.clearToolActivities.mockReset();
-    agentState.setPendingConfirmation.mockReset();
+    agentState.removePendingConfirmation.mockReset();
     agentState.setStreaming.mockReset();
     confirmToolMock.mockReset();
     cancelToolMock.mockReset();
@@ -984,14 +987,14 @@ describe('ExecutionGraphView empty-session state', () => {
       },
     ];
     agentState.pendingConfirmations = {
-      'session-1': {
+      'session-1': [{
         requestId: 'req-1',
         toolCallId: 'call-delete-1',
         sessionId: 'session-1',
         toolName: 'vfs_delete',
         args: { path: 'draft.txt' },
         timeoutMs: 0,
-      },
+      }],
     };
 
     await renderExecutionGraphView();
@@ -1000,7 +1003,7 @@ describe('ExecutionGraphView empty-session state', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Accept tool request' }));
 
     expect(confirmToolMock).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
-    expect(agentState.setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+    expect(agentState.removePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-1');
   });
 
   it('keeps awaiting-confirmation actions reachable from a collapsed tool group', async () => {
@@ -1043,14 +1046,14 @@ describe('ExecutionGraphView empty-session state', () => {
       },
     ];
     agentState.pendingConfirmations = {
-      'session-1': {
+      'session-1': [{
         requestId: 'req-1',
         toolCallId: 'call-delete-1',
         sessionId: 'session-1',
         toolName: 'vfs_delete',
         args: { path: 'draft.txt' },
         timeoutMs: 0,
-      },
+      }],
     };
 
     await renderExecutionGraphView();
@@ -1062,7 +1065,7 @@ describe('ExecutionGraphView empty-session state', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Accept tool request' }));
 
     expect(confirmToolMock).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
-    expect(agentState.setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+    expect(agentState.removePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-1');
   });
 
   it('does not show confirmation actions for a collapsed tool group when no grouped tool needs approval', async () => {
@@ -1107,14 +1110,14 @@ describe('ExecutionGraphView empty-session state', () => {
       },
     ];
     agentState.pendingConfirmations = {
-      'session-1': {
+      'session-1': [{
         requestId: 'req-unrelated',
         toolCallId: 'call-delete-elsewhere',
         sessionId: 'session-1',
         toolName: 'vfs_delete',
         args: { path: 'other.txt' },
         timeoutMs: 0,
-      },
+      }],
     };
 
     await renderExecutionGraphView();

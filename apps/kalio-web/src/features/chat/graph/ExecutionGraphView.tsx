@@ -18,6 +18,10 @@ import { focusExecutionGraphMessages, type ExecutionGraphFocusMode } from './exe
 import { extractArchitectureBranchSessionIds, extractExecutionGraphHydrationStatus } from './executionGraphHydration';
 import { architectureRunIdFromRootSession, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
 import { useExecutionGraphLaunch } from './useExecutionGraphLaunch';
+import {
+  selectPendingConfirmationsForSession,
+  selectRunningLoops,
+} from '../../../store/agentRuntimeSelectors';
 
 const DEFAULT_GRAPH_ZOOM = 0.82;
 const MIN_GRAPH_ZOOM = 0.58;
@@ -47,9 +51,9 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
   } = useSessionStore();
   const {
     toolActivities,
-    activeAgentLoops,
     pendingConfirmations,
-    setPendingConfirmation,
+    removePendingConfirmation,
+    runtimeActivitySnapshots,
   } = useAgentStore();
   const {
     activeSession,
@@ -73,6 +77,35 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
   const [resetViewportToken, setResetViewportToken] = useState(0);
   const [architectureRootGraph, setArchitectureRootGraph] = useState<ArchitectureGraphProjection | null>(null);
   const inspectorResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const hydrationInFlightRef = useRef<Set<string>>(new Set());
+
+  const requestSessionHydration = (
+    sessionId: string,
+    getActiveSessionId: () => string | null,
+    onError: (err: unknown) => void,
+  ) => {
+    if (hydrationInFlightRef.current.has(sessionId)) {
+      return;
+    }
+
+    hydrationInFlightRef.current.add(sessionId);
+    void hydrateActiveConversationSession({
+      mode: 'reload',
+      sessionId,
+      getActiveSessionId,
+      getSessions: () => sessions,
+      getSessionMessages,
+      setMessages,
+      setAgentTurns,
+      getSessionAgentTurns,
+      getSessionActiveTurnId,
+      hasActiveLoopForSession,
+    })
+      .catch(onError)
+      .finally(() => {
+        hydrationInFlightRef.current.delete(sessionId);
+      });
+  };
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -85,22 +118,15 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     }
 
     let cancelled = false;
-    void hydrateActiveConversationSession({
-      mode: 'reload',
-      sessionId: activeSessionId,
-      getActiveSessionId: () => activeSessionId,
-      getSessions: () => sessions,
-      getSessionMessages,
-      setMessages,
-      setAgentTurns,
-      getSessionAgentTurns,
-      getSessionActiveTurnId,
-      hasActiveLoopForSession,
-    }).catch((err: unknown) => {
-      if (!cancelled) {
-        console.error('[ExecutionGraphView] session history load failed', err);
-      }
-    });
+    requestSessionHydration(
+      activeSessionId,
+      () => activeSessionId,
+      (err: unknown) => {
+        if (!cancelled) {
+          console.error('[ExecutionGraphView] session history load failed', err);
+        }
+      },
+    );
 
     return () => {
       cancelled = true;
@@ -169,7 +195,17 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     };
   };
 
-  const runningLoops = Object.values(activeAgentLoops);
+  const runningLoops = useMemo(
+    () => selectRunningLoops({ runtimeActivitySnapshots }),
+    [runtimeActivitySnapshots],
+  );
+  const activeRuntimeSnapshot = activeSessionId ? runtimeActivitySnapshots[activeSessionId] ?? null : null;
+  const runtimeAwareAgentLoops = useMemo(
+    () => Object.fromEntries(
+      runningLoops.map((loop) => [`${loop.sessionId}:${loop.turnId}`, loop]),
+    ),
+    [runningLoops],
+  );
   const hasActiveLoopForSession = (sessionId: string) => runningLoops.some((loop) => loop.sessionId === sessionId);
   const runningToolActivities = toolActivities.filter((activity) => isLiveTool(activity));
   const sessionTitleById = new Map(sessions.map((session) => [session.id, session.title]));
@@ -229,22 +265,15 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
 
     let cancelled = false;
     branchSessionIds.forEach((sessionId) => {
-      void hydrateActiveConversationSession({
-        mode: 'reload',
+      requestSessionHydration(
         sessionId,
-        getSessions: () => sessions,
-        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
-        getSessionMessages,
-        setMessages,
-        setAgentTurns,
-        getSessionAgentTurns,
-        getSessionActiveTurnId,
-        hasActiveLoopForSession,
-      }).catch((err: unknown) => {
-        if (!cancelled) {
-          console.error('[ExecutionGraphView] branch history load failed', err);
-        }
-      });
+        () => useSessionStore.getState().activeSessionId,
+        (err: unknown) => {
+          if (!cancelled) {
+            console.error('[ExecutionGraphView] branch history load failed', err);
+          }
+        },
+      );
     });
 
     return () => {
@@ -276,22 +305,15 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
 
     let cancelled = false;
     branchSessionIds.forEach((sessionId) => {
-      void hydrateActiveConversationSession({
-        mode: 'reload',
+      requestSessionHydration(
         sessionId,
-        getSessions: () => sessions,
-        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
-        getSessionMessages,
-        setMessages,
-        setAgentTurns,
-        getSessionAgentTurns,
-        getSessionActiveTurnId,
-        hasActiveLoopForSession,
-      }).catch((err: unknown) => {
-        if (!cancelled) {
-          console.error('[ExecutionGraphView] architecture branch history load failed', err);
-        }
-      });
+        () => useSessionStore.getState().activeSessionId,
+        (err: unknown) => {
+          if (!cancelled) {
+            console.error('[ExecutionGraphView] architecture branch history load failed', err);
+          }
+        },
+      );
     });
 
     return () => {
@@ -369,7 +391,8 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     messages: visibleMessages,
     turns: graphTurns,
     toolActivities,
-    activeAgentLoops,
+    activeAgentLoops: runtimeAwareAgentLoops,
+    childExecutions: activeRuntimeSnapshot?.childExecutions ?? [],
     sessions,
     sessionMessages,
     sessionAgentTurns,
@@ -389,8 +412,28 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     : selectedNode?.payload.kind === 'tool-group'
       ? selectedNode.payload.tools.some((tool) => tool.confirmationRequired)
       : false;
+  const selectedSessionConfirmations = selectPendingConfirmationsForSession({
+    sessionId: selectedNode?.sessionId ?? activeSessionId ?? null,
+    pendingConfirmations,
+  });
   const selectedConfirmation = selectedNodeRequiresConfirmation
-    ? pendingConfirmations[selectedNode?.sessionId ?? activeSessionId ?? ''] ?? null
+    ? (() => {
+        if (selectedNode?.payload.kind === 'tool') {
+          const callId = selectedNode.payload.activity?.callId;
+          return callId
+            ? selectedSessionConfirmations.find((confirmation) => confirmation.toolCallId === callId) ?? null
+            : null;
+        }
+        if (selectedNode?.payload.kind === 'tool-group') {
+          const confirmationCallIds = new Set(
+            selectedNode.payload.tools
+              .filter((tool) => tool.confirmationRequired)
+              .map((tool) => tool.callId),
+          );
+          return selectedSessionConfirmations.find((confirmation) => confirmationCallIds.has(confirmation.toolCallId)) ?? null;
+        }
+        return selectedSessionConfirmations[0] ?? null;
+      })()
     : null;
 
   if (model.nodes.length === 0) {
@@ -452,7 +495,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
         selectedConfirmation={selectedConfirmation}
         setActiveSession={setActiveSession}
         onOpenSessionInConversation={onOpenSessionInConversation}
-        setPendingConfirmation={setPendingConfirmation}
+        removePendingConfirmation={removePendingConfirmation}
         setPendingMessage={setPendingMessage}
       />
     </div>

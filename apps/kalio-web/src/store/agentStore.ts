@@ -1,7 +1,34 @@
 import { create } from 'zustand';
-import type { AgentBudgetApprovalRequest, AgentRunContext, SocketEvents, ToolMeta, ToolConfirmationRequest, ToolResult } from '@kalio/types';
+import type {
+  AgentBudgetApprovalRequest,
+  AgentRunContext,
+  RuntimeToolActivity,
+  SocketEvents,
+  ToolMeta,
+  ToolConfirmationRequest,
+  ToolResult,
+} from '@kalio/types';
 import type { CLIChildProjection } from '../features/chat/cliChildProjection.model';
 import { areSessionStatusSnapshotsEquivalent } from './sessionStatusSnapshot';
+import {
+  patchRuntimeChildExecution,
+  patchRuntimeToolActivitiesByCallId,
+  mergeSessionToolActivities,
+  runtimeChildExecutionFromCliProjection,
+  runtimeChildExecutionFromSubagentLoop,
+  runtimeSnapshotHasActiveSessionRuntime,
+  updateRuntimeSnapshot,
+  upsertRuntimeChildExecution,
+} from './agentRuntimeStore.helpers';
+import {
+  applyCliProjectionUpsert,
+  applyPendingBudgetApprovalRemoval,
+  applyPendingBudgetApprovalUpsert,
+  applyPendingConfirmationRemoval,
+  applyPendingConfirmationUpsert,
+  applyRecordedSessionStatusSnapshot,
+  applyRuntimeActivitySnapshotSync,
+} from './agentRuntimeStore.mutators';
 
 export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled' | 'expired';
 
@@ -37,9 +64,9 @@ interface AgentState {
   isStreaming: boolean;
   streamingMessageId: string | undefined;
   streamingSessionId: string | null;
-  /** Pending tool confirmations keyed by sessionId — one per session at most */
-  pendingConfirmations: Record<string, ToolConfirmationRequest>;
-  pendingBudgetApprovals: Record<string, AgentBudgetApprovalRequest>;
+  /** Pending tool confirmations keyed by sessionId */
+  pendingConfirmations: Record<string, ToolConfirmationRequest[]>;
+  pendingBudgetApprovals: Record<string, AgentBudgetApprovalRequest[]>;
   availableTools: ToolMeta[];
   tools: ToolMeta[];
   /** Tool calls active in the current turn, in order */
@@ -72,6 +99,8 @@ interface AgentState {
   setStreaming: (streaming: boolean, messageId?: string, sessionId?: string | null) => void;
   setPendingConfirmation: (sessionId: string, req: ToolConfirmationRequest | null) => void;
   setPendingBudgetApproval: (sessionId: string, req: AgentBudgetApprovalRequest | null) => void;
+  removePendingConfirmation: (sessionId: string, requestId: string) => void;
+  removePendingBudgetApproval: (sessionId: string, requestId: string) => void;
   setAvailableTools: (tools: ToolMeta[]) => void;
   setTools: (tools: ToolMeta[]) => void;
   getToolActivitiesForSession: (sessionId: string | null) => ToolActivity[];
@@ -107,9 +136,13 @@ interface AgentState {
   setQueuedDepth: (sessionId: string, depth: number) => void;
   /** Last backend runtime status replayed per session, including descendants after reconnect */
   sessionStatusSnapshots: Record<string, SocketEvents['session:status']>;
+  /** Rebuildable backend runtime projection keyed by sessionId */
+  runtimeActivitySnapshots: Record<string, SocketEvents['session:runtime_snapshot']>;
+  getRuntimeActivitySnapshot: (sessionId: string | null) => SocketEvents['session:runtime_snapshot'] | null;
   /** Ordered status snapshots received before the session view is ready to replay them */
   bufferedSessionStatusSnapshots: Record<string, SocketEvents['session:status'][]>;
   setSessionStatusSnapshot: (snapshot: SocketEvents['session:status']) => void;
+  setRuntimeActivitySnapshot: (snapshot: SocketEvents['session:runtime_snapshot']) => void;
   recordSessionStatusSnapshot: (snapshot: SocketEvents['session:status']) => void;
   consumeBufferedSessionStatusSnapshots: (sessionId: string) => SocketEvents['session:status'][];
   clearBufferedSessionStatusSnapshots: (sessionId: string) => void;
@@ -124,6 +157,62 @@ function upsertActivity(list: ToolActivity[], activity: ToolActivity): ToolActiv
   return list.some((item) => item.callId === activity.callId)
     ? list.map((item) => (item.callId === activity.callId ? { ...item, ...activity } : item))
     : [...list, activity];
+}
+
+function upsertRuntimeToolActivity(
+  list: RuntimeToolActivity[],
+  activity: RuntimeToolActivity,
+): RuntimeToolActivity[] {
+  if (!activity.callId.trim()) {
+    return [...list, activity];
+  }
+
+  return list.some((item) => item.callId === activity.callId)
+    ? list.map((item) => (item.callId === activity.callId ? { ...item, ...activity } : item))
+    : [...list, activity];
+}
+
+function toolActivityStatusFromRuntimeStatus(status: RuntimeToolActivity['status']): ToolActivityStatus {
+  if (status === 'pending_confirmation') {
+    return 'awaiting_confirmation';
+  }
+  return status;
+}
+
+function runtimeStatusFromToolActivityStatus(status: ToolActivityStatus): RuntimeToolActivity['status'] {
+  if (status === 'awaiting_confirmation') {
+    return 'pending_confirmation';
+  }
+  if (status === 'expired') {
+    return 'cancelled';
+  }
+  return status;
+}
+
+function toolActivityFromRuntime(activity: RuntimeToolActivity): ToolActivity {
+  return {
+    callId: activity.callId,
+    toolName: activity.toolName,
+    args: activity.args,
+    sessionId: activity.sessionId,
+    status: toolActivityStatusFromRuntimeStatus(activity.status),
+    startedAt: activity.startedAt ?? 0,
+    finishedAt: activity.finishedAt,
+    result: activity.result,
+  };
+}
+
+function toolActivityToRuntime(activity: ToolActivity): RuntimeToolActivity {
+  return {
+    callId: activity.callId,
+    sessionId: activity.sessionId ?? '',
+    toolName: activity.toolName,
+    args: activity.args,
+    status: runtimeStatusFromToolActivityStatus(activity.status),
+    startedAt: activity.startedAt,
+    finishedAt: activity.finishedAt,
+    result: activity.result,
+  };
 }
 
 export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
@@ -148,6 +237,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   cliChildProjections: {},
   queuedDepthBySession: {},
   sessionStatusSnapshots: {},
+  runtimeActivitySnapshots: {},
   bufferedSessionStatusSnapshots: {},
   toolArgProgress: null,
 
@@ -172,36 +262,22 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
       };
     }),
   setPendingConfirmation: (sessionId, req) =>
-    set((s) => {
-      if (!sessionId.trim()) {
-        return s;
-      }
-
-      if (req === null) {
-        const next = { ...s.pendingConfirmations };
-        delete next[sessionId];
-        return { pendingConfirmations: next };
-      }
-      return { pendingConfirmations: { ...s.pendingConfirmations, [sessionId]: req } };
-    }),
+    set((s) => applyPendingConfirmationUpsert(s, sessionId, req)),
   setPendingBudgetApproval: (sessionId, req) =>
-    set((s) => {
-      if (!sessionId.trim()) {
-        return s;
-      }
-
-      if (req === null) {
-        const next = { ...s.pendingBudgetApprovals };
-        delete next[sessionId];
-        return { pendingBudgetApprovals: next };
-      }
-      return { pendingBudgetApprovals: { ...s.pendingBudgetApprovals, [sessionId]: req } };
-    }),
+    set((s) => applyPendingBudgetApprovalUpsert(s, sessionId, req)),
+  removePendingConfirmation: (sessionId, requestId) =>
+    set((s) => applyPendingConfirmationRemoval(s, sessionId, requestId)),
+  removePendingBudgetApproval: (sessionId, requestId) =>
+    set((s) => applyPendingBudgetApprovalRemoval(s, sessionId, requestId)),
   setAvailableTools: (tools) => set({ availableTools: tools }),
   setTools: (tools) => set({ tools }),
   getToolActivitiesForSession: (sessionId) => {
     if (!sessionId) return [];
-    return get().sessionToolActivities[sessionId] ?? [];
+    return mergeSessionToolActivities(
+      get().sessionToolActivities[sessionId] ?? [],
+      get().runtimeActivitySnapshots[sessionId],
+      toolActivityFromRuntime,
+    );
   },
 
   addToolActivity: (activity) =>
@@ -227,11 +303,23 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
             [activity.sessionId]: upsertActivity(s.sessionToolActivities[activity.sessionId] ?? [], activity),
           }
         : s.sessionToolActivities;
+      const nextRuntimeActivitySnapshots = activity.sessionId
+        ? updateRuntimeSnapshot(
+            s.runtimeActivitySnapshots,
+            activity.sessionId,
+            (snapshot) => ({
+              ...snapshot,
+              toolActivities: upsertRuntimeToolActivity(snapshot.toolActivities, toolActivityToRuntime(activity)),
+              updatedAt: Date.now(),
+            }),
+          )
+        : s.runtimeActivitySnapshots;
 
       return {
         ...autoOpen,
         toolActivities: nextToolActivities,
         sessionToolActivities: nextSessionToolActivities,
+        runtimeActivitySnapshots: nextRuntimeActivitySnapshots,
       };
     }),
 
@@ -246,12 +334,35 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
           activities.map((activity) => (activity.callId === callId ? { ...activity, ...patch } : activity)),
         ]),
       ),
+      runtimeActivitySnapshots: patchRuntimeToolActivitiesByCallId(
+        s.runtimeActivitySnapshots,
+        callId,
+        {
+          ...(patch.status ? { status: runtimeStatusFromToolActivityStatus(patch.status) } : {}),
+          ...(patch.toolName ? { toolName: patch.toolName } : {}),
+          ...(patch.args ? { args: patch.args } : {}),
+          ...(patch.sessionId ? { sessionId: patch.sessionId } : {}),
+          ...(patch.startedAt !== undefined ? { startedAt: patch.startedAt } : {}),
+          ...(patch.finishedAt !== undefined ? { finishedAt: patch.finishedAt } : {}),
+          ...(patch.result !== undefined ? { result: patch.result } : {}),
+        },
+      ),
     })),
 
   clearToolActivities: (sessionId) =>
     set((s) => {
       if (!sessionId) {
-        return { toolActivities: [], sessionToolActivities: {}, toolArgProgress: null };
+        return {
+          toolActivities: [],
+          sessionToolActivities: {},
+          toolArgProgress: null,
+          runtimeActivitySnapshots: Object.fromEntries(
+            Object.entries(s.runtimeActivitySnapshots).map(([key, snapshot]) => [
+              key,
+              { ...snapshot, toolActivities: [], updatedAt: Date.now() },
+            ]),
+          ),
+        };
       }
 
       const nextSessionToolActivities = { ...s.sessionToolActivities };
@@ -260,6 +371,16 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
         toolActivities: s.toolActivities.filter((activity) => activity.sessionId !== sessionId),
         sessionToolActivities: nextSessionToolActivities,
         toolArgProgress: null,
+        runtimeActivitySnapshots: updateRuntimeSnapshot(
+          s.runtimeActivitySnapshots,
+          sessionId,
+          (snapshot) => ({
+            ...snapshot,
+            toolActivities: [],
+            updatedAt: Date.now(),
+          }),
+          { createIfMissing: false },
+        ),
       };
     }),
 
@@ -278,6 +399,18 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
         toolActivities: nextToolActivities,
         sessionToolActivities: nextSessionToolActivities,
         llmActivities: s.llmActivities.filter((activity) => activity.status === 'running'),
+        runtimeActivitySnapshots: Object.fromEntries(
+          Object.entries(s.runtimeActivitySnapshots).map(([sessionId, snapshot]) => [
+            sessionId,
+            {
+              ...snapshot,
+              toolActivities: snapshot.toolActivities.filter(
+                (activity) => activity.status === 'running' || activity.status === 'pending_confirmation',
+              ),
+              updatedAt: Date.now(),
+            },
+          ]),
+        ),
       };
     }),
 
@@ -345,11 +478,55 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
           ...s.activeAgentLoops,
           [agentRun?.agentRunId ?? sessionId]: { sessionId, turnId, startedAt: Date.now(), agentRun },
         },
+        runtimeActivitySnapshots: (() => {
+          const now = Date.now();
+          const nextSnapshots = updateRuntimeSnapshot(
+            s.runtimeActivitySnapshots,
+            sessionId,
+            (snapshot) => ({
+              ...snapshot,
+              active: true,
+              turnId,
+              queueLength: 0,
+              run: snapshot.run?.status === 'active'
+                ? {
+                    ...snapshot.run,
+                    turnId,
+                    updatedAt: now,
+                    lastHeartbeatAt: now,
+                  }
+                : undefined,
+              updatedAt: now,
+            }),
+          );
+          const parentExecution = runtimeChildExecutionFromSubagentLoop(sessionId, agentRun, now);
+          if (!parentExecution) {
+            return nextSnapshots;
+          }
+          return updateRuntimeSnapshot(
+            nextSnapshots,
+            parentExecution.parentSessionId,
+            (snapshot) => ({
+              ...snapshot,
+              childExecutions: upsertRuntimeChildExecution(snapshot.childExecutions, parentExecution),
+              updatedAt: now,
+            }),
+          );
+        })(),
       };
     }),
 
   removeActiveAgentLoop: (sessionId, agentRun) =>
     set((s) => {
+      const removedLoop = Object.entries(s.activeAgentLoops).find(([key, loop]) => {
+        if (agentRun?.agentRunId && key === agentRun.agentRunId) {
+          return true;
+        }
+        if (key === sessionId) {
+          return true;
+        }
+        return loop.sessionId === sessionId;
+      })?.[1];
       const nextActiveAgentLoops = Object.fromEntries(
         Object.entries(s.activeAgentLoops).filter(([key, loop]) => {
           if (agentRun?.agentRunId && key === agentRun.agentRunId) {
@@ -361,12 +538,59 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
           return loop.sessionId !== sessionId;
         }),
       );
-      return { activeAgentLoops: nextActiveAgentLoops };
+      return {
+        activeAgentLoops: nextActiveAgentLoops,
+        runtimeActivitySnapshots: (() => {
+          const now = Date.now();
+          const nextSnapshots = updateRuntimeSnapshot(
+            s.runtimeActivitySnapshots,
+            sessionId,
+            (snapshot) => ({
+              ...snapshot,
+              active: false,
+              run: snapshot.run?.status === 'active' ? undefined : snapshot.run,
+              updatedAt: now,
+            }),
+            { createIfMissing: false },
+          );
+
+          if (
+            removedLoop?.agentRun?.agentType !== 'subagent'
+            || !removedLoop.agentRun.parentSessionId
+          ) {
+            return nextSnapshots;
+          }
+
+          return updateRuntimeSnapshot(
+            nextSnapshots,
+            removedLoop.agentRun.parentSessionId,
+            (snapshot) => ({
+              ...snapshot,
+              childExecutions: patchRuntimeChildExecution(
+                snapshot.childExecutions,
+                (execution) => (
+                  execution.kind === 'subagent'
+                  && execution.childSessionId === sessionId
+                ),
+                {
+                  status: 'completed',
+                  updatedAt: now,
+                },
+              ),
+              updatedAt: now,
+            }),
+            { createIfMissing: false },
+          );
+        })(),
+      };
     }),
 
   hasActiveLoopForSession: (sessionId) => {
     if (!sessionId) return false;
-    return Object.values(get().activeAgentLoops).some((loop) => loop.sessionId === sessionId);
+    if (Object.values(get().activeAgentLoops).some((loop) => loop.sessionId === sessionId)) {
+      return true;
+    }
+    return runtimeSnapshotHasActiveSessionRuntime(get().runtimeActivitySnapshots[sessionId]);
   },
 
   setToolArgProgress: (progress) => set({ toolArgProgress: progress }),
@@ -392,25 +616,31 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
     }),
 
   upsertCLIChildProjection: (projection) =>
-    set((s) => ({
-      cliChildProjections: {
-        ...s.cliChildProjections,
-        [projection.childSessionId]: {
-          ...s.cliChildProjections[projection.childSessionId],
-          ...projection,
-        },
-      },
-    })),
+    set((s) => applyCliProjectionUpsert(s, projection)),
 
   updateCLIChildProjection: (childSessionId, patch) =>
     set((s) => {
       const current = s.cliChildProjections[childSessionId];
       if (!current) return s;
+      const now = Date.now();
+      const mergedProjection = { ...current, ...patch };
       return {
         cliChildProjections: {
           ...s.cliChildProjections,
-          [childSessionId]: { ...current, ...patch },
+          [childSessionId]: mergedProjection,
         },
+        runtimeActivitySnapshots: updateRuntimeSnapshot(
+          s.runtimeActivitySnapshots,
+          mergedProjection.parentSessionId,
+          (snapshot) => ({
+            ...snapshot,
+            childExecutions: upsertRuntimeChildExecution(
+              snapshot.childExecutions,
+              runtimeChildExecutionFromCliProjection(mergedProjection, now),
+            ),
+            updatedAt: now,
+          }),
+        ),
       };
     }),
 
@@ -445,7 +675,23 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
         ...s.queuedDepthBySession,
         [sessionId]: depth,
       },
+      runtimeActivitySnapshots: updateRuntimeSnapshot(
+        s.runtimeActivitySnapshots,
+        sessionId,
+        (snapshot) => ({
+          ...snapshot,
+          queueLength: depth,
+          updatedAt: Date.now(),
+        }),
+      ),
     })),
+
+  getRuntimeActivitySnapshot: (sessionId) => {
+    if (!sessionId) {
+      return null;
+    }
+    return get().runtimeActivitySnapshots[sessionId] ?? null;
+  },
 
   setSessionStatusSnapshot: (snapshot) =>
     set((s) => {
@@ -463,6 +709,14 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
       };
     }),
 
+  setRuntimeActivitySnapshot: (snapshot) =>
+    set((s) => {
+      if (!snapshot.sessionId.trim()) {
+        return s;
+      }
+      return applyRuntimeActivitySnapshotSync(s, snapshot, toolActivityFromRuntime);
+    }),
+
   recordSessionStatusSnapshot: (snapshot) => {
     if (!snapshot.sessionId.trim()) {
       return;
@@ -470,17 +724,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
 
     get().setSessionStatusSnapshot(snapshot);
     set((s) => {
-      const currentBuffer = s.bufferedSessionStatusSnapshots[snapshot.sessionId] ?? [];
-      const previousBufferedSnapshot = currentBuffer[currentBuffer.length - 1];
-      if (areSessionStatusSnapshotsEquivalent(previousBufferedSnapshot, snapshot)) {
-        return s;
-      }
-      return {
-        bufferedSessionStatusSnapshots: {
-          ...s.bufferedSessionStatusSnapshots,
-          [snapshot.sessionId]: [...currentBuffer, snapshot],
-        },
-      };
+      return applyRecordedSessionStatusSnapshot(s, snapshot);
     });
   },
 

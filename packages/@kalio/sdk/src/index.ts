@@ -28,6 +28,7 @@ export type RaAppNativeResultHandler = (payload: SocketEvents['raapp:native_resu
 export type CLIAgentProgressHandler = (payload: SocketEvents['cli_agent:progress']) => void;
 export type ToolArgProgressHandler = (payload: SocketEvents['tool:arg_progress']) => void;
 export type SessionStatusHandler = (payload: SocketEvents['session:status']) => void;
+export type RuntimeActivitySnapshotHandler = (payload: SocketEvents['session:runtime_snapshot']) => void;
 export type QueuedHandler = (payload: SocketEvents['chat:queued']) => void;
 export type ReconnectHandler = () => void;
 export type DisconnectHandler = (reason: string) => void;
@@ -322,6 +323,14 @@ export class KalioSDK {
     return () => this.socket.off('session:status', wrappedHandler);
   }
 
+  onRuntimeActivitySnapshot(handler: RuntimeActivitySnapshotHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['session:runtime_snapshot']) => {
+      handler(payload);
+    };
+    this.socket.on('session:runtime_snapshot', wrappedHandler);
+    return () => this.socket.off('session:runtime_snapshot', wrappedHandler);
+  }
+
   onQueued(handler: QueuedHandler): () => void {
     const wrappedHandler = (payload: SocketEvents['chat:queued']) => {
       handler(payload);
@@ -330,13 +339,9 @@ export class KalioSDK {
     return () => this.socket.off('chat:queued', wrappedHandler);
   }
 
-  /**
-   * Fires when the socket connects to a NEW server session (recovered === false).
-   * Skipped when Socket.IO connection state recovery successfully replays events.
-   */
+  /** Fires after every socket connect following app startup/reconnect. */
   onReconnect(handler: ReconnectHandler): () => void {
     const wrappedHandler = () => {
-      if (this.socket.recovered) return;
       handler();
     };
     this.socket.on('connect', wrappedHandler);

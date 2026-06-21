@@ -1,11 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { Persona } from '@kalio/types';
 import { PersonaListItem } from './PersonaListItem';
-
-vi.mock('boring-avatars', () => ({
-  default: ({ name }: { name: string }) => <svg data-testid="boring-avatar">{name}</svg>,
-}));
 
 const PERSONA: Persona = {
   id: 'p1',
@@ -31,6 +27,6 @@ describe('PersonaListItem', () => {
     expect(screen.getByText('1 tool · MCP allow_all')).toBeInTheDocument();
     expect(screen.queryByTitle('Edit')).not.toBeInTheDocument();
     expect(screen.queryByTestId('persona-delete-btn')).not.toBeInTheDocument();
-    expect(screen.getByTestId('boring-avatar')).toBeInTheDocument();
+    expect(screen.getByTestId('persona-avatar')).toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import type { ChatMessage } from '@kalio/types';
+import type { ChatMessage, RuntimeChildExecution } from '@kalio/types';
 import type { AgentTurn } from '../../../store/sessionStore';
 import { renderArchitectureRunProjection } from './executionGraphArchitectureRun';
 import { findWorkflowEnvelopeArchitectureMessage } from './executionGraphWorkflowEnvelope';
@@ -17,6 +17,7 @@ import {
   getFinalAnswerMessage,
   getTurnStatus,
   NODE_WIDTH,
+  statusFromRuntimeChildExecution,
   statusFromActivity,
   uniqueMessages,
   type ExecutionGraphNodeStatus,
@@ -40,12 +41,64 @@ export type {
   ExecutionGraphNodePayload,
 } from './executionGraphModel.types';
 
+function findRuntimeChildExecution(
+  childExecutionsByCallId: Map<string, RuntimeChildExecution>,
+  callId: string,
+  kind: RuntimeChildExecution['kind'],
+): RuntimeChildExecution | null {
+  const execution = childExecutionsByCallId.get(callId) ?? null;
+  return execution?.kind === kind ? execution : null;
+}
+
+function cliSessionStatusFromRuntimeExecution(
+  status: RuntimeChildExecution['status'],
+): 'idle' | 'running' | 'completed' | 'failed' | 'stopped' {
+  if (status === 'completed') {
+    return 'completed';
+  }
+  if (status === 'failed' || status === 'blocked') {
+    return 'failed';
+  }
+  if (status === 'cancelled' || status === 'stopped') {
+    return 'stopped';
+  }
+  if (status === 'running' || status === 'waiting') {
+    return 'running';
+  }
+  return 'idle';
+}
+
+function agentFlowStatusFromRuntimeExecution(
+  status: RuntimeChildExecution['status'],
+): 'queued' | 'running' | 'waiting_on_orchestrator' | 'done' | 'failed' | 'cancelled' | 'blocked' {
+  if (status === 'completed') {
+    return 'done';
+  }
+  if (status === 'waiting') {
+    return 'waiting_on_orchestrator';
+  }
+  if (status === 'failed') {
+    return 'failed';
+  }
+  if (status === 'blocked') {
+    return 'blocked';
+  }
+  if (status === 'cancelled' || status === 'stopped') {
+    return 'cancelled';
+  }
+  if (status === 'running') {
+    return 'running';
+  }
+  return 'queued';
+}
+
 export function buildExecutionGraphModel({
   sessionId,
   messages,
   turns,
   toolActivities,
   activeAgentLoops,
+  childExecutions = [],
   sessions,
   sessionMessages,
   sessionAgentTurns = {},
@@ -78,6 +131,12 @@ export function buildExecutionGraphModel({
   for (const activity of toolActivities) {
     toolArgsByCallId.set(activity.callId, activity.args);
   }
+  const childExecutionsByCallId = new Map<string, RuntimeChildExecution>();
+  childExecutions.forEach((execution) => {
+    if (execution.parentToolCallId) {
+      childExecutionsByCallId.set(execution.parentToolCallId, execution);
+    }
+  });
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
   const personaById = new Map(personas.map((persona) => [persona.id, persona]));
   const activeLoopSessionIds = new Set(Object.values(activeAgentLoops).map((loop) => loop.sessionId));
@@ -231,6 +290,9 @@ export function buildExecutionGraphModel({
       branchColumn: number,
     ) => {
       const snapshot = toolSnapshots.get(callId);
+      const runtimeSubagentExecution = findRuntimeChildExecution(childExecutionsByCallId, callId, 'subagent');
+      const runtimeCliExecution = findRuntimeChildExecution(childExecutionsByCallId, callId, 'cli_agent');
+      const runtimeAgentFlowExecution = findRuntimeChildExecution(childExecutionsByCallId, callId, 'agent_flow');
       const outcomeIds: string[] = [];
       let maxRow = branchStartRow - 1;
 
@@ -258,9 +320,11 @@ export function buildExecutionGraphModel({
             subagentResult.vfsMode === 'isolated' ? 'isolated VFS' : 'shared VFS',
             compactGraphText(subagentResult.result),
           ].filter(Boolean).join(' - '),
-          status: activeLoopSessionIds.has(subagentResult.childSessionId)
-            ? 'running'
-            : statusFromActivity(snapshot.activity, true, snapshot.result, snapshot.toolName),
+          status: runtimeSubagentExecution
+            ? statusFromRuntimeChildExecution(runtimeSubagentExecution.status)
+            : activeLoopSessionIds.has(subagentResult.childSessionId)
+              ? 'running'
+              : statusFromActivity(snapshot.activity, true, snapshot.result, snapshot.toolName),
           column: branchColumn,
           row: subagentRow,
           sessionId: subagentResult.childSessionId,
@@ -323,9 +387,11 @@ export function buildExecutionGraphModel({
             cliAgentResult.workdir,
             compactGraphText(cliAgentResult.lastOutput),
           ].filter(Boolean).join(' - '),
-          status: activeLoopSessionIds.has(cliAgentResult.childSessionId)
-            ? 'running'
-            : statusFromActivity(snapshot.activity, true, snapshot.result, snapshot.toolName),
+          status: runtimeCliExecution
+            ? statusFromRuntimeChildExecution(runtimeCliExecution.status)
+            : activeLoopSessionIds.has(cliAgentResult.childSessionId)
+              ? 'running'
+              : statusFromActivity(snapshot.activity, true, snapshot.result, snapshot.toolName),
           column: branchColumn,
           row: cliRow,
           sessionId: cliAgentResult.childSessionId,
@@ -358,8 +424,9 @@ export function buildExecutionGraphModel({
         const childSessionId = subAgentFlowResult.openChatSessionId ?? subAgentFlowResult.childSessionId;
         const graphRunId = subAgentFlowResult.openGraphRunId ?? subAgentFlowResult.flowRunId;
         const flowRow = Math.max(branchStartRow - 1, 0);
-        const flowStatus: ExecutionGraphNodeStatus =
-          subAgentFlowResult.status === 'failed' || subAgentFlowResult.status === 'blocked' || subAgentFlowResult.status === 'cancelled'
+        const flowStatus: ExecutionGraphNodeStatus = runtimeAgentFlowExecution
+          ? statusFromRuntimeChildExecution(runtimeAgentFlowExecution.status)
+          : subAgentFlowResult.status === 'failed' || subAgentFlowResult.status === 'blocked' || subAgentFlowResult.status === 'cancelled'
             ? 'error'
             : subAgentFlowResult.status === 'done'
               ? 'success'
@@ -389,6 +456,155 @@ export function buildExecutionGraphModel({
         maxRow = flowRow;
 
         const nestedMaxRow = renderNestedSessionTurns(flowNode.id, childSessionId, flowRow, branchColumn + 1);
+        if (nestedMaxRow >= flowRow) {
+          maxRow = Math.max(maxRow, nestedMaxRow);
+        }
+
+        return { outcomeIds, maxRow };
+      }
+
+      if (runtimeSubagentExecution) {
+        const childSession = sessionById.get(runtimeSubagentExecution.childSessionId) ?? null;
+        const childPersona = childSession ? personaById.get(childSession.personaId) ?? null : null;
+        const contextPrompt = extractSubagentContextPrompt(snapshot.args);
+        const subagentRow = Math.max(branchStartRow - 1, 0);
+        const subagentNode = addNode({
+          id: `subagent:${runtimeSubagentExecution.childSessionId}`,
+          kind: 'subagent',
+          title: childSession?.title ?? childPersona?.name ?? runtimeSubagentExecution.label ?? `Sub-agent ${runtimeSubagentExecution.childSessionId.slice(0, 8)}`,
+          subtitle: [
+            runtimeSubagentExecution.label ?? childPersona?.name,
+            childPersona?.model,
+          ].filter(Boolean).join(' - ') || 'Sub-agent branch',
+          detail: [
+            contextPrompt,
+            compactGraphText(runtimeSubagentExecution.lastOutput),
+          ].filter(Boolean).join(' - ') || 'Live runtime branch',
+          status: statusFromRuntimeChildExecution(runtimeSubagentExecution.status),
+          column: branchColumn,
+          row: subagentRow,
+          sessionId: runtimeSubagentExecution.childSessionId,
+          callId,
+          payload: {
+            kind: 'subagent',
+            childExecutionKind: 'sub_agent',
+            result: null,
+            transcript: allSessionMessages[runtimeSubagentExecution.childSessionId] ?? [],
+            copiedFiles: [],
+            actorLabel: childPersona?.name ?? runtimeSubagentExecution.label ?? null,
+            modelLabel: childPersona?.model ?? null,
+            inputPrompt: contextPrompt,
+          },
+        });
+        addEdge(sourceNodeId, subagentNode.id);
+        outcomeIds.push(subagentNode.id);
+        maxRow = subagentRow;
+
+        const nestedMaxRow = renderNestedSessionTurns(
+          subagentNode.id,
+          runtimeSubagentExecution.childSessionId,
+          subagentRow,
+          branchColumn + 1,
+        );
+        if (nestedMaxRow >= subagentRow) {
+          maxRow = Math.max(maxRow, nestedMaxRow);
+        }
+
+        return { outcomeIds, maxRow };
+      }
+
+      if (runtimeCliExecution) {
+        const childSession = sessionById.get(runtimeCliExecution.childSessionId) ?? null;
+        const inputPrompt = extractSubagentContextPrompt(snapshot.args);
+        const workdir = typeof snapshot.args['workdir'] === 'string' ? snapshot.args['workdir'] : '';
+        const agentId = typeof snapshot.args['agentId'] === 'string'
+          ? snapshot.args['agentId']
+          : runtimeCliExecution.label ?? 'copilot';
+        const cliRow = Math.max(branchStartRow - 1, 0);
+        const cliNode = addNode({
+          id: `cli-agent:${runtimeCliExecution.childSessionId}`,
+          kind: 'cli-agent',
+          title: childSession?.title ?? `${agentId} CLI`,
+          subtitle: agentId,
+          detail: [
+            inputPrompt,
+            workdir,
+            compactGraphText(runtimeCliExecution.lastOutput),
+          ].filter(Boolean).join(' - ') || 'Live CLI runtime',
+          status: statusFromRuntimeChildExecution(runtimeCliExecution.status),
+          column: branchColumn,
+          row: cliRow,
+          sessionId: runtimeCliExecution.childSessionId,
+          callId,
+          payload: {
+            kind: 'cli-agent',
+            childExecutionKind: 'cli_agent',
+            snapshot: {
+              childSessionId: runtimeCliExecution.childSessionId,
+              parentSessionId: runtimeCliExecution.parentSessionId,
+              agentId,
+              workdir,
+              status: cliSessionStatusFromRuntimeExecution(runtimeCliExecution.status),
+              lastPrompt: inputPrompt ?? '',
+              updatedAt: runtimeCliExecution.updatedAt,
+              lastOutput: runtimeCliExecution.lastOutput,
+            },
+            transcript: allSessionMessages[runtimeCliExecution.childSessionId] ?? [],
+            inputPrompt,
+          },
+        });
+        addEdge(sourceNodeId, cliNode.id);
+        outcomeIds.push(cliNode.id);
+        maxRow = cliRow;
+
+        const nestedMaxRow = renderNestedSessionTurns(
+          cliNode.id,
+          runtimeCliExecution.childSessionId,
+          cliRow,
+          branchColumn + 1,
+        );
+        if (nestedMaxRow >= cliRow) {
+          maxRow = Math.max(maxRow, nestedMaxRow);
+        }
+
+        return { outcomeIds, maxRow };
+      }
+
+      if (runtimeAgentFlowExecution) {
+        const childSession = sessionById.get(runtimeAgentFlowExecution.childSessionId) ?? null;
+        const graphRunId = runtimeAgentFlowExecution.flowRunId ?? runtimeAgentFlowExecution.id;
+        const flowRow = Math.max(branchStartRow - 1, 0);
+        const runtimeFlowStatus = agentFlowStatusFromRuntimeExecution(runtimeAgentFlowExecution.status);
+        const flowNode = addNode({
+          id: `agent-flow:${graphRunId}`,
+          kind: 'agent-flow',
+          title: runtimeAgentFlowExecution.label ?? childSession?.title ?? 'Sub AgentFlow',
+          subtitle: `${graphRunId} / ${runtimeFlowStatus}`,
+          detail: compactGraphText(runtimeAgentFlowExecution.lastOutput) || 'Live AgentFlow runtime',
+          status: statusFromRuntimeChildExecution(runtimeAgentFlowExecution.status),
+          column: branchColumn,
+          row: flowRow,
+          sessionId: runtimeAgentFlowExecution.childSessionId,
+          callId,
+          payload: {
+            kind: 'agent-flow',
+            childExecutionKind: 'sub_agentflow',
+            result: null,
+            childSessionId: runtimeAgentFlowExecution.childSessionId,
+            graphRunId,
+            inputPrompt: extractSubagentContextPrompt(snapshot.args),
+          },
+        });
+        addEdge(sourceNodeId, flowNode.id);
+        outcomeIds.push(flowNode.id);
+        maxRow = flowRow;
+
+        const nestedMaxRow = renderNestedSessionTurns(
+          flowNode.id,
+          runtimeAgentFlowExecution.childSessionId,
+          flowRow,
+          branchColumn + 1,
+        );
         if (nestedMaxRow >= flowRow) {
           maxRow = Math.max(maxRow, nestedMaxRow);
         }

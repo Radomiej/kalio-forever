@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
+import type { ChatMessage, ChatSession, RuntimeActivitySnapshot, SocketEvents } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
 import {
   buildSessionListEntries,
@@ -14,6 +14,11 @@ import {
 } from './sessionTreeDisplay';
 import { filterRenderableSessions } from './sessionRenderableFilter';
 import { workflowEnvelopeRuntimeStateForSession } from './sessionWorkflowRuntimeState';
+import {
+  mergeRuntimeQueuedDepthBySession,
+  mergeRuntimeSessionStatusSnapshots,
+  selectLiveSessionIds,
+} from '../../store/agentRuntimeSelectors';
 
 export interface ConversationTreeModel {
   activeHostSessionId: string | null;
@@ -41,8 +46,9 @@ interface BuildConversationTreeModelArgs {
   sessionAgentTurns: Record<string, AgentTurn[]>;
   sessionMessages: Record<string, ChatMessage[]>;
   sessionStatusSnapshots: Record<string, SocketEvents['session:status']>;
+  runtimeActivitySnapshots?: Record<string, RuntimeActivitySnapshot>;
   sidebarSessions: ChatSession[];
-  activeAgentLoops: Record<string, { sessionId: string }>;
+  activeAgentLoops?: Record<string, { sessionId: string }>;
 }
 
 function resolveVisibleConversationRootId(
@@ -80,12 +86,23 @@ export function buildConversationTreeModel({
   sessionAgentTurns,
   sessionMessages,
   sessionStatusSnapshots,
+  runtimeActivitySnapshots,
   sidebarSessions,
-  activeAgentLoops,
 }: BuildConversationTreeModelArgs): ConversationTreeModel {
   const orderedSessions = sortSessionsForSidebar(sidebarSessions);
   const allSessionById = new Map(orderedSessions.map((session) => [session.id, session] as const));
-  const activeLoopSessionIds = new Set(Object.values(activeAgentLoops ?? {}).map((loop) => loop.sessionId));
+  const effectiveQueuedDepthBySession = mergeRuntimeQueuedDepthBySession(
+    queuedDepthBySession,
+    runtimeActivitySnapshots,
+  );
+  const effectiveSessionStatusSnapshots = mergeRuntimeSessionStatusSnapshots(
+    sessionStatusSnapshots,
+    runtimeActivitySnapshots,
+  );
+  const activeLoopSessionIds = selectLiveSessionIds({
+    sessionStatusSnapshots,
+    runtimeActivitySnapshots,
+  });
   const { renderableSessions, architectureSessionRuntimeStates } = filterRenderableSessions(
     orderedSessions,
     sessionMessages ?? {},
@@ -93,8 +110,8 @@ export function buildConversationTreeModel({
       pendingConfirmations,
       pendingBudgetApprovals,
       activeLoopSessionIds,
-      queuedDepthBySession: queuedDepthBySession ?? {},
-      sessionStatusSnapshots: sessionStatusSnapshots ?? {},
+      queuedDepthBySession: effectiveQueuedDepthBySession,
+      sessionStatusSnapshots: effectiveSessionStatusSnapshots,
     },
   );
   const sessionById = new Map(renderableSessions.map((session) => [session.id, session] as const));

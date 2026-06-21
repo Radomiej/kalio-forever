@@ -10,6 +10,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { eventBus } from '../../services/eventBus';
 import { resolveLiveTurnState } from '../chat/liveTurnState';
+import { selectQueuedDepth } from '../../store/agentRuntimeSelectors';
 
 interface RAAppRendererProps {
   block: RAAppBlock;
@@ -78,6 +79,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
   const getToolActivitiesForSession = useAgentStore((state) => state.getToolActivitiesForSession);
   const hasActiveLoopForSession = useAgentStore((state) => state.hasActiveLoopForSession);
   const queuedDepthBySession = useAgentStore((state) => state.queuedDepthBySession);
+  const runtimeActivitySnapshots = useAgentStore((state) => state.runtimeActivitySnapshots);
   const activeSessionLiveTurn = resolveLiveTurnState({
     sessionId: activeSessionId,
     sessionMessages: messages,
@@ -87,7 +89,11 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
     streamingSessionId: null,
     awaitingFirstChunk: false,
     hasActiveLoop: hasActiveLoopForSession(activeSessionId),
-    queuedDepth: activeSessionId ? (queuedDepthBySession[activeSessionId] ?? 0) : 0,
+    queuedDepth: selectQueuedDepth({
+      sessionId: activeSessionId,
+      queuedDepthBySession,
+      runtimeActivitySnapshots,
+    }),
     activeToolActivities: getToolActivitiesForSession(activeSessionId),
     streamingChunks,
     thinkingChunks,

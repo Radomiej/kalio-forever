@@ -4,6 +4,7 @@ import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { eventBus } from '../../../services/eventBus';
+import { identifyWatchedSession } from '../../../services/sessionWatchRegistry';
 import { shouldRefreshVfsForToolResult } from '../ChatInterface.Parts';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
 import {
@@ -66,6 +67,8 @@ export function useChatSocketEvents({
   const {
     setPendingConfirmation,
     setPendingBudgetApproval,
+    removePendingConfirmation,
+    removePendingBudgetApproval,
     setToolArgProgress,
     addToolActivity,
     updateToolActivity,
@@ -83,6 +86,7 @@ export function useChatSocketEvents({
     rebuildCLIChildProjections,
     setQueuedDepth,
     recordSessionStatusSnapshot,
+    setRuntimeActivitySnapshot,
     clearBufferedSessionStatusSnapshots,
   } = useAgentStore();
   const { addSession } = useSessionStore();
@@ -104,7 +108,7 @@ export function useChatSocketEvents({
       registerCallId,
       getAgentState: () => useAgentStore.getState(),
       getSessionState: () => useSessionStore.getState(),
-      identifySession: (sessionId: string) => eventBus.identifySession(sessionId),
+      identifySession: (sessionId: string) => identifyWatchedSession(sessionId, 'cli-child-runtime', { sticky: true }),
     };
 
     const offChunk = eventBus.onChunk((chunk) => {
@@ -234,7 +238,8 @@ export function useChatSocketEvents({
 
     const offConfirmationInvalidated = eventBus.onToolConfirmationInvalidated((payload) => {
       const agentState = useAgentStore.getState();
-      const pendingConfirmation = agentState.pendingConfirmations[payload.sessionId];
+      const pendingConfirmation = (agentState.pendingConfirmations[payload.sessionId] ?? [])
+        .find((pending) => pending.requestId === payload.requestId);
       const staleActivity = agentState
         .getToolActivitiesForSession(payload.sessionId)
         .find((activity) => activity.requestId === payload.requestId);
@@ -242,7 +247,7 @@ export function useChatSocketEvents({
         ?? (pendingConfirmation?.requestId === payload.requestId
           ? pendingConfirmation.toolCallId
           : staleActivity?.callId ?? payload.requestId);
-      setPendingConfirmation(payload.sessionId, null);
+      removePendingConfirmation(payload.sessionId, payload.requestId);
       if (payload.reason !== 'confirmed') {
         clearToolArgProgressTracking(payload.sessionId);
       }
@@ -266,7 +271,7 @@ export function useChatSocketEvents({
     });
 
     const offBudgetInvalidated = eventBus.onAgentBudgetInvalidated?.((payload) => {
-      setPendingBudgetApproval?.(payload.sessionId, null);
+      removePendingBudgetApproval?.(payload.sessionId, payload.requestId);
     });
 
     const offToolStart = eventBus.onToolStart((payload) => {
@@ -410,6 +415,7 @@ export function useChatSocketEvents({
       setStreaming,
       setQueuedDepth,
       recordSessionStatusSnapshot,
+      setRuntimeActivitySnapshot,
       clearBufferedSessionStatusSnapshots,
     });
 
@@ -499,6 +505,7 @@ export function useChatSocketEvents({
     setPendingBudgetApproval,
     setQueuedDepth,
     recordSessionStatusSnapshot,
+    setRuntimeActivitySnapshot,
     clearBufferedSessionStatusSnapshots,
     setRecoveryNotice,
     setStreaming,

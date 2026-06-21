@@ -334,34 +334,30 @@ export function ChatWelcomeScreen({
   }
 
   return (
-    <>
-      {activeSessionId && (
-        <NewChatScreen
-          key={activeSessionId}
-          architectures={architectures}
-          heading={activeSession?.title ?? 'New Chat'}
-          isBusy={isStreaming}
-          onArchitectureChange={onArchitectureChange}
-          onDraftChange={onDraftChange}
-          onPersonaChange={onPersonaChange}
-          onProjectPathChange={onProjectPathChange}
-          onRunPrompt={(content) => {
-            onDraftChange('');
-            if (selectedArchitectureId === 'single-chat') {
-              onSend(content, selectedPersonaId);
-              return;
-            }
-            onArchitectureRun(content, selectedArchitectureId);
-          }}
-          personas={personas}
-          projectPath={projectPath}
-          selectedPersonaId={selectedPersonaId}
-          selectedArchitectureId={selectedArchitectureId}
-          subtitle="AI assistant - build apps, query data, generate images, run tools"
-          testIdPrefix="welcome"
-        />
-      )}
-    </>
+    <NewChatScreen
+      key={activeSessionId ?? 'new-chat'}
+      architectures={architectures}
+      heading={activeSession?.title ?? 'New Chat'}
+      isBusy={isStreaming}
+      onArchitectureChange={onArchitectureChange}
+      onDraftChange={onDraftChange}
+      onPersonaChange={onPersonaChange}
+      onProjectPathChange={onProjectPathChange}
+      onRunPrompt={(content) => {
+        onDraftChange('');
+        if (selectedArchitectureId === 'single-chat') {
+          onSend(content, selectedPersonaId);
+          return;
+        }
+        onArchitectureRun(content, selectedArchitectureId);
+      }}
+      personas={personas}
+      projectPath={projectPath}
+      selectedPersonaId={selectedPersonaId}
+      selectedArchitectureId={selectedArchitectureId}
+      subtitle="AI assistant - build apps, query data, generate images, run tools"
+      testIdPrefix="welcome"
+    />
   );
 }
 

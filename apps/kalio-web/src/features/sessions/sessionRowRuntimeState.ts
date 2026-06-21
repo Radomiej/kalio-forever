@@ -31,12 +31,12 @@ export function sessionRuntimeState(
   if (safePendingConfirmations[sessionId] || safePendingBudgetApprovals[sessionId]) {
     return 'waiting';
   }
-  if (safeActiveLoopSessionIds.has(sessionId) || (safeQueuedDepthBySession[sessionId] ?? 0) > 0) {
-    return 'running';
-  }
   const snapshotState = sessionStatusSnapshotToRuntimeState(sessionStatusSnapshots[sessionId]);
   if (snapshotState) {
     return snapshotState;
+  }
+  if (safeActiveLoopSessionIds.has(sessionId) || (safeQueuedDepthBySession[sessionId] ?? 0) > 0) {
+    return 'running';
   }
   const architectureState = architectureSessionRuntimeStates.get(sessionId);
   if (architectureState) {

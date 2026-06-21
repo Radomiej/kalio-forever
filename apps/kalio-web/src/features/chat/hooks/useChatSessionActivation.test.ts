@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useChatSessionActivation } from './useChatSessionActivation';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
@@ -39,7 +39,6 @@ describe('useChatSessionActivation', () => {
       sessionActiveTurnIds: { 'session-1': null },
       getSessionMessages: () => [],
       pendingMessage: null,
-      pendingRAAppId: null,
     });
   });
 
@@ -93,6 +92,46 @@ describe('useChatSessionActivation', () => {
       });
     });
     expect(useAgentStore.getState().callIdToName['call-cli-1']).toBe('spawn_cli_agent');
+  });
+
+  it('auto-sends a pending RA-App launch intent that arrives after the session is already active', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+
+    const handleSendRef = { current: vi.fn() };
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef,
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+    });
+
+    handleSendRef.current.mockClear();
+
+    act(() => {
+      useSessionStore.getState().setPendingRAAppLaunchIntent({
+        targetSessionId: 'session-1',
+        appId: 'visual-calculator',
+        appName: 'Visual Calculator',
+        personaId: 'ra-apps',
+        prompt: 'Run the "Visual Calculator" RA-App for me.',
+        source: 'home_tile',
+      });
+    });
+
+    await waitFor(() => {
+      expect(handleSendRef.current).toHaveBeenCalledWith(
+        'Run the "Visual Calculator" RA-App for me.\n\nUse run_raapp with the exact id "visual-calculator" now. Do not choose a different RA-App id unless this exact id is missing.',
+        'ra-apps',
+      );
+    });
+    expect(useSessionStore.getState().pendingRAAppLaunchIntent).toBeNull();
   });
 
   it('identifies rebuilt CLI child sessions discovered only from loaded history', async () => {
@@ -360,7 +399,6 @@ describe('useChatSessionActivation', () => {
       activeTurnId: null,
       sessionActiveTurnIds: { 'session-1': null, 'arch-root': null },
       pendingMessage: null,
-      pendingRAAppId: null,
     });
     vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
       if (url === '/api/sessions/session-1/messages') {
@@ -480,7 +518,6 @@ describe('useChatSessionActivation', () => {
       activeTurnId: 'turn-live',
       sessionActiveTurnIds: { 'session-1': 'turn-live' },
       pendingMessage: null,
-      pendingRAAppId: null,
     });
     vi.mocked(apiClient.get).mockResolvedValue({
       data: [
@@ -658,7 +695,6 @@ describe('useChatSessionActivation', () => {
       activeTurnId: 'turn-new',
       sessionActiveTurnIds: { 'session-1': 'turn-new' },
       pendingMessage: null,
-      pendingRAAppId: null,
     });
 
     const setAgentTurns = vi.fn();
@@ -729,6 +765,81 @@ describe('useChatSessionActivation', () => {
     });
   });
 
+  it('prefers the runtime snapshot over stale buffered session status after hydration', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [
+        {
+          id: 'user-1',
+          sessionId: 'session-1',
+          role: 'user',
+          content: 'Continue.',
+          createdAt: 1,
+        },
+      ],
+    });
+    useAgentStore.setState({
+      runtimeActivitySnapshots: {
+        'session-1': {
+          sessionId: 'session-1',
+          active: false,
+          turnId: 'turn-completed',
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [],
+          updatedAt: 100,
+        },
+      },
+      sessionStatusSnapshots: {
+        'session-1': {
+          sessionId: 'session-1',
+          active: false,
+          turnId: 'turn-completed',
+          queueLength: 0,
+        },
+      },
+      bufferedSessionStatusSnapshots: {
+        'session-1': [
+          {
+            sessionId: 'session-1',
+            active: true,
+            turnId: 'turn-stale',
+            queueLength: 0,
+          },
+        ],
+      },
+      activeAgentLoops: {},
+    });
+    useSessionStore.setState({
+      sessionAgentTurns: {
+        'session-1': [],
+      },
+      sessionActiveTurnIds: {
+        'session-1': null,
+      },
+      agentTurns: [],
+      activeTurnId: null,
+    });
+
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns: useSessionStore.getState().setAgentTurns,
+      setMessages: useSessionStore.getState().setMessages,
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+    });
+    expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(false);
+    expect(useSessionStore.getState().getSessionActiveTurnId('session-1')).toBeNull();
+    expect(useAgentStore.getState().consumeBufferedSessionStatusSnapshots('session-1')).toEqual([]);
+  });
+
   it('replays buffered session status snapshots from the store after hydration', async () => {
     vi.mocked(apiClient.get).mockResolvedValue({
       data: [
@@ -742,6 +853,7 @@ describe('useChatSessionActivation', () => {
       ],
     });
     useAgentStore.setState({
+      runtimeActivitySnapshots: {},
       sessionStatusSnapshots: {
         'session-1': {
           sessionId: 'session-1',

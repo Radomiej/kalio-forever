@@ -14,6 +14,7 @@ import { SessionsService } from './sessions.service';
 import { RunJournalService } from './run-journal.service';
 import { ContextPreviewService } from './context-preview.service';
 import { SessionPipelineService } from './session-pipeline.service';
+import { SessionRuntimeWatchlistService, type RuntimeWatchTarget } from './session-runtime-watchlist.service';
 
 const PUBLIC_ARCHITECTURE_CONTEXT_KEYS = new Set([
   'projectPath',
@@ -21,6 +22,9 @@ const PUBLIC_ARCHITECTURE_CONTEXT_KEYS = new Set([
   'schemaId',
   'schemaName',
   'displayLabel',
+  'raAppLaunchId',
+  'raAppLaunchName',
+  'raAppLaunchSource',
 ]);
 
 @Controller('sessions')
@@ -30,11 +34,17 @@ export class SessionsController {
     private readonly runJournal: RunJournalService,
     private readonly contextPreview: ContextPreviewService,
     private readonly sessionPipeline: SessionPipelineService,
+    private readonly runtimeWatchlist: SessionRuntimeWatchlistService,
   ) {}
 
   @Get()
   list(@Query('includeArchived') includeArchived?: string): Promise<ChatSession[]> {
     return this.sessions.list({ includeArchived: includeArchived === 'true' });
+  }
+
+  @Get('runtime-watchlist')
+  listRuntimeWatchTargets(): Promise<RuntimeWatchTarget[]> {
+    return this.runtimeWatchlist.list();
   }
 
   @Post()

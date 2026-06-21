@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { buildArchitectureRunContext, ChatInterface } from './ChatInterface';
 import { computeAnsweredCallIds } from './chatUtils';
+import { resolveRenderableConversationProjection } from './conversationTranscriptProjection';
 import type { ChatMessage, ChatSession, VFSFile } from '@kalio/types';
 import { apiClient } from '../../services/apiClient';
 
@@ -89,6 +90,7 @@ vi.mock('../../services/eventBus', () => ({
     onCLIAgentProgress: (h: (...args: unknown[]) => void) => capture('cli_agent:progress', h),
     onToolArgProgress: (h: (...args: unknown[]) => void) => capture('tool:arg_progress', h),
     onSessionStatus: (h: (...args: unknown[]) => void) => capture('session:status', h),
+    onRuntimeActivitySnapshot: (h: (...args: unknown[]) => void) => capture('session:runtime_snapshot', h),
     onQueued: (h: (...args: unknown[]) => void) => capture('chat:queued', h),
     onReconnect: (h: (...args: unknown[]) => void) => capture('socket:reconnect', h),
     onConnectionState: (h: (...args: unknown[]) => void) => capture('socket:connection_state', h),
@@ -101,6 +103,18 @@ vi.mock('../../services/eventBus', () => ({
   },
 }));
 
+vi.mock('../../services/sessionWatchRegistry', () => ({
+  identifyWatchedSession: (...args: unknown[]) => {
+    const [sessionId] = args;
+    if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
+      mockIdentifySession(sessionId);
+    }
+  },
+  replaceBaselineWatchedSessions: vi.fn(),
+  resetSessionWatchConnectionEpoch: vi.fn(),
+  clearSessionWatchRegistry: vi.fn(),
+}));
+
 // ── agentStore mock ───────────────────────────────────────────────────────────
 const addToolActivity = vi.fn();
 const updateToolActivity = vi.fn();
@@ -108,6 +122,7 @@ const addSession = vi.fn();
 const addMessage = vi.fn();
 const setStreaming = vi.fn();
 const setPendingConfirmation = vi.fn();
+const removePendingConfirmation = vi.fn();
 const clearToolActivities = vi.fn();
 const addLlmActivity = vi.fn();
 const updateLlmActivity = vi.fn();
@@ -119,6 +134,7 @@ const appendCLIAgentChunk = vi.fn();
 const clearCLIAgentOutput = vi.fn();
 const setToolArgProgress = vi.fn();
 const setSessionStatusSnapshot = vi.fn();
+const setRuntimeActivitySnapshot = vi.fn();
 const recordSessionStatusSnapshot = vi.fn();
 const clearBufferedSessionStatusSnapshots = vi.fn();
 const consumeBufferedSessionStatusSnapshots = vi.fn(() => []);
@@ -145,10 +161,12 @@ const agentStoreState = {
   cliChildProjections: {} as Record<string, unknown>,
   queuedDepthBySession: {} as Record<string, number>,
   sessionStatusSnapshots: {} as Record<string, unknown>,
+  runtimeActivitySnapshots: {} as Record<string, unknown>,
   bufferedSessionStatusSnapshots: {} as Record<string, unknown>,
   cliAgentOutput: {} as Record<string, string>,
   setStreaming,
   setPendingConfirmation,
+  removePendingConfirmation,
   addToolActivity,
   updateToolActivity,
   clearToolActivities,
@@ -174,9 +192,14 @@ const agentStoreState = {
   appendCLIAgentChunk,
   clearCLIAgentOutput,
   setSessionStatusSnapshot,
+  setRuntimeActivitySnapshot,
   recordSessionStatusSnapshot,
   clearBufferedSessionStatusSnapshots,
   consumeBufferedSessionStatusSnapshots,
+  getRuntimeActivitySnapshot: (sessionId: string | null) =>
+    sessionId
+      ? agentStoreState.runtimeActivitySnapshots[sessionId] ?? null
+      : null,
   upsertCLIChildProjection: vi.fn(),
   updateCLIChildProjection: vi.fn(),
   rebuildCLIChildProjections: vi.fn(),
@@ -218,7 +241,7 @@ function createMockSessions(): ChatSession[] {
 
 // Mutable activeTurnId so tests can control what the store returns
 let mockActiveTurnId: string | null = null;
-let mockActiveSessionId = 'session-1';
+let mockActiveSessionId: string | null = 'session-1';
 let mockPendingMessage: string | null = null;
 let mockStreamingChunks: Record<string, string> = {};
 let mockThinkingChunks: Record<string, string> = {};
@@ -228,75 +251,59 @@ let mockMessages: ChatMessage[] = [];
 let mockSessions = createMockSessions();
 const mockSetPendingMessage = vi.fn();
 const mockSetPendingRAAppId = vi.fn();
+const mockSetPendingRAAppLaunchIntent = vi.fn();
+
+function buildSessionStoreState() {
+  return {
+    messages: mockMessages,
+    agentTurns: [],
+    activeTurnId: mockActiveTurnId,
+    activeSessionId: mockActiveSessionId,
+    sessions: mockSessions,
+    pendingMessage: mockPendingMessage,
+    addSession,
+    pendingRAAppId: null,
+    pendingRAAppLaunchIntent: null,
+    setPendingMessage: mockSetPendingMessage,
+    setPendingRAAppId: mockSetPendingRAAppId,
+    setPendingRAAppLaunchIntent: mockSetPendingRAAppLaunchIntent,
+    streamingChunks: mockStreamingChunks,
+    thinkingChunks: mockThinkingChunks,
+    chunkSessionIds: mockChunkSessionIds,
+    addMessage,
+    appendChunk: vi.fn(),
+    finalizeChunk: vi.fn(),
+    setMessages,
+    updateSession,
+    setAgentTurns,
+    updateAgentTurn,
+    startAgentTurn,
+    addTurnItem,
+    finalizeAgentTurn,
+    clearAgentTurns,
+    clearPendingChunks,
+    getSessionMessages,
+    getSessionActiveTurnId: () => mockActiveTurnId,
+    getSessionAgentTurns: () => [],
+    markAgentTurnError,
+    removeLastAgentTurn,
+    flushThinkingChunks: vi.fn(),
+    flushStreamingChunks,
+    isSessionHydrated: (sessionId: string | null) => (sessionId ? mockHydratedSessionIds[sessionId] === true : false),
+    markSessionHydrated: (sessionId: string) => {
+      mockHydratedSessionIds[sessionId] = true;
+    },
+  };
+}
 
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: Object.assign(
-    () => ({
-      messages: mockMessages,
-      agentTurns: [],
-      activeTurnId: mockActiveTurnId,
-      activeSessionId: mockActiveSessionId,
-      sessions: mockSessions,
-      streamingChunks: mockStreamingChunks,
-      thinkingChunks: mockThinkingChunks,
-      chunkSessionIds: mockChunkSessionIds,
-      addMessage,
-      addSession,
-      appendChunk: vi.fn(),
-      finalizeChunk: vi.fn(),
-      setMessages,
-      updateSession,
-      setAgentTurns,
-      updateAgentTurn,
-      startAgentTurn,
-      addTurnItem,
-      finalizeAgentTurn,
-      clearAgentTurns,
-      clearPendingChunks,
-      getSessionMessages,
-      getSessionActiveTurnId: () => mockActiveTurnId,
-      getSessionAgentTurns: () => [],
-      markAgentTurnError,
-      removeLastAgentTurn,
-      flushThinkingChunks: vi.fn(),
-      flushStreamingChunks,
-      isSessionHydrated: (sessionId: string | null) => (sessionId ? mockHydratedSessionIds[sessionId] === true : false),
-      markSessionHydrated: (sessionId: string) => {
-        mockHydratedSessionIds[sessionId] = true;
-      },
-    }),
+    <T,>(selector?: (state: ReturnType<typeof buildSessionStoreState>) => T) => {
+      const state = buildSessionStoreState();
+      return typeof selector === 'function' ? selector(state) : state;
+    },
     {
-      getState: () => ({
-        messages: mockMessages,
-        agentTurns: [],
-        activeTurnId: mockActiveTurnId,
-        activeSessionId: mockActiveSessionId,
-        sessions: mockSessions,
-        pendingMessage: mockPendingMessage,
-        addSession,
-        pendingRAAppId: null,
-        setPendingMessage: mockSetPendingMessage,
-        setPendingRAAppId: mockSetPendingRAAppId,
-        setMessages,
-        setAgentTurns,
-        updateAgentTurn,
-        updateSession,
-        streamingChunks: mockStreamingChunks,
-        thinkingChunks: mockThinkingChunks,
-        chunkSessionIds: mockChunkSessionIds,
-        clearPendingChunks,
-        getSessionMessages,
-        finalizeChunk: vi.fn(),
-        flushStreamingChunks,
-        getSessionActiveTurnId: () => mockActiveTurnId,
-        getSessionAgentTurns: () => [],
-        isSessionHydrated: (sessionId: string | null) => (sessionId ? mockHydratedSessionIds[sessionId] === true : false),
-        markSessionHydrated: (sessionId: string) => {
-          mockHydratedSessionIds[sessionId] = true;
-        },
-        markAgentTurnError,
-        removeLastAgentTurn,
-      }),
+      getState: () => buildSessionStoreState(),
     },
   ),
 }));
@@ -477,6 +484,16 @@ beforeEach(() => {
 });
 
 describe('ChatInterface event wiring', () => {
+  it('renders the welcome composer even before any session is active', async () => {
+    mockActiveSessionId = null;
+
+    await renderChatInterface();
+
+    expect(screen.getByTestId('welcome-screen')).toBeInTheDocument();
+    expect(screen.getByTestId('welcome-prompt-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-input')).toBeNull();
+  });
+
   it('renders only the welcome composer for an empty active chat', async () => {
     await renderChatInterface();
 
@@ -1263,7 +1280,7 @@ describe('ChatInterface event wiring', () => {
       agentRun: childAgentRun,
     });
 
-    expect(setPendingConfirmation).toHaveBeenCalledWith('child-session', null);
+    expect(removePendingConfirmation).toHaveBeenCalledWith('child-session', 'req-confirmed');
     expect(updateToolActivity).toHaveBeenCalledWith(
       'call-confirmed',
       expect.objectContaining({ status: 'running' }),
@@ -1330,7 +1347,7 @@ describe('ChatInterface event wiring', () => {
       message: 'Tool confirmation expired before fs_write could run.',
     });
 
-    expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
+    expect(removePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-fs-write');
     expect(updateToolActivity).toHaveBeenCalledWith(
       'call-fs-write',
       expect.objectContaining({
@@ -1709,6 +1726,51 @@ function makeMsg(overrides: Partial<ChatMessage>): ChatMessage {
 }
 
 describe('REGRESSION: computeAnsweredCallIds freezes old RA-App widgets', () => {
+  it('ignores scaffold-only branch user messages after projection', () => {
+    const branchSession: ChatSession = {
+      id: 'branch-1',
+      personaId: 'default',
+      title: 'Strategic Decision Council: Analyst',
+      parentSessionId: 'host-1',
+      createdAt: 1,
+      updatedAt: 1,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureContext: {
+          hostSessionId: 'host-1',
+          historySessionId: 'host-1',
+          sessionSurface: 'conversation-branch',
+        },
+      },
+    };
+    const projection = resolveRenderableConversationProjection({
+      session: branchSession,
+      messages: [
+        makeMsg({ id: 'assistant-1', sessionId: 'branch-1', role: 'assistant', content: '' }),
+        makeMsg({
+          id: 'tool-1',
+          sessionId: 'branch-1',
+          role: 'tool_result',
+          content: '{"type":"gui","status":"ready"}',
+          toolCallId: 'call_raapp_1',
+        }),
+        makeMsg({
+          id: 'user-scaffold',
+          sessionId: 'branch-1',
+          role: 'user',
+          content: 'Architecture: Strategic Decision Council v0.1.0\nSlot: Analyst (participant)\nTask: Assess repo.',
+        }),
+      ],
+      agentTurns: [],
+    });
+
+    const result = computeAnsweredCallIds(projection.messages);
+
+    expect(projection.messages.map((message) => message.id)).toEqual(['tool-1']);
+    expect(projection.messages.some((message) => message.role === 'user')).toBe(false);
+    expect(result.has('call_raapp_1')).toBe(false);
+  });
+
   it('returns empty set when no user message follows any tool_result', () => {
     const messages: ChatMessage[] = [
       makeMsg({ id: 'u1', role: 'user', content: 'Run Q&A' }),

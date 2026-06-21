@@ -8,6 +8,7 @@ import { eventBus } from '../../../services/eventBus';
 import { apiClient } from '../../../services/apiClient';
 
 const handlers: Record<string, Array<(...args: unknown[]) => void>> = {};
+const mockIdentifySession = vi.hoisted(() => vi.fn());
 
 function capture(event: string, handler: (...args: unknown[]) => void) {
   handlers[event] ??= [];
@@ -43,15 +44,27 @@ vi.mock('../../../services/eventBus', () => ({
     onToolArgProgress: (handler: (...args: unknown[]) => void) => capture('tool:arg_progress', handler),
     onSessionStatus: (handler: (...args: unknown[]) => void) => capture('session:status', handler),
     onQueued: (handler: (...args: unknown[]) => void) => capture('chat:queued', handler),
+    onRuntimeActivitySnapshot: (handler: (...args: unknown[]) => void) => capture('session:runtime_snapshot', handler),
     onReconnect: (handler: (...args: unknown[]) => void) => capture('socket:reconnect', handler),
     onConnectionState: (handler: (...args: unknown[]) => void) => capture('socket:connection_state', handler),
-    identifySession: vi.fn(),
+    identifySession: mockIdentifySession,
     sendMessage: vi.fn(),
     stopTurn: vi.fn(),
     confirmTool: vi.fn(),
     cancelTool: vi.fn(),
     disconnect: vi.fn(),
   },
+}));
+
+vi.mock('../../../services/sessionWatchRegistry', () => ({
+  identifyWatchedSession: (sessionId: string) => {
+    if (sessionId.trim().length > 0) {
+      mockIdentifySession(sessionId);
+    }
+  },
+  replaceBaselineWatchedSessions: vi.fn(),
+  resetSessionWatchConnectionEpoch: vi.fn(),
+  clearSessionWatchRegistry: vi.fn(),
 }));
 
 vi.mock('../../../services/backendHealth', () => ({

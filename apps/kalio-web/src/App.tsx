@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   MessageSquare, GitBranch, Gauge, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
@@ -35,19 +35,21 @@ import { useAgentStore } from './store/agentStore';
 import { backendHealth } from './services/backendHealth';
 import { apiClient } from './services/apiClient';
 import { eventBus } from './services/eventBus';
+import { loadConversationSessions, loadRuntimeWatchlist } from './services/sessionBootstrap';
+import {
+  identifyWatchedSession,
+  replaceBaselineWatchedSessions,
+  resetSessionWatchConnectionEpoch,
+} from './services/sessionWatchRegistry';
 import { useSettingsStore } from './features/settings/settingsStore';
 import type { ChatSession } from '@kalio/types';
 import { activateConversationSession } from './features/chat/activeConversationSession';
+import { selectPendingApprovalCount } from './store/agentRuntimeSelectors';
 
 const TALK_VIEW_OPTIONS: ReadonlyArray<{ id: TalkView; label: string; icon: React.ReactNode }> = [
   { id: 'conversation', label: 'Conversation', icon: <MessageSquare size={14} /> },
   { id: 'graph', label: 'Execution graph', icon: <GitBranch size={14} /> },
 ];
-
-function rootReplaySessions(sessions: ChatSession[]): ChatSession[] {
-  const ids = new Set(sessions.map((session) => session.id));
-  return sessions.filter((session) => !session.parentSessionId || !ids.has(session.parentSessionId));
-}
 
 function mergeSessionsPreservingLocal(current: ChatSession[], incoming: ChatSession[]): ChatSession[] {
   const merged = new Map<string, ChatSession>();
@@ -61,11 +63,6 @@ function mergeSessionsPreservingLocal(current: ChatSession[], incoming: ChatSess
     }
   }
   return Array.from(merged.values()).sort((left, right) => right.updatedAt - left.updatedAt);
-}
-
-async function loadSessionsForReplay(): Promise<ChatSession[]> {
-  const response = await apiClient.get<ChatSession[]>('/api/sessions');
-  return response.data;
 }
 
 export function App() {
@@ -83,22 +80,17 @@ export function App() {
 
   const openSettings = (tab?: string) => { setSettingsInitialTab(tab); setSettingsOpen(true); };
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
-  const { sessions, setActiveSession, setSessions } = useSessionStore();
+  const { sessions, activeSessionId, setActiveSession, setSessions } = useSessionStore();
   const recentTalkCount = recentTalkBadgeCount(sessions, lastTalkActiveAt);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
-  const pendingConfirmationCount = Object.keys(pendingConfirmations).length;
+  const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
+  const pendingConfirmationCount = selectPendingApprovalCount({
+    pendingConfirmations,
+    pendingBudgetApprovals,
+  });
   const hasPendingConfirmation = pendingConfirmationCount > 0;
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
-  const identifiedHitlSessionsRef = useRef<Set<string>>(new Set());
   const bootstrapFetchSeqRef = useRef(0);
-
-  const identifyHitlSession = useCallback((sessionId: string) => {
-    if (!sessionId.trim() || identifiedHitlSessionsRef.current.has(sessionId)) {
-      return;
-    }
-    eventBus.identifySession(sessionId);
-    identifiedHitlSessionsRef.current.add(sessionId);
-  }, []);
 
   // Initialize on app mount
   useEffect(() => {
@@ -115,49 +107,53 @@ export function App() {
   }, [setBackendConfig]);
 
   useEffect(() => {
-    if (sessions.length > 0) {
-      return;
-    }
     const requestSeq = bootstrapFetchSeqRef.current + 1;
     bootstrapFetchSeqRef.current = requestSeq;
-    void loadSessionsForReplay()
-      .then((sessionsFromApi) => {
+    const shouldFetchSessions = useSessionStore.getState().sessions.length === 0;
+
+    void Promise.all([
+      shouldFetchSessions ? loadConversationSessions() : Promise.resolve(useSessionStore.getState().sessions),
+      loadRuntimeWatchlist(),
+    ])
+      .then(([sessionsFromApi, runtimeWatchTargets]) => {
         if (bootstrapFetchSeqRef.current !== requestSeq) {
           return;
         }
         const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, sessionsFromApi);
-        setSessions(mergedSessions);
-        rootReplaySessions(mergedSessions).forEach((session) => identifyHitlSession(session.id));
+        if (shouldFetchSessions) {
+          setSessions(mergedSessions);
+        }
+        replaceBaselineWatchedSessions(runtimeWatchTargets.map((target) => target.sessionId), 'bootstrap-watchlist');
+        identifyWatchedSession(useSessionStore.getState().activeSessionId, 'bootstrap-active-session', { sticky: true });
       })
       .catch((err: unknown) => {
-        console.warn('[App] Failed to load sessions for HITL replay', err);
+        console.warn('[App] Failed to load bootstrap runtime state', err);
       });
-  }, [identifyHitlSession, sessions.length, setSessions]);
+  }, [setSessions]);
 
   useEffect(() => {
-    rootReplaySessions(sessions).forEach((session) => identifyHitlSession(session.id));
-  }, [identifyHitlSession, sessions]);
+    identifyWatchedSession(activeSessionId, 'active-session', { sticky: true });
+  }, [activeSessionId]);
 
   useEffect(() => {
     const offReconnect = eventBus.onReconnect(() => {
-      identifiedHitlSessionsRef.current.clear();
-      void loadSessionsForReplay()
-        .then((sessionsFromApi) => {
+      resetSessionWatchConnectionEpoch('socket-reconnect');
+      void Promise.all([
+        loadConversationSessions({ force: true }),
+        loadRuntimeWatchlist({ force: true }),
+      ])
+        .then(([sessionsFromApi, runtimeWatchTargets]) => {
           const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, sessionsFromApi);
           setSessions(mergedSessions);
-          const activeSessionId = useSessionStore.getState().activeSessionId;
-          if (activeSessionId) {
-            identifyHitlSession(activeSessionId);
-          }
-          rootReplaySessions(mergedSessions)
-            .forEach((session) => identifyHitlSession(session.id));
+          replaceBaselineWatchedSessions(runtimeWatchTargets.map((target) => target.sessionId), 'reconnect-watchlist');
+          identifyWatchedSession(useSessionStore.getState().activeSessionId, 'reconnect-active-session', { sticky: true });
         })
         .catch((err: unknown) => {
           console.warn('[App] Failed to refresh sessions after reconnect', err);
         });
     });
     return offReconnect;
-  }, [identifyHitlSession, setSessions]);
+  }, [setSessions]);
 
   // Close canvas when navigating away from talk
   useEffect(() => {

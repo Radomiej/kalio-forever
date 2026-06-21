@@ -4,6 +4,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { useSettingsStore } from '../settings/settingsStore';
 import { eventBus } from '../../services/eventBus';
+import { identifyWatchedSession } from '../../services/sessionWatchRegistry';
 import { MessageBubble } from './MessageBubble';
 import { AgentTurnBubble } from './AgentTurnBubble';
 import { ChatInput } from './ChatInput';
@@ -33,6 +34,7 @@ import {
 import { resolveConversationShellState } from './conversationShellState';
 import { resolveLiveTurnState } from './liveTurnState';
 import { resolveRenderableConversationProjection } from './conversationTranscriptProjection';
+import { selectQueuedDepth } from '../../store/agentRuntimeSelectors';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
@@ -99,10 +101,15 @@ export function ChatInterface() {
     getToolActivitiesForSession,
     getContextForSession,
     queuedDepthBySession,
+    runtimeActivitySnapshots,
     hasActiveLoopForSession,
   } = useAgentStore();
   const isStreamingForActiveSession = isStreaming && streamingSessionId === activeSessionId;
-  const queuedDepth = activeSessionId ? (queuedDepthBySession?.[activeSessionId] ?? 0) : 0;
+  const queuedDepth = selectQueuedDepth({
+    sessionId: activeSessionId,
+    queuedDepthBySession,
+    runtimeActivitySnapshots,
+  });
   const activeToolActivities = getToolActivitiesForSession(activeSessionId);
   const activeContext = getContextForSession(activeSessionId);
   const [error, setError] = useState<string | null>(null);
@@ -268,7 +275,7 @@ export function ChatInterface() {
 
   useEffect(() => {
     if (activeSessionId && eventBus.connected) {
-      eventBus.identifySession(activeSessionId);
+      identifyWatchedSession(activeSessionId, 'chat-interface-active', { sticky: true });
     }
   }, [activeSessionId]);
 

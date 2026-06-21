@@ -9,11 +9,13 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = resolve(fileURLToPath(import.meta.url), '..');
 const repoRoot = resolve(scriptDir, '..');
 const stackDir = resolve(repoRoot, '.kalio-stack');
-const logsDir = resolve(stackDir, 'logs');
+// TODO: legacy fallback: keep QA logs outside .kalio-stack because the old log directory can remain locked on Windows after stale runs.
+const logsDir = resolve(repoRoot, '.tmp', 'qa-stack-logs');
 const statePath = resolve(stackDir, 'qa-stack-state.json');
 const lastStatePath = resolve(stackDir, 'qa-stack-last-state.json');
-const backendLogPath = resolve(logsDir, 'backend.log');
-const frontendLogPath = resolve(logsDir, 'frontend.log');
+const logRunId = `${Date.now()}-${process.pid}`;
+const backendLogPath = resolve(logsDir, `backend-${logRunId}.log`);
+const frontendLogPath = resolve(logsDir, `frontend-${logRunId}.log`);
 
 const action = process.argv[2] ?? 'status';
 const args = process.argv.slice(3);

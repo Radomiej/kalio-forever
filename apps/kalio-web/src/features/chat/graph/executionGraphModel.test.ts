@@ -1439,6 +1439,176 @@ describe('buildExecutionGraphModel', () => {
     ]));
   });
 
+  it('renders runtime-only child execution placeholders before durable results arrive', () => {
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Delegate across all child kinds', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [
+          { id: 'call-sub', name: 'run_subagent', args: { inputPrompt: 'Review requirements' } },
+          { id: 'call-cli', name: 'run_cli_agent', args: { agentId: 'codex', workdir: 'C:/repo', prompt: 'Inspect repo' } },
+          { id: 'call-flow', name: 'run_sub_agentflow', args: { flowId: 'goal_guard_delivery_loop', goal: 'Verify delivery' } },
+        ],
+      }),
+    ];
+
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns: buildTurnsFromHistory(messages, 'session-1'),
+      toolActivities: [
+        { callId: 'call-sub', toolName: 'run_subagent', args: { inputPrompt: 'Review requirements' }, sessionId: 'session-1', status: 'running', startedAt: 2 },
+        { callId: 'call-cli', toolName: 'run_cli_agent', args: { agentId: 'codex', workdir: 'C:/repo', prompt: 'Inspect repo' }, sessionId: 'session-1', status: 'running', startedAt: 2 },
+        { callId: 'call-flow', toolName: 'run_sub_agentflow', args: { flowId: 'goal_guard_delivery_loop', goal: 'Verify delivery' }, sessionId: 'session-1', status: 'running', startedAt: 2 },
+      ],
+      activeAgentLoops: {},
+      childExecutions: [
+        {
+          id: 'child-sub-1',
+          kind: 'subagent',
+          parentSessionId: 'session-1',
+          childSessionId: 'sub-child-1',
+          parentToolCallId: 'call-sub',
+          label: 'Reviewer child',
+          status: 'running',
+          updatedAt: 3,
+        },
+        {
+          id: 'child-cli-1',
+          kind: 'cli_agent',
+          parentSessionId: 'session-1',
+          childSessionId: 'cli-child-1',
+          parentToolCallId: 'call-cli',
+          label: 'codex',
+          status: 'running',
+          lastOutput: 'Scanning repository...',
+          updatedAt: 4,
+        },
+        {
+          id: 'child-flow-1',
+          kind: 'agent_flow',
+          parentSessionId: 'session-1',
+          childSessionId: 'flow-child-1',
+          parentToolCallId: 'call-flow',
+          flowRunId: 'flow-run-1',
+          label: 'Goal Guard',
+          status: 'waiting',
+          updatedAt: 5,
+        },
+      ],
+      sessions: [
+        makeSession(),
+        makeSession({ id: 'sub-child-1', title: 'Reviewer child', kind: 'subagent', parentSessionId: 'session-1' }),
+        makeSession({ id: 'cli-child-1', title: 'Codex CLI', kind: 'cli-agent', parentSessionId: 'session-1' }),
+        makeSession({ id: 'flow-child-1', title: 'Goal Guard flow', kind: 'agent-flow', parentSessionId: 'session-1' }),
+      ],
+      sessionMessages: {
+        'session-1': messages,
+        'sub-child-1': [],
+        'cli-child-1': [],
+        'flow-child-1': [],
+      },
+      collapseTools: false,
+    });
+
+    expect(model.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'subagent:sub-child-1',
+        kind: 'subagent',
+        status: 'running',
+        payload: expect.objectContaining({ result: null, childExecutionKind: 'sub_agent' }),
+      }),
+      expect.objectContaining({
+        id: 'cli-agent:cli-child-1',
+        kind: 'cli-agent',
+        status: 'running',
+        payload: expect.objectContaining({
+          childExecutionKind: 'cli_agent',
+          snapshot: expect.objectContaining({ status: 'running', lastOutput: 'Scanning repository...' }),
+        }),
+      }),
+      expect.objectContaining({
+        id: 'agent-flow:flow-run-1',
+        kind: 'agent-flow',
+        status: 'running',
+        payload: expect.objectContaining({ result: null, childExecutionKind: 'sub_agentflow' }),
+      }),
+    ]));
+  });
+
+  it('prefers runtime child execution terminal status over stale loop state for CLI children', () => {
+    const cliAgentResult = {
+      childSessionId: 'cli-child-1',
+      parentSessionId: 'session-1',
+      agentId: 'codex',
+      workdir: 'C:/repo',
+      status: 'running',
+      lastPrompt: 'Inspect repo',
+      updatedAt: 9,
+      lastOutput: 'still running',
+    };
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Inspect the repo', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex', workdir: 'C:/repo', prompt: 'Inspect repo' } }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-cli-1',
+        content: JSON.stringify(cliAgentResult),
+        createdAt: 3,
+      }),
+    ];
+
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns: buildTurnsFromHistory(messages, 'session-1'),
+      toolActivities: [],
+      activeAgentLoops: {
+        'cli-loop-1': {
+          sessionId: 'cli-child-1',
+          turnId: 'cli-turn-1',
+          startedAt: 4,
+        },
+      },
+      childExecutions: [{
+        id: 'child-cli-1',
+        kind: 'cli_agent',
+        parentSessionId: 'session-1',
+        childSessionId: 'cli-child-1',
+        parentToolCallId: 'call-cli-1',
+        label: 'codex',
+        status: 'completed',
+        lastOutput: 'done',
+        updatedAt: 5,
+      }],
+      sessions: [
+        makeSession(),
+        makeSession({ id: 'cli-child-1', title: 'Codex CLI', kind: 'cli-agent', parentSessionId: 'session-1' }),
+      ],
+      sessionMessages: {
+        'session-1': messages,
+        'cli-child-1': [],
+      },
+      collapseTools: false,
+    });
+
+    expect(model.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'cli-agent:cli-child-1',
+        kind: 'cli-agent',
+        status: 'success',
+      }),
+    ]));
+  });
+
   it('marks awaiting-confirmation tools so the graph can render Accept actions', () => {
     const messages: ChatMessage[] = [
       makeMessage({ id: 'u1', role: 'user', content: 'Delete the draft file', createdAt: 1 }),

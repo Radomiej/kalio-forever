@@ -40,13 +40,14 @@ function timeoutLabel(timeoutMs: number): string {
 export function HomeHitlInbox({ onOpenSession }: HomeHitlInboxProps) {
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const sessionToolActivities = useAgentStore((s) => s.sessionToolActivities);
-  const setPendingConfirmation = useAgentStore((s) => s.setPendingConfirmation);
+  const removePendingConfirmation = useAgentStore((s) => s.removePendingConfirmation);
   const updateToolActivity = useAgentStore((s) => s.updateToolActivity);
   const sessions = useSessionStore((s) => s.sessions);
   const [notes, setNotes] = useState<Record<string, string>>({});
 
   const sessionsById = new Map(sessions.map((session) => [session.id, session]));
   const confirmations = Object.values(pendingConfirmations)
+    .flat()
     .filter((confirmation): confirmation is ToolConfirmationRequest => confirmation != null)
     .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
 
@@ -65,7 +66,7 @@ export function HomeHitlInbox({ onOpenSession }: HomeHitlInboxProps) {
       sessionId: confirmation.sessionId,
       ...notePayload(confirmation.requestId),
     });
-    setPendingConfirmation(confirmation.sessionId, null);
+    removePendingConfirmation(confirmation.sessionId, confirmation.requestId);
   };
 
   const reject = (confirmation: ToolConfirmationRequest) => {
@@ -78,7 +79,7 @@ export function HomeHitlInbox({ onOpenSession }: HomeHitlInboxProps) {
       sessionId: confirmation.sessionId,
       ...notePayload(confirmation.requestId),
     });
-    setPendingConfirmation(confirmation.sessionId, null);
+    removePendingConfirmation(confirmation.sessionId, confirmation.requestId);
   };
 
   return (

@@ -13,7 +13,7 @@ interface GraphInspectorActionsProps {
   onOpenSessionInConversation?: (sessionId: string) => void;
   setActiveSession: (sessionId: string | null) => void;
   setPendingMessage: (message: string | null) => void;
-  setPendingConfirmation: (sessionId: string, confirmation: ToolConfirmationRequest | null) => void;
+  removePendingConfirmation: (sessionId: string, requestId: string) => void;
 }
 
 const CLI_FOLLOW_UP_MESSAGE = 'Continue from the current task. Share a concise status update and your next concrete step.';
@@ -25,7 +25,7 @@ export function GraphInspectorActions({
   onOpenSessionInConversation,
   setActiveSession,
   setPendingMessage,
-  setPendingConfirmation,
+  removePendingConfirmation,
 }: GraphInspectorActionsProps) {
   const [cliActionNotice, setCliActionNotice] = useState<string | null>(null);
   const sessions = useSessionStore((state) => state.sessions);
@@ -162,7 +162,7 @@ export function GraphInspectorActions({
             className="w-full rounded-xl bg-emerald-500/85 hover:bg-emerald-500 text-white px-4 py-3 text-sm font-medium transition-colors"
             onClick={() => {
               eventBus.confirmTool({ requestId: selectedConfirmation.requestId, sessionId: selectedConfirmation.sessionId });
-              setPendingConfirmation(selectedConfirmation.sessionId, null);
+              removePendingConfirmation(selectedConfirmation.sessionId, selectedConfirmation.requestId);
             }}
           >
             <span className="flex items-center justify-center gap-2">
@@ -176,7 +176,7 @@ export function GraphInspectorActions({
             className="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-sm font-medium transition-colors hover:bg-base-200"
             onClick={() => {
               eventBus.cancelTool({ requestId: selectedConfirmation.requestId, sessionId: selectedConfirmation.sessionId });
-              setPendingConfirmation(selectedConfirmation.sessionId, null);
+              removePendingConfirmation(selectedConfirmation.sessionId, selectedConfirmation.requestId);
             }}
           >
             <span className="flex items-center justify-center gap-2">

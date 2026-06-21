@@ -13,10 +13,6 @@ const apiClientMock = vi.hoisted(() => ({
 
 vi.mock('../../services/apiClient', () => ({ apiClient: apiClientMock }));
 
-vi.mock('boring-avatars', () => ({
-  default: ({ name }: { name: string }) => <svg data-testid="boring-avatar">{name}</svg>,
-}));
-
 vi.mock('./PersonaToolPicker', () => ({
   PersonaToolPicker: () => <div data-testid="persona-tool-picker" />,
   PersonaToolBadges: () => <div data-testid="persona-tool-badges" />,

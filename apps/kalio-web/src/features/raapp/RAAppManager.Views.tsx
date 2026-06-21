@@ -15,6 +15,12 @@ import { RAAppGroupCard } from './components/RAAppGroupCard';
 import { RAAppCoreCard } from './components/RAAppCoreCard';
 import type { RAAppBlock, RAAppGroup, RAAppSummary, VFSFile } from '@kalio/types';
 
+export interface CatalogRunTarget {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 export interface FoundRAApp {
   messageId: string;
   block: RAAppBlock;
@@ -45,7 +51,7 @@ export function CatalogView({
   groups: RAAppGroup[];
   coreApps: RAAppSummary[];
   userStandaloneApps: RAAppSummary[];
-  onRun: (name: string) => void;
+  onRun: (target: CatalogRunTarget) => void;
   onGroupDelete: (slug: string) => void;
   onGroupApprove: (slug: string, bumpType: 'patch' | 'minor' | 'major') => Promise<void>;
   onGroupDiscard: (slug: string) => Promise<void>;
@@ -76,7 +82,12 @@ export function CatalogView({
             group={group}
             onRun={(slug) => {
               const g = groups.find((item) => item.slug === slug);
-              if (g) onRun(g.current.meta.name);
+              if (g) {
+                onRun({
+                  id: g.current.meta.id,
+                  name: g.current.meta.name,
+                });
+              }
             }}
             onDelete={onGroupDelete}
             onApprove={onGroupApprove}
