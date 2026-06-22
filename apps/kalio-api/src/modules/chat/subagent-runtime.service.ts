@@ -352,16 +352,31 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           }) as SubagentCopiedFile[]
         : [];
 
-      trackingEmit?.('chat:complete', {
-        sessionId: childSessionId,
-        messageId: loopResult.lastMessageId,
-        agentRun,
-      });
-      trackingEmit?.('agent:done', { sessionId: childSessionId, turnId, agentRun });
-
       const baseResultText = loopResult.exhausted
         ? this.exhaustedLoopResultText(maxIterations, loopResult.finalText || streamedText.trim())
         : loopResult.finalText || streamedText.trim() || 'Sub-agent completed with no output.';
+      let completionMessageId = loopResult.lastMessageId;
+      if (loopResult.exhausted || baseResultText === 'Sub-agent completed with no output.') {
+        const completionState = new TurnState();
+        completionState.replaceText(baseResultText);
+        const persistedCompletionMessageId = await this.persistTerminalAssistantMessage(
+          childSessionId,
+          nanoid(),
+          completionState,
+          { turnId, promptMessageId },
+          'completion fallback',
+        );
+        if (persistedCompletionMessageId) {
+          completionMessageId = persistedCompletionMessageId;
+        }
+      }
+
+      trackingEmit?.('chat:complete', {
+        sessionId: childSessionId,
+        messageId: completionMessageId,
+        agentRun,
+      });
+      trackingEmit?.('agent:done', { sessionId: childSessionId, turnId, agentRun });
 
       return {
         result: appendCopiedOutputLinks(baseResultText, request.parentSessionId, copiedFiles),
@@ -375,6 +390,15 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       };
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
+      const fallbackState = new TurnState();
+      fallbackState.replaceText(this.failedRunResultText(error.message, streamedText.trim()));
+      await this.persistTerminalAssistantMessage(
+        childSessionId,
+        nanoid(),
+        fallbackState,
+        { turnId, promptMessageId },
+        'error fallback',
+      );
       trackingEmit?.('chat:error', {
         sessionId: childSessionId,
         code: 'LLM_ERROR',
@@ -413,5 +437,29 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       ? ` Last assistant text before stopping: ${lastText.trim()}`
       : '';
     return `Sub-agent stopped after ${maxIterations} tool iteration${maxIterations === 1 ? '' : 's'} without producing a final answer.${suffix}`;
+  }
+
+  private failedRunResultText(errorMessage: string, lastText: string): string {
+    const suffix = lastText.trim().length > 0
+      ? ` Last assistant text before failure: ${lastText.trim()}`
+      : '';
+    return `Sub-agent failed: ${errorMessage}.${suffix}`;
+  }
+
+  private async persistTerminalAssistantMessage(
+    sessionId: string,
+    messageId: string,
+    state: TurnState,
+    metadata: { turnId: string; promptMessageId: string },
+    context: string,
+  ): Promise<string | null> {
+    try {
+      await this.sessionManager.persistAssistantMessage(sessionId, messageId, state, metadata);
+      return messageId;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Failed to persist ${context} for subagent ${sessionId}: ${message}`);
+      return null;
+    }
   }
 }

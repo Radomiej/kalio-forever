@@ -303,9 +303,6 @@ export function sessionStatusSnapshotToRuntimeState(
   if (!snapshot) {
     return null;
   }
-  if ((snapshot.queueLength ?? 0) > 0) {
-    return 'pending';
-  }
   if (snapshot.run?.status === 'completed' || snapshot.run?.phase === 'completed') {
     return 'done';
   }
@@ -317,6 +314,9 @@ export function sessionStatusSnapshotToRuntimeState(
   }
   if (snapshot.run?.status === 'interrupted_needs_retry') {
     return 'stopped';
+  }
+  if ((snapshot.queueLength ?? 0) > 0) {
+    return 'pending';
   }
   if (snapshot.active) {
     if (snapshot.run?.phase === 'queued') {

@@ -172,4 +172,114 @@ describe('buildRuntimeActivitySnapshot', () => {
     ]);
     expect(batch.snapshotsBySessionId['child-1'].childExecutions).toEqual([]);
   });
+
+  it('treats a child subagent with terminal run status as completed even if queueLength is stale', async () => {
+    const listChildren = vi.fn().mockImplementation(async (sessionId: string) => {
+      if (sessionId === 'session-1') {
+        return [{ id: 'child-1', parentSessionId: 'session-1', kind: 'subagent', parentToolCallId: 'call-1', title: 'Child 1', updatedAt: 2 }];
+      }
+      return [];
+    });
+    const getSessionStatusWithRun = vi.fn().mockImplementation(async (sessionId: string) => (
+      sessionId === 'child-1'
+        ? {
+            ...makeStatus(sessionId),
+            queueLength: 1,
+            run: {
+              id: 'run-child-1',
+              sessionId,
+              turnId: 'turn-1',
+              phase: 'completed',
+              status: 'completed',
+              retryCount: 0,
+              safeResume: true,
+              startedAt: 1,
+              updatedAt: 3,
+              lastHeartbeatAt: 3,
+            },
+          }
+        : makeStatus(sessionId)
+    ));
+
+    const batch = await buildRuntimeActivitySnapshotBatch({
+      rootSessionId: 'session-1',
+      pipeline: {
+        getSessionStatusWithRun,
+      },
+      toolDispatch: {
+        getPendingConfirmations: vi.fn().mockReturnValue([]),
+      },
+      agentBudgetApprovals: {
+        getPendingApprovals: vi.fn().mockReturnValue([]),
+      },
+      sessionsService: {
+        listChildren,
+        get: vi.fn(),
+        getMessages: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    expect(batch.snapshotsBySessionId['session-1'].childExecutions).toEqual([
+      expect.objectContaining({
+        childSessionId: 'child-1',
+        kind: 'subagent',
+        status: 'completed',
+      }),
+    ]);
+  });
+
+  it('treats a child subagent with failed run status as failed even if queueLength is stale', async () => {
+    const listChildren = vi.fn().mockImplementation(async (sessionId: string) => {
+      if (sessionId === 'session-1') {
+        return [{ id: 'child-1', parentSessionId: 'session-1', kind: 'subagent', parentToolCallId: 'call-1', title: 'Child 1', updatedAt: 2 }];
+      }
+      return [];
+    });
+    const getSessionStatusWithRun = vi.fn().mockImplementation(async (sessionId: string) => (
+      sessionId === 'child-1'
+        ? {
+            ...makeStatus(sessionId),
+            queueLength: 1,
+            run: {
+              id: 'run-child-1',
+              sessionId,
+              turnId: 'turn-1',
+              phase: 'failed',
+              status: 'failed',
+              retryCount: 0,
+              safeResume: false,
+              startedAt: 1,
+              updatedAt: 3,
+              lastHeartbeatAt: 3,
+            },
+          }
+        : makeStatus(sessionId)
+    ));
+
+    const batch = await buildRuntimeActivitySnapshotBatch({
+      rootSessionId: 'session-1',
+      pipeline: {
+        getSessionStatusWithRun,
+      },
+      toolDispatch: {
+        getPendingConfirmations: vi.fn().mockReturnValue([]),
+      },
+      agentBudgetApprovals: {
+        getPendingApprovals: vi.fn().mockReturnValue([]),
+      },
+      sessionsService: {
+        listChildren,
+        get: vi.fn(),
+        getMessages: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    expect(batch.snapshotsBySessionId['session-1'].childExecutions).toEqual([
+      expect.objectContaining({
+        childSessionId: 'child-1',
+        kind: 'subagent',
+        status: 'failed',
+      }),
+    ]);
+  });
 });
