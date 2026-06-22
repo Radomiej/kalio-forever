@@ -113,6 +113,9 @@ describe('FsReadTool', () => {
       await expect(
         tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/somedir` })),
       ).rejects.toThrow('NOT_A_FILE');
+      await expect(
+        tool.execute(makeRequest('fs_read', { path: `${ALLOWED_DIR}/somedir` })),
+      ).rejects.toThrow('Use fs_list for directories.');
     });
 
     it('throws FILE_TOO_LARGE when file exceeds 512KB', async () => {

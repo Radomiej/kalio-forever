@@ -1,5 +1,6 @@
 import type { ArchitectureRuntimeContext, ChatSession, SessionRuntimeContext, VFSFile } from '@kalio/types';
 import { apiClient } from '../../../services/apiClient';
+import { buildArchitectureRunLimitContext } from '../../architectureRunDefaults';
 
 type ArchitectureSessionLabel = {
   schemaId: string;
@@ -151,6 +152,7 @@ export function buildArchitectureRunContext(
 ): ArchitectureRuntimeContext {
   const projectScope = buildLaunchProjectScope(projectPath);
   const context: ArchitectureRuntimeContext = {
+    ...buildArchitectureRunLimitContext(),
     parentSessionId: sessionId,
     hostSessionId: sessionId,
     historySessionId: sessionId,

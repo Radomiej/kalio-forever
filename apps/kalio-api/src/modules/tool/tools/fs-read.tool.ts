@@ -29,12 +29,12 @@ function getLineArg(args: ToolCallRequest['args'], key: 'startLine' | 'endLine')
 @Injectable()
 @Tool({
   name: 'fs_read',
-  description: 'Read the contents of a file from the local filesystem. Path must be inside an allowed directory.',
+  description: 'Read the contents of a file from the local filesystem. Use this only for files; use fs_list for directories. Path must be inside an allowed directory.',
   parameters: {
     type: 'object',
     required: ['path'],
     properties: {
-      path: { type: 'string', description: 'Absolute or workspace-relative file path to read.' },
+      path: { type: 'string', description: 'Absolute or workspace-relative file path to read. Must point to a file, not a directory.' },
       startLine: { type: 'integer', description: 'Optional: 1-based start line (inclusive).' },
       endLine: { type: 'integer', description: 'Optional: 1-based end line (inclusive).' },
     },
@@ -57,7 +57,7 @@ export class FsReadTool {
     if (!existsSync(absPath)) throw new Error(`NOT_FOUND: ${rawPath}`);
 
     const stat = statSync(absPath);
-    if (!stat.isFile()) throw new Error(`NOT_A_FILE: ${rawPath}`);
+    if (!stat.isFile()) throw new Error(`NOT_A_FILE: ${rawPath}. Use fs_list for directories.`);
     if (stat.size > MAX_BYTES) throw new Error(`FILE_TOO_LARGE: ${stat.size} bytes exceeds 512KB limit`);
 
     const raw = readFileSync(absPath, 'utf8');
