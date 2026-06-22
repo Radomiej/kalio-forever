@@ -142,6 +142,8 @@ interface LiveSessionStatusMaterializationDeps {
   getSessionActiveTurnId: (sessionId: string) => string | null;
   addActiveAgentLoop: (sessionId: string, turnId: string) => void;
   startAgentTurn: (turnId: string, sessionId: string) => void;
+  getActiveSessionId?: () => string | null;
+  removeActiveAgentLoop?: (sessionId: string) => void;
   setAwaitingFirstChunk?: (value: boolean) => void;
   setStreaming?: (value: boolean, messageId?: string, sessionId?: string | null) => void;
 }
@@ -159,6 +161,37 @@ function materializeLiveTurn(
   }
   deps.setAwaitingFirstChunk?.(false);
   deps.setStreaming?.(true, undefined, sessionId);
+}
+
+function releaseLiveTurn(
+  sessionId: string,
+  deps: LiveSessionStatusMaterializationDeps,
+): void {
+  deps.removeActiveAgentLoop?.(sessionId);
+  deps.setStreaming?.(false, undefined, sessionId);
+  if (deps.getActiveSessionId?.() === sessionId) {
+    deps.setAwaitingFirstChunk?.(false);
+  }
+}
+
+export function sessionStatusKeepsSessionLive(
+  snapshot: SocketEvents['session:status'],
+): boolean {
+  return snapshot.active || (snapshot.queueLength ?? 0) > 0 || snapshot.run?.status === 'active';
+}
+
+export function runtimeSnapshotKeepsSessionLive(
+  snapshot: RuntimeActivitySnapshot,
+): boolean {
+  return snapshot.active
+    || snapshot.run?.status === 'active'
+    || snapshot.queueLength > 0
+    || snapshot.toolActivities.some((activity) => (
+      activity.status === 'running' || activity.status === 'pending_confirmation'
+    ))
+    || snapshot.childExecutions.some((execution) => (
+      execution.status === 'running' || execution.status === 'waiting'
+    ));
 }
 
 export function materializeLiveTurnFromSessionStatusSnapshot(
@@ -229,6 +262,7 @@ export function handleSessionStatusEvent(
     setRecoveryNotice: (value: string) => void;
     addActiveAgentLoop: (sessionId: string, turnId: string) => void;
     startAgentTurn: (turnId: string, sessionId: string) => void;
+    removeActiveAgentLoop: (sessionId: string) => void;
     setAwaitingFirstChunk: (value: boolean) => void;
     setStreaming: (value: boolean, messageId?: string, sessionId?: string | null) => void;
     recordSessionStatusSnapshot: (snapshot: SocketEvents['session:status']) => void;
@@ -250,7 +284,11 @@ export function handleSessionStatusEvent(
     && deps.isSessionHydrated(payload.sessionId)
   ) {
     deps.clearBufferedSessionStatusSnapshots(payload.sessionId);
-    materializeLiveTurnFromSessionStatusSnapshot(payload, deps);
+    if (sessionStatusKeepsSessionLive(payload)) {
+      materializeLiveTurnFromSessionStatusSnapshot(payload, deps);
+      return;
+    }
+    releaseLiveTurn(payload.sessionId, deps);
   }
 }
 

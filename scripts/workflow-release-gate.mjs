@@ -127,7 +127,7 @@ const groups = [
   },
   {
     name: 'stop and HITL gate',
-    grep: 'stop drains the active turn|replayed stale confirmation',
+    grep: 'stop drains the active turn|replayed stale confirmation|workflow stop clears the stop action',
   },
   {
     name: 'normal chat gate',

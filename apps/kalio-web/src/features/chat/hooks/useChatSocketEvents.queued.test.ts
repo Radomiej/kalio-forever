@@ -229,4 +229,41 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
       },
     });
   });
+
+  it('clears a stale active loop when a terminal runtime snapshot arrives without agent:done', () => {
+    mountHook();
+
+    act(() => {
+      fire('agent:start', {
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        agentRun: { kind: 'chat' },
+      });
+    });
+
+    expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(true);
+    expect(useAgentStore.getState().isStreaming).toBe(true);
+
+    act(() => {
+      fire('session:runtime_snapshot', {
+        sessionId: 'session-1',
+        active: false,
+        turnId: 'turn-1',
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [],
+        toolActivities: [],
+        childExecutions: [],
+        updatedAt: 2,
+      });
+    });
+
+    expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(false);
+    expect(useAgentStore.getState().isStreaming).toBe(false);
+    expect(useAgentStore.getState().runtimeActivitySnapshots['session-1']).toMatchObject({
+      sessionId: 'session-1',
+      active: false,
+      queueLength: 0,
+    });
+  });
 });

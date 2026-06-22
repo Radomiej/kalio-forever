@@ -6,8 +6,8 @@
 - [x] Baseline workflow `Oceń architekturę projektu` runs from the Talk UI on QA and exposes visible per-node / per-agent status.
 - [x] Every visible branch/router/finalizer session can be reopened as a sub-conversation and shows persisted transcript content instead of a placeholder.
 - [x] Refresh or opening the same workflow in a new UI session restores the active workflow state, node statuses, and child session visibility.
-- [ ] User-visible stop on a running workflow drains the active run cleanly and does not leave ghost running state.
-- [ ] HITL confirmation is user-visible and actionable on QA, and the resulting state does not resurrect stale confirmations.
+- [x] User-visible stop on a running workflow drains the active run cleanly and does not leave ghost running state.
+- [x] HITL confirmation is user-visible and actionable on QA, and the resulting state does not resurrect stale confirmations.
 - [x] Confirmed defects discovered during the audit are recorded in `docs/bugs.md`.
 
 ## Current Architecture
@@ -65,4 +65,11 @@ erDiagram
 - 2026-06-22: Any defect confirmed during the manual audit must be logged in `docs/bugs.md` before claiming release readiness.
 - 2026-06-22: Verified on rebuilt QA `3316/5288` that workflow launch from Talk UI auto-registers `C:\Projekty\kalio-forever` in `allowed_paths`, all five branch sessions complete successful `fs_*` reads without `ACCESS_DENIED`, and a branch sub-conversation opens with persisted transcript content.
 - 2026-06-22: Reload proof passed on host session `-GTTXQNr1Fdzyy9W0l2Xn`: timeline remained visible, eight completed node badges survived F5, finalizer content was still visible, and branch transcript reopened without the `Waiting for the first persisted message` placeholder.
-- 2026-06-22: Stop and HITL still need fresh FE proof on this rebuilt QA slice. Live provider stability is also still a release blocker because one branch hit malformed streamed tool args and another timed out during the same baseline run.
+- 2026-06-22: Fixed FE ghost-running state after `chat:stop` when the backend only emitted a terminal `session:status` / `session:runtime_snapshot` and no `agent:done`. Shared lifecycle handlers now release stale local active-loop state on terminal snapshots instead of waiting for a separate done event.
+- 2026-06-22: Focused FE gates passed: `corepack pnpm --filter kalio-web exec vitest run src/features/chat/hooks/useChatSocketEvents.helpers.spec.ts src/features/chat/hooks/useChatSocketEvents.helpers.test.ts src/features/chat/hooks/useChatSocketEvents.queued.test.ts src/features/chat/ChatInterface.test.tsx` and `corepack pnpm --filter kalio-web run typecheck`.
+- 2026-06-22: Built-QA browser proofs passed on fixed ports `3316/5288`:
+  - `regression-stop-follow-up.spec.ts` passed against external fixed QA.
+  - `workflow-stop-runtime.spec.ts` passed against external fixed QA and proved the stop button hides after a workflow launch.
+  - `hitl-tool-confirmation-runtime.spec.ts` passed against fixed QA after starting QA with `--force-env-llm` / mock provider.
+  - `corepack pnpm run release:workflow-gate` passed end to end on fixed QA and covered workflow visibility/replay, reconnect hydration, stale confirmation invalidation, normal chat streaming, plain stop, and workflow stop.
+- 2026-06-22: Live provider stability is still a release blocker because the rebuilt live baseline previously hit malformed streamed tool args and a 120000ms timeout on branch execution. The fixed-QA runtime gate is now green, but live release is still not safe until that provider-quality slice is proven.

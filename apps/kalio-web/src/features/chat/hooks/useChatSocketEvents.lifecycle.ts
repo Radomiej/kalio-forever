@@ -7,7 +7,12 @@ import { backendHealth } from '../../../services/backendHealth';
 import { eventBus } from '../../../services/eventBus';
 import { identifyWatchedSession } from '../../../services/sessionWatchRegistry';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
-import { handleSessionStatusEvent, handleConnectionStateEvent, type ReconnectUiState } from './useChatSocketEvents.helpers';
+import {
+  handleSessionStatusEvent,
+  handleConnectionStateEvent,
+  runtimeSnapshotKeepsSessionLive,
+  type ReconnectUiState,
+} from './useChatSocketEvents.helpers';
 import { handleCliChildSessionCreated } from './useChatSocketEvents.cliChild';
 import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
 
@@ -20,6 +25,7 @@ export function registerSessionLifecycleHandlers({
   addSession,
   setRecoveryNotice,
   addActiveAgentLoop,
+  removeActiveAgentLoop,
   startAgentTurn,
   setAwaitingFirstChunk,
   setStreaming,
@@ -32,6 +38,7 @@ export function registerSessionLifecycleHandlers({
   addSession: SessionStoreState['addSession'];
   setRecoveryNotice: (value: string | null) => void;
   addActiveAgentLoop: AgentStoreState['addActiveAgentLoop'];
+  removeActiveAgentLoop: AgentStoreState['removeActiveAgentLoop'];
   startAgentTurn: SessionStoreState['startAgentTurn'];
   setAwaitingFirstChunk: (value: boolean) => void;
   setStreaming: AgentStoreState['setStreaming'];
@@ -48,6 +55,7 @@ export function registerSessionLifecycleHandlers({
       getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
       setRecoveryNotice,
       addActiveAgentLoop,
+      removeActiveAgentLoop,
       startAgentTurn,
       setAwaitingFirstChunk,
       setStreaming,
@@ -58,6 +66,13 @@ export function registerSessionLifecycleHandlers({
 
   const offRuntimeSnapshot = eventBus.onRuntimeActivitySnapshot((payload) => {
     setRuntimeActivitySnapshot(payload);
+    if (!runtimeSnapshotKeepsSessionLive(payload)) {
+      removeActiveAgentLoop(payload.sessionId);
+      setStreaming(false, undefined, payload.sessionId);
+      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
+        setAwaitingFirstChunk(false);
+      }
+    }
   });
 
   const offSessionCreated = eventBus.onSessionCreated((session) => {
