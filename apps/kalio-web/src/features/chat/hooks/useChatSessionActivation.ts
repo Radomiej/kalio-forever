@@ -3,6 +3,7 @@ import type { MutableRefObject } from 'react';
 import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
+import { backendHealth } from '../../../services/backendHealth';
 import { identifyWatchedSession } from '../../../services/sessionWatchRegistry';
 import { buildCallIdToNameFromMessages, buildTurnsFromHistory } from '../chatUtils';
 import { rebuildCLIChildProjectionsFromMessages } from '../cliChildProjection.model';
@@ -50,8 +51,17 @@ export function useChatSessionActivation({
   useEffect(() => {
     if (!activeSessionId) return;
 
-    clearToolActivities(activeSessionId);
-    setPendingConfirmation(activeSessionId, null);
+    const runtimeSnapshot = useAgentStore.getState().getRuntimeActivitySnapshot(activeSessionId);
+    const hasRestoredPendingTool = (runtimeSnapshot?.pendingConfirmations ?? []).length > 0
+      || (runtimeSnapshot?.toolActivities ?? []).some((activity) =>
+        activity.status === 'pending_confirmation' || activity.status === 'running',
+      );
+    if (!hasRestoredPendingTool) {
+      clearToolActivities(activeSessionId);
+    }
+    if ((runtimeSnapshot?.pendingConfirmations ?? []).length === 0) {
+      setPendingConfirmation(activeSessionId, null);
+    }
     console.debug('[ChatInterface] session activated', activeSessionId);
 
     void hydrateActiveConversationSession({
@@ -67,6 +77,7 @@ export function useChatSessionActivation({
       hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
     })
       .then((hydratedMessages) => {
+        backendHealth.reportSuccess();
         if (!hydratedMessages) return;
         const {
           callIdToName: persistedCallIdToName,
@@ -131,6 +142,7 @@ export function useChatSessionActivation({
         );
       })
       .catch((err: unknown) => {
+        backendHealth.reportFailure();
         console.error('[ChatInterface] failed to load message history', err instanceof Error ? err : new Error(String(err)));
       });
   }, [activeSessionId, clearToolActivities, setAgentTurns, setMessages, setPendingConfirmation, updateAgentTurn]);

@@ -10,6 +10,10 @@ import {
 } from './sessionTreeDisplay';
 import { workflowEnvelopeRuntimeStateForSession } from './sessionWorkflowRuntimeState';
 
+function isTerminalRuntimeState(state: SessionRuntimeState | null | undefined): state is 'done' | 'error' | 'stopped' {
+  return state === 'done' || state === 'error' || state === 'stopped';
+}
+
 export function sessionRuntimeState(
   session: ChatSession | null,
   sessionId: string,
@@ -31,30 +35,37 @@ export function sessionRuntimeState(
   if (safePendingConfirmations[sessionId] || safePendingBudgetApprovals[sessionId]) {
     return 'waiting';
   }
-  const snapshotState = sessionStatusSnapshotToRuntimeState(sessionStatusSnapshots[sessionId]);
-  if (snapshotState) {
-    return snapshotState;
-  }
-  if (safeActiveLoopSessionIds.has(sessionId) || (safeQueuedDepthBySession[sessionId] ?? 0) > 0) {
-    return 'running';
-  }
   const architectureState = architectureSessionRuntimeStates.get(sessionId);
-  if (architectureState) {
-    return architectureState;
-  }
   const workflowEnvelopeState = workflowEnvelopeRuntimeStateForSession(
     safeSessionMessages[sessionId] ?? [],
     safeSessionAgentTurns[sessionId] ?? [],
   );
+  const lastTurn = safeSessionAgentTurns[sessionId]?.at(-1);
+  const turnTerminalState: SessionRuntimeState | null = lastTurn?.error
+    ? 'error'
+    : lastTurn?.done
+      ? 'done'
+      : null;
+  const terminalState = [architectureState, workflowEnvelopeState, turnTerminalState]
+    .find(isTerminalRuntimeState) ?? null;
+  const snapshotState = sessionStatusSnapshotToRuntimeState(sessionStatusSnapshots[sessionId]);
+  if (snapshotState) {
+    if (!isTerminalRuntimeState(snapshotState) && terminalState) {
+      return terminalState;
+    }
+    return snapshotState;
+  }
+  if (terminalState) {
+    return terminalState;
+  }
+  if (safeActiveLoopSessionIds.has(sessionId) || (safeQueuedDepthBySession[sessionId] ?? 0) > 0) {
+    return 'running';
+  }
+  if (architectureState) {
+    return architectureState;
+  }
   if (workflowEnvelopeState) {
     return workflowEnvelopeState;
-  }
-  const lastTurn = safeSessionAgentTurns[sessionId]?.at(-1);
-  if (lastTurn?.error) {
-    return 'error';
-  }
-  if (lastTurn?.done) {
-    return 'done';
   }
   if (
     session

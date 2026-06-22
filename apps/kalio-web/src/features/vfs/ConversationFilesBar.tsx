@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { FolderOpen, File, Download, Archive, RefreshCw, X, Loader, Eye, FileText, FileJson, FileCode, FileImage, Upload } from 'lucide-react';
 import { apiClient, getApiBaseUrl } from '../../services/apiClient';
+import { backendHealth } from '../../services/backendHealth';
 import type { VFSFile, VFSListResult, VFSReadResult } from '@kalio/types';
 
 interface ConversationFilesBarProps {
@@ -40,6 +41,7 @@ export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationF
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
@@ -47,10 +49,14 @@ export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationF
     setLoading(true);
     try {
       const res = await apiClient.get<VFSListResult>(`/api/sessions/${sessionId}/vfs`);
+      backendHealth.reportSuccess();
       setFiles(res.data.files);
+      setListError(null);
     } catch (err: unknown) {
+      backendHealth.reportFailure();
       console.error('[ConversationFilesBar] load failed', err);
       setFiles([]);
+      setListError('Backend offline. Retrying connection; files will reload after recovery.');
     } finally {
       setLoading(false);
     }
@@ -194,6 +200,11 @@ export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationF
 
           <div className="flex flex-1 overflow-hidden">
             <div className="w-64 shrink-0 border-r border-base-300 overflow-y-auto bg-base-200/30">
+              {listError && (
+                <div className="m-3 rounded border border-warning/25 bg-warning/10 p-2 text-[11px] leading-4 text-warning" data-testid="conversation-files-list-error">
+                  {listError}
+                </div>
+              )}
               {files.map((f) => (
                 <button
                   key={f.path}
@@ -215,7 +226,7 @@ export function ConversationFilesBar({ sessionId, refreshSignal }: ConversationF
                   </div>
                 </button>
               ))}
-              {files.length === 0 && !loading && (
+              {files.length === 0 && !loading && !listError && (
                 <div className="flex flex-col items-center justify-center h-full p-4 gap-2">
                   <File size={24} className="text-base-content/20" />
                   <p className="text-xs text-base-content/40 text-center">No files yet</p>

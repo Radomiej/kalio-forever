@@ -97,6 +97,81 @@ describe('sessionRuntimeState', () => {
     )).toBe('running');
   });
 
+  it('lets a terminal architecture state override a stale active session snapshot after reconnect', () => {
+    const branch = createSession({
+      id: 'arch-run-analyst',
+      title: 'Strategic Decision Council: Analyst',
+      kind: 'subagent',
+      parentSessionId: 'arch-run-root',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'analyst',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'analyst',
+          displayLabel: 'Analyst',
+          sessionSurface: 'conversation-branch',
+        },
+      },
+    });
+
+    expect(sessionRuntimeState(
+      branch,
+      branch.id,
+      {},
+      {},
+      new Set(),
+      {},
+      {
+        [branch.id]: {
+          sessionId: branch.id,
+          active: true,
+          turnId: 'turn-1',
+          queueLength: 0,
+          run: {
+            id: 'run-1',
+            sessionId: branch.id,
+            turnId: 'turn-1',
+            phase: 'tool_running',
+            status: 'active',
+            retryCount: 0,
+            safeResume: true,
+            startedAt: 1,
+            updatedAt: 1,
+            lastHeartbeatAt: 1,
+          },
+        },
+      },
+      {},
+      {},
+      new Map([[branch.id, 'done']]),
+    )).toBe('done');
+  });
+
+  it('lets a completed turn override stale queued state after reconnect', () => {
+    const session = createSession({ id: 'session-queued', title: 'Queued stale' });
+
+    expect(sessionRuntimeState(
+      session,
+      session.id,
+      {},
+      {},
+      new Set([session.id]),
+      { [session.id]: 1 },
+      {},
+      {
+        [session.id]: [{
+          id: 'turn-1',
+          sessionId: session.id,
+          items: [],
+          done: true,
+        }],
+      },
+      {},
+      new Map(),
+    )).toBe('done');
+  });
+
   it('treats interrupted_needs_retry as stopped when there is no live HITL request', () => {
     const session = createSession({ id: 'session-retry', title: 'Retry needed' });
 
