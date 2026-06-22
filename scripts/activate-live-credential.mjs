@@ -3,10 +3,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  allowGenericProviderFallbacks,
   defaultLlmBaseUrlForProvider,
   defaultLlmModelForProvider,
-  normalizeProvider,
   providerApiKeyEnvNames,
+  resolveProviderSetting,
   resolveProviderApiKey,
   resolveProviderSelection,
 } from './llm-provider-config.mjs';
@@ -116,18 +117,29 @@ export async function activateLiveCredential(options = {}) {
     envSources: [env, fileEnv],
     fallbackProvider: 'xiaomimimo',
   });
-  const allowGenericApiKey = !explicitProvider
-    || !configuredProvider
-    || normalizeProvider(explicitProvider) === normalizeProvider(configuredProvider);
-  const model = getArgValue(args, '--model', env.LLM_MODEL ?? fileEnv.LLM_MODEL ?? defaultLlmModelForProvider(provider));
-  const baseUrl = getArgValue(args, '--base-url', env.LLM_BASE_URL ?? fileEnv.LLM_BASE_URL ?? defaultLlmBaseUrlForProvider(provider));
-  const apiKey = resolveProviderApiKey(provider, [env, fileEnv], { allowGenericApiKey });
+  const allowGenericProviderFallback = allowGenericProviderFallbacks({
+    explicitProvider,
+    configuredProvider,
+  });
+  const model = getArgValue(args, '--model', resolveProviderSetting({
+    allowGenericFallback: allowGenericProviderFallback,
+    envValue: env.LLM_MODEL,
+    fileEnvValue: fileEnv.LLM_MODEL,
+    providerDefault: defaultLlmModelForProvider(provider),
+  }));
+  const baseUrl = getArgValue(args, '--base-url', resolveProviderSetting({
+    allowGenericFallback: allowGenericProviderFallback,
+    envValue: env.LLM_BASE_URL,
+    fileEnvValue: fileEnv.LLM_BASE_URL,
+    providerDefault: defaultLlmBaseUrlForProvider(provider),
+  }));
+  const apiKey = resolveProviderApiKey(provider, [env, fileEnv], { allowGenericApiKey: allowGenericProviderFallback });
   const name = getArgValue(args, '--name', `Live ${provider} ${model}`);
 
   if (!apiKey) {
     throw new Error(
       `[activate-live-credential] no API key found for ${provider}. ` +
-      `Set one of: ${providerApiKeyEnvNames(provider, { allowGenericApiKey }).join(', ')} in ignored .env.test or the process environment.`,
+      `Set one of: ${providerApiKeyEnvNames(provider, { allowGenericApiKey: allowGenericProviderFallback }).join(', ')} in ignored .env.test or the process environment.`,
     );
   }
 

@@ -1,4 +1,4 @@
-export const OPENROUTER_FREE_ARCHITECTURE_MODEL = 'nvidia/nemotron-3-ultra-550b-a55b:free';
+export const OPENROUTER_FREE_ARCHITECTURE_MODEL = 'cohere/north-mini-code:free';
 
 const PROVIDER_DEFAULTS = {
   mock: {
@@ -56,12 +56,24 @@ export function resolveProviderSelection({ explicitProvider, configuredProvider,
   return normalizeProvider(fallbackProvider);
 }
 
+export function allowGenericProviderFallbacks({ explicitProvider, configuredProvider }) {
+  const explicit = normalizeProvider(explicitProvider);
+  const configured = normalizeProvider(configuredProvider);
+  return !explicit || !configured || explicit === configured;
+}
+
 export function defaultLlmModelForProvider(provider) {
   return PROVIDER_DEFAULTS[normalizeProvider(provider)]?.model ?? 'gpt-4o-mini';
 }
 
 export function defaultLlmBaseUrlForProvider(provider) {
   return PROVIDER_DEFAULTS[normalizeProvider(provider)]?.baseUrl ?? 'https://api.openai.com/v1';
+}
+
+export function resolveProviderSetting({ allowGenericFallback, envValue, fileEnvValue, providerDefault }) {
+  return allowGenericFallback
+    ? envValue ?? fileEnvValue ?? providerDefault
+    : providerDefault;
 }
 
 export function resolveProviderApiKey(provider, envSources = [], options = {}) {

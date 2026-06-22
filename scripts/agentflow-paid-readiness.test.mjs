@@ -341,14 +341,14 @@ test('paid readiness does not require Web Search for non-research live workflow 
     stdout() {},
     stderr() {},
     fetchJson: fetchFrom({
-      'http://kalio.test/api/llm/config': response({ provider: 'openrouter', source: 'db', model: 'nvidia/nemotron-3-ultra-550b-a55b:free' }),
+      'http://kalio.test/api/llm/config': response({ provider: 'openrouter', source: 'db', model: 'cohere/north-mini-code:free' }),
       'http://kalio.test/api/credentials': response([{ id: 'cred-openrouter' }]),
       'http://kalio.test/api/credentials/active': response({ credentialId: 'cred-openrouter' }),
       'http://kalio.test/api/credentials/cred-openrouter/test': response({ ok: true, modelCount: 340 }),
       'http://kalio.test/api/credentials/cred-openrouter/test-completion': response({
         ok: true,
         provider: 'openrouter',
-        model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+        model: 'cohere/north-mini-code:free',
         source: 'db',
       }),
       'http://kalio.test/api/agent-flows/runs': response([]),
