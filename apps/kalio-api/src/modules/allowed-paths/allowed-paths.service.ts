@@ -44,6 +44,31 @@ export class AllowedPathsService {
     return { id, path: resolved, createdAt: now.getTime() };
   }
 
+  async ensurePath(path: string): Promise<AllowedPath> {
+    const resolved = this.normalizeAndValidate(path);
+    if (!existsSync(resolved)) {
+      throw new BadRequestException(`Path does not exist: ${path}`);
+    }
+    const stat = statSync(resolved);
+    if (!stat.isDirectory()) {
+      throw new BadRequestException(`Path is not a directory: ${path}`);
+    }
+
+    const rows = await this.drizzle.db.select().from(allowedPaths);
+    for (const row of rows) {
+      const root = this.normalizeAndValidate(row.path);
+      if (this.isPathWithinRoot(resolved, root)) {
+        return {
+          id: row.id,
+          path: row.path,
+          createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : row.createdAt,
+        };
+      }
+    }
+
+    return this.create({ path: resolved });
+  }
+
   async remove(id: string): Promise<void> {
     const existing = await this.drizzle.db.select().from(allowedPaths).where(eq(allowedPaths.id, id)).then((r) => r[0]);
     if (!existing) throw new NotFoundException(`Allowed path ${id} not found`);

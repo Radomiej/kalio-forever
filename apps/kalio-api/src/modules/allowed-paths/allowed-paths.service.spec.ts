@@ -230,6 +230,49 @@ describe('AllowedPathsService.create()', () => {
   });
 });
 
+describe('AllowedPathsService.ensurePath()', () => {
+  it('returns an existing root when the requested directory is already registered', async () => {
+    vi.mocked(nodefs.existsSync).mockReturnValue(true);
+    vi.mocked(nodefs.statSync).mockReturnValue({ isDirectory: () => true } as ReturnType<typeof nodefs.statSync>);
+
+    const drizzle = {
+      db: {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockResolvedValue([{ id: 'id-1', path: ROOT, createdAt: new Date(1000) }]),
+        }),
+        insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue(undefined) }),
+      },
+    } as unknown as DrizzleService;
+    const svc = new AllowedPathsService(drizzle);
+
+    const result = await svc.ensurePath(ROOT);
+
+    expect(result.id).toBe('id-1');
+    expect(vi.mocked(drizzle.db.insert)).not.toHaveBeenCalled();
+  });
+
+  it('creates a new root when no configured path covers the requested directory', async () => {
+    vi.mocked(nodefs.existsSync).mockReturnValue(true);
+    vi.mocked(nodefs.statSync).mockReturnValue({ isDirectory: () => true } as ReturnType<typeof nodefs.statSync>);
+
+    const insertValues = vi.fn().mockResolvedValue(undefined);
+    const drizzle = {
+      db: {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockResolvedValue([]),
+        }),
+        insert: vi.fn().mockReturnValue({ values: insertValues }),
+      },
+    } as unknown as DrizzleService;
+    const svc = new AllowedPathsService(drizzle);
+
+    const result = await svc.ensurePath(OUTSIDE);
+
+    expect(result.path).toBe(OUTSIDE);
+    expect(insertValues).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('AllowedPathsService.remove()', () => {
   it('throws NotFoundException when id not found', async () => {
     const { NotFoundException } = await import('@nestjs/common');

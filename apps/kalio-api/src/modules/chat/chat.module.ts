@@ -43,6 +43,7 @@ import { RAAppModule } from '../raapp/raapp.module';
 import { MCPModule } from '../mcp/mcp.module';
 import { SkillsModule } from '../skills/skills.module';
 import { CredentialsModule } from '../credentials/credentials.module';
+import { AllowedPathsModule } from '../allowed-paths/allowed-paths.module';
 import { RelayModule } from '../relay/relay.module';
 import { HitlModule } from '../hitl/hitl.module';
 import { HitlNotificationService } from '../hitl/hitl-notification.service';
@@ -69,7 +70,7 @@ import {
  *   TOOL_REGISTRY     → Tool dispatch registry port exported by ToolModule
  */
 @Module({
-  imports: [AuditModule, LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, HitlModule, RelayModule],
+  imports: [AuditModule, LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, AllowedPathsModule, HitlModule, RelayModule],
   controllers: [
     SessionsController,
     ContextController,

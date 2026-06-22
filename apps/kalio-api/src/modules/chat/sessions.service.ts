@@ -10,6 +10,7 @@ import { MESSAGE_REPOSITORY } from './chat.tokens';
 import { SessionEventsService } from './session-events.service';
 import { LLMService } from '../llm/llm.service';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
+import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 
 const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
 const DEFAULT_SESSION_TITLE = 'New Chat';
@@ -39,6 +40,7 @@ export class SessionsService {
     private readonly sessionEvents: SessionEventsService,
     @Inject(MESSAGE_REPOSITORY) private readonly repo: IMessageRepository,
     private readonly llm: LLMService,
+    private readonly allowedPaths: AllowedPathsService,
   ) {}
 
   async list(options: { includeArchived?: boolean } = {}): Promise<ChatSession[]> {
@@ -56,6 +58,7 @@ export class SessionsService {
   }
 
   async createWithId(id: string, dto: CreateSessionDto): Promise<ChatSession> {
+    await this.ensureRuntimeProjectPathAllowed(dto.runtimeContext);
     const now = new Date();
     const row = {
       id,
@@ -125,6 +128,7 @@ export class SessionsService {
     await this.assertExists(id);
     const hasPatch = patch.title !== undefined || patch.personaId !== undefined || patch.runtimeContext !== undefined;
     if (hasPatch) {
+      await this.ensureRuntimeProjectPathAllowed(patch.runtimeContext);
       const set: Record<string, unknown> = { updatedAt: new Date() };
       if (patch.title !== undefined) set.title = patch.title;
       if (patch.personaId !== undefined) set.personaId = patch.personaId;
@@ -136,6 +140,7 @@ export class SessionsService {
 
   async updateRuntimeContext(id: string, runtimeContext: SessionRuntimeContext): Promise<void> {
     await this.assertExists(id);
+    await this.ensureRuntimeProjectPathAllowed(runtimeContext);
     await this.drizzle.db
       .update(sessions)
       .set({ runtimeContext, updatedAt: new Date() })
@@ -217,6 +222,14 @@ export class SessionsService {
     return row;
   }
 
+  private async ensureRuntimeProjectPathAllowed(runtimeContext: SessionRuntimeContext | undefined): Promise<void> {
+    const projectPath = projectPathFromRuntimeContext(runtimeContext);
+    if (!projectPath) {
+      return;
+    }
+    await this.allowedPaths.ensurePath(projectPath);
+  }
+
   private toChatSession(row: {
     id: string;
     personaId: string;
@@ -242,6 +255,20 @@ export class SessionsService {
       updatedAt: toMs(row.updatedAt),
     };
   }
+}
+
+function projectPathFromRuntimeContext(runtimeContext: SessionRuntimeContext | null | undefined): string | undefined {
+  const projectPath = runtimeContext?.architectureContext?.['projectPath'];
+  if (typeof projectPath === 'string' && projectPath.trim().length > 0) {
+    return projectPath.trim();
+  }
+
+  const executionCwd = runtimeContext?.architectureContext?.['executionCwd'];
+  if (typeof executionCwd === 'string' && executionCwd.trim().length > 0) {
+    return executionCwd.trim();
+  }
+
+  return undefined;
 }
 
 function buildTitlePrompt(history: ChatMessage[]): ContextManagedLLMMessage[] {
