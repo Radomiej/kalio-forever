@@ -14,6 +14,7 @@ import { computeAnsweredCallIds } from './chatUtils';
 import { resolveRenderableConversationProjection } from './conversationTranscriptProjection';
 import type { ChatMessage, ChatSession, VFSFile } from '@kalio/types';
 import { apiClient } from '../../services/apiClient';
+import type { AgentTurn } from '../../store/sessionStore';
 
 // jsdom does not implement scrollIntoView
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -250,7 +251,12 @@ let mockStreamingChunks: Record<string, string> = {};
 let mockThinkingChunks: Record<string, string> = {};
 let mockChunkSessionIds: Record<string, string> = {};
 let mockHydratedSessionIds: Record<string, boolean> = {};
+let mockSessionHistoryMeta: Record<string, import('./sessionHistoryApi').SessionHistoryMeta> = {};
+let mockSessionMessages: Record<string, ChatMessage[]> = {};
+let mockSessionAgentTurns: Record<string, AgentTurn[]> = {};
+let mockSessionActiveTurnIds: Record<string, string | null> = {};
 let mockMessages: ChatMessage[] = [];
+let mockAgentTurns: AgentTurn[] = [];
 let mockSessions = createMockSessions();
 const mockSetPendingMessage = vi.fn();
 const mockSetPendingRAAppId = vi.fn();
@@ -259,10 +265,13 @@ const mockSetPendingRAAppLaunchIntent = vi.fn();
 function buildSessionStoreState() {
   return {
     messages: mockMessages,
-    agentTurns: [],
+    agentTurns: mockAgentTurns,
     activeTurnId: mockActiveTurnId,
     activeSessionId: mockActiveSessionId,
     sessions: mockSessions,
+    sessionMessages: mockSessionMessages,
+    sessionAgentTurns: mockSessionAgentTurns,
+    sessionActiveTurnIds: mockSessionActiveTurnIds,
     pendingMessage: mockPendingMessage,
     addSession,
     pendingRAAppId: null,
@@ -277,6 +286,16 @@ function buildSessionStoreState() {
     appendChunk: vi.fn(),
     finalizeChunk: vi.fn(),
     setMessages,
+    setSessionHistoryMeta: vi.fn((sessionId: string | null, meta: import('./sessionHistoryApi').SessionHistoryMeta | null) => {
+      if (!sessionId) {
+        return;
+      }
+      if (!meta) {
+        delete mockSessionHistoryMeta[sessionId];
+        return;
+      }
+      mockSessionHistoryMeta[sessionId] = meta;
+    }),
     updateSession,
     setAgentTurns,
     updateAgentTurn,
@@ -286,6 +305,7 @@ function buildSessionStoreState() {
     clearAgentTurns,
     clearPendingChunks,
     getSessionMessages,
+    getSessionHistoryMeta: (sessionId: string | null) => (sessionId ? mockSessionHistoryMeta[sessionId] ?? null : null),
     getSessionActiveTurnId: () => mockActiveTurnId,
     getSessionAgentTurns: () => [],
     markAgentTurnError,
@@ -307,6 +327,17 @@ vi.mock('../../store/sessionStore', () => ({
     },
     {
       getState: () => buildSessionStoreState(),
+      setState: (patch: Partial<ReturnType<typeof buildSessionStoreState>>) => {
+        if (Array.isArray(patch.messages)) {
+          mockMessages = patch.messages as ChatMessage[];
+        }
+        if (Array.isArray(patch.agentTurns)) {
+          mockAgentTurns = patch.agentTurns as AgentTurn[];
+        }
+        if ('activeTurnId' in patch) {
+          mockActiveTurnId = (patch.activeTurnId ?? null) as string | null;
+        }
+      },
     },
   ),
 }));
@@ -429,7 +460,7 @@ vi.mock('./AgentTurnBubble', () => ({ AgentTurnBubble: () => null }));
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-beforeEach(() => {
+  beforeEach(() => {
   vi.unstubAllGlobals();
   vi.stubGlobal(
     'fetch',
@@ -442,9 +473,14 @@ beforeEach(() => {
   mockPendingMessage = null;
   mockStreamingChunks = {};
   mockThinkingChunks = {};
-  mockChunkSessionIds = {};
-  mockHydratedSessionIds = {};
-  mockMessages = [];
+    mockChunkSessionIds = {};
+    mockHydratedSessionIds = {};
+    mockSessionHistoryMeta = {};
+    mockSessionMessages = {};
+    mockSessionAgentTurns = {};
+    mockSessionActiveTurnIds = {};
+    mockMessages = [];
+    mockAgentTurns = [];
   mockSessions = createMockSessions();
   settingsStoreState.conversationTitleSettings = {
     autoRenameEnabled: false,
@@ -893,7 +929,9 @@ describe('ChatInterface event wiring', () => {
 
     expect(mockIdentifySession).toHaveBeenCalledTimes(1);
     expect(mockIdentifySession).toHaveBeenCalledWith('session-1');
-    expect(apiGetMock).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+    expect(apiGetMock).toHaveBeenCalledWith('/api/sessions/session-1/messages', expect.objectContaining({
+      params: expect.objectContaining({ limit: 40 }),
+    }));
   });
 
   it('REGRESSION: reconnect history reload merges server history with local optimistic messages', async () => {
@@ -920,6 +958,94 @@ describe('ChatInterface event wiring', () => {
       expect.any(Array),
       'session-1',
     );
+  });
+
+  it('REGRESSION: loading older history merges into the latest store state and rebuilds turns', async () => {
+    const currentMessage = makeMsg({
+      id: 'msg-current',
+      sessionId: 'session-1',
+      role: 'user',
+      content: 'Current prompt',
+      createdAt: 20,
+    });
+    const liveMessage = makeMsg({
+      id: 'msg-live',
+      sessionId: 'session-1',
+      role: 'assistant',
+      content: 'Live reply',
+      createdAt: 30,
+    });
+    const olderMessage = makeMsg({
+      id: 'msg-older',
+      sessionId: 'session-1',
+      role: 'assistant',
+      content: 'Earlier reply',
+      createdAt: 10,
+    });
+
+    mockMessages = [currentMessage];
+    mockSessionHistoryMeta = {
+      'session-1': {
+        totalCount: 3,
+        hasMoreBefore: true,
+        oldestLoadedMessageId: 'msg-current',
+      },
+    };
+    const apiGetMock = vi.mocked(apiClient.get);
+    const defaultGet = apiGetMock.getMockImplementation();
+    apiGetMock.mockImplementation((url: string, config?: unknown) => {
+      if (url === '/api/sessions/session-1/messages') {
+        return Promise.resolve({
+          data: [currentMessage],
+          headers: {
+            'x-kalio-history-total-count': '3',
+            'x-kalio-history-has-more-before': '1',
+            'x-kalio-history-oldest-loaded-id': 'msg-current',
+          },
+        } as never);
+      }
+      return defaultGet
+        ? defaultGet(url, config as never)
+        : Promise.resolve({ data: [] } as never);
+    });
+
+    await renderChatInterface();
+    setMessages.mockClear();
+    setAgentTurns.mockClear();
+
+    mockMessages = [currentMessage, liveMessage];
+    getSessionMessages.mockReturnValue([currentMessage, liveMessage]);
+
+    apiGetMock.mockClear();
+    apiGetMock.mockResolvedValueOnce({
+      data: [olderMessage],
+      headers: {
+        'x-kalio-history-total-count': '3',
+        'x-kalio-history-has-more-before': '0',
+        'x-kalio-history-oldest-loaded-id': 'msg-older',
+      },
+    } as never);
+
+    const loadOlderButton = await screen.findByTestId('chat-load-older-btn');
+
+    await act(async () => {
+      fireEvent.click(loadOlderButton);
+      await flushReactEffects();
+    });
+
+    await waitFor(() => {
+      expect(apiGetMock).toHaveBeenCalledWith('/api/sessions/session-1/messages', expect.objectContaining({
+        params: expect.objectContaining({
+          limit: 40,
+          beforeMessageId: 'msg-current',
+        }),
+      }));
+      expect(setMessages).toHaveBeenCalledWith(
+        [olderMessage, currentMessage, liveMessage],
+        'session-1',
+      );
+      expect(setAgentTurns).toHaveBeenCalledWith(expect.any(Array), 'session-1');
+    });
   });
 
   it('REGRESSION: active session status replay restores the live agent turn after reconnect', async () => {
@@ -1076,6 +1202,10 @@ describe('ChatInterface event wiring', () => {
         createdAt: 2,
       },
     ];
+    mockSessionMessages = {
+      'branch-1': mockMessages,
+      'host-1': [],
+    };
     getSessionMessages.mockImplementation((sessionId: string | null) =>
       sessionId === 'branch-1' ? mockMessages : [],
     );

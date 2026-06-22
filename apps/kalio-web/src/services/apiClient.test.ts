@@ -87,6 +87,25 @@ describe('apiClient helpers', () => {
     });
   });
 
+  it('uses injected runtime config on random-port builds when no fixed port mapping exists', async () => {
+    vi.resetModules();
+    axiosCreate.mockClear();
+    window.__KALIO_RUNTIME_CONFIG__ = {
+      apiUrl: 'http://127.0.0.1:59756',
+    };
+
+    try {
+      await import('./apiClient');
+    } finally {
+      delete window.__KALIO_RUNTIME_CONFIG__;
+    }
+
+    expect(axiosCreate).toHaveBeenCalledWith({
+      baseURL: 'http://127.0.0.1:59756',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
   it('fetches RA-App summaries and groups through the shared client', async () => {
     const apps: RAAppSummary[] = [{
       id: 'app-1',
