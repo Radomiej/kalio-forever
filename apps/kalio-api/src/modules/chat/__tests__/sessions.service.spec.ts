@@ -79,6 +79,12 @@ describe('SessionsService', () => {
     repo = {
       ensureSession: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryPage: vi.fn().mockResolvedValue({
+        messages: [],
+        totalCount: 0,
+        hasMoreBefore: false,
+        oldestLoadedMessageId: null,
+      }),
       saveMessage: vi.fn().mockResolvedValue(undefined),
     };
     const fixture = makeDrizzle(rows);
@@ -117,7 +123,7 @@ describe('SessionsService', () => {
       expect(result.title).toBe('New Chat');
     });
 
-    it('registers projectPath in allowed paths before creating a scoped session', async () => {
+    it('does not register projectPath for public session creation by default', async () => {
       const runtimeContext = {
         runtimeKind: 'chat' as const,
         architectureContext: {
@@ -127,6 +133,22 @@ describe('SessionsService', () => {
       };
 
       await service.create({ personaId: 'p1', runtimeContext });
+
+      expect(allowedPaths.ensurePath).not.toHaveBeenCalled();
+    });
+
+    it('registers projectPath when an internal create explicitly requests it', async () => {
+      const runtimeContext = {
+        runtimeKind: 'chat' as const,
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      };
+
+      await service.createWithId('scoped-session', { personaId: 'p1', runtimeContext }, {
+        registerRuntimeProjectPath: true,
+      });
 
       expect(allowedPaths.ensurePath).toHaveBeenCalledWith('C:\\Projekty\\kalio-forever');
     });
@@ -195,6 +217,14 @@ describe('SessionsService', () => {
       await service.getMessages('s1');
       expect(repo.loadHistory).toHaveBeenCalledWith('s1');
     });
+
+    it('loads a paged message window for session activation', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
+
+      await service.getMessagePage('s1', { limit: 40, beforeMessageId: 'msg-10' });
+
+      expect(repo.loadHistoryPage).toHaveBeenCalledWith('s1', { limit: 40, beforeMessageId: 'msg-10' });
+    });
   });
 
   describe('delete', () => {
@@ -260,7 +290,7 @@ describe('SessionsService', () => {
 
       expect(ops).toContain('update');
       expect(rows[0].runtimeContext).toEqual(runtimeContext);
-      expect(allowedPaths.ensurePath).toHaveBeenCalledWith('C:\\Projekty\\kalio-forever');
+      expect(allowedPaths.ensurePath).not.toHaveBeenCalled();
     });
 
     it('updates metadata and runtimeContext in the same call', async () => {
@@ -283,6 +313,27 @@ describe('SessionsService', () => {
       expect(rows[0].personaId).toBe('builder');
       expect(rows[0].runtimeContext).toEqual(runtimeContext);
       expect(sessionEvents.emitSessionUpdated).toHaveBeenCalledTimes(1);
+      expect(allowedPaths.ensurePath).not.toHaveBeenCalled();
+    });
+
+    it('registers projectPath only for trusted runtime-context updates', async () => {
+      rows.push({
+        id: 's1',
+        personaId: 'p1',
+        title: 'Old',
+        runtimeContext: {
+          runtimeKind: 'chat',
+          architectureContext: {
+            projectPath: 'C:\\Projekty\\kalio-forever',
+            executionCwd: 'C:\\Projekty\\kalio-forever',
+          },
+        },
+        createdAt: 0,
+        updatedAt: 0,
+      });
+
+      await service.registerRuntimeProjectPathForSession('s1');
+
       expect(allowedPaths.ensurePath).toHaveBeenCalledWith('C:\\Projekty\\kalio-forever');
     });
   });

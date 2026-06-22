@@ -24,6 +24,12 @@ function makeService() {
     list: vi.fn().mockResolvedValue([mockSession]),
     create: vi.fn().mockResolvedValue(mockSession),
     getMessages: vi.fn().mockResolvedValue([mockMessage]),
+    getMessagePage: vi.fn().mockResolvedValue({
+      messages: [mockMessage],
+      totalCount: 12,
+      hasMoreBefore: true,
+      oldestLoadedMessageId: 'msg-1',
+    }),
     delete: vi.fn().mockResolvedValue(undefined),
     archive: vi.fn().mockResolvedValue(undefined),
     restore: vi.fn().mockResolvedValue(undefined),
@@ -135,9 +141,32 @@ describe('SessionsController', () => {
   });
 
   describe('getMessages()', () => {
-    it('returns messages for a session', async () => {
-      const result = await controller.getMessages('sess-1');
+    it('preserves full-history behavior when pagination is not requested', async () => {
+      const response = {
+        setHeader: vi.fn(),
+      };
+
+      const result = await controller.getMessages('sess-1', response as never);
+
       expect(svc.getMessages).toHaveBeenCalledWith('sess-1');
+      expect(svc.getMessagePage).not.toHaveBeenCalled();
+      expect(response.setHeader).toHaveBeenCalledWith('x-kalio-history-total-count', '1');
+      expect(response.setHeader).toHaveBeenCalledWith('x-kalio-history-has-more-before', '0');
+      expect(response.setHeader).toHaveBeenCalledWith('x-kalio-history-oldest-loaded-id', 'msg-1');
+      expect(result).toEqual([mockMessage]);
+    });
+
+    it('returns a lightweight paged history window for a session', async () => {
+      const response = {
+        setHeader: vi.fn(),
+      };
+
+      const result = await controller.getMessages('sess-1', response as never, '40', 'msg-20');
+
+      expect(svc.getMessagePage).toHaveBeenCalledWith('sess-1', { limit: 40, beforeMessageId: 'msg-20' });
+      expect(response.setHeader).toHaveBeenCalledWith('x-kalio-history-total-count', '12');
+      expect(response.setHeader).toHaveBeenCalledWith('x-kalio-history-has-more-before', '1');
+      expect(response.setHeader).toHaveBeenCalledWith('x-kalio-history-oldest-loaded-id', 'msg-1');
       expect(result).toEqual([mockMessage]);
     });
   });

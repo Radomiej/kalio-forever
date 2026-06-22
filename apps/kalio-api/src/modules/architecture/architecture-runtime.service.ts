@@ -642,7 +642,7 @@ export class ArchitectureRuntimeService {
         hostSessionId,
         historySessionId,
       }),
-    });
+    }, { registerRuntimeProjectPath: true });
 
     const executableSlots = schema.roleSlots.filter((slot) => this.shouldCreateBranch(slot, schema, dto.executionMode));
     const pairs = await Promise.all(
@@ -663,7 +663,7 @@ export class ArchitectureRuntimeService {
             hostSessionId,
             historySessionId,
           }),
-        });
+        }, { registerRuntimeProjectPath: true });
         return [slot.id, sessionId] as const;
       }),
     );

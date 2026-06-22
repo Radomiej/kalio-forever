@@ -53,6 +53,7 @@ describe('ChatService', () => {
   };
   let sessionsService: {
     get: ReturnType<typeof vi.fn>;
+    registerRuntimeProjectPathForSession: ReturnType<typeof vi.fn>;
     updateRuntimeContext: ReturnType<typeof vi.fn>;
   };
   let auditService: Partial<AuditService>;
@@ -99,6 +100,7 @@ describe('ChatService', () => {
         createdAt: 1,
         updatedAt: 1,
       }),
+      registerRuntimeProjectPathForSession: vi.fn().mockResolvedValue(undefined),
       updateRuntimeContext: vi.fn().mockResolvedValue(undefined),
     };
     auditService = {
