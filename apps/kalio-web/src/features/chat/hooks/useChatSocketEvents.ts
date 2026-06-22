@@ -383,6 +383,7 @@ export function useChatSocketEvents({
       addSession,
       setRecoveryNotice,
       addActiveAgentLoop,
+      removeActiveAgentLoop,
       startAgentTurn,
       setAwaitingFirstChunk,
       setStreaming,
