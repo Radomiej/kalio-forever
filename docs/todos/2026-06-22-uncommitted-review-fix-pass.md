@@ -7,7 +7,7 @@
 - [x] Fix only verified high-value issues that are critical or cheap to repair.
 - [x] Run focused regression tests for each touched slice.
 - [x] Run the repository test gate and record any remaining failures or blockers.
-- [ ] Commit the verified fixes in logical packages.
+- [x] Commit the verified fixes in logical packages.
 
 ## Current Architecture
 
@@ -55,7 +55,7 @@ erDiagram
 - [x] Patch frontend older-history merge to use the latest store state instead of a stale closure snapshot.
 - [x] Run targeted backend/frontend tests for the touched files.
 - [x] Run full repository tests and log the result.
-- [ ] Commit the fixes in small reviewable batches.
+- [x] Commit the fixes in small reviewable batches.
 
 ## Notes
 
@@ -75,3 +75,6 @@ erDiagram
 - 2026-06-22: Full-repo verification remains red on the current branch:
   - `corepack pnpm test` still fails in aggregate; the chat suites that failed there passed in isolation, so the remaining issue looks like cross-suite interference or unrelated branch state rather than a deterministic failure from this slice.
   - `corepack pnpm test:e2e` still fails across broader workflow/runtime specs (`ac-07-mcp-server`, `ac-21-embedding-credentials`, multiple `agentflow-goal-guard`, `architecture-follow-up-stability`, `familyquest-live-proof`, `regression-stop-follow-up`).
+- 2026-06-22: Verified fixes were split into reviewable commits:
+  - `36b9506a` `Harden session runtime scope and history reads`
+  - `4382bafb` `Wire paged session history into the web client`
