@@ -330,7 +330,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       expect(childSessionId).toBeTruthy();
       expect(emit).toHaveBeenCalledWith('chat:error', expect.objectContaining({
         sessionId: childSessionId,
-        code: 'LLM_ERROR',
+        code: 'LLM_TIMEOUT',
         message: 'Sub-agent timed out after 50ms',
         hadContent: false,
       }));
@@ -411,6 +411,7 @@ describe('SubagentRuntimeService nested subagents', () => {
         parentSessionId: 'master',
         parentToolCallId: 'call-follow-up',
       }),
+      { registerRuntimeProjectPath: true },
     );
     expect(sessions.createWithId).not.toHaveBeenCalled();
     expect(sessionManager.persistUserMessage).toHaveBeenCalledWith(
@@ -509,6 +510,7 @@ describe('SubagentRuntimeService nested subagents', () => {
           projectPath: 'C:\\Projekty\\kalio-forever',
         }),
       }),
+      { registerRuntimeProjectPath: true },
     );
     expect(sessionManager.loadHistoryForLLM).toHaveBeenCalledWith(
       'branch-implementer',
@@ -602,6 +604,7 @@ describe('SubagentRuntimeService nested subagents', () => {
           conversationVisibility: 'visible',
         }),
       }),
+      { registerRuntimeProjectPath: true },
     );
   });
 
@@ -1927,7 +1930,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       const childSessionId = (startCall?.[1] as { sessionId: string } | undefined)?.sessionId;
       expect(emit).toHaveBeenCalledWith('chat:error', expect.objectContaining({
         sessionId: childSessionId,
-        code: 'LLM_ERROR',
+        code: 'LLM_TIMEOUT',
         message: 'Sub-agent timed out after 50ms',
       }));
       expect(emit).toHaveBeenCalledWith('agent:done', expect.objectContaining({ sessionId: childSessionId }));

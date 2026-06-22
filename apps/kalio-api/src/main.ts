@@ -20,7 +20,14 @@ async function bootstrap(): Promise<void> {
   app.useWebSocketAdapter(new SocketIoAdapter(app));
 
   const corsOrigins = normalizeCorsOrigins(process.env['CORS_ORIGIN']);
-  app.enableCors({ origin: corsOrigins === '*' ? '*' : corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins });
+  app.enableCors({
+    origin: corsOrigins === '*' ? '*' : corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
+    exposedHeaders: [
+      'x-kalio-history-total-count',
+      'x-kalio-history-has-more-before',
+      'x-kalio-history-oldest-loaded-id',
+    ],
+  });
   app.setGlobalPrefix('api');
 
   // Health check — intentionally outside the 'api' prefix so it stays at /health,

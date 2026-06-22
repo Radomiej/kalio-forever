@@ -11,10 +11,15 @@ import { SessionEventsService } from './session-events.service';
 import { LLMService } from '../llm/llm.service';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
+import type { SessionMessagePage } from './interfaces/message-repository.interface';
 
 const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
 const DEFAULT_SESSION_TITLE = 'New Chat';
 const MAX_TITLE_LENGTH = 60;
+interface SessionRuntimeScopeOptions {
+  registerRuntimeProjectPath?: boolean;
+}
+
 const TITLE_SYSTEM_PROMPT = [
   'Generate a concise conversation title.',
   'Summarize the real user goal instead of copying the prompt.',
@@ -57,8 +62,12 @@ export class SessionsService {
     return this.createWithId(nanoid(), dto);
   }
 
-  async createWithId(id: string, dto: CreateSessionDto): Promise<ChatSession> {
-    await this.ensureRuntimeProjectPathAllowed(dto.runtimeContext);
+  async createWithId(
+    id: string,
+    dto: CreateSessionDto,
+    options: SessionRuntimeScopeOptions = {},
+  ): Promise<ChatSession> {
+    await this.registerRuntimeProjectPathIfRequested(dto.runtimeContext, options);
     const now = new Date();
     const row = {
       id,
@@ -86,6 +95,14 @@ export class SessionsService {
   async getMessages(sessionId: string): Promise<ChatMessage[]> {
     await this.assertExists(sessionId);
     return this.repo.loadHistory(sessionId);
+  }
+
+  async getMessagePage(
+    sessionId: string,
+    options: { limit?: number; beforeMessageId?: string } = {},
+  ): Promise<SessionMessagePage> {
+    await this.assertExists(sessionId);
+    return this.repo.loadHistoryPage(sessionId, options);
   }
 
   async listChildren(parentSessionId: string): Promise<ChatSession[]> {
@@ -125,10 +142,18 @@ export class SessionsService {
   }
 
   async update(id: string, patch: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext }): Promise<void> {
+    return this.updateWithOptions(id, patch);
+  }
+
+  async updateWithOptions(
+    id: string,
+    patch: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext },
+    options: SessionRuntimeScopeOptions = {},
+  ): Promise<void> {
     await this.assertExists(id);
     const hasPatch = patch.title !== undefined || patch.personaId !== undefined || patch.runtimeContext !== undefined;
     if (hasPatch) {
-      await this.ensureRuntimeProjectPathAllowed(patch.runtimeContext);
+      await this.registerRuntimeProjectPathIfRequested(patch.runtimeContext, options);
       const set: Record<string, unknown> = { updatedAt: new Date() };
       if (patch.title !== undefined) set.title = patch.title;
       if (patch.personaId !== undefined) set.personaId = patch.personaId;
@@ -138,14 +163,25 @@ export class SessionsService {
     }
   }
 
-  async updateRuntimeContext(id: string, runtimeContext: SessionRuntimeContext): Promise<void> {
+  async updateRuntimeContext(
+    id: string,
+    runtimeContext: SessionRuntimeContext,
+    options: SessionRuntimeScopeOptions = {},
+  ): Promise<void> {
     await this.assertExists(id);
-    await this.ensureRuntimeProjectPathAllowed(runtimeContext);
+    await this.registerRuntimeProjectPathIfRequested(runtimeContext, options);
     await this.drizzle.db
       .update(sessions)
       .set({ runtimeContext, updatedAt: new Date() })
       .where(eq(sessions.id, id));
     this.sessionEvents.emitSessionUpdated(await this.get(id));
+  }
+
+  async registerRuntimeProjectPathForSession(id: string): Promise<void> {
+    const row = await this.getRow(id);
+    await this.registerRuntimeProjectPathIfRequested(row.runtimeContext ?? undefined, {
+      registerRuntimeProjectPath: true,
+    });
   }
 
   async generateTitle(id: string): Promise<{ title: string }> {
@@ -222,7 +258,13 @@ export class SessionsService {
     return row;
   }
 
-  private async ensureRuntimeProjectPathAllowed(runtimeContext: SessionRuntimeContext | undefined): Promise<void> {
+  private async registerRuntimeProjectPathIfRequested(
+    runtimeContext: SessionRuntimeContext | undefined,
+    options: SessionRuntimeScopeOptions,
+  ): Promise<void> {
+    if (!options.registerRuntimeProjectPath) {
+      return;
+    }
     const projectPath = projectPathFromRuntimeContext(runtimeContext);
     if (!projectPath) {
       return;

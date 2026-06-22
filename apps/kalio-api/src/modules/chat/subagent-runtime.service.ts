@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import type { AgentRunContext, ArchitectureRuntimeContext, SessionRuntimeContext, SubagentCopiedFile } from '@kalio/types';
+import type { AgentRunContext, ArchitectureRuntimeContext, SessionRuntimeContext, SocketEvents, SubagentCopiedFile } from '@kalio/types';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import type { SubagentRuntimePort, RunSubagentRequest, RunSubagentResult } from '../tool/subagent-runtime.port';
 import { SessionManagerService } from './session-manager.service';
@@ -20,6 +20,28 @@ import { TurnState } from './turn-state';
 const DEFAULT_MAX_ITERATIONS = 8;
 
 type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number; autoApproveTools?: string[] };
+type ChatErrorCode = SocketEvents['chat:error']['code'];
+
+function subagentErrorCode(error: Error): ChatErrorCode {
+  if ('code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (
+      code === 'LLM_RATE_LIMIT'
+      || code === 'LLM_TIMEOUT'
+      || code === 'LLM_AUTH'
+      || code === 'LLM_PROVIDER_DOWN'
+      || code === 'LLM_QUOTA'
+      || code === 'LLM_BAD_TOOL_ARGS'
+      || code === 'MAX_ITERATIONS_REACHED'
+    ) {
+      return code;
+    }
+  }
+  if (error.message.toLowerCase().includes('timed out')) {
+    return 'LLM_TIMEOUT';
+  }
+  return 'LLM_ERROR';
+}
 
 function appendCopiedOutputLinks(baseText: string, parentSessionId: string, copiedFiles: SubagentCopiedFile[]): string {
   if (copiedFiles.length === 0) return baseText;
@@ -191,7 +213,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           parentSessionId: request.parentSessionId,
           parentToolCallId: request.parentToolCallId,
           runtimeContext,
-        });
+        }, { registerRuntimeProjectPath: true });
 
     if (childSession.kind !== 'subagent') {
       throw new Error(`Session ${childSession.id} is not a sub-agent session`);
@@ -203,7 +225,9 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       requestedChildSessionId
       && (!childSession.runtimeContext || !runtimeContextsEqual(childSession.runtimeContext, runtimeContext))
     ) {
-      await this.sessions.updateRuntimeContext(childSession.id, runtimeContext);
+      await this.sessions.updateRuntimeContext(childSession.id, runtimeContext, {
+        registerRuntimeProjectPath: true,
+      });
     }
 
     const attachmentPaths = request.attachments ?? [];
@@ -401,7 +425,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       );
       trackingEmit?.('chat:error', {
         sessionId: childSessionId,
-        code: 'LLM_ERROR',
+        code: subagentErrorCode(error),
         message: error.message,
         hadContent,
         agentRun,

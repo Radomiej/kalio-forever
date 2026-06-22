@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import type {
   ChatMessage,
   ChatRunSnapshot,
@@ -8,6 +8,7 @@ import type {
   LLMContextPreview,
   SessionRuntimeContext,
 } from '@kalio/types';
+import type { Response } from 'express';
 
 type SessionContextPreviewBody = Omit<Extract<ContextPreviewRequest, { sessionId: string }>, 'sessionId'>;
 import { SessionsService } from './sessions.service';
@@ -56,8 +57,33 @@ export class SessionsController {
   }
 
   @Get(':id/messages')
-  getMessages(@Param('id') id: string): Promise<ChatMessage[]> {
-    return this.sessions.getMessages(id);
+  async getMessages(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) response: Response,
+    @Query('limit') limit?: string,
+    @Query('beforeMessageId') beforeMessageId?: string,
+  ): Promise<ChatMessage[]> {
+    const hasExplicitPaging = (
+      typeof limit === 'string' && limit.trim().length > 0
+    ) || (
+      typeof beforeMessageId === 'string' && beforeMessageId.trim().length > 0
+    );
+    if (!hasExplicitPaging) {
+      const messages = await this.sessions.getMessages(id);
+      response.setHeader('x-kalio-history-total-count', String(messages.length));
+      response.setHeader('x-kalio-history-has-more-before', '0');
+      response.setHeader('x-kalio-history-oldest-loaded-id', messages[0]?.id ?? '');
+      return messages;
+    }
+
+    const page = await this.sessions.getMessagePage(id, {
+      limit: typeof limit === 'string' && limit.trim().length > 0 ? Number.parseInt(limit, 10) : undefined,
+      beforeMessageId,
+    });
+    response.setHeader('x-kalio-history-total-count', String(page.totalCount));
+    response.setHeader('x-kalio-history-has-more-before', page.hasMoreBefore ? '1' : '0');
+    response.setHeader('x-kalio-history-oldest-loaded-id', page.oldestLoadedMessageId ?? '');
+    return page.messages;
   }
 
   @Get(':id/runs/current')

@@ -24,7 +24,8 @@ function getChatErrorCode(err: unknown): ChatErrorCode {
       code === 'LLM_AUTH' ||
       code === 'LLM_PROVIDER_DOWN' ||
       code === 'LLM_QUOTA' ||
-      code === 'LLM_BAD_TOOL_ARGS'
+      code === 'LLM_BAD_TOOL_ARGS' ||
+      code === 'MAX_ITERATIONS_REACHED'
     ) {
       return code;
     }
@@ -85,6 +86,7 @@ export class ChatService {
 
       await this.sessionManager.ensureSession(sessionId, personaId);
       const session = await this.sessions.get(sessionId);
+      await this.sessions.registerRuntimeProjectPathForSession(sessionId);
       const runtimeContext = session.runtimeContext ?? {
         runtimeKind: 'chat' as const,
         systemPromptProfile: 'default-chat' as const,
