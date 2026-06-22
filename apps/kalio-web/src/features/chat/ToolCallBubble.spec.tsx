@@ -190,6 +190,7 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
     expect(mockConfirmTool).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
     expect(mockRemovePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-1');
     expect(mockUpdateToolActivity).toHaveBeenCalledWith('call-1', expect.objectContaining({ status: 'running' }));
+    expect(screen.queryByTestId('confirmation-confirm-btn')).toBeNull();
   });
 
   it('Cancel button calls eventBus.cancelTool and clears confirmation from store', () => {

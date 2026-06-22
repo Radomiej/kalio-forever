@@ -1248,6 +1248,14 @@ describe('findArchitectureRunInMessages', () => {
         status: 'completed',
       },
     });
+    expect(metadata?.trace[1]).toMatchObject({
+      speaker: 'router',
+      sessionId: 'arch-run-1-router',
+    });
+    expect(metadata?.trace[2]).toMatchObject({
+      speaker: 'finalizer',
+      sessionId: 'arch-run-1-finalizer',
+    });
   });
 
   it('restores sequential router chains in architecture event order after reload', () => {

@@ -145,4 +145,76 @@ describe('renderArchitectureRunProjection', () => {
     expect(nodes.find((node) => node.id === 'architecture-route:final-running:0')?.status).toBe('running');
     expect(nodes.find((node) => node.id === 'architecture-route:final-running:1')?.status).toBe('error');
   });
+
+  it('uses stable workflow activity summaries for route node details', () => {
+    const nodes: ExecutionGraphNode[] = [];
+
+    renderArchitectureRunProjection({
+      addNode: (node) => {
+        const stored = { ...node, x: 0, y: 0, width: 240, height: 120 };
+        nodes.push(stored);
+        return stored;
+      },
+      addEdge: () => undefined,
+      architectureRun: null,
+      branchMaxColumn: 1,
+      finalMessage: makeMessage({
+        id: 'final-detail',
+        architectureRun: {
+          runId: 'run-detail',
+          schemaId: 'architecture-debate',
+          status: 'completed',
+          trace: [
+            {
+              speaker: 'participant',
+              content: '# Pragmatist\n\nReal branch output.',
+              eventId: 'event-pragmatist',
+              nodeId: 'pragmatist',
+              nextNodeId: 'router',
+              stream: {
+                streamGroupId: 'group-2',
+                branchSessionId: 'arch-run-detail-pragmatist',
+                status: 'completed',
+                chunkCount: 3,
+                text: 'Real branch output.',
+              },
+            },
+            {
+              speaker: 'finalizer',
+              content: '# Ocena Architektury Strategic Decision Council v0.1.0',
+              eventId: 'event-finalizer',
+              nodeId: 'finalizer',
+              stream: {
+                streamGroupId: 'group-2',
+                branchSessionId: 'arch-run-detail-finalizer',
+                status: 'completed',
+                chunkCount: 5,
+                text: 'Real finalizer output.',
+              },
+            },
+          ],
+          routeHops: [
+            { eventId: 'event-pragmatist', source: 'parallel', fromNodeId: 'architecture-debate', toNodeId: 'pragmatist' },
+            { eventId: 'event-finalizer', source: 'router', fromNodeId: 'router', toNodeId: 'finalizer' },
+          ],
+        },
+      }),
+      startRow: 0,
+      turn: {
+        id: 'turn-1',
+        sessionId: 'session-1',
+        promptMessageId: 'prompt-1',
+        done: true,
+        items: [],
+      },
+      turnNodeId: 'turn:turn-1',
+    });
+
+    expect(nodes.find((node) => node.id === 'architecture-route:final-detail:0')?.detail).toContain(
+      'Branch completed its role-specific response.',
+    );
+    expect(nodes.find((node) => node.id === 'architecture-route:final-detail:1')?.detail).toContain(
+      'Final answer produced from the routed graph outputs.',
+    );
+  });
 });

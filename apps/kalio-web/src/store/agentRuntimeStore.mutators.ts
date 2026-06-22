@@ -19,6 +19,7 @@ import {
 interface RuntimePendingState {
   pendingConfirmations: Record<string, ToolConfirmationRequest[]>;
   pendingBudgetApprovals: Record<string, AgentBudgetApprovalRequest[]>;
+  settledConfirmationRequestIds: Record<string, true>;
   runtimeActivitySnapshots: Record<string, SocketEvents['session:runtime_snapshot']>;
 }
 
@@ -48,10 +49,11 @@ function applyPendingConfirmationEntries(
   nextEntries: ToolConfirmationRequest[],
   createIfMissing: boolean,
 ): RuntimePendingState {
+  const visibleNextEntries = nextEntries.filter((entry) => !state.settledConfirmationRequestIds[entry.requestId]);
   return {
     ...state,
-    pendingConfirmations: nextEntries.length > 0
-      ? { ...state.pendingConfirmations, [sessionId]: nextEntries }
+    pendingConfirmations: visibleNextEntries.length > 0
+      ? { ...state.pendingConfirmations, [sessionId]: visibleNextEntries }
       : Object.fromEntries(
           Object.entries(state.pendingConfirmations).filter(([key]) => key !== sessionId),
         ),
@@ -60,7 +62,7 @@ function applyPendingConfirmationEntries(
       sessionId,
       (snapshot) => ({
         ...snapshot,
-        pendingConfirmations: nextEntries,
+        pendingConfirmations: visibleNextEntries,
         updatedAt: Date.now(),
       }),
       { createIfMissing },
@@ -106,6 +108,9 @@ export function applyPendingConfirmationUpsert(
   if (request === null) {
     return applyPendingConfirmationEntries(state, sessionId, [], false);
   }
+  if (state.settledConfirmationRequestIds[request.requestId]) {
+    return state;
+  }
 
   return applyPendingConfirmationEntries(
     state,
@@ -145,12 +150,19 @@ export function applyPendingConfirmationRemoval(
     return state;
   }
 
-  return applyPendingConfirmationEntries(
+  const nextState = applyPendingConfirmationEntries(
     state,
     sessionId,
     removePendingByRequestId(state.pendingConfirmations[sessionId], requestId),
     false,
   );
+  return {
+    ...nextState,
+    settledConfirmationRequestIds: {
+      ...nextState.settledConfirmationRequestIds,
+      [requestId]: true,
+    },
+  };
 }
 
 export function applyPendingBudgetApprovalRemoval(
@@ -175,14 +187,25 @@ export function applyRuntimeActivitySnapshotSync<TActivity extends { sessionId?:
   snapshot: SocketEvents['session:runtime_snapshot'],
   mapRuntimeActivity: (activity: RuntimeToolActivity) => TActivity,
 ): RuntimeSnapshotSyncState<TActivity> {
+  const filteredSnapshot: SocketEvents['session:runtime_snapshot'] = {
+    ...snapshot,
+    pendingConfirmations: snapshot.pendingConfirmations.filter((entry) =>
+      !state.settledConfirmationRequestIds[entry.requestId],
+    ),
+    toolActivities: snapshot.toolActivities.filter((activity) =>
+      activity.status !== 'pending_confirmation'
+      || !activity.requestId
+      || !state.settledConfirmationRequestIds[activity.requestId],
+    ),
+  };
   const syncedPendingCollections = syncPendingCollectionsFromRuntimeSnapshot({
     pendingConfirmations: state.pendingConfirmations,
     pendingBudgetApprovals: state.pendingBudgetApprovals,
-    snapshot,
+    snapshot: filteredSnapshot,
   });
   const syncedToolActivities = syncSessionToolActivitiesFromRuntimeSnapshot(
     state,
-    snapshot,
+    filteredSnapshot,
     mapRuntimeActivity,
   );
 
@@ -190,13 +213,13 @@ export function applyRuntimeActivitySnapshotSync<TActivity extends { sessionId?:
     ...state,
     runtimeActivitySnapshots: {
       ...state.runtimeActivitySnapshots,
-      [snapshot.sessionId]: snapshot,
+      [filteredSnapshot.sessionId]: filteredSnapshot,
     },
     pendingConfirmations: syncedPendingCollections.pendingConfirmations,
     pendingBudgetApprovals: syncedPendingCollections.pendingBudgetApprovals,
     queuedDepthBySession: {
       ...state.queuedDepthBySession,
-      [snapshot.sessionId]: snapshot.queueLength,
+      [filteredSnapshot.sessionId]: filteredSnapshot.queueLength,
     },
     toolActivities: syncedToolActivities.toolActivities,
     sessionToolActivities: syncedToolActivities.sessionToolActivities,

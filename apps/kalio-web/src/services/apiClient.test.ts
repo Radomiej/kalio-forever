@@ -68,6 +68,25 @@ describe('apiClient helpers', () => {
     expect(module.apiClient).toBeDefined();
   });
 
+  it('prefers the official fixed-port backend over stale build-time API env', async () => {
+    vi.resetModules();
+    axiosCreate.mockClear();
+    vi.doMock('./backendOrigin', () => ({
+      resolvePairedBackendOrigin: () => 'http://127.0.0.1:3316',
+    }));
+
+    try {
+      await import('./apiClient');
+    } finally {
+      vi.doUnmock('./backendOrigin');
+    }
+
+    expect(axiosCreate).toHaveBeenCalledWith({
+      baseURL: 'http://127.0.0.1:3316',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
   it('fetches RA-App summaries and groups through the shared client', async () => {
     const apps: RAAppSummary[] = [{
       id: 'app-1',

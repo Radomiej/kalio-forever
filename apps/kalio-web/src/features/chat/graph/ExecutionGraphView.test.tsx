@@ -709,6 +709,11 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(await screen.findByTestId('graph-node-architecture-root:five-minds-debate')).toBeInTheDocument();
     expect(await screen.findByTestId('graph-node-architecture-root:pragmatist')).toBeInTheDocument();
     expect(screen.queryByText('No execution nodes yet for this session.')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('graph-node-architecture-root:pragmatist'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open child chat' }));
+
+    expect(sessionState.setActiveSession).toHaveBeenCalledWith('arch-run-1-pragmatist');
   });
 
   it('prefers the durable architecture graph over a prompt-only root session projection', async () => {

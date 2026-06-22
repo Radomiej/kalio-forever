@@ -1,5 +1,8 @@
 import type { ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
-import { architectureSessionSurfaceForSession } from './architectureSessionContext';
+import {
+  architectureConversationVisibilityForSession,
+  architectureSessionSurfaceForSession,
+} from './architectureSessionContext';
 import {
   buildArchitectureSessionRuntimeStates,
   isPendingArchitecturePlaceholderSession,
@@ -21,6 +24,11 @@ function isArchitectureBranchConversationSession(session: ChatSession): boolean 
   return sessionSurface === 'conversation-branch';
 }
 
+function isVisibleTechnicalConversationSession(session: ChatSession): boolean {
+  return architectureSessionSurfaceForSession(session) === 'technical-node'
+    && architectureConversationVisibilityForSession(session) === 'visible';
+}
+
 function hasLiveSessionActivity(
   sessionId: string,
   signals: RenderableSessionFilterSignals,
@@ -40,6 +48,10 @@ export function isRenderableConversationSession(
   architectureSessionRuntimeStates: Map<string, SessionRuntimeState>,
   signals: RenderableSessionFilterSignals = {},
 ): boolean {
+  if (isVisibleTechnicalConversationSession(session)) {
+    return true;
+  }
+
   if (isTechnicalArchitectureSession(session)) {
     return false;
   }

@@ -1,8 +1,9 @@
-import type {
-  ArchitectureGraphProjection,
-  ArchitectureRunStatus,
-  ChatMessage,
-  ChatSession,
+import {
+  architectureSessionPrefixForRun,
+  type ArchitectureGraphProjection,
+  type ArchitectureRunStatus,
+  type ChatMessage,
+  type ChatSession,
 } from '@kalio/types';
 import { applyGraphNodeLayout, estimateGraphNodeHeight } from './executionGraphNodePresentation';
 import type { ExecutionGraphModel, ExecutionGraphNode } from './executionGraphModel.types';
@@ -33,8 +34,9 @@ export function buildArchitectureRootGraphModel(input: {
     index,
     graph: input.graph,
     layout: layout.get(node.id),
-    branchSessionId: branchSessionByNodeId.get(normalizeNodeId(node.id)),
-    branchMessages: input.sessionMessages[branchSessionByNodeId.get(normalizeNodeId(node.id)) ?? ''] ?? [],
+    // TODO: legacy fallback - older graph projections omitted node.sessionId and require session-name matching.
+    branchSessionId: node.sessionId ?? branchSessionByNodeId.get(normalizeNodeId(node.id)),
+    branchMessages: input.sessionMessages[node.sessionId ?? branchSessionByNodeId.get(normalizeNodeId(node.id)) ?? ''] ?? [],
   }));
   const knownNodeIds = new Set(nodes.map((node) => node.id));
   const edges = input.graph.edges
@@ -64,7 +66,7 @@ function toExecutionNode(input: {
   branchMessages: ChatMessage[];
 }): ExecutionGraphNode {
   const { node, graph, branchSessionId, branchMessages } = input;
-  const openableBranchSessionId = node.kind === 'role' ? branchSessionId : undefined;
+  const openableBranchSessionId = branchSessionId;
   const toolEvidence = extractToolEvidence(node);
   const incompleteReason = extractIncompleteReason(node);
   const routeHops = graph.routeHops ?? [];
@@ -99,6 +101,7 @@ function toExecutionNode(input: {
       openableBranchSessionId ? 'branch session' : undefined,
     ].filter(Boolean).join(' / '),
     detail: [
+      node.actionSummary,
       node.behavior?.mode?.replaceAll('_', ' '),
       incompleteReason ? 'incomplete' : undefined,
       openableBranchSessionId && branchMessages.length > 0 ? `${branchMessages.length} branch messages loaded` : undefined,
@@ -235,10 +238,16 @@ function stringArray(value: unknown): string[] {
 }
 
 function branchSessionMap(runId: string, rootSessionId: string, sessions: ChatSession[]): Map<string, string> {
+  const sessionPrefix = `${architectureSessionPrefixForRun(runId)}-`;
   const pairs = sessions
-    .filter((session) => session.kind === 'subagent' && session.parentSessionId === rootSessionId && session.id.startsWith(`arch-${runId}-`))
-    .map((session): [string, string] => [normalizeNodeId(session.id.replace(`arch-${runId}-`, '')), session.id]);
-  return new Map(pairs);
+    .filter((session) => session.kind === 'subagent' && session.parentSessionId === rootSessionId && session.id.startsWith(sessionPrefix))
+    .map((session): [string, string] => [normalizeNodeId(session.id.slice(sessionPrefix.length)), session.id]);
+  const result = new Map(pairs);
+  const finalizerSessionId = result.get('finalizer');
+  if (finalizerSessionId && !result.has('final-artifact')) {
+    result.set('final-artifact', finalizerSessionId);
+  }
+  return result;
 }
 
 function normalizeNodeId(value: string): string {

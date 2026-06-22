@@ -1,37 +1,12 @@
-import { useEffect, useRef, type RefObject } from 'react';
-import { nanoid } from 'nanoid';
-import type { ChatMessage } from '@kalio/types';
+import { useEffect, useRef } from 'react';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { eventBus } from '../../../services/eventBus';
 import { identifyWatchedSession } from '../../../services/sessionWatchRegistry';
-import { shouldRefreshVfsForToolResult } from '../ChatInterface.Parts';
-import type { ChatConnectionState } from '../ChatInterface.Parts';
-import {
-  canReleaseComposerAfterToolResult,
-  createToolArgProgressHandlers,
-  mergeRaAppNativeResultIntoMessages,
-  type ReconnectUiState,
-} from './useChatSocketEvents.helpers';
-import {
-  handleCliChildProgress,
-  handleCliChildToolResult,
-  isCliChildToolName,
-  resolveCliToolName,
-} from './useChatSocketEvents.cliChild';
+import { shouldRefreshVfsForToolResult, type ChatConnectionState } from '../ChatInterface.Parts';
+import { canReleaseComposerAfterToolResult, createToolResultMessage, createToolArgProgressHandlers, findPendingConfirmationForToolResult, mergeRaAppNativeResultIntoMessages, type ReconnectUiState, type UseChatSocketEventsOptions } from './useChatSocketEvents.helpers';
+import { handleCliChildProgress, handleCliChildToolResult, isCliChildToolName, resolveCliToolName } from './useChatSocketEvents.cliChild';
 import { registerConnectionRecoveryHandlers, registerSessionLifecycleHandlers } from './useChatSocketEvents.lifecycle';
-
-interface UseChatSocketEventsOptions {
-  hasPendingChunksForSession: (sessionId: string | null) => boolean;
-  requestGeneratedTitleIfNeeded: (sessionId: string | null) => void;
-  setAwaitingFirstChunk: (value: boolean) => void;
-  setConnectionState: (value: ChatConnectionState) => void;
-  setError: (value: string | null) => void;
-  setRecoveryNotice: (value: string | null) => void;
-  setVfsRefreshSignal: (updater: (value: number) => number) => void;
-  toolArgProgressSeenRef: RefObject<Record<string, Set<string>>>;
-  onContextInvalidated?: () => void;
-}
 
 export function useChatSocketEvents({
   hasPendingChunksForSession,
@@ -360,30 +335,28 @@ export function useChatSocketEvents({
         result,
       });
       const agentState = useAgentStore.getState();
+      const settledConfirmation = findPendingConfirmationForToolResult({
+        callId: result.callId,
+        sessionId: resultSessionId,
+        pendingConfirmations: agentState.pendingConfirmations,
+      });
+      if (settledConfirmation) removePendingConfirmation(settledConfirmation.sessionId, settledConfirmation.requestId);
       const toolName = resolveCliToolName(result, agentState.callIdToName, agentState.toolActivities);
       handleCliChildToolResult(cliChildDeps, result, resultSessionId);
       clearCLIAgentOutput(result.callId);
       if (result.status === 'success') {
         if (shouldRefreshVfsForToolResult(toolName, result.data)) setVfsRefreshSignal((value) => value + 1);
       }
-      if (result.data !== undefined && resultSessionId && toolName && (result.status === 'success' || isCliChildToolName(toolName))) {
-        const content = toolName && isCliChildToolName(toolName) && result.data && typeof result.data === 'object' && !Array.isArray(result.data)
-          ? JSON.stringify({
-              ...(result.data as Record<string, unknown>),
-              toolResultStatus: result.status,
-              ...(result.errorCode ? { toolResultErrorCode: result.errorCode } : {}),
-              ...(result.errorMessage ? { toolResultErrorMessage: result.errorMessage } : {}),
-            })
-          : JSON.stringify(result.data);
-        const toolResultMsg: ChatMessage = {
-          id: nanoid(),
-          sessionId: resultSessionId,
-          role: 'tool_result',
-          content,
-          toolCallId: result.callId,
-          createdAt: Date.now(),
-        };
-        addMessage(toolResultMsg);
+      if (result.status === 'success' || (toolName && isCliChildToolName(toolName))) {
+        const toolResultMsg = createToolResultMessage({
+          result,
+          resultSessionId,
+          toolName,
+          isCliChildToolName,
+        });
+        if (toolResultMsg) {
+          addMessage(toolResultMsg);
+        }
       }
       onContextInvalidated?.();
       if (

@@ -19,6 +19,7 @@ describe('envSchema', () => {
     expect(value.EMBEDDING_MODEL).toBe('Xenova/multilingual-e5-small');
     expect(value.EMBEDDING_DIMENSIONS).toBe(384);
     expect(value.EMBEDDING_BACKEND).toBe('cpu');
+    expect(value.KALIO_ENABLE_TEST_SUPPORT).toBe(false);
   });
 
   it('fills mock LLM defaults in test mode', () => {
@@ -46,5 +47,21 @@ describe('envSchema', () => {
 
     expect(error).toBeDefined();
     expect(error?.details[0]?.message).toContain('CREDENTIALS_MASTER_KEY');
+  });
+
+  it('accepts explicit test-support enablement for QA stacks', () => {
+    const { error, value } = envSchema.validate({
+      DATABASE_PATH: './data/qa.sqlite',
+      WORKSPACE_ROOT: './sessions/qa',
+      NODE_ENV: 'production',
+      CREDENTIALS_MASTER_KEY: 'qa-master-key-32-chars-minimum',
+      LLM_API_KEY: 'qa-key',
+      LLM_BASE_URL: 'https://api.example.com/v1',
+      LLM_MODEL: 'gpt-qa',
+      KALIO_ENABLE_TEST_SUPPORT: true,
+    });
+
+    expect(error).toBeUndefined();
+    expect(value.KALIO_ENABLE_TEST_SUPPORT).toBe(true);
   });
 });

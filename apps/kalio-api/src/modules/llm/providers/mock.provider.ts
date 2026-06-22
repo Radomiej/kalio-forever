@@ -117,10 +117,24 @@ export class MockLLMProvider implements ILLMProvider {
     }
 
     if (lastMessage.includes(MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER)) {
+      if (
+        hasPriorToolResult(messages, 'vfs_write', 'e2e/mock-tool-trigger.txt')
+        || hasPriorAssistantToolCall(messages, 'vfs_write', 'e2e/mock-tool-trigger.txt')
+      ) {
+        emitText(options, 'vfs_write completed for e2e/mock-tool-trigger.txt.');
+        return [];
+      }
       return [createVfsWriteToolCall()];
     }
 
     if (lastMessage.includes(MOCK_VFS_WRITE_TRIGGER)) {
+      if (
+        hasPriorToolResult(messages, 'vfs_write', 'e2e/mock-tool-trigger.txt')
+        || hasPriorAssistantToolCall(messages, 'vfs_write', 'e2e/mock-tool-trigger.txt')
+      ) {
+        emitText(options, 'vfs_write completed for e2e/mock-tool-trigger.txt.');
+        return [];
+      }
       const toolCall = createVfsWriteToolCall();
       emitMockToolArgProgress(options, toolCall);
       return [toolCall];

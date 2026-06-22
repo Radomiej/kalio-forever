@@ -8,7 +8,12 @@ import {
   ShieldCheck,
   XCircle,
 } from 'lucide-react';
-import type { ArchitectureChatRunSummary, ChatMessage, ChatSession } from '@kalio/types';
+import {
+  architectureSessionIdForRunSlot,
+  type ArchitectureChatRunSummary,
+  type ChatMessage,
+  type ChatSession,
+} from '@kalio/types';
 import { compactArchitectureTraceContent } from './architectureChatSummary';
 import {
   buildTimelineStages,
@@ -71,6 +76,10 @@ function isSameStep(
 }
 
 function branchSessionCandidates(runId: string, step: TraceStep): string[] {
+  const explicitSessionId = step.sessionId;
+  if (explicitSessionId) {
+    return [explicitSessionId];
+  }
   const fromStream = step.stream?.branchSessionId;
   if (fromStream) {
     return [fromStream];
@@ -84,7 +93,9 @@ function branchSessionCandidates(runId: string, step: TraceStep): string[] {
     raw.replace(/-/g, '_'),
     raw.replace(/_/g, '-'),
   ]);
-  return [...normalized].map((nodeId) => `arch-${runId}-${nodeId}`);
+  return [...normalized]
+    .map((nodeId) => architectureSessionIdForRunSlot(runId, nodeId))
+    .filter((sessionId): sessionId is string => typeof sessionId === 'string');
 }
 
 function resolveBranchSessionId(

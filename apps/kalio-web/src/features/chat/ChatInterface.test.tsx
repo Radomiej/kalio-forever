@@ -66,6 +66,7 @@ async function emitEvent(event: string, payload: unknown) {
 const mockSendMessage = vi.hoisted(() => vi.fn());
 const mockConversationFilesBar = vi.hoisted(() => vi.fn());
 const mockIdentifySession = vi.hoisted(() => vi.fn());
+const mockEventBusConnected = vi.hoisted(() => ({ value: true }));
 const mockGetArchitectureSchemas = vi.hoisted(() => vi.fn());
 const mockStartArchitectureRun = vi.hoisted(() => vi.fn());
 const mockStartGoalGuardAgentFlowRun = vi.hoisted(() => vi.fn());
@@ -73,7 +74,9 @@ const mockStartGoalGuardAgentFlowRun = vi.hoisted(() => vi.fn());
 // ── eventBus mock ─────────────────────────────────────────────────────────────
 vi.mock('../../services/eventBus', () => ({
   eventBus: {
-    connected: true,
+    get connected() {
+      return mockEventBusConnected.value;
+    },
     connect: vi.fn(),
     onChunk: (h: (...args: unknown[]) => void) => capture('chat:chunk', h),
     onComplete: (h: (...args: unknown[]) => void) => capture('chat:complete', h),
@@ -433,6 +436,7 @@ beforeEach(() => {
     vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([]) })),
   );
   Object.keys(handlers).forEach((k) => delete handlers[k]);
+  mockEventBusConnected.value = true;
   mockActiveTurnId = null;
   mockActiveSessionId = 'session-1';
   mockPendingMessage = null;
@@ -848,6 +852,17 @@ describe('ChatInterface event wiring', () => {
     expect(mockIdentifySession).toHaveBeenCalledWith('session-1');
   });
 
+  it('REGRESSION: identifies the active session after socket connects', async () => {
+    mockEventBusConnected.value = false;
+    await renderChatInterface();
+    mockIdentifySession.mockClear();
+
+    mockEventBusConnected.value = true;
+    await emitEvent('socket:connection_state', { status: 'connected', recovered: false });
+
+    expect(mockIdentifySession).toHaveBeenCalledWith('session-1');
+  });
+
   it('REGRESSION: re-identifies when the active session changes', async () => {
     const { rerender } = await renderChatInterface();
     mockIdentifySession.mockClear();
@@ -1104,6 +1119,29 @@ describe('ChatInterface event wiring', () => {
       'call-3',
       expect.objectContaining({ status: 'error' }),
     );
+  });
+
+  it('REGRESSION: tool:result clears a matching pending confirmation when invalidation races', async () => {
+    await renderChatInterface();
+    removePendingConfirmation.mockClear();
+    agentStoreState.pendingConfirmations = {
+      'session-1': [{
+        requestId: 'req-confirmed-result',
+        toolCallId: 'call-confirmed-result',
+        sessionId: 'session-1',
+        toolName: 'vfs_write',
+        args: { path: 'e2e/mock-tool-trigger.txt' },
+        timeoutMs: 600000,
+      }],
+    };
+
+    await emitEvent('tool:result', {
+      callId: 'call-confirmed-result',
+      status: 'success',
+      sessionId: 'session-1',
+    });
+
+    expect(removePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-confirmed-result');
   });
 
   it('tool:result for the active session unlocks composer streaming state when no turn remains active', async () => {

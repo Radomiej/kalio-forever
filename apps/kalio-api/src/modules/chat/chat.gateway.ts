@@ -102,6 +102,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const sessionTree = await this.collectRuntimeSnapshotSessionTree(payload.sessionId);
     const statusesBySessionId: Record<string, SocketEvents['session:status']> = {};
+    for (const sessionId of sessionTree.sessionIds) {
+      if (sessionId === payload.sessionId) {
+        continue;
+      }
+      const descendantSession = sessionTree.childSessionsById[sessionId];
+      if (descendantSession) {
+        client.emit('session:updated', descendantSession);
+      }
+    }
 
     for (const sessionId of sessionTree.sessionIds) {
       if (sessionId !== payload.sessionId) {

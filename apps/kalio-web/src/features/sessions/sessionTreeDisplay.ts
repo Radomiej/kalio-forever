@@ -1,5 +1,12 @@
-import type { ArchitectureGraphProjection, ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
 import {
+  architectureSessionPrefixForRun,
+  type ArchitectureGraphProjection,
+  type ChatMessage,
+  type ChatSession,
+  type SocketEvents,
+} from '@kalio/types';
+import {
+  architectureConversationVisibilityForSession,
   architectureContextForSession,
   architectureContextStringField,
   architectureSessionSurfaceForSession,
@@ -11,6 +18,11 @@ type ArchitectureRunWithGraph = NonNullable<ChatMessage['architectureRun']> & {
 };
 const TECHNICAL_ARCHITECTURE_SLOT_IDS = new Set(['router', 'finalizer', 'orchestrator']);
 const TECHNICAL_ARCHITECTURE_SLOT_TYPES = new Set(['router', 'finalizer']);
+
+function isVisibleTechnicalConversationSession(session: ChatSession): boolean {
+  return architectureSessionSurfaceForSession(session) === 'technical-node'
+    && architectureConversationVisibilityForSession(session) === 'visible';
+}
 
 export function buildChildSessionsByParent(sessions: ChatSession[]): Map<string, ChatSession[]> {
   return sessions.reduce((acc, session) => {
@@ -38,7 +50,8 @@ export function visibleConversationTreeChildren(
   childSessionsByParent: Map<string, ChatSession[]>,
 ): ChatSession[] {
   return (childSessionsByParent.get(sessionId) ?? []).flatMap((child) => (
-    isArchitectureWorkflowContainerSession(child) || isTechnicalArchitectureSession(child)
+    isArchitectureWorkflowContainerSession(child)
+      || (isTechnicalArchitectureSession(child) && !isVisibleTechnicalConversationSession(child))
       ? visibleConversationTreeChildren(child.id, childSessionsByParent)
       : [child]
   ));
@@ -110,7 +123,10 @@ export function visibleConversationParentId(
     if (!parent) {
       return null;
     }
-    if (!isArchitectureWorkflowContainerSession(parent) && !isTechnicalArchitectureSession(parent)) {
+    if (
+      !isArchitectureWorkflowContainerSession(parent)
+      && (!isTechnicalArchitectureSession(parent) || isVisibleTechnicalConversationSession(parent))
+    ) {
       return parent.id;
     }
     parentId = parent.parentSessionId;
@@ -136,7 +152,7 @@ export function buildArchitectureSessionRuntimeStates(
     );
 
     for (const session of architectureSessions) {
-      if (architectureRunIdForSession(session) !== run.runId) {
+      if (!sameArchitectureRunId(architectureRunIdForSession(session), run.runId)) {
         continue;
       }
       const slotId = architectureSlotIdForSession(session);
@@ -245,7 +261,7 @@ function isWorkflowConversationSession(session: ChatSession): boolean {
     return true;
   }
   if (sessionSurface === 'technical-node') {
-    return false;
+    return isVisibleTechnicalConversationSession(session);
   }
   return Boolean(architectureRunIdForSession(session)) && !isTechnicalArchitectureSession(session);
 }
@@ -362,6 +378,13 @@ export function architectureRunIdForSession(session: ChatSession): string | unde
   if (runId) return runId;
   return architectureRunIdFromParentToolCall(session.parentToolCallId)
     ?? architectureRunIdFromParentToolCall(session.runtimeContext?.parentToolCallId);
+}
+
+export function sameArchitectureRunId(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  return architectureSessionPrefixForRun(left) === architectureSessionPrefixForRun(right);
 }
 
 export function architectureSlotIdForSession(session: ChatSession): string | undefined {

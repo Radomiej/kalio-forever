@@ -265,4 +265,78 @@ describe('filterRenderableSessions', () => {
 
     expect(renderableSessions.map((session) => session.id)).toEqual(['host', 'arch-shadow']);
   });
+
+  it('shows technical node sessions when the runtime contract marks them visible conversations', () => {
+    const sessions: ChatSession[] = [
+      makeSession({ id: 'host', title: 'Workflow host', updatedAt: 10 }),
+      makeSession({
+        id: 'arch-root',
+        title: 'Architecture: Workflow host',
+        kind: 'agent-flow',
+        parentSessionId: 'host',
+        createdAt: 11,
+        updatedAt: 11,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-root',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            schemaName: 'Strategic Decision Council',
+            displayLabel: 'Strategic Decision Council',
+            sessionSurface: 'technical-node',
+            conversationVisibility: 'hidden',
+          },
+        },
+      }),
+      makeSession({
+        id: 'arch-router',
+        title: 'Strategic Decision Council: Router',
+        kind: 'subagent',
+        parentSessionId: 'arch-root',
+        createdAt: 12,
+        updatedAt: 12,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'router',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            roleSlotId: 'router',
+            roleSlotType: 'router',
+            displayLabel: 'Router',
+            sessionSurface: 'technical-node',
+            conversationVisibility: 'visible',
+          },
+        },
+      }),
+      makeSession({
+        id: 'arch-finalizer',
+        title: 'Strategic Decision Council: Finalizer',
+        kind: 'subagent',
+        parentSessionId: 'arch-root',
+        createdAt: 13,
+        updatedAt: 13,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'finalizer',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            roleSlotId: 'finalizer',
+            roleSlotType: 'finalizer',
+            displayLabel: 'Finalizer',
+            sessionSurface: 'technical-node',
+            conversationVisibility: 'visible',
+          },
+        },
+      }),
+    ];
+
+    const { renderableSessions } = filterRenderableSessions(sessions, {
+      host: [makeArchitectureSummaryMessage([])],
+    });
+
+    expect(renderableSessions.map((session) => session.id)).toEqual([
+      'host',
+      'arch-router',
+      'arch-finalizer',
+    ]);
+  });
 });

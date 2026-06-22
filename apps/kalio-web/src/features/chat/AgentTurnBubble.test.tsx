@@ -941,7 +941,7 @@ describe('AgentTurnBubble', () => {
     render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-partial-arch' }], false)} toolActivities={[]} />);
 
     expect(screen.getByTestId('architecture-run-timeline')).toHaveTextContent('running / 2 graph steps');
-    expect(screen.getByTestId('architecture-route-agent')).toHaveTextContent('streaming');
+    expect(screen.getByTestId('architecture-route-agent')).toHaveTextContent('Branch is producing its role-specific response.');
     expect(screen.queryByTestId('architecture-route-finalizer')).not.toBeInTheDocument();
   });
 

@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, Circle, GitBranch, Loader2, Route, ShieldCheck, XCircle } from 'lucide-react';
-import type { ArchitectureChatRunSummary } from '@kalio/types';
-import { compactArchitectureTraceContent } from './architectureChatSummary';
+import { architectureSessionIdForRunSlot, type ArchitectureChatRunSummary } from '@kalio/types';
+import { architectureTraceActivitySummary, compactArchitectureTraceContent } from './architectureChatSummary';
 import {
   buildTimelineStages,
   graphStepCount,
@@ -37,6 +37,17 @@ function shortSummary(step: TraceStep, maxLength = 120): string {
   return `${summary.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
 }
 
+function activitySummary(step: TraceStep, maxLength = 120): string {
+  const status = step.stream?.status;
+  const summary = status === 'started' || status === 'streaming' || status === 'failed'
+    ? architectureTraceActivitySummary(step.speaker, status)
+    : step.actionSummary ?? shortSummary(step, maxLength);
+  if (summary.length <= maxLength) {
+    return summary;
+  }
+  return `${summary.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
+}
+
 function StatusBadge({ status }: { status: TimelineStatus | null }) {
   if (!status) {
     return null;
@@ -49,7 +60,11 @@ function StatusBadge({ status }: { status: TimelineStatus | null }) {
   );
 }
 
-function branchSessionCandidates(runId: string, step: TraceStep): string[] {
+function stepSessionCandidates(runId: string, step: TraceStep): string[] {
+  const explicitSessionId = step.sessionId;
+  if (explicitSessionId) {
+    return [explicitSessionId];
+  }
   const fromStream = step.stream?.branchSessionId;
   if (fromStream) {
     return [fromStream];
@@ -63,7 +78,9 @@ function branchSessionCandidates(runId: string, step: TraceStep): string[] {
     raw.replace(/-/g, '_'),
     raw.replace(/_/g, '-'),
   ]);
-  return [...normalized].map((nodeId) => `arch-${runId}-${nodeId}`);
+  return [...normalized]
+    .map((nodeId) => architectureSessionIdForRunSlot(runId, nodeId))
+    .filter((sessionId): sessionId is string => typeof sessionId === 'string');
 }
 
 function resolveBranchSessionId(
@@ -71,16 +88,20 @@ function resolveBranchSessionId(
   step: TraceStep,
   canOpenBranchSession: (sessionId: string | undefined) => boolean,
 ): string | undefined {
-  return branchSessionCandidates(runId, step).find((sessionId) => canOpenBranchSession(sessionId));
+  return stepSessionCandidates(runId, step).find((sessionId) => canOpenBranchSession(sessionId));
 }
 
 function RouterStep({
   step,
   label,
+  openableSessionId,
+  onOpenBranch,
   onOpenStep,
 }: {
   step: TraceStep | undefined;
   label: string;
+  openableSessionId?: string;
+  onOpenBranch: (sessionId: string) => void;
   onOpenStep: (step: TraceStep) => void;
 }) {
   const routerOutput = step?.routerOutput;
@@ -94,7 +115,17 @@ function RouterStep({
       type="button"
       className="w-full rounded-lg border border-amber-400/20 bg-amber-400/5 px-2.5 py-2 text-left transition-colors hover:border-amber-300/40 hover:bg-amber-400/10 disabled:cursor-default disabled:hover:border-amber-400/20 disabled:hover:bg-amber-400/5"
       data-testid="architecture-route-router"
-      onClick={() => step && onOpenStep(step)}
+      data-session-id={openableSessionId}
+      data-status={status ?? undefined}
+      onClick={() => {
+        if (openableSessionId) {
+          onOpenBranch(openableSessionId);
+          return;
+        }
+        if (step) {
+          onOpenStep(step);
+        }
+      }}
       disabled={!step}
     >
       <div className="flex items-center gap-2">
@@ -105,9 +136,9 @@ function RouterStep({
         )}
         <StatusBadge status={status} />
       </div>
-      {step?.content && (
+      {step && (
         <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
-          {shortSummary(step)}
+          {activitySummary(step)}
         </p>
       )}
       {routerOutput && (
@@ -164,6 +195,7 @@ function AgentStep({
       className="min-w-0 rounded-lg border border-sky-400/20 bg-sky-400/5 px-2.5 py-2 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-400/10 disabled:cursor-default disabled:hover:border-sky-400/20 disabled:hover:bg-sky-400/5"
       data-testid="architecture-route-agent"
       data-session-id={openableBranchSessionId}
+      data-status={status ?? undefined}
       onClick={() => {
         if (openableBranchSessionId) {
           onOpenBranch(openableBranchSessionId);
@@ -177,9 +209,9 @@ function AgentStep({
         <span className="truncate text-xs font-medium text-base-content">{nodeLabel(step)}</span>
         <StatusBadge status={status} />
       </div>
-      {step.content && (
+      {step && (
         <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
-          {shortSummary(step)}
+          {activitySummary(step)}
         </p>
       )}
     </button>
@@ -219,6 +251,7 @@ function ParallelBranches({
             className="min-w-0 rounded-md border border-base-content/10 bg-base-300/45 px-2 py-1.5 text-left transition-colors hover:border-sky-400/40 hover:bg-sky-400/10 disabled:cursor-default disabled:hover:border-base-content/10 disabled:hover:bg-base-300/45"
             data-testid="architecture-route-agent"
             data-session-id={openableBranchSessionId}
+            data-status={status ?? undefined}
             onClick={() => {
               if (openableBranchSessionId) {
                 onOpenBranch(openableBranchSessionId);
@@ -231,9 +264,9 @@ function ParallelBranches({
               <span className="truncate text-[11px] font-medium text-base-content">{nodeLabel(step)}</span>
               <StatusBadge status={status} />
             </div>
-            {step.content && (
+            {step && (
               <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-base-content/50" title={compact(step)}>
-                {shortSummary(step, 92)}
+                {activitySummary(step, 92)}
               </p>
             )}
           </button>
@@ -266,9 +299,13 @@ function TimelineStatusIcon({
 
 function FinalizerStep({
   step,
+  openableSessionId,
+  onOpenBranch,
   onOpenStep,
 }: {
   step: TraceStep | undefined;
+  openableSessionId?: string;
+  onOpenBranch: (sessionId: string) => void;
   onOpenStep: (step: TraceStep) => void;
 }) {
   const status = statusForStep(step);
@@ -277,7 +314,17 @@ function FinalizerStep({
       type="button"
       className="w-full rounded-lg border border-emerald-400/20 bg-emerald-400/5 px-2.5 py-2 text-left transition-colors hover:border-emerald-300/40 hover:bg-emerald-400/10 disabled:cursor-default disabled:hover:border-emerald-400/20 disabled:hover:bg-emerald-400/5"
       data-testid="architecture-route-finalizer"
-      onClick={() => step && onOpenStep(step)}
+      data-session-id={openableSessionId}
+      data-status={status ?? undefined}
+      onClick={() => {
+        if (openableSessionId) {
+          onOpenBranch(openableSessionId);
+          return;
+        }
+        if (step) {
+          onOpenStep(step);
+        }
+      }}
       disabled={!step}
     >
       <div className="flex items-center gap-2">
@@ -285,9 +332,9 @@ function FinalizerStep({
         <span className="text-xs font-medium text-base-content">Finalizer</span>
         <StatusBadge status={status} />
       </div>
-      {step?.content && (
+      {step && (
         <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
-          {shortSummary(step)}
+          {activitySummary(step)}
         </p>
       )}
     </button>
@@ -346,7 +393,11 @@ export function ArchitectureRunTimeline({
   };
 
   return (
-    <div className="space-y-2 rounded-xl border border-sky-400/20 bg-base-200/45 p-2.5 shadow-sm shadow-sky-950/20" data-testid="architecture-run-timeline">
+    <div
+      className="space-y-2 rounded-xl border border-sky-400/20 bg-base-200/45 p-2.5 shadow-sm shadow-sky-950/20"
+      data-testid="architecture-run-timeline"
+      data-status={run.status}
+    >
       <div className="flex items-start gap-2">
         <GitBranch size={13} className="text-sky-300" />
         <div className="min-w-0 flex-1">
@@ -399,10 +450,27 @@ export function ArchitectureRunTimeline({
                 : step === finalRouter && hasMerge
                   ? 'Router merge'
                   : nodeLabel(step);
-              return <RouterStep key={step.eventId ?? `${step.nodeId}-${index}`} step={step} label={label} onOpenStep={openStep} />;
+              return (
+                <RouterStep
+                  key={step.eventId ?? `${step.nodeId}-${index}`}
+                  step={step}
+                  label={label}
+                  openableSessionId={resolveBranchSessionId(run.runId, step, canOpenBranchSession)}
+                  onOpenBranch={onOpenBranch}
+                  onOpenStep={openStep}
+                />
+              );
             }
             if (step.speaker === 'finalizer') {
-              return <FinalizerStep key={step.eventId ?? `${step.nodeId}-${index}`} step={step} onOpenStep={openStep} />;
+              return (
+                <FinalizerStep
+                  key={step.eventId ?? `${step.nodeId}-${index}`}
+                  step={step}
+                  openableSessionId={resolveBranchSessionId(run.runId, step, canOpenBranchSession)}
+                  onOpenBranch={onOpenBranch}
+                  onOpenStep={openStep}
+                />
+              );
             }
             return null;
         })}

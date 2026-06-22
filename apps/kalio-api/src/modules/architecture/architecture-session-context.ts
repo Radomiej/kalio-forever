@@ -59,6 +59,7 @@ export function createArchitectureRootSessionRuntimeContext(
       ...(args.hostSessionId ? { hostSessionId: args.hostSessionId } : {}),
       ...(args.historySessionId ? { historySessionId: args.historySessionId } : {}),
       sessionSurface: 'technical-node',
+      conversationVisibility: 'hidden',
     },
   };
 }
@@ -82,6 +83,7 @@ export function createArchitectureBranchSessionRuntimeContext(
       ...(args.hostSessionId ? { hostSessionId: args.hostSessionId } : {}),
       ...(args.historySessionId ? { historySessionId: args.historySessionId } : {}),
       sessionSurface,
+      conversationVisibility: 'visible',
     },
   };
 }

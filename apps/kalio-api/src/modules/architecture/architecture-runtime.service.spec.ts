@@ -4003,8 +4003,18 @@ describe('ArchitectureRuntimeService', () => {
     await expect(service.getChatDurable('durable-run')).resolves.toMatchObject({
       runId: 'durable-run',
       messages: expect.arrayContaining([
-        expect.objectContaining({ speaker: 'participant', content: 'Analyst found evidence in src/App.tsx.' }),
-        expect.objectContaining({ speaker: 'finalizer', content: 'Final answer preserved from audit.' }),
+        expect.objectContaining({
+          speaker: 'participant',
+          content: 'Analyst found evidence in src/App.tsx.',
+          action: 'participant_completed',
+          detail: 'Ready for synthesizer.',
+        }),
+        expect.objectContaining({
+          speaker: 'finalizer',
+          content: 'Final answer preserved from audit.',
+          action: 'finalizer_completed',
+          detail: 'Final answer ready.',
+        }),
       ]),
     });
     await expect(service.getGraphDurable('durable-run')).resolves.toMatchObject({

@@ -1,4 +1,9 @@
-import type { ArchitectureRuntimeContext, ChatSession, WorkflowSessionSurface } from '@kalio/types';
+import type {
+  ArchitectureRuntimeContext,
+  ChatSession,
+  WorkflowConversationVisibility,
+  WorkflowSessionSurface,
+} from '@kalio/types';
 
 export function architectureContextForSession(
   session: ChatSession,
@@ -14,6 +19,15 @@ export function architectureSessionSurfaceForSession(
 ): WorkflowSessionSurface | undefined {
   const value = architectureContextForSession(session)?.sessionSurface;
   return value === 'host-envelope' || value === 'conversation-branch' || value === 'technical-node'
+    ? value
+    : undefined;
+}
+
+export function architectureConversationVisibilityForSession(
+  session: ChatSession,
+): WorkflowConversationVisibility | undefined {
+  const value = architectureContextForSession(session)?.conversationVisibility;
+  return value === 'visible' || value === 'hidden'
     ? value
     : undefined;
 }

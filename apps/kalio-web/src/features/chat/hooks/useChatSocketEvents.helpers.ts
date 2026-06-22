@@ -1,10 +1,23 @@
 import type { RefObject } from 'react';
-import type { ChatMessage, RuntimeActivitySnapshot, SocketEvents } from '@kalio/types';
+import { nanoid } from 'nanoid';
+import type { ChatMessage, RuntimeActivitySnapshot, SocketEvents, ToolConfirmationRequest } from '@kalio/types';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
 
 export interface ReconnectUiState {
   hasConnectedOnce: boolean;
   hadRealDisconnect: boolean;
+}
+
+export interface UseChatSocketEventsOptions {
+  hasPendingChunksForSession: (sessionId: string | null) => boolean;
+  requestGeneratedTitleIfNeeded: (sessionId: string | null) => void;
+  setAwaitingFirstChunk: (value: boolean) => void;
+  setConnectionState: (value: ChatConnectionState) => void;
+  setError: (value: string | null) => void;
+  setRecoveryNotice: (value: string | null) => void;
+  setVfsRefreshSignal: (updater: (value: number) => number) => void;
+  toolArgProgressSeenRef: RefObject<Record<string, Set<string>>>;
+  onContextInvalidated?: () => void;
 }
 
 type ToolArgProgress = { toolName: string; totalChars: number; charsPerSec: number };
@@ -73,6 +86,55 @@ export function canReleaseComposerAfterToolResult({
   }
 
   return !hasActiveLoop && !hasActiveTool && !hasPendingChunks;
+}
+
+export function findPendingConfirmationForToolResult(params: {
+  callId: string;
+  sessionId?: string | null;
+  pendingConfirmations: Record<string, ToolConfirmationRequest[]>;
+}): ToolConfirmationRequest | null {
+  const sessionEntries = params.sessionId
+    ? [[params.sessionId, params.pendingConfirmations[params.sessionId] ?? []] as const]
+    : Object.entries(params.pendingConfirmations);
+
+  for (const [, confirmations] of sessionEntries) {
+    const match = confirmations.find((confirmation) => confirmation.toolCallId === params.callId);
+    if (match) {
+      return match;
+    }
+  }
+
+  return null;
+}
+
+export function createToolResultMessage(params: {
+  result: SocketEvents['tool:result'];
+  resultSessionId?: string | null;
+  toolName?: string | null;
+  isCliChildToolName: (toolName: string) => boolean;
+}): ChatMessage | null {
+  const { result, resultSessionId, toolName } = params;
+  if (result.data === undefined || !resultSessionId || !toolName) {
+    return null;
+  }
+
+  const content = params.isCliChildToolName(toolName) && result.data && typeof result.data === 'object' && !Array.isArray(result.data)
+    ? JSON.stringify({
+        ...(result.data as Record<string, unknown>),
+        toolResultStatus: result.status,
+        ...(result.errorCode ? { toolResultErrorCode: result.errorCode } : {}),
+        ...(result.errorMessage ? { toolResultErrorMessage: result.errorMessage } : {}),
+      })
+    : JSON.stringify(result.data);
+
+  return {
+    id: nanoid(),
+    sessionId: resultSessionId,
+    role: 'tool_result',
+    content,
+    toolCallId: result.callId,
+    createdAt: Date.now(),
+  };
 }
 
 interface LiveSessionStatusMaterializationDeps {

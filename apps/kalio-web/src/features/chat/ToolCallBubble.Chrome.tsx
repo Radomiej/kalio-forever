@@ -82,6 +82,7 @@ export function Chip({
 
 export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
   const [argsOpen, setArgsOpen] = useState(false);
+  const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const toolArgProgress = useAgentStore((s) => s.toolArgProgress);
   const removePendingConfirmation = useAgentStore((s) => s.removePendingConfirmation);
@@ -92,7 +93,7 @@ export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity 
   });
   const matchingToolProgress = toolArgProgress?.toolName === activity.toolName ? toolArgProgress : null;
 
-  const isMatch = confirmation != null;
+  const isMatch = confirmation != null && confirmation.requestId !== submittedRequestId;
 
   const argEntries = Object.entries(activity.args);
   const argPreview = argEntries.length === 0
@@ -102,6 +103,7 @@ export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity 
 
   const handleConfirm = () => {
     if (!confirmation) return;
+    setSubmittedRequestId(confirmation.requestId);
     updateToolActivity(activity.callId, { status: 'running', startedAt: Date.now() });
     eventBus.confirmTool({ requestId: confirmation.requestId, sessionId: confirmation.sessionId });
     removePendingConfirmation(confirmation.sessionId, confirmation.requestId);
@@ -109,6 +111,7 @@ export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity 
 
   const handleCancel = () => {
     if (!confirmation) return;
+    setSubmittedRequestId(confirmation.requestId);
     updateToolActivity(activity.callId, { status: 'cancelled', finishedAt: Date.now() });
     eventBus.cancelTool({ requestId: confirmation.requestId, sessionId: confirmation.sessionId });
     removePendingConfirmation(confirmation.sessionId, confirmation.requestId);

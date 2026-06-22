@@ -1,19 +1,47 @@
 import type { ArchitectureChatRunSummary } from '@kalio/types';
 
 type TraceSpeaker = ArchitectureChatRunSummary['trace'][number]['speaker'];
+type TraceStreamStatus = NonNullable<ArchitectureChatRunSummary['trace'][number]['stream']>['status'];
+
+export function architectureTraceActivitySummary(
+  speaker: TraceSpeaker,
+  streamStatus?: TraceStreamStatus,
+): string {
+  if (speaker === 'router') {
+    if (streamStatus === 'failed') {
+      return 'Router failed to synthesize the next graph node.';
+    }
+    if (streamStatus === 'started' || streamStatus === 'streaming') {
+      return 'Router is synthesizing the next graph node.';
+    }
+    return 'Router completed synthesis for the next graph node.';
+  }
+
+  if (speaker === 'finalizer') {
+    if (streamStatus === 'failed') {
+      return 'Finalizer failed to produce the final answer.';
+    }
+    if (streamStatus === 'started' || streamStatus === 'streaming') {
+      return 'Finalizer is producing the final answer.';
+    }
+    return 'Final answer produced from the routed graph outputs.';
+  }
+
+  if (streamStatus === 'failed') {
+    return 'Branch failed to produce its role-specific response.';
+  }
+  if (streamStatus === 'started' || streamStatus === 'streaming') {
+    return 'Branch is producing its role-specific response.';
+  }
+  return 'Branch completed its role-specific response.';
+}
 
 export function compactArchitectureTraceContent(content: string, speaker: TraceSpeaker): string {
   const cleaned = stripArchitectureRuntimeScaffold(content);
   if (cleaned) {
     return cleaned;
   }
-  if (speaker === 'router') {
-    return 'Router completed synthesis for the next graph node.';
-  }
-  if (speaker === 'finalizer') {
-    return 'Final answer produced from the routed graph outputs.';
-  }
-  return 'Branch completed its role-specific response.';
+  return architectureTraceActivitySummary(speaker);
 }
 
 export function stripArchitectureRuntimeScaffold(content: string): string {

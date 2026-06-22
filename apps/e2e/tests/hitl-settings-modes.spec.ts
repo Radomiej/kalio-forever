@@ -2,7 +2,9 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import {
   API_BASE,
   deleteSessionIfExists,
-  isMockLlm,
+  ensureEnvMockProvider,
+  getActiveCredentialId,
+  restoreActiveCredential,
   selectSession,
   sendMessageFromComposer,
 } from './helpers/test-config';
@@ -65,31 +67,6 @@ async function restoreHitlConfig(request: APIRequestContext, config: HitlConfig)
     data: config,
   });
   expect(response.ok()).toBeTruthy();
-}
-
-async function getActiveCredentialId(request: APIRequestContext): Promise<string | null> {
-  const response = await request.get(`${API_BASE}/credentials/active`);
-  expect(response.ok()).toBeTruthy();
-  const payload = await response.json() as { credentialId?: string | null };
-  return payload.credentialId ?? null;
-}
-
-async function restoreActiveCredential(request: APIRequestContext, credentialId: string | null): Promise<void> {
-  if (credentialId) {
-    const activateResponse = await request.put(`${API_BASE}/credentials/active/${credentialId}`);
-    expect(activateResponse.ok()).toBeTruthy();
-    return;
-  }
-
-  await request.delete(`${API_BASE}/credentials/active`).catch(() => undefined);
-}
-
-async function ensureEnvMockProvider(request: APIRequestContext): Promise<void> {
-  await request.delete(`${API_BASE}/credentials/active`).catch(() => undefined);
-  await expect.poll(async () => isMockLlm(request), {
-    timeout: 10_000,
-    message: 'Expected Playwright stack to fall back to env mock provider',
-  }).toBe(true);
 }
 
 async function createSession(

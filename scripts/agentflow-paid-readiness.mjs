@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readStackApiUrl } from './stack-state.mjs';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..');
-const stackStatePath = resolve(repoRoot, '.kalio-stack/qa-stack-state.json');
 
 export async function collectPaidReadinessChecks(options = {}) {
   const cliApiBase = resolveApiBaseFromArgv(options.argv, options.stderr ?? console.error);
@@ -15,6 +14,10 @@ export async function collectPaidReadinessChecks(options = {}) {
     options.maxRecentProviderFailureMs ?? process.env.AGENTFLOW_RECENT_PROVIDER_FAILURE_AGE_MS ?? 60 * 60 * 1000,
   );
   const requiredHighLevelModel = options.requiredHighLevelModel ?? process.env.AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL;
+  const requireWebSearch = options.requireWebSearch ?? readBooleanFlag(
+    resolveBooleanFlagFromArgv(options.argv, '--require-web-search') ?? process.env.AGENTFLOW_REQUIRE_WEB_SEARCH,
+    false,
+  );
   const fetchJson = options.fetchJson ?? fetch;
   const now = options.now ?? Date.now();
   const checks = [];
@@ -25,14 +28,18 @@ export async function collectPaidReadinessChecks(options = {}) {
   const runs = await checkJson(fetchJson, checks, `${apiBase}/agent-flows/runs`, 'AgentFlow runs endpoint is reachable');
   const sessions = await checkJson(fetchJson, checks, `${apiBase}/sessions`, 'Sessions endpoint is reachable');
   const codexConfig = await checkJson(fetchJson, checks, `${apiBase}/cli-agents/codex/config`, 'Codex CLI config endpoint is reachable');
-  const searchConfig = await checkJson(fetchJson, checks, `${apiBase}/search/config`, 'Web Search config endpoint is reachable');
-  const searchTest = await checkJson(
-    fetchJson,
-    checks,
-    `${apiBase}/search/test`,
-    'Web Search smoke endpoint is reachable',
-    { method: 'POST' },
-  );
+  const searchConfig = requireWebSearch
+    ? await checkJson(fetchJson, checks, `${apiBase}/search/config`, 'Web Search config endpoint is reachable')
+    : null;
+  const searchTest = requireWebSearch
+    ? await checkJson(
+        fetchJson,
+        checks,
+        `${apiBase}/search/test`,
+        'Web Search smoke endpoint is reachable',
+        { method: 'POST' },
+      )
+    : null;
 
   if (llmConfig) {
     passOrFail(
@@ -71,7 +78,8 @@ export async function collectPaidReadinessChecks(options = {}) {
       `Active credential is set (${active.credentialId})`,
       'Active credential is not set.',
     );
-    if (typeof active.credentialId === 'string' && active.credentialId.trim().length > 0) {
+    const activeCredentialIsEffective = llmConfig?.source === 'db';
+    if (typeof active.credentialId === 'string' && active.credentialId.trim().length > 0 && activeCredentialIsEffective) {
       const credentialCheck = await checkJson(
         fetchJson,
         checks,
@@ -176,6 +184,8 @@ export async function collectPaidReadinessChecks(options = {}) {
           }
         }
       }
+    } else if (typeof active.credentialId === 'string' && active.credentialId.trim().length > 0) {
+      checks.push({ ok: true, message: 'Active credential smoke skipped because effective LLM source is not db' });
     }
   }
 
@@ -240,6 +250,9 @@ export async function collectPaidReadinessChecks(options = {}) {
       `Web Search smoke failed: ${searchTest.error ?? 'unknown error'}`,
     );
   }
+  if (!requireWebSearch) {
+    checks.push({ ok: true, message: 'Web Search is not required for this readiness profile' });
+  }
 
   return checks;
 }
@@ -277,6 +290,22 @@ function resolveApiBaseFromArgv(argv, stderr = console.error) {
     return null;
   }
   return value.trim();
+}
+
+function resolveBooleanFlagFromArgv(argv, flag) {
+  if (!Array.isArray(argv)) return undefined;
+  const direct = argv.find((item) => item === flag || item.startsWith(`${flag}=`));
+  if (!direct) return undefined;
+  if (!direct.includes('=')) return 'true';
+  return direct.split('=').slice(1).join('=');
+}
+
+function readBooleanFlag(value, defaultValue) {
+  if (typeof value !== 'string') return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return defaultValue;
 }
 
 async function checkJson(fetchJson, checks, url, successMessage, init) {
@@ -369,18 +398,7 @@ function containsProviderFailureText(value) {
 }
 
 function resolveManagedApiBase() {
-  if (existsSync(stackStatePath)) {
-    try {
-      const state = JSON.parse(readFileSync(stackStatePath, 'utf8'));
-      if (Number.isInteger(state?.backendPort) && state.backendPort > 0) {
-        return `http://127.0.0.1:${state.backendPort}/api`;
-      }
-    } catch {
-      // Fall through to the manual development default below.
-    }
-  }
-
-  return 'http://127.0.0.1:3016/api';
+  return readStackApiUrl(repoRoot) ?? 'http://127.0.0.1:3016/api';
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

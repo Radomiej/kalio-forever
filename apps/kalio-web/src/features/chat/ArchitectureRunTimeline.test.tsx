@@ -128,6 +128,107 @@ describe('ArchitectureRunTimeline', () => {
     expect(onOpenStep).toHaveBeenCalledWith({ eventId: 'run-3:event:1', nodeId: 'router' });
   });
 
+  it('opens the router sub-conversation when the step exposes a known session id', () => {
+    const onOpenBranch = vi.fn();
+    const onOpenStep = vi.fn();
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-router-session',
+      schemaId: 'strategic-decision-council',
+      status: 'running',
+      routeHops: [],
+      graphNodes: [
+        {
+          id: 'router',
+          sessionId: 'arch-run-router-session-router',
+          label: 'Router',
+          kind: 'router',
+          status: 'running',
+          eventIds: ['run-router-session:event:1'],
+        },
+      ],
+      graphEdges: [],
+      trace: [
+        {
+          speaker: 'router',
+          sessionId: 'arch-run-router-session-router',
+          content: 'Dispatch council branches.',
+          eventId: 'run-router-session:event:1',
+          nodeId: 'router',
+          nextNodeId: 'pragmatist',
+        },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={onOpenBranch}
+        onOpenStep={onOpenStep}
+        knownBranchSessionIds={new Set(['arch-run-router-session-router'])}
+      />,
+    );
+
+    const routerCard = screen.getByTestId('architecture-route-router');
+    expect(routerCard).toHaveAttribute('data-session-id', 'arch-run-router-session-router');
+    expect(routerCard).toHaveAttribute('data-status', 'running');
+
+    fireEvent.click(routerCard);
+
+    expect(onOpenBranch).toHaveBeenCalledWith('arch-run-router-session-router');
+    expect(onOpenStep).not.toHaveBeenCalled();
+  });
+
+  it('keeps graph node session ids when matching trace steps do not carry them', () => {
+    const onOpenBranch = vi.fn();
+    const onOpenStep = vi.fn();
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-router-graph-session',
+      schemaId: 'strategic-decision-council',
+      status: 'completed',
+      routeHops: [],
+      graphNodes: [
+        {
+          id: 'router',
+          sessionId: 'arch-run-router-graph-session-router',
+          label: 'Router',
+          kind: 'router',
+          status: 'completed',
+          eventIds: ['run-router-graph-session:event:1'],
+        },
+      ],
+      graphEdges: [],
+      trace: [
+        {
+          speaker: 'router',
+          content: 'Route to final artifact.',
+          eventId: 'run-router-graph-session:event:1',
+          nodeId: 'router',
+          nextNodeId: 'final-artifact',
+        },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={onOpenBranch}
+        onOpenStep={onOpenStep}
+        knownBranchSessionIds={new Set(['arch-run-router-graph-session-router'])}
+      />,
+    );
+
+    const routerCard = screen.getByTestId('architecture-route-router');
+    expect(routerCard).toHaveAttribute('data-session-id', 'arch-run-router-graph-session-router');
+    expect(routerCard).toHaveAttribute('data-status', 'completed');
+
+    fireEvent.click(routerCard);
+
+    expect(onOpenBranch).toHaveBeenCalledWith('arch-run-router-graph-session-router');
+    expect(onOpenStep).not.toHaveBeenCalled();
+  });
+
   it('renders planned pending stages from graph nodes before the trace completes', () => {
     const run: ArchitectureRunWithGraph = {
       runId: 'run-live',
@@ -196,8 +297,10 @@ describe('ArchitectureRunTimeline', () => {
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('Parallel sub-agents');
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('5');
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('pending');
+    expect(screen.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'running');
     expect(screen.getAllByTestId('architecture-route-router')).toHaveLength(2);
     expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('pending');
+    expect(screen.getByTestId('architecture-route-finalizer')).toHaveAttribute('data-status', 'pending');
   });
 
   it('renders graph-only pending stages before any trace messages exist', () => {

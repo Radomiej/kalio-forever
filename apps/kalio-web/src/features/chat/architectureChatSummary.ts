@@ -6,20 +6,21 @@ import type {
   LLMToolCall,
   SubagentToolResult,
 } from '@kalio/types';
+import { architectureSessionIdForRunSlot } from '@kalio/types';
 import type { AgentTurnItem } from '../../store/sessionStore';
 import type { ArchitectRunResult } from '../architect/architect.types';
 import { sanitizeRouterOutput } from './architectureRouterOutput';
 import { streamFromEventData } from './architectureStreamSummary';
 import { parseSubagentToolResult } from './architectureSubagentToolResult';
-import { compactArchitectureTraceContent } from './architectureTraceContent';
+import { architectureTraceActivitySummary, compactArchitectureTraceContent } from './architectureTraceContent';
 
-export { compactArchitectureTraceContent } from './architectureTraceContent';
+export { architectureTraceActivitySummary, compactArchitectureTraceContent } from './architectureTraceContent';
 
 type TraceSpeaker = ArchitectureChatRunSummary['trace'][number]['speaker'];
 type ArchitectureRunChatMessage = ArchitectRunResult['chat']['messages'][number] & { speaker: TraceSpeaker };
 export type ArchitectureGraphNodeSummary = Pick<
   ArchitectureGraphProjection['nodes'][number],
-  'id' | 'label' | 'kind' | 'behavior' | 'status' | 'eventIds' | 'incompleteReason'
+  'id' | 'sessionId' | 'label' | 'kind' | 'behavior' | 'status' | 'eventIds' | 'incompleteReason'
 >;
 export type ArchitectureRunSummaryWithGraph = ArchitectureChatRunSummary & {
   graphNodes?: ArchitectureGraphNodeSummary[];
@@ -57,7 +58,14 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
     .map((message) => ({
       speaker: message.speaker,
       content: compactArchitectureTraceContent(message.content, message.speaker),
+      actionSummary: message.actionSummary,
+      action: message.action,
+      detail: message.detail,
       eventId: message.eventId,
+      sessionId: result.graph.nodes.find((node) => (
+        node.id === message.route?.fromNodeId
+        || (message.eventId !== undefined && node.eventIds.includes(message.eventId))
+      ))?.sessionId,
       nodeId: message.route?.fromNodeId,
       nextNodeId: message.route?.nextNodeId,
       visitIndex: visitIndexByEventId.get(message.eventId),
@@ -82,6 +90,7 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
     routeHops: result.graph.routeHops ?? [],
     graphNodes: result.graph.nodes.map((node) => ({
       id: node.id,
+      sessionId: node.sessionId,
       label: node.label,
       kind: node.kind,
       behavior: node.behavior,
@@ -132,6 +141,9 @@ export function findArchitectureRunInMessages(messages: ChatMessage[]): Architec
     return {
       speaker: 'participant',
       content: result?.result ?? '',
+      actionSummary: architectureTraceActivitySummary('participant'),
+      action: 'participant_completed',
+      detail: nodeId ? `Ready for ${nodeId}.` : 'Output recorded.',
       eventId: typeof result?.taskId === 'string' ? result.taskId : toolCall.id,
       nodeId,
       nextNodeId: 'router',
@@ -154,7 +166,11 @@ export function findArchitectureRunInMessages(messages: ChatMessage[]): Architec
         return {
           speaker: 'router',
           content: message.content,
+          actionSummary: architectureTraceActivitySummary('router'),
+          action: 'router_selected',
+          detail: 'Routing decision recorded.',
           eventId: message.id,
+          sessionId: architectureSessionIdForRunSlot(runId, 'router'),
           nodeId: 'router',
           nextNodeId: 'final-artifact',
           incompleteReason: incompleteReasonFromContent(message.content),
@@ -164,7 +180,11 @@ export function findArchitectureRunInMessages(messages: ChatMessage[]): Architec
         return {
           speaker: 'finalizer',
           content: message.content,
+          actionSummary: architectureTraceActivitySummary('finalizer'),
+          action: 'finalizer_completed',
+          detail: 'Final answer ready.',
           eventId: message.id,
+          sessionId: architectureSessionIdForRunSlot(runId, 'finalizer'),
           nodeId: 'final-artifact',
           incompleteReason: incompleteReasonFromContent(message.content),
         };

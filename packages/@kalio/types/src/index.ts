@@ -64,6 +64,7 @@ export interface ArchitectureSlotToolPolicy {
 }
 
 export type WorkflowSessionSurface = 'host-envelope' | 'conversation-branch' | 'technical-node';
+export type WorkflowConversationVisibility = 'visible' | 'hidden';
 
 export interface ArchitectureRuntimeContext extends Record<string, unknown> {
   parentSessionId?: ID;
@@ -72,6 +73,7 @@ export interface ArchitectureRuntimeContext extends Record<string, unknown> {
   hostSessionId?: ID;
   historySessionId?: ID;
   sessionSurface?: WorkflowSessionSurface;
+  conversationVisibility?: WorkflowConversationVisibility;
   schemaId?: string;
   schemaName?: string;
   displayLabel?: string;
@@ -80,6 +82,19 @@ export interface ArchitectureRuntimeContext extends Record<string, unknown> {
   roleLabel?: string;
   projectPath?: string;
   executionCwd?: string;
+}
+
+export function architectureSessionPrefixForRun(runId: ID): ID {
+  const normalizedRunId = runId.trim();
+  return normalizedRunId.startsWith('arch-') ? normalizedRunId : `arch-${normalizedRunId}`;
+}
+
+export function architectureSessionIdForRunSlot(runId: ID, slotOrNodeId: string | undefined): ID | undefined {
+  const normalizedSlotOrNodeId = slotOrNodeId?.trim();
+  if (!runId.trim() || !normalizedSlotOrNodeId) {
+    return undefined;
+  }
+  return `${architectureSessionPrefixForRun(runId)}-${normalizedSlotOrNodeId}`;
 }
 
 export interface SessionRuntimeContext {
@@ -283,7 +298,11 @@ export interface ChatAttachment {
 export interface ArchitectureChatTraceStep {
   speaker: 'participant' | 'router' | 'finalizer';
   content: string;
+  actionSummary?: string;
+  action?: ArchitectureEventAction;
+  detail?: string;
   eventId?: ID;
+  sessionId?: ID;
   nodeId?: string;
   nextNodeId?: string;
   visitIndex?: number;
@@ -913,6 +932,7 @@ export type RuntimeToolActivityStatus = 'pending_confirmation' | 'running' | 'su
 
 export interface RuntimeToolActivity {
   callId: ID;
+  requestId?: ID;
   sessionId: ID;
   toolName: string;
   args: Record<string, unknown>;
@@ -1447,6 +1467,16 @@ export type ArchitectureNodeScoringPolicy = 'confidence' | 'risk' | 'cost' | 'cu
 export type ArchitectureRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ArchitectureExecutionMode = 'session_branches' | 'subagent_execution';
 export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime_fallback';
+export type ArchitectureEventAction =
+  | 'run_created'
+  | 'run_stopped'
+  | 'participant_completed'
+  | 'participant_incomplete'
+  | 'router_selected'
+  | 'router_returned_to_orchestrator'
+  | 'router_incomplete'
+  | 'router_synthesized'
+  | 'finalizer_completed';
 export type ArchitectureExecutionEventType =
   | 'run_created'
   | 'node_started'
@@ -1631,6 +1661,9 @@ export interface ArchitectureExecutionEvent {
   sequence: number;
   type: ArchitectureExecutionEventType;
   message: string;
+  actionSummary?: string;
+  action?: ArchitectureEventAction;
+  detail?: string;
   nodeId?: string;
   roleSlotId?: string;
   route?: ArchitectureRouteDecision;
@@ -1646,10 +1679,14 @@ export interface ArchitectureGraphProjection {
   status?: ArchitectureRunStatus;
   nodes: Array<{
     id: string;
+    sessionId?: ID;
     label: string;
     kind: ArchitectureNodeKind;
     behavior?: ArchitectureSchemaNode['behavior'];
     status: 'pending' | 'running' | 'completed';
+    actionSummary?: string;
+    action?: ArchitectureEventAction;
+    detail?: string;
     visitCount?: number;
     eventIds: ID[];
     toolEvidence?: Record<string, unknown>;
@@ -1680,10 +1717,13 @@ export interface ArchitectureChatProjection {
     id: ID;
     eventId: ID;
     speaker: 'system' | 'participant' | 'router' | 'finalizer';
-      content: string;
-      roleSlotId?: string;
-      route?: ArchitectureRouteDecision;
-      incompleteReason?: string;
-      createdAt: Timestamp;
-    }>;
-  }
+    content: string;
+    actionSummary?: string;
+    action?: ArchitectureEventAction;
+    detail?: string;
+    roleSlotId?: string;
+    route?: ArchitectureRouteDecision;
+    incompleteReason?: string;
+    createdAt: Timestamp;
+  }>;
+}

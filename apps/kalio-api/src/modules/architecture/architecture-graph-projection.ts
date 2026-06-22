@@ -1,10 +1,17 @@
 import type {
   ArchitectureExecutionEvent,
   ArchitectureGraphProjection,
+  ArchitectureNodeKind,
   ArchitectureRunStatus,
   ArchitectureSchema,
   ArchitectureSchemaNode,
 } from '@kalio/types';
+import {
+  architectureActionFieldsForEvent,
+  architectureCompletedActionSummaryForNodeKind,
+  architectureRunningActionSummaryForNodeKind,
+} from './architecture-action-summary';
+import { architectureSessionIdForRunSlot } from './architecture-session-ids';
 
 export function buildArchitectureGraphProjection(
   runId: string,
@@ -17,14 +24,14 @@ export function buildArchitectureGraphProjection(
     schemaId: schema.id,
     schemaName: schema.name,
     status,
-    nodes: schema.nodes.map((node) => toGraphNode(node, events)),
+    nodes: schema.nodes.map((node) => toGraphNode(runId, node, events)),
     edges: schema.edges,
     routeHops: toRouteHops(events),
     childAgents: toChildAgents(events),
   };
 }
 
-function toGraphNode(node: ArchitectureSchemaNode, events: ArchitectureExecutionEvent[]) {
+function toGraphNode(runId: string, node: ArchitectureSchemaNode, events: ArchitectureExecutionEvent[]) {
   const nodeEvents = events.filter((event) =>
     event.nodeId !== undefined
       ? event.nodeId === node.id
@@ -32,17 +39,30 @@ function toGraphNode(node: ArchitectureSchemaNode, events: ArchitectureExecution
   const eventIds = nodeEvents.map((event) => event.id);
   const toolEvidence = latestToolEvidence(nodeEvents);
   const incompleteReason = latestIncompleteReason(nodeEvents);
+  const status = nodeStatus(nodeEvents);
+  const actionFields = latestActionFields(nodeEvents, node.kind, status);
   return {
     id: node.id,
+    sessionId: sessionIdForNode(runId, node),
     label: node.label,
     kind: node.kind,
     behavior: node.behavior ? { ...node.behavior } : undefined,
-    status: nodeStatus(nodeEvents),
+    status,
+    actionSummary: actionFields.actionSummary,
+    action: actionFields.action,
+    detail: actionFields.detail,
     visitCount: nodeVisitCount(nodeEvents),
     eventIds,
     toolEvidence,
     incompleteReason,
   };
+}
+
+function sessionIdForNode(runId: string, node: ArchitectureSchemaNode): string | undefined {
+  if (!runId) {
+    return undefined;
+  }
+  return architectureSessionIdForRunSlot(runId, node.roleSlotId ?? node.id);
 }
 
 function latestToolEvidence(events: ArchitectureExecutionEvent[]): Record<string, unknown> | undefined {
@@ -61,6 +81,26 @@ function latestIncompleteReason(events: ArchitectureExecutionEvent[]): string | 
     .reverse()
     .map((event) => event.data?.['incompleteReason'])
     .find((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+function latestActionFields(
+  events: ArchitectureExecutionEvent[],
+  nodeKind: ArchitectureNodeKind,
+  status: 'pending' | 'running' | 'completed',
+): ReturnType<typeof architectureActionFieldsForEvent> {
+  for (const event of [...events].reverse()) {
+    const fields = architectureActionFieldsForEvent(event, nodeKind);
+    if (fields.actionSummary || fields.action || fields.detail) {
+      return fields;
+    }
+  }
+  if (status === 'running') {
+    return { actionSummary: architectureRunningActionSummaryForNodeKind(nodeKind) };
+  }
+  if (status === 'completed') {
+    return { actionSummary: architectureCompletedActionSummaryForNodeKind(nodeKind) };
+  }
+  return {};
 }
 
 function nodeStatus(events: ArchitectureExecutionEvent[]): 'pending' | 'running' | 'completed' {

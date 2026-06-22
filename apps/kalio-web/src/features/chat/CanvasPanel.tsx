@@ -17,6 +17,7 @@ import { buildSubagentPreviews, SubagentConversationCard } from './CanvasPanel.S
 import { buildCliChildPreviews, CliChildConversationCanvasCard } from './CanvasPanel.CliChildren';
 import { SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
 import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
+import { architectureRunIdForSession, sameArchitectureRunId } from '../sessions/sessionTreeDisplay';
 import { resolveLiveTurnState } from './liveTurnState';
 import { activateConversationSession } from './activeConversationSession';
 import {
@@ -26,24 +27,17 @@ import {
   selectQueuedDepth,
 } from '../../store/agentRuntimeSelectors';
 
-function architectureRunIdForSession(session: ChatSession): string | null {
-  const parentToolCallId = session.parentToolCallId ?? session.runtimeContext?.parentToolCallId;
-  if (typeof parentToolCallId === 'string') {
-    const match = /^architecture:([^:]+):/.exec(parentToolCallId.trim());
-    if (match?.[1]) {
-      return match[1];
-    }
-  }
-
+function isArchitectureTechnicalConversation(session: ChatSession): boolean {
   const architectureContext = session.runtimeContext?.architectureContext;
-  if (architectureContext && typeof architectureContext === 'object' && !Array.isArray(architectureContext)) {
-    const runId = (architectureContext as Record<string, unknown>)['architectureRunId'];
-    if (typeof runId === 'string' && runId.trim().length > 0) {
-      return runId.trim();
-    }
+  if (!architectureContext || typeof architectureContext !== 'object' || Array.isArray(architectureContext)) {
+    return false;
   }
-
-  return null;
+  const context = architectureContext as Record<string, unknown>;
+  if (context['sessionSurface'] === 'technical-node') {
+    return true;
+  }
+  const roleSlotType = context['roleSlotType'];
+  return roleSlotType === 'router' || roleSlotType === 'finalizer' || roleSlotType === 'orchestrator';
 }
 
 export function CanvasPanel() {
@@ -114,11 +108,25 @@ export function CanvasPanel() {
 
     return new Set(
       sessions
-        .filter((session) => architectureRunIdForSession(session) === architectureRun.runId)
+        .filter((session) => sameArchitectureRunId(architectureRunIdForSession(session), architectureRun.runId))
         .map((session) => session.id),
     );
   }, [architectureRun, sessions]);
-  const openableArchitectureBranchSessionIds = useMemo(() => {
+  const architectureTechnicalConversationSessionIds = useMemo(() => {
+    if (!architectureRun) {
+      return new Set<string>();
+    }
+
+    return new Set(
+      sessions
+        .filter((session) => (
+          sameArchitectureRunId(architectureRunIdForSession(session), architectureRun.runId)
+          && isArchitectureTechnicalConversation(session)
+        ))
+        .map((session) => session.id),
+    );
+  }, [architectureRun, sessions]);
+  const openableArchitectureConversationSessionIds = useMemo(() => {
     const effectiveQueuedDepthBySession = mergeRuntimeQueuedDepthBySession(
       queuedDepthBySession,
       runtimeActivitySnapshots,
@@ -142,8 +150,12 @@ export function CanvasPanel() {
         sessionStatusSnapshots: effectiveSessionStatusSnapshots,
       },
     );
-    return new Set(renderableSessions.map((session) => session.id));
+    return new Set([
+      ...renderableSessions.map((session) => session.id),
+      ...architectureTechnicalConversationSessionIds,
+    ]);
   }, [
+    architectureTechnicalConversationSessionIds,
     pendingBudgetApprovals,
     pendingConfirmations,
     queuedDepthBySession,
@@ -336,7 +348,7 @@ export function CanvasPanel() {
                 <ArchitectureRunCanvasSection
                   run={architectureRun}
                   sessions={sessions}
-                  knownBranchSessionIds={openableArchitectureBranchSessionIds}
+                  knownBranchSessionIds={openableArchitectureConversationSessionIds}
                   onOpenSession={(sessionId) => setCanvasFocus({ kind: 'architecture-branch', sessionId })}
                   getBranchMessages={(sessionId) => getSessionMessages(sessionId)}
                   focused={canvasFocus?.kind === 'architecture-run' && canvasFocus.runId === architectureRun.runId}

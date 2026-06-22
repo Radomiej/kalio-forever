@@ -78,18 +78,19 @@ Launcher: `start-qa.ps1` → `scripts/stack-manager.mjs`.
 | Ports | API **3316**, FE **5288** |
 | `NODE_ENV` | `production` |
 | Data | `%LocalAppData%\kalio-forever-qa\` (isolated from dev) |
-| LLM | `.env` / process env unless `-UseMockLLM`; passes `--use-env-llm` by default |
-| Rebuild | `pnpm qa` reuses existing `dist`; `pnpm qa:rebuild` builds first |
+| LLM | `.env` / process env unless `-UseMockLLM`; `-UseMockLLM` also forces env/mock so stale active DB credentials cannot override QA mock mode |
+| Rebuild | `pnpm qa` builds API + web first; `pnpm qa:fast` is the explicit existing-`dist` shortcut |
 
 ```powershell
-pnpm qa              # fast start from existing dist
-pnpm qa:rebuild      # build API + web, then start
+pnpm qa              # build API + web, then start
+pnpm qa:fast         # fast start from existing dist
+pnpm qa:rebuild      # compatibility alias for build + start
 pnpm qa:status
 pnpm qa:stop
 
 # or
 .\start-qa.ps1
-.\start-qa.ps1 -Rebuild
+.\start-qa.ps1 -SkipBuild
 .\start-qa.ps1 -UseMockLLM
 ```
 
@@ -120,14 +121,16 @@ pnpm llm:probe -- --provider xiaomimimo --model mimo-v2.5-pro
 
 State and logs:
 
-- `.kalio-stack/qa-stack-state.json`
-- `.kalio-stack/logs/backend.log`
-- `.kalio-stack/logs/frontend.log`
+- `.tmp/qa-stack/qa-stack-state.json`
+- `.tmp/qa-stack/qa-stack-last-state.json`
+- `.tmp/qa-stack-logs/backend-*.log`
+- `.tmp/qa-stack-logs/frontend-*.log`
 
 `stack-manager.mjs` usage:
 
 ```text
 node scripts/stack-manager.mjs <start|status|stop>
+  [--json]
   [--backend-port <port|0>] [--frontend-port <port|0>]
   [--skip-build] [--use-env-llm]
   [--data-root <path>] [--database-path <path>] [--workspace-root <path>]
@@ -208,8 +211,9 @@ flowchart TB
 | Command | What it does |
 |---|---|
 | `pnpm dev` | Dev stack with hot reload (`3016` / `5188`) |
-| `pnpm qa` | Fixed-port built QA stack (`3316` / `5288`), skip build |
-| `pnpm qa:rebuild` | Build + fixed-port QA stack |
+| `pnpm qa` | Build + fixed-port QA stack (`3316` / `5288`) |
+| `pnpm qa:fast` | Fixed-port QA stack from existing dist, explicit skip build |
+| `pnpm qa:rebuild` | Compatibility alias for build + fixed-port QA stack |
 | `pnpm qa:status` / `pnpm qa:stop` | Inspect or stop fixed QA stack |
 | `pnpm stack:start` | Built stack, random ports, repo QA data dir |
 | `pnpm stack:status` / `pnpm stack:stop` | Managed stack lifecycle |
@@ -432,7 +436,7 @@ sequenceDiagram
 | Port already in use | `pnpm qa:stop` / `pnpm stack:stop`; dev script also kills port owners on start |
 | `ERR_DLOPEN_FAILED` (sqlite) | Use system Node on PATH, then `pnpm rebuild better-sqlite3` |
 | FE cannot reach API | Open `http://localhost:5188` (dev) or `http://localhost:5288` (QA) |
-| QA shows stale code | `pnpm qa:rebuild` |
+| QA shows stale code | Use `pnpm qa`; reserve `pnpm qa:fast` only when intentionally reusing existing dist |
 | Wrong Node on Windows | Prepend `C:\Program Files\nodejs` to PATH |
 | Tailwind / Vite crash on Windows | Do not pipe Vite stdout; use `start-dev.ps1` as written |
 | E2E hits dev ports | E2E must use random ports; do not start dev stack on 3016/5188 before E2E unless intentional |

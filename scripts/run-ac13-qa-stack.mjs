@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readStackState as readManagedStackState, resolveStackPaths } from './stack-state.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
 const e2eDir = resolve(repoRoot, 'apps/e2e');
 const playwrightCli = resolve(e2eDir, 'node_modules/@playwright/test/cli.js');
 const stackManager = resolve(repoRoot, 'scripts/stack-manager.mjs');
-const statePath = resolve(repoRoot, '.kalio-stack/qa-stack-state.json');
+const { statePath } = resolveStackPaths(repoRoot);
 
 function normalizedWindowsEnv(baseEnv) {
   if (process.platform !== 'win32') {
@@ -40,10 +40,9 @@ function run(command, args, options) {
   });
 }
 
-function readStackState() {
-  const raw = readFileSync(statePath, 'utf8');
-  const state = JSON.parse(raw);
-  if (!state.backendPort || !state.frontendPort) {
+function readRequiredStackState() {
+  const state = readManagedStackState(repoRoot);
+  if (!state?.backendPort || !state?.frontendPort) {
     throw new Error(`[qa-ac13] missing ports in ${statePath}`);
   }
   return state;
@@ -91,7 +90,7 @@ try {
   }
 
   stackStarted = true;
-  const state = readStackState();
+  const state = readRequiredStackState();
   const frontendUrl = `http://127.0.0.1:${state.frontendPort}`;
   const backendUrl = `http://127.0.0.1:${state.backendPort}`;
 

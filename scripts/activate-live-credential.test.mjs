@@ -31,8 +31,8 @@ test('activation refuses remote Kalio API URLs unless explicitly allowed', () =>
 
 test('activation reads the managed stack API URL from random-port state', () => {
   const root = mkdtempSync(join(tmpdir(), 'kalio-activate-live-'));
-  mkdirSync(join(root, '.kalio-stack'));
-  writeFileSync(join(root, '.kalio-stack/qa-stack-state.json'), JSON.stringify({ backendPort: 51052 }), 'utf8');
+  mkdirSync(join(root, '.tmp/qa-stack'), { recursive: true });
+  writeFileSync(join(root, '.tmp/qa-stack/qa-stack-state.json'), JSON.stringify({ backendPort: 51052 }), 'utf8');
 
   assert.equal(readStackApiUrl(root), 'http://127.0.0.1:51052/api');
 });
@@ -118,6 +118,51 @@ test('activation defaults Xiaomi live credentials to the cheaper mimo-v2.5 model
   assert.equal(body.model, 'mimo-v2.5');
 });
 
+test('activation infers OpenRouter credential settings from OPENROUTER_API_KEY', async () => {
+  const calls = [];
+
+  await activateLiveCredential({
+    args: ['--api-url', 'http://127.0.0.1:51052/api'],
+    env: {
+      OPENROUTER_API_KEY: 'secret-openrouter-key',
+    },
+    repoRoot: mkdtempSync(join(tmpdir(), 'kalio-activate-live-openrouter-')),
+    fetchJson: async (url, init) => {
+      calls.push({ url, init });
+      return url.endsWith('/credentials') ? response({ id: 'cred-openrouter' }) : response('');
+    },
+  });
+
+  const body = JSON.parse(calls[0].init.body);
+  assert.equal(body.provider, 'openrouter');
+  assert.equal(body.apiKey, 'secret-openrouter-key');
+  assert.equal(body.model, 'nvidia/nemotron-3-ultra-550b-a55b:free');
+  assert.equal(body.baseUrl, 'https://openrouter.ai/api/v1');
+});
+
+test('activation does not reuse generic LLM_API_KEY when explicit provider conflicts with configured provider', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'kalio-activate-live-provider-mismatch-'));
+  writeFileSync(join(root, '.env.test'), [
+    'LLM_PROVIDER=xiaomimimo',
+    'LLM_API_KEY=xiaomi-key',
+  ].join('\n'), 'utf8');
+  let called = false;
+
+  await assert.rejects(
+    () => activateLiveCredential({
+      args: ['--api-url', 'http://127.0.0.1:51052/api', '--provider', 'openrouter'],
+      env: {},
+      repoRoot: root,
+      fetchJson: async () => {
+        called = true;
+        return response({});
+      },
+    }),
+    /Set one of: OPENROUTER_API_KEY/,
+  );
+  assert.equal(called, false);
+});
+
 test('activation fails before network calls when no API key is available', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kalio-activate-live-empty-env-'));
   let called = false;
@@ -132,7 +177,7 @@ test('activation fails before network calls when no API key is available', async
         return response({});
       },
     }),
-    /LLM_API_KEY is empty/,
+    /Set one of: XIAOMI_API_KEY, XIAOMIMIMO_API_KEY, LLM_API_KEY/,
   );
   assert.equal(called, false);
 });

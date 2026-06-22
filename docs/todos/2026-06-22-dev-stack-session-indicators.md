@@ -8,7 +8,7 @@
 - [x] Session runtime icon remains runtime-only and exposes clear labels: Pending, Running, Waiting, Completed, Failed, Stopped.
 - [x] Prepare QA build/stack for user testing after chat/workflow focused gates pass.
 - [x] Skip session row context ring for this release slice per user direction.
-- [ ] Focused frontend tests, typecheck, and dev stack smoke pass before release readiness is claimed.
+- [x] Focused frontend tests, typecheck, and dev stack smoke pass before release readiness is claimed.
 
 ## Current Architecture
 
@@ -76,6 +76,14 @@ erDiagram
   - Live fixed QA gate passed on `http://127.0.0.1:5288` -> `http://127.0.0.1:3316` with `provider=xiaomimimo model=mimo-v2.5 source=db`.
   - `npm.cmd run agentflow:paid-readiness -- --api http://127.0.0.1:3316/api` passed.
   - `npm.cmd run release:workflow-gate -- --require-live` passed: workflow visibility/replay/graph child chat `1 passed`, stop/HITL `3 passed`, normal chat `3 passed`.
-- 2026-06-22: Remaining release-audit gaps after the live gate:
-  - no dedicated real-browser forced disconnect/reconnect Playwright spec proving Socket.IO replay plus FE hydration in one run;
-  - `apps/e2e/tests/ac-02-hitl-confirmation.spec.ts` still has skipped confirm-result/cancel/argument-visibility cases, so HITL E2E proof is not yet exhaustive.
+- 2026-06-22: Closed the remaining release-audit gaps:
+  - added `apps/e2e/tests/chat-reconnect-hydration.spec.ts`, which forces the browser offline in Playwright, mutates backend pending-confirmation state while disconnected, and proves reconnect clears stale approval UI without a page reload on fixed QA `3316/5288`;
+  - unskipped and implemented the remaining `apps/e2e/tests/ac-02-hitl-confirmation.spec.ts` cases on the isolated env-mock Playwright stack: confirm executes `vfs_write`, cancel preserves no-write semantics, and HITL args render via target label plus expanded payload.
+- 2026-06-22: Release-gate contract tightened:
+  - `scripts/workflow-release-gate.mjs` now includes a dedicated reconnect/hydration live gate;
+  - the live QA gate no longer tries to run mock-only manual HITL confirmation proof against a DB-backed live credential stack;
+  - full manual HITL proof remains covered on the isolated Playwright stack where env-mock is the intended contract.
+- 2026-06-22: Final verification for this slice:
+  - isolated mock-stack AC-02 gate passed: `corepack pnpm --filter @kalio/e2e run test:e2e -- tests/ac-02-hitl-confirmation.spec.ts --project=chromium`;
+  - live fixed-QA reconnect proof passed on `http://127.0.0.1:5288`;
+  - live fixed-QA release gate passed after stabilizing long-running architecture/chat timing expectations: `npm.cmd run release:workflow-gate -- --require-live`.

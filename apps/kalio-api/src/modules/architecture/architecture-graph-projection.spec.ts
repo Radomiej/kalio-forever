@@ -35,6 +35,7 @@ describe('buildArchitectureGraphProjection', () => {
     expect(graph.status).toBe('failed');
     expect(graph.schemaId).toBe('test-schema');
     expect(graph.schemaName).toBe('Test Schema');
+    expect(graph.nodes[0]?.sessionId).toBe('arch-run-1-implementer');
     expect(graph.nodes[0]?.status).toBe('pending');
   });
 
@@ -139,7 +140,106 @@ describe('buildArchitectureGraphProjection', () => {
     expect(graph.nodes[0]).toMatchObject({
       id: 'goal-master',
       incompleteReason: 'Subagent exhausted its tool loop without producing a final answer.',
+      action: 'router_incomplete',
+      detail: 'Subagent exhausted its tool loop without producing a final answer.',
     });
+  });
+
+  it('projects stable action/detail from latest participant, router, and finalizer events', () => {
+    const schema: ArchitectureSchema = {
+      id: 'test-schema',
+      name: 'Test Schema',
+      description: 'Test schema',
+      version: '0.1.0',
+      roleSlots: [],
+      nodes: [
+        { id: 'implementer', label: 'Implementer', kind: 'role' },
+        { id: 'goal-master', label: 'Goal Master', kind: 'router', behavior: { mode: 'choose_one' } },
+        { id: 'final-artifact', label: 'Final Artifact', kind: 'artifact' },
+      ],
+      edges: [],
+      routerPolicy: {
+        mode: 'rank_then_merge',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'test',
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-participant',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'participant_output',
+        message: 'Implementer prepared the patch.',
+        nodeId: 'implementer',
+        route: {
+          source: 'agent',
+          fromNodeId: 'implementer',
+          selectedNodeIds: ['goal-master'],
+          nextNodeId: 'goal-master',
+        },
+        createdAt: 1,
+      },
+      {
+        id: 'event-router',
+        runId: 'run-1',
+        sequence: 2,
+        type: 'router_output',
+        message: 'Goal Master merged the branch outputs.',
+        nodeId: 'goal-master',
+        routerOutput: {
+          selectedStrategy: 'ship',
+          mergedDecision: 'Ship the implementer patch.',
+          acceptedInputs: [],
+          rejectedInputs: [],
+          unresolvedConflicts: [],
+          risks: [],
+          confidence: 0.8,
+          nextAction: 'finalize',
+        },
+        createdAt: 2,
+      },
+      {
+        id: 'event-finalizer',
+        runId: 'run-1',
+        sequence: 3,
+        type: 'final_artifact',
+        message: 'Final answer ready.',
+        nodeId: 'final-artifact',
+        createdAt: 3,
+      },
+    ];
+
+    const graph = buildArchitectureGraphProjection('run-1', schema, events);
+
+    expect(graph.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'implementer',
+        action: 'participant_completed',
+        detail: 'Ready for goal-master.',
+      }),
+      expect.objectContaining({
+        id: 'goal-master',
+        action: 'router_synthesized',
+        detail: 'Next action: finalize.',
+      }),
+      expect.objectContaining({
+        id: 'final-artifact',
+        action: 'finalizer_completed',
+        detail: 'Final answer ready.',
+      }),
+    ]));
   });
 
   it('projects durable CLI agents as runtime child-agent nodes', () => {
