@@ -7,6 +7,7 @@ import type { SessionManagerService } from '../session-manager.service';
 import type { ChatSessionKind } from '@kalio/types';
 import type { SessionEventsService } from '../session-events.service';
 import type { LLMService } from '../../llm/llm.service';
+import type { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 
 interface FakeRow {
   id: string;
@@ -69,6 +70,7 @@ describe('SessionsService', () => {
   let repo: IMessageRepository;
   let sessionEvents: SessionEventsService;
   let llm: LLMService;
+  let allowedPaths: AllowedPathsService;
   let rows: FakeRow[];
   let ops: string[];
 
@@ -95,7 +97,10 @@ describe('SessionsService', () => {
         return [];
       }),
     } as unknown as LLMService;
-    service = new SessionsService(fixture.drizzle, sessionManager, sessionEvents, repo, llm);
+    allowedPaths = {
+      ensurePath: vi.fn().mockResolvedValue({ id: 'allowed-1', path: 'C:\\Projekty\\kalio-forever', createdAt: 1 }),
+    } as unknown as AllowedPathsService;
+    service = new SessionsService(fixture.drizzle, sessionManager, sessionEvents, repo, llm, allowedPaths);
   });
 
   describe('create', () => {
@@ -110,6 +115,20 @@ describe('SessionsService', () => {
     it('defaults title to "New Chat" when not provided', async () => {
       const result = await service.create({ personaId: 'p1' });
       expect(result.title).toBe('New Chat');
+    });
+
+    it('registers projectPath in allowed paths before creating a scoped session', async () => {
+      const runtimeContext = {
+        runtimeKind: 'chat' as const,
+        architectureContext: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+        },
+      };
+
+      await service.create({ personaId: 'p1', runtimeContext });
+
+      expect(allowedPaths.ensurePath).toHaveBeenCalledWith('C:\\Projekty\\kalio-forever');
     });
   });
 
@@ -241,6 +260,7 @@ describe('SessionsService', () => {
 
       expect(ops).toContain('update');
       expect(rows[0].runtimeContext).toEqual(runtimeContext);
+      expect(allowedPaths.ensurePath).toHaveBeenCalledWith('C:\\Projekty\\kalio-forever');
     });
 
     it('updates metadata and runtimeContext in the same call', async () => {
@@ -263,6 +283,7 @@ describe('SessionsService', () => {
       expect(rows[0].personaId).toBe('builder');
       expect(rows[0].runtimeContext).toEqual(runtimeContext);
       expect(sessionEvents.emitSessionUpdated).toHaveBeenCalledTimes(1);
+      expect(allowedPaths.ensurePath).toHaveBeenCalledWith('C:\\Projekty\\kalio-forever');
     });
   });
 
