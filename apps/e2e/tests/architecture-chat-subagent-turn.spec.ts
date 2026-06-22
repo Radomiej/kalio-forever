@@ -4,6 +4,7 @@ import {
   deleteSessionIfExists,
   selectArchitectureInComposer,
   selectSession,
+  selectSessionOriginFilter,
   sendMessageFromComposer,
 } from './helpers/test-config';
 
@@ -14,6 +15,7 @@ type ArchitectureSessionListItem = {
   runtimeContext?: {
     architectureContext?: {
       architectureRunId?: string;
+      projectPath?: string;
     };
   };
 };
@@ -530,6 +532,101 @@ test.describe('Architecture chat turn projection', () => {
       await page.screenshot({ path: screenshotPath, fullPage: true });
     } finally {
       await deleteSessionIfExists(request, session.id);
+    }
+  });
+
+  test('launches Architecture Debate from the welcome screen with projectPath and keeps child transcripts repo-scoped after reload', async ({ page, request }) => {
+    test.setTimeout(420_000);
+    const projectPath = 'C:\\Projekty\\kalio-forever';
+    let sessionId: string | null = null;
+    let title = '';
+
+    try {
+      await page.goto('/');
+      await page.getByTestId('nav-talk').click();
+      await page.getByTestId('new-session-btn').click();
+      await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
+
+      await selectArchitectureInComposer(page, 'strategic-decision-council');
+      await page.getByTestId('welcome-project-path-input').fill(projectPath);
+      await page.getByTestId('welcome-prompt-input').fill('Oceń architekturę projektu');
+      await page.getByTestId('welcome-run-prompt').click();
+
+      await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
+      await expect
+        .poll(() => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')), { timeout: 15_000 })
+        .not.toBeNull();
+      sessionId = await page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id'));
+      if (!sessionId) {
+        throw new Error('Missing host session id after welcome-screen workflow launch');
+      }
+
+      title = (await page.getByTestId('chat-session-title').textContent())?.trim() ?? '';
+      expect(title.length).toBeGreaterThan(0);
+
+      const sessionsResponse = await request.get(`${API_BASE}/sessions`);
+      expect(sessionsResponse.ok()).toBeTruthy();
+      const persistedSessions = await sessionsResponse.json() as ArchitectureSessionListItem[];
+      const rootSession = persistedSessions.find((candidate) => candidate.id === sessionId);
+      expect(rootSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath);
+
+      const sessionById = new Map(persistedSessions.map((candidate) => [candidate.id, candidate]));
+      const isCurrentWorkflowDescendant = (candidate: { id: string; parentSessionId?: string }): boolean => {
+        let currentParentId = candidate.parentSessionId;
+        const visited = new Set<string>();
+        while (currentParentId) {
+          if (visited.has(currentParentId)) return false;
+          if (currentParentId === sessionId) return true;
+          visited.add(currentParentId);
+          currentParentId = sessionById.get(currentParentId)?.parentSessionId;
+        }
+        return false;
+      };
+
+      const currentWorkflowSessions = persistedSessions.filter((candidate) => isCurrentWorkflowDescendant(candidate));
+      const architectureRunId = currentWorkflowSessions
+        .map((candidate) => candidate.runtimeContext?.architectureContext?.architectureRunId)
+        .find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0);
+      expect(architectureRunId).toBeTruthy();
+      if (!architectureRunId) {
+        throw new Error('Missing architecture run id for projectPath workflow proof');
+      }
+
+      await waitForArchitectureRunCompleted(request, architectureRunId, 360_000);
+      await expect(page.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'completed', { timeout: 30_000 });
+
+      const branchSessions = currentWorkflowSessions.filter((candidate) => /: (Pragmatist|User Advocate|Innovator|Analyst|Shadow)$/i.test(candidate.title));
+      expect(branchSessions.length).toBe(5);
+
+      for (const branchSession of branchSessions) {
+        const branchMessagesResponse = await request.get(`${API_BASE}/sessions/${branchSession.id}/messages`);
+        expect(branchMessagesResponse.ok()).toBeTruthy();
+        const branchMessages = await branchMessagesResponse.json() as Array<{ content?: string }>;
+        const serialized = JSON.stringify(branchMessages);
+        expect(serialized).not.toContain('ACCESS_DENIED');
+        expect(serialized.length).toBeGreaterThan(120);
+      }
+
+      await page.reload();
+      await page.getByTestId('nav-talk').click();
+      await selectSession(page, sessionId, title);
+      await expect(page.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'completed', { timeout: 30_000 });
+
+      const firstBranchSession = branchSessions[0];
+      if (!firstBranchSession) {
+        throw new Error('Missing branch session for projectPath transcript proof');
+      }
+      await selectSessionOriginFilter(page, 'agent');
+      await selectSession(page, firstBranchSession.id, firstBranchSession.title);
+      await expect(page.getByTestId('message-list')).not.toContainText('Waiting for the first persisted message');
+      await expect(page.getByTestId('message-list')).not.toContainText('ACCESS_DENIED');
+
+      await selectSessionOriginFilter(page, 'all');
+      await selectSession(page, sessionId, title);
+    } finally {
+      if (sessionId) {
+        await deleteSessionIfExists(request, sessionId);
+      }
     }
   });
 });

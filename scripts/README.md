@@ -50,7 +50,7 @@ Examples:
 
 - `pnpm stack:start -- --use-env-llm --provider xiaomimimo --model mimo-v2.5 --base-url https://api.xiaomimimo.com/v1`
 - `pnpm llm:probe -- --provider xiaomimimo --model mimo-v2.5-pro --base-url https://token-plan-ams.xiaomimimo.com/v1`
-- `pnpm llm:probe -- --provider openrouter --model nvidia/nemotron-3-ultra-550b-a55b:free --base-url https://openrouter.ai/api/v1`
+- `pnpm llm:probe -- --provider openrouter --model cohere/north-mini-code:free --base-url https://openrouter.ai/api/v1`
 - `pnpm stack:status`
 - `pnpm stack:stop`
 

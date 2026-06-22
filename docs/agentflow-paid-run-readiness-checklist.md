@@ -33,8 +33,8 @@ npm.cmd run agentflow:paid-readiness
 For the current Architecture Debate release gate, OpenRouter is the preferred live provider. Put `OPENROUTER_API_KEY` in ignored `.env.test` or the process environment, then run:
 
 ```powershell
-npm.cmd run agentflow:activate-live-credential -- --provider openrouter --model nvidia/nemotron-3-ultra-550b-a55b:free --base-url https://openrouter.ai/api/v1
-npm.cmd run llm:probe -- --provider openrouter --model nvidia/nemotron-3-ultra-550b-a55b:free --base-url https://openrouter.ai/api/v1
+npm.cmd run agentflow:activate-live-credential -- --provider openrouter --model cohere/north-mini-code:free --base-url https://openrouter.ai/api/v1
+npm.cmd run llm:probe -- --provider openrouter --model cohere/north-mini-code:free --base-url https://openrouter.ai/api/v1
 npm.cmd run agentflow:paid-readiness
 ```
 

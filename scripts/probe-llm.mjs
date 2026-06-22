@@ -3,10 +3,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  allowGenericProviderFallbacks,
   defaultLlmBaseUrlForProvider,
   defaultLlmModelForProvider,
-  normalizeProvider,
   providerApiKeyEnvNames,
+  resolveProviderSetting,
   resolveProviderApiKey,
   resolveProviderSelection,
 } from './llm-provider-config.mjs';
@@ -100,12 +101,23 @@ const provider = resolveProviderSelection({
   envSources: [process.env, fileEnv],
   fallbackProvider: 'mock',
 });
-const allowGenericApiKey = !explicitProvider
-  || !configuredProvider
-  || normalizeProvider(explicitProvider) === normalizeProvider(configuredProvider);
-const model = getArgValue('--model', process.env.LLM_MODEL ?? fileEnv.LLM_MODEL ?? defaultLlmModelForProvider(provider));
-const baseUrl = getArgValue('--base-url', process.env.LLM_BASE_URL ?? fileEnv.LLM_BASE_URL ?? defaultLlmBaseUrlForProvider(provider));
-const apiKey = resolveProviderApiKey(provider, [process.env, fileEnv], { allowGenericApiKey });
+const allowGenericProviderFallback = allowGenericProviderFallbacks({
+  explicitProvider,
+  configuredProvider,
+});
+const model = getArgValue('--model', resolveProviderSetting({
+  allowGenericFallback: allowGenericProviderFallback,
+  envValue: process.env.LLM_MODEL,
+  fileEnvValue: fileEnv.LLM_MODEL,
+  providerDefault: defaultLlmModelForProvider(provider),
+}));
+const baseUrl = getArgValue('--base-url', resolveProviderSetting({
+  allowGenericFallback: allowGenericProviderFallback,
+  envValue: process.env.LLM_BASE_URL,
+  fileEnvValue: fileEnv.LLM_BASE_URL,
+  providerDefault: defaultLlmBaseUrlForProvider(provider),
+}));
+const apiKey = resolveProviderApiKey(provider, [process.env, fileEnv], { allowGenericApiKey: allowGenericProviderFallback });
 
 if (!apiKey && !['mock', 'ollama', 'bitnet'].includes(provider)) {
   console.log(JSON.stringify({
@@ -114,7 +126,7 @@ if (!apiKey && !['mock', 'ollama', 'bitnet'].includes(provider)) {
     model,
     baseUrl,
     latencyMs: 0,
-    error: `No API key found. Set one of: ${providerApiKeyEnvNames(provider, { allowGenericApiKey }).join(', ')}`,
+    error: `No API key found. Set one of: ${providerApiKeyEnvNames(provider, { allowGenericApiKey: allowGenericProviderFallback }).join(', ')}`,
   }, null, 2));
   process.exit(1);
 }

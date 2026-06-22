@@ -136,7 +136,7 @@ test('activation infers OpenRouter credential settings from OPENROUTER_API_KEY',
   const body = JSON.parse(calls[0].init.body);
   assert.equal(body.provider, 'openrouter');
   assert.equal(body.apiKey, 'secret-openrouter-key');
-  assert.equal(body.model, 'nvidia/nemotron-3-ultra-550b-a55b:free');
+  assert.equal(body.model, 'cohere/north-mini-code:free');
   assert.equal(body.baseUrl, 'https://openrouter.ai/api/v1');
 });
 
@@ -161,6 +161,32 @@ test('activation does not reuse generic LLM_API_KEY when explicit provider confl
     /Set one of: OPENROUTER_API_KEY/,
   );
   assert.equal(called, false);
+});
+
+test('activation does not reuse generic model or base URL when explicit provider conflicts with configured provider', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'kalio-activate-live-provider-config-mismatch-'));
+  writeFileSync(join(root, '.env.test'), [
+    'LLM_PROVIDER=xiaomimimo',
+    'LLM_MODEL=mimo-v2.5-pro',
+    'LLM_BASE_URL=https://token-plan-ams.xiaomimimo.com/v1',
+    'OPENROUTER_API_KEY=secret-openrouter-key',
+  ].join('\n'), 'utf8');
+  const calls = [];
+
+  await activateLiveCredential({
+    args: ['--api-url', 'http://127.0.0.1:51052/api', '--provider', 'openrouter'],
+    env: {},
+    repoRoot: root,
+    fetchJson: async (url, init) => {
+      calls.push({ url, init });
+      return url.endsWith('/credentials') ? response({ id: 'cred-openrouter' }) : response('');
+    },
+  });
+
+  const body = JSON.parse(calls[0].init.body);
+  assert.equal(body.provider, 'openrouter');
+  assert.equal(body.model, 'cohere/north-mini-code:free');
+  assert.equal(body.baseUrl, 'https://openrouter.ai/api/v1');
 });
 
 test('activation fails before network calls when no API key is available', async () => {
