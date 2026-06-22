@@ -334,6 +334,10 @@ describe('SubagentRuntimeService nested subagents', () => {
         message: 'Sub-agent timed out after 50ms',
         hadContent: false,
       }));
+      expect(sessionManager.persistAssistantMessage).toHaveBeenCalledTimes(1);
+      expect((sessionManager.persistAssistantMessage.mock.calls.at(-1)?.[2] as TurnState).text).toBe(
+        'Sub-agent failed: Sub-agent timed out after 50ms.',
+      );
       expect(emit).toHaveBeenCalledWith('agent:done', expect.objectContaining({ sessionId: childSessionId }));
       expect(emit.mock.calls.some((call: unknown[]) => call[0] === 'chat:complete')).toBe(false);
       expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
@@ -692,6 +696,50 @@ describe('SubagentRuntimeService nested subagents', () => {
       messageId: persistedMessageId,
     }));
     expect((completeCall?.[1] as { messageId: string } | undefined)?.messageId).not.toBe(result.childSessionId);
+  });
+
+  it('persists a completion fallback message when the child finishes with no output', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([{ type: 'done' }])),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const emit = vi.fn();
+    const runtime = buildSubagentRuntime(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-empty-complete',
+      objective: 'Finish silently',
+      availableTools: [],
+      timeoutMs: 60000,
+      vfsMode: 'shared',
+      copyOutputs: false,
+      emit,
+    });
+
+    expect(result.result).toBe('Sub-agent completed with no output.');
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledTimes(2);
+    const fallbackCall = sessionManager.persistAssistantMessage.mock.calls.at(-1);
+    expect((fallbackCall?.[2] as TurnState).text).toBe('Sub-agent completed with no output.');
+    const completeCall = emit.mock.calls.find((call: unknown[]) => call[0] === 'chat:complete');
+    expect(completeCall?.[1]).toEqual(expect.objectContaining({
+      sessionId: result.childSessionId,
+      messageId: fallbackCall?.[1],
+    }));
   });
 
   it('includes parent download URLs in the returned result when isolated child outputs are copied back', async () => {
@@ -1696,5 +1744,200 @@ describe('SubagentRuntimeService nested subagents', () => {
     expect(result.result).toContain('Last assistant text before stopping: Let me inspect one more file.');
     expect(result.result).not.toBe('Let me inspect one more file.');
     expect(toolDispatch.dispatch).toHaveBeenCalledOnce();
+  });
+
+  it('persists a terminal assistant fallback message when max iterations are exhausted', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([
+        { type: 'text_delta', delta: 'Let me inspect one more file.' },
+        { type: 'tool_call', callId: 'tool-1', name: 'vfs_read', args: { filePath: 'README.md' } },
+        { type: 'done' },
+      ])),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [{ role: 'user', content: 'read' }], unboundedHistoryCount: 1 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const toolDispatch = {
+      dispatch: vi.fn(async (callId: string): Promise<ToolResult> => ({
+        callId,
+        status: 'success',
+        data: { content: 'ok' },
+      })),
+      getToolMetas: vi.fn(),
+    };
+    const emit = vi.fn();
+    const runtime = buildSubagentRuntime(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      toolDispatch as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-max-iterations-visible-output',
+      objective: 'keep reading files',
+      availableTools: tools.filter((tool) => tool.name === 'vfs_read'),
+      timeoutMs: 60000,
+      maxIterations: 1,
+      vfsMode: 'shared',
+      copyOutputs: false,
+      emit,
+    });
+
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledTimes(2);
+    const terminalFallbackCall = sessionManager.persistAssistantMessage.mock.calls.at(-1);
+    expect(terminalFallbackCall?.[0]).toBe(result.childSessionId);
+    expect((terminalFallbackCall?.[2] as TurnState).text).toContain(
+      'Sub-agent stopped after 1 tool iteration without producing a final answer.',
+    );
+    const completeCall = emit.mock.calls.find((call: unknown[]) => call[0] === 'chat:complete');
+    expect(completeCall?.[1]).toEqual(expect.objectContaining({
+      sessionId: result.childSessionId,
+      messageId: terminalFallbackCall?.[1],
+    }));
+  });
+
+  it('persists an error fallback message with the last streamed text when the child run throws', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(async function* stream(): AsyncGenerator<InternalLLMChunk> {
+        yield { type: 'text_delta', delta: 'partial result' };
+        throw new Error('stream exploded');
+      }),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const emit = vi.fn();
+    const runtime = buildSubagentRuntime(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    await expect(runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-error-fallback',
+      objective: 'Stream and fail',
+      availableTools: [],
+      timeoutMs: 60000,
+      vfsMode: 'shared',
+      copyOutputs: false,
+      emit,
+    })).rejects.toThrow('stream exploded');
+
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledTimes(1);
+    const fallbackCall = sessionManager.persistAssistantMessage.mock.calls[0];
+    const startCall = emit.mock.calls.find((call: unknown[]) => call[0] === 'agent:start');
+    const childSessionId = (startCall?.[1] as { sessionId: string } | undefined)?.sessionId;
+
+    expect(fallbackCall?.[0]).toBe(childSessionId);
+    expect((fallbackCall?.[2] as TurnState).text).toBe(
+      'Sub-agent failed: stream exploded. Last assistant text before failure: partial result',
+    );
+    expect(emit).toHaveBeenCalledWith('chat:error', expect.objectContaining({
+      sessionId: childSessionId,
+      code: 'LLM_ERROR',
+      message: 'stream exploded',
+      hadContent: true,
+    }));
+  });
+
+  it('does not mask the original timeout when persisting the terminal fallback message fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const llmSource: ILLMSource = {
+        stream: vi.fn(async function* stream(): AsyncGenerator<InternalLLMChunk> {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          yield { type: 'done' };
+        }),
+      };
+      const sessionManager = {
+        persistUserMessage: vi.fn().mockResolvedValue(undefined),
+        persistAssistantMessage: vi.fn().mockRejectedValueOnce(new Error('persist failed')),
+        saveToolResult: vi.fn().mockResolvedValue(undefined),
+        loadHistory: vi.fn().mockResolvedValue([]),
+        loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+      } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+      const emit = vi.fn();
+      const audit = { log: vi.fn().mockResolvedValue(undefined) } satisfies Pick<AuditService, 'log'>;
+      const runtime = buildSubagentRuntime(
+        llmSource,
+        makeProcessor(sessionManager) as StreamProcessorService,
+        { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+        sessionManager as unknown as SessionManagerService,
+        { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+        { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+        { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+        audit as unknown as AuditService,
+      );
+
+      const runPromise = runtime.runSubagent({
+        parentSessionId: 'master',
+        parentToolCallId: 'call-timeout-persist-fails',
+        objective: 'Take too long',
+        availableTools: [],
+        timeoutMs: 50,
+        vfsMode: 'shared',
+        copyOutputs: false,
+        emit,
+      });
+
+      const observation: {
+        value:
+          | { status: 'pending' }
+          | { status: 'resolved' }
+          | { status: 'rejected'; error: unknown };
+      } = { value: { status: 'pending' } };
+      void runPromise.then(
+        () => {
+          observation.value = { status: 'resolved' };
+        },
+        (error: unknown) => {
+          observation.value = { status: 'rejected', error };
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(51);
+      await Promise.resolve();
+
+      const settled = observation.value;
+      expect(settled.status).toBe('rejected');
+      if (settled.status !== 'rejected') {
+        throw new Error(`Expected timeout rejection, got ${settled.status}`);
+      }
+      expect((settled.error as Error).message).toBe('Sub-agent timed out after 50ms');
+      expect(sessionManager.persistAssistantMessage).toHaveBeenCalledTimes(1);
+      const startCall = emit.mock.calls.find((call: unknown[]) => call[0] === 'agent:start');
+      const childSessionId = (startCall?.[1] as { sessionId: string } | undefined)?.sessionId;
+      expect(emit).toHaveBeenCalledWith('chat:error', expect.objectContaining({
+        sessionId: childSessionId,
+        code: 'LLM_ERROR',
+        message: 'Sub-agent timed out after 50ms',
+      }));
+      expect(emit).toHaveBeenCalledWith('agent:done', expect.objectContaining({ sessionId: childSessionId }));
+      expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: childSessionId,
+        type: 'error',
+        label: 'subagent:error',
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

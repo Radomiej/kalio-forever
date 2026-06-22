@@ -19,8 +19,6 @@ if (-not $localAppData) {
 }
 $prodDataRoot = Join-Path $localAppData 'kalio-forever'
 $envFile = Join-Path $prodDataRoot '.env'
-$stackStatePath = Join-Path $root '.kalio-stack\qa-stack-state.json'
-
 $programFilesNode = 'C:\Program Files\nodejs'
 if (Test-Path $programFilesNode) {
     $env:PATH = "$programFilesNode;$env:PATH"
@@ -131,12 +129,23 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-if (-not (Test-Path $stackStatePath)) {
-    Write-Host "[FAIL] Stack state file missing after start: $stackStatePath" -ForegroundColor Red
+try {
+    $statusJson = & $nodeCmd.Source (Join-Path $root 'scripts\stack-manager.mjs') 'status' '--json'
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    $status = $statusJson | ConvertFrom-Json
+} catch {
+    Write-Host "[FAIL] Could not read prod stack status from stack-manager: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
-$state = Get-Content $stackStatePath -Raw | ConvertFrom-Json
+$state = $status.state
+if ($status.status -ne 'running' -or -not $state) {
+    Write-Host "[FAIL] Prod stack did not report running status after start: $($status.status)" -ForegroundColor Red
+    exit 1
+}
+
 $backendPid = [int]$state.backend.pid
 $frontendPid = [int]$state.frontend.pid
 

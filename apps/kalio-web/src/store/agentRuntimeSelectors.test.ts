@@ -86,6 +86,34 @@ describe('agentRuntimeSelectors', () => {
     expect(liveSessionIds.has('session-1')).toBe(true);
   });
 
+  it('does not treat interrupted retry snapshots with stale queued work as live sessions', () => {
+    const liveSessionIds = selectLiveSessionIds({
+      activeAgentLoops: {},
+      sessionStatusSnapshots: {
+        'session-1': {
+          sessionId: 'session-1',
+          active: true,
+          queueLength: 3,
+          run: {
+            id: 'run-1',
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            phase: 'tool_pending',
+            status: 'interrupted_needs_retry',
+            retryCount: 1,
+            safeResume: true,
+            startedAt: 1,
+            updatedAt: 2,
+            lastHeartbeatAt: 2,
+          },
+        },
+      },
+      runtimeActivitySnapshots: {},
+    });
+
+    expect(liveSessionIds.has('session-1')).toBe(false);
+  });
+
   it('builds running loop summaries from runtime snapshots when legacy loops are missing', () => {
     const runningLoops = selectRunningLoops({
       activeAgentLoops: {},

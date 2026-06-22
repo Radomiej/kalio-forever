@@ -6,6 +6,7 @@ const stackManagerSource = readFileSync(new URL('./stack-manager.mjs', import.me
 const stackStatusSource = readFileSync(new URL('./stack-status.mjs', import.meta.url), 'utf8');
 const installScriptSource = readFileSync(new URL('./install.ps1', import.meta.url), 'utf8');
 const autostartScriptSource = readFileSync(new URL('./kalio-autostart.ps1', import.meta.url), 'utf8');
+const prodScriptSource = readFileSync(new URL('../start-prod.ps1', import.meta.url), 'utf8');
 const quickstartSource = readFileSync(new URL('../docs/quickstart-user.md', import.meta.url), 'utf8');
 const localDevGuideSource = readFileSync(new URL('../docs/local-dev-guide.md', import.meta.url), 'utf8');
 const scriptsReadmeSource = readFileSync(new URL('./README.md', import.meta.url), 'utf8');
@@ -71,6 +72,12 @@ test('fixed QA launcher builds dist by default and requires explicit SkipBuild f
   assert.match(qaScriptSource, /\[switch\]\$SkipBuild/);
   assert.match(qaScriptSource, /if \(\$SkipBuild\) \{\s*\$stackArgs \+= "--skip-build"/);
   assert.doesNotMatch(qaScriptSource, /if \(-not \$Rebuild\) \{\s*\$stackArgs \+= "--skip-build"/);
+});
+
+test('prod launcher reads canonical stack-manager status instead of a legacy state path', () => {
+  assert.match(prodScriptSource, /\$statusJson = & \$nodeCmd\.Source \(Join-Path \$root 'scripts\\stack-manager\.mjs'\) 'status' '--json'/);
+  assert.match(prodScriptSource, /\$state = \$status\.state/);
+  assert.doesNotMatch(prodScriptSource, /\.kalio-stack\\qa-stack-state\.json/);
 });
 
 test('stack manager refreshes managed PIDs from live port owners and refuses unmanaged port reuse', () => {

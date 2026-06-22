@@ -4,6 +4,7 @@ import {
   displayTitleForSession,
   isPendingArchitecturePlaceholderSession,
   normalizeConversationSessionId,
+  sessionStatusSnapshotToRuntimeState,
   visibleConversationParentId,
 } from './sessionTreeDisplay';
 
@@ -245,5 +246,67 @@ describe('displayTitleForSession', () => {
     expect(isPendingArchitecturePlaceholderSession(branch, new Map([[branch.id, 'pending']]), {
       [branch.id]: [{ id: 'm1', sessionId: branch.id, role: 'assistant', content: 'Started', createdAt: 11 }],
     })).toBe(false);
+  });
+});
+
+describe('sessionStatusSnapshotToRuntimeState', () => {
+  it('prefers terminal completion over stale queued work', () => {
+    expect(sessionStatusSnapshotToRuntimeState({
+      sessionId: 'session-done',
+      active: false,
+      queueLength: 2,
+      run: {
+        id: 'run-1',
+        sessionId: 'session-done',
+        turnId: 'turn-1',
+        phase: 'completed',
+        status: 'completed',
+        retryCount: 0,
+        safeResume: true,
+        startedAt: 1,
+        updatedAt: 2,
+        lastHeartbeatAt: 2,
+      },
+    })).toBe('done');
+  });
+
+  it('prefers terminal failure over stale queued work', () => {
+    expect(sessionStatusSnapshotToRuntimeState({
+      sessionId: 'session-failed',
+      active: false,
+      queueLength: 1,
+      run: {
+        id: 'run-2',
+        sessionId: 'session-failed',
+        turnId: 'turn-2',
+        phase: 'failed',
+        status: 'failed',
+        retryCount: 0,
+        safeResume: false,
+        startedAt: 1,
+        updatedAt: 2,
+        lastHeartbeatAt: 2,
+      },
+    })).toBe('error');
+  });
+
+  it('prefers interrupted-needs-retry over stale queued work', () => {
+    expect(sessionStatusSnapshotToRuntimeState({
+      sessionId: 'session-retry',
+      active: true,
+      queueLength: 3,
+      run: {
+        id: 'run-3',
+        sessionId: 'session-retry',
+        turnId: 'turn-3',
+        phase: 'tool_pending',
+        status: 'interrupted_needs_retry',
+        retryCount: 1,
+        safeResume: true,
+        startedAt: 1,
+        updatedAt: 2,
+        lastHeartbeatAt: 2,
+      },
+    })).toBe('stopped');
   });
 });

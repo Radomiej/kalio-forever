@@ -77,17 +77,20 @@ function mapCliStatus(status: CLIAgentSessionStatus): RuntimeChildExecutionStatu
 }
 
 function mapSubagentStatus(status: SocketEvents['session:status']): RuntimeChildExecutionStatus {
-  if ((status.queueLength ?? 0) > 0) {
-    return 'waiting';
-  }
-  if (status.active) {
-    return 'running';
+  if (status.run?.status === 'completed' || status.run?.phase === 'completed') {
+    return 'completed';
   }
   if (status.run?.status === 'interrupted_needs_retry' || status.run?.status === 'interrupted') {
     return 'stopped';
   }
   if (status.run?.status === 'failed') {
     return 'failed';
+  }
+  if ((status.queueLength ?? 0) > 0) {
+    return 'waiting';
+  }
+  if (status.active) {
+    return 'running';
   }
   return 'completed';
 }
