@@ -53,3 +53,33 @@ test('autostart docs and scripts describe logon-based startup, not reboot startu
   assert.match(installScriptSource, /At logon/);
   assert.match(autostartScriptSource, /Scheduled Task after Windows sign-in/i);
 });
+
+test('fixed QA mock mode forces env LLM so stale DB credentials cannot override mock', () => {
+  assert.match(stackManagerSource, /--force-env-llm/);
+  assert.match(stackManagerSource, /KALIO_FORCE_ENV_LLM: forceEnvLlm \? '1'/);
+  assert.match(stackManagerSource, /forceEnvLlm: backendEnv\.KALIO_FORCE_ENV_LLM === '1'/);
+  assert.match(
+    readFileSync(new URL('../start-qa.ps1', import.meta.url), 'utf8'),
+    /\$stackArgs \+= "--force-env-llm"/,
+  );
+});
+
+test('fixed QA launcher builds dist by default and requires explicit SkipBuild for reuse', () => {
+  const qaScriptSource = readFileSync(new URL('../start-qa.ps1', import.meta.url), 'utf8');
+  assert.match(qaScriptSource, /\[switch\]\$SkipBuild/);
+  assert.match(qaScriptSource, /if \(\$SkipBuild\) \{\s*\$stackArgs \+= "--skip-build"/);
+  assert.doesNotMatch(qaScriptSource, /if \(-not \$Rebuild\) \{\s*\$stackArgs \+= "--skip-build"/);
+});
+
+test('stack manager refreshes managed PIDs from live port owners and refuses unmanaged port reuse', () => {
+  assert.match(stackManagerSource, /async function resolveListeningPid\(port\)/);
+  assert.match(stackManagerSource, /async function refreshStatePortOwners\(state\)/);
+  assert.match(stackManagerSource, /async function ensureRequestedPortsAreFree\(ports\)/);
+  assert.match(stackManagerSource, /await ensureRequestedPortsAreFree\(\[backendPort, frontendPort\]\);/);
+  assert.match(stackManagerSource, /await refreshStatePortOwners\(readState\(\)\);/);
+  assert.match(stackManagerSource, /const state = await refreshStatePortOwners\(readState\(\)\);/);
+  assert.match(stackManagerSource, /const state = await refreshStatePortOwners\(readState\(\) \?\? readLastState\(\)\);/);
+  assert.match(stackManagerSource, /requested ports already in use by unmanaged listeners/);
+  assert.match(stackManagerSource, /async function detectKnownManagedPortConflicts\(\)/);
+  assert.match(stackManagerSource, /buildStatusReport\('unmanaged listeners', null\)/);
+});

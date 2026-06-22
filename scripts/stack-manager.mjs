@@ -5,20 +5,18 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readStackState, resolveStackPaths } from './stack-state.mjs';
 
 const scriptDir = resolve(fileURLToPath(import.meta.url), '..');
 const repoRoot = resolve(scriptDir, '..');
-const stackDir = resolve(repoRoot, '.kalio-stack');
-// TODO: legacy fallback: keep QA logs outside .kalio-stack because the old log directory can remain locked on Windows after stale runs.
-const logsDir = resolve(repoRoot, '.tmp', 'qa-stack-logs');
-const statePath = resolve(stackDir, 'qa-stack-state.json');
-const lastStatePath = resolve(stackDir, 'qa-stack-last-state.json');
+const { stackDir, logsDir, statePath, lastStatePath } = resolveStackPaths(repoRoot);
 const logRunId = `${Date.now()}-${process.pid}`;
 const backendLogPath = resolve(logsDir, `backend-${logRunId}.log`);
 const frontendLogPath = resolve(logsDir, `frontend-${logRunId}.log`);
 
 const action = process.argv[2] ?? 'status';
 const args = process.argv.slice(3);
+const outputJson = args.includes('--json');
 const stackProfile = getArgValue(args, '--profile', '');
 const isProdProfile = stackProfile === 'prod' || process.env.KALIO_INSTALL_PROFILE === 'prod';
 const backendPortDefault = isProdProfile ? '4016' : '0';
@@ -62,7 +60,7 @@ function getArgValue(argv, flag, fallback) {
 }
 
 function showUsage() {
-  console.log('Usage: node scripts/stack-manager.mjs <start|status|stop> [--profile prod] [--backend-port <port|0>] [--frontend-port <port|0>] [--skip-build] [--runtime direct] [--use-env-llm] [--env-file <path>] [--data-root <path>] [--database-path <path>] [--workspace-root <path>] [--memory-db-path <path>] [--embedding-cache-dir <path>] [--provider xiaomimimo] [--model mimo-v2.5] [--base-url https://api.xiaomimimo.com/v1]');
+  console.log('Usage: node scripts/stack-manager.mjs <start|status|stop> [--json] [--profile prod] [--backend-port <port|0>] [--frontend-port <port|0>] [--skip-build] [--runtime direct] [--use-env-llm] [--force-env-llm] [--env-file <path>] [--data-root <path>] [--database-path <path>] [--workspace-root <path>] [--memory-db-path <path>] [--embedding-cache-dir <path>] [--provider xiaomimimo] [--model mimo-v2.5] [--base-url https://api.xiaomimimo.com/v1]');
 }
 
 function resolveConfiguredPath(pathValue) {
@@ -259,6 +257,7 @@ function resolveQaEnv() {
   const envFile = getArgValue(args, '--env-file', '.env');
   const testEnvFile = getArgValue(args, '--test-env-file', '.env.test');
   const useEnvLlm = args.includes('--use-env-llm');
+  const forceEnvLlm = args.includes('--force-env-llm');
   const fileEnv = {
     ...readEnvFile(resolveEnvFilePath(testEnvFile)),
     ...readEnvFile(resolveEnvFilePath(envFile)),
@@ -272,6 +271,7 @@ function resolveQaEnv() {
     LLM_API_KEY: getArgValue(args, '--api-key', llmEnv.LLM_API_KEY ?? 'mock'),
     LLM_BASE_URL: getArgValue(args, '--base-url', llmEnv.LLM_BASE_URL ?? 'mock'),
     LLM_MODEL: getArgValue(args, '--model', llmEnv.LLM_MODEL ?? 'mock'),
+    KALIO_FORCE_ENV_LLM: forceEnvLlm ? '1' : (process.env.KALIO_FORCE_ENV_LLM ?? fileEnv.KALIO_FORCE_ENV_LLM ?? ''),
   };
 }
 
@@ -296,6 +296,7 @@ function commonEnv(qaEnv) {
     ...qaEnv,
     NODE_ENV: 'production',
     KALIO_INSTALL_PROFILE: isProdProfile ? 'prod' : qaEnv.KALIO_INSTALL_PROFILE,
+    KALIO_ENABLE_TEST_SUPPORT: isProdProfile ? 'false' : 'true',
     CREDENTIALS_MASTER_KEY: resolveCredentialsMasterKey(qaEnv),
     DATABASE_PATH: dataPaths.databasePath,
     WORKSPACE_ROOT: dataPaths.workspaceRoot,
@@ -348,6 +349,121 @@ function resolveFrontendLauncher() {
   }
 }
 
+async function captureCommand(command, commandArgs) {
+  return await new Promise((resolvePromise, reject) => {
+    const child = spawn(command, commandArgs, {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    child.stdout?.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    child.once('error', reject);
+    child.once('exit', (code) => {
+      resolvePromise({ code: code ?? 1, stdout });
+    });
+  });
+}
+
+async function resolveListeningPid(port) {
+  if (!Number.isInteger(port) || port <= 0) {
+    return null;
+  }
+
+  if (process.platform === 'win32') {
+    let result;
+    try {
+      result = await captureCommand(
+        resolve(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+        [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess`,
+        ],
+      );
+    } catch {
+      return null;
+    }
+    if (result.code !== 0) {
+      return null;
+    }
+    const pid = Number.parseInt(result.stdout.trim(), 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  }
+
+  let result;
+  try {
+    result = await captureCommand('lsof', ['-tiTCP:' + String(port), '-sTCP:LISTEN']);
+  } catch {
+    return null;
+  }
+  if (result.code !== 0) {
+    return null;
+  }
+  const pid = Number.parseInt(result.stdout.trim().split(/\r?\n/)[0] ?? '', 10);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+async function refreshStatePortOwners(state) {
+  if (!state) {
+    return state;
+  }
+
+  const backendPid = await resolveListeningPid(Number(state.backendPort));
+  const frontendPid = await resolveListeningPid(Number(state.frontendPort));
+  const nextState = structuredClone(state);
+  let changed = false;
+
+  if (backendPid && nextState.backend?.pid !== backendPid) {
+    nextState.backend.pid = backendPid;
+    changed = true;
+  }
+  if (frontendPid && nextState.frontend?.pid !== frontendPid) {
+    nextState.frontend.pid = frontendPid;
+    changed = true;
+  }
+
+  if (changed) {
+    writeState(nextState);
+  }
+
+  return nextState;
+}
+
+async function ensureRequestedPortsAreFree(ports) {
+  const occupied = [];
+  for (const port of ports) {
+    const ownerPid = await resolveListeningPid(port);
+    if (ownerPid) {
+      occupied.push({ port, pid: ownerPid });
+    }
+  }
+
+  if (occupied.length > 0) {
+    const detail = occupied.map(({ port, pid }) => `${port}=>pid ${pid}`).join(', ');
+    throw new Error(`requested ports already in use by unmanaged listeners: ${detail}`);
+  }
+}
+
+async function detectKnownManagedPortConflicts() {
+  const conflictEntries = [];
+  for (const [profile, ports] of [
+    ['qa', [3316, 5288]],
+    ['prod', [4016, 6188]],
+  ]) {
+    for (const port of ports) {
+      const pid = await resolveListeningPid(port);
+      if (pid) {
+        conflictEntries.push({ profile, port, pid });
+      }
+    }
+  }
+  return conflictEntries;
+}
+
 async function startStack() {
   await clearIfRunning();
 
@@ -357,6 +473,7 @@ async function startStack() {
 
   const backendPort = backendPortArg === 0 ? await getFreePort() : backendPortArg;
   const frontendPort = frontendPortArg === 0 ? await getFreePort() : frontendPortArg;
+  await ensureRequestedPortsAreFree([backendPort, frontendPort]);
   const backendUrl = `http://127.0.0.1:${backendPort}`;
   const frontendUrl = `http://127.0.0.1:${frontendPort}`;
   const frontendLocalhostUrl = `http://localhost:${frontendPort}`;
@@ -462,6 +579,7 @@ async function startStack() {
     frontendLogPath,
     provider: backendEnv.LLM_PROVIDER,
     model: backendEnv.LLM_MODEL,
+    forceEnvLlm: backendEnv.KALIO_FORCE_ENV_LLM === '1',
     databasePath: backendEnv.DATABASE_PATH,
     workspaceRoot: backendEnv.WORKSPACE_ROOT,
     memoryDbPath: backendEnv.MEMORY_DB_PATH,
@@ -474,6 +592,7 @@ async function startStack() {
   try {
     await waitForUrl(`${backendUrl}/api/health`, 60_000);
     await waitForUrl(frontendUrl, 60_000);
+    await refreshStatePortOwners(readState());
   } catch (error) {
     await stopStack();
     throw error;
@@ -530,16 +649,38 @@ async function runProcess(command, commandArgs, options, label) {
 }
 
 async function showStatus() {
-  const state = readState();
+  const state = await refreshStatePortOwners(readState());
   if (!state) {
+    const conflicts = await detectKnownManagedPortConflicts();
+    if (conflicts.length > 0) {
+      const report = buildStatusReport('unmanaged listeners', null);
+      report.conflicts = conflicts;
+      if (outputJson) {
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+      console.log('[stack] status: unmanaged listeners');
+      conflicts.forEach(({ profile, port, pid }) => {
+        console.log(`[stack] ${profile} port ${port} is held by pid ${pid}`);
+      });
+      return;
+    }
     const lastState = readLastState();
     if (hasAliveChild(lastState)) {
+      if (outputJson) {
+        console.log(JSON.stringify(buildStatusReport('orphaned managed process', lastState), null, 2));
+        return;
+      }
       console.log('[stack] status: orphaned managed process');
       reportStateProcesses(lastState);
       return;
     }
 
     clearLastState();
+    if (outputJson) {
+      console.log(JSON.stringify(buildStatusReport('stopped', null), null, 2));
+      return;
+    }
     console.log('[stack] status: stopped');
     return;
   }
@@ -547,11 +688,19 @@ async function showStatus() {
   const backendUp = isProcessAlive(state?.backend?.pid);
   const frontendUp = isProcessAlive(state?.frontend?.pid);
   if (!backendUp || !frontendUp) {
+    if (outputJson) {
+      console.log(JSON.stringify(buildStatusReport('partial/stale state', state), null, 2));
+      return;
+    }
     console.log('[stack] status: partial/stale state');
     reportStateProcesses(state);
     return;
   }
 
+  if (outputJson) {
+    console.log(JSON.stringify(buildStatusReport('running', state), null, 2));
+    return;
+  }
   console.log('[stack] status: running');
   reportStateProcesses(state);
   await reportHealth(`http://127.0.0.1:${state.backendPort}/api/health`, 'backend');
@@ -559,7 +708,7 @@ async function showStatus() {
 }
 
 async function stopStack(exitCode) {
-  const state = readState() ?? readLastState();
+  const state = await refreshStatePortOwners(readState() ?? readLastState());
   if (!state) {
     console.log('[stack] stop: already stopped');
     return;
@@ -600,25 +749,11 @@ function writeState(state) {
 }
 
 function readState() {
-  if (!existsSync(statePath)) {
-    return null;
-  }
-  try {
-    return JSON.parse(readFileSync(statePath, 'utf8'));
-  } catch {
-    return null;
-  }
+  return readStackState(repoRoot);
 }
 
 function readLastState() {
-  if (!existsSync(lastStatePath)) {
-    return null;
-  }
-  try {
-    return JSON.parse(readFileSync(lastStatePath, 'utf8'));
-  } catch {
-    return null;
-  }
+  return readStackState(repoRoot, { last: true });
 }
 
 function clearState() {
@@ -645,6 +780,16 @@ async function clearIfRunning() {
     return;
   }
   await stopStack();
+}
+
+function buildStatusReport(status, state) {
+  return {
+    status,
+    backendUp: isProcessAlive(state?.backend?.pid),
+    frontendUp: isProcessAlive(state?.frontend?.pid),
+    state: state ?? null,
+    paths: resolveStackPaths(repoRoot),
+  };
 }
 
 function hasAliveChild(state) {
