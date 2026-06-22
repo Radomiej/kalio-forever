@@ -143,6 +143,8 @@ $previousEnv = @{
     VITE_API_URL = $env:VITE_API_URL
     VITE_WS_URL = $env:VITE_WS_URL
     VITE_PORT = $env:VITE_PORT
+    VITE_HMR_HOST = $env:VITE_HMR_HOST
+    VITE_HMR_CLIENT_PORT = $env:VITE_HMR_CLIENT_PORT
 }
 
 function Import-EnvFileIfMissing {
@@ -192,7 +194,8 @@ if ($UseMockLLM) {
     $env:KALIO_FORCE_ENV_LLM = '1'
 }
 
-$apiOrigin = "http://localhost:$BE_PORT"
+$devOriginHost = '127.0.0.1'
+$apiOrigin = "http://$devOriginHost`:$BE_PORT"
 $useDedicatedPorts = $BE_PORT -ne 3016 -or $FE_PORT -ne 5188
 
 if ($useDedicatedPorts) {
@@ -234,6 +237,8 @@ $env:PORT = "$BE_PORT"
 $env:VITE_API_URL = $apiOrigin
 $env:VITE_WS_URL = $apiOrigin
 $env:VITE_PORT = "$FE_PORT"
+$env:VITE_HMR_HOST = $devOriginHost
+$env:VITE_HMR_CLIENT_PORT = "$FE_PORT"
 
 function Get-PortOwners {
     param([int[]]$Ports)

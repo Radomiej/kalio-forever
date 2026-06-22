@@ -1,10 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import type { ToolConfirmationRequest } from '@kalio/types';
 import { useChatSessionActivation } from './useChatSessionActivation';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
 import { eventBus } from '../../../services/eventBus';
+import { backendHealth } from '../../../services/backendHealth';
+
+const { reportBackendSuccess, reportBackendFailure } = vi.hoisted(() => ({
+  reportBackendSuccess: vi.fn(),
+  reportBackendFailure: vi.fn(),
+}));
 
 vi.mock('../../../services/apiClient', () => ({
   apiClient: {
@@ -18,14 +25,25 @@ vi.mock('../../../services/eventBus', () => ({
   },
 }));
 
+vi.mock('../../../services/backendHealth', () => ({
+  backendHealth: {
+    reportSuccess: reportBackendSuccess,
+    reportFailure: reportBackendFailure,
+  },
+}));
+
 describe('useChatSessionActivation', () => {
   beforeEach(() => {
     vi.mocked(apiClient.get).mockReset();
     vi.mocked(eventBus.identifySession).mockReset();
+    vi.mocked(backendHealth.reportSuccess).mockReset();
+    vi.mocked(backendHealth.reportFailure).mockReset();
     useAgentStore.setState({
       callIdToName: {},
       cliChildProjections: {},
       activeAgentLoops: {},
+      pendingConfirmations: {},
+      runtimeActivitySnapshots: {},
     });
     useSessionStore.setState({
       activeSessionId: 'session-1',
@@ -92,6 +110,125 @@ describe('useChatSessionActivation', () => {
       });
     });
     expect(useAgentStore.getState().callIdToName['call-cli-1']).toBe('spawn_cli_agent');
+    expect(backendHealth.reportSuccess).toHaveBeenCalled();
+  });
+
+  it('reports backend failure when activation history hydration fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(apiClient.get).mockRejectedValue(new Error('backend refused connection'));
+
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(backendHealth.reportFailure).toHaveBeenCalled();
+    });
+    expect(errorSpy).toHaveBeenCalledWith('[ChatInterface] failed to load message history', expect.any(Error));
+  });
+
+  it('does not clear pending confirmation restored from runtime snapshot on activation', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+    const pending: ToolConfirmationRequest = {
+      requestId: 'req-replay',
+      toolCallId: 'call-replay',
+      sessionId: 'session-1',
+      toolName: 'image_generate',
+      args: { prompt: 'Generate a coffee poster' },
+      timeoutMs: 600000,
+    };
+    useAgentStore.setState({
+      pendingConfirmations: { 'session-1': [pending] },
+      runtimeActivitySnapshots: {
+        'session-1': {
+          sessionId: 'session-1',
+          active: false,
+          queueLength: 0,
+          pendingConfirmations: [pending],
+          pendingBudgetApprovals: [],
+          toolActivities: [{
+            callId: pending.toolCallId,
+            requestId: pending.requestId,
+            sessionId: pending.sessionId,
+            toolName: pending.toolName,
+            args: pending.args,
+            status: 'pending_confirmation',
+            startedAt: 100,
+          }],
+          childExecutions: [],
+          updatedAt: 100,
+        },
+      },
+    });
+
+    const setPendingConfirmation = vi.fn();
+    const clearToolActivities = vi.fn();
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities,
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation,
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+    });
+    expect(setPendingConfirmation).not.toHaveBeenCalledWith('session-1', null);
+    expect(clearToolActivities).not.toHaveBeenCalledWith('session-1');
+  });
+
+  it('keeps restored running tool activity while clearing stale pending confirmation state on activation', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+    useAgentStore.setState({
+      runtimeActivitySnapshots: {
+        'session-1': {
+          sessionId: 'session-1',
+          active: true,
+          turnId: 'turn-live',
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [{
+            callId: 'call-running',
+            requestId: 'req-running',
+            sessionId: 'session-1',
+            toolName: 'terminal_exec',
+            args: { command: 'dir' },
+            status: 'running',
+            startedAt: 100,
+          }],
+          childExecutions: [],
+          updatedAt: 100,
+        },
+      },
+    });
+
+    const setPendingConfirmation = vi.fn();
+    const clearToolActivities = vi.fn();
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities,
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation,
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+    });
+    expect(clearToolActivities).not.toHaveBeenCalledWith('session-1');
+    expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
   });
 
   it('auto-sends a pending RA-App launch intent that arrives after the session is already active', async () => {

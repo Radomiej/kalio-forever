@@ -1,5 +1,5 @@
 import type { Dispatch, MouseEvent, ReactNode, RefObject, SetStateAction } from 'react';
-import { AlertTriangle, Archive, BrainCircuit, Check, CheckCircle2, ChevronRight, Circle, GitBranch, Loader2, MessageSquare, Pencil, RotateCcw, TerminalSquare, Trash2, X, XCircle } from 'lucide-react';
+import { Archive, BrainCircuit, Check, ChevronRight, GitBranch, MessageSquare, Pencil, RotateCcw, TerminalSquare, Trash2, X } from 'lucide-react';
 import type { ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
 import { formatRelativeTime } from './session.utils';
 import {
@@ -11,6 +11,7 @@ import type { SessionOriginFilter } from './sessionListModel';
 import type { AgentTurn } from '../../store/sessionStore';
 import type { ToolActivity } from '../../store/agentStore';
 import { countDescendantRuntimeStates, descendantActivityState, sessionRuntimeState } from './sessionRowRuntimeState';
+import { SessionRuntimeStatusIcon } from './SessionPanelIndicators';
 
 const formatChildCount = (count: number): string => count > 99 ? '99+' : String(count);
 
@@ -260,54 +261,7 @@ export function SessionPanelSessionItem({
                 {displayTitle}
               </span>
               <div className="flex shrink-0 items-center gap-1">
-                {effectiveRuntimeState === 'waiting' && (
-                  <AlertTriangle
-                    size={10}
-                    className="text-warning shrink-0"
-                    aria-label="Awaiting confirmation"
-                    data-testid={`session-pending-confirmation-${session.id}`}
-                  />
-                )}
-                {effectiveRuntimeState === 'pending' && (
-                  <Circle
-                    size={10}
-                    className="shrink-0 text-base-content/40"
-                    aria-label="Session pending"
-                    data-testid={`session-pending-${session.id}`}
-                  />
-                )}
-                {effectiveRuntimeState === 'running' && (
-                  <Loader2
-                    size={10}
-                    className="shrink-0 animate-spin text-sky-300"
-                    aria-label="Session running"
-                    data-testid={`session-running-${session.id}`}
-                  />
-                )}
-                {effectiveRuntimeState === 'stopped' && (
-                  <XCircle
-                    size={10}
-                    className="shrink-0 text-base-content/45"
-                    aria-label="Session stopped"
-                    data-testid={`session-stopped-${session.id}`}
-                  />
-                )}
-                {effectiveRuntimeState === 'done' && (
-                  <CheckCircle2
-                    size={10}
-                    className="shrink-0 text-emerald-300"
-                    aria-label="Session completed"
-                    data-testid={`session-done-${session.id}`}
-                  />
-                )}
-                {effectiveRuntimeState === 'error' && (
-                  <XCircle
-                    size={10}
-                    className="shrink-0 text-rose-300"
-                    aria-label="Session failed"
-                    data-testid={`session-error-${session.id}`}
-                  />
-                )}
+                <SessionRuntimeStatusIcon sessionId={session.id} state={effectiveRuntimeState} />
               </div>
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">

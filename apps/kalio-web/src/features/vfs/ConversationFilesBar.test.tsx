@@ -6,6 +6,10 @@ const { apiGet, apiPost } = vi.hoisted(() => ({
   apiGet: vi.fn(),
   apiPost: vi.fn(),
 }));
+const { reportBackendSuccess, reportBackendFailure } = vi.hoisted(() => ({
+  reportBackendSuccess: vi.fn(),
+  reportBackendFailure: vi.fn(),
+}));
 
 vi.mock('../../services/apiClient', () => ({
   apiClient: {
@@ -16,6 +20,13 @@ vi.mock('../../services/apiClient', () => ({
     },
   },
   getApiBaseUrl: () => 'http://api.example.com',
+}));
+
+vi.mock('../../services/backendHealth', () => ({
+  backendHealth: {
+    reportSuccess: reportBackendSuccess,
+    reportFailure: reportBackendFailure,
+  },
 }));
 
 import { ConversationFilesBar } from './ConversationFilesBar';
@@ -93,7 +104,7 @@ describe('ConversationFilesBar', () => {
     );
   });
 
-  it('logs list failures and falls back to an empty file list', async () => {
+  it('logs list failures and shows an offline retry state instead of an empty file list', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     apiGet.mockRejectedValue(new Error('list failed'));
 
@@ -104,7 +115,9 @@ describe('ConversationFilesBar', () => {
     });
 
     fireEvent.click(screen.getByTestId('conversation-files-toggle'));
-    expect(await screen.findByText('No files yet')).toBeInTheDocument();
+    expect(await screen.findByTestId('conversation-files-list-error')).toHaveTextContent('Backend offline');
+    expect(screen.queryByText('No files yet')).toBeNull();
+    expect(reportBackendFailure).toHaveBeenCalled();
   });
 
   it('refreshes on signal changes and shows a preview fallback when file loading fails', async () => {

@@ -6,9 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 const configDir = dirname(fileURLToPath(import.meta.url));
 const vitePort = Number.parseInt(process.env['VITE_PORT'] ?? '5188', 10);
-const apiOrigin = process.env['VITE_API_URL'] ?? 'http://localhost:3016';
+const resolvedVitePort = Number.isNaN(vitePort) ? 5188 : vitePort;
+const hmrClientPort = Number.parseInt(process.env['VITE_HMR_CLIENT_PORT'] ?? String(resolvedVitePort), 10);
+const apiOrigin = process.env['VITE_API_URL'] ?? 'http://127.0.0.1:3016';
 const wsOrigin = process.env['VITE_WS_URL'] ?? apiOrigin;
 const cacheDir = process.env['VITE_CACHE_DIR'] ?? 'node_modules/.vite';
+const devHost = process.env['VITE_DEV_HOST'] ?? '127.0.0.1';
+const hmrHost = process.env['VITE_HMR_HOST'] ?? devHost;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -24,7 +28,14 @@ export default defineConfig({
     },
   },
   server: {
-    port: Number.isNaN(vitePort) ? 5188 : vitePort,
+    host: devHost,
+    port: resolvedVitePort,
+    strictPort: true,
+    hmr: {
+      protocol: 'ws',
+      host: hmrHost,
+      clientPort: Number.isNaN(hmrClientPort) ? resolvedVitePort : hmrClientPort,
+    },
     watch: {
       ignored: ['**/*.spec.ts', '**/*.spec.tsx', '**/*.test.ts', '**/*.test.tsx'],
     },

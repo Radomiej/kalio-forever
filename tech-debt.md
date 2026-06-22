@@ -23,9 +23,9 @@ This file tracks audit items that are real but should not block the current MVP 
 | Full state-machine library | XState may help once states are durable and explicit, but adding it now would wrap an already-tested custom FSM. | Re-evaluate after durable run journal exists. |
 | Message virtualization | Long conversations can grow the DOM and slow the chat view. | Add `react-virtuoso` or equivalent after recovery semantics are stable. |
 | TanStack Query migration | Would improve cache/retry/loading states for REST data, but does not solve chat recovery by itself. | Migrate one feature at a time, starting with sessions/personas, not the live stream path. |
+| Session list loads all sessions at once | Current sidebar fetches `/api/sessions` as one full list, which is already visible with 251 sessions and will get worse. | Add a backend cursor contract (`limit`, `cursor`, `includeChildrenFor`) and migrate the sidebar to TanStack Query `useInfiniteQuery` with socket-driven invalidation. |
 | Auth/RBAC | Needed before multi-user or exposed deployments. | Keep local-first assumptions for MVP; design auth as a separate security milestone. |
 | Credential encryption | API keys are intentionally not returned by APIs, but DB-at-rest encryption is still missing. | Implement libsodium secretbox or OS keychain-backed encryption with migration support. |
 | Tool sandboxing | Host CLI tools can be destructive if misconfigured. | Add optional Docker/Podman execution backend for high-risk tools. |
 | OpenTelemetry traces | Useful for diagnosing long tool loops and agent runs. | Add after run IDs are durable so traces can link to persisted chat runs. |
 | Socket.IO Redis adapter | Required for horizontal scaling. | Defer until more than one backend process is a real deployment target. |
-
