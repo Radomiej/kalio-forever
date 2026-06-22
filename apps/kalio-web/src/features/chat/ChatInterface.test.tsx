@@ -591,6 +591,9 @@ describe('ChatInterface event wiring', () => {
     }];
 
     expect(buildArchitectureRunContext('session-1', files, ['vfs_read', 'fs_read'])).toEqual({
+      maxArchitectureSteps: 64,
+      maxArchitectureNodeVisits: 4,
+      maxArchitectureSubagentIterations: 8,
       parentSessionId: 'session-1',
       hostSessionId: 'session-1',
       historySessionId: 'session-1',
@@ -604,6 +607,9 @@ describe('ChatInterface event wiring', () => {
 
   it('keeps prompt-only architecture runs explicit when no VFS files are attached', () => {
     expect(buildArchitectureRunContext('session-1', [], ['vfs_read'])).toEqual({
+      maxArchitectureSteps: 64,
+      maxArchitectureNodeVisits: 4,
+      maxArchitectureSubagentIterations: 8,
       parentSessionId: 'session-1',
       hostSessionId: 'session-1',
       historySessionId: 'session-1',
@@ -614,6 +620,9 @@ describe('ChatInterface event wiring', () => {
 
   it('includes the selected project path in architecture launch context', () => {
     expect(buildArchitectureRunContext('session-1', [], ['vfs_read'], 'C:\\Projekty\\kalio-forever')).toEqual({
+      maxArchitectureSteps: 64,
+      maxArchitectureNodeVisits: 4,
+      maxArchitectureSubagentIterations: 8,
       parentSessionId: 'session-1',
       hostSessionId: 'session-1',
       historySessionId: 'session-1',

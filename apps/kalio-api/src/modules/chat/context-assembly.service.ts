@@ -186,6 +186,10 @@ function buildLaunchScopePrompt(architectureContext: Record<string, unknown> | u
     `Local project path: ${projectPath}`,
     'Treat this path as the default host project root for file inspection, edits, and terminal checks in this chat.',
     'If you need project evidence, start from this path before assuming another repo or working directory.',
+    'For directory structure, use fs_list. Use fs_read only for files.',
+    'If fs_read returns NOT_A_FILE, switch to fs_list for that path instead of retrying fs_read.',
+    'For a project overview, inspect only a small set of high-signal paths first, then answer once you have enough evidence.',
+    'Do not recursively inventory the whole repository unless the user explicitly asks for a deep listing.',
   ];
   if (executionCwd && executionCwd !== projectPath) {
     scopeLines.push(`Execution working directory: ${executionCwd}`);

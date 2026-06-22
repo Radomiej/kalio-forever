@@ -10,7 +10,7 @@ describe('useArchitectRunOptions', () => {
     expect(result.current.runContext()).toEqual({
       maxArchitectureSteps: 64,
       maxArchitectureNodeVisits: 4,
-      maxArchitectureSubagentIterations: 4,
+      maxArchitectureSubagentIterations: 8,
     });
   });
 
@@ -26,7 +26,7 @@ describe('useArchitectRunOptions', () => {
     expect(result.current.runContext()).toEqual({
       maxArchitectureSteps: 64,
       maxArchitectureNodeVisits: 4,
-      maxArchitectureSubagentIterations: 4,
+      maxArchitectureSubagentIterations: 8,
       projectPath: 'C:/Projekty/kalio-forever',
       executionCwd: 'C:/Projekty/kalio-forever',
       autoApproveArchitectureProjectWrites: true,

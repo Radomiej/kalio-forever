@@ -260,7 +260,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     if (typeof global === 'number' && Number.isFinite(global)) {
       return Math.max(1, Math.min(100, Math.round(global)));
     }
-    return input.slot.slotType === 'tool_executor' ? 2 : 4;
+    return input.slot.slotType === 'tool_executor' ? 2 : 8;
   }
 
   private maxIterationsFromContext(context: Record<string, unknown> | undefined, slotId: string): number | undefined {
@@ -357,6 +357,9 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         '',
         `Local host project path: ${localProjectPath}`,
         'If your answer depends on host project files, call fs_list or fs_read first. Use fs_write only from tool-executor slots when an approved implementation write is required.',
+        'Use fs_list for directories and fs_read only for files.',
+        'If fs_read returns NOT_A_FILE, switch to fs_list for that path instead of retrying fs_read.',
+        'Inspect only the minimum high-signal paths needed for your role, then conclude instead of recursively traversing the whole repository.',
       );
     }
     const context = this.contextForObjective(input.run.context, policy);

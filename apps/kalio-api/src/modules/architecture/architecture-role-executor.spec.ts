@@ -94,7 +94,7 @@ describe('ArchitectureRoleExecutorService', () => {
       parentToolCallId: 'architecture:run-1:pragmatist',
       childSessionId: 'branch-1',
       personaId: 'dev',
-      maxIterations: 4,
+      maxIterations: 8,
       slotPolicy: expect.objectContaining({
         allowedToolNames: expect.arrayContaining(['vfs_list', 'vfs_read']),
       }),
@@ -514,6 +514,35 @@ describe('ArchitectureRoleExecutorService', () => {
     expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].maxIterations).toBe(25);
   });
 
+  it('uses the higher shared default iteration budget for non-tool-executor slots', async () => {
+    const schema = getSchema();
+    const slot = schema.roleSlots.find((candidate) => candidate.slotType === 'participant');
+    if (!slot) throw new Error('Expected participant slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'Subagent result',
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 42,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    await service.execute({
+      schema,
+      run: createRun('subagent_execution'),
+      slot,
+      branchSessionId: 'branch-1',
+      personaId: slot.defaultPersonaId,
+    });
+
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].maxIterations).toBe(8);
+  });
+
   it('returns partial tool evidence when a subagent errors after CLI work starts', async () => {
     const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     const slot = schema?.roleSlots.find((candidate) => candidate.id === 'orchestrator');
@@ -810,6 +839,8 @@ describe('ArchitectureRoleExecutorService', () => {
     expect(slotToolNames(call)).not.toContain('fs_write');
     expect(call?.objective).toContain('Local host project path: C:\\Projekty\\bitecs-gpu---shared-memory-explorer');
     expect(call?.objective).toContain('call fs_list or fs_read first');
+    expect(call?.objective).toContain('Use fs_list for directories and fs_read only for files.');
+    expect(call?.objective).toContain('If fs_read returns NOT_A_FILE, switch to fs_list');
   });
 
   it('grants host project write tools only to tool executor slots without auto-approving them by default', async () => {

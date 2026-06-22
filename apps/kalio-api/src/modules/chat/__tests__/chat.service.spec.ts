@@ -297,6 +297,8 @@ describe('ChatService', () => {
     const systemMessage = params.messages.find((message) => message.role === 'system');
     expect(systemMessage?.content).toContain('Local project path: C:\\Projekty\\kalio-forever');
     expect(systemMessage?.content).toContain('default host project root');
+    expect(systemMessage?.content).toContain('Use fs_read only for files.');
+    expect(systemMessage?.content).toContain('If fs_read returns NOT_A_FILE, switch to fs_list');
   });
 
   it('resumes agent-flow-branch sessions with slot policy narrowing and branch prompt assembly', async () => {
