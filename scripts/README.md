@@ -20,8 +20,9 @@ This folder contains workspace-level helper scripts. Keep command surface small.
 - `pnpm clean` -> cross-platform dist/tsbuildinfo cleanup
 - `pnpm audit:report` -> static architecture audit + aggregated report
 - `pnpm stack:start` -> run QA stack from built backend + vite preview --strictPort on allocated ports, using isolated QA database/workspace paths and mock LLM by default
-- `pnpm qa` -> fixed-port dist-only stack on `3316/5288` with AppData profile `%LocalAppData%\\kalio-forever-qa`, skip-build by default
-- `pnpm qa:rebuild` -> same as `pnpm qa`, but rebuilds backend + frontend first
+- `pnpm qa` -> build backend + frontend dist, then start fixed-port QA on `3316/5288` with AppData profile `%LocalAppData%\\kalio-forever-qa`
+- `pnpm qa:fast` -> start fixed-port QA from existing dist with explicit skip-build
+- `pnpm qa:rebuild` -> compatibility alias for build + fixed-port QA
 - `pnpm qa:status` / `pnpm qa:stop` -> inspect or stop the managed QA stack
 - `pnpm prod` -> prod-profile dist stack on `4016/6188` with AppData `%LocalAppData%\\kalio-forever`
 - `pnpm prod:rebuild` -> build + prod-profile stack
@@ -29,7 +30,7 @@ This folder contains workspace-level helper scripts. Keep command surface small.
 - `pnpm prod:uninstall` -> remove Scheduled Task + app dir, keep user data by default
 - `pnpm stack:status` -> show running state + health checks
 - `pnpm stack:stop` -> stop QA stack and cleanup process tree on Windows
-- `pnpm llm:probe` -> test the running stack's active provider path without printing the API key; refuses non-local API URLs unless explicitly allowed
+- `pnpm llm:probe` -> test the running stack's active provider path without printing the API key; refuses non-local API URLs unless explicitly allowed; infers OpenRouter from `OPENROUTER_API_KEY`
 
 ## Script map
 
@@ -37,16 +38,19 @@ This folder contains workspace-level helper scripts. Keep command surface small.
 - `clean-paths.mjs` - cross-platform recursive cleanup helper
 - `code-audit/*` - architecture/process audit tooling
 - `repo-preflight.mjs` - repo integrity preflight + repair checks
-- `stack-manager.mjs` - start/status/stop for built QA/prod stacks (`--profile prod`, `--runtime direct`)
+- `stack-manager.mjs` - start/status/stop for built QA/prod stacks (`--profile prod`, `--runtime direct`, `status --json`)
+- `stack-state.mjs` - shared managed-stack state contract for readiness, LLM probe, activation, and QA wrappers
 - `install.ps1` - Windows production installer (clone, build, Scheduled Task)
 - `uninstall.ps1` - Windows production uninstaller
 - `kalio-autostart.ps1` - Scheduled Task entrypoint after Windows sign-in
 - `probe-llm.mjs` - sanitized live provider probe through `/api/credentials/test`
+- `llm-provider-config.mjs` - shared provider defaults and API key env resolution for release gates
 
 Examples:
 
 - `pnpm stack:start -- --use-env-llm --provider xiaomimimo --model mimo-v2.5 --base-url https://api.xiaomimimo.com/v1`
 - `pnpm llm:probe -- --provider xiaomimimo --model mimo-v2.5-pro --base-url https://token-plan-ams.xiaomimimo.com/v1`
+- `pnpm llm:probe -- --provider openrouter --model nvidia/nemotron-3-ultra-550b-a55b:free --base-url https://openrouter.ai/api/v1`
 - `pnpm stack:status`
 - `pnpm stack:stop`
 

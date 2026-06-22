@@ -840,6 +840,41 @@ describe('ChatGateway', () => {
       expect(pipeline.getSessionStatusWithRun).toHaveBeenCalledTimes(2);
     });
 
+    it('REGRESSION: re-identifying the root session replays descendant session metadata for hydration', async () => {
+      const childSession = {
+        id: 'child-session',
+        personaId: 'default',
+        title: 'Router',
+        kind: 'subagent',
+        parentSessionId: 'session-1',
+        createdAt: 10,
+        updatedAt: 11,
+      };
+      const grandchildSession = {
+        id: 'grandchild-session',
+        personaId: 'default',
+        title: 'Analyst',
+        kind: 'subagent',
+        parentSessionId: 'child-session',
+        createdAt: 12,
+        updatedAt: 13,
+      };
+      (sessions.listChildren as ReturnType<typeof vi.fn>).mockImplementation(async (sessionId: string) => {
+        if (sessionId === 'session-1') {
+          return [childSession];
+        }
+        if (sessionId === 'child-session') {
+          return [grandchildSession];
+        }
+        return [];
+      });
+
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-1' });
+
+      expect(client.emit.mock.calls).toContainEqual(['session:updated', childSession]);
+      expect(client.emit.mock.calls).toContainEqual(['session:updated', grandchildSession]);
+    });
+
     it('REGRESSION: re-identifying the master session replays child confirmations and lets the socket confirm them', async () => {
       const pending: ToolConfirmationRequest = {
         requestId: 'req-child',

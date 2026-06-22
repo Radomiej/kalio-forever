@@ -15,7 +15,13 @@ $env:AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL='mimo-v2.5-pro'
 npm.cmd run agentflow:paid-readiness
 ```
 
-This command checks the managed Kalio API, live LLM provider state, saved/active credentials, active credential provider validation, Web Search configuration/smoke, stale running AgentFlow rows, and Codex CLI default model. A failing result is a hard stop.
+This command checks the managed Kalio API, live LLM provider state, saved/active credentials, active credential provider validation, stale running AgentFlow rows, and Codex CLI default model. A failing result is a hard stop.
+
+Web Search is required only for flows that need live research or source persistence. For those runs, use:
+
+```powershell
+npm.cmd run agentflow:paid-readiness -- --require-web-search
+```
 
 If the only missing step is local credential activation, put the provider key in ignored `.env.test`, then run:
 
@@ -23,6 +29,16 @@ If the only missing step is local credential activation, put the provider key in
 npm.cmd run agentflow:activate-live-credential -- --provider xiaomimimo --model mimo-v2.5-pro --base-url https://token-plan-ams.xiaomimimo.com/v1
 npm.cmd run agentflow:paid-readiness
 ```
+
+For the current Architecture Debate release gate, OpenRouter is the preferred live provider. Put `OPENROUTER_API_KEY` in ignored `.env.test` or the process environment, then run:
+
+```powershell
+npm.cmd run agentflow:activate-live-credential -- --provider openrouter --model nvidia/nemotron-3-ultra-550b-a55b:free --base-url https://openrouter.ai/api/v1
+npm.cmd run llm:probe -- --provider openrouter --model nvidia/nemotron-3-ultra-550b-a55b:free --base-url https://openrouter.ai/api/v1
+npm.cmd run agentflow:paid-readiness
+```
+
+`agentflow:activate-live-credential` and `llm:probe` also infer OpenRouter from `OPENROUTER_API_KEY` when no explicit provider is passed.
 
 Do not pass real keys in chat, commit them, or print them in logs.
 
@@ -38,7 +54,7 @@ Do not pass real keys in chat, commit them, or print them in logs.
 - [ ] `npm.cmd run agentflow:paid-readiness` passes against the managed Kalio API.
 - [ ] The active credential provider test inside `agentflow:paid-readiness` passes; saved/active DB state alone is not enough.
 - [ ] If a separate high-level model is required, `AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL` is set and the high-level completion smoke passes.
-- [ ] The Web Search config and smoke checks inside `agentflow:paid-readiness` pass when the paid flow requires live research/source persistence.
+- [ ] The Web Search config and smoke checks inside `agentflow:paid-readiness -- --require-web-search` pass when the paid flow requires live research/source persistence.
 - [ ] No live run is already stuck in `running` because of a stale runtime worker.
 - [ ] The run context explicitly disables unavailable paid/CLI backends, or the UI proves the selected backend is available.
 - [ ] The test scenario starts from Kalio FE when the requirement is FE+BE, not only from direct API polling.

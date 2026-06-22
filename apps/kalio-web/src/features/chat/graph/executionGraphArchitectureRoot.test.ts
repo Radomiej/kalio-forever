@@ -58,7 +58,7 @@ describe('buildArchitectureRootGraphModel', () => {
     expect(new Set(model.nodes.map((node) => node.row))).toEqual(new Set([0]));
   });
 
-  it('keeps branch sessions only on real role nodes and marks in-progress architecture graphs as running', () => {
+  it('attaches branch sessions to every executable architecture node and marks in-progress graphs as running', () => {
     const graph = {
       runId: 'run-42',
       schemaId: 'strategic-decision-council',
@@ -124,8 +124,8 @@ describe('buildArchitectureRootGraphModel', () => {
     const roleNode = model.nodes.find((node) => node.id === 'architecture-root:materializer');
 
     expect(routeNode).toMatchObject({
-      sessionId: undefined,
-      subtitle: 'router / pending',
+      sessionId: 'arch-run-42-goal_master',
+      subtitle: 'router / pending / branch session',
       status: 'idle',
       payload: expect.objectContaining({
         kind: 'architecture-run',
@@ -134,24 +134,125 @@ describe('buildArchitectureRootGraphModel', () => {
           status: 'running',
         }),
         route: expect.objectContaining({
-          branchSessionId: undefined,
+          branchSessionOpenable: true,
+          branchSessionId: 'arch-run-42-goal_master',
           streamStatus: 'pending',
         }),
       }),
     });
-    expect(routeNode?.detail).not.toContain('branch messages loaded');
+    expect(routeNode?.detail).toContain('1 branch messages loaded');
     expect(roleNode).toMatchObject({
       sessionId: 'arch-run-42-materializer',
       subtitle: 'role / completed / branch session',
       status: 'success',
       payload: expect.objectContaining({
         route: expect.objectContaining({
+          branchSessionOpenable: true,
           branchSessionId: 'arch-run-42-materializer',
           streamStatus: 'completed',
         }),
       }),
     });
     expect(roleNode?.detail).toContain('1 branch messages loaded');
+  });
+
+  it('maps final artifact nodes to the durable finalizer child session', () => {
+    const graph: ArchitectureGraphProjection = {
+      runId: 'run-final',
+      nodes: [
+        { id: 'router', label: 'Router', kind: 'router', status: 'completed', eventIds: ['event-router'] },
+        { id: 'final-artifact', label: 'Final Artifact', kind: 'artifact', status: 'completed', eventIds: ['event-final'] },
+      ],
+      edges: [
+        { id: 'router-final', fromNodeId: 'router', toNodeId: 'final-artifact' },
+      ],
+      routeHops: [
+        { eventId: 'event-final', source: 'router', fromNodeId: 'router', toNodeId: 'final-artifact' },
+      ],
+    };
+
+    const model = buildArchitectureRootGraphModel({
+      graph,
+      rootSessionId: 'arch-run-final-root',
+      sessions: [
+        {
+          id: 'arch-run-final-finalizer',
+          personaId: 'default',
+          title: 'Strategic Decision Council: Finalizer',
+          kind: 'subagent',
+          parentSessionId: 'arch-run-final-root',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      sessionMessages: {
+        'arch-run-final-finalizer': [
+          {
+            id: 'finalizer-msg-1',
+            sessionId: 'arch-run-final-finalizer',
+            role: 'assistant',
+            content: 'Final answer produced from the routed graph outputs.',
+            createdAt: 1,
+          } as never,
+        ],
+      },
+    });
+
+    const finalNode = model.nodes.find((node) => node.id === 'architecture-root:final-artifact');
+
+    expect(finalNode).toMatchObject({
+      sessionId: 'arch-run-final-finalizer',
+      subtitle: 'artifact / completed / branch session',
+      payload: expect.objectContaining({
+        route: expect.objectContaining({
+          branchSessionOpenable: true,
+          branchSessionId: 'arch-run-final-finalizer',
+        }),
+      }),
+    });
+  });
+
+  it('prefers durable API node session ids over session-name reconstruction', () => {
+    const graph: ArchitectureGraphProjection = {
+      runId: 'run-direct-session',
+      nodes: [
+        {
+          id: 'pragmatist',
+          sessionId: 'custom-pragmatist-session',
+          label: 'Pragmatist',
+          kind: 'role',
+          status: 'completed',
+          eventIds: ['event-pragmatist'],
+        },
+      ],
+      edges: [],
+      routeHops: [
+        { eventId: 'event-pragmatist', source: 'runtime_fallback', fromNodeId: 'pragmatist', toNodeId: 'router' },
+      ],
+    };
+
+    const model = buildArchitectureRootGraphModel({
+      graph,
+      rootSessionId: 'arch-run-direct-session-root',
+      sessions: [
+        {
+          id: 'arch-run-direct-session-pragmatist',
+          personaId: 'default',
+          title: 'Legacy Pragmatist branch',
+          kind: 'subagent',
+          parentSessionId: 'arch-run-direct-session-root',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      sessionMessages: {},
+    });
+
+    const roleNode = model.nodes.find((node) => node.id === 'architecture-root:pragmatist');
+
+    expect(roleNode?.sessionId).toBe('custom-pragmatist-session');
+    expect(roleNode?.payload.kind === 'architecture-run' ? roleNode.payload.route?.branchSessionId : null)
+      .toBe('custom-pragmatist-session');
   });
 
   it('normalizes incomplete tool evidence before exposing it on the architecture root graph', () => {

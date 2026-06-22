@@ -148,6 +148,66 @@ describe('displayTitleForSession', () => {
     ]))).toBe(host.id);
   });
 
+  it('keeps visible technical node sessions in the conversation tree hierarchy', () => {
+    const host = createSession({ id: 'host', title: 'Workflow host' });
+    const container = createSession({
+      id: 'arch-root',
+      title: 'Architecture: Strategic Decision Council',
+      parentSessionId: host.id,
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          schemaName: 'Strategic Decision Council',
+          displayLabel: 'Strategic Decision Council',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'hidden',
+        },
+      },
+    });
+    const router = createSession({
+      id: 'arch-router',
+      title: 'Strategic Decision Council: Router',
+      parentSessionId: container.id,
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'router',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'router',
+          roleSlotType: 'router',
+          displayLabel: 'Router',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'visible',
+        },
+      },
+    });
+    const branch = createSession({
+      id: 'arch-analyst',
+      title: 'Strategic Decision Council: Analyst',
+      parentSessionId: router.id,
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'analyst',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'analyst',
+          displayLabel: 'Analyst',
+          sessionSurface: 'conversation-branch',
+        },
+      },
+    });
+
+    expect(visibleConversationParentId(branch, new Map([
+      [host.id, host],
+      [container.id, container],
+      [router.id, router],
+      [branch.id, branch],
+    ]))).toBe(router.id);
+  });
+
   it('treats untouched pending architecture branches as sidebar placeholders', () => {
     const branch = createSession({
       id: 'arch-run-innovator',

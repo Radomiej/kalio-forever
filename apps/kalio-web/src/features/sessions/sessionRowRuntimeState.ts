@@ -14,6 +14,12 @@ function isTerminalRuntimeState(state: SessionRuntimeState | null | undefined): 
   return state === 'done' || state === 'error' || state === 'stopped';
 }
 
+function isLiveMetadataRuntimeState(
+  state: SessionRuntimeState | null | undefined,
+): state is 'pending' | 'running' | 'waiting' {
+  return state === 'pending' || state === 'running' || state === 'waiting';
+}
+
 export function sessionRuntimeState(
   session: ChatSession | null,
   sessionId: string,
@@ -40,6 +46,8 @@ export function sessionRuntimeState(
     safeSessionMessages[sessionId] ?? [],
     safeSessionAgentTurns[sessionId] ?? [],
   );
+  const liveMetadataState = [architectureState, workflowEnvelopeState]
+    .find(isLiveMetadataRuntimeState) ?? null;
   const lastTurn = safeSessionAgentTurns[sessionId]?.at(-1);
   const turnTerminalState: SessionRuntimeState | null = lastTurn?.error
     ? 'error'
@@ -54,6 +62,9 @@ export function sessionRuntimeState(
       return terminalState;
     }
     return snapshotState;
+  }
+  if (liveMetadataState) {
+    return liveMetadataState;
   }
   if (terminalState) {
     return terminalState;

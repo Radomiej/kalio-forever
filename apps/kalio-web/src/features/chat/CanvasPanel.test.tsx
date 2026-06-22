@@ -831,6 +831,91 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.queryByTestId('architecture-run-transcript-branch-arch-run-placeholder-analyst')).not.toBeInTheDocument();
   });
 
+  it('opens technical architecture sessions when replayed graph run ids are arch-prefixed', () => {
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-run', runId: 'arch-run-prefixed' };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'arch-run-prefixed-router',
+        personaId: 'default',
+        title: 'Strategic Decision Council: Router',
+        kind: 'subagent',
+        parentSessionId: 'arch-run-prefixed-root',
+        createdAt: 2,
+        updatedAt: 3,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'router',
+          architectureContext: {
+            architectureRunId: 'run-prefixed',
+            roleSlotId: 'router',
+            roleSlotType: 'router',
+            sessionSurface: 'technical-node',
+            conversationVisibility: 'visible',
+            displayLabel: 'Router',
+          },
+        },
+      },
+    ];
+    sessionState.messages = [
+      {
+        id: 'arch-prefixed-summary',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: '### Router',
+        createdAt: 3,
+        architectureRun: {
+          runId: 'arch-run-prefixed',
+          schemaId: 'strategic-decision-council',
+          status: 'completed',
+          trace: [
+            {
+              speaker: 'router',
+              content: '### Router\nRoute: router -> final-artifact',
+              eventId: 'event-router',
+              nodeId: 'router',
+              nextNodeId: 'final-artifact',
+            },
+          ],
+          routeHops: [],
+          graphNodes: [
+            {
+              id: 'router',
+              sessionId: 'arch-run-prefixed-router',
+              label: 'Router',
+              kind: 'router',
+              status: 'completed',
+              eventIds: ['event-router'],
+            },
+          ],
+          graphEdges: [],
+        } as NonNullable<ChatMessage['architectureRun']> & {
+          graphNodes: Array<{
+            id: string;
+            sessionId: string;
+            label: string;
+            kind: 'router';
+            status: 'completed';
+            eventIds: string[];
+          }>;
+          graphEdges: [];
+        },
+      },
+    ];
+    sessionState.sessionMessages = { 'session-1': sessionState.messages };
+
+    render(<CanvasPanel />);
+
+    fireEvent.click(screen.getByTestId('architecture-open-branch-arch-run-prefixed-router'));
+
+    expect(agentState.setCanvasFocus).toHaveBeenCalledWith({
+      kind: 'architecture-branch',
+      sessionId: 'arch-run-prefixed-router',
+    });
+  });
+
   it('shows a waiting state for a real focused architecture branch before its transcript hydrates', () => {
     agentState.toolActivities = [];
     agentState.activeAgentLoops = {};

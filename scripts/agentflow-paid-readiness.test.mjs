@@ -69,9 +69,11 @@ test('paid readiness fails closed for mock provider, missing credentials, stale 
     'Found stale running AgentFlow runs: run-stale',
     'Codex CLI agent is disabled.',
     'Codex CLI default model is gpt-5.3-codex, expected gpt-5.4-mini.',
-    'Web Search is not configured (perplexity); configure it before paid research/persistence runs.',
-    'Web Search smoke failed: Web search not configured.',
   ]);
+  assert.ok(checks.some((check) => (
+    check.ok === true
+    && check.message === 'Web Search is not required for this readiness profile'
+  )));
 });
 
 test('paid readiness passes only when live provider, active credential, fresh runs, and Codex defaults are valid', async () => {
@@ -292,8 +294,6 @@ test('paid readiness honors explicit API base when the managed stack uses random
     'http://127.0.0.1:51052/api/agent-flows/runs',
     'http://127.0.0.1:51052/api/sessions',
     'http://127.0.0.1:51052/api/cli-agents/codex/config',
-    'http://127.0.0.1:51052/api/search/config',
-    'http://127.0.0.1:51052/api/search/test',
     'http://127.0.0.1:51052/api/credentials/cred-live/test',
     'http://127.0.0.1:51052/api/credentials/cred-live/test-completion',
   ]);
@@ -304,6 +304,7 @@ test('paid readiness fails when Web Search is not configured for research persis
     apiBase: 'http://kalio.test/api',
     now: 10_000,
     maxRunningAgeMs: 1_000,
+    requireWebSearch: true,
     fetchJson: fetchFrom({
       'http://kalio.test/api/llm/config': response({ provider: 'xiaomimimo', source: 'db', model: 'mimo-v2.5' }),
       'http://kalio.test/api/credentials': response([{ id: 'cred-live' }]),
@@ -329,6 +330,71 @@ test('paid readiness fails when Web Search is not configured for research persis
   assert.ok(checks.some((check) => (
     check.ok === false
     && check.message === 'Web Search smoke failed: Web search not configured.'
+  )));
+});
+
+test('paid readiness does not require Web Search for non-research live workflow profiles', async () => {
+  const exitCode = await runPaidReadinessCheck({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    stdout() {},
+    stderr() {},
+    fetchJson: fetchFrom({
+      'http://kalio.test/api/llm/config': response({ provider: 'openrouter', source: 'db', model: 'nvidia/nemotron-3-ultra-550b-a55b:free' }),
+      'http://kalio.test/api/credentials': response([{ id: 'cred-openrouter' }]),
+      'http://kalio.test/api/credentials/active': response({ credentialId: 'cred-openrouter' }),
+      'http://kalio.test/api/credentials/cred-openrouter/test': response({ ok: true, modelCount: 340 }),
+      'http://kalio.test/api/credentials/cred-openrouter/test-completion': response({
+        ok: true,
+        provider: 'openrouter',
+        model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+        source: 'db',
+      }),
+      'http://kalio.test/api/agent-flows/runs': response([]),
+      'http://kalio.test/api/cli-agents/codex/config': response({ enabled: true, model: 'gpt-5.4-mini' }),
+      'http://kalio.test/api/search/config': response({ provider: 'perplexity', configured: false }),
+      'http://kalio.test/api/search/test': response({ ok: false, error: 'Web search not configured.' }),
+    }),
+  });
+
+  assert.equal(exitCode, 0);
+});
+
+test('paid readiness skips active credential smoke when env provider is forced', async () => {
+  const requestedUrls = [];
+  const checks = await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    fetchJson: async (url) => {
+      requestedUrls.push(url);
+      if (url === 'http://kalio.test/api/llm/config') {
+        return response({ provider: 'mock', source: 'env', model: 'mock' });
+      }
+      if (url === 'http://kalio.test/api/credentials') {
+        return response([{ id: 'cred-stale' }]);
+      }
+      if (url === 'http://kalio.test/api/credentials/active') {
+        return response({ credentialId: 'cred-stale' });
+      }
+      if (url === 'http://kalio.test/api/agent-flows/runs') {
+        return response([]);
+      }
+      if (url === 'http://kalio.test/api/sessions') {
+        return response([]);
+      }
+      if (url === 'http://kalio.test/api/cli-agents/codex/config') {
+        return response({ enabled: true, model: 'gpt-5.4-mini' });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+
+  assert.ok(!requestedUrls.some((url) => url.includes('/credentials/cred-stale/test')));
+  assert.ok(checks.some((check) => (
+    check.ok === true
+    && check.message === 'Active credential smoke skipped because effective LLM source is not db'
   )));
 });
 

@@ -709,8 +709,10 @@ describe('buildExecutionGraphModel', () => {
     const routeNode = model.nodes.find((node) => node.id === 'architecture-route:a1:0');
 
     expect(routeNode?.detail).toContain('Stream completed / 2 chunks');
-    expect(routeNode?.detail).toContain('Real streamed response');
+    expect(routeNode?.detail).toContain('Branch completed its role-specific response.');
     expect(routeNode?.detail).not.toContain('branch-agent-1');
+    expect(routeNode?.sessionId).toBe('branch-agent-1');
+    expect(routeNode?.payload.kind === 'architecture-run' ? routeNode.payload.route?.branchSessionOpenable : null).toBe(true);
     expect(routeNode?.payload.kind === 'architecture-run' ? routeNode.payload.route?.branchSessionId : null).toBe('branch-agent-1');
   });
 

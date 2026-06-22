@@ -215,6 +215,42 @@ describe('MockLLMProvider', () => {
     ]);
   });
 
+  it('REGRESSION: stops repeating deterministic vfs_write after the HITL tool result exists', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const onToolArgChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Please trigger HITL tool intent [[mock:tool:vfs_write:no-arg-progress]]',
+      },
+      {
+        role: 'tool',
+        toolCallId: 'mock-tool-1',
+        content: JSON.stringify({
+          name: 'vfs_write',
+          result: {
+            filePath: 'e2e/mock-tool-trigger.txt',
+            bytesWritten: 25,
+          },
+        }),
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'vfs_write', description: 'Write to VFS', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-2', onChunk, onToolArgChunk },
+    );
+
+    expect(toolCalls).toEqual([]);
+    expect(onToolArgChunk).not.toHaveBeenCalled();
+    expect(onChunk).toHaveBeenCalledWith(expect.objectContaining({
+      delta: expect.stringContaining('vfs_write completed'),
+      done: false,
+    }));
+  });
+
   it('returns deterministic fs_write tool call with prompt-provided path and content', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();

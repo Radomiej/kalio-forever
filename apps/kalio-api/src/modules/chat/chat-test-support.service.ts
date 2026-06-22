@@ -89,7 +89,7 @@ export class ChatTestSupportService {
   ) {}
 
   async seedReplayFixture(input: SeedReplayFixtureInput): Promise<ToolConfirmationRequest> {
-    this.assertTestMode();
+    this.assertTestSupportEnabled();
     await this.sessions.get(input.sessionId);
 
     const now = Date.now();
@@ -131,14 +131,14 @@ export class ChatTestSupportService {
   }
 
   dropPendingConfirmation(input: DropPendingConfirmationInput): { status: 'removed' | 'not_found' | 'session_mismatch' } {
-    this.assertTestMode();
+    this.assertTestSupportEnabled();
     return {
       status: this.toolDispatch.dropPendingConfirmation(input.requestId, input.sessionId),
     };
   }
 
   async seedBudgetReplayFixture(input: SeedBudgetReplayFixtureInput): Promise<AgentBudgetApprovalRequest> {
-    this.assertTestMode();
+    this.assertTestSupportEnabled();
     await this.sessions.get(input.sessionId);
 
     const now = Date.now();
@@ -171,7 +171,7 @@ export class ChatTestSupportService {
   }
 
   dropPendingBudgetApproval(input: DropPendingBudgetApprovalInput): { status: 'removed' | 'not_found' | 'session_mismatch' } {
-    this.assertTestMode();
+    this.assertTestSupportEnabled();
     const status = this.agentBudgetApprovals.dropPendingApproval(input.requestId, input.sessionId);
     if (status === 'removed' && input.sessionId) {
       this.sessionPipeline.clearSeededActiveTurn(input.sessionId);
@@ -182,7 +182,7 @@ export class ChatTestSupportService {
   }
 
   async seedRaAppHitlFixture(input: SeedRaAppHitlFixtureInput): Promise<SeedRaAppHitlFixtureResult> {
-    this.assertTestMode();
+    this.assertTestSupportEnabled();
     await this.sessions.get(input.sessionId);
 
     const now = Date.now();
@@ -242,8 +242,10 @@ export class ChatTestSupportService {
     };
   }
 
-  private assertTestMode(): void {
-    if (this.config.get<string>('NODE_ENV', 'development') !== 'test') {
+  private assertTestSupportEnabled(): void {
+    const isTestMode = this.config.get<string>('NODE_ENV', 'development') === 'test';
+    const isExplicitlyEnabled = this.config.get<boolean>('KALIO_ENABLE_TEST_SUPPORT', false) === true;
+    if (!isTestMode && !isExplicitlyEnabled) {
       throw new NotFoundException();
     }
   }

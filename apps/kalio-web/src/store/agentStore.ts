@@ -67,6 +67,7 @@ interface AgentState {
   /** Pending tool confirmations keyed by sessionId */
   pendingConfirmations: Record<string, ToolConfirmationRequest[]>;
   pendingBudgetApprovals: Record<string, AgentBudgetApprovalRequest[]>;
+  settledConfirmationRequestIds: Record<string, true>;
   availableTools: ToolMeta[];
   tools: ToolMeta[];
   /** Tool calls active in the current turn, in order */
@@ -192,6 +193,7 @@ function runtimeStatusFromToolActivityStatus(status: ToolActivityStatus): Runtim
 function toolActivityFromRuntime(activity: RuntimeToolActivity): ToolActivity {
   return {
     callId: activity.callId,
+    requestId: activity.requestId,
     toolName: activity.toolName,
     args: activity.args,
     sessionId: activity.sessionId,
@@ -205,6 +207,7 @@ function toolActivityFromRuntime(activity: RuntimeToolActivity): ToolActivity {
 function toolActivityToRuntime(activity: ToolActivity): RuntimeToolActivity {
   return {
     callId: activity.callId,
+    requestId: activity.requestId,
     sessionId: activity.sessionId ?? '',
     toolName: activity.toolName,
     args: activity.args,
@@ -221,6 +224,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   streamingSessionId: null,
   pendingConfirmations: {},
   pendingBudgetApprovals: {},
+  settledConfirmationRequestIds: {},
   availableTools: [],
   tools: [],
   toolActivities: [],

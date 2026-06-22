@@ -5,6 +5,54 @@ import { reconstructDurableArchitectureGraph } from './architecture-durable-grap
 import type { SessionsService } from '../chat/sessions.service';
 
 describe('reconstructDurableArchitectureGraph', () => {
+  it('does not double-prefix node session ids when replaying an arch-prefixed run id', async () => {
+    const runId = 'arch-prefixed-replay-run';
+    const registry = new ArchitectureRegistryService();
+    const sessions = createPersistedSessions({
+      [`${runId}-root`]: [
+        {
+          id: `architecture:${runId}:user`,
+          sessionId: `${runId}-root`,
+          role: 'user',
+          content: '[Architecture: strategic-decision-council]\nAssess the project architecture.',
+          createdAt: 100,
+        },
+        {
+          id: `architecture:${runId}:router`,
+          sessionId: `${runId}-router`,
+          role: 'assistant',
+          content: '### Router\nRoute: router -> final-artifact',
+          createdAt: 101,
+        },
+        {
+          id: `architecture:${runId}:finalizer`,
+          sessionId: `${runId}-finalizer`,
+          role: 'assistant',
+          content: '### Finalizer\nFinal answer.',
+          createdAt: 102,
+        },
+      ],
+    });
+
+    const graph = await reconstructDurableArchitectureGraph(runId, sessions, registry);
+
+    expect(graph?.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'router',
+        sessionId: `${runId}-router`,
+        action: 'router_selected',
+        detail: 'Selected final-artifact.',
+      }),
+      expect.objectContaining({
+        id: 'final-artifact',
+        sessionId: `${runId}-finalizer`,
+        action: 'finalizer_completed',
+        detail: 'Final answer ready.',
+      }),
+    ]));
+    expect(graph?.nodes.map((node) => node.sessionId)).not.toContain(`arch-${runId}-router`);
+  });
+
   it('projects persisted CLI child evidence from expected files and keeps completed status over stale running snapshots', async () => {
     const runId = 'durable-child-proof-run';
     const registry = new ArchitectureRegistryService();
@@ -96,8 +144,14 @@ describe('reconstructDurableArchitectureGraph', () => {
     expect(graph).toMatchObject({
       runId,
       nodes: expect.arrayContaining([
-        expect.objectContaining({ id: 'final-artifact', status: 'completed' }),
-        expect.objectContaining({ id: 'implementer', status: 'pending' }),
+        expect.objectContaining({
+          id: 'final-artifact',
+          sessionId: `arch-${runId}-finalizer`,
+          status: 'completed',
+          action: 'finalizer_completed',
+          detail: 'Final answer ready.',
+        }),
+        expect.objectContaining({ id: 'implementer', sessionId: `arch-${runId}-implementer`, status: 'pending' }),
       ]),
       childAgents: [
         expect.objectContaining({

@@ -14,6 +14,7 @@ export const envSchema = Joi.object({
   // Dedicated embedding provider (optional — falls back to LLM config if not set)
   EMBEDDING_BASE_URL:  Joi.string().optional(),
   EMBEDDING_API_KEY:   Joi.string().optional(),
+  KALIO_ENABLE_TEST_SUPPORT: Joi.boolean().default(false),
   // Web search (Perplexity) — optional, can be configured via Settings UI
   PERPLEXITY_API_KEY:  Joi.string().optional(),
   PERPLEXITY_PROVIDER: Joi.string().valid('perplexity', 'perplexity-openrouter').optional(),

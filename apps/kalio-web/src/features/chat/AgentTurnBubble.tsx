@@ -18,6 +18,7 @@ import { deriveVisibleTurnItems } from './agentTurnVisibleItems';
 import { isMessageLiveStreaming } from './agentTurnStreaming';
 import { eventBus } from '../../services/eventBus';
 import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
+import { architectureRunIdForSession, sameArchitectureRunId } from '../sessions/sessionTreeDisplay';
 import { resolveWorkflowTurnProjection } from './workflowTurnProjection';
 import type { ChatMessage } from '@kalio/types';
 import {
@@ -180,6 +181,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
       renderableSessions
         .filter((session) => (
           turnBranchSessionIds.has(session.id)
+          || (turnArchitectureRun && sameArchitectureRunId(architectureRunIdForSession(session), turnArchitectureRun.runId))
           || (
           liveSessionIds.has(session.id)
           || (sessionMessages?.[session.id]?.length ?? 0) > 0

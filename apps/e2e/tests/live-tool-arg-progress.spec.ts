@@ -1,6 +1,13 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { io, Socket } from 'socket.io-client';
-import { API_BASE, selectSession, sendMessageFromComposer, deleteSessionIfExists } from './helpers/test-config';
+import {
+  API_BASE,
+  deleteSessionIfExists,
+  getActiveCredentialId,
+  restoreActiveCredential,
+  selectSession,
+  sendMessageFromComposer,
+} from './helpers/test-config';
 
 const WS_BASE = API_BASE.replace('/api', '');
 const LIVE_PROVIDER = process.env['KALIO_LIVE_LLM_PROVIDER'] ?? 'xiaomimimo';
@@ -31,21 +38,6 @@ async function waitFor<T>(producer: () => T | undefined, timeoutMs: number, labe
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error(`Timeout waiting for ${label}`);
-}
-
-async function getActiveCredentialId(request: APIRequestContext): Promise<string | null> {
-  const response = await request.get(`${API_BASE}/credentials/active`);
-  expect(response.ok()).toBeTruthy();
-  const payload = await response.json() as { credentialId?: string | null };
-  return payload.credentialId ?? null;
-}
-
-async function restoreActiveCredential(request: APIRequestContext, credentialId: string | null): Promise<void> {
-  if (credentialId) {
-    await request.put(`${API_BASE}/credentials/active/${credentialId}`);
-    return;
-  }
-  await request.delete(`${API_BASE}/credentials/active`);
 }
 
 async function runLiveRaappFlow(page: Page, request: APIRequestContext): Promise<{

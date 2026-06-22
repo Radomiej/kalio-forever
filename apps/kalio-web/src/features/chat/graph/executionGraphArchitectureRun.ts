@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@kalio/types';
 import type { AgentTurn } from '../../../store/sessionStore';
+import { architectureTraceActivitySummary } from '../architectureChatSummary';
 import type { ExecutionGraphEdge, ExecutionGraphNode } from './executionGraphModel.types';
 
 type ArchitectureRun = NonNullable<ChatMessage['architectureRun']>;
@@ -67,6 +68,7 @@ export function renderArchitectureRunProjection({
   routeSteps.forEach(({ hop, traceStep }, index) => {
     const layout = architectureRouteLayout(routeSteps, index);
     const fromLabel = traceStep?.visitIndex ? `${hop.fromNodeId} #${traceStep.visitIndex}` : hop.fromNodeId;
+    const branchSessionId = traceStep?.sessionId ?? traceStep?.stream?.branchSessionId;
     const routeNode = addNode({
       id: `architecture-route:${finalMessage.id}:${index}`,
       kind: 'architecture-run',
@@ -77,6 +79,7 @@ export function renderArchitectureRunProjection({
       column: branchMaxColumn + 2 + layout.column,
       row: startRow + layout.row,
       turnId: turn.id,
+      sessionId: branchSessionId,
       payload: {
         kind: 'architecture-run',
         summary: run,
@@ -85,9 +88,10 @@ export function renderArchitectureRunProjection({
           source: hop.source,
           fromNodeId: hop.fromNodeId,
           toNodeId: hop.toNodeId,
+          branchSessionOpenable: Boolean(branchSessionId),
           streamStatus: traceStep?.stream?.status,
           chunkCount: traceStep?.stream?.chunkCount,
-          branchSessionId: traceStep?.stream?.branchSessionId,
+          branchSessionId,
           contentPreview: compactArchitectureContent(traceStep?.content),
         },
       },
@@ -193,7 +197,11 @@ function architectureRouteDetail(
   const stream = traceStep.stream
     ? `Stream ${traceStep.stream.status} / ${traceStep.stream.chunkCount} chunks`
     : undefined;
-  return [stream, compactArchitectureContent(traceStep.content)].filter(Boolean).join('\n');
+  const activity = traceStep.stream?.status === 'started' || traceStep.stream?.status === 'streaming' || traceStep.stream?.status === 'failed'
+    ? architectureTraceActivitySummary(traceStep.speaker, traceStep.stream.status)
+    : traceStep.actionSummary ?? architectureTraceActivitySummary(traceStep.speaker);
+  const incomplete = traceStep.incompleteReason ? `Incomplete: ${traceStep.incompleteReason}` : undefined;
+  return [stream, activity, incomplete].filter(Boolean).join('\n');
 }
 
 function compactArchitectureContent(value: string | undefined): string | undefined {

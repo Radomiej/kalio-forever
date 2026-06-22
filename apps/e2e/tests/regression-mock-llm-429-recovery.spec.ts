@@ -3,6 +3,8 @@ import {
   API_BASE,
   deleteSessionIfExists,
   expectComposerEnabled,
+  getActiveCredentialId,
+  restoreActiveCredential,
   selectSession,
   sendMessageFromComposer,
 } from './helpers/test-config';
@@ -13,8 +15,7 @@ function uniqueSessionTitle(prefix: string): string {
 
 test.describe('REGRESSION: mock LLM 429 recovery', () => {
   test('UI recovers cleanly after a deterministic mock-provider 429 error', async ({ page, request }) => {
-    const previousActiveResponse = await request.get(`${API_BASE}/credentials/active`);
-    const previousActive = await previousActiveResponse.json() as { credentialId?: string | null };
+    const previousActiveCredentialId = await getActiveCredentialId(request);
 
     const credentialResponse = await request.post(`${API_BASE}/credentials`, {
       data: {
@@ -54,11 +55,7 @@ test.describe('REGRESSION: mock LLM 429 recovery', () => {
       await expect(page.getByText('No active agent runs.')).toBeVisible({ timeout: 10_000 });
     } finally {
       await deleteSessionIfExists(request, session.id);
-      if (previousActive.credentialId) {
-        await request.put(`${API_BASE}/credentials/active/${previousActive.credentialId}`);
-      } else {
-        await request.delete(`${API_BASE}/credentials/active`);
-      }
+      await restoreActiveCredential(request, previousActiveCredentialId);
       await request.delete(`${API_BASE}/credentials/${credential.id}`);
     }
   });

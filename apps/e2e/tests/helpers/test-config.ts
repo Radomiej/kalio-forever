@@ -29,8 +29,50 @@ export async function isMockLlm(request: APIRequestContext): Promise<boolean> {
 	return config.source === 'env' && config.provider === 'mock';
 }
 
+export async function getActiveCredentialId(request: APIRequestContext): Promise<string | null> {
+	const response = await request.get(`${API_BASE}/credentials/active`);
+	if (!response.ok()) {
+		throw new Error(`Failed to read active credential: ${response.status()} ${response.statusText()}`);
+	}
+
+	const payload = await response.json() as { credentialId?: string | null };
+	return payload.credentialId ?? null;
+}
+
+export async function restoreActiveCredential(
+	request: APIRequestContext,
+	credentialId: string | null,
+): Promise<void> {
+	if (credentialId) {
+		const response = await request.put(`${API_BASE}/credentials/active/${credentialId}`);
+		expect(response.ok()).toBeTruthy();
+		return;
+	}
+
+	const response = await request.delete(`${API_BASE}/credentials/active`);
+	expect(response.ok()).toBeTruthy();
+}
+
+export async function ensureEnvMockProvider(request: APIRequestContext): Promise<void> {
+	const response = await request.delete(`${API_BASE}/credentials/active`);
+	expect(response.ok()).toBeTruthy();
+	await expect.poll(async () => isMockLlm(request), {
+		timeout: 10_000,
+		message: 'Expected Playwright stack to fall back to env mock provider',
+	}).toBe(true);
+}
+
 export async function selectSession(page: Page, sessionId: string, title: string): Promise<void> {
+	await expect(page.getByTestId('session-panel')).toBeVisible({ timeout: 15_000 });
+
 	for (let attempt = 0; attempt < 3; attempt += 1) {
+		await expect
+			.poll(
+				async () => page.getByText('Connecting to backend...').count(),
+				{ timeout: 15_000 },
+			)
+			.toBe(0);
+
 		const sessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
 		if (await sessionItem.isVisible().catch(() => false)) {
 			await sessionItem.evaluate((node) => {
@@ -47,6 +89,11 @@ export async function selectSession(page: Page, sessionId: string, title: string
 				)
 				.toBe(sessionId);
 			return;
+		}
+
+		await page.waitForTimeout(1_000);
+		if (await sessionItem.isVisible().catch(() => false)) {
+			continue;
 		}
 
 		if (attempt < 2) {

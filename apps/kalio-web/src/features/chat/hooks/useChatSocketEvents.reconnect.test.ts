@@ -691,9 +691,10 @@ describe('handleSocketReconnect', () => {
     expect(setAgentTurns).not.toHaveBeenCalled();
   });
 
-  it('clears awaitingFirstChunk during reconnect recovery before replaying a live runtime snapshot', async () => {
+  it('clears awaitingFirstChunk immediately during reconnect recovery before async hydration resumes', async () => {
     const setAwaitingFirstChunk = vi.fn();
     const setStreaming = vi.fn();
+    const fetchMessages = vi.fn(async () => []);
 
     useAgentStore.setState({
       runtimeActivitySnapshots: {
@@ -766,13 +767,15 @@ describe('handleSocketReconnect', () => {
         useSessionStore.getState().setAgentTurns(turns, sessionId);
       }),
       hasActiveLoopForSession: () => false,
-      fetchMessages: async () => [],
+      fetchMessages,
     });
 
     await waitFor(() => {
       expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
     });
     expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-1');
-    expect(useSessionStore.getState().getSessionActiveTurnId('session-1')).toBe('turn-live');
+    await waitFor(() => {
+      expect(fetchMessages).toHaveBeenCalledWith('session-1');
+    });
   });
 });

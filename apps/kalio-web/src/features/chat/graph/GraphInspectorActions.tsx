@@ -32,6 +32,8 @@ export function GraphInspectorActions({
   const childSessionExists = useSessionStore((state) => (
     node.sessionId != null && state.sessions.some((session) => session.id === node.sessionId)
   ));
+  const isArchitectureRunNode = node.payload.kind === 'architecture-run';
+  const hasOpenableSession = isArchitectureRunNode || childSessionExists;
   const openConversation = (sessionId: string, reason: 'canvas' | 'confirmation') => {
     void activateConversationSession({
       sessionId,
@@ -44,10 +46,10 @@ export function GraphInspectorActions({
     node.payload.kind === 'subagent'
     || node.payload.kind === 'cli-agent'
     || node.payload.kind === 'agent-flow'
-    || (node.payload.kind === 'architecture-run' && node.payload.route?.branchSessionOpenable === true)
+    || isArchitectureRunNode
   )
     && node.sessionId
-    && childSessionExists
+    && hasOpenableSession
     && node.sessionId !== activeSessionId;
   const isCliChildNode = node.payload.kind === 'cli-agent' && isChildSessionNode;
   const isAgentFlowChildNode = node.payload.kind === 'agent-flow' && isChildSessionNode;

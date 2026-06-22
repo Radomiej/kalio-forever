@@ -42,6 +42,46 @@ function runtimeContextsEqual(left: SessionRuntimeContext, right: SessionRuntime
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringField(record: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function architectureContextForSubagent(request: RunSubagentRequest): ArchitectureRuntimeContext | undefined {
+  const base = isRecord(request.architectureContext)
+    ? request.architectureContext as ArchitectureRuntimeContext
+    : undefined;
+  if (!isRecord(request.auditContext) || !stringField(request.auditContext, 'architectureRunId')) {
+    return base;
+  }
+
+  const audit = request.auditContext;
+  const roleSlotId = stringField(audit, 'roleSlotId');
+  const roleSlotType = stringField(audit, 'roleSlotType');
+  const technicalSlot = roleSlotType === 'router'
+    || roleSlotType === 'finalizer'
+    || roleSlotId === 'router'
+    || roleSlotId === 'finalizer'
+    || roleSlotId === 'orchestrator';
+
+  return {
+    ...(base ?? {}),
+    architectureRunId: stringField(audit, 'architectureRunId'),
+    schemaId: stringField(audit, 'schemaId') ?? base?.schemaId,
+    schemaName: stringField(audit, 'schemaName') ?? base?.schemaName,
+    roleSlotId,
+    roleSlotType,
+    roleLabel: stringField(audit, 'roleLabel'),
+    displayLabel: stringField(audit, 'displayLabel') ?? stringField(audit, 'roleLabel') ?? base?.displayLabel,
+    sessionSurface: technicalSlot ? 'technical-node' : (base?.sessionSurface ?? 'conversation-branch'),
+    conversationVisibility: 'visible',
+  };
+}
+
 function resolveHistorySessionId(
   runtimeKind: SessionRuntimeContext['runtimeKind'],
   architectureContext: ArchitectureRuntimeContext | undefined,
@@ -93,9 +133,10 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     const subagentDepth = parentDepth + 1;
     const runtimeKind = request.auditContext?.architectureRunId ? 'agent-flow-branch' : 'subagent';
     const personaId = request.personaId ?? 'default';
+    const architectureContext = architectureContextForSubagent(request);
     const historySessionId = resolveHistorySessionId(
       runtimeKind,
-      request.architectureContext,
+      architectureContext,
       request.parentSessionId,
       childSessionId,
     );
@@ -122,7 +163,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       modelOverride: request.model,
       explicitToolNames: policyDecision.allowedToolNames,
       systemPromptProfile: runtimeKind === 'agent-flow-branch' ? 'agent-flow-branch' : 'subagent',
-      architectureContext: request.architectureContext,
+      architectureContext,
       architectureSlotId: typeof request.auditContext?.roleSlotId === 'string'
         ? request.auditContext.roleSlotId
         : undefined,

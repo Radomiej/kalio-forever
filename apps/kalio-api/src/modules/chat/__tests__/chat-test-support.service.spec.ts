@@ -4,9 +4,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingApproval } from '../../raapp/effects-processor.service';
 import { ChatTestSupportService } from '../chat-test-support.service';
 
-function makeConfig(environment: string) {
+function makeConfig(environment: string, testSupportEnabled = false) {
   return {
-    get: vi.fn().mockReturnValue(environment),
+    get: vi.fn((key: string, fallback?: unknown) => {
+      if (key === 'NODE_ENV') {
+        return environment;
+      }
+      if (key === 'KALIO_ENABLE_TEST_SUPPORT') {
+        return testSupportEnabled;
+      }
+      return fallback;
+    }),
   };
 }
 
@@ -166,6 +174,32 @@ describe('ChatTestSupportService', () => {
       expect(agentBudgetApprovals.seedPendingApproval).not.toHaveBeenCalled();
       expect(sessionPipeline.seedActiveTurn).not.toHaveBeenCalled();
       expect(repo.saveMessage).not.toHaveBeenCalled();
+    });
+
+    it('allows replay seeding in QA when test-support is explicitly enabled', async () => {
+      config = makeConfig('production', true);
+      service = new ChatTestSupportService(
+        config as never,
+        sessions as never,
+        toolDispatch as never,
+        raappHitl as never,
+        agentBudgetApprovals as never,
+        sessionPipeline as never,
+        repo as never,
+      );
+
+      await service.seedBudgetReplayFixture({
+        sessionId: 'sess-qa',
+        requestId: 'budget-qa',
+        promptMessage: 'Seed QA replay',
+        currentLimit: 25,
+        usedIterations: 25,
+      });
+
+      expect(sessions.get).toHaveBeenCalledWith('sess-qa');
+      expect(agentBudgetApprovals.seedPendingApproval).toHaveBeenCalled();
+      expect(sessionPipeline.seedActiveTurn).toHaveBeenCalledWith('sess-qa', expect.stringMatching(/^seeded-budget-turn-/));
+      expect(repo.saveMessage).toHaveBeenCalledTimes(1);
     });
   });
 

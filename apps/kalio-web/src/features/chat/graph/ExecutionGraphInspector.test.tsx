@@ -269,7 +269,9 @@ describe('ExecutionGraphInspector', () => {
     expect(screen.queryByText(/"toolEvidence"/)).toBeNull();
   });
 
-  it('keeps architecture stream and branch internals behind details without exposing router chats as child sessions', () => {
+  it('opens architecture router child sessions while keeping stream internals behind details', () => {
+    const setActiveSession = vi.fn();
+
     render(
       <ExecutionGraphInspector
         activeSessionId="arch-run-root"
@@ -302,13 +304,14 @@ describe('ExecutionGraphInspector', () => {
               source: 'runtime_fallback',
               fromNodeId: 'architecture-root:router',
               toNodeId: 'architecture-root:final-artifact',
+              branchSessionOpenable: true,
               streamStatus: 'completed',
               chunkCount: 42,
               branchSessionId: 'branch-session-1234567890',
             },
           },
         }}
-        setActiveSession={vi.fn()}
+        setActiveSession={setActiveSession}
         removePendingConfirmation={vi.fn()}
         setPendingMessage={vi.fn()}
       />,
@@ -323,7 +326,59 @@ describe('ExecutionGraphInspector', () => {
     expect(screen.getByText('completed / 42 chunks')).toBeTruthy();
     expect(screen.getByText('Branch')).toBeTruthy();
     expect(screen.getAllByText('branch...7890').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: 'Open child chat' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Open child chat' }));
+    expect(setActiveSession).toHaveBeenCalledWith('branch-session-1234567890');
+  });
+
+  it('keeps architecture graph child chat actions visible before the session list catches up', () => {
+    useSessionStore.setState({ sessions: [] });
+    const setActiveSession = vi.fn();
+
+    render(
+      <ExecutionGraphInspector
+        activeSessionId="arch-run-root"
+        inspectorWidth={360}
+        selectedConfirmation={null}
+        selectedNode={{
+          id: 'architecture-root:pragmatist',
+          kind: 'architecture-run',
+          title: 'Pragmatist',
+          subtitle: 'role / completed / branch session',
+          status: 'success',
+          column: 1,
+          row: 0,
+          x: 0,
+          y: 0,
+          width: 220,
+          height: 140,
+          sessionId: 'api-pragmatist-session',
+          payload: {
+            kind: 'architecture-run',
+            summary: {
+              runId: 'run-api-session',
+              schemaId: 'architecture-run',
+              status: 'completed',
+              trace: [],
+              routeHops: [],
+            },
+            route: {
+              eventId: 'event-1',
+              source: 'runtime_fallback',
+              fromNodeId: 'pragmatist',
+              toNodeId: 'router',
+              branchSessionId: 'api-pragmatist-session',
+            },
+          },
+        }}
+        setActiveSession={setActiveSession}
+        removePendingConfirmation={vi.fn()}
+        setPendingMessage={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open child chat' }));
+
+    expect(setActiveSession).toHaveBeenCalledWith('api-pragmatist-session');
   });
 
   it('shows incomplete architecture evidence without expanding raw payload', () => {

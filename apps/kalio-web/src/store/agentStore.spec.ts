@@ -320,6 +320,7 @@ describe('runtimeActivitySnapshots', () => {
       pendingBudgetApprovals: [budgetReq],
       toolActivities: [{
         callId: 'call-runtime',
+        requestId: confirmation.requestId,
         sessionId: 'session-A',
         toolName: 'vfs_write',
         args: { path: '/tmp/file', content: 'hello' },
@@ -335,9 +336,34 @@ describe('runtimeActivitySnapshots', () => {
     expect(state.getToolActivitiesForSession('session-A')).toEqual([
       expect.objectContaining({
         callId: 'call-runtime',
+        requestId: confirmation.requestId,
         status: 'awaiting_confirmation',
       }),
     ]);
+  });
+
+  it('does not restore a locally settled confirmation from a delayed runtime snapshot', () => {
+    const store = useAgentStore.getState();
+    const confirmation = makeReq('session-A', 'call-settled');
+
+    store.setPendingConfirmation('session-A', confirmation);
+    store.removePendingConfirmation('session-A', confirmation.requestId);
+    store.setRuntimeActivitySnapshot(makeRuntimeActivitySnapshot({
+      pendingConfirmations: [confirmation],
+      toolActivities: [{
+        callId: confirmation.toolCallId,
+        requestId: confirmation.requestId,
+        sessionId: 'session-A',
+        toolName: confirmation.toolName,
+        args: confirmation.args,
+        status: 'pending_confirmation',
+        startedAt: 123,
+      }],
+    }));
+
+    const state = useAgentStore.getState();
+    expect(state.pendingConfirmations['session-A']).toBeUndefined();
+    expect(state.getToolActivitiesForSession('session-A')).toEqual([]);
   });
 
   it('rebuilds multiple confirmations and budget approvals from one runtime snapshot', () => {

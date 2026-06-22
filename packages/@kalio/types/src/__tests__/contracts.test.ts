@@ -62,6 +62,10 @@ import type {
   ResumeAgentFlowRunDto,
   SubAgentFlowResult,
 } from '../index.js';
+import {
+  architectureSessionIdForRunSlot,
+  architectureSessionPrefixForRun,
+} from '../index.js';
 
 describe('@kalio/types contract shape', () => {
   it('keeps primitive aliases aligned with serialized API values', () => {
@@ -594,7 +598,7 @@ describe('@kalio/types contract shape', () => {
     expectTypeOf<ArchitectureRun['slotOverrides']>().toEqualTypeOf<Record<string, ID> | undefined>();
     expectTypeOf<ArchitectureRun['rootSessionId']>().toEqualTypeOf<ID | undefined>();
     expectTypeOf<ArchitectureRun['branchSessionIds']>().toEqualTypeOf<Record<string, ID> | undefined>();
-    expectTypeOf<Pick<ArchitectureExecutionEvent, 'runId' | 'sequence' | 'type' | 'message'>>().toEqualTypeOf<{
+    expectTypeOf<Pick<ArchitectureExecutionEvent, 'runId' | 'sequence' | 'type' | 'message' | 'actionSummary'>>().toEqualTypeOf<{
       runId: ID;
       sequence: number;
       type:
@@ -612,7 +616,21 @@ describe('@kalio/types contract shape', () => {
         | 'node_completed'
         | 'run_stopped';
       message: string;
+      actionSummary?: string;
     }>();
+    expectTypeOf<ArchitectureExecutionEvent['action']>().toEqualTypeOf<
+      | 'run_created'
+      | 'run_stopped'
+      | 'participant_completed'
+      | 'participant_incomplete'
+      | 'router_selected'
+      | 'router_returned_to_orchestrator'
+      | 'router_incomplete'
+      | 'router_synthesized'
+      | 'finalizer_completed'
+      | undefined
+    >();
+    expectTypeOf<ArchitectureExecutionEvent['detail']>().toEqualTypeOf<string | undefined>();
     expectTypeOf<ArchitectureRouteDecision>().toEqualTypeOf<{
       source: 'agent' | 'router' | 'parallel' | 'runtime_fallback';
       fromNodeId: string;
@@ -654,15 +672,21 @@ describe('@kalio/types contract shape', () => {
       confidence: number;
       nextAction: 'finalize' | 'ask_human' | 'run_more_research' | 'rerun_with_different_personas';
     }>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['action']>().toEqualTypeOf<ArchitectureExecutionEvent['action']>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['detail']>().toEqualTypeOf<string | undefined>();
     expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['routerOutput']>().toEqualTypeOf<ArchitectureRouterOutput | undefined>();
     expectTypeOf<Pick<ArchitectureGraphProjection, 'runId' | 'nodes' | 'edges' | 'routeHops' | 'childAgents'>>().toEqualTypeOf<{
       runId: ID;
       nodes: Array<{
         id: string;
+        sessionId?: ID;
         label: string;
         kind: 'parallel' | 'role' | 'router' | 'artifact';
         behavior?: ArchitectureSchema['nodes'][number]['behavior'];
         status: 'pending' | 'running' | 'completed';
+        actionSummary?: string;
+        action?: ArchitectureExecutionEvent['action'];
+        detail?: string;
         visitCount?: number;
         eventIds: ID[];
         toolEvidence?: Record<string, unknown>;
@@ -690,5 +714,22 @@ describe('@kalio/types contract shape', () => {
     expectTypeOf<ArchitectureChatProjection['messages'][number]['route']>().toEqualTypeOf<
       ArchitectureRouteDecision | undefined
     >();
+    expectTypeOf<ArchitectureChatProjection['messages'][number]['actionSummary']>().toEqualTypeOf<
+      string | undefined
+    >();
+    expectTypeOf<ArchitectureChatProjection['messages'][number]['action']>().toEqualTypeOf<
+      ArchitectureExecutionEvent['action']
+    >();
+    expectTypeOf<ArchitectureChatProjection['messages'][number]['detail']>().toEqualTypeOf<
+      string | undefined
+    >();
+  });
+
+  it('normalizes architecture run session ids without double arch prefixes', () => {
+    expect(architectureSessionPrefixForRun('run-1')).toBe('arch-run-1');
+    expect(architectureSessionPrefixForRun('arch-run-1')).toBe('arch-run-1');
+    expect(architectureSessionIdForRunSlot('run-1', 'router')).toBe('arch-run-1-router');
+    expect(architectureSessionIdForRunSlot('arch-run-1', 'router')).toBe('arch-run-1-router');
+    expect(architectureSessionIdForRunSlot('arch-run-1', undefined)).toBeUndefined();
   });
 });

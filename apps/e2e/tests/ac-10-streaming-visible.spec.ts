@@ -49,6 +49,7 @@ test.describe('AC-10: Streaming visibility', () => {
   });
 
   test('multiple turns render in chronological order', async ({ page, request }) => {
+    test.setTimeout(120_000);
     const title = uniqueSessionTitle('AC10 Multi-Turn Test');
 
     const res = await request.post(`${API_BASE}/sessions`, {
@@ -62,27 +63,35 @@ test.describe('AC-10: Streaming visibility', () => {
 
     await selectSession(page, session.id, title);
 
-    const chatInput = await expectComposerEnabled(page, 5000);
+    await expectComposerEnabled(page, 5000);
+
+    const allBubbles = page.locator('[data-testid="message-bubble"], [data-testid="agent-turn-bubble"]');
+    const queuedBanner = page.getByTestId('queued-follow-up-banner');
 
     // First message
     await sendMessageFromComposer(page, 'First message.');
-    await expectComposerEnabled(page, 30_000);
+    await expect
+      .poll(async () => allBubbles.count(), { timeout: 60_000, message: 'Expected first assistant turn to render' })
+      .toBeGreaterThanOrEqual(2);
+    await expectComposerEnabled(page, 60_000);
 
     // Second message
     await sendMessageFromComposer(page, 'Second message.');
-    await expectComposerEnabled(page, 30_000);
+    await expect
+      .poll(async () => allBubbles.count(), { timeout: 60_000, message: 'Expected both assistant turns to render' })
+      .toBe(4);
+    await expectComposerEnabled(page, 60_000);
+    await expect(queuedBanner).toHaveCount(0);
 
     // Verify interleaved order: user, agent, user, agent
-    const allBubbles = page.locator('[data-testid="message-bubble"], [data-testid="agent-turn-bubble"]');
-    const count = await allBubbles.count();
-    expect(count).toBe(4);
-
     // First should be user message
     await expect(allBubbles.nth(0)).toHaveAttribute('data-testid', 'message-bubble');
+    await expect(allBubbles.nth(0)).toContainText('First message.');
     // Second should be agent turn
     await expect(allBubbles.nth(1)).toHaveAttribute('data-testid', 'agent-turn-bubble');
     // Third should be user message
     await expect(allBubbles.nth(2)).toHaveAttribute('data-testid', 'message-bubble');
+    await expect(allBubbles.nth(2)).toContainText('Second message.');
     // Fourth should be agent turn
     await expect(allBubbles.nth(3)).toHaveAttribute('data-testid', 'agent-turn-bubble');
 

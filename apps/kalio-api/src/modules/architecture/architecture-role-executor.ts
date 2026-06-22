@@ -11,6 +11,7 @@ import type {
 import { buildArchitectureSlotToolPolicy } from '../chat/architecture-slot-tool-policy';
 import { SUBAGENT_RUNTIME, type SubagentEmit, type SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { FINAL_ARTIFACT_CONTRACT_INSTRUCTION, parseFinalArtifactContract } from './architecture-final-artifact-contract';
+import { summarizeArchitectureIncomingEvent } from './architecture-incoming-event-summary';
 import { createArchitectureBranchStreamHook, type ArchitectureBranchStreamSnapshot } from './architecture-stream-hooks';
 import { PersonaService } from '../persona/persona.service';
 import { CredentialsService } from '../credentials/credentials.service';
@@ -129,8 +130,13 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         objective: this.buildObjective(input),
         auditContext: {
           architectureRunId: input.run.id,
+          schemaId: input.schema.id,
+          schemaName: input.schema.name,
           nodeId: input.node?.id,
           roleSlotId: input.slot.id,
+          roleSlotType: input.slot.slotType,
+          roleLabel: input.slot.label,
+          displayLabel: input.slot.label,
         },
         slotPolicy: slotPolicy ?? undefined,
         architectureContext: input.run.context,
@@ -328,7 +334,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     if (incomingEvents.length > 0) {
       lines.push('', 'Incoming graph outputs:');
       for (const event of incomingEvents) {
-        lines.push(`- ${event.roleSlotId ?? event.nodeId ?? event.type}: ${event.message}${incomingEventEvidenceSummary(event)}`);
+        lines.push(`- ${event.roleSlotId ?? event.nodeId ?? event.type}: ${summarizeArchitectureIncomingEvent(event, input.slot.slotType)}${incomingEventEvidenceSummary(event)}`);
       }
     }
     if (outgoingNodeIds.length > 0) {

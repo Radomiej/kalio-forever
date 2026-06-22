@@ -150,14 +150,16 @@ function stepFromGraphNode(
   graphRun: ArchitectureRunSummaryWithGraph,
 ): TraceStep {
   const traceStep = findTraceStepForNode(run.trace, node);
+  const nextNodeId = nextNodeIdForGraphNode(node.id, graphRun);
   return {
     speaker: speakerForGraphNode(node),
     content: node.kind === 'artifact' ? graphRun.finalArtifact ?? '' : '',
-    eventId: node.eventIds[0],
-    nodeId: node.id,
-    nextNodeId: nextNodeIdForGraphNode(node.id, graphRun),
-    incompleteReason: node.incompleteReason,
     ...traceStep,
+    eventId: traceStep?.eventId ?? node.eventIds[0],
+    sessionId: traceStep?.sessionId ?? node.sessionId,
+    nodeId: traceStep?.nodeId ?? node.id,
+    nextNodeId: traceStep?.nextNodeId ?? nextNodeId,
+    incompleteReason: traceStep?.incompleteReason ?? node.incompleteReason,
     plannedLabel: node.kind === 'parallel' ? undefined : node.label,
     plannedStatus: node.status,
   };

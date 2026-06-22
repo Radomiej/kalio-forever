@@ -172,6 +172,47 @@ describe('sessionRuntimeState', () => {
     )).toBe('done');
   });
 
+  it('keeps a workflow envelope running even when the rebuilt host turn is already marked done', () => {
+    const session = createSession({ id: 'session-host', title: 'Workflow host' });
+
+    expect(sessionRuntimeState(
+      session,
+      session.id,
+      {},
+      {},
+      new Set(),
+      {},
+      {},
+      {
+        [session.id]: [{
+          id: 'turn-1',
+          sessionId: session.id,
+          turnKind: 'workflow-envelope',
+          items: [],
+          done: true,
+        }],
+      },
+      {
+        [session.id]: [{
+          id: 'workflow-live',
+          sessionId: session.id,
+          role: 'assistant',
+          content: '',
+          createdAt: 1,
+          architectureRun: {
+            runId: 'run-live',
+            schemaId: 'Strategic Decision Council',
+            status: 'running',
+            hostProjectionKind: 'workflow-envelope',
+            trace: [],
+            routeHops: [],
+          },
+        }],
+      },
+      new Map(),
+    )).toBe('running');
+  });
+
   it('treats interrupted_needs_retry as stopped when there is no live HITL request', () => {
     const session = createSession({ id: 'session-retry', title: 'Retry needed' });
 

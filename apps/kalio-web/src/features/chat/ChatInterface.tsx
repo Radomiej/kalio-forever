@@ -274,10 +274,10 @@ export function ChatInterface() {
   }, [activeSessionId, invalidateContextPreview, setToolArgProgress]);
 
   useEffect(() => {
-    if (activeSessionId && eventBus.connected) {
+    if (activeSessionId && connectionState === 'connected') {
       identifyWatchedSession(activeSessionId, 'chat-interface-active', { sticky: true });
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, connectionState]);
 
   useEffect(() => {
     if (shouldAutoScrollRef.current) {

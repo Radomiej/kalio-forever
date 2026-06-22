@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { API_BASE } from './helpers/test-config';
+import { API_BASE, getActiveCredentialId, restoreActiveCredential } from './helpers/test-config';
 
 // ── Helper: open Settings → LLM Providers tab ─────────────────────────────────
 async function openLLMPanel(page: Page) {
@@ -14,21 +14,6 @@ async function openLLMPanel(page: Page) {
 // ── Helper: clean up a credential by id via API ───────────────────────────────
 async function deleteCredential(page: Page, id: string) {
   await page.request.delete(`${API_BASE}/credentials/${id}`);
-}
-
-async function getActiveCredentialId(page: Page): Promise<string | null> {
-  const response = await page.request.get(`${API_BASE}/credentials/active`);
-  const payload = await response.json() as { credentialId?: string | null };
-  return payload.credentialId ?? null;
-}
-
-async function restoreActiveCredential(page: Page, credentialId: string | null) {
-  if (credentialId) {
-    await page.request.put(`${API_BASE}/credentials/active/${credentialId}`);
-    return;
-  }
-
-  await page.request.delete(`${API_BASE}/credentials/active`);
 }
 
 async function getRuntimeModel(page: Page): Promise<string> {
@@ -116,7 +101,7 @@ test.describe('LLMPanel E2E', () => {
   });
 
   test('can switch back to the env fallback after activating a saved credential', async ({ page }) => {
-    const previousActiveId = await getActiveCredentialId(page);
+    const previousActiveId = await getActiveCredentialId(page.request);
     await page.request.delete(`${API_BASE}/credentials/active`);
     const envModel = await getRuntimeModel(page);
 
@@ -147,7 +132,7 @@ test.describe('LLMPanel E2E', () => {
       await expect(row).not.toContainText('active');
       await expect(page.getByTestId('model-selector')).toHaveValue(envModel);
     } finally {
-      await restoreActiveCredential(page, previousActiveId);
+      await restoreActiveCredential(page.request, previousActiveId);
       await deleteCredential(page, cred.id);
     }
   });

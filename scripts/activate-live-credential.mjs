@@ -2,6 +2,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  defaultLlmBaseUrlForProvider,
+  defaultLlmModelForProvider,
+  normalizeProvider,
+  providerApiKeyEnvNames,
+  resolveProviderApiKey,
+  resolveProviderSelection,
+} from './llm-provider-config.mjs';
+import { readStackApiUrl as readManagedStackApiUrl } from './stack-state.mjs';
 
 const scriptDir = resolve(fileURLToPath(import.meta.url), '..');
 const repoRoot = resolve(scriptDir, '..');
@@ -47,17 +56,7 @@ export function readEnvFile(filePath) {
 }
 
 export function readStackApiUrl(root = repoRoot) {
-  const statePath = resolve(root, '.kalio-stack/qa-stack-state.json');
-  if (!existsSync(statePath)) {
-    return null;
-  }
-  try {
-    const state = JSON.parse(readFileSync(statePath, 'utf8'));
-    const port = Number(state?.backendPort);
-    return Number.isInteger(port) && port > 0 ? `http://127.0.0.1:${port}/api` : null;
-  } catch {
-    return null;
-  }
+  return readManagedStackApiUrl(root);
 }
 
 export function assertLocalApiUrl(value, allowRemoteApiUrl = false) {
@@ -109,14 +108,27 @@ export async function activateLiveCredential(options = {}) {
   }
   assertLocalApiUrl(apiUrl, allowRemoteApiUrl);
 
-  const provider = getArgValue(args, '--provider', env.LLM_PROVIDER ?? fileEnv.LLM_PROVIDER ?? 'xiaomimimo');
-  const model = getArgValue(args, '--model', env.LLM_MODEL ?? fileEnv.LLM_MODEL ?? 'mimo-v2.5');
-  const baseUrl = getArgValue(args, '--base-url', env.LLM_BASE_URL ?? fileEnv.LLM_BASE_URL ?? 'https://token-plan-ams.xiaomimimo.com/v1');
-  const apiKey = env.LLM_API_KEY ?? fileEnv.LLM_API_KEY ?? '';
+  const explicitProvider = getArgValue(args, '--provider', undefined);
+  const configuredProvider = env.LLM_PROVIDER ?? fileEnv.LLM_PROVIDER;
+  const provider = resolveProviderSelection({
+    explicitProvider,
+    configuredProvider,
+    envSources: [env, fileEnv],
+    fallbackProvider: 'xiaomimimo',
+  });
+  const allowGenericApiKey = !explicitProvider
+    || !configuredProvider
+    || normalizeProvider(explicitProvider) === normalizeProvider(configuredProvider);
+  const model = getArgValue(args, '--model', env.LLM_MODEL ?? fileEnv.LLM_MODEL ?? defaultLlmModelForProvider(provider));
+  const baseUrl = getArgValue(args, '--base-url', env.LLM_BASE_URL ?? fileEnv.LLM_BASE_URL ?? defaultLlmBaseUrlForProvider(provider));
+  const apiKey = resolveProviderApiKey(provider, [env, fileEnv], { allowGenericApiKey });
   const name = getArgValue(args, '--name', `Live ${provider} ${model}`);
 
   if (!apiKey) {
-    throw new Error('[activate-live-credential] LLM_API_KEY is empty. Put the key in ignored .env.test or pass it via the process environment.');
+    throw new Error(
+      `[activate-live-credential] no API key found for ${provider}. ` +
+      `Set one of: ${providerApiKeyEnvNames(provider, { allowGenericApiKey }).join(', ')} in ignored .env.test or the process environment.`,
+    );
   }
 
   const normalizedApiUrl = apiUrl.replace(/\/$/, '');

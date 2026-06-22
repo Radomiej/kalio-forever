@@ -66,7 +66,7 @@ Or from an existing install directory:
 |---|---|
 | Node not found | Install Node 22+ from https://nodejs.org (system install, not Cursor bundled Node) |
 | Port 4016/6188 in use | Stop the other process or reinstall with `-BackendPort` / `-FrontendPort` |
-| Stack not running after sign-in | Check `Get-ScheduledTask -TaskName Kalio-Forever`; logs in `%LocalAppData%\kalio-forever\app\.kalio-stack\logs\` |
+| Stack not running after sign-in | Check `Get-ScheduledTask -TaskName Kalio-Forever`; autostart log is `%LocalAppData%\kalio-forever\app\.kalio-stack\logs\autostart.log`, backend/frontend logs are in `%LocalAppData%\kalio-forever\app\.tmp\qa-stack-logs\` |
 | Provider errors | Open Settings, verify API key and base URL |
 
 ## For developers

@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage, ChatSession } from '@kalio/types';
+import type {
+  ArchitectureChatProjection,
+  ArchitectureExecutionEvent,
+  ArchitectureGraphProjection,
+  ChatMessage,
+  ChatSession,
+} from '@kalio/types';
 import { reloadSessionHistoryWithArchitectureProjection } from './architectureReloadHydration';
 
 const mockState: {
@@ -147,5 +153,230 @@ describe('reloadSessionHistoryWithArchitectureProjection', () => {
     expect(setMessages).toHaveBeenCalledWith(reloadedMessages, 'host');
     expect(setMessages).not.toHaveBeenCalledWith(expect.anything(), 'arch-root');
     expect(setAgentTurns).not.toHaveBeenCalledWith(expect.anything(), 'arch-root');
+  });
+
+  it('hydrates a technical architecture child with synthetic node activity when the child has no persisted transcript yet', async () => {
+    const technicalSession: ChatSession = {
+      id: 'arch-router',
+      personaId: 'default',
+      title: 'Strategic Decision Council: Router',
+      parentSessionId: 'host',
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'router',
+        architectureContext: {
+          architectureRunId: 'run-router',
+          schemaName: 'Strategic Decision Council',
+          displayLabel: 'Router',
+          roleSlotId: 'router',
+          roleSlotType: 'router',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'visible',
+        },
+      },
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    mockState.sessions = [technicalSession];
+    mockState.activeSessionId = 'arch-router';
+
+    const setMessages = vi.fn();
+    const setAgentTurns = vi.fn();
+    const fetchMessages = vi.fn(async () => []);
+    const fetchArchitectureRunProjection = vi.fn(async () => {
+      const chat: ArchitectureChatProjection = {
+        runId: 'run-router',
+        messages: [],
+      };
+      const events: ArchitectureExecutionEvent[] = [
+        {
+          id: 'event-router',
+          runId: 'run-router',
+          sequence: 4,
+          type: 'node_completed' as ArchitectureExecutionEvent['type'],
+          message: 'Router completed synthesis for the next graph node.',
+          nodeId: 'router-entry',
+          roleSlotId: 'router',
+          createdAt: 25,
+        },
+      ];
+      const graph: ArchitectureGraphProjection = {
+        runId: 'run-router',
+        schemaName: 'Strategic Decision Council',
+        status: 'running',
+        nodes: [
+          {
+            id: 'router-entry',
+            sessionId: 'arch-router',
+            label: 'Router',
+            kind: 'router',
+            status: 'running',
+            eventIds: ['event-router'],
+          },
+        ],
+        edges: [],
+      };
+      return { chat, events, graph };
+    });
+
+    const reloadedMessages = await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: 'arch-router',
+      getActiveSessionId: () => mockState.activeSessionId,
+      getSessions: () => mockState.sessions,
+      getSessionMessages: mockState.getSessionMessages,
+      setMessages,
+      setAgentTurns,
+      fetchMessages,
+      fetchArchitectureRunProjection,
+    });
+
+    expect(fetchMessages).toHaveBeenCalledWith('arch-router');
+    expect(fetchArchitectureRunProjection).toHaveBeenCalledWith('run-router');
+    expect(reloadedMessages).toEqual([
+      expect.objectContaining({
+        id: 'architecture-node-rehydrate:arch-router:run-router:event-router',
+        sessionId: 'arch-router',
+        role: 'assistant',
+        content: expect.stringContaining('### Router'),
+      }),
+    ]);
+    expect(reloadedMessages?.[0]?.content).toContain('Status: running');
+    expect(reloadedMessages?.[0]?.content).toContain('Last action: Router completed synthesis for the next graph node.');
+    expect(setMessages).toHaveBeenCalledWith(reloadedMessages, 'arch-router');
+  });
+
+  it('rehydrates the host workflow envelope from architecture run projection when host and child transcripts are still empty', async () => {
+    const hostSession: ChatSession = {
+      id: 'host',
+      personaId: 'default',
+      title: 'Architecture host',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const routerSession: ChatSession = {
+      id: 'arch-router',
+      personaId: 'default',
+      title: 'Strategic Decision Council: Router',
+      parentSessionId: 'host',
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'router',
+        architectureContext: {
+          architectureRunId: 'run-host',
+          schemaId: 'strategic-decision-council',
+          schemaName: 'Strategic Decision Council',
+          displayLabel: 'Router',
+          roleSlotId: 'router',
+          roleSlotType: 'router',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'visible',
+        },
+      },
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    mockState.sessions = [hostSession, routerSession];
+    mockState.activeSessionId = 'host';
+
+    const setMessages = vi.fn();
+    const setAgentTurns = vi.fn();
+    const fetchMessages = vi.fn(async () => []);
+    const fetchArchitectureRunProjection = vi.fn(async () => {
+      const chat: ArchitectureChatProjection = {
+        runId: 'run-host',
+        messages: [
+          {
+            id: 'chat-router',
+            eventId: 'event-router',
+            speaker: 'router',
+            content: '### Router\n\nRouter selected the five-way council.',
+            roleSlotId: 'router',
+            createdAt: 10,
+          },
+          {
+            id: 'chat-finalizer',
+            eventId: 'event-finalizer',
+            speaker: 'finalizer',
+            content: '### Finalizer\n\nFinal answer.',
+            roleSlotId: 'finalizer',
+            createdAt: 12,
+          },
+        ],
+      };
+      const events: ArchitectureExecutionEvent[] = [
+        {
+          id: 'event-router',
+          runId: 'run-host',
+          sequence: 1,
+          type: 'node_completed' as ArchitectureExecutionEvent['type'],
+          message: 'Router dispatched the council.',
+          nodeId: 'router-entry',
+          roleSlotId: 'router',
+          createdAt: 10,
+        },
+        {
+          id: 'event-finalizer',
+          runId: 'run-host',
+          sequence: 2,
+          type: 'node_completed' as ArchitectureExecutionEvent['type'],
+          message: 'Finalizer produced the recommendation.',
+          nodeId: 'final-artifact',
+          roleSlotId: 'finalizer',
+          createdAt: 12,
+        },
+      ];
+      const graph: ArchitectureGraphProjection = {
+        runId: 'run-host',
+        schemaId: 'strategic-decision-council',
+        schemaName: 'Strategic Decision Council',
+        status: 'completed',
+        nodes: [
+          {
+            id: 'router-entry',
+            sessionId: 'arch-router',
+            label: 'Router',
+            kind: 'router',
+            status: 'completed',
+            eventIds: ['event-router'],
+          },
+          {
+            id: 'final-artifact',
+            sessionId: 'arch-finalizer',
+            label: 'Finalizer',
+            kind: 'artifact',
+            status: 'completed',
+            eventIds: ['event-finalizer'],
+          },
+        ],
+        edges: [],
+      };
+      return { chat, events, graph };
+    });
+
+    const reloadedMessages = await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: 'host',
+      getActiveSessionId: () => mockState.activeSessionId,
+      getSessions: () => mockState.sessions,
+      getSessionMessages: mockState.getSessionMessages,
+      setMessages,
+      setAgentTurns,
+      fetchMessages,
+      fetchArchitectureRunProjection,
+    });
+
+    expect(fetchArchitectureRunProjection).toHaveBeenCalledWith('run-host');
+    expect(reloadedMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'architecture-rehydrate:host:run-host',
+        architectureRun: expect.objectContaining({
+          runId: 'run-host',
+          status: 'completed',
+          hostProjectionKind: 'workflow-envelope',
+        }),
+      }),
+    ]));
+    expect(setMessages).toHaveBeenCalledWith(reloadedMessages, 'host');
   });
 });

@@ -467,7 +467,11 @@ describe('SubagentRuntimeService nested subagents', () => {
       copyOutputs: false,
       auditContext: {
         architectureRunId: 'run-1',
+        schemaId: 'goal-master-delivery-loop',
+        schemaName: 'Goal Master Delivery Loop',
         roleSlotId: 'implementer',
+        roleSlotType: 'tool_executor',
+        roleLabel: 'Implementer',
         nodeId: 'node-1',
       },
       slotPolicy: {
@@ -491,9 +495,13 @@ describe('SubagentRuntimeService nested subagents', () => {
         architectureSlotId: 'implementer',
         architectureContext: expect.objectContaining({
           architectureRunId: 'run-1',
+          schemaName: 'Goal Master Delivery Loop',
           roleSlotId: 'implementer',
+          roleSlotType: 'tool_executor',
           hostSessionId: 'host-chat',
           historySessionId: 'host-chat',
+          sessionSurface: 'conversation-branch',
+          conversationVisibility: 'visible',
           projectPath: 'C:\\Projekty\\kalio-forever',
         }),
       }),
@@ -502,6 +510,93 @@ describe('SubagentRuntimeService nested subagents', () => {
       'branch-implementer',
       expect.objectContaining({
         historySessionId: 'host-chat',
+      }),
+    );
+  });
+
+  it('keeps technical architecture router sessions visible when execution updates runtimeContext', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([{ type: 'text_delta', delta: 'router done' }, { type: 'done' }])),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const existingChild = {
+      id: 'arch-run-1-router',
+      personaId: 'orchestrator',
+      title: 'Strategic Decision Council: Router',
+      kind: 'subagent' as const,
+      parentSessionId: 'arch-root',
+      runtimeContext: undefined,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const sessions = {
+      createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)),
+      get: vi.fn(async () => existingChild),
+      updateRuntimeContext: vi.fn().mockResolvedValue(undefined),
+    };
+    const runtime = buildSubagentRuntime(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      sessions as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    await runtime.runSubagent({
+      parentSessionId: 'arch-root',
+      parentToolCallId: 'architecture:run-1:router',
+      childSessionId: 'arch-run-1-router',
+      personaId: 'orchestrator',
+      objective: 'Merge router outputs',
+      availableTools: tools,
+      timeoutMs: 60000,
+      vfsMode: 'shared',
+      copyOutputs: false,
+      auditContext: {
+        architectureRunId: 'run-1',
+        schemaId: 'strategic-decision-council',
+        schemaName: 'Strategic Decision Council',
+        roleSlotId: 'router',
+        roleSlotType: 'router',
+        roleLabel: 'Router',
+        nodeId: 'router',
+      },
+      slotPolicy: {
+        allowedToolNames: [],
+      },
+      architectureContext: {
+        hostSessionId: 'host-chat',
+        historySessionId: 'host-chat',
+        sessionSurface: 'host-envelope',
+      },
+    });
+
+    expect(sessions.updateRuntimeContext).toHaveBeenCalledWith(
+      'arch-run-1-router',
+      expect.objectContaining({
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'router',
+        architectureContext: expect.objectContaining({
+          architectureRunId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          schemaName: 'Strategic Decision Council',
+          roleSlotId: 'router',
+          roleSlotType: 'router',
+          roleLabel: 'Router',
+          displayLabel: 'Router',
+          hostSessionId: 'host-chat',
+          historySessionId: 'host-chat',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'visible',
+        }),
       }),
     );
   });

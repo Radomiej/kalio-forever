@@ -1,13 +1,14 @@
 # Kalio v2 — built QA / prod-preview launcher
 # Runs dist-only API + vite preview on fixed ports with isolated AppData profile.
 # Usage:
-#   .\start-qa.ps1              # start from existing dist (no rebuild)
-#   .\start-qa.ps1 -Rebuild     # build first, then start
+#   .\start-qa.ps1              # build dist, then start
+#   .\start-qa.ps1 -SkipBuild   # start from existing dist
 #   .\start-qa.ps1 -UseMockLLM  # ignore .env LLM and force mock provider
 # Stop: Ctrl+C in this console, or `pnpm qa:stop`
 
 param(
     [switch]$Rebuild,
+    [switch]$SkipBuild,
     [switch]$UseMockLLM,
     [int]$BackendPort = 3316,
     [int]$FrontendPort = 5288
@@ -19,7 +20,6 @@ if (-not $localAppData) {
     $localAppData = Join-Path $env:USERPROFILE "AppData\Local"
 }
 $qaDataRoot = Join-Path $localAppData "kalio-forever-qa"
-$stackStatePath = Join-Path $root ".kalio-stack\qa-stack-state.json"
 
 $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $nodeCmd) { $nodeCmd = Get-Command node -ErrorAction SilentlyContinue }
@@ -56,10 +56,10 @@ Write-Host "KALIO QA Stack (dist-only)" -ForegroundColor Cyan
 Write-Host "  kalio-api  ->  http://localhost:$BackendPort" -ForegroundColor Green
 Write-Host "  kalio-web  ->  http://localhost:$FrontendPort" -ForegroundColor Green
 Write-Host "  data root  ->  $qaDataRoot" -ForegroundColor Green
-if ($Rebuild) {
-    Write-Host "  mode       ->  rebuild + start" -ForegroundColor DarkYellow
-} else {
+if ($SkipBuild) {
     Write-Host "  mode       ->  skip-build (reuse existing dist)" -ForegroundColor DarkYellow
+} else {
+    Write-Host "  mode       ->  build + start" -ForegroundColor DarkYellow
 }
 if ($UseMockLLM) {
     Write-Host "  llm-mode   ->  mock" -ForegroundColor DarkYellow
@@ -76,12 +76,14 @@ $stackArgs = @(
     "--data-root", $qaDataRoot
 )
 
-if (-not $Rebuild) {
+if ($SkipBuild) {
     $stackArgs += "--skip-build"
 }
 
 if (-not $UseMockLLM) {
     $stackArgs += "--use-env-llm"
+} else {
+    $stackArgs += "--force-env-llm"
 }
 
 & $nodeCmd.Source @stackArgs
@@ -89,12 +91,23 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-if (-not (Test-Path $stackStatePath)) {
-    Write-Host "[FAIL] QA stack state file missing after start: $stackStatePath" -ForegroundColor Red
+try {
+    $statusJson = & $nodeCmd.Source (Join-Path $root "scripts\stack-manager.mjs") "status" "--json"
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    $status = $statusJson | ConvertFrom-Json
+} catch {
+    Write-Host "[FAIL] Could not read QA stack status from stack-manager: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
-$state = Get-Content $stackStatePath -Raw | ConvertFrom-Json
+$state = $status.state
+if ($status.status -ne "running" -or -not $state) {
+    Write-Host "[FAIL] QA stack did not report running status after start: $($status.status)" -ForegroundColor Red
+    exit 1
+}
+
 $backendPid = [int]$state.backend.pid
 $frontendPid = [int]$state.frontend.pid
 

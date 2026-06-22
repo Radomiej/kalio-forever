@@ -33,6 +33,7 @@ import { mergeChildAgentStatus } from './architecture-cli-child-status';
 import { createArchitectureGraphEvents } from './architecture-graph-runtime';
 import { buildArchitectureGraphProjection } from './architecture-graph-projection';
 import { reconstructDurableArchitectureGraph } from './architecture-durable-graph';
+import { architectureActionFieldsForEvent, architectureActionSummaryForEvent } from './architecture-action-summary';
 import { buildArchitectureParentChatMessages } from './architecture-parent-chat-projection';
 import { hydrateArchitectureRootVfs, type ArchitectureVfsHydrationResult } from './architecture-vfs-hydration';
 import { extractAllowanceContext } from '../agent-flow/agent-flow-launch-context';
@@ -387,6 +388,7 @@ export class ArchitectureRuntimeService {
       sequence: events.length + 1,
       type: 'run_stopped',
       message: 'Architecture run stopped by user.',
+      actionSummary: architectureActionSummaryForEvent('run_stopped'),
       data: {
         reasonCode: 'user_stop',
         stoppedByUser: true,
@@ -575,6 +577,9 @@ export class ArchitectureRuntimeService {
           eventId: event.id,
           speaker: this.toSpeaker(event),
           content: event.message,
+          actionSummary: architectureActionFieldsForEvent(event).actionSummary,
+          action: architectureActionFieldsForEvent(event).action,
+          detail: architectureActionFieldsForEvent(event).detail,
           roleSlotId: event.roleSlotId,
           route: event.route,
           incompleteReason: this.incompleteReasonFromEvent(event),
@@ -599,6 +604,9 @@ export class ArchitectureRuntimeService {
           eventId: event.id,
           speaker: this.toSpeaker(event),
           content: event.message,
+          actionSummary: architectureActionFieldsForEvent(event).actionSummary,
+          action: architectureActionFieldsForEvent(event).action,
+          detail: architectureActionFieldsForEvent(event).detail,
           roleSlotId: event.roleSlotId,
           route: event.route,
           incompleteReason: this.incompleteReasonFromEvent(event),
@@ -779,6 +787,7 @@ export class ArchitectureRuntimeService {
     event: ArchitectureExecutionEvent,
   ): void {
     if (!this.audit) return;
+    const actionFields = architectureActionFieldsForEvent(event);
     void this.audit.log({
       sessionId: getArchitectureParentSessionId(run.context) ?? run.rootSessionId,
       type: 'architecture_event',
@@ -801,6 +810,9 @@ export class ArchitectureRuntimeService {
         route: event.route,
         routerOutput: event.routerOutput,
         messagePreview: event.message.slice(0, 800),
+        actionSummary: actionFields.actionSummary,
+        action: actionFields.action,
+        detail: actionFields.detail,
       },
     });
   }
@@ -957,16 +969,31 @@ export class ArchitectureRuntimeService {
       if (!this.isArchitectureExecutionEventType(eventType)) {
         throw new Error(`Invalid recovered architecture event type for run ${runId}`);
       }
+      const route = this.routeDecisionField(data, 'route');
+      const routerOutput = this.routerOutputField(data, 'routerOutput');
+      // TODO: legacy fallback - older audit rows only persisted messagePreview/actionSummary, so rebuild action/detail from structured route/routerOutput when needed.
+      const actionFields = architectureActionFieldsForEvent({
+        type: eventType,
+        actionSummary: this.stringField(data, 'actionSummary'),
+        action: this.eventActionField(data, 'action'),
+        detail: this.stringField(data, 'detail'),
+        route,
+        routerOutput,
+        data,
+      });
       return {
         id: eventId,
         runId,
         sequence: this.numberField(data, 'sequence') ?? index + 1,
         type: eventType,
         message: this.stringField(data, 'messagePreview') ?? row.label,
+        actionSummary: actionFields.actionSummary,
+        action: actionFields.action,
+        detail: actionFields.detail,
         nodeId: this.stringField(data, 'nodeId'),
         roleSlotId: this.stringField(data, 'roleSlotId'),
-        route: this.routeDecisionField(data, 'route'),
-        routerOutput: this.routerOutputField(data, 'routerOutput'),
+        route,
+        routerOutput,
         data,
         createdAt: row.createdAt,
       };
@@ -1038,6 +1065,21 @@ export class ArchitectureRuntimeService {
   private routerOutputField(record: Record<string, unknown>, key: string): ArchitectureRouterOutput | undefined {
     const value = record[key];
     return this.isArchitectureRouterOutput(value) ? value : undefined;
+  }
+
+  private eventActionField(record: Record<string, unknown>, key: string): ArchitectureExecutionEvent['action'] {
+    const value = record[key];
+    return value === 'run_created'
+      || value === 'run_stopped'
+      || value === 'participant_completed'
+      || value === 'participant_incomplete'
+      || value === 'router_selected'
+      || value === 'router_returned_to_orchestrator'
+      || value === 'router_incomplete'
+      || value === 'router_synthesized'
+      || value === 'finalizer_completed'
+      ? value
+      : undefined;
   }
 
   private isArchitectureExecutionEventType(value: unknown): value is ArchitectureExecutionEventType {

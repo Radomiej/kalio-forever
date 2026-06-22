@@ -1,7 +1,9 @@
 import type { ArchitectureGraphProjection, ArchitectureSchema, ChatMessage } from '@kalio/types';
 import type { SessionsService } from '../chat/sessions.service';
 import type { ArchitectureRegistryService } from './architecture-registry.service';
+import { architectureActionFieldsForEvent } from './architecture-action-summary';
 import { isCompletedCliChildStatus } from './architecture-cli-child-status';
+import { architectureSessionIdForRunSlot, architectureSessionPrefixForRun } from './architecture-session-ids';
 import {
   eventIdFromToolCallId,
   isCliAgentToolName,
@@ -28,8 +30,9 @@ export async function reconstructDurableArchitectureGraph(
 async function findPersistedArchitectureMessages(runId: string, sessions: SessionsService): Promise<ChatMessage[]> {
   const messages: ChatMessage[] = [];
   const chatSessions = await sessions.list({ includeArchived: true });
+  const sessionPrefix = `${architectureSessionPrefixForRun(runId)}-`;
   for (const session of chatSessions) {
-    if (!session.id.includes(runId) && !session.parentSessionId?.includes(`arch-${runId}-`)) {
+    if (!session.id.includes(runId) && !session.parentSessionId?.includes(sessionPrefix)) {
       const sessionMessages = await sessions.getMessages(session.id);
       if (sessionMessages.some((message) => messageReferencesArchitectureRun(message, runId))) {
         messages.push(...sessionMessages);
@@ -42,11 +45,12 @@ async function findPersistedArchitectureMessages(runId: string, sessions: Sessio
 }
 
 function messageReferencesArchitectureRun(message: ChatMessage, runId: string): boolean {
+  const sessionPrefix = `${architectureSessionPrefixForRun(runId)}-`;
   if (
     message.architectureRun?.runId === runId
     || message.id.includes(`architecture:${runId}:`)
     || message.sessionId.includes(runId)
-    || message.content.includes(`arch-${runId}-`)
+    || message.content.includes(sessionPrefix)
   ) {
     return true;
   }
@@ -108,18 +112,53 @@ function reconstructGraphFromMessages(
 
   return {
     runId,
-    nodes: schema.nodes.map((node) => ({
-      id: node.id,
-      label: node.label,
-      kind: node.kind,
-      behavior: node.behavior ? { ...node.behavior } : undefined,
-      status: completedNodeIds.has(node.id) ? 'completed' : 'pending',
-      eventIds: eventIdsByNodeId.get(node.id) ?? [],
-    })),
+    nodes: schema.nodes.map((node) => {
+      const actionFields = reconstructedNodeActionFields(node.id, node.kind, completedNodeIds, routeHops);
+      return {
+        id: node.id,
+        sessionId: sessionIdForNode(runId, node.roleSlotId ?? node.id),
+        label: node.label,
+        kind: node.kind,
+        behavior: node.behavior ? { ...node.behavior } : undefined,
+        status: completedNodeIds.has(node.id) ? 'completed' : 'pending',
+        actionSummary: actionFields.actionSummary,
+        action: actionFields.action,
+        detail: actionFields.detail,
+        eventIds: eventIdsByNodeId.get(node.id) ?? [],
+      };
+    }),
     edges: schema.edges,
     routeHops,
     childAgents: reconstructChildAgents(runId, schema, scopedMessages),
   };
+}
+
+function sessionIdForNode(runId: string, slotOrNodeId: string | undefined): string | undefined {
+  return architectureSessionIdForRunSlot(runId, slotOrNodeId);
+}
+
+function reconstructedNodeActionFields(
+  nodeId: string,
+  nodeKind: ArchitectureGraphProjection['nodes'][number]['kind'],
+  completedNodeIds: Set<string>,
+  routeHops: NonNullable<ArchitectureGraphProjection['routeHops']>,
+): ReturnType<typeof architectureActionFieldsForEvent> {
+  const routeHop = routeHops.find((hop) => hop.fromNodeId === nodeId);
+  if (routeHop) {
+    return architectureActionFieldsForEvent({
+      type: routeHop.source === 'router' ? 'router_decision' : 'participant_output',
+      route: {
+        source: routeHop.source,
+        fromNodeId: routeHop.fromNodeId,
+        selectedNodeIds: [routeHop.toNodeId],
+        nextNodeId: routeHop.toNodeId,
+      },
+    }, nodeKind);
+  }
+  if (nodeKind === 'artifact' && completedNodeIds.has(nodeId)) {
+    return architectureActionFieldsForEvent({ type: 'final_artifact' }, nodeKind);
+  }
+  return {};
 }
 
 function reconstructChildAgents(
@@ -174,7 +213,7 @@ function reconstructChildAgents(
     if (
       !snapshot
       || !childSessionId
-      || !parentSessionId?.includes(`arch-${runId}-`)
+      || !parentSessionId?.includes(`${architectureSessionPrefixForRun(runId)}-`)
       || !isCliAgentSnapshot(snapshot)
     ) {
       continue;
@@ -234,8 +273,9 @@ function inferParentFromToolCall(
     return { nodeId: explicitNodeId, roleSlotId: explicitRoleSlotId };
   }
 
-  const branchSuffix = sessionId.startsWith(`arch-${runId}-`)
-    ? sessionId.slice(`arch-${runId}-`.length)
+  const sessionPrefix = `${architectureSessionPrefixForRun(runId)}-`;
+  const branchSuffix = sessionId.startsWith(sessionPrefix)
+    ? sessionId.slice(sessionPrefix.length)
     : undefined;
   if (!branchSuffix) {
     return {};

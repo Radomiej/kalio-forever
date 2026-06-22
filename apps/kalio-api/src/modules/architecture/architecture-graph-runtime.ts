@@ -1,5 +1,6 @@
 import type { AgentFlowContinuationCursor, ArchitectureExecutionEvent, ArchitectureNodeBehaviorMode, ArchitectureRoleSlot, ArchitectureRouteDecision, ArchitectureRouterOutput, ArchitectureRun, ArchitectureSchema, ArchitectureSchemaEdge, ArchitectureSchemaNode } from '@kalio/types';
 import type { ArchitectureRoleExecutionInput, ArchitectureRoleExecutor } from './architecture-role-executor';
+import { architectureActionFieldsForEvent, architectureActionSummaryForEvent } from './architecture-action-summary';
 import { isCompletedCliChildStatus } from './architecture-cli-child-status';
 import { createArchitectureRouterOutput } from './architecture-router-output';
 
@@ -16,6 +17,7 @@ type GraphRuntimeOptions = {
 };
 
 type EventOptions = {
+  actionSummary?: string;
   nodeId?: string;
   roleSlotId?: string;
   route?: ArchitectureRouteDecision;
@@ -51,6 +53,7 @@ class ArchitectureGraphRuntime {
     this.seedPriorEvents();
     if (!this.options.resumeFrom) {
       this.push('run_created', `Architecture run created for: ${this.options.run.prompt}`, {
+        actionSummary: architectureActionSummaryForEvent('run_created'),
         data: { rootSessionId: this.options.run.rootSessionId },
       });
     }
@@ -78,6 +81,7 @@ class ArchitectureGraphRuntime {
 
       const batchResults = await Promise.all(executableBatch.map(async (node) => {
         this.push('node_started', `${node.label} started.`, {
+          actionSummary: architectureActionSummaryForEvent('node_started', node.kind),
           nodeId: node.id,
           roleSlotId: node.roleSlotId,
           data: { kind: node.kind, behavior: node.behavior ? { ...node.behavior } : undefined },
@@ -122,6 +126,7 @@ class ArchitectureGraphRuntime {
         .find((handoff) => handoff.pendingNodeIds.length > 0);
       if (orchestratorHandoff) {
         this.push('router_decision', `${orchestratorHandoff.node.label} returned control to the orchestrator.`, {
+          actionSummary: architectureActionSummaryForEvent('router_decision', orchestratorHandoff.node.kind),
           nodeId: orchestratorHandoff.node.id,
           roleSlotId: orchestratorHandoff.node.roleSlotId,
           data: {
@@ -159,6 +164,7 @@ class ArchitectureGraphRuntime {
         ? `Runtime stopped after ${maxSteps} graph steps.`
         : `Runtime stopped after reaching max node visits.`;
       this.push('router_decision', reason, {
+        actionSummary: architectureActionSummaryForEvent('router_decision'),
         data: {
           maxNodeVisits,
           maxSteps,
@@ -269,6 +275,7 @@ class ArchitectureGraphRuntime {
 
     if (node.kind === 'role') {
       this.push('participant_output', message, {
+        actionSummary: architectureActionSummaryForEvent('participant_output', 'role'),
         nodeId: node.id,
         roleSlotId: node.roleSlotId,
         route: {
@@ -287,6 +294,7 @@ class ArchitectureGraphRuntime {
     if (node.kind === 'artifact') {
       const synthesized = this.synthesizedArtifactMessage(node, this.incomingNodeIdsFor(node.id));
       this.push('final_artifact', `${message}\n\n${synthesized}`, {
+        actionSummary: architectureActionSummaryForEvent('final_artifact', 'artifact'),
         nodeId: node.id,
         roleSlotId: node.roleSlotId,
         data,
@@ -295,6 +303,7 @@ class ArchitectureGraphRuntime {
     }
 
     this.push('router_decision', message, {
+      actionSummary: architectureActionSummaryForEvent('router_decision', node.kind),
       nodeId: node.id,
       roleSlotId: node.roleSlotId,
       route: {
@@ -329,6 +338,7 @@ class ArchitectureGraphRuntime {
         return this.executeFinalizerNode(node, incomingNodeIds, outgoingNodeIds);
       }
       this.push('final_artifact', this.synthesizedArtifactMessage(node, incomingNodeIds), {
+        actionSummary: architectureActionSummaryForEvent('final_artifact', 'artifact'),
         nodeId: node.id,
         roleSlotId: node.roleSlotId,
         data: {
@@ -369,6 +379,7 @@ class ArchitectureGraphRuntime {
       throw new Error(`Missing branch session for role slot ${slot.id}`);
     }
     this.push('agent_started', `${slot.label} agent started.`, {
+      actionSummary: architectureActionSummaryForEvent('agent_started', 'role'),
       nodeId: node.id,
       roleSlotId: slot.id,
       data: {
@@ -404,6 +415,7 @@ class ArchitectureGraphRuntime {
     const routeRequest = this.routeRequest(result.data);
     const hasAgentRoute = !incompleteReason && routeRequest !== undefined && outgoingNodeIds.includes(routeRequest.targetNodeId);
     this.push('participant_output', result.message, {
+      actionSummary: architectureActionSummaryForEvent('participant_output', 'role'),
       nodeId: node.id,
       roleSlotId: slot.id,
       route: {
@@ -498,6 +510,7 @@ class ArchitectureGraphRuntime {
       result.data,
     );
     this.push('router_decision', result.message, {
+      actionSummary: architectureActionSummaryForEvent('router_decision', 'router'),
       nodeId: node.id,
       roleSlotId: slot.id,
       route,
@@ -515,6 +528,7 @@ class ArchitectureGraphRuntime {
       },
     });
     this.push('router_output', routerOutput.mergedDecision, {
+      actionSummary: architectureActionSummaryForEvent('router_output', 'router'),
       nodeId: node.id,
       roleSlotId: slot.id,
       route,
@@ -557,6 +571,7 @@ class ArchitectureGraphRuntime {
       ? this.toRouterOutput(node, incomingNodeIds, route, message, {})
       : undefined;
     this.push('router_decision', message, {
+      actionSummary: architectureActionSummaryForEvent('router_decision', node.kind),
       nodeId: node.id,
       roleSlotId: node.roleSlotId,
       route,
@@ -575,6 +590,7 @@ class ArchitectureGraphRuntime {
     });
     if (routerOutput) {
       this.push('router_output', routerOutput.mergedDecision, {
+        actionSummary: architectureActionSummaryForEvent('router_output', node.kind),
         nodeId: node.id,
         roleSlotId: node.roleSlotId,
         route,
@@ -613,6 +629,7 @@ class ArchitectureGraphRuntime {
       emit: this.options.emit,
     });
     this.push('final_artifact', result.message, {
+      actionSummary: architectureActionSummaryForEvent('final_artifact', 'artifact'),
       nodeId: node.id,
       roleSlotId: slot.id,
       data: {
@@ -1180,12 +1197,22 @@ class ArchitectureGraphRuntime {
     options: EventOptions = {},
   ): void {
     this.sequence += 1;
+    const actionFields = architectureActionFieldsForEvent({
+      type,
+      actionSummary: options.actionSummary,
+      route: options.route,
+      routerOutput: options.routerOutput,
+      data: options.data,
+    });
     const event = {
       id: `${this.options.run.id}:event:${this.sequence}`,
       runId: this.options.run.id,
       sequence: this.sequence,
       type,
       message,
+      actionSummary: actionFields.actionSummary,
+      action: actionFields.action,
+      detail: actionFields.detail,
       nodeId: options.nodeId,
       roleSlotId: options.roleSlotId,
       route: options.route,
@@ -1219,6 +1246,7 @@ class ArchitectureGraphRuntime {
     const payload = this.isRecord(data) ? data : {};
     if (event === 'agent:start') {
       this.push('agent_started', `${slot.label} child agent started.`, {
+        actionSummary: architectureActionSummaryForEvent('agent_started', 'role'),
         nodeId: node.id,
         roleSlotId: slot.id,
         data: this.branchStreamEventData(event, payload),
@@ -1227,6 +1255,7 @@ class ArchitectureGraphRuntime {
     }
     if (event === 'tool:confirmation_required') {
       this.push('human_gate', `${slot.label} requested HITL approval for ${this.toolName(payload)}.`, {
+        actionSummary: architectureActionSummaryForEvent('human_gate', 'role'),
         nodeId: node.id,
         roleSlotId: slot.id,
         data: this.branchStreamEventData(event, payload),
@@ -1235,6 +1264,7 @@ class ArchitectureGraphRuntime {
     }
     if (event === 'tool:start') {
       this.push('tool_call', `${slot.label} started ${this.toolName(payload)}.`, {
+        actionSummary: architectureActionSummaryForEvent('tool_call', 'role'),
         nodeId: node.id,
         roleSlotId: slot.id,
         data: this.branchStreamEventData(event, payload),
@@ -1244,6 +1274,7 @@ class ArchitectureGraphRuntime {
     if (event === 'tool:result') {
       const status = typeof payload['status'] === 'string' ? payload['status'] : 'unknown';
       this.push('tool_call', `${slot.label} ${this.toolName(payload)} ${status}.`, {
+        actionSummary: architectureActionSummaryForEvent('tool_call', 'role'),
         nodeId: node.id,
         roleSlotId: slot.id,
         data: this.branchStreamEventData(event, payload),
@@ -1252,6 +1283,7 @@ class ArchitectureGraphRuntime {
     }
     if (event === 'chat:error') {
       this.push('tool_call', `${slot.label} branch error: ${this.errorMessageFromPayload(payload)}.`, {
+        actionSummary: architectureActionSummaryForEvent('tool_call', 'role'),
         nodeId: node.id,
         roleSlotId: slot.id,
         data: this.branchStreamEventData(event, payload),

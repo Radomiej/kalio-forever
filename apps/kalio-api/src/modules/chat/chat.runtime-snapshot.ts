@@ -255,6 +255,7 @@ function buildToolActivitiesForSession(params: {
   const updatedAt = Date.now();
   const toolActivities: SocketEvents['session:runtime_snapshot']['toolActivities'] = params.pendingConfirmations.map((request) => ({
     callId: request.toolCallId,
+    requestId: request.requestId,
     sessionId: request.sessionId,
     toolName: request.toolName,
     args: request.args,
