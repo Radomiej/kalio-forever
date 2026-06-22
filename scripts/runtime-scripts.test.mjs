@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const stackManagerSource = readFileSync(new URL('./stack-manager.mjs', import.meta.url), 'utf8');
+const stackStatusSource = readFileSync(new URL('./stack-status.mjs', import.meta.url), 'utf8');
 const installScriptSource = readFileSync(new URL('./install.ps1', import.meta.url), 'utf8');
 const autostartScriptSource = readFileSync(new URL('./kalio-autostart.ps1', import.meta.url), 'utf8');
 const quickstartSource = readFileSync(new URL('../docs/quickstart-user.md', import.meta.url), 'utf8');
 const localDevGuideSource = readFileSync(new URL('../docs/local-dev-guide.md', import.meta.url), 'utf8');
 const scriptsReadmeSource = readFileSync(new URL('./README.md', import.meta.url), 'utf8');
+const ac13QaStackSource = readFileSync(new URL('./run-ac13-qa-stack.mjs', import.meta.url), 'utf8');
 
 test('prod stack fallback paths use prod defaults when --data-root is omitted', () => {
   assert.match(
@@ -81,5 +83,12 @@ test('stack manager refreshes managed PIDs from live port owners and refuses unm
   assert.match(stackManagerSource, /const state = await refreshStatePortOwners\(readState\(\) \?\? readLastState\(\)\);/);
   assert.match(stackManagerSource, /requested ports already in use by unmanaged listeners/);
   assert.match(stackManagerSource, /async function detectKnownManagedPortConflicts\(\)/);
-  assert.match(stackManagerSource, /buildStatusReport\('unmanaged listeners', null\)/);
+  assert.match(stackManagerSource, /buildStackStatusReport\(\{ status: 'unmanaged listeners'/);
+});
+
+test('managed stack status reports effective live llm config from the backend api', () => {
+  assert.match(stackManagerSource, /renderEffectiveLlmLine/);
+  assert.match(stackStatusSource, /effectiveLlm: await readEffectiveLlmConfig\(state, fetchImpl\)/);
+  assert.match(stackStatusSource, /`\$\{apiUrl\}\/llm\/config`/);
+  assert.match(ac13QaStackSource, /readEffectiveLlmConfig/);
 });

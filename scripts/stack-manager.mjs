@@ -6,6 +6,7 @@ import { createServer } from 'node:net';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readStackState, resolveStackPaths } from './stack-state.mjs';
+import { buildStackStatusReport, hasAliveChild, renderEffectiveLlmLine, renderStateProcesses } from './stack-status.mjs';
 
 const scriptDir = resolve(fileURLToPath(import.meta.url), '..');
 const repoRoot = resolve(scriptDir, '..');
@@ -653,7 +654,7 @@ async function showStatus() {
   if (!state) {
     const conflicts = await detectKnownManagedPortConflicts();
     if (conflicts.length > 0) {
-      const report = buildStatusReport('unmanaged listeners', null);
+      const report = await buildStackStatusReport({ status: 'unmanaged listeners', state: null, repoRoot, isProcessAlive });
       report.conflicts = conflicts;
       if (outputJson) {
         console.log(JSON.stringify(report, null, 2));
@@ -666,9 +667,15 @@ async function showStatus() {
       return;
     }
     const lastState = readLastState();
-    if (hasAliveChild(lastState)) {
+    if (hasAliveChild(lastState, isProcessAlive)) {
       if (outputJson) {
-        console.log(JSON.stringify(buildStatusReport('orphaned managed process', lastState), null, 2));
+        console.log(
+          JSON.stringify(
+            await buildStackStatusReport({ status: 'orphaned managed process', state: lastState, repoRoot, isProcessAlive }),
+            null,
+            2,
+          ),
+        );
         return;
       }
       console.log('[stack] status: orphaned managed process');
@@ -678,7 +685,7 @@ async function showStatus() {
 
     clearLastState();
     if (outputJson) {
-      console.log(JSON.stringify(buildStatusReport('stopped', null), null, 2));
+      console.log(JSON.stringify(await buildStackStatusReport({ status: 'stopped', state: null, repoRoot, isProcessAlive }), null, 2));
       return;
     }
     console.log('[stack] status: stopped');
@@ -689,7 +696,13 @@ async function showStatus() {
   const frontendUp = isProcessAlive(state?.frontend?.pid);
   if (!backendUp || !frontendUp) {
     if (outputJson) {
-      console.log(JSON.stringify(buildStatusReport('partial/stale state', state), null, 2));
+      console.log(
+        JSON.stringify(
+          await buildStackStatusReport({ status: 'partial/stale state', state, repoRoot, isProcessAlive }),
+          null,
+          2,
+        ),
+      );
       return;
     }
     console.log('[stack] status: partial/stale state');
@@ -697,12 +710,17 @@ async function showStatus() {
     return;
   }
 
+  const report = await buildStackStatusReport({ status: 'running', state, repoRoot, isProcessAlive });
   if (outputJson) {
-    console.log(JSON.stringify(buildStatusReport('running', state), null, 2));
+    console.log(JSON.stringify(report, null, 2));
     return;
   }
   console.log('[stack] status: running');
   reportStateProcesses(state);
+  const effectiveLlmLine = renderEffectiveLlmLine(report.effectiveLlm);
+  if (effectiveLlmLine) {
+    console.log(effectiveLlmLine);
+  }
   await reportHealth(`http://127.0.0.1:${state.backendPort}/api/health`, 'backend');
   await reportHealth(`http://127.0.0.1:${state.frontendPort}`, 'frontend');
 }
@@ -770,11 +788,11 @@ function clearLastState() {
 
 async function clearIfRunning() {
   const state = readState();
-  if (!state && !hasAliveChild(readLastState())) {
+  if (!state && !hasAliveChild(readLastState(), isProcessAlive)) {
     clearLastState();
     return;
   }
-  if (!hasAliveChild(state)) {
+  if (!hasAliveChild(state, isProcessAlive)) {
     clearState();
     clearLastState();
     return;
@@ -782,38 +800,9 @@ async function clearIfRunning() {
   await stopStack();
 }
 
-function buildStatusReport(status, state) {
-  return {
-    status,
-    backendUp: isProcessAlive(state?.backend?.pid),
-    frontendUp: isProcessAlive(state?.frontend?.pid),
-    state: state ?? null,
-    paths: resolveStackPaths(repoRoot),
-  };
-}
-
-function hasAliveChild(state) {
-  return Boolean(state && (isProcessAlive(state?.backend?.pid) || isProcessAlive(state?.frontend?.pid)));
-}
-
 function reportStateProcesses(state) {
-  console.log(`[stack] backend pid ${state.backend?.pid ?? 'unknown'}  (${state.backend?.cwd ?? 'unknown cwd'})`);
-  console.log(`[stack] frontend pid ${state.frontend?.pid ?? 'unknown'} (${state.frontend?.cwd ?? 'unknown cwd'})`);
-  console.log(`[stack] ports: backend=${state.backendPort ?? 'unknown'}, frontend=${state.frontendPort ?? 'unknown'}`);
-  if (state.databasePath) {
-    console.log(`[stack] database=${state.databasePath}`);
-  }
-  if (state.workspaceRoot) {
-    console.log(`[stack] workspace=${state.workspaceRoot}`);
-  }
-  if (state.dataRoot) {
-    console.log(`[stack] data-root=${state.dataRoot}`);
-  }
-  if (state.profile) {
-    console.log(`[stack] profile=${state.profile}`);
-  }
-  if (state.installRoot) {
-    console.log(`[stack] install-root=${state.installRoot}`);
+  for (const line of renderStateProcesses(state)) {
+    console.log(line);
   }
 }
 
