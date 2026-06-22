@@ -1,11 +1,17 @@
 import axios from 'axios';
 import type { RAAppSummary, RAAppGroup, VFSListResult } from '@kalio/types';
 import { resolvePairedBackendOrigin } from './backendOrigin';
+import { readRuntimeConfig } from './runtimeConfig';
 
 function resolveConfiguredApiUrl(): string {
   const pairedBackendOrigin = resolvePairedBackendOrigin(globalThis.location);
   if (pairedBackendOrigin) {
     return pairedBackendOrigin;
+  }
+
+  const runtimeApiUrl = readRuntimeConfig()?.apiUrl;
+  if (runtimeApiUrl) {
+    return runtimeApiUrl;
   }
 
   const configured = import.meta.env['VITE_API_URL'] as string | undefined;

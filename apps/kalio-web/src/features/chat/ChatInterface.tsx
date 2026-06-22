@@ -13,7 +13,7 @@ import { useContextPreview } from './hooks/useContextPreview';
 import { useChatSessionActivation } from './hooks/useChatSessionActivation';
 import { useChatSocketEvents } from './hooks/useChatSocketEvents';
 import { useChatComposerActions } from './hooks/useChatComposerActions';
-import { computeAnsweredCallIds, buildConversationTimeline } from './chatUtils';
+import { buildTurnsFromHistory, computeAnsweredCallIds, buildConversationTimeline, mergeFetchedMessages } from './chatUtils';
 import { apiClient } from '../../services/apiClient';
 import type { ChatMessage, ConversationTitleSettings } from '@kalio/types';
 import { getArchitectureSchemas } from '../architect/architect.api';
@@ -35,6 +35,7 @@ import { resolveConversationShellState } from './conversationShellState';
 import { resolveLiveTurnState } from './liveTurnState';
 import { resolveRenderableConversationProjection } from './conversationTranscriptProjection';
 import { selectQueuedDepth } from '../../store/agentRuntimeSelectors';
+import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
@@ -82,6 +83,8 @@ export function ChatInterface() {
     messages, activeSessionId, sessions, addMessage, setMessages,
     agentTurns, setAgentTurns, updateAgentTurn, updateSession,
     getSessionActiveTurnId,
+    getSessionHistoryMeta,
+    setSessionHistoryMeta,
     streamingChunks,
     thinkingChunks,
     chunkSessionIds,
@@ -112,6 +115,7 @@ export function ChatInterface() {
   });
   const activeToolActivities = getToolActivitiesForSession(activeSessionId);
   const activeContext = getContextForSession(activeSessionId);
+  const activeSessionHistoryMeta = getSessionHistoryMeta(activeSessionId);
   const [error, setError] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<ChatConnectionState>(
@@ -125,6 +129,7 @@ export function ChatInterface() {
   const [projectPath, setProjectPath] = useState('');
   const [draftUserMessage, setDraftUserMessage] = useState('');
   const [contextPreviewRefreshKey, setContextPreviewRefreshKey] = useState(0);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const toolArgProgressSeenRef = useRef<Record<string, Set<string>>>({});
 
   useEffect(() => {
@@ -377,6 +382,9 @@ export function ChatInterface() {
   };
 
   const [copied, setCopied] = useState(false);
+  const remainingHistoryCount = activeSessionHistoryMeta
+    ? Math.max(0, activeSessionHistoryMeta.totalCount - messages.length)
+    : 0;
   const handleCopyChat = () => {
     const text = buildCopiedChatText(messages);
     void navigator.clipboard.writeText(text).then(() => {
@@ -401,6 +409,37 @@ export function ChatInterface() {
 
     handleComposerSend(content, personaId);
   }, [activeSession, handleComposerSend, updateSession]);
+
+  const handleLoadOlderMessages = useCallback(async () => {
+    if (!activeSessionId || !activeSessionHistoryMeta?.hasMoreBefore || loadingOlderMessages) {
+      return;
+    }
+
+    setLoadingOlderMessages(true);
+    try {
+      const response = await fetchSessionHistoryWindow(activeSessionId, {
+        limit: DEFAULT_SESSION_HISTORY_LIMIT,
+        beforeMessageId: activeSessionHistoryMeta.oldestLoadedMessageId,
+      });
+      const currentMessages = useSessionStore.getState().getSessionMessages(activeSessionId);
+      const mergedMessages = mergeFetchedMessages(currentMessages, response.messages);
+      setSessionHistoryMeta(activeSessionId, response.meta);
+      setMessages(mergedMessages, activeSessionId);
+      setAgentTurns(buildTurnsFromHistory(mergedMessages, activeSessionId), activeSessionId);
+    } catch (err: unknown) {
+      console.error('[ChatInterface] older history load failed', err instanceof Error ? err : new Error(String(err)));
+      setError('Failed to load older messages.');
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }, [
+    activeSessionHistoryMeta,
+    activeSessionId,
+    loadingOlderMessages,
+    setAgentTurns,
+    setMessages,
+    setSessionHistoryMeta,
+  ]);
 
   return (
     <div data-testid="chat-interface" className="flex h-full flex-col bg-base-200 overflow-hidden">
@@ -454,6 +493,21 @@ export function ChatInterface() {
         onScroll={handleMessageListScroll}
       >
         <div className="flex w-full flex-col gap-1">
+          {activeSessionId && activeSessionHistoryMeta?.hasMoreBefore && (
+            <div className="flex justify-center pb-2">
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs text-[11px]"
+                onClick={() => void handleLoadOlderMessages()}
+                disabled={loadingOlderMessages}
+                data-testid="chat-load-older-btn"
+              >
+                {loadingOlderMessages
+                  ? 'Loading older messages...'
+                  : `Load older messages${remainingHistoryCount > 0 ? ` (${remainingHistoryCount} remaining)` : ''}`}
+              </button>
+            </div>
+          )}
           {(conversationShellState.mode === 'launch-form' || conversationShellState.mode === 'pending-child-session') && (
             <ChatWelcomeScreen
               activeSession={activeSession}

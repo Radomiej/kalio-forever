@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AgentRunContext, ChatSession, ChatMessage, ID, RAAppLaunchIntent } from '@kalio/types';
+import type { SessionHistoryMeta } from '../features/chat/sessionHistoryApi';
 import { useAgentStore } from './agentStore';
 import type { AgentTurn, AgentTurnItem } from './sessionStore.helpers';
 import {
@@ -17,6 +18,7 @@ interface SessionState {
   activeSessionId: string | null;
   messages: ChatMessage[];
   sessionMessages: Record<string, ChatMessage[]>;
+  sessionHistoryMeta: Record<string, SessionHistoryMeta>;
   hydratedSessionIds: Record<string, true>;
   streamingChunks: Record<string, string>;    // messageId → accumulated answer delta
   thinkingChunks: Record<string, string>;     // messageId → accumulated thinking delta
@@ -36,11 +38,13 @@ interface SessionState {
   createSession: (name: string) => string;
   setActiveSession: (id: string | null) => void;
   getSessionMessages: (sessionId: string | null) => ChatMessage[];
+  getSessionHistoryMeta: (sessionId: string | null) => SessionHistoryMeta | null;
   getSessionAgentTurns: (sessionId: string | null) => AgentTurn[];
   getSessionActiveTurnId: (sessionId: string | null) => ID | null;
   isSessionHydrated: (sessionId: string | null) => boolean;
   markSessionHydrated: (sessionId: string | null) => void;
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
+  setSessionHistoryMeta: (sessionId: string | null, meta: SessionHistoryMeta | null) => void;
   addMessage: (message: ChatMessage) => void;
   appendChunk: (messageId: string, delta: string, thinking?: boolean, chunkSessionId?: string) => void;
   finalizeChunk: (messageId: string) => void;
@@ -78,6 +82,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   activeSessionId: null,
   messages: [],
   sessionMessages: {},
+  sessionHistoryMeta: {},
   hydratedSessionIds: {},
   streamingChunks: {},
   thinkingChunks: {},
@@ -112,6 +117,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     return id;
   },
   getSessionMessages: (sessionId) => resolveSessionSlice(get(), sessionId).messages,
+  getSessionHistoryMeta: (sessionId) => (sessionId ? get().sessionHistoryMeta[sessionId] ?? null : null),
   getSessionAgentTurns: (sessionId) => resolveSessionSlice(get(), sessionId).agentTurns,
   getSessionActiveTurnId: (sessionId) => resolveSessionSlice(get(), sessionId).activeTurnId,
   isSessionHydrated: (sessionId) => (sessionId ? get().hydratedSessionIds[sessionId] === true : false),
@@ -161,6 +167,26 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           [targetSessionId]: nextMessages,
         },
         messages: targetSessionId === s.activeSessionId ? nextMessages : s.messages,
+      };
+    }),
+  setSessionHistoryMeta: (sessionId, meta) =>
+    set((s) => {
+      if (!sessionId) {
+        return s;
+      }
+      if (!meta) {
+        if (!s.sessionHistoryMeta[sessionId]) {
+          return s;
+        }
+        const nextSessionHistoryMeta = { ...s.sessionHistoryMeta };
+        delete nextSessionHistoryMeta[sessionId];
+        return { sessionHistoryMeta: nextSessionHistoryMeta };
+      }
+      return {
+        sessionHistoryMeta: {
+          ...s.sessionHistoryMeta,
+          [sessionId]: meta,
+        },
       };
     }),
   addMessage: (message) =>
@@ -376,6 +402,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((s) => {
       const nextSessionMessages = { ...s.sessionMessages };
       delete nextSessionMessages[id];
+      const nextSessionHistoryMeta = { ...s.sessionHistoryMeta };
+      delete nextSessionHistoryMeta[id];
       const nextHydratedSessionIds = { ...s.hydratedSessionIds };
       delete nextHydratedSessionIds[id];
       const nextSessionAgentTurns = { ...s.sessionAgentTurns };
@@ -389,6 +417,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         agentTurns: s.activeSessionId === id ? [] : s.agentTurns,
         activeTurnId: s.activeSessionId === id ? null : s.activeTurnId,
         sessionMessages: nextSessionMessages,
+        sessionHistoryMeta: nextSessionHistoryMeta,
         hydratedSessionIds: nextHydratedSessionIds,
         sessionAgentTurns: nextSessionAgentTurns,
         sessionActiveTurnIds: nextSessionActiveTurnIds,
