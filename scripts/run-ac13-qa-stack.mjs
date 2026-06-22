@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readStackState as readManagedStackState, resolveStackPaths } from './stack-state.mjs';
+import { readEffectiveLlmConfig } from './stack-status.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
@@ -94,7 +95,10 @@ try {
   const frontendUrl = `http://127.0.0.1:${state.frontendPort}`;
   const backendUrl = `http://127.0.0.1:${state.backendPort}`;
 
-  console.log(`[qa-ac13] QA stack ready: frontend=${frontendUrl} backend=${backendUrl} provider=${state.provider ?? 'mock'}`);
+  const effectiveLlm = await readEffectiveLlmConfig(state);
+  console.log(
+    `[qa-ac13] QA stack ready: frontend=${frontendUrl} backend=${backendUrl} provider=${effectiveLlm?.provider ?? state.provider ?? 'mock'}`,
+  );
 
   const playwrightEnv = normalizedWindowsEnv({
     ...process.env,
