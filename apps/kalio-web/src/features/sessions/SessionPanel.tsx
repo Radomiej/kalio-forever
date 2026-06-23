@@ -90,7 +90,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
           }
         }
       })
-      .catch((err: unknown) => console.error('[SessionPanel] load failed', err))
+      .catch((err: unknown) => console.warn('[SessionPanel] load failed', err))
       .finally(() => setLoading(false));
   }, [setSessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -111,7 +111,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         const visibleIds = new Set(sessions.map((session) => session.id));
         setArchivedSessions(r.data.filter((session) => !visibleIds.has(session.id)));
       })
-      .catch((err: unknown) => console.error('[SessionPanel] load archived sessions failed', err));
+      .catch((err: unknown) => console.warn('[SessionPanel] load archived sessions failed', err));
   }, [originFilter, sessions]);
 
   const reloadSessionHistory = useCallback(async (sessionId: string, activeSessionIdForHydration: string = sessionId) => {
@@ -135,7 +135,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
 
       return hydratedMessages;
     } catch (err) {
-      console.error('[SessionPanel] load messages failed', err);
+      console.warn('[SessionPanel] load messages failed', err);
       return null;
     }
   }, [getSessionActiveTurnId, getSessionAgentTurns, getSessionMessages, sessions, setAgentTurns, setMessages, setSessionHistoryMeta]);
@@ -332,7 +332,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
           }
         })
         .catch((err: unknown) => {
-          console.error('[SessionPanel] architecture descendant refresh failed', err);
+          console.warn('[SessionPanel] architecture descendant refresh failed', err);
         })
         .finally(() => {
           void reloadSessionHistory(recoverySessionId).finally(() => {

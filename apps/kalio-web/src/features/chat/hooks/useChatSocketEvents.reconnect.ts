@@ -58,7 +58,7 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
         refreshedSessions = await deps.fetchSessions();
         deps.setSessions(refreshedSessions);
       } catch (err) {
-        console.error(
+        console.warn(
           '[ChatInterface] reconnect session refresh failed',
           err instanceof Error ? err : new Error(String(err)),
         );
