@@ -29,6 +29,7 @@ const useDirectRuntime = args.includes('--runtime') && getArgValue(args, '--runt
 const apiDir = resolve(repoRoot, 'apps/kalio-api');
 const backendDist = resolve(apiDir, 'dist/main.js');
 const webDir = resolve(repoRoot, 'apps/kalio-web');
+const webDistDir = resolve(webDir, 'dist');
 const workspaceRoot = resolve(repoRoot, 'data/workspaces-qa');
 const databasePath = resolve(repoRoot, 'data/kalio-qa.db');
 
@@ -153,6 +154,16 @@ function resolveViteBin() {
     resolve(webDir, 'node_modules/vite/bin/vite.js'),
     'vite@',
     'node_modules/vite/bin/vite.js',
+  );
+}
+
+function writeFrontendRuntimeConfig(frontendUrl, backendUrl) {
+  const runtimeConfigPath = resolve(webDistDir, 'runtime-config.js');
+  mkdirSync(dirname(runtimeConfigPath), { recursive: true });
+  writeFileSync(
+    runtimeConfigPath,
+    `window.__KALIO_RUNTIME_CONFIG__ = ${JSON.stringify({ apiUrl: backendUrl, wsUrl: backendUrl })};\n`,
+    'utf8',
   );
 }
 
@@ -307,47 +318,31 @@ function commonEnv(qaEnv) {
 }
 
 function resolveFrontendLauncher() {
+  const viteBin = resolveViteBin();
+  if (viteBin) {
+    return {
+      mode: 'direct',
+      command: process.execPath,
+      argsPrefix: [viteBin],
+      cwd: webDir,
+      shell: false,
+      label: `${process.execPath} ${viteBin} preview --configLoader runner --strictPort`,
+    };
+  }
+
   if (useDirectRuntime) {
-    const viteBin = resolveViteBin();
-    if (!viteBin) {
-      throw new Error('vite CLI not found for direct runtime. Run pnpm install from repo root.');
-    }
-
-    return {
-      mode: 'direct',
-      command: process.execPath,
-      argsPrefix: [viteBin],
-      cwd: webDir,
-      shell: false,
-      label: `${process.execPath} ${viteBin} preview --configLoader runner --strictPort`,
-    };
+    throw new Error('vite CLI not found for direct runtime. Run pnpm install from repo root.');
   }
 
-  try {
-    const pnpm = getPnpmLauncher();
-    return {
-      mode: 'pnpm',
-      command: pnpm.command,
-      argsPrefix: [...pnpm.argsPrefix, '--filter', 'kalio-web', 'exec', 'vite'],
-      cwd: repoRoot,
-      shell: pnpm.shell,
-      label: `${pnpm.command} ${pnpm.argsPrefix.join(' ')} --filter kalio-web exec vite preview --configLoader runner --strictPort`,
-    };
-  } catch (error) {
-    const viteBin = resolveViteBin();
-    if (!viteBin) {
-      throw error;
-    }
-
-    return {
-      mode: 'direct',
-      command: process.execPath,
-      argsPrefix: [viteBin],
-      cwd: webDir,
-      shell: false,
-      label: `${process.execPath} ${viteBin} preview --configLoader runner --strictPort`,
-    };
-  }
+  const pnpm = getPnpmLauncher();
+  return {
+    mode: 'pnpm',
+    command: pnpm.command,
+    argsPrefix: [...pnpm.argsPrefix, '--filter', 'kalio-web', 'exec', 'vite'],
+    cwd: repoRoot,
+    shell: pnpm.shell,
+    label: `${pnpm.command} ${pnpm.argsPrefix.join(' ')} --filter kalio-web exec vite preview --configLoader runner --strictPort`,
+  };
 }
 
 async function captureCommand(command, commandArgs) {
@@ -506,6 +501,8 @@ async function startStack() {
   if (!existsSync(backendDist) || !existsSync(resolve(webDir, 'dist/index.html'))) {
     throw new Error('Built stack requires backend and frontend dist artifacts. Run without --skip-build or run: pnpm build');
   }
+
+  writeFrontendRuntimeConfig(frontendUrl, backendUrl);
 
   const frontendLauncher = resolveFrontendLauncher();
 

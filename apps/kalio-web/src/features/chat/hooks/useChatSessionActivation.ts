@@ -71,6 +71,7 @@ export function useChatSessionActivation({
       getSessions: () => useSessionStore.getState().sessions,
       getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
       setMessages,
+      setSessionHistoryMeta: (sessionId, meta) => useSessionStore.getState().setSessionHistoryMeta(sessionId, meta),
       setAgentTurns,
       getSessionAgentTurns: (sessionId) => useSessionStore.getState().getSessionAgentTurns(sessionId),
       getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),

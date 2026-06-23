@@ -197,6 +197,21 @@ describe('ChatGateway', () => {
     );
   });
 
+  it('REGRESSION: chat:stop broadcasts terminal runtime snapshots to session subscribers', async () => {
+    await gateway.handleSessionIdentify(observer as never, { sessionId: 'session-1' });
+    vi.mocked(observer.emit).mockClear();
+
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+
+    expect(observer.emit).toHaveBeenCalledWith(
+      'session:runtime_snapshot',
+      expect.objectContaining({
+        sessionId: 'session-1',
+        active: false,
+      }),
+    );
+  });
+
   it('uses one collected session tree during chat:stop instead of rebuilding descendants per snapshot', async () => {
     (sessions.listChildren as ReturnType<typeof vi.fn>)
       .mockImplementation(async (sessionId: string) => (
@@ -657,6 +672,42 @@ describe('ChatGateway', () => {
 
     await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
 
+    expect(agentFlowRuntime.stop).toHaveBeenCalledWith('flow-run-1');
+  });
+
+  it('REGRESSION: stopping AgentFlow runs uses scoped parent-session lookup instead of findAll', async () => {
+    const snapshot: AgentFlowRunSnapshot = {
+      run: {
+        id: 'flow-run-1',
+        parentSessionId: 'session-1',
+        childSessionId: 'arch-flow-run-1-root',
+        openChatSessionId: 'arch-flow-run-1-root',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'running',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+    };
+    const findByParentSessionId = vi.fn().mockResolvedValueOnce([snapshot]);
+    agentFlowRuntime = {
+      ...agentFlowRuntime,
+      findAll: vi.fn().mockResolvedValue([]),
+      findByParentSessionId,
+      stop: vi.fn().mockResolvedValue(null),
+    } as unknown as AgentFlowRuntimePort;
+    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals, agentFlowRuntime, cliAgentSessionRuntime);
+    gateway.handleConnection(client as never);
+    (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+      .get(client.id)
+      ?.add('session-1');
+
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+
+    expect(findByParentSessionId).toHaveBeenCalledWith('session-1');
+    expect(agentFlowRuntime.findAll).not.toHaveBeenCalled();
     expect(agentFlowRuntime.stop).toHaveBeenCalledWith('flow-run-1');
   });
 

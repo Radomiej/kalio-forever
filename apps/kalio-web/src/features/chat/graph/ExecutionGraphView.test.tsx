@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ChatSession, Persona, RuntimeActivitySnapshot, ToolConfirmationRequest } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
+import type { SessionHistoryMeta } from '../sessionHistoryApi';
 import { buildTurnsFromHistory } from '../chatUtils';
 import { ExecutionGraphView } from './ExecutionGraphView';
 import { DEFAULT_TEST_PERSONA_AVATAR } from '../../../test/personaFixtures';
@@ -14,6 +15,7 @@ type SessionStateShape = {
   sessions: ChatSession[];
   sessionMessages: Record<string, ChatMessage[]>;
   sessionAgentTurns: Record<string, AgentTurn[]>;
+  sessionHistoryMeta: Record<string, SessionHistoryMeta>;
   getSessionMessages: (sessionId: string | null) => ChatMessage[];
   getSessionAgentTurns: (sessionId: string | null) => AgentTurn[];
   getSessionActiveTurnId: (sessionId: string | null) => string | null;
@@ -21,6 +23,7 @@ type SessionStateShape = {
   addSession: ReturnType<typeof vi.fn>;
   setMessages: ReturnType<typeof vi.fn>;
   setAgentTurns: ReturnType<typeof vi.fn>;
+  setSessionHistoryMeta: ReturnType<typeof vi.fn>;
   setPendingMessage: ReturnType<typeof vi.fn>;
   addMessage: ReturnType<typeof vi.fn>;
   updateSession: ReturnType<typeof vi.fn>;
@@ -75,6 +78,7 @@ const {
     sessions: [] as ChatSession[],
     sessionMessages: {} as Record<string, ChatMessage[]>,
     sessionAgentTurns: {} as Record<string, AgentTurn[]>,
+    sessionHistoryMeta: {} as Record<string, SessionHistoryMeta>,
     getSessionMessages: (sessionId: string | null) => (sessionId ? (sessionState.sessionMessages[sessionId] ?? []) : []),
     getSessionAgentTurns: (sessionId: string | null) => (sessionId ? (sessionState.sessionAgentTurns[sessionId] ?? []) : []),
     getSessionActiveTurnId: () => null,
@@ -82,6 +86,16 @@ const {
     addSession: vi.fn(),
     setMessages: vi.fn(),
     setAgentTurns: vi.fn(),
+    setSessionHistoryMeta: vi.fn((sessionId: string | null, meta: SessionHistoryMeta | null) => {
+      if (!sessionId) {
+        return;
+      }
+      if (!meta) {
+        delete sessionState.sessionHistoryMeta[sessionId];
+        return;
+      }
+      sessionState.sessionHistoryMeta[sessionId] = meta;
+    }),
     setPendingMessage: vi.fn(),
     addMessage: vi.fn(),
     updateSession: vi.fn(),
@@ -216,6 +230,7 @@ describe('ExecutionGraphView empty-session state', () => {
     sessionState.messages = [];
     sessionState.agentTurns = [];
     sessionState.sessionAgentTurns = {};
+    sessionState.sessionHistoryMeta = {};
     sessionState.sessions = [
       {
         id: 'session-1',
@@ -239,6 +254,7 @@ describe('ExecutionGraphView empty-session state', () => {
     sessionState.addSession.mockReset();
     sessionState.setMessages.mockReset();
     sessionState.setAgentTurns.mockReset();
+    sessionState.setSessionHistoryMeta.mockClear();
     sessionState.setPendingMessage.mockReset();
     sessionState.addMessage.mockReset();
     sessionState.updateSession.mockReset();
@@ -935,7 +951,9 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
-    expect(apiGetMock).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+    expect(apiGetMock).toHaveBeenCalledWith('/api/sessions/session-1/messages', expect.objectContaining({
+      params: expect.objectContaining({ limit: 40 }),
+    }));
     expect(sessionState.setMessages).toHaveBeenCalledWith(messages, 'session-1');
     expect(sessionState.setAgentTurns).toHaveBeenCalledWith(buildTurnsFromHistory(messages, 'session-1'), 'session-1');
   });

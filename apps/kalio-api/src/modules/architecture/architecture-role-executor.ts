@@ -340,7 +340,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     if (outgoingNodeIds.length > 0) {
       lines.push('', `Available next nodes: ${outgoingNodeIds.join(', ')}`);
     }
-    const canUseEvidenceTools = input.slot.slotType !== 'finalizer';
+    const canUseEvidenceTools = this.canUseEvidenceToolsForSlot(input.slot, input.run.context);
     const attachedFilePaths = canUseEvidenceTools ? this.attachedFilePaths(input.run.context) : [];
     if (attachedFilePaths.length > 0) {
       lines.push(
@@ -724,6 +724,19 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
 
   private isImplementationWriterSlot(slot: ArchitectureRoleSlot): boolean {
     return slot.id === 'implementer';
+  }
+
+  private canUseEvidenceToolsForSlot(
+    slot: ArchitectureRoleSlot,
+    context: Record<string, unknown> | undefined,
+  ): boolean {
+    if (slot.slotType === 'finalizer') {
+      return false;
+    }
+    if (slot.slotType === 'router' && !this.isOrchestrationSlot(slot)) {
+      return context?.['allowArchitectureRouterEvidenceTools'] === true;
+    }
+    return true;
   }
 
   private baseData(

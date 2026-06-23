@@ -85,7 +85,7 @@ describe('QuickChatWidget', () => {
     expect(setPendingMessage).toHaveBeenCalledWith('hello Kalio');
     expect(setActiveSession).toHaveBeenCalledWith('session-1');
     expect(onMessageSent).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('quick-chat-input')).toHaveValue('');
+    await waitFor(() => expect(screen.getByTestId('quick-chat-input')).toHaveValue(''));
   });
 
   it('submits on Enter but keeps Shift+Enter for multiline typing', async () => {

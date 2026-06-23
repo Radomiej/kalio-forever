@@ -484,10 +484,14 @@ class ArchitectureGraphRuntime {
     );
     const incompleteReason = this.incompleteResultReason(result.message);
     const routeRequest = this.routeRequest(result.data);
-    const hasAgentRoute = !incompleteReason && routeRequest !== undefined && outgoingNodeIds.includes(routeRequest.targetNodeId);
+    const canAgentRouteOverride = node.behavior?.mode !== 'fan_out_all';
+    const hasAgentRoute = canAgentRouteOverride
+      && !incompleteReason
+      && routeRequest !== undefined
+      && outgoingNodeIds.includes(routeRequest.targetNodeId);
     const requestedSelectedNodeIds = incompleteReason
       ? this.incompleteContinuationNodeIds(outgoingNodeIds, node.behavior?.convergeToNodeId)
-      : routeRequest && outgoingNodeIds.includes(routeRequest.targetNodeId)
+      : hasAgentRoute
       ? [routeRequest.targetNodeId]
       : fallbackNodeIds;
     const guard = this.judgeContinuationGuard(slot, node, incomingNodeIds, requestedSelectedNodeIds, outgoingNodeIds);

@@ -165,7 +165,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const snapshotBatch = await this.buildRuntimeActivitySnapshots(payload.sessionId, sessionTree);
     for (const sessionId of snapshotBatch.sessionIds) {
-      client.emit('session:runtime_snapshot', snapshotBatch.snapshotsBySessionId[sessionId]);
+      this.emitToInitiatorAndSessionSubscribers(
+        client.id,
+        sessionId,
+        'session:runtime_snapshot',
+        snapshotBatch.snapshotsBySessionId[sessionId],
+      );
     }
   }
 

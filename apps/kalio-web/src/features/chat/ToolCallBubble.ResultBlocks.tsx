@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import type { ChatMessage, CLIAgentSessionSnapshot, RAAppBlock, SubagentToolResult, SubAgentFlowResult } from '@kalio/types';
-import { apiClient } from '../../services/apiClient';
+import type { CLIAgentSessionSnapshot, RAAppBlock, SubagentToolResult, SubAgentFlowResult } from '@kalio/types';
 import { RAAppRenderer } from '../raapp/RAAppRenderer';
 import { ImageResultRenderer, type ImageResultData } from './ImageResultRenderer';
 import { extractChildToolPreviews, getChildImageIdentity } from './ToolCallBubble.parsers';
+import { DEFAULT_CHILD_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
 
 function statusTone(status: SubAgentFlowResult['status']): string {
   if (status === 'done') return 'text-success';
@@ -96,12 +96,13 @@ export function SubagentResultBlock({ result }: { result: SubagentToolResult }) 
     let cancelled = false;
     const abortController = new AbortController();
 
-    void apiClient.get<ChatMessage[]>(`/api/sessions/${result.childSessionId}/messages`, {
+    void fetchSessionHistoryWindow(result.childSessionId, {
+      limit: DEFAULT_CHILD_SESSION_HISTORY_LIMIT,
       signal: abortController.signal,
     })
       .then((response) => {
         if (cancelled) return;
-        const previews = extractChildToolPreviews(response.data);
+        const previews = extractChildToolPreviews(response.messages);
         setChildRaapp(previews.raapp);
         setChildImages(previews.images);
       })

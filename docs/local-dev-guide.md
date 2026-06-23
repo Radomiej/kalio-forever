@@ -65,7 +65,7 @@ Health checks:
 - API: http://localhost:3016/api/health
 - Provider: http://localhost:3016/api/llm/config
 
-Use **`localhost:5188`** for manual browser QA in dev. The stack allows both `localhost` and `127.0.0.1` CORS origins.
+Use **`localhost:5188`** for ordinary manual browser QA in dev. For browser MCP or extension-driven automation, prefer **`127.0.0.1`** if localhost bootstrap requests fail. The stack must keep both `localhost` and `127.0.0.1` CORS origins working.
 
 ### QA fixed — stable built stack (`pnpm qa`)
 

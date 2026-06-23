@@ -1,5 +1,21 @@
 import { Injectable } from '@nestjs/common';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { ICLIAgentAdapter } from './cli-agent.adapter';
+
+export function defaultCodexCommand(platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'win32') {
+    return 'codex';
+  }
+
+  const appData = process.env.APPDATA;
+  const appDataShim = appData ? join(appData, 'npm', 'codex.cmd') : '';
+  if (appDataShim && existsSync(appDataShim)) {
+    return appDataShim;
+  }
+
+  return 'codex.cmd';
+}
 
 @Injectable()
 export class CodexAdapter implements ICLIAgentAdapter {
@@ -14,7 +30,7 @@ export class CodexAdapter implements ICLIAgentAdapter {
   }
 
   wrapperArgs(platform: NodeJS.Platform): string[] {
-    return platform === 'win32' ? ['/c', 'codex'] : [];
+    return platform === 'win32' ? ['/c', defaultCodexCommand(platform)] : [];
   }
 
   buildArgs(prompt: string, _workdir: string, extra: string[] = [], model = ''): string[] {

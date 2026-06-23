@@ -48,4 +48,22 @@ describe('eventBus', () => {
       wsUrl: 'http://127.0.0.1:3316',
     });
   });
+
+  it('uses injected runtime websocket config on random-port builds', async () => {
+    vi.resetModules();
+    kalioSdkMock.mockClear();
+    window.__KALIO_RUNTIME_CONFIG__ = {
+      wsUrl: 'http://127.0.0.1:59756',
+    };
+
+    try {
+      await import('./eventBus');
+    } finally {
+      delete window.__KALIO_RUNTIME_CONFIG__;
+    }
+
+    expect(kalioSdkMock).toHaveBeenCalledWith({
+      wsUrl: 'http://127.0.0.1:59756',
+    });
+  });
 });

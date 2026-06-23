@@ -183,6 +183,126 @@ describe('handleSocketReconnect', () => {
     expect(setActiveSession).not.toHaveBeenCalled();
   });
 
+  it('persists session history metadata when reconnect hydration uses SessionHistoryWindow results', async () => {
+    const setMessages = vi.fn((messages, sessionId?: string | null) => {
+      useSessionStore.getState().setMessages(messages, sessionId);
+    });
+    const setAgentTurns = vi.fn((turns, sessionId?: string | null) => {
+      useSessionStore.getState().setAgentTurns(turns, sessionId);
+    });
+    const setSessionHistoryMeta = vi.fn();
+
+    handleSocketReconnect({
+      cliChild: {
+        upsertCLIChildProjection: vi.fn(),
+        updateCLIChildProjection: vi.fn(),
+        rebuildCLIChildProjections: vi.fn(),
+        appendCLIAgentChunk: vi.fn(),
+        registerCallId: vi.fn(),
+        getAgentState: () => ({
+          callIdToName: {},
+          toolActivities: [],
+          cliChildProjections: {},
+          cliAgentOutput: {},
+        }),
+        getSessionState: () => ({
+          activeSessionId: useSessionStore.getState().activeSessionId,
+          sessions: useSessionStore.getState().sessions,
+        }),
+        identifySession: vi.fn(),
+      },
+      setStreaming: vi.fn(),
+      clearToolArgProgressTracking: vi.fn(),
+      clearToolActivities: vi.fn(),
+      removeActiveAgentLoop: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      getActiveSessionId: () => useSessionStore.getState().activeSessionId,
+      getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
+      setMessages,
+      setSessionHistoryMeta,
+      setAgentTurns,
+      hasActiveLoopForSession: () => false,
+      fetchMessages: async (sessionId) => {
+        if (sessionId === 'session-1') {
+          return {
+            messages: [
+              {
+                id: 'user-1',
+                sessionId: 'session-1',
+                role: 'user',
+                content: 'Plan it.',
+                createdAt: 1,
+              },
+              {
+                id: 'assistant-final',
+                sessionId: 'session-1',
+                role: 'assistant',
+                content: 'Final recommendation.',
+                createdAt: 5,
+              },
+            ],
+            meta: {
+              totalCount: 52,
+              hasMoreBefore: true,
+              oldestLoadedMessageId: 'user-1',
+            },
+          };
+        }
+        if (sessionId === 'arch-root') {
+          return {
+            messages: [
+              {
+                id: 'arch-summary',
+                sessionId: 'arch-root',
+                role: 'assistant',
+                content: '',
+                architectureRun: {
+                  runId: 'run-live',
+                  schemaId: 'Strategic Decision Council',
+                  status: 'running',
+                  trace: [],
+                  routeHops: [],
+                  graphNodes: [
+                    { id: 'router', label: 'Router', kind: 'router', status: 'running', eventIds: ['event-router'] },
+                    { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
+                  ],
+                  graphEdges: [],
+                },
+                createdAt: 3,
+              },
+            ],
+            meta: {
+              totalCount: 9,
+              hasMoreBefore: false,
+              oldestLoadedMessageId: 'arch-summary',
+            },
+          };
+        }
+        return {
+          messages: [],
+          meta: {
+            totalCount: 0,
+            hasMoreBefore: false,
+            oldestLoadedMessageId: null,
+          },
+        };
+      },
+    });
+
+    await waitFor(() => {
+      expect(setSessionHistoryMeta).toHaveBeenCalledWith('session-1', {
+        totalCount: 52,
+        hasMoreBefore: true,
+        oldestLoadedMessageId: 'user-1',
+      });
+    });
+    expect(setSessionHistoryMeta).toHaveBeenCalledWith('arch-root', {
+      totalCount: 9,
+      hasMoreBefore: false,
+      oldestLoadedMessageId: 'arch-summary',
+    });
+  });
+
   it('normalizes an active architecture envelope session back to the host session during reconnect', async () => {
     useSessionStore.setState({
       activeSessionId: 'arch-root',

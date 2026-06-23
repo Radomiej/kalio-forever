@@ -180,7 +180,9 @@ describe('useChatSessionActivation', () => {
     }));
 
     await waitFor(() => {
-      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages', expect.objectContaining({
+        params: { limit: 40 },
+      }));
     });
     expect(setPendingConfirmation).not.toHaveBeenCalledWith('session-1', null);
     expect(clearToolActivities).not.toHaveBeenCalledWith('session-1');
@@ -225,7 +227,9 @@ describe('useChatSessionActivation', () => {
     }));
 
     await waitFor(() => {
-      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages', expect.objectContaining({
+        params: { limit: 40 },
+      }));
     });
     expect(clearToolActivities).not.toHaveBeenCalledWith('session-1');
     expect(setPendingConfirmation).toHaveBeenCalledWith('session-1', null);
@@ -246,7 +250,9 @@ describe('useChatSessionActivation', () => {
     }));
 
     await waitFor(() => {
-      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages', expect.objectContaining({
+        params: { limit: 40 },
+      }));
     });
 
     handleSendRef.current.mockClear();
@@ -846,7 +852,9 @@ describe('useChatSessionActivation', () => {
     }));
 
     await waitFor(() => {
-      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages', expect.objectContaining({
+        params: { limit: 40 },
+      }));
     });
     expect(setAgentTurns).not.toHaveBeenCalled();
   });
@@ -970,7 +978,9 @@ describe('useChatSessionActivation', () => {
     }));
 
     await waitFor(() => {
-      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages');
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages', expect.objectContaining({
+        params: { limit: 40 },
+      }));
     });
     expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(false);
     expect(useSessionStore.getState().getSessionActiveTurnId('session-1')).toBeNull();

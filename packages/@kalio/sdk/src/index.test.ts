@@ -44,11 +44,23 @@ describe('KalioSDK reconnect handling', () => {
     };
   });
 
+  it('does not fire app-level reconnect callbacks on the initial socket connect', () => {
+    fakeSocket.connected = false;
+    const sdk = new KalioSDK({ wsUrl: 'http://localhost:3016' });
+    const handler = vi.fn();
+
+    sdk.onReconnect(handler);
+    handlers.get('connect')?.();
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it('fires app-level reconnect callbacks even when Socket.IO recovered packet delivery', () => {
     const sdk = new KalioSDK({ wsUrl: 'http://localhost:3016' });
     const handler = vi.fn();
 
     sdk.onReconnect(handler);
+    handlers.get('disconnect')?.('transport close');
     fakeSocket.recovered = true;
     handlers.get('connect')?.();
 

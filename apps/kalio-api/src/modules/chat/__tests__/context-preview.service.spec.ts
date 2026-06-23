@@ -18,6 +18,12 @@ function makeRepo(messages: ChatMessage[] = []): IMessageRepository {
   return {
     ensureSession: vi.fn().mockResolvedValue(undefined),
     loadHistory: vi.fn().mockResolvedValue(messages),
+    loadHistoryPage: vi.fn().mockResolvedValue({
+      messages,
+      totalCount: messages.length,
+      hasMoreBefore: false,
+      oldestLoadedMessageId: messages[0]?.id ?? null,
+    }),
     saveMessage: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -258,9 +264,7 @@ describe('ContextPreviewService', () => {
   });
 
   it('loads preview history from the workflow host session when runtime context provides historySessionId', async () => {
-    const repo = {
-      ensureSession: vi.fn().mockResolvedValue(undefined),
-      loadHistory: vi.fn(async (sessionId: string) => {
+    const loadHistory = vi.fn(async (sessionId: string): Promise<ChatMessage[]> => {
         if (sessionId === 'host-session') {
           return [
             { id: 'u1', sessionId: 'host-session', role: 'user' as const, content: 'Host objective', createdAt: 1 },
@@ -273,9 +277,21 @@ describe('ContextPreviewService', () => {
           ];
         }
         return [];
+      });
+    const repo: IMessageRepository = {
+      ensureSession: vi.fn().mockResolvedValue(undefined),
+      loadHistory,
+      loadHistoryPage: vi.fn(async (sessionId: string) => {
+        const messages = await loadHistory(sessionId);
+        return {
+          messages,
+          totalCount: messages.length,
+          hasMoreBefore: false,
+          oldestLoadedMessageId: messages[0]?.id ?? null,
+        };
       }),
       saveMessage: vi.fn().mockResolvedValue(undefined),
-    } satisfies IMessageRepository;
+    };
     const moduleRef = await Test.createTestingModule({
       providers: [
         ContextPreviewService,

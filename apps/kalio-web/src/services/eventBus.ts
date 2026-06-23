@@ -1,10 +1,16 @@
 import { KalioSDK } from '@kalio/sdk';
 import { resolvePairedBackendOrigin } from './backendOrigin';
+import { readRuntimeConfig } from './runtimeConfig';
 
 function resolveWsUrl(): string {
   const pairedBackendOrigin = resolvePairedBackendOrigin(globalThis.location);
   if (pairedBackendOrigin) {
     return pairedBackendOrigin;
+  }
+
+  const runtimeWsUrl = readRuntimeConfig()?.wsUrl;
+  if (runtimeWsUrl) {
+    return runtimeWsUrl;
   }
 
   const configured = import.meta.env['VITE_WS_URL'] as string | undefined;

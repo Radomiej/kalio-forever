@@ -1,10 +1,11 @@
 import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
+import type { SessionHistoryFetchResult, SessionHistoryMeta, SessionHistoryWindow } from './sessionHistoryApi';
 import { useSessionStore } from '../../store/sessionStore';
-import { apiClient } from '../../services/apiClient';
 import { hydrateSessionHistoryIntoStore } from './historyHydration';
 import { createAndActivateHostSession } from './launch/sessionLaunchShared';
 import { normalizeConversationSessionId } from '../sessions/sessionTreeDisplay';
+import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
 
 export const LAST_ACTIVE_CONVERSATION_SESSION_STORAGE_KEY = 'kalio:last-active-session-id';
 
@@ -25,11 +26,12 @@ export interface SharedConversationHydrationDeps {
   getSessions: () => ChatSession[];
   getSessionMessages: (sessionId: string) => ChatMessage[];
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
+  setSessionHistoryMeta?: (sessionId: string, meta: SessionHistoryMeta | null) => void;
   setAgentTurns: (turns: AgentTurn[], sessionId?: string | null) => void;
   getSessionAgentTurns: (sessionId: string) => AgentTurn[];
   getSessionActiveTurnId: (sessionId: string) => string | null;
   hasActiveLoopForSession: (sessionId: string) => boolean;
-  fetchMessages?: (sessionId: string) => Promise<ChatMessage[]>;
+  fetchMessages?: (sessionId: string) => Promise<SessionHistoryFetchResult>;
 }
 
 interface ActivateConversationSessionParams {
@@ -92,6 +94,7 @@ export async function hydrateActiveConversationSession({
   getSessions,
   getSessionMessages,
   setMessages,
+  setSessionHistoryMeta,
   setAgentTurns,
   getSessionAgentTurns,
   getSessionActiveTurnId,
@@ -105,6 +108,7 @@ export async function hydrateActiveConversationSession({
     getSessions,
     getSessionMessages,
     setMessages,
+    setSessionHistoryMeta,
     setAgentTurns,
     getSessionAgentTurns,
     getSessionActiveTurnId,
@@ -153,7 +157,8 @@ export async function createAndActivateEmptyHostSession({
   return session;
 }
 
-async function fetchConversationSessionMessages(sessionId: string): Promise<ChatMessage[]> {
-  const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
-  return response.data;
+async function fetchConversationSessionMessages(sessionId: string): Promise<SessionHistoryWindow> {
+  const window = await fetchSessionHistoryWindow(sessionId, { limit: DEFAULT_SESSION_HISTORY_LIMIT });
+  useSessionStore.getState().setSessionHistoryMeta(sessionId, window.meta);
+  return window;
 }

@@ -69,14 +69,14 @@ test.describe('AC-10: Streaming visibility', () => {
     const queuedBanner = page.getByTestId('queued-follow-up-banner');
 
     // First message
-    await sendMessageFromComposer(page, 'First message.');
+    await sendMessageFromComposer(page, 'Reply with the word FIRST and no tools.');
     await expect
       .poll(async () => allBubbles.count(), { timeout: 60_000, message: 'Expected first assistant turn to render' })
       .toBeGreaterThanOrEqual(2);
     await expectComposerEnabled(page, 60_000);
 
     // Second message
-    await sendMessageFromComposer(page, 'Second message.');
+    await sendMessageFromComposer(page, 'Reply with the word SECOND and no tools.');
     await expect
       .poll(async () => allBubbles.count(), { timeout: 60_000, message: 'Expected both assistant turns to render' })
       .toBe(4);
@@ -86,12 +86,12 @@ test.describe('AC-10: Streaming visibility', () => {
     // Verify interleaved order: user, agent, user, agent
     // First should be user message
     await expect(allBubbles.nth(0)).toHaveAttribute('data-testid', 'message-bubble');
-    await expect(allBubbles.nth(0)).toContainText('First message.');
+    await expect(allBubbles.nth(0)).toContainText('Reply with the word FIRST and no tools.');
     // Second should be agent turn
     await expect(allBubbles.nth(1)).toHaveAttribute('data-testid', 'agent-turn-bubble');
     // Third should be user message
     await expect(allBubbles.nth(2)).toHaveAttribute('data-testid', 'message-bubble');
-    await expect(allBubbles.nth(2)).toContainText('Second message.');
+    await expect(allBubbles.nth(2)).toContainText('Reply with the word SECOND and no tools.');
     // Fourth should be agent turn
     await expect(allBubbles.nth(3)).toHaveAttribute('data-testid', 'agent-turn-bubble');
 

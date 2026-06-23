@@ -2610,6 +2610,62 @@ describe('ArchitectureRoleExecutorService', () => {
     expect(routerObjective).not.toContain('browserSession');
   });
 
+  it('keeps merge-only routers on incoming outputs instead of repository tools', async () => {
+    const schema = getSchema();
+    const router = schema.roleSlots.find((slot) => slot.id === 'router');
+    if (!router) throw new Error('Expected router slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'Router result',
+        taskId: 'task-router',
+        childSessionId: 'branch-router',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    await service.execute({
+      schema,
+      run: {
+        ...createRun('subagent_execution'),
+        branchSessionIds: { router: 'branch-router' },
+        context: {
+          projectPath: 'C:\\Projekty\\kalio-forever',
+          executionCwd: 'C:\\Projekty\\kalio-forever',
+          hydrateFilePaths: ['docs/spec.md'],
+        },
+      },
+      slot: router,
+      branchSessionId: 'branch-router',
+      personaId: router.defaultPersonaId,
+      incomingEvents: [
+        {
+          id: 'event-analyst',
+          runId: 'run-1',
+          sequence: 1,
+          type: 'participant_output',
+          message: 'Analyst recommends option A.',
+          nodeId: 'analyst',
+          roleSlotId: 'analyst',
+          createdAt: 2,
+        },
+      ],
+    });
+
+    const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
+    const objective = call?.objective ?? '';
+    expect(call?.slotPolicy?.allowedToolNames).toEqual([]);
+    expect(objective).toContain('Incoming graph outputs:');
+    expect(objective).toContain('Analyst recommends option A.');
+    expect(objective).not.toContain('Attached VFS project files:');
+    expect(objective).not.toContain('Local host project path:');
+    expect(objective).not.toContain('call fs_list or fs_read first');
+  });
+
   it('guards finalizer objectives against unverified tool or file claims', async () => {
     const schema = getSchema();
     const finalizer = schema.roleSlots.find((slot) => slot.slotType === 'finalizer');

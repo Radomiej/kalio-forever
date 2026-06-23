@@ -8,3 +8,10 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+interface Window {
+  __KALIO_RUNTIME_CONFIG__?: {
+    apiUrl?: string
+    wsUrl?: string
+  }
+}

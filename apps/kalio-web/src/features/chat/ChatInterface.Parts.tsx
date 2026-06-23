@@ -1,12 +1,16 @@
 import { Check, Copy } from 'lucide-react';
 import type { ChatMessage, ChatSession, LLMContextPreview, Persona } from '@kalio/types';
 import type { TokenCount } from '../../services/tokenCounter';
+import { useAgentStore } from '../../store/agentStore';
+import { useSessionStore } from '../../store/sessionStore';
+import { mergeRuntimeSessionStatusSnapshots } from '../../store/agentRuntimeSelectors';
 import { ConversationFilesBar } from '../vfs/ConversationFilesBar';
 import { ContextStats, type ContextPreviewStatus } from './ContextStats';
 import { TokenBadge } from './TokenBadge';
 import type { ArchitectSchema } from '../architect/architect.types';
 import { NewChatScreen } from './launch/NewChatScreen';
-import { findArchitectureRunInMessages } from './architectureChatSummary';
+import { compactArchitectureTraceContent, findArchitectureRunInMessages } from './architectureChatSummary';
+import { architectureSlotIdForSession, sessionStatusSnapshotToRuntimeState } from '../sessions/sessionTreeDisplay';
 import type { LiveTurnState } from './liveTurnState';
 
 export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
@@ -125,9 +129,56 @@ function isChildSessionWithoutMessages(
   return typeof session?.parentSessionId === 'string' && session.parentSessionId.length > 0;
 }
 
+function runtimePhaseLabel(activeSession: ChatSession): string {
+  const mergedSnapshots = mergeRuntimeSessionStatusSnapshots(
+    useAgentStore.getState().sessionStatusSnapshots,
+    useAgentStore.getState().runtimeActivitySnapshots,
+  );
+  const snapshot = mergedSnapshots[activeSession.id];
+  const runtimeState = sessionStatusSnapshotToRuntimeState(snapshot);
+  if (runtimeState === 'waiting') return 'Waiting';
+  if (runtimeState === 'running') return 'Running';
+  if (runtimeState === 'pending') return 'Pending';
+  const phase = snapshot?.run?.phase;
+  if (phase === 'tool_pending') return 'Waiting';
+  if (phase === 'tool_running' || phase === 'llm_streaming' || phase === 'started') return 'Running';
+  return 'Pending';
+}
+
+function childSessionTraceSummary(activeSession: ChatSession): { action: string; detail?: string } | null {
+  const hostSessionId = typeof activeSession.runtimeContext?.architectureContext?.['hostSessionId'] === 'string'
+    ? activeSession.runtimeContext.architectureContext['hostSessionId']
+    : activeSession.parentSessionId;
+  if (!hostSessionId) {
+    return null;
+  }
+  const hostMessages = useSessionStore.getState().sessionMessages[hostSessionId] ?? [];
+  const summary = findArchitectureRunInMessages(hostMessages);
+  if (!summary) {
+    return null;
+  }
+  const slotId = architectureSlotIdForSession(activeSession);
+  const step = [...summary.trace].reverse().find((candidate) => (
+    candidate.sessionId === activeSession.id
+    || (slotId !== undefined && candidate.nodeId === slotId)
+  ));
+  if (!step) {
+    return null;
+  }
+  const action = step.actionSummary?.trim()
+    || compactArchitectureTraceContent(step.content, step.speaker).trim()
+    || 'Workflow activity recorded.';
+  const detail = step.detail?.trim()
+    || step.nextNodeId
+    || undefined;
+  return { action, detail };
+}
+
 function PendingChildSessionScreen({ activeSession }: { activeSession: ChatSession }) {
   const architectureLabel = architectureSessionLabel(activeSession);
   const waitingLabel = architectureLabel ? `${architectureLabel} branch` : 'Sub-conversation';
+  const phaseLabel = runtimePhaseLabel(activeSession);
+  const traceSummary = childSessionTraceSummary(activeSession);
 
   return (
     <div
@@ -139,12 +190,24 @@ function PendingChildSessionScreen({ activeSession }: { activeSession: ChatSessi
           {waitingLabel}
         </p>
         <h2 className="mt-2 text-lg font-semibold text-base-content">
-          Waiting for the first persisted message
+          {phaseLabel} before the first persisted message
         </h2>
         <p className="mt-3 text-sm leading-6 text-base-content/65">
           This child session already exists, but the agent has not written visible chat output yet.
-          Use the host workflow timeline to track live router and branch progress.
         </p>
+        <div className="mt-4 rounded-xl border border-base-300 bg-base-200/40 px-4 py-3 text-left">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-base-content/45">
+            Current activity
+          </p>
+          <p className="mt-2 text-sm font-medium text-base-content">
+            {traceSummary?.action ?? 'Waiting for live workflow activity.'}
+          </p>
+          {traceSummary?.detail && (
+            <p className="mt-1 text-xs leading-5 text-base-content/55">
+              {traceSummary.detail}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

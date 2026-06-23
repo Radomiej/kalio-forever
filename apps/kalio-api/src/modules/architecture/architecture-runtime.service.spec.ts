@@ -1291,6 +1291,59 @@ describe('ArchitectureRuntimeService', () => {
     expect(startedSlots).toEqual(['pragmatist', 'innovator', 'router', 'finalizer']);
   });
 
+  it('does not let a router-role narrow fan_out_all to a single branch', async () => {
+    const { service, executor } = createService();
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, node, personaId, run, slot }) => {
+      if (slot.id === 'orchestrator') {
+        return {
+          message: 'Route to researcher first. route_to(researcher, deep architecture analysis)',
+          data: {
+            branchSessionId,
+            personaId,
+            rootSessionId: run.rootSessionId,
+            slotType: slot.slotType,
+            executionMode: run.executionMode,
+            route_to: {
+              targetNodeId: 'researcher',
+              response: 'deep architecture analysis',
+            },
+          },
+        };
+      }
+
+      return {
+        message: `${slot.label} completed.`,
+        data: {
+          branchSessionId,
+          personaId,
+          rootSessionId: run.rootSessionId,
+          slotType: slot.slotType,
+          executionMode: run.executionMode,
+        },
+      };
+    });
+
+    const run = await service.createRun({
+      schemaId: 'architecture_debate',
+      prompt: 'oceń architekturę',
+      executionMode: 'subagent_execution',
+      context: {
+        projectPath: 'C:\\Projekty\\FamilyQuest',
+        executionCwd: 'C:\\Projekty\\FamilyQuest',
+      },
+    });
+
+    const orchestratorEvent = semanticEvents(service.getEvents(run.id))
+      .find((event) => event.nodeId === 'orchestrator' && event.type === 'router_decision');
+    expect(orchestratorEvent?.route).toMatchObject({
+      mode: 'fan_out_all',
+      source: 'router',
+      selectedNodeIds: ['researcher', 'pragmatist', 'user-advocate'],
+      rejectedNodeIds: [],
+    });
+    expect(orchestratorEvent?.route?.selectedNodeIds).not.toEqual(['researcher']);
+  });
+
   it('waits for every active fan-out branch to reach a convergence router before routing onward', async () => {
     const { service, executor } = createService();
     const baseSchema = new ArchitectureRegistryService().findOne('strategic-decision-council')!;

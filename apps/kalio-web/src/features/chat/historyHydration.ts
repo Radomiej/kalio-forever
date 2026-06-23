@@ -4,11 +4,13 @@ import { useSessionStore } from '../../store/sessionStore';
 import { resolveSessionSlice } from '../../store/sessionStore.helpers';
 import { buildTurnsFromHistory } from './chatUtils';
 import { reloadSessionHistoryWithArchitectureProjection } from './architectureReloadHydration';
+import type { SessionHistoryFetchResult, SessionHistoryMeta } from './sessionHistoryApi';
 import { shouldReplaceTurnsFromHydratedHistory } from './turnHydrationPolicy';
 
 type SetMessages = (messages: ChatMessage[], sessionId?: string | null) => void;
 type SetAgentTurns = (turns: AgentTurn[], sessionId?: string | null) => void;
-type FetchMessages = (sessionId: string) => Promise<ChatMessage[]>;
+type SetSessionHistoryMeta = (sessionId: string, meta: SessionHistoryMeta | null) => void;
+type FetchMessages = (sessionId: string) => Promise<SessionHistoryFetchResult>;
 
 interface HydrateSessionHistoryIntoStoreParams {
   sessionId: string;
@@ -16,6 +18,7 @@ interface HydrateSessionHistoryIntoStoreParams {
   getSessions?: () => ChatSession[];
   getSessionMessages: (sessionId: string) => ChatMessage[];
   setMessages: SetMessages;
+  setSessionHistoryMeta?: SetSessionHistoryMeta;
   setAgentTurns: SetAgentTurns;
   getSessionAgentTurns: (sessionId: string) => AgentTurn[];
   getSessionActiveTurnId: (sessionId: string) => ID | null;
@@ -29,6 +32,7 @@ export async function hydrateSessionHistoryIntoStore({
   getSessions,
   getSessionMessages,
   setMessages,
+  setSessionHistoryMeta,
   setAgentTurns,
   getSessionAgentTurns,
   getSessionActiveTurnId,
@@ -41,6 +45,7 @@ export async function hydrateSessionHistoryIntoStore({
     getSessions,
     getSessionMessages,
     setMessages,
+    setSessionHistoryMeta,
     setAgentTurns,
     fetchMessages,
   });

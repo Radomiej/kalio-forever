@@ -5,14 +5,25 @@ import type {
   ChatMessage,
   ChatSession,
 } from '@kalio/types';
+import { useSessionStore } from '../../store/sessionStore';
 import { apiClient } from '../../services/apiClient';
 import { buildArchitectureRunMetadata, findArchitectureRunInMessages } from './architectureChatSummary';
 import { buildTurnsFromHistory, mergeFetchedMessages } from './chatUtils';
 import { architectureRunIdForSession } from '../sessions/sessionTreeDisplay';
+import {
+  DEFAULT_CHILD_SESSION_HISTORY_LIMIT,
+  DEFAULT_SESSION_HISTORY_LIMIT,
+  fetchSessionHistoryWindow,
+  toSessionHistoryWindow,
+  type SessionHistoryFetchResult,
+  type SessionHistoryMeta,
+  type SessionHistoryWindow,
+} from './sessionHistoryApi';
 
 type SetMessages = (messages: ChatMessage[], sessionId?: string | null) => void;
 type SetAgentTurns = (turns: ReturnType<typeof buildTurnsFromHistory>, sessionId?: string | null) => void;
-type FetchMessages = (sessionId: string) => Promise<ChatMessage[]>;
+type SetSessionHistoryMeta = (sessionId: string, meta: SessionHistoryMeta | null) => void;
+type FetchMessages = (sessionId: string) => Promise<SessionHistoryFetchResult>;
 type FetchArchitectureRunProjection = (
   runId: string,
 ) => Promise<{
@@ -23,10 +34,12 @@ type FetchArchitectureRunProjection = (
 type GetSessions = () => ChatSession[];
 type GetSessionMessages = (sessionId: string) => ChatMessage[];
 
-function defaultFetchMessages(sessionId: string): Promise<ChatMessage[]> {
-  return apiClient
-    .get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`)
-    .then((response) => response.data);
+function defaultFetchMessages(sessionId: string): Promise<SessionHistoryWindow> {
+  const session = useSessionStore.getState().sessions.find((candidate) => candidate.id === sessionId);
+  const isChildSession = Boolean(session?.parentSessionId);
+  return fetchSessionHistoryWindow(sessionId, {
+    limit: isChildSession ? DEFAULT_CHILD_SESSION_HISTORY_LIMIT : DEFAULT_SESSION_HISTORY_LIMIT,
+  });
 }
 
 function defaultFetchArchitectureRunProjection(
@@ -191,6 +204,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
   mergedMessages: ChatMessage[],
   setMessages: SetMessages,
   setAgentTurns: SetAgentTurns,
+  setSessionHistoryMeta: SetSessionHistoryMeta | undefined,
   fetchMessages: FetchMessages = defaultFetchMessages,
   fetchArchitectureRunProjection: FetchArchitectureRunProjection = defaultFetchArchitectureRunProjection,
   getActiveSessionId: () => string | null = () => null,
@@ -219,16 +233,15 @@ export async function hydrateArchitectureProjectionFromDescendants(
   let derivedSummary: ReturnType<typeof findArchitectureRunInMessages> = null;
   for (const session of candidateSessions) {
     const currentChildMessages = getSessionMessages(session.id);
+    const fetchedWindow = currentChildMessages.length > 0 ? null : toSessionHistoryWindow(await fetchMessages(session.id));
     const childMessages = currentChildMessages.length > 0
       ? currentChildMessages
-      : mergeFetchedMessages(
-          currentChildMessages,
-          await fetchMessages(session.id),
-        );
+      : mergeFetchedMessages(currentChildMessages, fetchedWindow?.messages ?? []);
     if (getActiveSessionId() !== activeSessionId) {
       return mergedMessages;
     }
     if (currentChildMessages.length === 0) {
+      setSessionHistoryMeta?.(session.id, fetchedWindow?.meta ?? null);
       setMessages(childMessages, session.id);
       setAgentTurns(buildTurnsFromHistory(childMessages, session.id), session.id);
     }
@@ -277,6 +290,7 @@ export async function reloadSessionHistoryWithArchitectureProjection({
   getSessions,
   getSessionMessages,
   setMessages,
+  setSessionHistoryMeta,
   setAgentTurns,
   fetchMessages = defaultFetchMessages,
   fetchArchitectureRunProjection = defaultFetchArchitectureRunProjection,
@@ -286,16 +300,18 @@ export async function reloadSessionHistoryWithArchitectureProjection({
   getSessions?: GetSessions;
   getSessionMessages: (sessionId: string) => ChatMessage[];
   setMessages: SetMessages;
+  setSessionHistoryMeta?: SetSessionHistoryMeta;
   setAgentTurns: SetAgentTurns;
   fetchMessages?: FetchMessages;
   fetchArchitectureRunProjection?: FetchArchitectureRunProjection;
 }): Promise<ChatMessage[] | null> {
-  const fetchedMessages = await fetchMessages(sessionId);
+  const fetchedWindow = toSessionHistoryWindow(await fetchMessages(sessionId));
   if (getActiveSessionId && getActiveSessionId() !== sessionId) {
     return null;
   }
 
-  let mergedMessages = mergeFetchedMessages(getSessionMessages(sessionId), fetchedMessages);
+  setSessionHistoryMeta?.(sessionId, fetchedWindow.meta);
+  let mergedMessages = mergeFetchedMessages(getSessionMessages(sessionId), fetchedWindow.messages);
   if (mergedMessages.length === 0) {
     const syntheticMessages = await hydrateArchitectureActivityForSession(
       sessionId,
@@ -314,6 +330,7 @@ export async function reloadSessionHistoryWithArchitectureProjection({
     mergedMessages,
     setMessages,
     setAgentTurns,
+    setSessionHistoryMeta,
     fetchMessages,
     fetchArchitectureRunProjection,
     getActiveSessionId,
