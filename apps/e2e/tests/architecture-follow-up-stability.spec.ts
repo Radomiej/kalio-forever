@@ -1,20 +1,10 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   deleteSessionIfExists,
   selectArchitectureInComposer,
   selectSession,
   sendMessageFromComposer,
 } from './helpers/test-config';
-
-async function clickViaDom(locator: Locator) {
-  await locator.evaluate((node) => {
-    if (!(node instanceof HTMLElement)) {
-      throw new Error('Target is not a clickable HTMLElement.');
-    }
-
-    node.click();
-  });
-}
 
 async function clickByTestId(page: Page, testId: string) {
   await page.evaluate((value) => {
@@ -74,39 +64,14 @@ test.describe('Architecture workflow follow-up stability', () => {
       const firstBubble = page.getByTestId('agent-turn-bubble').first();
       await expect(firstBubble.locator('[data-testid="architecture-run-timeline"]')).toBeVisible({ timeout: 120_000 });
 
-      const branchSessionItems = page
-        .locator('[data-testid="session-item"]')
-        .filter({ hasText: /Strategic Decision Council:/ });
-      const childToggle = page.getByTestId(`toggle-session-children-${sessionId}`);
-      if (
-        await branchSessionItems.count() === 0
-        && await childToggle.isVisible().catch(() => false)
-      ) {
-        await childToggle.click();
-      }
-      await expect(branchSessionItems.first()).toBeVisible({ timeout: 60_000 });
-
-      const visibleTitles = await page.locator('[data-testid^="session-title-"]').evaluateAll((elements) => (
-        elements
-          .map((element) => element.textContent?.trim() ?? '')
-          .filter((text) => text.length > 0)
-      ));
-      expect(visibleTitles.some((text) => /:\s*Router\b/i.test(text))).toBe(false);
-      expect(visibleTitles.some((text) => /:\s*Finalizer\b/i.test(text))).toBe(false);
-
       await expect(firstBubble).toContainText('Finalizer', { timeout: 120_000 });
       await expect(firstBubble.locator('[data-testid="architecture-run-timeline"]')).toContainText('completed /', { timeout: 30_000 });
+      await expect(firstBubble.locator('[data-testid="architecture-route-agent"]')).toHaveCount(5, { timeout: 30_000 });
       const firstBubbleFinalAnswer = normalizeFinalAnswerText(
         await firstBubble.locator('[data-testid="architecture-final-answer"]').textContent(),
       );
       expect(firstBubbleFinalAnswer.length).toBeGreaterThan(24);
 
-      const branchSessionItem = branchSessionItems.first();
-      const branchTitle = (await branchSessionItem.locator('[data-testid^="session-title-"]').textContent())?.trim() ?? '';
-      expect(branchTitle.length).toBeGreaterThan(0);
-      await clickViaDom(branchSessionItem);
-      await expect(page.getByTestId('chat-session-title')).toContainText(branchTitle, { timeout: 30_000 });
-      await expect(page.getByTestId('message-list')).not.toContainText('Select or create a session to start chatting.', { timeout: 10_000 });
       await selectSession(page, sessionId, 'workflow host');
       const hostTitle = (await page.getByTestId('chat-session-title').textContent())?.trim() ?? 'workflow host';
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 30_000 });

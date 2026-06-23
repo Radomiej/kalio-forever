@@ -77,6 +77,7 @@ describe('ChatService — MAX_ITERATIONS', () => {
       updatedAt: 1,
       runtimeContext: null,
     }),
+    registerRuntimeProjectPathForSession: vi.fn().mockResolvedValue(undefined),
   };
   const auditService = { log: vi.fn().mockResolvedValue('audit-id'), update: vi.fn().mockResolvedValue(undefined) };
 

@@ -34,6 +34,10 @@ export function buildArchitectureSlotToolPolicy(
     return { allowedToolNames: [] };
   }
 
+  if (isMergeOnlyRouterSlot(input.slot, input.architectureContext)) {
+    return { allowedToolNames: [] };
+  }
+
   const context = input.architectureContext;
   const hasLocalProjectContext = hasLocalProjectPath(context);
   const canUseCliAgents = canUseCliAgentsForSlot(context, input.slot);
@@ -221,6 +225,16 @@ function hasLocalProjectPath(context: Record<string, unknown> | undefined): bool
 
 function isOrchestrationSlot(slot: ArchitectureRoleSlot): boolean {
   return slot.slotType === 'router' && /\borchestrator\b/i.test(`${slot.id} ${slot.label}`);
+}
+
+function isMergeOnlyRouterSlot(
+  slot: ArchitectureRoleSlot,
+  context: Record<string, unknown> | undefined,
+): boolean {
+  if (slot.slotType !== 'router' || isOrchestrationSlot(slot)) {
+    return false;
+  }
+  return context?.['allowArchitectureRouterEvidenceTools'] !== true;
 }
 
 function isImplementationWriterSlot(slot: ArchitectureRoleSlot): boolean {

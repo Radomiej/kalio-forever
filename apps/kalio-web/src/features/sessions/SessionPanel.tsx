@@ -39,6 +39,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     setActiveSession,
     addSession,
     getSessionMessages,
+    setSessionHistoryMeta,
     getSessionAgentTurns,
     getSessionActiveTurnId,
     setMessages,
@@ -48,6 +49,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   } = useSessionStore();
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
+  const activeAgentLoops = useAgentStore((s) => s.activeAgentLoops);
   const queuedDepthBySession = useAgentStore((s) => s.queuedDepthBySession);
   const sessionStatusSnapshots = useAgentStore((s) => s.sessionStatusSnapshots);
   const runtimeActivitySnapshots = useAgentStore((s) => s.runtimeActivitySnapshots);
@@ -55,6 +57,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const sessionAgentTurns = useSessionStore((s) => s.sessionAgentTurns);
   const sessionMessages = useSessionStore((s) => s.sessionMessages);
   const [loading, setLoading] = useState(false);
+  const [creatingSession, setCreatingSession] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [originFilter, setOriginFilter] = useState<SessionOriginFilter>('all');
@@ -80,7 +83,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       .then((loadedSessions) => {
         setSessions(loadedSessions);
         const orderedSessions = sortSessionsForSidebar(loadedSessions);
-        if (!activeSessionId) {
+        if (!useSessionStore.getState().activeSessionId) {
           const storedSessionId = normalizeConversationSessionId(loadStoredActiveConversationSessionId(), orderedSessions);
           if (storedSessionId && orderedSessions.some((session) => session.id === storedSessionId)) {
             void selectSession(storedSessionId);
@@ -120,6 +123,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         getSessions: () => sessions,
         getSessionMessages,
         setMessages,
+        setSessionHistoryMeta,
         setAgentTurns,
         getSessionAgentTurns,
         getSessionActiveTurnId,
@@ -134,9 +138,13 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       console.error('[SessionPanel] load messages failed', err);
       return null;
     }
-  }, [getSessionActiveTurnId, getSessionAgentTurns, getSessionMessages, sessions, setAgentTurns, setMessages]);
+  }, [getSessionActiveTurnId, getSessionAgentTurns, getSessionMessages, sessions, setAgentTurns, setMessages, setSessionHistoryMeta]);
 
   const createSession = async () => {
+    if (creatingSession) {
+      return;
+    }
+    setCreatingSession(true);
     try {
       await createAndActivateEmptyHostSession({
         personaId: newPersonaId,
@@ -149,6 +157,8 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       onSelect?.();
     } catch (err) {
       console.error('[SessionPanel] create failed', err);
+    } finally {
+      setCreatingSession(false);
     }
   };
 
@@ -206,6 +216,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     sessionStatusSnapshots: sessionStatusSnapshots ?? {},
     runtimeActivitySnapshots: runtimeActivitySnapshots ?? {},
     sidebarSessions,
+    activeAgentLoops,
   });
   const activeOriginFilter = SESSION_ORIGIN_FILTERS.find((filter) => filter.id === originFilter) ?? SESSION_ORIGIN_FILTERS[0];
   const activeWorkflowHostSessionId = activeHostSessionId ?? activeSessionId;
@@ -458,7 +469,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
           <button
             className="btn btn-success btn-xs gap-1 px-2.5 min-h-0 h-6 font-medium"
             onClick={() => void createSession()}
-            disabled={loading}
+            disabled={creatingSession}
             title={`New ${personas.find((p) => p.id === newPersonaId)?.name ?? ''} chat`}
             data-testid="new-session-btn"
           >

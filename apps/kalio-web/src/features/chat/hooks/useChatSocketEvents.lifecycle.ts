@@ -1,4 +1,3 @@
-import type { ChatMessage } from '@kalio/types';
 import type { ChatSession } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
@@ -15,6 +14,7 @@ import {
 } from './useChatSocketEvents.helpers';
 import { handleCliChildSessionCreated } from './useChatSocketEvents.cliChild';
 import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
+import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from '../sessionHistoryApi';
 
 type AgentStoreState = ReturnType<typeof useAgentStore.getState>;
 type SessionStoreState = ReturnType<typeof useSessionStore.getState>;
@@ -165,6 +165,7 @@ export function registerConnectionRecoveryHandlers({
       getActiveSessionId: () => useSessionStore.getState().activeSessionId,
       getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
       setMessages,
+      setSessionHistoryMeta: (sessionId, meta) => useSessionStore.getState().setSessionHistoryMeta(sessionId, meta),
       setAgentTurns,
       hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
       fetchSessions: async () => {
@@ -172,8 +173,7 @@ export function registerConnectionRecoveryHandlers({
         return response.data;
       },
       fetchMessages: async (sessionId) => {
-        const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
-        return response.data;
+        return fetchSessionHistoryWindow(sessionId, { limit: DEFAULT_SESSION_HISTORY_LIMIT });
       },
       onContextInvalidated,
     });

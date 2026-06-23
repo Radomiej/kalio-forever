@@ -13,6 +13,7 @@ const mockSetActiveSession = vi.fn();
 const mockAddSession = vi.fn();
 const mockSetMessages = vi.fn();
 const mockSetAgentTurns = vi.fn();
+const mockSetSessionHistoryMeta = vi.fn();
 const mockRemoveSession = vi.fn();
 const mockUpdateSession = vi.fn();
 
@@ -35,11 +36,13 @@ const mockState: {
   sessions: ChatSession[];
   activeSessionId: string | null;
   hydratedSessionIds: Record<string, true>;
+  sessionHistoryMeta: Record<string, import('../chat/sessionHistoryApi').SessionHistoryMeta>;
   setSessions: typeof mockSetSessions;
   setActiveSession: typeof mockSetActiveSession;
   addSession: typeof mockAddSession;
   setMessages: typeof mockSetMessages;
   setAgentTurns: typeof mockSetAgentTurns;
+  setSessionHistoryMeta: typeof mockSetSessionHistoryMeta;
   sessionAgentTurns: Record<string, AgentTurn[]>;
   sessionMessages: Record<string, ChatMessage[]>;
   getSessionMessages: (sessionId: string | null) => ChatMessage[];
@@ -53,6 +56,7 @@ const mockState: {
   sessions: mockSessions,
   activeSessionId: 's1',
   hydratedSessionIds: {},
+  sessionHistoryMeta: {},
   setSessions: mockSetSessions,
   setActiveSession: mockSetActiveSession,
   addSession: mockAddSession,
@@ -70,6 +74,7 @@ const mockState: {
     }
     mockState.hydratedSessionIds[sessionId] = true;
   },
+  setSessionHistoryMeta: mockSetSessionHistoryMeta,
   removeSession: mockRemoveSession,
   updateSession: mockUpdateSession,
 };
@@ -91,7 +96,21 @@ const mockApiPatch = vi.fn();
 
 vi.mock('../../services/apiClient', () => ({
   apiClient: {
-    get: (...args: unknown[]) => mockApiGet(...args),
+    get: async (...args: unknown[]) => {
+      const response = await mockApiGet(...args);
+      const [url] = args;
+      if (
+        typeof url === 'string'
+        && url.includes('/messages')
+        && response
+        && typeof response === 'object'
+        && !Array.isArray(response)
+        && !('headers' in response)
+      ) {
+        return { ...response, headers: {} };
+      }
+      return response;
+    },
     post: (...args: unknown[]) => mockApiPost(...args),
     delete: (...args: unknown[]) => mockApiDelete(...args),
     patch: (...args: unknown[]) => mockApiPatch(...args),
@@ -179,6 +198,7 @@ describe('SessionPanel', () => {
     mockState.sessions = mockSessions;
     mockState.activeSessionId = 's1';
     mockState.hydratedSessionIds = {};
+    mockState.sessionHistoryMeta = {};
     mockState.sessionAgentTurns = {};
     mockState.sessionMessages = {};
     mockAgentState.pendingConfirmations = {};
@@ -192,6 +212,16 @@ describe('SessionPanel', () => {
     mockSetActiveSession.mockImplementation((id: string | null) => {
       mockState.activeSessionId = id;
     });
+    mockSetSessionHistoryMeta.mockImplementation((sessionId: string | null, meta) => {
+      if (!sessionId) {
+        return;
+      }
+      if (!meta) {
+        delete mockState.sessionHistoryMeta[sessionId];
+        return;
+      }
+      mockState.sessionHistoryMeta[sessionId] = meta;
+    });
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
       if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
@@ -202,6 +232,21 @@ describe('SessionPanel', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
+
+  function expectSessionHistoryRequest(sessionId: string): void {
+    expect(mockApiGet).toHaveBeenCalledWith(
+      `/api/sessions/${sessionId}/messages`,
+      expect.objectContaining({
+        params: expect.objectContaining({ limit: 40 }),
+      }),
+    );
+  }
+
+  function expectNoSessionHistoryRequest(sessionId: string): void {
+    expect(
+      mockApiGet.mock.calls.some(([url]) => url === `/api/sessions/${sessionId}/messages`),
+    ).toBe(false);
+  }
 
   it('renders session titles', async () => {
     render(<SessionPanel />);
@@ -309,8 +354,8 @@ describe('SessionPanel', () => {
     expect(mockApiGet).toHaveBeenCalledWith('/api/sessions');
 
     await vi.advanceTimersByTimeAsync(400);
-    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/host-1/messages');
-    expect(mockApiGet).not.toHaveBeenCalledWith('/api/sessions/branch-1/messages');
+    expectSessionHistoryRequest('host-1');
+    expectNoSessionHistoryRequest('branch-1');
   });
 
   it('hides child subagent sessions from the default conversation list', async () => {
@@ -1863,6 +1908,29 @@ describe('SessionPanel', () => {
     await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ title: 'New Chat' })));
   });
 
+  it('keeps New Chat available while the full session list is still loading', async () => {
+    let resolveSessions!: (value: { data: ChatSession[] }) => void;
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') {
+        return new Promise((resolve) => {
+          resolveSessions = resolve;
+        });
+      }
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      return Promise.resolve({ data: [] });
+    });
+    mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'p1', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
+
+    render(<SessionPanel />);
+
+    const newBtn = await screen.findByTestId('new-session-btn');
+    expect(newBtn).not.toBeDisabled();
+    fireEvent.click(newBtn);
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ title: 'New Chat' })));
+    resolveSessions({ data: mockSessions });
+  });
+
   it('new session button uses the first available persona instead of hardcoded default', async () => {
     mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'p1', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
     render(<SessionPanel />);
@@ -1926,7 +1994,34 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
 
     await waitFor(() => expect(mockSetActiveSession).toHaveBeenCalledWith('s1'));
-    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/s1/messages');
+    expectSessionHistoryRequest('s1');
+  });
+
+  it('does not restore a stored session over a newer active session chosen while the initial load is in flight', async () => {
+    mockState.activeSessionId = null;
+    sessionStorage.setItem('kalio:last-active-session-id', 's1');
+
+    let resolveSessions: ((value: { data: ChatSession[] }) => void) | null = null;
+    const sessionsPromise = new Promise<{ data: ChatSession[] }>((resolve) => {
+      resolveSessions = resolve;
+    });
+
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return sessionsPromise;
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      if (url === '/api/sessions/s1/messages') return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    mockState.activeSessionId = 's2';
+    if (resolveSessions) {
+      (resolveSessions as (value: { data: ChatSession[] }) => void)({ data: mockSessions });
+    }
+
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
+    expect(mockSetActiveSession).not.toHaveBeenCalledWith('s1');
+    expectNoSessionHistoryRequest('s1');
   });
 
   it('does not auto-select the newest session when there is no stored active session', async () => {
@@ -2252,8 +2347,8 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
 
     await waitFor(() => expect(mockSetActiveSession).toHaveBeenCalledWith('host'));
-    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/host/messages');
-    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/arch-root/messages');
+    expectSessionHistoryRequest('host');
+    expectSessionHistoryRequest('arch-root');
     await waitFor(() => expect(sessionStorage.getItem('kalio:last-active-session-id')).toBe('host'));
   });
 
@@ -2320,7 +2415,7 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
 
     await waitFor(() => expect(mockSetActiveSession).toHaveBeenCalledWith('arch-analyst'));
-    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/arch-analyst/messages');
+    expectSessionHistoryRequest('arch-analyst');
     await waitFor(() => expect(sessionStorage.getItem('kalio:last-active-session-id')).toBe('arch-analyst'));
   });
 
@@ -2457,7 +2552,7 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
 
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
-    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/host/messages'));
+    await waitFor(() => expectSessionHistoryRequest('host'));
     await waitFor(() => expect(mockSetMessages).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({

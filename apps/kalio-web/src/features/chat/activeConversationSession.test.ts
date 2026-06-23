@@ -196,16 +196,26 @@ describe('activeConversationSession', () => {
     const hydrateArgs = mockHydrateSessionHistoryIntoStore.mock.calls[0]?.[0];
     expect(hydrateArgs).toBeTruthy();
     const fetchedMessages = await hydrateArgs.fetchMessages('session-1');
-    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/session-1/messages');
-    expect(fetchedMessages).toEqual([
-      {
-        id: 'message-1',
-        sessionId: 'session-1',
-        role: 'assistant',
-        content: 'Recovered',
-        createdAt: 1,
+    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/session-1/messages', {
+      params: { limit: 40 },
+      signal: undefined,
+    });
+    expect(fetchedMessages).toEqual({
+      messages: [
+        {
+          id: 'message-1',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: 'Recovered',
+          createdAt: 1,
+        },
+      ],
+      meta: {
+        totalCount: 1,
+        hasMoreBefore: false,
+        oldestLoadedMessageId: null,
       },
-    ]);
+    });
   });
 
   it('removes the stored active session id when persistence is cleared', () => {

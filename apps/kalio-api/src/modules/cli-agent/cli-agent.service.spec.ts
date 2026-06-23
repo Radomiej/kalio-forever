@@ -11,7 +11,7 @@ import type { CLIAgentConfigService } from './cli-agent-config.service';
 import type { CopilotAdapter } from './adapters/copilot.adapter';
 import type { GeminiAdapter } from './adapters/gemini.adapter';
 import type { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
-import type { CodexAdapter } from './adapters/codex.adapter';
+import { defaultCodexCommand, type CodexAdapter } from './adapters/codex.adapter';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn(), execFile: vi.fn() }));
 import * as childProcess from 'node:child_process';
@@ -57,6 +57,7 @@ function makeAdapter(id: string) {
 }
 
 const WINDOWS_POWERSHELL_EXE = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const WINDOWS_CODEX_COMMAND = defaultCodexCommand('win32');
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -245,7 +246,7 @@ describe('CLIAgentService', () => {
             '-ExecutionPolicy',
             'Bypass',
             '-Command',
-            expect.stringMatching(/\$prompt = Get-Content -Raw -LiteralPath '.+'; \$prompt \| & 'codex' '-p' '-'$/),
+            expect.stringContaining(`$prompt | & '${WINDOWS_CODEX_COMMAND}' '-p' '-'`),
           ],
         }
       : {
@@ -287,7 +288,7 @@ describe('CLIAgentService', () => {
         '-ExecutionPolicy',
         'Bypass',
         '-Command',
-        expect.stringContaining("$prompt | & 'codex' '-p' '-'"),
+        expect.stringContaining(`$prompt | & '${WINDOWS_CODEX_COMMAND}' '-p' '-'`),
       ],
     }));
     expect(command).not.toContain(prompt);

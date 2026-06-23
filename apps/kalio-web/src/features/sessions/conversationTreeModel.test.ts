@@ -94,6 +94,7 @@ describe('buildConversationTreeModel', () => {
     expect(model.activeHostSessionId).toBe(host.id);
     expect(model.activeRenderableDescendantCount).toBe(1);
     expect(model.activeWorkflowRuntimeState).toBe('running');
+    expect(model.activeLoopSessionIds.has(branch.id)).toBe(true);
     expect(model.visibleSessions.map((session) => session.id)).toEqual([host.id, branch.id]);
     expect(model.sessionListEntries).toEqual([
       {

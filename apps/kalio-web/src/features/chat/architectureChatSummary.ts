@@ -358,8 +358,8 @@ export function buildArchitectureRunTurnProjection(
 
   const toolCalls = branchMessages
     .map((message) => {
-      const stream = streamByEventId.get(message.eventId);
-      return stream ? toSubagentToolCall(result, message, stream) : null;
+      const childSessionId = resolveBranchSessionId(result, message, streamByEventId.get(message.eventId));
+      return childSessionId ? toSubagentToolCall(result, message, childSessionId) : null;
     })
     .filter((toolCall): toolCall is LLMToolCall => toolCall !== null);
   if (toolCalls.length > 0) {
@@ -374,14 +374,18 @@ export function buildArchitectureRunTurnProjection(
     });
     turnItems.push(...toolCalls.map((call) => ({ kind: 'tool' as const, callId: call.id })));
     branchMessages
-      .map((message, index) => ({ message, index, stream: streamByEventId.get(message.eventId) }))
-      .filter((entry): entry is typeof entry & { stream: ArchitectureBranchStreamSummary } => Boolean(entry.stream))
-      .forEach(({ message, index, stream }) => {
+      .map((message, index) => ({
+        message,
+        index,
+        childSessionId: resolveBranchSessionId(result, message, streamByEventId.get(message.eventId)),
+      }))
+      .filter((entry): entry is typeof entry & { childSessionId: string } => Boolean(entry.childSessionId))
+      .forEach(({ message, index, childSessionId }) => {
       messages.push({
         id: `architecture:${result.run.id}:tool-result:${message.eventId}`,
         sessionId,
         role: 'tool_result',
-        content: JSON.stringify(toSubagentToolResult(result, sessionId, message, stream)),
+        content: JSON.stringify(toSubagentToolResult(result, sessionId, message, childSessionId)),
         toolCallId: `architecture:${result.run.id}:${message.eventId}`,
         createdAt: now + 1 + index,
       });
@@ -423,7 +427,7 @@ export function buildArchitectureRunTurnProjection(
 function toSubagentToolCall(
   result: ArchitectRunResult,
   message: ArchitectureRunChatMessage,
-  stream: ArchitectureBranchStreamSummary,
+  childSessionId: string,
 ): LLMToolCall {
   const schemaLabel = resolveArchitectureSchemaLabel(result);
   return {
@@ -435,7 +439,7 @@ function toSubagentToolCall(
       schemaName: schemaLabel,
       nodeId: message.route?.fromNodeId,
       roleSlotId: message.roleSlotId,
-      childSessionId: stream.branchSessionId,
+      childSessionId,
     },
   };
 }
@@ -444,18 +448,41 @@ function toSubagentToolResult(
   result: ArchitectRunResult,
   parentSessionId: string,
   message: ArchitectureRunChatMessage,
-  stream: ArchitectureBranchStreamSummary,
+  childSessionId: string,
 ): SubagentToolResult {
   return {
     result: message.content,
     taskId: message.eventId,
-    childSessionId: stream.branchSessionId,
+    childSessionId,
     parentSessionId,
     vfsMode: 'shared',
     vfsSessionId: result.run.rootSessionId ?? parentSessionId,
     copiedFiles: [],
     durationMs: 0,
   };
+}
+
+function resolveBranchSessionId(
+  result: ArchitectRunResult,
+  message: ArchitectureRunChatMessage,
+  stream: ArchitectureBranchStreamSummary | undefined,
+): string | undefined {
+  if (stream?.branchSessionId) {
+    return stream.branchSessionId;
+  }
+
+  const graphNodeSessionId = result.graph.nodes.find((node) => (
+    (message.route?.fromNodeId && node.id === message.route.fromNodeId)
+    || (message.eventId !== undefined && node.eventIds.includes(message.eventId))
+  ))?.sessionId;
+  if (graphNodeSessionId) {
+    return graphNodeSessionId;
+  }
+
+  if (message.roleSlotId?.trim()) {
+    return architectureSessionIdForRunSlot(result.run.id, message.roleSlotId) ?? undefined;
+  }
+  return architectureSessionIdForRunSlot(result.run.id, message.eventId);
 }
 
 function speakerLabel(speaker: TraceSpeaker, roleSlotId: string | undefined): string {

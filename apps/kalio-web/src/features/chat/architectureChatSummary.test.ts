@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ArchitectureGraphProjection } from '@kalio/types';
+import { architectureSessionIdForRunSlot, type ArchitectureGraphProjection } from '@kalio/types';
 import {
   buildArchitectureRunChatTurnDrafts,
   buildArchitectureRunMetadata,
@@ -1031,6 +1031,83 @@ describe('buildArchitectureRunTurnProjection', () => {
     });
   });
 
+  it('keeps participant branch tool calls when stream metadata is missing but graph session ids exist', () => {
+    const projection = buildArchitectureRunTurnProjection({
+      run: {
+        id: 'run-missing-stream',
+        schemaId: 'strategic-decision-council',
+        prompt: 'Decide.',
+        status: 'completed',
+        executionMode: 'subagent_execution',
+        rootSessionId: 'root-1',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+      graph: {
+        runId: 'run-missing-stream',
+        nodes: [
+          {
+            id: 'analyst',
+            sessionId: 'arch-run-missing-analyst',
+            label: 'Analyst',
+            kind: 'role',
+            status: 'completed',
+            eventIds: ['event-analyst'],
+          },
+        ],
+        edges: [],
+        routeHops: [],
+      },
+      chat: {
+        runId: 'run-missing-stream',
+        messages: [
+          {
+            id: 'm1',
+            eventId: 'event-analyst',
+            speaker: 'participant',
+            roleSlotId: 'analyst',
+            content: 'Analyst answer',
+            createdAt: 3,
+            route: {
+              source: 'runtime_fallback',
+              fromNodeId: 'analyst',
+              selectedNodeIds: ['router'],
+              nextNodeId: 'router',
+            },
+          },
+          {
+            id: 'm2',
+            eventId: 'event-router',
+            speaker: 'router',
+            roleSlotId: 'router',
+            content: 'Router answer',
+            createdAt: 4,
+          },
+        ],
+      },
+    }, 'parent-session');
+
+    expect(projection.turnItems).toContainEqual({
+      kind: 'tool',
+      callId: 'architecture:run-missing-stream:event-analyst',
+    });
+    expect(projection.messages[0]).toMatchObject({
+      role: 'assistant',
+      toolCalls: [
+        expect.objectContaining({
+          args: expect.objectContaining({
+            childSessionId: 'arch-run-missing-analyst',
+          }),
+        }),
+      ],
+    });
+    expect(projection.messages[1]).toMatchObject({
+      role: 'tool_result',
+      toolCallId: 'architecture:run-missing-stream:event-analyst',
+    });
+  });
+
   it('attaches graph metadata to branch-only tool call turns for reload recovery', () => {
     const projection = buildArchitectureRunTurnProjection({
       run: {
@@ -1109,7 +1186,7 @@ describe('buildArchitectureRunTurnProjection', () => {
     expect(reloaded?.graphNodes?.find((node) => node.id === 'final-artifact')?.status).toBe('pending');
   });
 
-  it('does not project fake run_subagent tool results when a branch has no real session stream', () => {
+  it('projects deterministic branch tool results when a branch has no live stream metadata but the role slot is known', () => {
     const projection = buildArchitectureRunTurnProjection({
       run: {
         id: 'run-streamless',
@@ -1154,11 +1231,26 @@ describe('buildArchitectureRunTurnProjection', () => {
       },
     }, 'parent-session');
 
-    expect(projection.messages.some((message) => message.role === 'tool_result')).toBe(false);
-    expect(projection.messages.some((message) => (
-      message.role === 'assistant'
-      && (message.toolCalls?.some((toolCall) => toolCall.name === 'run_subagent') ?? false)
-    ))).toBe(false);
+    const derivedBranchSessionId = architectureSessionIdForRunSlot('run-streamless', 'pragmatist');
+
+    expect(projection.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'assistant',
+        toolCalls: [
+          expect.objectContaining({
+            name: 'run_subagent',
+            args: expect.objectContaining({
+              childSessionId: derivedBranchSessionId,
+              roleSlotId: 'pragmatist',
+            }),
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        role: 'tool_result',
+        toolCallId: 'architecture:run-streamless:event-pragmatist',
+      }),
+    ]));
     expect(projection.messages).toEqual(expect.arrayContaining([
       expect.objectContaining({
         role: 'assistant',

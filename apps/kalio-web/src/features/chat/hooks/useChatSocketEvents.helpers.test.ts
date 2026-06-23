@@ -204,6 +204,48 @@ describe('terminal runtime cleanup guards', () => {
     })).toBe(true);
   });
 
+  it('materializes a workflow live turn from an inactive parent snapshot with a running child', () => {
+    const addActiveAgentLoop = vi.fn();
+    const startAgentTurn = vi.fn();
+    const setAwaitingFirstChunk = vi.fn();
+
+    materializeLiveTurnFromHydratedRuntimeState(
+      {
+        runtimeSnapshot: {
+          sessionId: 'session-1',
+          active: false,
+          turnId: 'turn-workflow',
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [{
+            id: 'child-run-1',
+            kind: 'subagent',
+            parentSessionId: 'session-1',
+            childSessionId: 'child-1',
+            status: 'running',
+            updatedAt: 10,
+          }],
+          updatedAt: 10,
+        },
+        bufferedSessionStatusSnapshots: [],
+        latestSessionStatusSnapshot: undefined,
+      },
+      {
+        hasActiveLoopForSession: () => false,
+        getSessionActiveTurnId: () => null,
+        addActiveAgentLoop,
+        startAgentTurn,
+        setAwaitingFirstChunk,
+      },
+    );
+
+    expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-workflow');
+    expect(startAgentTurn).toHaveBeenCalledWith('turn-workflow', 'session-1');
+    expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
+  });
+
   it('releases a hydrated live turn when session status becomes terminal', () => {
     const removeActiveAgentLoop = vi.fn();
     const setStreaming = vi.fn();

@@ -209,7 +209,7 @@ export function materializeLiveTurnFromRuntimeActivitySnapshot(
   snapshot: RuntimeActivitySnapshot | null | undefined,
   deps: LiveSessionStatusMaterializationDeps,
 ): void {
-  if (!snapshot?.active || !snapshot.turnId) {
+  if (!snapshot?.turnId || !runtimeSnapshotKeepsSessionLive(snapshot)) {
     return;
   }
 

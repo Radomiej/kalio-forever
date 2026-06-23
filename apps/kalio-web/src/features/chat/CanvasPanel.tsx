@@ -4,9 +4,8 @@ import {
 } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
-import { apiClient } from '../../services/apiClient';
 import { eventBus } from '../../services/eventBus';
-import type { ChatMessage, ChatSession } from '@kalio/types';
+import type { ChatSession } from '@kalio/types';
 import { findArchitectureRunInMessages } from './architectureChatSummary';
 import { mergeFetchedMessages } from './chatUtils';
 import { ArchitectureRunCanvasSection } from './CanvasPanel.ArchitectureRun';
@@ -26,6 +25,7 @@ import {
   selectLiveSessionIds,
   selectQueuedDepth,
 } from '../../store/agentRuntimeSelectors';
+import { DEFAULT_CHILD_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
 
 function isArchitectureTechnicalConversation(session: ChatSession): boolean {
   const architectureContext = session.runtimeContext?.architectureContext;
@@ -266,15 +266,16 @@ export function CanvasPanel() {
 
     void Promise.all(
       missingSessionIds.map(async (sessionId) => {
-        const response = await apiClient.get<ChatMessage[]>(`/api/sessions/${sessionId}/messages`);
-        return [sessionId, response.data] as const;
+        const response = await fetchSessionHistoryWindow(sessionId, { limit: DEFAULT_CHILD_SESSION_HISTORY_LIMIT });
+        return [sessionId, response] as const;
       }),
     )
       .then((results) => {
         if (cancelled) return;
-        results.forEach(([sessionId, loadedMessages]) => {
+        results.forEach(([sessionId, loadedWindow]) => {
           const currentMessages = getSessionMessages(sessionId);
-          setMessages(mergeFetchedMessages(currentMessages, loadedMessages), sessionId);
+          useSessionStore.getState().setSessionHistoryMeta(sessionId, loadedWindow.meta);
+          setMessages(mergeFetchedMessages(currentMessages, loadedWindow.messages), sessionId);
         });
         setHydratedSubagentSessions((current) => {
           const next = { ...current };

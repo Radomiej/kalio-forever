@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import type { ChatMessage, ChatSession, Persona } from '@kalio/types';
 import type { ArchitectSchema } from '../architect/architect.types';
+import { useAgentStore } from '../../store/agentStore';
+import { useSessionStore } from '../../store/sessionStore';
 import { buildCopiedChatText, ChatSessionHeader, ChatWelcomeScreen } from './ChatInterface.Parts';
 import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
 
@@ -103,6 +105,15 @@ describe('buildCopiedChatText', () => {
 
 describe('ChatWelcomeScreen', () => {
   it('shows a waiting placeholder for empty child sessions instead of the launch screen', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessionStatusSnapshots: {},
+      runtimeActivitySnapshots: {},
+    }));
+    useSessionStore.setState((state) => ({
+      ...state,
+      sessionMessages: {},
+    }));
     render(
       <ChatWelcomeScreen
         activeSession={{
@@ -136,7 +147,102 @@ describe('ChatWelcomeScreen', () => {
 
     expect(screen.getByTestId('pending-child-session-screen')).toBeInTheDocument();
     expect(screen.queryByTestId('welcome-run-prompt')).not.toBeInTheDocument();
-    expect(screen.getByText('Waiting for the first persisted message')).toBeInTheDocument();
+    expect(screen.getByText('Pending before the first persisted message')).toBeInTheDocument();
+  });
+
+  it('shows live child-session activity from the host workflow trace', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessionStatusSnapshots: {
+        'branch-1': {
+          sessionId: 'branch-1',
+          active: true,
+          turnId: 'turn-1',
+          queueLength: 0,
+          run: {
+            id: 'run-1',
+            sessionId: 'branch-1',
+            turnId: 'turn-1',
+            phase: 'tool_running',
+            status: 'active',
+            retryCount: 0,
+            safeResume: true,
+            startedAt: 1,
+            updatedAt: 2,
+            lastHeartbeatAt: 2,
+          },
+        },
+      },
+      runtimeActivitySnapshots: {},
+    }));
+    useSessionStore.setState((state) => ({
+      ...state,
+      sessionMessages: {
+        'host-1': [
+          msg({
+            id: 'host-msg-1',
+            sessionId: 'host-1',
+            role: 'assistant',
+            content: '',
+            architectureRun: {
+              runId: 'run-1',
+              schemaId: 'Architecture Debate',
+              status: 'running',
+              hostProjectionKind: 'workflow-envelope',
+              trace: [{
+                speaker: 'participant',
+                sessionId: 'branch-1',
+                nodeId: 'analyst',
+                content: 'Researcher is inspecting project evidence.',
+                actionSummary: 'Researcher is inspecting project evidence.',
+                detail: 'fs_read -> src/App.tsx',
+              }],
+              routeHops: [],
+            },
+          }),
+        ],
+      },
+    }));
+
+    render(
+      <ChatWelcomeScreen
+        activeSession={{
+          ...session(),
+          id: 'branch-1',
+          title: 'Strategic Decision Council: Analyst',
+          kind: 'subagent',
+          parentSessionId: 'arch-root',
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureContext: {
+              displayLabel: 'Analyst',
+              hostSessionId: 'host-1',
+              architectureRunId: 'run-1',
+              roleSlotId: 'analyst',
+            },
+            architectureSlotId: 'analyst',
+          },
+        }}
+        activeSessionId="branch-1"
+        architectures={[schema()]}
+        isStreaming={false}
+        onArchitectureChange={vi.fn()}
+        onArchitectureRun={vi.fn()}
+        onDraftChange={vi.fn()}
+        onPersonaChange={vi.fn()}
+        onProjectPathChange={vi.fn()}
+        onSend={vi.fn()}
+        personas={[persona()]}
+        projectPath=""
+        selectedPersonaId="default"
+        selectedArchitectureId="single-chat"
+      />,
+    );
+
+    expect(screen.getByText('Running before the first persisted message')).toBeInTheDocument();
+    expect(screen.getByText('Current activity')).toBeInTheDocument();
+    expect(screen.getByText('Researcher is inspecting project evidence.')).toBeInTheDocument();
+    expect(screen.getByText('fs_read -> src/App.tsx')).toBeInTheDocument();
   });
 
   it('runs the prompt through the selected architecture instead of direct chat', () => {

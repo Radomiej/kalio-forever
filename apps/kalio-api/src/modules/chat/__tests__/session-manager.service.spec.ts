@@ -12,6 +12,12 @@ function makeRepo(messages: ChatMessage[] = []): IMessageRepository {
   return {
     ensureSession: vi.fn().mockResolvedValue(undefined),
     loadHistory: vi.fn().mockResolvedValue(messages),
+    loadHistoryPage: vi.fn().mockResolvedValue({
+      messages,
+      totalCount: messages.length,
+      hasMoreBefore: false,
+      oldestLoadedMessageId: messages[0]?.id ?? null,
+    }),
     saveMessage: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -306,6 +312,15 @@ describe('SessionManagerService', () => {
             ];
           }
           return [];
+        }),
+        loadHistoryPage: vi.fn(async (sessionId: string) => {
+          const messages = await nextRepo.loadHistory(sessionId);
+          return {
+            messages,
+            totalCount: messages.length,
+            hasMoreBefore: false,
+            oldestLoadedMessageId: messages[0]?.id ?? null,
+          };
         }),
         saveMessage: vi.fn().mockResolvedValue(undefined),
       };

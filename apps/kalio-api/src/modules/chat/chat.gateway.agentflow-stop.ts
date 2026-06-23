@@ -5,16 +5,13 @@ export async function findAgentFlowSnapshotsForSessions(
   agentFlowRuntime: Pick<AgentFlowRuntimePort, 'findAll' | 'findByParentSessionId'>,
   sessionIds: string[],
 ): Promise<AgentFlowRunSnapshot[]> {
-  if (agentFlowRuntime.findAll) {
-    return agentFlowRuntime.findAll();
+  if (agentFlowRuntime.findByParentSessionId) {
+    const snapshots = await Promise.all(
+      sessionIds.map((sessionId) => agentFlowRuntime.findByParentSessionId?.(sessionId) ?? Promise.resolve([])),
+    );
+    return snapshots.flat();
   }
-  if (!agentFlowRuntime.findByParentSessionId) {
-    return [];
-  }
-  const snapshots = await Promise.all(
-    sessionIds.map((sessionId) => agentFlowRuntime.findByParentSessionId?.(sessionId) ?? Promise.resolve([])),
-  );
-  return snapshots.flat();
+  return agentFlowRuntime.findAll?.() ?? [];
 }
 
 export function isActiveAgentFlowSnapshot(snapshot: AgentFlowRunSnapshot): boolean {

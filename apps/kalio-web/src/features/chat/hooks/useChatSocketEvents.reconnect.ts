@@ -2,6 +2,7 @@ import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { AgentTurn } from '../../../store/sessionStore';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
+import type { SessionHistoryFetchResult, SessionHistoryMeta } from '../sessionHistoryApi';
 import type { CliChildSocketDeps } from './useChatSocketEvents.cliChild';
 import {
   identifyCliChildProjections,
@@ -27,9 +28,10 @@ export interface SocketReconnectDeps {
   getActiveSessionId: () => string | null;
   getSessionMessages: (sessionId: string) => ChatMessage[];
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
+  setSessionHistoryMeta?: (sessionId: string, meta: SessionHistoryMeta | null) => void;
   setAgentTurns: (turns: AgentTurn[], sessionId?: string | null) => void;
   hasActiveLoopForSession: (sessionId: string) => boolean;
-  fetchMessages: (sessionId: string) => Promise<ChatMessage[]>;
+  fetchMessages: (sessionId: string) => Promise<SessionHistoryFetchResult>;
   fetchSessions?: () => Promise<ChatSession[]>;
   onContextInvalidated?: () => void;
 }
@@ -92,6 +94,7 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
       getSessions: () => refreshedSessions ?? useSessionStore.getState().sessions,
       getSessionMessages: deps.getSessionMessages,
       setMessages: deps.setMessages,
+      setSessionHistoryMeta: deps.setSessionHistoryMeta,
       setAgentTurns: deps.setAgentTurns,
       getSessionAgentTurns: (sessionId) => useSessionStore.getState().getSessionAgentTurns(sessionId),
       getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),

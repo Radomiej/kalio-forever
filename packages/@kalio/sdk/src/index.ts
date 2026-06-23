@@ -339,13 +339,25 @@ export class KalioSDK {
     return () => this.socket.off('chat:queued', wrappedHandler);
   }
 
-  /** Fires after every socket connect following app startup/reconnect. */
+  /** Fires after a real disconnect/connect cycle, not on initial startup connect. */
   onReconnect(handler: ReconnectHandler): () => void {
-    const wrappedHandler = () => {
+    let disconnectedSinceRegistration = false;
+    const onDisconnect = () => {
+      disconnectedSinceRegistration = true;
+    };
+    const onConnect = () => {
+      if (!disconnectedSinceRegistration) {
+        return;
+      }
+      disconnectedSinceRegistration = false;
       handler();
     };
-    this.socket.on('connect', wrappedHandler);
-    return () => this.socket.off('connect', wrappedHandler);
+    this.socket.on('disconnect', onDisconnect);
+    this.socket.on('connect', onConnect);
+    return () => {
+      this.socket.off('disconnect', onDisconnect);
+      this.socket.off('connect', onConnect);
+    };
   }
 
   /** Fires on every socket disconnection. */

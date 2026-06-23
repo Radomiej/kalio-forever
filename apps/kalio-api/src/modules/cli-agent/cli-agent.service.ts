@@ -7,7 +7,7 @@ import type { CLIAgentAdapterInfo } from '@kalio/types';
 import { CopilotAdapter } from './adapters/copilot.adapter';
 import { GeminiAdapter } from './adapters/gemini.adapter';
 import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
-import { CodexAdapter } from './adapters/codex.adapter';
+import { CodexAdapter, defaultCodexCommand } from './adapters/codex.adapter';
 import type { ICLIAgentAdapter } from './adapters/cli-agent.adapter';
 import { CLIAgentConfigService } from './cli-agent-config.service';
 import { terminateCliAgentProcess, type KillableProcess } from './cli-agent-process-kill';
@@ -406,7 +406,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
     const promptPath = join(promptDir, 'prompt.txt');
     await writeFile(promptPath, prompt, 'utf8');
 
-    const codexCommand = cliPath || 'codex';
+    const codexCommand = cliPath || defaultCodexCommand(platform);
     const argsWithoutPrompt = promptArgs.at(-1) === prompt ? promptArgs.slice(0, -1) : promptArgs;
     const command = [
       `$prompt = Get-Content -Raw -LiteralPath ${quotePowerShellArg(promptPath)}`,

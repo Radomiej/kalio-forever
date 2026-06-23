@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { CodexAdapter } from './codex.adapter';
+import { CodexAdapter, defaultCodexCommand } from './codex.adapter';
 
 describe('CodexAdapter', () => {
   const adapter = new CodexAdapter();
 
   it('wraps the Windows npm shim via cmd /c', () => {
     expect(adapter.executable('win32')).toBe('cmd');
-    expect(adapter.wrapperArgs('win32')).toEqual(['/c', 'codex']);
+    expect(adapter.wrapperArgs('win32')).toEqual(['/c', defaultCodexCommand('win32')]);
   });
 
   it('builds a non-interactive workspace-write exec invocation', () => {

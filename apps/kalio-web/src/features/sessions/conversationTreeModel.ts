@@ -88,6 +88,7 @@ export function buildConversationTreeModel({
   sessionStatusSnapshots,
   runtimeActivitySnapshots,
   sidebarSessions,
+  activeAgentLoops,
 }: BuildConversationTreeModelArgs): ConversationTreeModel {
   const orderedSessions = sortSessionsForSidebar(sidebarSessions);
   const allSessionById = new Map(orderedSessions.map((session) => [session.id, session] as const));
@@ -100,6 +101,7 @@ export function buildConversationTreeModel({
     runtimeActivitySnapshots,
   );
   const activeLoopSessionIds = selectLiveSessionIds({
+    activeAgentLoops,
     sessionStatusSnapshots,
     runtimeActivitySnapshots,
   });

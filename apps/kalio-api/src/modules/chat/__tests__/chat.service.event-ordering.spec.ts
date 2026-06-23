@@ -79,6 +79,7 @@ async function buildService(
       updatedAt: 1,
       runtimeContext: null,
     }),
+    registerRuntimeProjectPathForSession: vi.fn().mockResolvedValue(undefined),
   };
   const processorModuleRef = await Test.createTestingModule({
     providers: [
