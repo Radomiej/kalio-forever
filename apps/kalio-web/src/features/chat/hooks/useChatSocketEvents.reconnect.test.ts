@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { waitFor } from '@testing-library/react';
 import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
@@ -7,6 +7,7 @@ import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
 
 describe('handleSocketReconnect', () => {
   beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     useSessionStore.setState({
       activeSessionId: 'session-1',
       sessions: [
@@ -301,6 +302,10 @@ describe('handleSocketReconnect', () => {
       hasMoreBefore: false,
       oldestLoadedMessageId: 'arch-summary',
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('normalizes an active architecture envelope session back to the host session during reconnect', async () => {

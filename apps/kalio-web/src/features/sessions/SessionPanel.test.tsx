@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SessionPanel } from './SessionPanel';
 import { formatRelativeTime } from './session.utils';
 import type { ChatMessage, ChatSession, Persona } from '@kalio/types';
@@ -195,6 +195,14 @@ describe('SessionPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    const originalConsoleError = console.error;
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      const [firstArg] = args;
+      if (typeof firstArg === 'string' && firstArg.includes('not wrapped in act')) {
+        return;
+      }
+      originalConsoleError(...args);
+    });
     mockState.sessions = mockSessions;
     mockState.activeSessionId = 's1';
     mockState.hydratedSessionIds = {};
@@ -231,6 +239,7 @@ describe('SessionPanel', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   function expectSessionHistoryRequest(sessionId: string): void {
@@ -349,8 +358,10 @@ describe('SessionPanel', () => {
       return Promise.resolve({ data: [] });
     });
 
-    render(<SessionPanel />);
-    await vi.advanceTimersByTimeAsync(0);
+    await act(async () => {
+      render(<SessionPanel />);
+      await vi.advanceTimersByTimeAsync(0);
+    });
     expect(mockApiGet).toHaveBeenCalledWith('/api/sessions');
 
     await vi.advanceTimersByTimeAsync(400);
@@ -1899,7 +1910,9 @@ describe('SessionPanel', () => {
 
   it('new session button creates session with title "New Chat"', async () => {
     mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'default', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
-    render(<SessionPanel />);
+    await act(async () => {
+      render(<SessionPanel />);
+    });
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
 
     const newBtn = screen.getByTestId('new-session-btn');
@@ -1928,7 +1941,10 @@ describe('SessionPanel', () => {
     fireEvent.click(newBtn);
 
     await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ title: 'New Chat' })));
-    resolveSessions({ data: mockSessions });
+    await act(async () => {
+      resolveSessions({ data: mockSessions });
+      await Promise.resolve();
+    });
   });
 
   it('new session button uses the first available persona instead of hardcoded default', async () => {

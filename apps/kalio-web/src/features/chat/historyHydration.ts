@@ -69,7 +69,7 @@ export async function hydrateSessionHistoryIntoStore({
   }
 
   const sessionState = useSessionStore.getState();
-  if (sessionState.activeSessionId === sessionId) {
+  if (sessionState.activeSessionId === sessionId && typeof useSessionStore.setState === 'function') {
     const activeSlice = resolveSessionSlice(sessionState, sessionId);
     useSessionStore.setState({
       messages: activeSlice.messages,

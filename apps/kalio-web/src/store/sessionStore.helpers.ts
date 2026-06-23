@@ -32,13 +32,17 @@ export interface SessionProjectionState {
 export function mergePendingMessages(
   sessionId: string | null,
   baseMessages: ChatMessage[],
-  streamingChunks: Record<string, string>,
-  thinkingChunks: Record<string, string>,
-  chunkSessionIds: Record<string, string>,
+  streamingChunks: Record<string, string> | null | undefined,
+  thinkingChunks: Record<string, string> | null | undefined,
+  chunkSessionIds: Record<string, string> | null | undefined,
 ): ChatMessage[] {
   if (!sessionId) return [];
 
-  const pendingIds = Object.entries(chunkSessionIds)
+  const safeStreamingChunks = streamingChunks ?? {};
+  const safeThinkingChunks = thinkingChunks ?? {};
+  const safeChunkSessionIds = chunkSessionIds ?? {};
+
+  const pendingIds = Object.entries(safeChunkSessionIds)
     .filter(([, sid]) => sid === sessionId)
     .map(([messageId]) => messageId);
 
@@ -49,8 +53,8 @@ export function mergePendingMessages(
 
   pendingIds.forEach((messageId) => {
     const existingIndex = indexById.get(messageId);
-    const content = streamingChunks[messageId] ?? '';
-    const thinking = thinkingChunks[messageId];
+    const content = safeStreamingChunks[messageId] ?? '';
+    const thinking = safeThinkingChunks[messageId];
 
     if (existingIndex !== undefined) {
       const existing = nextMessages[existingIndex];
@@ -79,23 +83,31 @@ export function mergePendingMessages(
 
 export function getStoredSessionMessages(state: SessionProjectionState, sessionId: string | null): ChatMessage[] {
   if (!sessionId) return [];
-  return state.sessionMessages[sessionId] ?? (sessionId === state.activeSessionId ? state.messages : []);
+  const sessionMessages = state.sessionMessages ?? {};
+  return sessionMessages[sessionId] ?? (sessionId === state.activeSessionId ? state.messages : []);
 }
 
 export function getStoredSessionTurns(state: SessionProjectionState, sessionId: string | null): AgentTurn[] {
   if (!sessionId) return [];
-  return state.sessionAgentTurns[sessionId] ?? (sessionId === state.activeSessionId ? state.agentTurns : []);
+  const sessionAgentTurns = state.sessionAgentTurns ?? {};
+  return sessionAgentTurns[sessionId] ?? (sessionId === state.activeSessionId ? state.agentTurns : []);
 }
 
 export function getStoredSessionActiveTurnId(state: SessionProjectionState, sessionId: string | null): ID | null {
   if (!sessionId) return null;
-  return state.sessionActiveTurnIds[sessionId] ?? (sessionId === state.activeSessionId ? state.activeTurnId : null);
+  const sessionActiveTurnIds = state.sessionActiveTurnIds ?? {};
+  return sessionActiveTurnIds[sessionId] ?? (sessionId === state.activeSessionId ? state.activeTurnId : null);
 }
 
-function buildRestoredTurn(sessionId: string | null, messages: ChatMessage[], chunkSessionIds: Record<string, string>): { agentTurns: AgentTurn[]; activeTurnId: ID | null } {
+function buildRestoredTurn(
+  sessionId: string | null,
+  messages: ChatMessage[],
+  chunkSessionIds: Record<string, string> | null | undefined,
+): { agentTurns: AgentTurn[]; activeTurnId: ID | null } {
   if (!sessionId) return { agentTurns: [], activeTurnId: null };
 
-  const pendingIds = Object.entries(chunkSessionIds)
+  const safeChunkSessionIds = chunkSessionIds ?? {};
+  const pendingIds = Object.entries(safeChunkSessionIds)
     .filter(([, sid]) => sid === sessionId)
     .map(([messageId]) => messageId);
 
@@ -128,7 +140,7 @@ export function resolveSessionSlice(state: SessionProjectionState, sessionId: st
 
   const storedMessages = getStoredSessionMessages(state, sessionId);
   const messages = mergePendingMessages(sessionId, storedMessages, state.streamingChunks, state.thinkingChunks, state.chunkSessionIds);
-  const storedTurns = getStoredSessionTurns(state, sessionId);
+  const storedTurns = getStoredSessionTurns(state, sessionId) ?? [];
   const storedActiveTurnId = getStoredSessionActiveTurnId(state, sessionId);
 
   if (storedTurns.length > 0 || storedActiveTurnId) {

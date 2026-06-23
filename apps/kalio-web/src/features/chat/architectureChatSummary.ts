@@ -48,12 +48,16 @@ function formatRouteLabel(source: string, fromNodeId: string, toNodeId: string):
 }
 
 export function buildArchitectureRunMetadata(result: ArchitectRunResult): ArchitectureChatRunSummary {
+  const chatMessages = result.chat.messages ?? [];
+  const graphNodes = result.graph.nodes ?? [];
+  const graphEdges = result.graph.edges ?? [];
+  const graphChildAgents = result.graph.childAgents ?? [];
   const schemaLabel = resolveArchitectureSchemaLabel(result);
   const visitIndexByEventId = buildVisitIndexByEventId(result);
   const streamByEventId = buildStreamByEventId(result);
   const routerOutputByEventId = buildRouterOutputByEventId(result);
   const incompleteReasonByEventId = buildIncompleteReasonByEventId(result);
-  const trace = result.chat.messages
+  const trace = chatMessages
     .filter((message): message is typeof message & { speaker: TraceSpeaker } => isTraceSpeaker(message.speaker))
     .map((message) => ({
       speaker: message.speaker,
@@ -62,7 +66,7 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
       action: message.action,
       detail: message.detail,
       eventId: message.eventId,
-      sessionId: result.graph.nodes.find((node) => (
+      sessionId: graphNodes.find((node) => (
         node.id === message.route?.fromNodeId
         || (message.eventId !== undefined && node.eventIds.includes(message.eventId))
       ))?.sessionId,
@@ -78,17 +82,17 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
     schemaId: schemaLabel,
     status: result.run.status,
     hostProjectionKind: 'workflow-envelope',
-    finalArtifact: [...result.chat.messages]
+    finalArtifact: [...chatMessages]
       .reverse()
       .find((message) => message.speaker === 'finalizer')
       ? compactArchitectureTraceContent(
-          [...result.chat.messages].reverse().find((message) => message.speaker === 'finalizer')?.content ?? '',
+          [...chatMessages].reverse().find((message) => message.speaker === 'finalizer')?.content ?? '',
           'finalizer',
         )
       : undefined,
     trace,
     routeHops: result.graph.routeHops ?? [],
-    graphNodes: result.graph.nodes.map((node) => ({
+    graphNodes: graphNodes.map((node) => ({
       id: node.id,
       sessionId: node.sessionId,
       label: node.label,
@@ -98,8 +102,8 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
       eventIds: [...node.eventIds],
       incompleteReason: node.incompleteReason,
     })),
-    graphEdges: result.graph.edges.map((edge) => ({ ...edge })),
-    graphChildAgents: result.graph.childAgents?.map((agent) => ({ ...agent })),
+    graphEdges: graphEdges.map((edge) => ({ ...edge })),
+    graphChildAgents: graphChildAgents.map((agent) => ({ ...agent })),
   };
   return metadata;
 }
