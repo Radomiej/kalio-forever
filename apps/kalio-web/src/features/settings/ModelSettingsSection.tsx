@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, RefreshCw, Check, AlertCircle } from 'lucide-react';
 import { ModelCombobox } from './ModelCombobox';
 import type { ActiveRuntimeConfig, LLMConfigWithSource } from './llm-panel.types';
+import { SettingsRangeField } from './SettingsRangeField';
 import { formatLargeTokenCount } from './settings-format';
 
 interface Props {
@@ -298,58 +299,47 @@ export function ModelSettingsSection({
           <div className="flex flex-col gap-4">
             {/* Temperature */}
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-base-content/60">Temperature</span>
-                <span className="badge badge-neutral font-mono text-xs" data-testid="gen-temperature-value">
-                  {genSettings.temperature.toFixed(2)}
-                </span>
-              </div>
-              <input
-                type="range"
-                className="range range-sm range-primary w-full"
+              <SettingsRangeField
+                ariaLabel="Temperature"
+                label="Temperature"
+                marks={[
+                  { value: 0, label: '0 (deterministic)' },
+                  { value: 1, label: '1 (balanced)' },
+                  { value: 2, label: '2 (creative)' },
+                ]}
                 min={0}
                 max={2}
                 step={0.05}
                 value={genSettings.temperature}
-                onChange={() => undefined}
+                valueLabel={genSettings.temperature.toFixed(2)}
                 onInput={handleTemperatureInput}
-                aria-label="Temperature"
-                data-testid="gen-temperature"
+                testId="gen-temperature"
               />
-              <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
-                <span>0 (deterministic)</span><span>1 (balanced)</span><span>2 (creative)</span>
-              </div>
             </div>
 
             {/* Max Tokens */}
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-base-content/60">Max Output Tokens</span>
-                <span
-                  className="badge badge-neutral font-mono text-xs"
-                  data-testid="gen-max-tokens-value"
-                >
-                  {formatLargeTokenCount(genSettings.maxTokens)}
-                </span>
-              </div>
-              <input
-                type="range"
-                className="range range-sm range-secondary w-full"
+              <SettingsRangeField
+                ariaLabel="Max output tokens"
+                inputClassName="range range-sm range-secondary w-full"
+                label="Max Output Tokens"
+                marks={[
+                  { value: 256, label: '256' },
+                  { value: 4_096, label: '4k' },
+                  { value: 65_536, label: '64k' },
+                  { value: 262_144, label: '256k' },
+                ]}
                 min={MAX_OUTPUT_TOKENS_MIN}
                 max={MAX_OUTPUT_TOKENS_LIMIT}
                 step={256}
                 value={genSettings.maxTokens}
-                onChange={() => undefined}
+                valueLabel={formatLargeTokenCount(genSettings.maxTokens)}
                 onInput={handleMaxTokensInput}
                 onMouseUp={(event) => void handleMaxTokensCommit(parseInt((event.target as HTMLInputElement).value, 10))}
                 onTouchEnd={(event) => void handleMaxTokensCommit(parseInt((event.target as HTMLInputElement).value, 10))}
                 onBlur={(event) => void handleMaxTokensCommit(parseInt((event.target as HTMLInputElement).value, 10))}
-                aria-label="Max output tokens"
-                data-testid="gen-max-tokens"
+                testId="gen-max-tokens"
               />
-              <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
-                <span>256</span><span>4k</span><span>64k</span><span>256k</span>
-              </div>
             </div>
 
             {genError && (

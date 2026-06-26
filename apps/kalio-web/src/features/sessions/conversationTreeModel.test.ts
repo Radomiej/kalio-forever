@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage, ChatSession } from '@kalio/types';
 import { buildConversationTreeModel } from './conversationTreeModel';
+import { countDescendantRuntimeStates } from './sessionRowRuntimeState';
 
 function makeSession(overrides: Partial<ChatSession>): ChatSession {
   return {
@@ -173,5 +174,66 @@ describe('buildConversationTreeModel', () => {
 
     expect(model.renderableSessions.map((session) => session.id)).toEqual([host.id, branch.id]);
     expect(model.activeLoopSessionIds.has(branch.id)).toBe(true);
+  });
+
+  it('counts a child pending HITL confirmation as waiting descendant state', () => {
+    const host = makeSession({
+      id: 'host',
+      title: 'Workflow host',
+      updatedAt: 20,
+    });
+    const branch = makeSession({
+      id: 'branch-qa',
+      title: 'Release Guard: QA',
+      kind: 'subagent',
+      parentSessionId: 'host',
+      createdAt: 22,
+      updatedAt: 22,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'qa',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'qa',
+          displayLabel: 'QA',
+          sessionSurface: 'conversation-branch',
+        },
+      },
+    });
+    const pendingConfirmations = {
+      [branch.id]: [{ requestId: 'req-hitl', sessionId: branch.id }],
+    };
+
+    const model = buildConversationTreeModel({
+      activeSessionId: host.id,
+      originFilter: 'all',
+      pendingBudgetApprovals: {},
+      pendingConfirmations,
+      queuedDepthBySession: {},
+      sessionAgentTurns: {},
+      sessionMessages: {
+        [host.id]: [makeWorkflowEnvelopeMessage(host.id)],
+        [branch.id]: [],
+      },
+      sessionStatusSnapshots: {},
+      sidebarSessions: [host, branch],
+      activeAgentLoops: {},
+    });
+
+    const counts = countDescendantRuntimeStates(
+      host.id,
+      model.childSessionsByParent,
+      pendingConfirmations,
+      {},
+      new Set(),
+      {},
+      {},
+      {},
+      {},
+      model.architectureSessionRuntimeStates,
+    );
+
+    expect(model.renderableSessions.map((session) => session.id)).toEqual([host.id, branch.id]);
+    expect(counts).toEqual({ pending: 0, running: 0, waiting: 1 });
   });
 });

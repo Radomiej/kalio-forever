@@ -201,6 +201,45 @@ describe('filterRenderableSessions', () => {
     expect(renderableSessions.map((session) => session.id)).toEqual(['host', 'arch-analyst']);
   });
 
+  it('keeps an otherwise untouched branch visible when it has a pending HITL confirmation', () => {
+    const sessions: ChatSession[] = [
+      makeSession({ id: 'host', title: 'Workflow host', updatedAt: 10 }),
+      makeSession({
+        id: 'arch-analyst',
+        title: 'Strategic Decision Council: Analyst',
+        kind: 'subagent',
+        parentSessionId: 'host',
+        createdAt: 12,
+        updatedAt: 12,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'analyst',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            roleSlotId: 'analyst',
+            displayLabel: 'Analyst',
+          },
+        },
+      }),
+    ];
+
+    const hiddenWithoutLiveState = filterRenderableSessions(sessions, {
+      host: [],
+      'arch-analyst': [],
+    });
+    const visibleWithHitl = filterRenderableSessions(sessions, {
+      host: [],
+      'arch-analyst': [],
+    }, {
+      pendingConfirmations: {
+        'arch-analyst': [{ requestId: 'req-hitl' }],
+      },
+    });
+
+    expect(hiddenWithoutLiveState.renderableSessions.map((session) => session.id)).toEqual(['host']);
+    expect(visibleWithHitl.renderableSessions.map((session) => session.id)).toEqual(['host', 'arch-analyst']);
+  });
+
   it('prefers explicit sessionSurface over legacy architecture heuristics', () => {
     const sessions: ChatSession[] = [
       makeSession({ id: 'host', title: 'Workflow host', updatedAt: 10 }),

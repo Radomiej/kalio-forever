@@ -226,4 +226,13 @@ describe('activeConversationSession', () => {
 
     expect(loadStoredActiveConversationSessionId()).toBeNull();
   });
+
+  it('does not persist pending host-session ids into session storage', () => {
+    persistActiveConversationSessionId('session-1');
+    expect(loadStoredActiveConversationSessionId()).toBe('session-1');
+
+    persistActiveConversationSessionId('pending-host-session:temp-1');
+
+    expect(loadStoredActiveConversationSessionId()).toBe('session-1');
+  });
 });

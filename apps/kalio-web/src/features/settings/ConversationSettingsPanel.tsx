@@ -48,7 +48,7 @@ export function ConversationSettingsPanel() {
   };
 
   return (
-    <section className="flex flex-col gap-5 rounded-xl border border-base-300 bg-base-200/10 p-4" data-testid="conversation-settings-panel">
+    <section className="flex flex-col gap-6 rounded-2xl border border-base-300 bg-base-200/10 p-5 sm:p-6" data-testid="conversation-settings-panel">
       <div>
         <h3 className="text-sm font-semibold">Conversation</h3>
         <p className="text-xs text-base-content/60">

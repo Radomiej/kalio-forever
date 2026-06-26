@@ -7,6 +7,7 @@ import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
 import { eventBus } from '../../../services/eventBus';
 import { backendHealth } from '../../../services/backendHealth';
+import { clearSessionWatchRegistry } from '../../../services/sessionWatchRegistry';
 
 const { reportBackendSuccess, reportBackendFailure } = vi.hoisted(() => ({
   reportBackendSuccess: vi.fn(),
@@ -38,6 +39,7 @@ describe('useChatSessionActivation', () => {
     vi.mocked(eventBus.identifySession).mockReset();
     vi.mocked(backendHealth.reportSuccess).mockReset();
     vi.mocked(backendHealth.reportFailure).mockReset();
+    clearSessionWatchRegistry();
     useAgentStore.setState({
       callIdToName: {},
       cliChildProjections: {},
@@ -58,6 +60,48 @@ describe('useChatSessionActivation', () => {
       getSessionMessages: () => [],
       pendingMessage: null,
     });
+  });
+
+  it('identifies the active session before history hydration completes', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    expect(eventBus.identifySession).toHaveBeenCalledWith('session-1');
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages', expect.objectContaining({
+        params: { limit: 40 },
+      }));
+    });
+  });
+
+  it('skips history hydration for pending host-session ids', async () => {
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'pending-host-session:temp-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(eventBus.identifySession).not.toHaveBeenCalled();
+    expect(apiClient.get).not.toHaveBeenCalled();
+    expect(backendHealth.reportSuccess).not.toHaveBeenCalled();
+    expect(backendHealth.reportFailure).not.toHaveBeenCalled();
   });
 
   it('rebuilds CLI child projections when session history is loaded', async () => {

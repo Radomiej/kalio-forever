@@ -154,13 +154,20 @@ instead of relying on whatever tools happen to be connected:
 | `mcp-dev-servers` | Kalio service lifecycle, logs, stack health, managed service restart | Full-stack architecture QA and live run recovery |
 | `mcp-playwright-orchestrator` | Browser flow execution, screenshots, visual/WCAG/focus/runtime audits | FE-started workflow proof and generated-site QA |
 
-Kalio can receive this profile in two supported ways:
+Kalio can receive this profile in two ways, but only one is the normal
+Kalio-Forever development path:
 
-1. Import `.vscode/mcp.json` through Settings -> MCP Servers -> Import Existing
-   MCP Configs. `MCPExternalImportService` discovers the workspace `.vscode`
-   config through the `copilot` source entry.
-2. Manage the same servers from TOML using
-   `docs/examples/kalio-agent-qa-mcp.config.toml` as the copy source.
+1. Manage the servers from TOML using
+   `docs/examples/kalio-agent-qa-mcp.config.toml` as the copy source. This is
+   the source of truth for Kalio-Forever dev.
+2. Import `.vscode/mcp.json` through Settings -> MCP Servers -> Import Existing
+   MCP Configs only for legacy/manual UI inspection or importer debugging.
+   `MCPExternalImportService` discovers the workspace `.vscode` config through
+   the `copilot` source entry.
+
+Do not keep both TOML-managed and UI-imported duplicates active. Do not use
+`~/.codex/config.toml` as evidence for Kalio MCP configuration; it is a separate
+Codex-only config surface.
 
 Agent personas used for testing should either use `mcpPolicy = "allow_all"` in a
 dedicated QA persona or an allow-list that includes only the prefixed tools from

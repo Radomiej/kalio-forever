@@ -61,6 +61,8 @@ test('fixed QA mock mode forces env LLM so stale DB credentials cannot override 
   assert.match(stackManagerSource, /--force-env-llm/);
   assert.match(stackManagerSource, /KALIO_FORCE_ENV_LLM: forceEnvLlm \? '1'/);
   assert.match(stackManagerSource, /forceEnvLlm: backendEnv\.KALIO_FORCE_ENV_LLM === '1'/);
+  assert.match(stackManagerSource, /KALIO_MOCK_LLM_FAST: getArgValue\(args, '--provider'/);
+  assert.match(stackManagerSource, /fastMockLlm: backendEnv\.KALIO_MOCK_LLM_FAST === '1'/);
   assert.match(
     readFileSync(new URL('../start-qa.ps1', import.meta.url), 'utf8'),
     /\$stackArgs \+= "--force-env-llm"/,

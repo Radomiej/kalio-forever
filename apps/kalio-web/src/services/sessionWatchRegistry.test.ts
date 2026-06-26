@@ -49,4 +49,14 @@ describe('sessionWatchRegistry', () => {
     expect(eventBus.identifySession).toHaveBeenCalledWith('root-2');
     expect(eventBus.identifySession).not.toHaveBeenCalledWith('root-1');
   });
+
+  it('ignores pending host-session ids', () => {
+    identifyWatchedSession('pending-host-session:temp-1', 'active', { sticky: true });
+
+    expect(eventBus.identifySession).not.toHaveBeenCalled();
+
+    resetSessionWatchConnectionEpoch('reconnect');
+
+    expect(eventBus.identifySession).not.toHaveBeenCalled();
+  });
 });

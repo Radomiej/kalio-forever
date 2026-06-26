@@ -39,7 +39,7 @@ test.describe('REGRESSION: stop and follow-up runtime flow', () => {
     const followUpInput = await expectComposerEnabled(page, 5_000);
     const followUpSendBtn = await getComposerSendButton(page);
 
-    await followUpInput.fill('follow-up after stop');
+    await followUpInput.fill(`${LONG_STREAMING_PROMPT} after stop`);
     await followUpSendBtn.click();
 
     await expect(stopBtn).toBeVisible({ timeout: 5_000 });

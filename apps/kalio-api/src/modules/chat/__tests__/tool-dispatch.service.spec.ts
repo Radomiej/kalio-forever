@@ -411,6 +411,47 @@ describe('ToolDispatchService', () => {
       expect(entry.execute).not.toHaveBeenCalled();
     });
 
+    it('REGRESSION: unsupported autoApproveTools entries do not bypass HITL', async () => {
+      const entry = makeEntry('raapp_create', true, { appId: 'visual-calculator' });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'child-session',
+        vfsSessionId: 'child-session',
+        agentRun: {
+          agentRunId: 'sub-run-unsupported-auto',
+          agentType: 'subagent' as const,
+          parentSessionId: 'master-session',
+          vfsMode: 'isolated' as const,
+          autoApproveTools: ['raapp_create'],
+        },
+      };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
+
+      const result = await scopedService.dispatch('c1', 'raapp_create', { appId: 'visual-calculator' }, ctx);
+
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.objectContaining({
+        toolName: 'raapp_create',
+        sessionId: 'child-session',
+        agentRun: expect.objectContaining({
+          agentType: 'subagent',
+          autoApproveTools: ['raapp_create'],
+        }),
+      }));
+      expect(result.status).toBe('cancelled');
+      expect(entry.execute).not.toHaveBeenCalled();
+    });
+
     it('REGRESSION: auto-approves shared VFS writes only when the subagent run explicitly opts in', async () => {
       const entry = makeEntry('vfs_write', true, { path: 'evidence/proof.json' });
       const moduleRef = await Test.createTestingModule({

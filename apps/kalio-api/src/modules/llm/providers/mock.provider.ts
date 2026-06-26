@@ -6,12 +6,15 @@ import {
   createGoalGuardVfsReadToolCall,
   createGoalGuardVfsWriteToolCall,
   createRaappCreateToolCall,
+  createRunRaappToolCall,
+  createRunSubagentToolCall,
   createRunSubAgentFlowToolCall,
   createVfsWriteToolCall,
   defaultDelay,
   emitMockToolArgProgress,
   emitText,
   extractMockField,
+  extractRunRaappLaunchId,
   extractMockScript,
   getLastUserMessageText,
   hasPriorAgentFlowResult,
@@ -26,6 +29,8 @@ import {
   MOCK_GOAL_GUARD_VFS_SUCCESS_TRIGGER,
   MOCK_RAAPP_CREATE_NO_ARG_PROGRESS_TRIGGER,
   MOCK_RAAPP_CREATE_TRIGGER,
+  MOCK_RUN_SUBAGENT_AUTO_APPROVE_TRIGGER,
+  MOCK_RUN_SUBAGENT_HITL_TRIGGER,
   MOCK_RUN_SUB_AGENTFLOW_TRIGGER,
   MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER,
   MOCK_VFS_WRITE_TRIGGER,
@@ -116,6 +121,20 @@ export class MockLLMProvider implements ILLMProvider {
       return [toolCall];
     }
 
+    const runRaappLaunchId = extractRunRaappLaunchId(lastMessage);
+    if (runRaappLaunchId && hasTool(tools, 'run_raapp')) {
+      if (
+        hasPriorToolResult(messages, 'run_raapp', runRaappLaunchId)
+        || hasPriorAssistantToolCall(messages, 'run_raapp', runRaappLaunchId)
+      ) {
+        emitText(options, `run_raapp completed for ${runRaappLaunchId}.`);
+        return [];
+      }
+      const toolCall = createRunRaappToolCall(runRaappLaunchId);
+      emitMockToolArgProgress(options, toolCall);
+      return [toolCall];
+    }
+
     if (lastMessage.includes(MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER)) {
       if (
         hasPriorToolResult(messages, 'vfs_write', 'e2e/mock-tool-trigger.txt')
@@ -150,6 +169,32 @@ export class MockLLMProvider implements ILLMProvider {
         return [];
       }
       const toolCall = createFsWriteToolCall(lastMessage);
+      emitMockToolArgProgress(options, toolCall);
+      return [toolCall];
+    }
+
+    if (
+      lastMessage.includes(MOCK_RUN_SUBAGENT_HITL_TRIGGER)
+      && hasTool(tools, 'run_subagent')
+    ) {
+      if (hasPriorToolResult(messages, 'run_subagent') || hasPriorAssistantToolCall(messages, 'run_subagent')) {
+        emitText(options, 'run_subagent completed for child HITL scenario.');
+        return [];
+      }
+      const toolCall = createRunSubagentToolCall(false);
+      emitMockToolArgProgress(options, toolCall);
+      return [toolCall];
+    }
+
+    if (
+      lastMessage.includes(MOCK_RUN_SUBAGENT_AUTO_APPROVE_TRIGGER)
+      && hasTool(tools, 'run_subagent')
+    ) {
+      if (hasPriorToolResult(messages, 'run_subagent') || hasPriorAssistantToolCall(messages, 'run_subagent')) {
+        emitText(options, 'run_subagent completed for child auto-approve scenario.');
+        return [];
+      }
+      const toolCall = createRunSubagentToolCall(true);
       emitMockToolArgProgress(options, toolCall);
       return [toolCall];
     }

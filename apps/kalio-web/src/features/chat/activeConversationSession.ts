@@ -4,6 +4,7 @@ import type { SessionHistoryFetchResult, SessionHistoryMeta, SessionHistoryWindo
 import { useSessionStore } from '../../store/sessionStore';
 import { hydrateSessionHistoryIntoStore } from './historyHydration';
 import { createAndActivateHostSession } from './launch/sessionLaunchShared';
+import { isPendingHostSessionId } from './pendingHostSession';
 import { normalizeConversationSessionId } from '../sessions/sessionTreeDisplay';
 import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
 
@@ -73,6 +74,9 @@ export function persistActiveConversationSessionId(sessionId: string | null): vo
   }
 
   if (sessionId) {
+    if (isPendingHostSessionId(sessionId)) {
+      return;
+    }
     window.sessionStorage.setItem(LAST_ACTIVE_CONVERSATION_SESSION_STORAGE_KEY, sessionId);
     return;
   }

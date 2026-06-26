@@ -4,7 +4,7 @@ import type { ToolDispatchService } from '../tool-dispatch.service';
 import type { SessionPipelineService } from '../session-pipeline.service';
 import type { SessionsService } from '../sessions.service';
 import type { RAAppHITLService, SavedApproval } from '../../raapp/raapp-hitl.service';
-import type { AgentFlowRunSnapshot, ChatSession, ToolConfirmationRequest } from '@kalio/types';
+import type { AgentBudgetApprovalRequest, AgentFlowRunSnapshot, ChatSession, ToolConfirmationRequest } from '@kalio/types';
 import type { AgentFlowRuntimePort } from '../../agent-flow/agent-flow-runtime.port';
 import { CLI_AGENT_SESSION_RUNTIME } from '../../cli-agent/cli-agent-session-runtime.port';
 import type { CLIAgentSessionRuntimePort } from '../../cli-agent/cli-agent-session-runtime.port';
@@ -388,6 +388,92 @@ describe('ChatGateway', () => {
     expect(toolDispatch.resolveConfirmation).not.toHaveBeenCalled();
   });
 
+  it('REGRESSION: child HITL events grant immediate confirm rights to the initiating socket', async () => {
+    const pending: ToolConfirmationRequest = {
+      requestId: 'req-child-live',
+      toolCallId: 'call-child-live',
+      sessionId: 'child-session',
+      toolName: 'terminal_spawn',
+      args: { command: 'npm run build' },
+      timeoutMs: 0,
+    };
+    (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
+      emit('tool:confirmation_required', pending);
+    });
+
+    await gateway.handleChatSend(client as never, {
+      sessionId: 'session-1',
+      content: 'delegate this task',
+      personaId: 'default',
+    });
+
+    expect(client.emit.mock.calls).toContainEqual(['tool:confirmation_required', pending]);
+
+    const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
+    handleToolConfirm(client as never, { requestId: 'req-child-live', sessionId: 'child-session' });
+
+    expect(toolDispatch.resolveConfirmation).toHaveBeenCalledWith('req-child-live', 'child-session');
+  });
+
+  it('REGRESSION: child HITL events grant immediate cancel rights to the initiating socket', async () => {
+    const pending: ToolConfirmationRequest = {
+      requestId: 'req-child-cancel-live',
+      toolCallId: 'call-child-cancel-live',
+      sessionId: 'child-session',
+      toolName: 'terminal_spawn',
+      args: { command: 'npm run test' },
+      timeoutMs: 0,
+    };
+    (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
+      emit('tool:confirmation_required', pending);
+    });
+
+    await gateway.handleChatSend(client as never, {
+      sessionId: 'session-1',
+      content: 'delegate this task',
+      personaId: 'default',
+    });
+
+    expect(client.emit.mock.calls).toContainEqual(['tool:confirmation_required', pending]);
+
+    const handleToolCancel = (gateway as unknown as { handleToolCancel: ConfirmHandler }).handleToolCancel.bind(gateway);
+    handleToolCancel(client as never, { requestId: 'req-child-cancel-live', sessionId: 'child-session' });
+
+    expect(toolDispatch.cancelConfirmation).toHaveBeenCalledWith('req-child-cancel-live', 'child-session');
+  });
+
+  it('REGRESSION: child budget approval events grant immediate approval rights to the initiating socket', async () => {
+    const pending: AgentBudgetApprovalRequest = {
+      requestId: 'budget-child-live',
+      sessionId: 'child-session',
+      scope: 'chat',
+      usedIterations: 60,
+      currentLimit: 60,
+      suggestedNextLimit: 70,
+      requestedBy: 'subagent',
+    };
+    vi.mocked(agentBudgetApprovals.getPendingApprovals).mockReturnValue([pending]);
+    (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
+      emit('agent:budget_required', pending);
+    });
+
+    await gateway.handleChatSend(client as never, {
+      sessionId: 'session-1',
+      content: 'delegate this task',
+      personaId: 'default',
+    });
+
+    expect(client.emit.mock.calls).toContainEqual(['agent:budget_required', pending]);
+
+    gateway.handleAgentBudgetApprove(client as never, {
+      requestId: 'budget-child-live',
+      sessionId: 'child-session',
+      decision: 'allow_ten',
+    });
+
+    expect(agentBudgetApprovals.resolveApproval).toHaveBeenCalledWith('budget-child-live', 'child-session', 'allow_ten');
+  });
+
   it('REGRESSION: emitToInitiatorAndSessionSubscribers does not re-subscribe a disconnected socket', () => {
     gateway.handleDisconnect(client as never);
 
@@ -490,6 +576,36 @@ describe('ChatGateway', () => {
       .map(([event]) => event);
 
     expect(branchLifecycleEvents).toEqual(['session:created', 'session:updated']);
+  });
+
+  it('REGRESSION: logs lifecycle queue recovery and keeps later events flowing', async () => {
+    const host = sessionFixture({ id: 'host-session', title: 'Host' });
+    const branch = sessionFixture({
+      id: 'arch-run-pragmatist',
+      title: 'Architecture: Pragmatist',
+      kind: 'subagent',
+      parentSessionId: host.id,
+    });
+    const logger = (gateway as unknown as { logger: { warn: ReturnType<typeof vi.fn> } }).logger;
+    logger.warn = vi.fn();
+    vi.mocked(sessions.get).mockImplementation(async (sessionId: string) => {
+      if (sessionId === host.id) return host;
+      if (sessionId === branch.id) return branch;
+      throw new Error(`Unknown session ${sessionId}`);
+    });
+
+    await gateway.handleSessionIdentify(client as never, { sessionId: host.id });
+    client.emit.mockClear();
+    (gateway as unknown as { sessionLifecycleBroadcastQueue: Promise<void> }).sessionLifecycleBroadcastQueue =
+      Promise.reject(new Error('transient ancestor lookup failure'));
+
+    updatedHandler()({ session: { ...branch, title: 'Architecture: Pragmatist updated', updatedAt: 2 } });
+    await flushLifecycleBroadcast();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Session lifecycle queue recovered after previous failure: transient ancestor lookup failure',
+    );
+    expect(client.emit).toHaveBeenCalledWith('session:updated', expect.objectContaining({ id: branch.id }));
   });
 
   it('REGRESSION: emits a lifecycle event once when a socket subscribes to both parent and child root', async () => {

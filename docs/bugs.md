@@ -1,5 +1,21 @@
 # Bug Log
 
+## 2026-06-24
+
+- Fixed: `scripts/stack-manager.mjs` still had an empty `catch {}` around the non-Windows fallback `SIGKILL` path. It now treats `ESRCH` as the expected already-exited process case and logs other kill failures with PID context.
+- Fixed: `apps/kalio-api/src/modules/chat/chat.gateway.ts` still swallowed a failed lifecycle broadcast queue link with `.catch(() => undefined)`, so a transient ancestor/session lookup failure was invisible. The queue now logs the recovered failure and continues with later lifecycle events.
+- Fixed: `scripts/code-audit/run-audit.mjs` emitted Node DEP0190 on Node 24 because it spawned `npx.cmd` with `shell: true` plus argument arrays. The audit runner now builds an explicit `cmd.exe /d /s /c ...` command on Windows with `shell: false`.
+- Fixed: `scripts/code-audit/run-audit.mjs` produced a false-green `madge` circular-dependency result on Windows because the runner quoted `--extensions "ts,tsx"`, which made `madge` scan no TypeScript files and write `[]`. The Windows argument quoting now leaves comma-separated values unquoted and the regression test covers `--extensions ts,tsx`.
+- Release blocker: backend module boundary rules are not currently enforceable. A subagent architecture scan found broad direct imports between `apps/kalio-api/src/modules/*` modules, including `chat.gateway.ts`, `chat.runtime-snapshot.ts`, `chat.service.ts`, and `chat.module.ts`, which conflicts with the repo rule that cross-module contracts should go through shared types or module APIs.
+- Needs verification: direct filesystem tools are expected to access the real backend host filesystem, but release QA must prove they consistently enforce Settings `allowed_paths` before reading, listing, writing, or searching outside approved roots.
+- Release risk: the public release browser gate does not yet cover the full shell surface. Current automated workflow gates focus on chat/workflow/HITL and need either tests or documented manual evidence for Landing, Quick Chat, Tools/RAApp/MCP, Mind, Observability, Settings, mobile layout, and RAApp tile execution.
+- Fixed: mock QA could not prove RAApp catalog launches because an explicit `Use run_raapp with the exact id ...` launch prompt was echoed instead of converted into a `run_raapp` tool call. `MockLLMProvider` now emits `run_raapp` for explicit launch intents.
+- Fixed: after that mock RAApp launch path emitted `run_raapp`, it repeated the same tool until the 8/8 tool limit and left the session pending. The mock provider now stops after a prior `run_raapp` result for the same id and emits a completion sentence.
+- Release risk: at least one stored generated RAApp (`Quiz: Ciekawostki o Francji`) renders with a browser page error (`Unexpected identifier 'est'`) even though the RAApp runtime frame appears. Generated app quality needs a catalog validation pass separate from runtime correctness.
+- Release risk: the production web build still emits Vite chunk-size warnings for chunks over 500 kB after minification. This is not a functional blocker, but public release should track bundle splitting/performance.
+- Fixed: fixed-port QA started by `scripts/stack-manager.mjs` did not force fast mock streaming, unlike the random Playwright E2E stack. `release:workflow-gate` could fail at 180s while the architecture run completed a few seconds later. Mock fixed QA now sets `KALIO_MOCK_LLM_FAST=1` and records `fastMockLlm` in stack state.
+- Release blocker: after the fast-mock and stop-follow-up fixes, a full `npm.cmd run release:workflow-gate` run timed out at the outer command limit after about 31 minutes without returning its own failure output. `scripts/workflow-release-gate.mjs` currently has no per-group timeout, so a hung Playwright group can make the release gate non-diagnostic.
+
 ## 2026-06-21
 
 - `scripts/stack-manager.mjs` could not start a managed QA stack because `C:\Projekty\kalio-forever\.kalio-stack\logs\backend.log` was locked, which caused `EPERM` on `openSync()` and blocked random-port QA startup.

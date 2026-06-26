@@ -42,28 +42,14 @@ import {
   resetSessionWatchConnectionEpoch,
 } from './services/sessionWatchRegistry';
 import { useSettingsStore } from './features/settings/settingsStore';
-import type { ChatSession } from '@kalio/types';
 import { activateConversationSession } from './features/chat/activeConversationSession';
 import { selectPendingApprovalCount } from './store/agentRuntimeSelectors';
+import { mergeSessionsPreservingLocal } from './features/sessions/mergeSessionsPreservingLocal';
 
 const TALK_VIEW_OPTIONS: ReadonlyArray<{ id: TalkView; label: string; icon: React.ReactNode }> = [
   { id: 'conversation', label: 'Conversation', icon: <MessageSquare size={14} /> },
   { id: 'graph', label: 'Execution graph', icon: <GitBranch size={14} /> },
 ];
-
-function mergeSessionsPreservingLocal(current: ChatSession[], incoming: ChatSession[]): ChatSession[] {
-  const merged = new Map<string, ChatSession>();
-  for (const session of current) {
-    merged.set(session.id, session);
-  }
-  for (const session of incoming) {
-    const existing = merged.get(session.id);
-    if (!existing || session.updatedAt >= existing.updatedAt) {
-      merged.set(session.id, existing ? { ...existing, ...session } : session);
-    }
-  }
-  return Array.from(merged.values()).sort((left, right) => right.updatedAt - left.updatedAt);
-}
 
 export function App() {
   const initialViewState = loadAppViewState();

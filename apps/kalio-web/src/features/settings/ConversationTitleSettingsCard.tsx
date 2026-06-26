@@ -1,4 +1,5 @@
 import type { ConversationTitleSettings } from '@kalio/types';
+import { SettingsRangeField } from './SettingsRangeField';
 
 type ConversationTitleSettingsCardProps = {
   loading: boolean;
@@ -12,7 +13,7 @@ export function ConversationTitleSettingsCard({
   onPatchSettings,
 }: ConversationTitleSettingsCardProps) {
   return (
-    <div className="rounded-lg border border-base-300 bg-base-100/60 p-4">
+    <div className="rounded-xl border border-base-300 bg-base-100/60 p-5 sm:p-6">
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="text-sm font-medium">Active Change Conversation Title</div>
@@ -30,27 +31,26 @@ export function ConversationTitleSettingsCard({
         />
       </div>
 
-      <div className="mt-4 border-t border-base-300 pt-4">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs text-base-content/60">Rename every completed assistant replies</span>
-          <span className="badge badge-neutral font-mono text-xs" data-testid="conversation-title-rename-every-value">
-            {settings.renameEveryReplies}
-          </span>
-        </div>
-        <input
-          type="range"
-          className="range range-sm range-primary w-full"
+      <div className="mt-5 border-t border-base-300 pt-5">
+        <SettingsRangeField
+          ariaLabel="Rename every completed assistant replies"
+          disabled={loading || !settings.autoRenameEnabled}
+          label="Rename every completed assistant replies"
+          marks={[
+            { value: 1, label: '1' },
+            { value: 3, label: '3' },
+            { value: 5, label: '5' },
+            { value: 10, label: '10' },
+          ]}
           min={1}
           max={10}
           step={1}
           value={settings.renameEveryReplies}
-          disabled={loading || !settings.autoRenameEnabled}
+          valueLabel={settings.renameEveryReplies}
+          valueTestId="conversation-title-rename-every-value"
           onChange={(event) => void onPatchSettings({ renameEveryReplies: parseInt(event.target.value, 10) })}
-          data-testid="conversation-title-rename-every-slider"
+          testId="conversation-title-rename-every-slider"
         />
-        <div className="mt-1 flex justify-between px-1 text-[10px] text-base-content/40">
-          <span>1</span><span>3</span><span>5</span><span>10</span>
-        </div>
       </div>
     </div>
   );

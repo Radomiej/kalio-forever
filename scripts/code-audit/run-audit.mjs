@@ -55,17 +55,29 @@ const SILENT_CATCH_PATTERN =
   String.raw`|\.catch\s*\(\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*(?:\{\s*${EMPTY_BLOCK_CONTENT}\}|null|undefined|false)\s*\)`;
 const ANY_TYPE_RE = /(?:^|[^A-Za-z0-9_])(?::\s*any\b|as\s+any\b|<any>)/g;
 
+function quoteWindowsCmdArg(value) {
+  const text = String(value);
+  if (/^[A-Za-z0-9_./\\:=@%+,-]+$/.test(text)) return text;
+  return `"${text.replace(/"/g, '\\"')}"`;
+}
+
+export function buildSpawnCommand(cmd, args, platform = process.platform) {
+  if (platform !== 'win32') return { command: cmd, args, shell: false };
+  const shellCommand = process.env.ComSpec ?? 'cmd.exe';
+  const commandLine = [cmd, ...args].map(quoteWindowsCmdArg).join(' ');
+  return { command: shellCommand, args: ['/d', '/s', '/c', commandLine], shell: false };
+}
+
 /**
  * Run a command, capture stdout+stderr, never throw.
  * Returns { code, stdout, stderr }.
  */
 function run(cmd, args, opts = {}) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, {
+    const spawnCommand = buildSpawnCommand(cmd, args);
+    const child = spawn(spawnCommand.command, spawnCommand.args, {
       cwd: REPO_ROOT,
-      // Windows requires shell=true when invoking .cmd shims (npx.cmd);
-      // otherwise Node throws EINVAL on spawn.
-      shell: process.platform === 'win32',
+      shell: spawnCommand.shell,
       ...opts,
     });
     let stdout = '';

@@ -97,21 +97,24 @@ uses manually:
 - `mcp-playwright-orchestrator` for browser sessions, screenshots, visual
   audits, WCAG checks, focus checks, and runtime console evidence.
 
-The repo keeps an importable VS Code MCP config in `.vscode/mcp.json`. From the
-Kalio UI, open Settings -> MCP Servers -> Import Existing MCP Configs and import
-those entries. This path is preferred for local development because it keeps the
-server definitions visible and editable in the Settings UI.
-
-If you want TOML to be the source of truth instead, use:
+For Kalio-Forever development, the source of truth is TOML, not the Settings UI
+import flow:
 
 ```text
 docs/examples/kalio-agent-qa-mcp.config.toml
 ```
 
 Copy the required blocks into `.kalio/config.toml` or
-`%USERPROFILE%\.kalio\config.toml`. Do not keep duplicate UI-imported and
-TOML-managed entries active at the same time; MCP tool names are server-id
-prefixed, so duplicates create confusing agent tool lists.
+`%USERPROFILE%\.kalio\config.toml`. This is the canonical local-dev setup for
+this repo.
+
+The repo also keeps `.vscode/mcp.json` as a legacy/manual import example for
+one-off UI inspection or importer debugging. Do not use it as the normal dev
+path, and do not keep UI-imported and TOML-managed entries active at the same
+time; MCP tool names are server-id prefixed, so duplicates create confusing
+agent tool lists. The external importer also de-duplicates equivalent configs by
+effective signature, so UI import is a poor source of truth for repeatable repo
+setup.
 
 ---
 
@@ -186,3 +189,8 @@ on reload). Run `npx @iarna/toml parse .kalio/config.toml` to validate.
 **Q: Which file wins when the same key appears in both `~/.kalio/config.toml` and `.kalio/config.toml`?**  
 A: The project-level file wins (deeper paths have higher priority). Within the
 same scope, a deeper sub-directory config wins over the project root config.
+
+**Q: Can I diagnose Kalio MCP state from `~/.codex/config.toml`?**  
+A: No. `~/.codex/config.toml` configures Codex only. Kalio MCP state should be
+diagnosed from `.kalio/config.toml`, `~/.kalio/config.toml`, and the Kalio
+runtime/API state.
