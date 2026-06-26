@@ -220,6 +220,26 @@ describe('SessionPanel', () => {
     mockSetActiveSession.mockImplementation((id: string | null) => {
       mockState.activeSessionId = id;
     });
+    mockSetSessions.mockImplementation((sessions: ChatSession[]) => {
+      mockState.sessions = sessions;
+    });
+    mockAddSession.mockImplementation((session: ChatSession) => {
+      mockState.sessions = mockState.sessions.some((item) => item.id === session.id)
+        ? mockState.sessions.map((item) => item.id === session.id ? { ...item, ...session } : item)
+        : [...mockState.sessions, session];
+    });
+    mockSetMessages.mockImplementation((messages: ChatMessage[], sessionId?: string | null) => {
+      if (!sessionId) {
+        return;
+      }
+      mockState.sessionMessages[sessionId] = messages;
+    });
+    mockSetAgentTurns.mockImplementation((turns: AgentTurn[], sessionId?: string | null) => {
+      if (!sessionId) {
+        return;
+      }
+      mockState.sessionAgentTurns[sessionId] = turns;
+    });
     mockSetSessionHistoryMeta.mockImplementation((sessionId: string | null, meta) => {
       if (!sessionId) {
         return;
@@ -229,6 +249,20 @@ describe('SessionPanel', () => {
         return;
       }
       mockState.sessionHistoryMeta[sessionId] = meta;
+    });
+    mockRemoveSession.mockImplementation((id: string) => {
+      mockState.sessions = mockState.sessions.filter((session) => session.id !== id);
+      delete mockState.sessionMessages[id];
+      delete mockState.sessionAgentTurns[id];
+      delete mockState.sessionHistoryMeta[id];
+      if (mockState.activeSessionId === id) {
+        mockState.activeSessionId = null;
+      }
+    });
+    mockUpdateSession.mockImplementation((id: string, patch: Partial<ChatSession>) => {
+      mockState.sessions = mockState.sessions.map((session) => (
+        session.id === id ? { ...session, ...patch } : session
+      ));
     });
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
@@ -1945,6 +1979,74 @@ describe('SessionPanel', () => {
       resolveSessions({ data: mockSessions });
       await Promise.resolve();
     });
+  });
+
+  it('activates a pending New Chat shell immediately while session creation is still in flight', async () => {
+    let resolvePost!: (value: { data: ChatSession }) => void;
+    mockApiPost.mockReturnValue(new Promise((resolve) => {
+      resolvePost = resolve;
+    }));
+    const onSelect = vi.fn();
+
+    render(<SessionPanel onSelect={onSelect} />);
+
+    const newBtn = await screen.findByTestId('new-session-btn');
+    await waitFor(() => expect(newBtn).toHaveAttribute('title', 'New Dev Assistant chat'));
+    fireEvent.click(newBtn);
+
+    expect(newBtn).toBeDisabled();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(mockAddSession).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringMatching(/^pending-host-session:/),
+      personaId: 'p1',
+      title: 'New Chat',
+    }));
+
+    const pendingSessionId = mockSetActiveSession.mock.calls.at(-1)?.[0];
+    expect(typeof pendingSessionId).toBe('string');
+    expect(pendingSessionId).toMatch(/^pending-host-session:/);
+    expect(mockState.activeSessionId).toBe(pendingSessionId);
+    expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
+      personaId: 'p1',
+      title: 'New Chat',
+    }));
+    expect(mockSetActiveSession).not.toHaveBeenCalledWith('s3');
+
+    await act(async () => {
+      resolvePost({
+        data: { id: 's3', personaId: 'p1', title: 'New Chat', createdAt: 3000, updatedAt: 3000 },
+      });
+      await Promise.resolve();
+    });
+
+    expect(mockSetActiveSession).toHaveBeenCalledWith('s3');
+    expect(mockRemoveSession).toHaveBeenCalledWith(pendingSessionId);
+  });
+
+  it('restores the previous active session when pending New Chat creation fails', async () => {
+    const createError = new Error('session create failed');
+    mockApiPost.mockRejectedValue(createError);
+    const onSelect = vi.fn();
+
+    render(<SessionPanel onSelect={onSelect} />);
+
+    const newBtn = await screen.findByTestId('new-session-btn');
+    fireEvent.click(newBtn);
+
+    const pendingSessionId = mockSetActiveSession.mock.calls.at(-1)?.[0];
+    expect(typeof pendingSessionId).toBe('string');
+    expect(pendingSessionId).toMatch(/^pending-host-session:/);
+    expect(mockState.activeSessionId).toBe(pendingSessionId);
+
+    await waitFor(() => {
+      expect(mockRemoveSession).toHaveBeenCalledWith(pendingSessionId);
+      expect(mockSetActiveSession).toHaveBeenCalledWith('s1');
+    });
+
+    expect(mockState.activeSessionId).toBe('s1');
+    expect(mockState.sessions.some((session) => session.id === pendingSessionId)).toBe(false);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith('[SessionPanel] create failed', createError);
   });
 
   it('new session button uses the first available persona instead of hardcoded default', async () => {

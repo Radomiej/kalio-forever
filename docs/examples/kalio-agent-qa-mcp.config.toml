@@ -1,6 +1,8 @@
-# Example only. Copy the relevant blocks into .kalio/config.toml or
-# %USERPROFILE%\.kalio\config.toml when you want Kalio to manage these MCP
-# servers directly instead of importing them through Settings.
+# Canonical Kalio-Forever dev MCP profile.
+# Copy the relevant blocks into .kalio/config.toml or
+# %USERPROFILE%\.kalio\config.toml.
+# Use Settings import only as a legacy/manual fallback, not alongside this TOML
+# profile as an active duplicate source of truth.
 
 [features]
 mcp = true

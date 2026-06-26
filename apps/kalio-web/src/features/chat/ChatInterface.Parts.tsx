@@ -9,6 +9,7 @@ import { ContextStats, type ContextPreviewStatus } from './ContextStats';
 import { TokenBadge } from './TokenBadge';
 import type { ArchitectSchema } from '../architect/architect.types';
 import { NewChatScreen } from './launch/NewChatScreen';
+import { isPendingHostSessionId } from './pendingHostSession';
 import { compactArchitectureTraceContent, findArchitectureRunInMessages } from './architectureChatSummary';
 import { architectureSlotIdForSession, sessionStatusSnapshotToRuntimeState } from '../sessions/sessionTreeDisplay';
 import type { LiveTurnState } from './liveTurnState';
@@ -311,6 +312,7 @@ export function ChatSessionHeader({
   vfsRefreshSignal,
 }: ChatSessionHeaderProps) {
   const architectureLabel = resolveArchitectureLabel(activeSession, messages);
+  const pendingHostSession = isPendingHostSessionId(activeSessionId);
 
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
@@ -325,7 +327,7 @@ export function ChatSessionHeader({
           </span>
         )}
       </div>
-      <ConversationFilesBar sessionId={activeSessionId} refreshSignal={vfsRefreshSignal} />
+      {!pendingHostSession && <ConversationFilesBar sessionId={activeSessionId} refreshSignal={vfsRefreshSignal} />}
       {messages.length > 0 && (
         <button
           className="btn btn-ghost btn-xs text-base-content/40 hover:text-base-content/70"
@@ -396,12 +398,14 @@ export function ChatWelcomeScreen({
     return <PendingChildSessionScreen activeSession={activeSession} />;
   }
 
+  const launchBusy = isStreaming || isPendingHostSessionId(activeSessionId ?? activeSession?.id ?? null);
+
   return (
     <NewChatScreen
       key={activeSessionId ?? 'new-chat'}
       architectures={architectures}
       heading={activeSession?.title ?? 'New Chat'}
-      isBusy={isStreaming}
+      isBusy={launchBusy}
       onArchitectureChange={onArchitectureChange}
       onDraftChange={onDraftChange}
       onPersonaChange={onPersonaChange}

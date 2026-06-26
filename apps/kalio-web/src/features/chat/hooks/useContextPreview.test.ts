@@ -46,6 +46,7 @@ function makePreview(overrides: Partial<LLMContextPreview> = {}): LLMContextPrev
 
 describe('useContextPreview', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     apiPostMock.mockResolvedValue({ data: makePreview() });
   });
@@ -154,6 +155,25 @@ describe('useContextPreview', () => {
 
     expect(result.current.preview).toBeNull();
     expect(result.current.tokenCount).toBeNull();
+  });
+
+  it('does not call the backend for pending host-session ids', () => {
+    vi.useFakeTimers();
+
+    const { result } = renderHook(() => useContextPreview({
+      sessionId: 'pending-host-session:temp-1',
+      personaId: 'persona-1',
+      draftUserMessage: 'draft',
+      refreshKey: 0,
+    }));
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    expect(apiPostMock).not.toHaveBeenCalled();
+    expect(result.current.preview).toBeNull();
+    expect(result.current.loading).toBe(false);
   });
 
   it('keeps the previous preview marked stale when a refresh fails', async () => {

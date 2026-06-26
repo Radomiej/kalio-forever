@@ -9,6 +9,8 @@ export const MOCK_RAAPP_CREATE_NO_ARG_PROGRESS_TRIGGER = '[[mock:tool:raapp_crea
 export const MOCK_VFS_WRITE_TRIGGER = '[[mock:tool:vfs_write]]';
 export const MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER = '[[mock:tool:vfs_write:no-arg-progress]]';
 export const MOCK_FS_WRITE_TRIGGER = '[[mock:tool:fs_write]]';
+export const MOCK_RUN_SUBAGENT_HITL_TRIGGER = '[[mock:tool:run_subagent:hitl]]';
+export const MOCK_RUN_SUBAGENT_AUTO_APPROVE_TRIGGER = '[[mock:tool:run_subagent:auto-approve]]';
 export const MOCK_RUN_SUB_AGENTFLOW_TRIGGER = '[[mock:tool:run_sub_agentflow]]';
 export const MOCK_GOAL_GUARD_VFS_SUCCESS_TRIGGER = '[[mock:goal-guard-vfs-success]]';
 const MOCK_SCRIPT_START = '[[mock:script]]';
@@ -155,6 +157,19 @@ export function createRaappCreateToolCall(): LLMToolCall {
   };
 }
 
+export function extractRunRaappLaunchId(prompt: string): string | null {
+  const match = /Use run_raapp with the exact id "([^"]+)" now/i.exec(prompt);
+  return match?.[1]?.trim() || null;
+}
+
+export function createRunRaappToolCall(id: string): LLMToolCall {
+  return {
+    id: `mock_tool_${Date.now()}`,
+    name: 'run_raapp',
+    args: { id },
+  };
+}
+
 export function createVfsWriteToolCall(): LLMToolCall {
   return {
     id: `mock_tool_${Date.now()}`,
@@ -178,6 +193,29 @@ export function createFsWriteToolCall(prompt: string): LLMToolCall {
     args: {
       path: extractMockField(prompt, 'fs_write_path') ?? 'mock-fs-write-proof.txt',
       content: extractMockField(prompt, 'fs_write_content') ?? 'mock-fs-write-confirmation',
+    },
+  };
+}
+
+export function createRunSubagentToolCall(autoApproveChildTools = false): LLMToolCall {
+  if (!autoApproveChildTools) {
+    return {
+      id: `mock_tool_${Date.now()}`,
+      name: 'run_subagent',
+      args: {
+        inputPrompt: `${MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER} Use exactly the vfs_write tool and nothing else.`,
+        vfsMode: 'shared',
+      },
+    };
+  }
+
+  return {
+    id: `mock_tool_${Date.now()}`,
+    name: 'run_subagent',
+    args: {
+      inputPrompt: `${MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER} Use exactly the vfs_write tool and nothing else.`,
+      vfsMode: 'isolated',
+      autoApproveTools: ['vfs_write'],
     },
   };
 }

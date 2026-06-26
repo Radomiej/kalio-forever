@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { extractSilentCatchHits } from './run-audit.mjs';
+import { buildSpawnCommand, extractSilentCatchHits } from './run-audit.mjs';
 import { collectKnipRows } from './aggregate.mjs';
 import { extractRegressionReviewLeads } from './regression-checks.mjs';
 
@@ -18,6 +18,19 @@ test('extractSilentCatchHits detects comment-only catch bodies', () => {
     hits.map((hit) => hit.line),
     [1, 2],
   );
+});
+
+test('buildSpawnCommand avoids shell true with args on Windows', () => {
+  const spawnCommand = buildSpawnCommand(
+    'npx.cmd',
+    ['--yes', 'madge', '--extensions', 'ts,tsx', '--json', 'apps/kalio-api/src'],
+    'win32',
+  );
+
+  assert.equal(spawnCommand.command.endsWith('cmd.exe'), true);
+  assert.deepEqual(spawnCommand.args.slice(0, 3), ['/d', '/s', '/c']);
+  assert.match(spawnCommand.args[3], /--extensions ts,tsx --json/);
+  assert.equal(spawnCommand.shell, false);
 });
 
 test('collectKnipRows includes unused files nested under issues', () => {

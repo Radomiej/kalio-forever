@@ -389,9 +389,71 @@ describe('ChatWelcomeScreen', () => {
     expect(onProjectPathChange).toHaveBeenCalledWith('C:\\Projekty\\family-quest');
   });
 
+  it('disables launch controls while the active host session is still pending creation', () => {
+    render(
+      <ChatWelcomeScreen
+        activeSession={{
+          ...session(),
+          id: 'pending-host-session:temp-1',
+          title: 'New Chat',
+        }}
+        activeSessionId="pending-host-session:temp-1"
+        architectures={[schema()]}
+        isStreaming={false}
+        onArchitectureChange={vi.fn()}
+        onArchitectureRun={vi.fn()}
+        onDraftChange={vi.fn()}
+        onPersonaChange={vi.fn()}
+        onProjectPathChange={vi.fn()}
+        onSend={vi.fn()}
+        personas={[persona()]}
+        projectPath=""
+        selectedPersonaId="default"
+        selectedArchitectureId="single-chat"
+      />,
+    );
+
+    expect(screen.getByTestId('welcome-prompt-input')).toBeDisabled();
+    expect(screen.getByTestId('welcome-run-prompt')).toBeDisabled();
+  });
+
 });
 
 describe('ChatSessionHeader', () => {
+  it('does not mount the files bar while the active host session is still pending creation', () => {
+    render(
+      <ChatSessionHeader
+        activeContext={{ systemPrompt: null, activeToolNames: [] }}
+        activeModel="mimo-v2.5"
+        activeSession={{
+          ...session(),
+          id: 'pending-host-session:temp-1',
+        }}
+        activeSessionId="pending-host-session:temp-1"
+        copied={false}
+        messages={[]}
+        needsCompact={false}
+        onCloseContextStats={vi.fn()}
+        onCompactNow={vi.fn()}
+        onCopyChat={vi.fn()}
+        onToggleContextStats={vi.fn()}
+        showContextStats={false}
+        tokenCount={{
+          total: 0,
+          breakdown: { systemPrompt: 0, skills: 0, tools: 0, history: 0, images: 0 },
+          cacheable: 0,
+          contextLimit: 32000,
+          usagePercent: 0,
+        }}
+        contextPreview={null}
+        contextPreviewStatus={{ loading: false, stale: false, error: null }}
+        vfsRefreshSignal={0}
+      />,
+    );
+
+    expect(screen.queryByTestId('conversation-files-bar')).not.toBeInTheDocument();
+  });
+
   it('shows architecture label from runtimeContext when the active session is an architecture session', () => {
     render(
       <ChatSessionHeader

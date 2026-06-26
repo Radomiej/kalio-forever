@@ -6,7 +6,6 @@ import { apiClient } from '../../services/apiClient';
 import type { ChatSession, Persona } from '@kalio/types';
 import {
   activateConversationSession,
-  createAndActivateEmptyHostSession,
   hydrateActiveConversationSession,
   loadStoredActiveConversationSessionId,
   persistActiveConversationSessionId,
@@ -30,6 +29,8 @@ import {
   mergeRuntimeSessionStatusSnapshots,
 } from '../../store/agentRuntimeSelectors';
 import { loadConversationSessions } from '../../services/sessionBootstrap';
+import { mergeSessionsPreservingLocal } from './mergeSessionsPreservingLocal';
+import { startPendingSessionFromPanel } from './sessionPanelCreateSession';
 
 export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void; viewSwitcher?: ReactNode } = {}) {
   const {
@@ -81,8 +82,9 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     setLoading(true);
     loadConversationSessions()
       .then((loadedSessions) => {
-        setSessions(loadedSessions);
-        const orderedSessions = sortSessionsForSidebar(loadedSessions);
+        const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, loadedSessions);
+        setSessions(mergedSessions);
+        const orderedSessions = sortSessionsForSidebar(mergedSessions);
         if (!useSessionStore.getState().activeSessionId) {
           const storedSessionId = normalizeConversationSessionId(loadStoredActiveConversationSessionId(), orderedSessions);
           if (storedSessionId && orderedSessions.some((session) => session.id === storedSessionId)) {
@@ -146,15 +148,16 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     }
     setCreatingSession(true);
     try {
-      await createAndActivateEmptyHostSession({
+      await startPendingSessionFromPanel({
         personaId: newPersonaId,
+        previousActiveSessionId: activeSessionId,
         addSession,
         setActiveSession,
         setMessages,
         setAgentTurns,
-        reason: 'select',
+        removeSession,
+        onSelect,
       });
-      onSelect?.();
     } catch (err) {
       console.error('[SessionPanel] create failed', err);
     } finally {
@@ -328,7 +331,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         .get<ChatSession[]>('/api/sessions')
         .then((response) => {
           if (!cancelled) {
-            setSessions(response.data);
+            setSessions(mergeSessionsPreservingLocal(useSessionStore.getState().sessions, response.data));
           }
         })
         .catch((err: unknown) => {

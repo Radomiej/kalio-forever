@@ -24,6 +24,7 @@ import {
   type CLIAgentSessionRuntimePort,
 } from '../cli-agent/cli-agent-session-runtime.port';
 import { findAgentFlowSnapshotsForSessions, isActiveAgentFlowSnapshot } from './chat.gateway.agentflow-stop';
+import { getSocketEventSessionId, isActionableSessionEvent } from './chat.gateway.event-routing';
 import { emitSessionLifecycleEventToSubscribers } from './chat.gateway.lifecycle';
 import {
   buildRuntimeActivitySnapshot,
@@ -336,8 +337,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     event: K,
     data: SocketEvents[K],
   ): void {
-    const targetSessionId = this.getEventSessionId(data) ?? fallbackSessionId;
-    this.subscribeSocketToSession(initiatorSocketId, targetSessionId, { ownSession: false });
+    const targetSessionId = getSocketEventSessionId(data) ?? fallbackSessionId;
+    this.subscribeSocketToSession(initiatorSocketId, targetSessionId, {
+      ownSession: isActionableSessionEvent(event),
+    });
 
     const initiator = this.clients.get(initiatorSocketId);
     initiator?.emit(event, data);
@@ -349,12 +352,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (socketId === initiatorSocketId) return;
       this.clients.get(socketId)?.emit(event, data);
     });
-  }
-
-  private getEventSessionId(payload: unknown): string | undefined {
-    if (!payload || typeof payload !== 'object') return undefined;
-    const candidate = payload as { sessionId?: unknown };
-    return typeof candidate.sessionId === 'string' ? candidate.sessionId : undefined;
   }
 
   private collectRuntimeSnapshotSessionTree(rootSessionId: string): Promise<RuntimeSnapshotSessionTree> {
@@ -402,7 +399,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     payload: SocketEvents[K],
   ): void {
     this.sessionLifecycleBroadcastQueue = this.sessionLifecycleBroadcastQueue
-      .catch(() => undefined)
+      .catch((error: unknown) => this.logger.warn(`Session lifecycle queue recovered after previous failure: ${error instanceof Error ? error.message : String(error)}`))
       .then(() => emitSessionLifecycleEventToSubscribers({
         event,
         payload,
@@ -498,7 +495,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const parentSessionId = session.parentSessionId;
       const emit: EmitFn = (event, data) => {
-        const eventSessionId = this.getEventSessionId(data);
+        const eventSessionId = getSocketEventSessionId(data);
         if (eventSessionId) {
           this.emitToInitiatorAndSessionSubscribers(initiatorSocketId, eventSessionId, event, data);
           return;

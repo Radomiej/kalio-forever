@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatAttachment, LLMContextPreview } from '@kalio/types';
 import type { TokenCount } from '../../../services/tokenCounter';
 import { apiClient } from '../../../services/apiClient';
+import { isPendingHostSessionId } from '../pendingHostSession';
 
 export interface ContextPreviewStatus {
   loading: boolean;
@@ -70,7 +71,7 @@ export function useContextPreview({
   }, []);
 
   useEffect(() => {
-    if (!sessionId || !personaId) {
+    if (!sessionId || !personaId || isPendingHostSessionId(sessionId)) {
       requestSeqRef.current += 1;
       setPreview(null);
       setTokenCount(null);

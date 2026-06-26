@@ -284,6 +284,9 @@ function resolveQaEnv() {
     LLM_BASE_URL: getArgValue(args, '--base-url', llmEnv.LLM_BASE_URL ?? 'mock'),
     LLM_MODEL: getArgValue(args, '--model', llmEnv.LLM_MODEL ?? 'mock'),
     KALIO_FORCE_ENV_LLM: forceEnvLlm ? '1' : (process.env.KALIO_FORCE_ENV_LLM ?? fileEnv.KALIO_FORCE_ENV_LLM ?? ''),
+    KALIO_MOCK_LLM_FAST: getArgValue(args, '--provider', llmEnv.LLM_PROVIDER ?? 'mock') === 'mock'
+      ? '1'
+      : (process.env.KALIO_MOCK_LLM_FAST ?? fileEnv.KALIO_MOCK_LLM_FAST ?? ''),
   };
 }
 
@@ -578,6 +581,7 @@ async function startStack() {
     provider: backendEnv.LLM_PROVIDER,
     model: backendEnv.LLM_MODEL,
     forceEnvLlm: backendEnv.KALIO_FORCE_ENV_LLM === '1',
+    fastMockLlm: backendEnv.KALIO_MOCK_LLM_FAST === '1',
     databasePath: backendEnv.DATABASE_PATH,
     workspaceRoot: backendEnv.WORKSPACE_ROOT,
     memoryDbPath: backendEnv.MEMORY_DB_PATH,
@@ -845,7 +849,11 @@ function killProcessTree(pid) {
     const timer = setTimeout(() => {
       try {
         process.kill(pid, 'SIGKILL');
-      } catch {}
+      } catch (error) {
+        if (error?.code !== 'ESRCH') {
+          console.warn(`[stack-manager] Failed to SIGKILL pid ${pid}: ${error?.message ?? error}`);
+        }
+      }
       resolve();
     }, 5000);
 

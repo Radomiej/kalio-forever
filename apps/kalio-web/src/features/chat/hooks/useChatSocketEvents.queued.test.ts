@@ -5,6 +5,8 @@ import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { eventBus } from '../../../services/eventBus';
 import { apiClient } from '../../../services/apiClient';
+import { clearSessionWatchRegistry } from '../../../services/sessionWatchRegistry';
+import { selectPendingApprovalCount } from '../../../store/agentRuntimeSelectors';
 
 type QueuedPayload = { sessionId: string; queueLength: number; position?: number };
 
@@ -39,6 +41,7 @@ vi.mock('../../../services/eventBus', () => ({
     onAgentStart: (handler: (...args: unknown[]) => void) => capture('agent:start', handler),
     onAgentDone: (handler: (...args: unknown[]) => void) => capture('agent:done', handler),
     onSessionCreated: (handler: (...args: unknown[]) => void) => capture('session:created', handler),
+    onSessionUpdated: (handler: (...args: unknown[]) => void) => capture('session:updated', handler),
     onRaAppNativeResult: (handler: (...args: unknown[]) => void) => capture('raapp:native_result', handler),
     onCLIAgentProgress: (handler: (...args: unknown[]) => void) => capture('cli_agent:progress', handler),
     onToolArgProgress: (handler: (...args: unknown[]) => void) => capture('tool:arg_progress', handler),
@@ -73,6 +76,7 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
     for (const key of Object.keys(handlers)) {
       delete handlers[key];
     }
+    clearSessionWatchRegistry();
     vi.mocked(eventBus.identifySession).mockClear();
     vi.mocked(apiClient.get).mockReset();
     vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
@@ -265,5 +269,60 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
       active: false,
       queueLength: 0,
     });
+  });
+
+  it('identifies child sessions discovered from live session:updated events', () => {
+    mountHook();
+
+    act(() => {
+      fire('session:updated', {
+        id: 'child-session',
+        personaId: 'default',
+        title: 'Release Guard: QA',
+        kind: 'subagent',
+        parentSessionId: 'session-1',
+        createdAt: 2,
+        updatedAt: 3,
+      });
+    });
+
+    expect(useSessionStore.getState().addSession).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'child-session',
+      parentSessionId: 'session-1',
+    }));
+    expect(eventBus.identifySession).toHaveBeenCalledWith('child-session');
+  });
+
+  it('stores child HITL notifications as pending approval live state', () => {
+    mountHook();
+
+    act(() => {
+      fire('tool:confirmation_required', {
+        requestId: 'req-child-hitl',
+        toolCallId: 'call-child-hitl',
+        sessionId: 'child-session',
+        toolName: 'terminal_spawn',
+        args: { command: 'npm run build' },
+        timeoutMs: 0,
+      });
+    });
+
+    const state = useAgentStore.getState();
+    expect(state.pendingConfirmations['child-session']).toEqual([
+      expect.objectContaining({
+        requestId: 'req-child-hitl',
+        sessionId: 'child-session',
+        toolName: 'terminal_spawn',
+      }),
+    ]);
+    expect(state.toolActivities).toContainEqual(expect.objectContaining({
+      requestId: 'req-child-hitl',
+      sessionId: 'child-session',
+      status: 'awaiting_confirmation',
+    }));
+    expect(selectPendingApprovalCount({
+      pendingConfirmations: state.pendingConfirmations,
+      pendingBudgetApprovals: state.pendingBudgetApprovals,
+    })).toBe(1);
   });
 });

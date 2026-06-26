@@ -185,6 +185,8 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - Native tool classes should stay thin; domain logic belongs in services, not in tool handlers.
 - Error handling pattern: Never use empty catch. Always log errors with context and rethrow or handle explicitly.
 - Testing pattern and framework: Vitest for unit/integration, Playwright for E2E. Mock LLM with `MockLLMProvider` in tests.
+- For Kalio-Forever development, MCP source of truth is `<repo>/.kalio/config.toml` or `~/.kalio/config.toml`; do not treat `.vscode/mcp.json` import as the normal dev path.
+- When diagnosing Kalio MCP state, do not use `~/.codex/config.toml` as evidence; that file configures Codex, not the Kalio app.
 - Backend is the durable runtime source of truth; frontend state for chat/appflow/runtime must stay rebuildable from backend snapshots after F5/reconnect.
 - Prefer extending shared runtime contracts and selectors over adding panel-local state channels, duplicated truth maps, or one-off socket event handling.
 - Treat CLI agents, subagents, and AgentFlow children as one child-execution model whenever the UI/runtime needs shared lifecycle handling.
@@ -243,6 +245,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Keep `docs/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/post-mvp-plans.md`.
 - Whenever a compatibility fallback is added, include a `TODO: legacy fallback` code comment with the reason.
 - For architecture/runtime/appflow changes, prove reconnect/F5 hydration, stop/follow-up drain, queue state, and child-session visibility from the FE before calling the slice release-ready.
+- For Kalio dev MCP, treat `.kalio/config.toml` as the only source of truth; use `.vscode/mcp.json` import only as a legacy/manual fallback and never infer Kalio state from `~/.codex/config.toml`.
 
 ---
 

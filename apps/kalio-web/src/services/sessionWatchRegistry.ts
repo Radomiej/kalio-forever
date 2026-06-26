@@ -1,4 +1,5 @@
 import { eventBus } from './eventBus';
+import { isPendingHostSessionId } from '../features/chat/pendingHostSession';
 
 const baselineSessionIds = new Set<string>();
 const stickySessionIds = new Set<string>();
@@ -22,7 +23,7 @@ export function identifyWatchedSession(
   options: { sticky?: boolean } = {},
 ): void {
   const normalized = normalizeSessionId(sessionId);
-  if (!normalized) {
+  if (!normalized || isPendingHostSessionId(normalized)) {
     return;
   }
 

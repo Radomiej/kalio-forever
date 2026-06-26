@@ -1,3 +1,5 @@
+import { SettingsRangeField } from './SettingsRangeField';
+
 interface ProviderStreamsSectionProps {
   value: number;
   onInputChange: (value: number) => void;
@@ -15,30 +17,27 @@ export function ProviderStreamsSection({
       <p className="text-xs text-base-content/60 mb-3">
         Limit concurrent provider streams so parallel agent runs stay within provider rate limits.
       </p>
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-base-content/60">Max provider streams</span>
-        <span className="badge badge-neutral font-mono text-xs" data-testid="provider-max-streams-value">
-          {value}
-        </span>
-      </div>
-      <input
-        type="range"
-        className="range range-sm range-primary w-full"
+      <SettingsRangeField
+        ariaLabel="Max provider streams"
+        label="Max provider streams"
+        marks={[
+          { value: 1, label: '1' },
+          { value: 4, label: '4' },
+          { value: 8, label: '8' },
+          { value: 20, label: '20' },
+        ]}
         min={1}
         max={20}
         step={1}
         value={value}
-        onChange={() => undefined}
+        valueLabel={value}
+        valueTestId="provider-max-streams-value"
         onInput={(event) => onInputChange(parseInt((event.target as HTMLInputElement).value, 10))}
         onMouseUp={(event) => onCommit(parseInt((event.target as HTMLInputElement).value, 10))}
         onTouchEnd={(event) => onCommit(parseInt((event.target as HTMLInputElement).value, 10))}
         onBlur={(event) => onCommit(parseInt((event.target as HTMLInputElement).value, 10))}
-        aria-label="Max provider streams"
-        data-testid="provider-max-streams-slider"
+        testId="provider-max-streams-slider"
       />
-      <div className="flex justify-between text-[10px] text-base-content/40 mt-1 px-1">
-        <span>1</span><span>4</span><span>8</span><span>20</span>
-      </div>
     </div>
   );
 }

@@ -24,7 +24,9 @@ Test Kalio like a user, then support the conclusion with API/terminal evidence. 
 5. Use API calls only as supporting evidence: health, run status, sessions, graph, chat.
 6. Before a mock/local AgentFlow run, verify `/api/llm/config` shows the intended provider. Do not proceed if `.env` or a saved DB credential silently switches the stack to a live provider.
 7. Manual QA must allow both `localhost` and `127.0.0.1` origins so browser evidence is not invalidated by CORS. Use `localhost` for ordinary manual browser QA; prefer `127.0.0.1` for browser MCP automation if localhost bootstrap requests fail.
-8. If the QA MCP tools are missing in Kalio, import `.vscode/mcp.json` from Settings -> MCP Servers -> Import Existing MCP Configs, or copy `docs/examples/kalio-agent-qa-mcp.config.toml` into a real `.kalio/config.toml`.
+8. If the QA MCP tools are missing in Kalio, first copy `docs/examples/kalio-agent-qa-mcp.config.toml` into a real `.kalio/config.toml` and restart the Kalio API or wait for config cache refresh.
+9. Treat `.vscode/mcp.json` import as legacy/manual fallback only. If you use Settings -> MCP Servers -> Import Existing MCP Configs for debugging, do not leave imported duplicates active beside TOML-managed entries.
+10. Do not use `~/.codex/config.toml` to diagnose Kalio MCP state; that file is Codex-only.
 
 ## Architecture QA
 

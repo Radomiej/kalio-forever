@@ -83,6 +83,7 @@ export function registerSessionLifecycleHandlers({
 
   const offSessionUpdated = eventBus.onSessionUpdated?.((session) => {
     addSession(session);
+    identifyWatchedSession(session.id, 'session-updated', { sticky: true });
   });
 
   const offQueued = eventBus.onQueued((payload) => {

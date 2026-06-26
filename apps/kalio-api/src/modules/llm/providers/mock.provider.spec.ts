@@ -81,6 +81,69 @@ describe('MockLLMProvider', () => {
     ]);
   });
 
+  it('REGRESSION: launches an explicit RAApp intent through run_raapp instead of echoing the prompt', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const onToolArgChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: [
+          'Run the "Visual Calculator" RA-App for me. Launch it immediately.',
+          'Use run_raapp with the exact id "visual-calculator" now.',
+          'Do not choose a different RA-App id unless this exact id is missing.',
+        ].join('\n'),
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'run_raapp', description: 'Run app', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-1', onChunk, onToolArgChunk },
+    );
+
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onToolArgChunk).toHaveBeenCalledWith('run_raapp', expect.any(Number));
+    expect(toolCalls).toEqual([
+      expect.objectContaining({
+        name: 'run_raapp',
+        args: { id: 'visual-calculator' },
+      }),
+    ]);
+  });
+
+  it('REGRESSION: stops explicit RAApp mock launch after run_raapp has already completed', async () => {
+    const provider = new MockLLMProvider({ delay: vi.fn().mockResolvedValue(undefined) });
+    const onChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Use run_raapp with the exact id "visual-calculator" now.',
+      },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'call-1', name: 'run_raapp', args: { id: 'visual-calculator' } }],
+      },
+      {
+        role: 'tool',
+        content: '{"name":"run_raapp","id":"visual-calculator","ok":true}',
+        toolCallId: 'call-1',
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'run_raapp', description: 'Run app', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-1', onChunk },
+    );
+
+    expect(toolCalls).toEqual([]);
+    expect(onChunk).toHaveBeenCalledWith(
+      expect.objectContaining({ delta: 'run_raapp completed for visual-calculator.' }),
+    );
+  });
+
   it('returns a deterministic run_sub_agentflow tool call for Talk-started AgentFlow e2e', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();
@@ -249,6 +312,112 @@ describe('MockLLMProvider', () => {
       delta: expect.stringContaining('vfs_write completed'),
       done: false,
     }));
+  });
+
+  it('returns a deterministic run_subagent tool call that will trigger child HITL', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const onToolArgChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Please delegate this with child HITL [[mock:tool:run_subagent:hitl]]',
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'run_subagent', description: 'Run a reasoning child', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-1', onChunk, onToolArgChunk },
+    );
+
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onToolArgChunk).toHaveBeenCalledWith('run_subagent', expect.any(Number));
+    expect(toolCalls).toEqual([
+      expect.objectContaining({
+        name: 'run_subagent',
+        args: expect.objectContaining({
+          inputPrompt: expect.stringContaining('[[mock:tool:vfs_write:no-arg-progress]]'),
+          vfsMode: 'shared',
+        }),
+      }),
+    ]);
+    expect(toolCalls[0]?.args['autoApproveTools']).toBeUndefined();
+  });
+
+  it('returns a deterministic run_subagent tool call that auto-approves child vfs_write', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const onToolArgChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Please delegate this with child auto-approval [[mock:tool:run_subagent:auto-approve]]',
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'run_subagent', description: 'Run a reasoning child', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-1', onChunk, onToolArgChunk },
+    );
+
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onToolArgChunk).toHaveBeenCalledWith('run_subagent', expect.any(Number));
+    expect(toolCalls).toEqual([
+      expect.objectContaining({
+        name: 'run_subagent',
+        args: expect.objectContaining({
+          inputPrompt: expect.stringContaining('[[mock:tool:vfs_write:no-arg-progress]]'),
+          autoApproveTools: ['vfs_write'],
+          vfsMode: 'isolated',
+        }),
+      }),
+    ]);
+  });
+
+  it('stops repeating deterministic run_subagent after the child HITL tool result exists', async () => {
+    const provider = new MockLLMProvider({ delay: vi.fn().mockResolvedValue(undefined) });
+    const onChunk = vi.fn();
+    const onToolArgChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Please delegate this with child HITL [[mock:tool:run_subagent:hitl]]',
+      },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          {
+            id: 'call-subagent-1',
+            name: 'run_subagent',
+            args: {
+              taskType: 'reasoning',
+              inputPrompt: 'Please inspect the issue. [[mock:tool:vfs_write:no-arg-progress]]',
+              vfsMode: 'shared',
+            },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        content: '{"name":"run_subagent","ok":true,"sessionId":"child-session-1"}',
+        toolCallId: 'call-subagent-1',
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'run_subagent', description: 'Run a reasoning child', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-2', onChunk, onToolArgChunk },
+    );
+
+    expect(toolCalls).toEqual([]);
+    expect(onToolArgChunk).not.toHaveBeenCalled();
+    expect(onChunk).toHaveBeenCalledWith(
+      expect.objectContaining({ delta: 'run_subagent completed for child HITL scenario.' }),
+    );
   });
 
   it('returns deterministic fs_write tool call with prompt-provided path and content', async () => {
