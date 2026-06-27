@@ -184,7 +184,7 @@ export function MCPExternalImportModal({ isOpen, onClose, onImported }: Props) {
                         ? `HTTP: ${entry.dto.url ?? ''}`
                         : `stdio: ${entry.dto.command ?? ''} ${(entry.dto.args ?? []).join(' ')}`}
                     </p>
-                    {(entry.serverKey || entry.effectiveState || entry.originSource) && (
+                    {(entry.serverKey || entry.effectiveState || entry.originSource || entry.key) && (
                       <p className="text-[11px] text-base-content/60 mt-1">
                         key: {entry.serverKey ?? entry.key}
                         {entry.effectiveState ? ` | state: ${entry.effectiveState}` : ''}
