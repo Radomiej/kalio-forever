@@ -64,7 +64,7 @@ export function MCPSettingsPanel() {
 
   const handleRemove = async (serverKey: string) => {
     await apiFetch(`/mcp/servers/${encodeURIComponent(serverKey)}`, { method: 'DELETE' });
-    setServers((prev) => prev.filter((server) => (server.serverKey ?? server.id) !== serverKey));
+    setServers((prev) => prev.filter((server) => server.serverKey !== serverKey));
   };
 
   const handleReloadConfig = async () => {
