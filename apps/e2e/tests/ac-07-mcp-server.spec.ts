@@ -17,9 +17,9 @@ async function deleteMCPServer(page: Page, serverKey: string) {
   await page.request.delete(`${API_BASE}/mcp/servers/${encodeURIComponent(serverKey)}`);
 }
 
-function expectServerKey(entry: { serverKey?: string; id: string; name: string }): string {
+function expectServerKey(entry: { serverKey: string; id: string; name: string }): string {
   expect(entry.serverKey, `serverKey should be present for MCP server ${entry.name} (${entry.id})`).toBeTruthy();
-  return entry.serverKey!;
+  return entry.serverKey;
 }
 
 test.describe('AC-07: MCP server management', () => {
@@ -40,9 +40,9 @@ test.describe('AC-07: MCP server management', () => {
     // Server should appear in the list (even if connection fails, it's created)
     await expect(page.getByText('E2E Test Server')).toBeVisible({ timeout: 8000 });
 
-    // Cleanup: find created server by serverKey/serverId and delete
+    // Cleanup: find created server by canonical serverKey and delete
     const servers = await page.request.get(`${API_BASE}/mcp/servers`);
-    const list = await servers.json() as { id: string; serverKey?: string; name: string }[];
+    const list = await servers.json() as { id: string; serverKey: string; name: string }[];
     const created = list.find((s) => s.name === 'E2E Test Server');
     if (created) {
       await deleteMCPServer(page, expectServerKey(created));
@@ -53,7 +53,7 @@ test.describe('AC-07: MCP server management', () => {
     const res = await page.request.post(`${API_BASE}/mcp/servers`, {
       data: { name: 'E2E Remove Test', transport: 'http', url: 'http://localhost:19999/mcp' },
     });
-    const server = await res.json() as { id: string; serverKey?: string };
+    const server = await res.json() as { id: string; serverKey: string };
     const serverKey = expectServerKey(server);
     const rowSuffix = toSettingsRowSuffix(serverKey);
 
