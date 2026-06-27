@@ -25,7 +25,7 @@ describe('mcpToolServerKey', () => {
       serverId: 'sqlite::docs',
       parameters: {},
       requiresConfirmation: false,
-    } satisfies MCPTool;
+    };
 
     expect(getCanonicalMcpToolServerKey(tool)).toBe('sqlite::docs');
     expect(toolBelongsToServerKey(tool, 'sqlite::docs')).toBe(true);
