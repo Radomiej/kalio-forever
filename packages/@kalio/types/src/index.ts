@@ -762,7 +762,8 @@ export interface MCPServer {
 export interface MCPTool {
   name: string;               // runtime name: "mcp_<serverKey>_<toolName>"
   description: string;
-  serverId: ID;               // origin-qualified runtime id, e.g. "toml::docs" or "sqlite::abc123"
+  serverKey?: ID;             // canonical origin-qualified runtime key, e.g. "toml::docs" or "sqlite::abc123"
+  serverId: ID;               // legacy alias kept for one release while clients migrate
   requiresConfirmation: boolean;
   parameters: Record<string, unknown>;
 }

@@ -477,6 +477,8 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
       expect(canonicalTools).toHaveLength(1);
       expect(canonicalTools[0]!.name).toBe('mcp_toml::docs_search');
+      expect(canonicalTools[0]!.serverKey).toBe('toml::docs');
+      expect(canonicalTools[0]!.serverId).toBe('toml::docs');
 
       expect(internals.toolNameMap.has('mcp_toml::docs_search')).toBe(true);
       expect(internals.toolNameMap.has('mcp_docs_search')).toBe(true);

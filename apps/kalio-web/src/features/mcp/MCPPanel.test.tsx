@@ -84,7 +84,8 @@ describe('MCPPanel', () => {
       {
         name: 'mcp_sqlite::alpha_read_file',
         description: 'Read files',
-        serverId: 'sqlite::alpha',
+        serverKey: 'sqlite::alpha',
+        serverId: 'sqlite::legacy-alpha',
         requiresConfirmation: false,
         parameters: {},
       },
@@ -98,6 +99,7 @@ describe('MCPPanel', () => {
       {
         name: 'mcp_sqlite::beta_hidden_tool',
         description: 'Other server tool',
+        serverKey: 'sqlite::beta',
         serverId: 'sqlite::beta',
         requiresConfirmation: false,
         parameters: {},

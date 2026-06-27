@@ -37,7 +37,7 @@ function ServerRow({ server, onRestart }: ServerRowProps) {
     apiClient
       .get<MCPTool[]>('/api/mcp/tools')
       .then((r) =>
-        setTools(r.data.filter((t) => t.serverId === server.serverKey)),
+        setTools(r.data.filter((t) => (t.serverKey ?? t.serverId) === server.serverKey)),
       )
       .catch(() => setTools([]))
       .finally(() => setLoadingTools(false));
