@@ -239,6 +239,13 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    if (this.kalioConfig) {
+      const { config } = await this.kalioConfig.getEffectiveConfig();
+      if (Object.prototype.hasOwnProperty.call(config.mcp_servers ?? {}, serverKeyOrLegacyId)) {
+        return `toml::${serverKeyOrLegacyId}`;
+      }
+    }
+
     const [row] = await this.drizzle.db
       .select({ id: mcpServers.id })
       .from(mcpServers)
@@ -246,15 +253,6 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       .limit(1);
     if (row) {
       return `sqlite::${serverKeyOrLegacyId}`;
-    }
-
-    if (!this.kalioConfig) {
-      return null;
-    }
-
-    const { config } = await this.kalioConfig.getEffectiveConfig();
-    if (Object.prototype.hasOwnProperty.call(config.mcp_servers ?? {}, serverKeyOrLegacyId)) {
-      return `toml::${serverKeyOrLegacyId}`;
     }
 
     return null;

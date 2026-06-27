@@ -230,6 +230,32 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
       await expect(service.removeServer('docs')).rejects.toThrow('managed by .kalio/config.toml');
     });
+
+    it('prefers TOML over SQLite when both share the same raw key', async () => {
+      const db = (drizzleSvc as unknown as { db: ReturnType<typeof drizzle> }).db;
+      await db.insert(schema.mcpServers).values({
+        id: 'docs',
+        name: 'SQLite Docs',
+        transport: 'http',
+        url: 'https://sqlite.example.com',
+        enabled: true,
+        status: 'disconnected',
+        createdAt: new Date(),
+      });
+
+      const kalioConfig = makeKalioConfigMock({
+        docs: {
+          command: 'npx',
+        },
+      });
+      service = new MCPService(drizzleSvc, kalioConfig as KalioConfigService);
+
+      await expect(service.removeServer('docs')).rejects.toThrow('managed by .kalio/config.toml');
+
+      const all = await service.findAll();
+      expect(all.map((server) => server.serverKey)).toContain('sqlite::docs');
+      expect(all.map((server) => server.serverKey)).toContain('toml::docs');
+    });
   });
 
   describe('restartServer()', () => {

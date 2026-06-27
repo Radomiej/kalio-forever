@@ -91,3 +91,5 @@ flowchart TD
 - 2026-06-27: targeted backend MCP runtime tests passed after the naming refactor: `tool-dispatch.service.spec.ts`, `mcp.service.spec.ts`, and `kalio-api` typecheck.
 - 2026-06-27: external import discovery now calls the source config identifier `sourceKey` so the UI no longer conflates it with canonical Kalio `serverKey`.
 - 2026-06-27: external import flow verification passed after the `sourceKey` rename: `mcp-external-import.service.spec.ts`, `MCPExternalImportModal.test.tsx`, `parseMcpJson.spec.ts`, plus `kalio-api` and `kalio-web` typecheck.
+- 2026-06-27: `resolveServerKey()` now enforces the intended `TOML > SQLite` precedence when both stores share the same raw key, and the regression test covers that conflict case.
+- 2026-06-27: backend MCP service spec now covers the conflicting raw-key precedence case in addition to the existing legacy sqlite/TOML compatibility tests.
