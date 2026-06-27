@@ -131,4 +131,18 @@ describe('groupToolsByPrefix', () => {
     ]);
     expect(result[1]).toMatchObject({ label: 'Other' });
   });
+
+  it('groups MCP tools into a dedicated MCP bucket after native tools', () => {
+    const result = groupToolsByPrefix([
+      makeTool('web_search'),
+      {
+        ...makeTool('mcp_toml::docs_search'),
+        serverKey: 'toml::docs',
+      },
+      makeTool('custom_tool'),
+    ]);
+
+    expect(result.map((group) => group.label)).toEqual(['Web', 'MCP', 'Other']);
+    expect(result[1]?.tools.map((tool) => tool.name)).toEqual(['mcp_toml::docs_search']);
+  });
 });
