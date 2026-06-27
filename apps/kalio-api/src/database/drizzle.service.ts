@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { drizzle, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import Database from 'better-sqlite3';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import * as schema from './schema';
 
@@ -25,11 +25,24 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
 
     // Run migrations from the migrations folder (idempotent)
     const migrationsFolder = resolve(__dirname, 'migrations');
+    const migrationDriftMessage = this.describeMigrationDrift(migrationsFolder);
+    if (migrationDriftMessage) {
+      this.logger.warn(migrationDriftMessage);
+    }
     try {
       migrate(this.db, { migrationsFolder });
       this.logger.log(`Migrations applied from ${migrationsFolder}`);
     } catch (err) {
-      this.logger.warn(`Migration warning (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (/duplicate column name/i.test(errorMessage) && migrationDriftMessage) {
+        this.logger.error(
+          'Drizzle migration mismatch detected. Migration history likely still includes 0017_mcp_server_origin_source while mcp_servers already has origin_source from 0000_init.sql. '
+          + 'To avoid non-deterministic startup state, reset local DB and re-run with a fresh migrations baseline.',
+        );
+        this.logger.error(`Migration warning (non-fatal): ${errorMessage}`);
+      } else {
+        this.logger.warn(`Migration warning (non-fatal): ${errorMessage}`);
+      }
     }
     this.ensureAgentFlowTables();
     this.ensurePersonaColumns();
@@ -139,6 +152,61 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
     const columns = this.sqlite.prepare('PRAGMA table_info(mcp_servers)').all() as Array<{ name: string }>;
     if (columns.some((column) => column.name === name)) return;
     this.sqlite.exec(`ALTER TABLE mcp_servers ADD COLUMN ${name} ${definition}`);
+  }
+
+  private describeMigrationDrift(migrationsFolder: string): string | null {
+    if (!this.tableExists('mcp_servers')) {
+      return null;
+    }
+
+    const mcpColumns = this.sqlite.prepare('PRAGMA table_info(mcp_servers)').all() as Array<{ name: string }>;
+    const hasMcpOriginSource = mcpColumns.some((column) => column.name === 'origin_source');
+    if (!hasMcpOriginSource) {
+      return null;
+    }
+
+    if (!this.migrationJournalContainsTag(migrationsFolder, '0017_mcp_server_origin_source')) {
+      return null;
+    }
+
+    if (!this.migrationSqlContainsColumn(migrationsFolder, '0000_init', 'origin_source')) {
+      return null;
+    }
+
+    if (!this.migrationSqlContainsColumn(migrationsFolder, '0017_mcp_server_origin_source', 'origin_source')) {
+      return null;
+    }
+
+    return 'Detected migration drift: mcp_servers.origin_source already exists in 0000_init.sql and is also added in 0017_mcp_server_origin_source. '
+      + 'This is a schema-history mismatch and should be visible as a startup warning instead of a silent migration fallback.';
+  }
+
+  private migrationSqlContainsColumn(migrationsFolder: string, tag: string, columnName: string): boolean {
+    const migrationPath = resolve(migrationsFolder, `${tag}.sql`);
+    if (!existsSync(migrationPath)) {
+      return false;
+    }
+
+    const sql = readFileSync(migrationPath, 'utf8');
+    const regex = new RegExp(`\`${columnName}\``, 'i');
+    return regex.test(sql);
+  }
+
+  private migrationJournalContainsTag(migrationsFolder: string, tag: string): boolean {
+    const journalPath = resolve(migrationsFolder, 'meta/_journal.json');
+    if (!existsSync(journalPath)) {
+      return false;
+    }
+
+    const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as { entries?: Array<{ tag?: string }> };
+    return (journal.entries ?? []).some((entry) => entry.tag === tag);
+  }
+
+  private tableExists(tableName: string): boolean {
+    const row = this.sqlite.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+    ).get(tableName);
+    return Boolean(row);
   }
 
   private ensureSessionColumn(name: string, definition: string): void {
