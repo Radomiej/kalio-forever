@@ -16,6 +16,7 @@ function makeTestDrizzle(): DrizzleService {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       transport TEXT NOT NULL DEFAULT 'http',
+      origin_source TEXT NOT NULL DEFAULT 'manual',
       url TEXT,
       command TEXT,
       args TEXT,
@@ -94,11 +95,14 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       expect(servers.map((server) => server.id)).toEqual(['docs']);
       expect(servers[0]).toMatchObject({
         id: 'docs',
+        serverKey: 'toml::docs',
         name: 'docs',
+        store: 'toml',
+        originSource: 'toml',
+        effectiveState: 'active',
         transport: 'stdio',
         command: 'npx',
         status: 'disconnected',
-        managedBy: 'toml',
       });
     });
   });
@@ -139,7 +143,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
         createdAt: new Date(),
       });
 
-      await expect(service.removeServer('orphan-1')).resolves.not.toThrow();
+      await expect(service.removeServer('sqlite::orphan-1')).resolves.not.toThrow();
       const all = await service.findAll();
       expect(all).toHaveLength(0);
     });
@@ -152,14 +156,14 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       });
       service = new MCPService(drizzleSvc, kalioConfig as KalioConfigService);
 
-      await expect(service.removeServer('docs')).rejects.toThrow('managed by .kalio/config.toml');
+      await expect(service.removeServer('toml::docs')).rejects.toThrow('managed by .kalio/config.toml');
     });
   });
 
   describe('restartServer()', () => {
     it('throws when server not found in handles', async () => {
-      await expect(service.restartServer('non-existent')).rejects.toThrow(
-        'MCP server not found: non-existent',
+      await expect(service.restartServer('sqlite::non-existent')).rejects.toThrow(
+        'MCP server not found: sqlite::non-existent',
       );
     });
   });
@@ -184,7 +188,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
   describe('getToolsForServer()', () => {
     it('returns empty array for unknown server id', () => {
-      const tools = service.getToolsForServer('unknown-server');
+      const tools = service.getToolsForServer('sqlite::unknown-server');
       expect(tools).toHaveLength(0);
     });
   });
@@ -219,7 +223,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
     it('stdio transport missing command throws via restartServer', async () => {
       // restartServer throws when handle not found
-      await expect(service.restartServer('no-such-id')).rejects.toThrow('MCP server not found: no-such-id');
+      await expect(service.restartServer('sqlite::no-such-id')).rejects.toThrow('MCP server not found: sqlite::no-such-id');
     });
   });
 
@@ -232,35 +236,35 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
   describe('getToolByName()', () => {
     it('returns undefined for an unknown tool name (not in toolNameMap)', () => {
-      expect(service.getToolByName('mcp_s1_foo')).toBeUndefined();
+      expect(service.getToolByName('mcp_sqlite::s1_foo')).toBeUndefined();
     });
 
     it('returns undefined when tool is in toolNameMap but server handle does not exist', () => {
       const internals = service as unknown as ServiceInternals;
-      internals.toolNameMap.set('mcp_s1_foo', { serverId: 's1', originalName: 'foo' });
+      internals.toolNameMap.set('mcp_sqlite::s1_foo', { serverId: 'sqlite::s1', originalName: 'foo' });
       // No handle for 's1' → optional chain returns undefined
-      expect(service.getToolByName('mcp_s1_foo')).toBeUndefined();
+      expect(service.getToolByName('mcp_sqlite::s1_foo')).toBeUndefined();
     });
 
     it('returns undefined when server is present but tools array is empty (disconnected)', () => {
       const internals = service as unknown as ServiceInternals;
-      internals.toolNameMap.set('mcp_s1_bar', { serverId: 's1', originalName: 'bar' });
-      internals.handles.set('s1', { id: 's1', tools: [], status: 'disconnected' });
-      expect(service.getToolByName('mcp_s1_bar')).toBeUndefined();
+      internals.toolNameMap.set('mcp_sqlite::s1_bar', { serverId: 'sqlite::s1', originalName: 'bar' });
+      internals.handles.set('sqlite::s1', { id: 's1', tools: [], status: 'disconnected' });
+      expect(service.getToolByName('mcp_sqlite::s1_bar')).toBeUndefined();
     });
 
     it('returns the matching MCPTool when server is connected and tool exists', () => {
       const tool: MCPTool = {
-        name: 'mcp_s1_baz',
+        name: 'mcp_sqlite::s1_baz',
         description: 'baz',
         parameters: {},
         requiresConfirmation: false,
-        serverId: 's1',
+        serverId: 'sqlite::s1',
       };
       const internals = service as unknown as ServiceInternals;
-      internals.toolNameMap.set('mcp_s1_baz', { serverId: 's1', originalName: 'baz' });
-      internals.handles.set('s1', { id: 's1', tools: [tool], status: 'connected' });
-      expect(service.getToolByName('mcp_s1_baz')).toStrictEqual(tool);
+      internals.toolNameMap.set('mcp_sqlite::s1_baz', { serverId: 'sqlite::s1', originalName: 'baz' });
+      internals.handles.set('sqlite::s1', { id: 's1', tools: [tool], status: 'connected' });
+      expect(service.getToolByName('mcp_sqlite::s1_baz')).toStrictEqual(tool);
     });
   });
 
@@ -278,12 +282,12 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       };
 
       const internals = service as unknown as ServiceInternals;
-      const tools = await internals.discoverTools('s1', fakeClient);
+      const tools = await internals.discoverTools('sqlite::s1', fakeClient);
 
       expect(callCount).toBe(100);
       expect(tools).toHaveLength(100);
-      expect(tools[0].name).toBe('mcp_s1_tool_1');
-      expect(tools[99].name).toBe('mcp_s1_tool_100');
+      expect(tools[0].name).toBe('mcp_sqlite::s1_tool_1');
+      expect(tools[99].name).toBe('mcp_sqlite::s1_tool_100');
     });
 
     it('stops early when server returns no nextCursor', async () => {
@@ -298,11 +302,11 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       };
 
       const internals = service as unknown as ServiceInternals;
-      const tools = await internals.discoverTools('s2', fakeClient);
+      const tools = await internals.discoverTools('sqlite::s2', fakeClient);
 
       expect(fakeClient.listTools).toHaveBeenCalledTimes(1);
       expect(tools).toHaveLength(2);
-      expect(tools.map((t) => t.name)).toEqual(['mcp_s2_alpha', 'mcp_s2_beta']);
+      expect(tools.map((t) => t.name)).toEqual(['mcp_sqlite::s2_alpha', 'mcp_sqlite::s2_beta']);
     });
 
     it('follows cursor across multiple pages until exhausted', async () => {
@@ -317,10 +321,10 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       };
 
       const internals = service as unknown as ServiceInternals;
-      const tools = await internals.discoverTools('s3', fakeClient);
+      const tools = await internals.discoverTools('sqlite::s3', fakeClient);
 
       expect(fakeClient.listTools).toHaveBeenCalledTimes(3);
-      expect(tools.map((t) => t.name)).toEqual(['mcp_s3_a', 'mcp_s3_b', 'mcp_s3_c']);
+      expect(tools.map((t) => t.name)).toEqual(['mcp_sqlite::s3_a', 'mcp_sqlite::s3_b', 'mcp_sqlite::s3_c']);
     });
   });
 });

@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, ChevronUp, RefreshCw, Container, Loader2, Wrench, AlertCircle, FolderInput } from 'lucide-react';
-import type { MCPServer, CreateMCPServerDto } from '@kalio/types';
+import type { CreateMCPServerDto } from '@kalio/types';
 import { MCPServerRow } from './MCPServerRow';
 import { MCPAddServerForm } from './MCPAddServerForm';
 import { MCPExternalImportModal } from './MCPExternalImportModal';
-
-type SettingsMCPServer = MCPServer & { managedBy?: 'toml' };
+import type { SettingsMCPServer } from './MCPSettingsPanel.model';
+import { normalizeSettingsServers } from './MCPSettingsPanel.model';
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -34,8 +34,7 @@ export function MCPSettingsPanel() {
   const load = useCallback(async () => {
     try {
       const list = await apiFetch<SettingsMCPServer[]>('/mcp/servers');
-      // Deduplicate by ID to prevent React key collision warnings
-      setServers([...new Map(list.map((s) => [s.id, s])).values()]);
+      setServers(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load servers');
     } finally {
@@ -50,29 +49,29 @@ export function MCPSettingsPanel() {
   }, [load]);
 
   const handleAdd = async (dto: CreateMCPServerDto) => {
-    const created = await apiFetch<MCPServer>('/mcp/servers', {
+    const created = await apiFetch<SettingsMCPServer>('/mcp/servers', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
-    setServers((prev) => prev.some((s) => s.id === created.id) ? prev : [...prev, created]);
+    setServers((prev) => [...prev, created]);
     setShowForm(false);
   };
 
-  const handleRestart = async (id: string) => {
-    await apiFetch(`/mcp/servers/${id}/restart`, { method: 'POST' });
+  const handleRestart = async (serverKey: string) => {
+    await apiFetch(`/mcp/servers/${encodeURIComponent(serverKey)}/restart`, { method: 'POST' });
     await load();
   };
 
-  const handleRemove = async (id: string) => {
-    await apiFetch(`/mcp/servers/${id}`, { method: 'DELETE' });
-    setServers((prev) => prev.filter((s) => s.id !== id));
+  const handleRemove = async (serverKey: string) => {
+    await apiFetch(`/mcp/servers/${encodeURIComponent(serverKey)}`, { method: 'DELETE' });
+    setServers((prev) => prev.filter((server) => (server.serverKey ?? server.id) !== serverKey));
   };
 
   const handleReloadConfig = async () => {
     setReloadingConfig(true);
     try {
       const list = await apiFetch<SettingsMCPServer[]>('/mcp/servers/reload-config', { method: 'POST' });
-      setServers([...new Map(list.map((s) => [s.id, s])).values()]);
+      setServers(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reload MCP config');
     } finally {
@@ -101,6 +100,7 @@ export function MCPSettingsPanel() {
   const connectedCount = servers.filter((s) => s.status === 'connected').length;
   const totalTools = servers.reduce((n, s) => n + (s.toolCount ?? 0), 0);
   const gatewayConnected = servers.some((s) => s.name === DOCKER_GATEWAY_NAME);
+  const rows = normalizeSettingsServers(servers);
 
   return (
     <div className="flex flex-col gap-5" data-testid="mcp-panel">
@@ -182,10 +182,10 @@ export function MCPSettingsPanel() {
         </p>
       ) : (
         <div className="flex flex-col gap-2">
-          {servers.map((s) => (
+          {rows.map((server) => (
             <MCPServerRow
-              key={s.id}
-              server={s}
+              key={server.rowKey}
+              server={server}
               onRestart={handleRestart}
               onRemove={handleRemove}
             />

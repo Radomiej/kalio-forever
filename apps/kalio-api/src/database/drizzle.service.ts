@@ -33,6 +33,7 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
     }
     this.ensureAgentFlowTables();
     this.ensurePersonaColumns();
+    this.ensureMcpServerColumns();
     this.ensureSessionColumn('runtime_context', 'text');
     this.ensureMessageColumn('turn_id', 'text');
     this.ensureMessageColumn('prompt_message_id', 'text');
@@ -128,6 +129,16 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
     const columns = this.sqlite.prepare('PRAGMA table_info(personas)').all() as Array<{ name: string }>;
     if (columns.some((column) => column.name === name)) return;
     this.sqlite.exec(`ALTER TABLE personas ADD COLUMN ${name} ${definition}`);
+  }
+
+  private ensureMcpServerColumns(): void {
+    this.ensureMcpServerColumn('origin_source', `text NOT NULL DEFAULT 'manual'`);
+  }
+
+  private ensureMcpServerColumn(name: string, definition: string): void {
+    const columns = this.sqlite.prepare('PRAGMA table_info(mcp_servers)').all() as Array<{ name: string }>;
+    if (columns.some((column) => column.name === name)) return;
+    this.sqlite.exec(`ALTER TABLE mcp_servers ADD COLUMN ${name} ${definition}`);
   }
 
   private ensureSessionColumn(name: string, definition: string): void {

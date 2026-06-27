@@ -27,7 +27,7 @@ const STATUS_DOT: Record<string, string> = {
 
 interface ServerRowProps {
   server: MCPServer;
-  onRestart: (id: string) => void;
+  onRestart: (serverKey: string) => void;
 }
 
 function ServerRow({ server, onRestart }: ServerRowProps) {
@@ -40,10 +40,10 @@ function ServerRow({ server, onRestart }: ServerRowProps) {
     setLoadingTools(true);
     apiClient
       .get<MCPTool[]>('/api/mcp/tools')
-      .then((r) => setTools(r.data.filter((t) => t.serverId === server.id)))
+      .then((r) => setTools(r.data.filter((t) => t.serverId === server.serverKey)))
       .catch(() => setTools([]))
       .finally(() => setLoadingTools(false));
-  }, [server.id]);
+  }, [server.serverKey]);
 
   const toggle = () => {
     setOpen((v) => {
@@ -55,8 +55,8 @@ function ServerRow({ server, onRestart }: ServerRowProps) {
   const handleRestart = async () => {
     setRestarting(true);
     try {
-      await apiClient.post(`/api/mcp/servers/${server.id}/restart`);
-      onRestart(server.id);
+      await apiClient.post(`/api/mcp/servers/${encodeURIComponent(server.serverKey)}/restart`);
+      onRestart(server.serverKey);
     } catch (err) {
       console.error('[MCPPanel] restart failed', err instanceof Error ? err.message : err);
     } finally {
@@ -112,7 +112,7 @@ function ServerRow({ server, onRestart }: ServerRowProps) {
             <p className="text-base-content/40 text-[10px]">No tools exposed.</p>
           )}
           {tools.map((t) => {
-            const displayName = cleanToolName(t.name, server.id);
+            const displayName = cleanToolName(t.name, server.serverKey);
             return (
               <div key={t.name} className="flex items-start gap-1.5">
                 <Wrench size={9} className="mt-0.5 text-base-content/30 shrink-0" />
@@ -138,7 +138,7 @@ export function MCPPanel({ onOpenSettings }: MCPPanelProps) {
   const load = useCallback(async () => {
     try {
       const response = await apiClient.get<MCPServer[]>('/api/mcp/servers');
-      setServers([...new Map(response.data.map((server) => [server.id, server])).values()]);
+      setServers(response.data);
     } catch (err: unknown) {
       console.error('[MCPPanel] load failed', err);
     } finally {
@@ -151,8 +151,8 @@ export function MCPPanel({ onOpenSettings }: MCPPanelProps) {
     void load();
   }, [load]);
 
-  const handleRestarted = useCallback((serverId: string) => {
-    void serverId;
+  const handleRestarted = useCallback((serverKey: string) => {
+    void serverKey;
     refresh();
   }, [refresh]);
 
@@ -213,7 +213,7 @@ export function MCPPanel({ onOpenSettings }: MCPPanelProps) {
           </div>
         )}
         {servers.map((s) => (
-          <ServerRow key={s.id} server={s} onRestart={handleRestarted} />
+          <ServerRow key={s.serverKey} server={s} onRestart={handleRestarted} />
         ))}
       </div>
     </div>

@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { CreateMCPServerDto, MCPServer } from '@kalio/types';
 import { MCPService } from './mcp.service';
+import { buildMcpSignatureFromDto, buildMcpSignatureFromServer } from './mcp-registry.utils';
 
 export interface ExternalMCPServerEntry {
   id: string;
@@ -16,7 +17,7 @@ export interface ExternalMCPServerEntry {
     envKeys: string[];
     headerKeys: string[];
   };
-  duplicate: boolean;
+  equivalentToExisting: boolean;
 }
 
 export interface ExternalMCPImportResult {
@@ -38,8 +39,7 @@ export class MCPExternalImportService {
 
   async discover(): Promise<ExternalMCPServerEntry[]> {
     const existing = await this.mcpService.findAll();
-    const existingSignatures = new Set(existing.map((server) => this.signatureFromServer(server)));
-    const seenSignatures = new Set<string>();
+    const existingSignatures = new Set(existing.map((server) => buildMcpSignatureFromServer(server)));
     const discovered: ExternalMCPServerEntry[] = [];
 
     for (const sourceConfig of this.getSourceConfigs()) {
@@ -52,10 +52,8 @@ export class MCPExternalImportService {
           const raw = await readFile(configPath, 'utf8');
           const parsed = this.parseConfig(raw, sourceConfig.source, configPath);
           for (const entry of parsed) {
-            const signature = this.signatureFromDto(entry.dto);
-            const duplicate = existingSignatures.has(signature) || seenSignatures.has(signature);
-            seenSignatures.add(signature);
-            discovered.push({ ...entry, duplicate });
+            const signature = buildMcpSignatureFromDto(entry.dto);
+            discovered.push({ ...entry, equivalentToExisting: existingSignatures.has(signature) });
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -75,22 +73,15 @@ export class MCPExternalImportService {
     const failed: Array<{ id: string; reason: string }> = [];
 
     const uniqueIds = [...new Set(entryIds)];
-    const importedSignatures = new Set<string>();
     for (const id of uniqueIds) {
       const entry = byId.get(id);
       if (!entry) {
         failed.push({ id, reason: 'Entry was not found in current discovery snapshot' });
         continue;
       }
-      const signature = this.signatureFromDto(entry.dto);
-      if (entry.duplicate || importedSignatures.has(signature)) {
-        skipped.push({ id, reason: 'Server with equivalent config already exists' });
-        continue;
-      }
 
       try {
         const created = await this.mcpService.addServer(entry.dto);
-        importedSignatures.add(signature);
         imported.push(created);
       } catch (err) {
         failed.push({
@@ -186,7 +177,7 @@ export class MCPExternalImportService {
         continue;
       }
       const entryObj = value as Record<string, unknown>;
-      const dto = this.toDto(key, entryObj);
+      const dto = this.toDto(key, entryObj, source);
       if (!dto) {
         continue;
       }
@@ -201,14 +192,18 @@ export class MCPExternalImportService {
           envKeys: this.readObjectKeys(entryObj['env']),
           headerKeys: this.readObjectKeys(entryObj['headers']),
         },
-        duplicate: false,
+        equivalentToExisting: false,
       });
     }
 
     return entries;
   }
 
-  private toDto(key: string, entry: Record<string, unknown>): CreateMCPServerDto | null {
+  private toDto(
+    key: string,
+    entry: Record<string, unknown>,
+    source: ExternalMCPServerEntry['source'],
+  ): CreateMCPServerDto | null {
     const type = this.readString(entry['type']);
     const name = this.readString(entry['name']) ?? key;
     const url = this.readString(entry['url']);
@@ -233,6 +228,7 @@ export class MCPExternalImportService {
         transport,
         url,
         headers: headers && Object.keys(headers).length > 0 ? headers : undefined,
+        originSource: source,
       };
     }
 
@@ -248,6 +244,7 @@ export class MCPExternalImportService {
       command,
       args: args ?? undefined,
       env: env && Object.keys(env).length > 0 ? env : undefined,
+      originSource: source,
     };
   }
 
@@ -304,17 +301,4 @@ export class MCPExternalImportService {
     return Object.keys(value as Record<string, unknown>);
   }
 
-  private signatureFromServer(server: MCPServer): string {
-    if (server.transport === 'http') {
-      return `http:${server.url ?? ''}`;
-    }
-    return `stdio:${server.command ?? ''}:${(server.args ?? []).join('\u0000')}`;
-  }
-
-  private signatureFromDto(dto: CreateMCPServerDto): string {
-    if (dto.transport === 'http') {
-      return `http:${dto.url ?? ''}`;
-    }
-    return `stdio:${dto.command ?? ''}:${(dto.args ?? []).join('\u0000')}`;
-  }
 }

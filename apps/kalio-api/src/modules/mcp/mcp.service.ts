@@ -11,19 +11,35 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { MCPServer, MCPTool, CreateMCPServerDto } from '@kalio/types';
+import type {
+  CreateMCPServerDto,
+  MCPServer,
+  MCPServerOriginSource,
+  MCPServerStore,
+  MCPTool,
+} from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { mcpServers } from '../../database/schema';
 import { KalioConfigService } from '../../config/kalio-config.service';
 import type { KalioMcpServerConfig } from '../../config/kalio-config.types';
+import {
+  buildMcpSignature,
+  buildServerKey,
+  parseServerKey,
+  resolveRegistryEntries,
+  type MCPResolvedRegistryEntry,
+} from './mcp-registry.utils';
 
 const HEALTH_CHECK_MS = 30_000;
 const BASE_RESTART_MS = 2_000;
 const MAX_RESTART_MS = 60_000;
 
 interface ServerHandle {
+  serverKey: string;
   id: string;
   name: string;
+  store: MCPServerStore;
+  originSource: MCPServerOriginSource;
   transport: 'stdio' | 'http';
   url?: string;
   command?: string;
@@ -35,10 +51,15 @@ interface ServerHandle {
   status: 'connecting' | 'connected' | 'disconnected' | 'error';
   tools: MCPTool[];
   restartCount: number;
+  createdAt: number;
+  enabled: boolean;
   lastError?: string;
   permanentError?: boolean;
   managed?: boolean;
+  signature: string;
 }
+
+type MCPServerRow = typeof mcpServers.$inferSelect;
 
 @Injectable()
 export class MCPService implements OnModuleInit, OnModuleDestroy {
@@ -58,37 +79,19 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
-    const rows = await this.drizzle.db.select().from(mcpServers).where(eq(mcpServers.enabled, true));
-    const handles = [
-      ...rows.map((r) => this.rowToHandle(r)),
-      ...await this.loadManagedHandles(),
-    ];
-    if (handles.length === 0) return;
-    this.logger.log(`[MCP] Scheduling background connect for ${handles.length} server(s)...`);
-    // Fire-and-forget: do NOT await so NestJS finishes startup and health endpoint
-    // responds immediately; MCP servers connect in the background.
-    void Promise.allSettled(handles.map((handle) => this.connectHandle(handle))).then(() => {
-      const connected = [...this.handles.values()].filter((h) => h.status === 'connected').length;
-      this.logger.log(`[MCP] Background connect done: ${connected}/${handles.length} connected`);
-    });
-    this.healthTimer = setInterval(() => void this.healthCheckAll(), HEALTH_CHECK_MS);
+    const activeHandles = await this.reconcileRuntime();
+    if (activeHandles.length === 0) return;
+    this.logger.log(`[MCP] Active registry resolved: ${activeHandles.length} server(s) scheduled`);
   }
   async onModuleDestroy(): Promise<void> {
     if (this.healthTimer) clearInterval(this.healthTimer);
-    await Promise.allSettled([...this.handles.keys()].map((id) => this.disconnectHandle(id)));
+    await Promise.allSettled([...this.handles.keys()].map((serverKey) => this.disconnectHandle(serverKey)));
     this.handles.clear();
   }
 
   async findAll(): Promise<MCPServer[]> {
-    const rows = await this.drizzle.db.select().from(mcpServers);
-    const servers = new Map<string, MCPServer>();
-    for (const row of rows) {
-      servers.set(row.id, this.toMCPServer(row));
-    }
-    for (const handle of await this.loadManagedHandles()) {
-      servers.set(handle.id, this.handleToMCPServer(this.handles.get(handle.id) ?? handle));
-    }
-    return [...servers.values()];
+    const registry = await this.loadRegistryEntries();
+    return registry.resolved.map((entry) => this.toMCPServer(entry, registry.rowsByServerKey.get(entry.serverKey)));
   }
 
   getAllTools(): MCPTool[] {
@@ -122,61 +125,52 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       id,
       name: dto.name,
       transport: dto.transport ?? 'http',
+      originSource: dto.originSource ?? 'manual',
       url: dto.url ?? null,
       command: dto.command ?? null,
       args: dto.args ?? null,
       envVars: dto.env ?? null,
       headers: dto.headers ?? null,
       enabled: true,
-      status: 'connecting',
+      status: 'disconnected',
       createdAt: now,
     });
-    const [row] = await this.drizzle.db.select().from(mcpServers).where(eq(mcpServers.id, id));
-    await this.connectHandle(this.rowToHandle(row!));
-    if (!this.healthTimer) this.healthTimer = setInterval(() => void this.healthCheckAll(), HEALTH_CHECK_MS);
-    return this.toMCPServer(row!);
+    await this.reconcileRuntime();
+    return await this.findServerByKey(buildServerKey('sqlite', id));
   }
 
-  async removeServer(id: string): Promise<void> {
-    if (this.handles.get(id)?.managed || (await this.loadManagedHandles()).some((handle) => handle.id === id)) {
-      throw new Error(`MCP server ${id} is managed by .kalio/config.toml`);
+  async removeServer(serverKey: string): Promise<void> {
+    const parsed = parseServerKey(serverKey);
+    if (!parsed) {
+      throw new Error(`MCP server not found: ${serverKey}`);
     }
-    await this.disconnectHandle(id);
-    this.handles.delete(id);
-    this.removeToolRefs(id);
-    await this.drizzle.db.delete(mcpServers).where(eq(mcpServers.id, id));
+    if (parsed.store === 'toml') {
+      throw new Error(`MCP server ${serverKey} is managed by .kalio/config.toml`);
+    }
+    await this.disconnectHandle(serverKey);
+    this.handles.delete(serverKey);
+    this.removeToolRefs(serverKey);
+    await this.drizzle.db.delete(mcpServers).where(eq(mcpServers.id, parsed.id));
+    await this.reconcileRuntime();
   }
 
   async reloadManagedServers(): Promise<MCPServer[]> {
     this.kalioConfig?.invalidateCache();
-    const managedIds = [...this.handles.values()]
-      .filter((handle) => handle.managed)
-      .map((handle) => handle.id);
-    for (const id of managedIds) {
-      await this.disconnectHandle(id);
-      this.handles.delete(id);
-      this.removeToolRefs(id);
-    }
-
-    const handles = await this.loadManagedHandles();
-    await Promise.allSettled(handles.map((handle) => this.connectHandle(handle)));
-    if (!this.healthTimer && handles.length > 0) {
-      this.healthTimer = setInterval(() => void this.healthCheckAll(), HEALTH_CHECK_MS);
-    }
+    await this.reconcileRuntime();
     return this.findAll();
   }
 
-  async restartServer(id: string): Promise<void> {
-    const handle = this.handles.get(id);
-    if (!handle) throw new Error(`MCP server not found: ${id}`);
-    await this.disconnectHandle(id);
+  async restartServer(serverKey: string): Promise<void> {
+    const handle = this.handles.get(serverKey);
+    if (!handle) throw new Error(`MCP server not found: ${serverKey}`);
+    await this.disconnectHandle(serverKey);
     handle.restartCount = 0;
     handle.permanentError = false;
     await this.connectHandle(handle);
   }
 
   private async connectHandle(handle: ServerHandle): Promise<void> {
-    this.handles.set(handle.id, handle);
+    this.handles.set(handle.serverKey, handle);
     handle.status = 'connecting';
     this.emitStatus(handle);
 
@@ -185,7 +179,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       transport = this.createTransport(handle);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`[MCP] Transport error for ${handle.id}: ${msg}`);
+      this.logger.error(`[MCP] Transport error for ${handle.serverKey}: ${msg}`);
       handle.status = 'error';
       handle.lastError = msg;
       handle.permanentError = true;
@@ -202,7 +196,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       await client.connect(transport);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`[MCP] Connect failed for ${handle.id}: ${msg}`);
+      this.logger.error(`[MCP] Connect failed for ${handle.serverKey}: ${msg}`);
       handle.status = 'error';
       handle.lastError = msg;
       await this.persistStatus(handle);
@@ -211,20 +205,20 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      handle.tools = await this.discoverTools(handle.id, client);
+      handle.tools = await this.discoverTools(handle.serverKey, client);
     } catch (err) {
-      this.logger.warn(`[MCP] Tool discovery failed for ${handle.id}: ${err}`);
+      this.logger.warn(`[MCP] Tool discovery failed for ${handle.serverKey}: ${err}`);
       handle.tools = [];
     }
 
     transport.onclose = () => {
       if (handle.status === 'connected') {
-        this.logger.warn(`[MCP] Server ${handle.id} disconnected unexpectedly`);
+        this.logger.warn(`[MCP] Server ${handle.serverKey} disconnected unexpectedly`);
         handle.status = 'error';
         handle.lastError = 'Connection closed unexpectedly';
         void this.persistStatus(handle);
         this.emitStatus(handle);
-        if (!handle.permanentError) void this.attemptRestart(handle.id);
+        if (!handle.permanentError) void this.attemptRestart(handle.serverKey);
       }
     };
 
@@ -236,13 +230,14 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`[MCP] Connected ${handle.name}: ${handle.tools.length} tool(s)`);
   }
 
-  private async disconnectHandle(id: string): Promise<void> {
-    const handle = this.handles.get(id);
+  private async disconnectHandle(serverKey: string): Promise<void> {
+    const handle = this.handles.get(serverKey);
     if (!handle) return;
-    try { await handle.client?.close(); } catch (err) { this.logger.warn(`[MCP] Error closing client for ${handle.id}`, err instanceof Error ? err.stack : String(err)); }
-    try { await handle.rawTransport?.close(); } catch (err) { this.logger.warn(`[MCP] Error closing transport for ${handle.id}`, err instanceof Error ? err.stack : String(err)); }
+    try { await handle.client?.close(); } catch (err) { this.logger.warn(`[MCP] Error closing client for ${handle.serverKey}`, err instanceof Error ? err.stack : String(err)); }
+    try { await handle.rawTransport?.close(); } catch (err) { this.logger.warn(`[MCP] Error closing transport for ${handle.serverKey}`, err instanceof Error ? err.stack : String(err)); }
     handle.status = 'disconnected';
     handle.tools = [];
+    await this.persistStatus(handle);
     this.emitStatus(handle);
   }
 
@@ -295,30 +290,31 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       try {
         await handle.client.listTools();
       } catch (err) {
-        this.logger.warn(`[MCP] Health check failed for ${handle.id}`, err instanceof Error ? err.stack : String(err));
+        this.logger.warn(`[MCP] Health check failed for ${handle.serverKey}`, err instanceof Error ? err.stack : String(err));
         handle.status = 'error';
         handle.lastError = 'Health check failed';
         void this.persistStatus(handle);
         this.emitStatus(handle);
-        void this.attemptRestart(handle.id);
+        void this.attemptRestart(handle.serverKey);
       }
     }
   }
 
-  private async attemptRestart(id: string): Promise<void> {
-    const handle = this.handles.get(id);
+  private async attemptRestart(serverKey: string): Promise<void> {
+    const handle = this.handles.get(serverKey);
     if (!handle || handle.permanentError) return;
     handle.restartCount++;
     const delay = Math.min(BASE_RESTART_MS * 2 ** (handle.restartCount - 1), MAX_RESTART_MS);
-    this.logger.log(`[MCP] Restarting ${id} in ${delay}ms (attempt ${handle.restartCount})`);
+    this.logger.log(`[MCP] Restarting ${serverKey} in ${delay}ms (attempt ${handle.restartCount})`);
     await new Promise((r) => setTimeout(r, delay));
-    if (!this.handles.get(id)) return;
-    await this.connectHandle(this.handles.get(id)!);
+    if (!this.handles.get(serverKey)) return;
+    await this.connectHandle(this.handles.get(serverKey)!);
   }
 
   private emitStatus(handle: ServerHandle): void {
     this.gatewayRef?.emitToAll('mcp:server:status', {
       serverId: handle.id,
+      serverKey: handle.serverKey,
       serverName: handle.name,
       status: handle.status,
       toolCount: handle.tools.length,
@@ -327,7 +323,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async persistStatus(handle: ServerHandle): Promise<void> {
-    if (handle.managed) return;
+    if (handle.store !== 'sqlite') return;
     await this.drizzle.db
       .update(mcpServers)
       .set({ status: handle.status, toolCount: handle.tools.length, lastError: handle.lastError ?? null })
@@ -343,9 +339,13 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   private configToHandle(id: string, server: KalioMcpServerConfig): ServerHandle {
+    const serverKey = buildServerKey('toml', id);
     return {
       id,
+      serverKey,
       name: id,
+      store: 'toml',
+      originSource: 'toml',
       transport: server.url ? 'http' : 'stdio',
       url: server.url,
       command: server.command,
@@ -357,7 +357,15 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       status: 'disconnected',
       tools: [],
       restartCount: 0,
+      createdAt: 0,
+      enabled: server.enabled !== false,
       managed: true,
+      signature: buildMcpSignature({
+        transport: server.url ? 'http' : 'stdio',
+        url: server.url,
+        command: server.command,
+        args: server.args,
+      }),
     };
   }
 
@@ -398,10 +406,13 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private rowToHandle(row: typeof mcpServers.$inferSelect): ServerHandle {
+  private rowToHandle(row: MCPServerRow): ServerHandle {
     return {
       id: row.id,
+      serverKey: buildServerKey('sqlite', row.id),
       name: row.name,
+      store: 'sqlite',
+      originSource: row.originSource ?? 'manual',
       transport: (row.transport as 'stdio' | 'http') ?? 'http',
       url: row.url ?? undefined,
       command: row.command ?? undefined,
@@ -413,38 +424,149 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       status: 'disconnected',
       tools: [],
       restartCount: 0,
-    };
-  }
-
-  private toMCPServer(row: typeof mcpServers.$inferSelect): MCPServer {
-    const handle = this.handles.get(row.id);
-    return {
-      id: row.id,
-      name: row.name,
-      transport: (row.transport as 'stdio' | 'http') ?? 'http',
-      url: row.url ?? undefined,
-      command: row.command ?? undefined,
-      status: (handle?.status ?? row.status ?? 'disconnected') as MCPServer['status'],
-      toolCount: handle?.tools.length ?? (row.toolCount ?? 0),
-      lastError: handle?.lastError ?? row.lastError ?? undefined,
       createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : (row.createdAt as number),
+      enabled: row.enabled ?? true,
+      signature: buildMcpSignature({
+        transport: (row.transport as 'stdio' | 'http') ?? 'http',
+        url: row.url ?? undefined,
+        command: row.command ?? undefined,
+        args: row.args ?? undefined,
+      }),
     };
   }
 
-  private handleToMCPServer(handle: ServerHandle): MCPServer {
-    const server: MCPServer & { managedBy?: 'toml' } = {
-      id: handle.id,
-      name: handle.name,
-      transport: handle.transport,
-      url: handle.url,
-      command: handle.command,
-      status: handle.status,
-      toolCount: handle.tools.length,
-      lastError: handle.lastError,
-      createdAt: 0,
-      managedBy: handle.managed ? 'toml' : undefined,
+  private async loadRegistryEntries(enabledRowsOnly = false): Promise<{
+    resolved: MCPResolvedRegistryEntry[];
+    rowsByServerKey: Map<string, MCPServerRow>;
+    managedByServerKey: Map<string, ServerHandle>;
+  }> {
+    const rows = enabledRowsOnly
+      ? await this.drizzle.db.select().from(mcpServers).where(eq(mcpServers.enabled, true))
+      : await this.drizzle.db.select().from(mcpServers);
+    const managedHandles = await this.loadManagedHandles();
+
+    const rowsByServerKey = new Map(rows.map((row) => [buildServerKey('sqlite', row.id), row]));
+    const managedByServerKey = new Map(managedHandles.map((handle) => [handle.serverKey, handle]));
+    const resolved = resolveRegistryEntries([
+      ...rows.map((row) => ({
+        id: row.id,
+        serverKey: buildServerKey('sqlite', row.id),
+        name: row.name,
+        store: 'sqlite' as const,
+        originSource: row.originSource ?? 'manual',
+        createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : (row.createdAt as number),
+        transport: (row.transport as 'stdio' | 'http') ?? 'http',
+        url: row.url ?? undefined,
+        command: row.command ?? undefined,
+        args: row.args ?? undefined,
+      })),
+      ...managedHandles.map((handle) => ({
+        id: handle.id,
+        serverKey: handle.serverKey,
+        name: handle.name,
+        store: handle.store,
+        originSource: handle.originSource,
+        createdAt: handle.createdAt,
+        transport: handle.transport,
+        url: handle.url,
+        command: handle.command,
+        args: handle.args,
+      })),
+    ]);
+
+    return {
+      resolved,
+      rowsByServerKey,
+      managedByServerKey,
     };
-    return server;
+  }
+
+  private async reconcileRuntime(): Promise<ServerHandle[]> {
+    const registry = await this.loadRegistryEntries(true);
+    const activeEntries = registry.resolved.filter((entry) => entry.effectiveState === 'active');
+    const desiredKeys = new Set(activeEntries.map((entry) => entry.serverKey));
+
+    for (const existingKey of [...this.handles.keys()]) {
+      if (desiredKeys.has(existingKey)) {
+        continue;
+      }
+      await this.disconnectHandle(existingKey);
+      this.handles.delete(existingKey);
+      this.removeToolRefs(existingKey);
+    }
+
+    const scheduled: ServerHandle[] = [];
+    for (const entry of activeEntries) {
+      const desiredHandle = registry.managedByServerKey.get(entry.serverKey)
+        ?? this.rowToHandle(registry.rowsByServerKey.get(entry.serverKey)!);
+      const currentHandle = this.handles.get(entry.serverKey);
+
+      if (currentHandle && this.sameHandleConfig(currentHandle, desiredHandle)) {
+        if (currentHandle.status !== 'connected' && currentHandle.status !== 'connecting') {
+          await this.connectHandle(currentHandle);
+          scheduled.push(currentHandle);
+        }
+        continue;
+      }
+
+      if (currentHandle) {
+        await this.disconnectHandle(entry.serverKey);
+        this.handles.delete(entry.serverKey);
+        this.removeToolRefs(entry.serverKey);
+      }
+
+      await this.connectHandle(desiredHandle);
+      scheduled.push(desiredHandle);
+    }
+
+    if (this.handles.size > 0 && !this.healthTimer) {
+      this.healthTimer = setInterval(() => void this.healthCheckAll(), HEALTH_CHECK_MS);
+    }
+    if (this.handles.size === 0 && this.healthTimer) {
+      clearInterval(this.healthTimer);
+      this.healthTimer = null;
+    }
+
+    return activeEntries.map((entry) =>
+      this.handles.get(entry.serverKey)
+      ?? registry.managedByServerKey.get(entry.serverKey)
+      ?? this.rowToHandle(registry.rowsByServerKey.get(entry.serverKey)!));
+  }
+
+  private sameHandleConfig(left: ServerHandle, right: ServerHandle): boolean {
+    return left.signature === right.signature
+      && left.serverKey === right.serverKey
+      && JSON.stringify(left.envVars ?? {}) === JSON.stringify(right.envVars ?? {})
+      && JSON.stringify(left.headers ?? {}) === JSON.stringify(right.headers ?? {});
+  }
+
+  private toMCPServer(entry: MCPResolvedRegistryEntry, row?: MCPServerRow): MCPServer {
+    const handle = this.handles.get(entry.serverKey);
+    return {
+      id: entry.id,
+      serverKey: entry.serverKey,
+      name: entry.name,
+      store: entry.store,
+      originSource: entry.originSource,
+      effectiveState: entry.effectiveState,
+      conflictGroup: entry.conflictGroup,
+      transport: entry.transport,
+      url: entry.url,
+      command: entry.command,
+      args: entry.args,
+      status: (handle?.status ?? row?.status ?? 'disconnected') as MCPServer['status'],
+      toolCount: handle?.tools.length ?? (row?.toolCount ?? 0),
+      lastError: handle?.lastError ?? row?.lastError ?? undefined,
+      createdAt: entry.createdAt,
+    };
+  }
+
+  private async findServerByKey(serverKey: string): Promise<MCPServer> {
+    const found = (await this.findAll()).find((server) => server.serverKey === serverKey);
+    if (!found) {
+      throw new Error(`MCP server not found: ${serverKey}`);
+    }
+    return found;
   }
 
 }
