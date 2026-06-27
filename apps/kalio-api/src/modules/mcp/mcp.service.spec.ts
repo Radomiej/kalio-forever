@@ -256,6 +256,73 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       expect(all.map((server) => server.serverKey)).toContain('sqlite::docs');
       expect(all.map((server) => server.serverKey)).toContain('toml::docs');
     });
+
+    it('prefers TOML over SQLite for restart resolution when both share the same raw key', async () => {
+      const db = (drizzleSvc as unknown as { db: ReturnType<typeof drizzle> }).db;
+      await db.insert(schema.mcpServers).values({
+        id: 'docs',
+        name: 'SQLite Docs',
+        transport: 'http',
+        url: 'https://sqlite.example.com',
+        enabled: true,
+        status: 'disconnected',
+        createdAt: new Date(),
+      });
+
+      const kalioConfig = makeKalioConfigMock({
+        docs: {
+          command: 'npx',
+        },
+      });
+      service = new MCPService(drizzleSvc, kalioConfig as KalioConfigService);
+
+      const internals = service as unknown as {
+        handles: Map<string, {
+          serverKey: string;
+          id: string;
+          name: string;
+          store: 'toml' | 'sqlite';
+          originSource: 'toml' | 'manual' | 'cursor' | 'windsurf' | 'codex' | 'copilot';
+          transport: 'stdio' | 'http';
+          status: 'connecting' | 'connected' | 'disconnected' | 'error';
+          tools: [];
+          restartCount: number;
+          createdAt: number;
+          enabled: boolean;
+          client: unknown;
+          rawTransport: unknown;
+          signature: string;
+        }>;
+        connectHandle(handle: unknown): Promise<void>;
+        disconnectHandle(serverKey: string): Promise<void>;
+      };
+      const connectHandle = vi.spyOn(internals, 'connectHandle').mockResolvedValue(undefined);
+      const disconnectHandle = vi.spyOn(internals, 'disconnectHandle').mockResolvedValue(undefined);
+
+      internals.handles.set('sqlite::docs', {
+        serverKey: 'sqlite::docs',
+        id: 'docs',
+        name: 'SQLite Docs',
+        store: 'sqlite',
+        originSource: 'manual',
+        transport: 'http',
+        status: 'disconnected',
+        tools: [],
+        restartCount: 0,
+        createdAt: Date.now(),
+        enabled: true,
+        client: null,
+        rawTransport: null,
+        signature: 'http:https://sqlite.example.com',
+      });
+
+      await expect(service.restartServer('docs')).rejects.toThrow('MCP server not found: docs');
+      expect(disconnectHandle).not.toHaveBeenCalled();
+      expect(connectHandle).not.toHaveBeenCalled();
+
+      connectHandle.mockRestore();
+      disconnectHandle.mockRestore();
+    });
   });
 
   describe('restartServer()', () => {

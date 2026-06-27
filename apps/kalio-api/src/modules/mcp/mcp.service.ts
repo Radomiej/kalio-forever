@@ -232,17 +232,17 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       return serverKeyOrLegacyId;
     }
 
-    const directCandidates = [`toml::${serverKeyOrLegacyId}`, `sqlite::${serverKeyOrLegacyId}`];
-    for (const candidate of directCandidates) {
-      if (this.handles.has(candidate)) {
-        return candidate;
-      }
-    }
-
     if (this.kalioConfig) {
       const { config } = await this.kalioConfig.getEffectiveConfig();
       if (Object.prototype.hasOwnProperty.call(config.mcp_servers ?? {}, serverKeyOrLegacyId)) {
         return `toml::${serverKeyOrLegacyId}`;
+      }
+    }
+
+    const directCandidates = [`toml::${serverKeyOrLegacyId}`, `sqlite::${serverKeyOrLegacyId}`];
+    for (const candidate of directCandidates) {
+      if (this.handles.has(candidate)) {
+        return candidate;
       }
     }
 
