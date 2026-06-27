@@ -63,7 +63,7 @@ export function parseMcpJson(raw: string): ParsedMCPEntry[] {
 
   const results: ParsedMCPEntry[] = [];
 
-  for (const [serverId, rawEntry] of Object.entries(serversObj)) {
+  for (const [serverKey, rawEntry] of Object.entries(serversObj)) {
     if (!rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) continue;
 
     const entry = rawEntry as Record<string, unknown>;
@@ -86,7 +86,7 @@ export function parseMcpJson(raw: string): ParsedMCPEntry[] {
       continue;
     }
 
-    const name = getNonEmptyString(entry['name']) ?? serverId;
+    const name = getNonEmptyString(entry['name']) ?? serverKey;
 
     const dto: CreateMCPServerDto = { name, transport };
 
@@ -122,7 +122,7 @@ export function parseMcpJson(raw: string): ParsedMCPEntry[] {
       }
     }
 
-    results.push({ key: serverId, dto });
+    results.push({ key: serverKey, dto });
   }
 
   return results;
