@@ -8,12 +8,11 @@ interface MCPPanelProps {
 }
 
 /** Strip the `mcp_{serverId}_` prefix that the backend adds to tool names. */
-function cleanToolName(toolName: string, serverId: string): string {
-  const prefix = `mcp_${serverId}_`;
-  if (toolName.startsWith(prefix)) return toolName.slice(prefix.length);
-  // Also handle :: namespace format (legacy)
-  const colonIdx = toolName.lastIndexOf('::');
-  if (colonIdx !== -1) return toolName.slice(colonIdx + 2);
+function cleanToolName(toolName: string, serverId: string, serverKey: string): string {
+  const prefixes = [`mcp_${serverId}_`, `mcp_${serverKey}_`];
+  for (const prefix of prefixes) {
+    if (toolName.startsWith(prefix)) return toolName.slice(prefix.length);
+  }
   return toolName;
 }
 
@@ -40,7 +39,11 @@ function ServerRow({ server, onRestart }: ServerRowProps) {
     setLoadingTools(true);
     apiClient
       .get<MCPTool[]>('/api/mcp/tools')
-      .then((r) => setTools(r.data.filter((t) => t.serverId === server.serverKey)))
+      .then((r) =>
+        setTools(
+          r.data.filter((t) => t.serverId === server.serverKey || t.serverId === server.id),
+        ),
+      )
       .catch(() => setTools([]))
       .finally(() => setLoadingTools(false));
   }, [server.serverKey]);
@@ -112,7 +115,7 @@ function ServerRow({ server, onRestart }: ServerRowProps) {
             <p className="text-base-content/40 text-[10px]">No tools exposed.</p>
           )}
           {tools.map((t) => {
-            const displayName = cleanToolName(t.name, server.serverKey);
+            const displayName = cleanToolName(t.name, server.id, server.serverKey);
             return (
               <div key={t.name} className="flex items-start gap-1.5">
                 <Wrench size={9} className="mt-0.5 text-base-content/30 shrink-0" />

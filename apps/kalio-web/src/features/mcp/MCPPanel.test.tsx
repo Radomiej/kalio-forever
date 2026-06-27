@@ -89,7 +89,7 @@ describe('MCPPanel', () => {
         parameters: {},
       },
       {
-        name: 'legacy::list_prompts',
+        name: 'mcp_alpha::list_prompts',
         description: 'Legacy name',
         serverId: 'sqlite::alpha',
         requiresConfirmation: false,
@@ -118,7 +118,8 @@ describe('MCPPanel', () => {
     await user.click(await screen.findByRole('button', { name: /Alpha/i }));
 
     expect(await screen.findByText('read_file')).toBeInTheDocument();
-    expect(screen.getByText('list_prompts')).toBeInTheDocument();
+    expect(screen.getByText('mcp_alpha::list_prompts')).toBeInTheDocument();
+    expect(screen.queryByText('read_file')).toBeInTheDocument();
     expect(screen.queryByText('hidden_tool')).not.toBeInTheDocument();
   });
 
