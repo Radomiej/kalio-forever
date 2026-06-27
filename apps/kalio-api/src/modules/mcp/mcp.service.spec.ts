@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
-import type { MCPTool } from '@kalio/types';
+import type { CreateMCPServerDto, MCPTool } from '@kalio/types';
 import { MCPService } from './mcp.service';
 import { DrizzleService } from '../../database/drizzle.service';
 import type { KalioConfigService } from '../../config/kalio-config.service';
@@ -130,6 +130,23 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
   });
 
   describe('removeServer()', () => {
+    it('accepts legacy sqlite row id and removes row during compatibility fallback', async () => {
+      const db = (drizzleSvc as unknown as { db: ReturnType<typeof drizzle> }).db;
+      await db.insert(schema.mcpServers).values({
+        id: 'legacy-1',
+        name: 'Legacy Row',
+        transport: 'http',
+        url: 'https://legacy.example.com',
+        enabled: true,
+        status: 'disconnected',
+        createdAt: new Date(),
+      });
+
+      await expect(service.removeServer('legacy-1')).resolves.not.toThrow();
+      const all = await service.findAll();
+      expect(all).toHaveLength(0);
+    });
+
     it('does not throw when server not found in handles', async () => {
       // Insert a row first so DB delete doesn't throw
       const db = (drizzleSvc as unknown as { db: ReturnType<typeof drizzle> }).db;
@@ -161,6 +178,56 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
   });
 
   describe('restartServer()', () => {
+    it('accepts legacy sqlite id when handle key is stored in runtime map', async () => {
+      const internals = service as unknown as {
+        handles: Map<string, {
+          serverKey: string;
+          id: string;
+          name: string;
+          store: 'toml' | 'sqlite';
+          originSource: 'toml' | 'manual' | 'cursor' | 'windsurf' | 'codex' | 'copilot';
+          transport: 'stdio' | 'http';
+          status: 'connecting' | 'connected' | 'disconnected' | 'error';
+          tools: [];
+          restartCount: number;
+          createdAt: number;
+          enabled: boolean;
+          client: unknown;
+          rawTransport: unknown;
+          signature: string;
+        }>;
+        connectHandle(handle: unknown): Promise<void>;
+        disconnectHandle(serverKey: string): Promise<void>;
+      };
+      const connectHandle = vi.spyOn(internals, 'connectHandle').mockResolvedValue(undefined);
+      const disconnectHandle = vi.spyOn(internals, 'disconnectHandle').mockResolvedValue(undefined);
+
+      internals.handles.set('sqlite::legacy-run', {
+        serverKey: 'sqlite::legacy-run',
+        id: 'legacy-run',
+        name: 'Legacy Runtime',
+        store: 'sqlite',
+        originSource: 'manual',
+        transport: 'http',
+        status: 'disconnected',
+        tools: [],
+        restartCount: 0,
+        createdAt: Date.now(),
+        enabled: true,
+        client: null,
+        rawTransport: null,
+        signature: 'http:',
+      });
+
+      await expect(service.restartServer('legacy-run')).resolves.not.toThrow();
+      expect(disconnectHandle).toHaveBeenCalledWith('sqlite::legacy-run');
+      expect(connectHandle).toHaveBeenCalledTimes(1);
+      expect(connectHandle).toHaveBeenCalledWith(expect.objectContaining({ serverKey: 'sqlite::legacy-run' }));
+
+      connectHandle.mockRestore();
+      disconnectHandle.mockRestore();
+    });
+
     it('throws when server not found in handles', async () => {
       await expect(service.restartServer('sqlite::non-existent')).rejects.toThrow(
         'MCP server not found: sqlite::non-existent',
@@ -199,7 +266,43 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
     });
   });
 
-  describe('addServer() — transport validation', () => {
+  describe('addServer() – transport validation', () => {
+    it('reuses deterministic id for duplicate server config', async () => {
+      const dto: CreateMCPServerDto = {
+        name: 'Test HTTP Server',
+        transport: 'http',
+        url: 'https://example.com/mcp',
+      };
+
+      const first = await service.addServer(dto);
+      const second = await service.addServer(dto);
+      const all = await service.findAll();
+
+      expect(first.id).toBe(second.id);
+      expect(first.id).toMatch(/^test-http-server-/);
+      expect(all.filter((server) => server.id === first.id)).toHaveLength(1);
+    });
+
+    it('normalizes server config for deterministic ids regardless of object key order', async () => {
+      const first = await service.addServer({
+        name: '  Demo MCP Server ',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-demo'],
+        env: { B: 'two', A: 'one' },
+      });
+      const second = await service.addServer({
+        name: 'Demo MCP Server',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-demo'],
+        env: { A: 'one', B: 'two' },
+      });
+
+      expect(second.id).toBe(first.id);
+      expect(second.id).toMatch(/^demo-mcp-server-/);
+    });
+
     it('toMCPServer shape: reflects handle status when present', async () => {
       // Insert a row directly so we can call findAll() and check toMCPServer mapping
       const db = (drizzleSvc as unknown as { db: ReturnType<typeof drizzle> }).db;
