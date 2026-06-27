@@ -109,6 +109,17 @@ describe('MCPController', () => {
     expect(mcpService.removeServer).toHaveBeenCalledWith(legacyId);
   });
 
+  it('accepts legacy serverId input for restart and forwards it unchanged for compatibility', async () => {
+    const legacyId = 'github';
+    const controller = new MCPController(
+      mcpService as unknown as MCPService,
+      externalImportService as unknown as MCPExternalImportService,
+    );
+
+    await expect(controller.restartServer(legacyId)).resolves.toBeUndefined();
+    expect(mcpService.restartServer).toHaveBeenCalledWith(legacyId);
+  });
+
   it('delegates tool listing to the service', async () => {
     const controller = new MCPController(
       mcpService as unknown as MCPService,
