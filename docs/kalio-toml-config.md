@@ -5,6 +5,12 @@ thereafter (cache TTL). Values in these files take priority over anything saved
 through the Settings UI or the REST API. The file is optional; the application
 runs with built-in defaults when none is present.
 
+For MCP specifically, Kalio uses a dual-store model:
+
+- `.kalio/config.toml` is the canonical source for repo/dev-managed MCP config.
+- `mcp_servers` in SQLite remains the app-local MCP store used by Settings UI imports and manual additions.
+- Equivalent TOML and SQLite entries remain separately visible; TOML wins only as the active runtime entry for that conflict group.
+
 ---
 
 ## Where to place the file
@@ -97,8 +103,7 @@ uses manually:
 - `mcp-playwright-orchestrator` for browser sessions, screenshots, visual
   audits, WCAG checks, focus checks, and runtime console evidence.
 
-For Kalio-Forever development, the source of truth is TOML, not the Settings UI
-import flow:
+For Kalio-Forever development, TOML is the canonical repo/dev-managed MCP path:
 
 ```text
 docs/examples/kalio-agent-qa-mcp.config.toml
@@ -110,11 +115,12 @@ this repo.
 
 The repo also keeps `.vscode/mcp.json` as a legacy/manual import example for
 one-off UI inspection or importer debugging. Do not use it as the normal dev
-path, and do not keep UI-imported and TOML-managed entries active at the same
-time; MCP tool names are server-id prefixed, so duplicates create confusing
-agent tool lists. The external importer also de-duplicates equivalent configs by
-effective signature, so UI import is a poor source of truth for repeatable repo
-setup.
+path.
+
+Imported SQLite entries are still valid Kalio config, but they are not the
+canonical repo/dev-managed store. If TOML and SQLite contain equivalent MCP
+config, both rows remain visible in Settings and only the TOML row is active at
+runtime; the SQLite row is marked `shadowed`.
 
 ---
 
@@ -135,6 +141,15 @@ When a value is present in `.kalio/config.toml`:
 - The cached value is refreshed automatically **every 30 seconds**.
   Call `KalioConfigService.invalidateCache()` from code if you need an immediate
   reload (e.g. after writing the file programmatically).
+
+For MCP server config there is one important exception to the generic rule
+above:
+
+- TOML does not delete or overwrite SQLite MCP rows.
+- Settings UI and external import can still create SQLite MCP entries.
+- Runtime conflict resolution is `visible != active`: equivalent TOML and
+  SQLite entries are both listed, but only one runtime handle is activated.
+- In the current policy, `TOML > SQLite` for equivalent MCP config.
 
 ---
 
@@ -194,3 +209,8 @@ same scope, a deeper sub-directory config wins over the project root config.
 A: No. `~/.codex/config.toml` configures Codex only. Kalio MCP state should be
 diagnosed from `.kalio/config.toml`, `~/.kalio/config.toml`, and the Kalio
 runtime/API state.
+
+**Q: Why do I see the same MCP server twice in Settings?**  
+A: Kalio keeps TOML and SQLite MCP stores separately. Equivalent entries remain
+visible as separate rows. If they conflict, the TOML row is active and the
+SQLite row is marked `shadowed`.

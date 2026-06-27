@@ -338,7 +338,7 @@ Implemented:
 - `ArchitectureGraphRuntime` treats failing/high-severity external quality gates as finalization blockers and routes Goal Master back to the implementer branch.
 - Architect FE exposes a waiting-run action to resume Goal Guard AgentFlow with structured Playwright QA evidence (`source`, `status`, `highFindings`, `summary`, artifact path).
 - Architecture adapter trace output now exposes product-level `flow:*` events (`flow:node_start`, `flow:node_result`, `flow:edge_taken`, `flow:guard_result`, `flow:final_artifact`) while preserving the original architecture event kind in `data.sourceEventType`.
-- Settings MCP import now discovers workspace-parent `.vscode/mcp.json` even when the API process runs from a nested cwd, parses BOM-prefixed JSON, defaults to selecting no external servers, and de-dupes equivalent discovered server signatures within one scan/import batch.
+- Settings MCP import now discovers workspace-parent `.vscode/mcp.json` even when the API process runs from a nested cwd, parses BOM-prefixed JSON, defaults to selecting no external servers, and reports equivalent discovered server signatures without blocking import selection.
 - Orchestration slots now propagate `vfs_write` auto-approval to delegated subagents so VFS-only proof creation cannot hang behind invisible subagent HITL while host writes remain explicit opt-in.
 - Max-node-visit stops now emit terminal guard events with pending nodes and visit counts instead of silently ending without finalization.
 - AgentFlow API/tool entrypoints reject invalid parent/session payloads before orphaned runs are created, and API supports listing runs by parent session.

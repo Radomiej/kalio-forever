@@ -185,7 +185,7 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - Native tool classes should stay thin; domain logic belongs in services, not in tool handlers.
 - Error handling pattern: Never use empty catch. Always log errors with context and rethrow or handle explicitly.
 - Testing pattern and framework: Vitest for unit/integration, Playwright for E2E. Mock LLM with `MockLLMProvider` in tests.
-- For Kalio-Forever development, MCP source of truth is `<repo>/.kalio/config.toml` or `~/.kalio/config.toml`; do not treat `.vscode/mcp.json` import as the normal dev path.
+- For Kalio-Forever development, repo/dev-managed MCP config is canonical in `<repo>/.kalio/config.toml` or `~/.kalio/config.toml`; SQLite remains the app-local MCP store, and `.vscode/mcp.json` import is legacy/manual, not the normal dev path.
 - When diagnosing Kalio MCP state, do not use `~/.codex/config.toml` as evidence; that file configures Codex, not the Kalio app.
 - Backend is the durable runtime source of truth; frontend state for chat/appflow/runtime must stay rebuildable from backend snapshots after F5/reconnect.
 - Prefer extending shared runtime contracts and selectors over adding panel-local state channels, duplicated truth maps, or one-off socket event handling.
@@ -242,10 +242,11 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Treat `.\start-dev.ps1` ports `3016/5188` as the official manual-dev hot-reload stack; treat `node scripts/stack-manager.mjs start --backend-port 0 --frontend-port 0` as an isolated built QA stack on random ports using `NODE_ENV=production`, `data/kalio-qa.db`, and `data/workspaces-qa`.
 - For failing CI work, start with `superpowers:systematic-debugging` and finish with `superpowers:verification-before-completion` before claiming the pipeline is fixed.
 - On Windows, always use system Node (`C:\Program Files\nodejs\node.exe`) for `node`/`pnpm`/`npm` installs and rebuilds; never Cursor's bundled Node 22 — prepend that directory to PATH when the agent shell resolves the wrong `node`.
+- On Windows, run `better-sqlite3`-backed Kalio API tests and rebuilds outside the sandbox with system Node on PATH; sandboxed or non-system Node runs are not valid evidence for SQLite failures.
 - Keep `docs/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/post-mvp-plans.md`.
 - Whenever a compatibility fallback is added, include a `TODO: legacy fallback` code comment with the reason.
 - For architecture/runtime/appflow changes, prove reconnect/F5 hydration, stop/follow-up drain, queue state, and child-session visibility from the FE before calling the slice release-ready.
-- For Kalio dev MCP, treat `.kalio/config.toml` as the only source of truth; use `.vscode/mcp.json` import only as a legacy/manual fallback and never infer Kalio state from `~/.codex/config.toml`.
+- For Kalio dev MCP, treat `.kalio/config.toml` as the canonical repo/dev-managed store, keep `mcp_servers` SQLite as the app-local store, use `.vscode/mcp.json` import only as a legacy/manual fallback, and never infer Kalio state from `~/.codex/config.toml`.
 
 ---
 

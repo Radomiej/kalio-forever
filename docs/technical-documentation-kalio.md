@@ -255,7 +255,7 @@ Narzędzia natywne są klasami NestJS dekorowanymi przez `@Tool()` albo `@Confir
 
 ### 3.5. MCP
 
-MCP jest zewnętrzną powierzchnią integracji. Kalio potrafi podłączyć serwery MCP przez transport stdio albo HTTP. Narzędzia MCP są wykrywane dynamicznie i eksponowane pod prefiksowanymi nazwami, np. `mcp_<serverId>_<toolName>`.
+MCP jest zewnętrzną powierzchnią integracji. Kalio potrafi podłączyć serwery MCP przez transport stdio albo HTTP. Narzędzia MCP są wykrywane dynamicznie i eksponowane pod prefiksowanymi nazwami, np. `mcp_<serverKey>_<toolName>`, gdzie `serverKey` rozróżnia wpisy TOML i SQLite.
 
 Zasady:
 
