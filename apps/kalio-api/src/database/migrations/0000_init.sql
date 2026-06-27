@@ -21,7 +21,6 @@ CREATE TABLE `mcp_servers` (
 `id` text PRIMARY KEY NOT NULL,
 `name` text NOT NULL,
 `transport` text NOT NULL DEFAULT 'http',
-`origin_source` text NOT NULL DEFAULT 'manual',
 `url` text,
 `command` text,
 `args` text,
