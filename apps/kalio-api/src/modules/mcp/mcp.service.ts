@@ -419,7 +419,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
 
   private emitStatus(handle: ServerHandle): void {
     this.gatewayRef?.emitToAll('mcp:server:status', {
-      serverId: handle.id,
+      serverId: handle.serverKey,
       serverKey: handle.serverKey,
       serverName: handle.name,
       status: handle.status,
