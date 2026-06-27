@@ -175,6 +175,17 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
       await expect(service.removeServer('toml::docs')).rejects.toThrow('managed by .kalio/config.toml');
     });
+
+    it('resolves legacy TOML key before rejecting remove for managed config', async () => {
+      const kalioConfig = makeKalioConfigMock({
+        docs: {
+          command: 'npx',
+        },
+      });
+      service = new MCPService(drizzleSvc, kalioConfig as KalioConfigService);
+
+      await expect(service.removeServer('docs')).rejects.toThrow('managed by .kalio/config.toml');
+    });
   });
 
   describe('restartServer()', () => {
