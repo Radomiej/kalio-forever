@@ -2,8 +2,9 @@
 
 ## Summary
 
+- Superseded on 2026-06-27 by `2026-06-27-kalio-mcp-dual-store-runtime-rewire.md`.
 - Goal: remove repo guidance that mixed Kalio dev MCP setup with Codex MCP setup.
-- Decision: for Kalio-Forever dev, MCP source of truth is TOML only: `<repo>/.kalio/config.toml` or `~/.kalio/config.toml`.
+- Historical decision at the time: document TOML as the canonical Kalio-Forever dev path and stop using Codex config as Kalio evidence.
 - Scope completed: `AGENTS.md`, durable MCP docs, repo copy of the manual QA skill, and the canonical TOML example.
 
 ## Checklist
@@ -37,7 +38,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  A["AGENTS.md / repo docs"] --> B["Agent rule: Kalio dev MCP = TOML only"]
+  A["AGENTS.md / repo docs"] --> B["Historical rule: Kalio dev MCP = TOML canonical"]
   B --> D["<repo>/.kalio/config.toml"]
   D --> H["Kalio mcp_servers effective config"]
   H --> I["Kalio MCP runtime"]
@@ -67,6 +68,6 @@ flowchart TD
 
 ## Notes
 
-- User clarification during planning: Kalio dev MCP should be `TOML only`.
+- Historical planning note: this slice initially treated Kalio dev MCP as TOML-only in practice, but runtime/product direction moved to a dual-store model with TOML canonical for repo/dev-managed config and SQLite retained as the app-local store.
 - `.vscode/mcp.json` remains in repo as a legacy/manual import example and importer-debug surface, not as the preferred development workflow.
 - Historical session notes that mention import-based proof were left untouched as evidence, not as current process documentation.

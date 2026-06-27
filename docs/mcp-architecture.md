@@ -1,72 +1,106 @@
 # MCP Architecture
 
-This document describes the current MCP runtime in Kalio: how server configs are stored, how connections are established, how tools are discovered, and how those tools are filtered and dispatched.
+This document describes the current MCP runtime in Kalio after the dual-store
+rewire: where config is stored, how conflicts are resolved, how live runtime
+handles are chosen, and how MCP tools are exposed to the rest of the app.
 
 ## Main components
 
 | Component | Current responsibility |
 | --- | --- |
-| `MCPService` | Owns live server handles, transport creation, connection lifecycle, tool discovery, health checks, and restart attempts |
-| `MCPController` | REST API for list, add, remove, restart, and current tool listing |
-| `ToolDispatchService` | Merges MCP tools into the runtime tool list and routes prefixed tool names back to `MCPService` |
+| `KalioConfigService` | Loads `.kalio/config.toml` and produces the effective TOML-managed MCP config |
+| `MCPService` | Builds the visible registry, resolves conflicts, owns live server handles, manages connection lifecycle, discovers tools, and restarts active servers |
+| `MCPExternalImportService` | Discovers external `mcp.json` files and imports selected entries into SQLite with provenance |
+| `MCPController` | REST API for list, add, remove, restart, reload-config, import discovery/apply, and current tool listing |
+| `ToolDispatchService` | Merges connected MCP tools into the runtime tool list and routes prefixed tool names back to `MCPService` |
 | `ChatService` | Filters MCP visibility per persona before the LLM sees the tool set |
-| `mcp_servers` table | Stores persistent server configuration and last known status summary |
+| `mcp_servers` table | Stores SQLite-backed MCP configuration, provenance, and last known runtime status summary |
 
-## Data model split: persisted config vs live handle
+## Persistent stores vs runtime registry
 
-MCP has two parallel models and they should not be confused.
+Kalio now has two durable MCP config stores:
+
+| Store | Purpose |
+| --- | --- |
+| `.kalio/config.toml` and `~/.kalio/config.toml` | Canonical repo/dev-managed MCP config |
+| `mcp_servers` in SQLite | App-local MCP config created through Settings UI, imports, and manual add flows |
+
+Those stores are not merged by raw `id`.
+
+Instead, `MCPService` builds an explicit registry entry for every TOML and
+SQLite row, computes a normalized config signature, groups equivalent entries,
+and then applies the runtime policy:
+
+- both stores remain visible in the API/UI,
+- only one entry per conflict group becomes runtime-active,
+- current winner policy is `TOML > SQLite`.
+
+```mermaid
+flowchart LR
+    TOML[".kalio/config.toml + ~/.kalio/config.toml"] --> CFG["KalioConfigService"]
+    CFG --> REG["MCPService registry builder"]
+    DB["sqlite mcp_servers"] --> REG
+    REG --> GROUP["group by normalized signature"]
+    GROUP --> VIEW["visible MCPServer DTOs"]
+    GROUP --> ACTIVE["active runtime entries only"]
+```
+
+## Data model split
+
+MCP has three layers that should not be confused.
 
 | Layer | What lives there |
 | --- | --- |
-| Persisted row (`mcp_servers`) | `id`, `name`, `transport`, `url` or `command`, args, env vars, headers, enabled flag, last status summary |
-| Live runtime handle (`ServerHandle`) | instantiated `Client`, raw transport, discovered `MCPTool[]`, restart counter, last runtime error, connection state |
+| Durable TOML entry | repo/home managed config keyed by TOML table name |
+| Durable SQLite row | `id`, `name`, `transport`, `url` or `command`, args, env vars, headers, origin source, enabled flag, last status summary |
+| Live runtime handle (`ServerHandle`) | instantiated `Client`, raw transport, discovered `MCPTool[]`, restart counter, current connection state, current runtime error |
 
-Only connected handles contribute tools to the live tool list.
+The public `MCPServer` DTO now carries dual-store metadata:
 
-## Startup and server lifecycle
+- `serverKey`
+- `store`
+- `originSource`
+- `effectiveState`
+- optional `conflictGroup`
 
-`MCPService` does not block Nest startup waiting for MCP servers.
-Enabled rows are loaded from the database, connection attempts are kicked off in the background, and health checks continue every 30 seconds.
+That means `visible != active`: a row can be listed in Settings even when it is
+not the runtime winner.
+
+## Startup and runtime reconciliation
+
+`MCPService` does not block Nest startup waiting for MCP servers. It reconciles
+the active registry in the background and only connects active winners.
 
 ```mermaid
 flowchart TD
-    Boot[API boot] --> Rows[load enabled rows from mcp_servers]
-    Rows --> Connect[connectHandle per server in background]
-    Connect --> Transport{transport type}
-    Transport -- stdio --> Stdio[build StdioClientTransport]
-    Transport -- http --> Http[build StreamableHTTPClientTransport]
-    Stdio --> ClientConnect[client.connect]
-    Http --> ClientConnect
-
-    ClientConnect --> Discover[listTools pagination]
-    Discover --> Prefix[prefix tools as mcp_serverId_name]
-    Prefix --> Connected[set status connected and persist summary]
-    Connected --> Health[health check every 30s]
-
-    ClientConnect -->|connect error| ConnectError[set error status and persist]
-    Health --> Healthy{listTools succeeds?}
-    Healthy -- yes --> Connected
-    Healthy -- no --> RuntimeError[set error status and persist]
-    RuntimeError --> Restart[restart with exponential backoff 2s to 60s]
-    Restart --> Connect
+    Boot["API boot"] --> Load["load TOML entries + enabled SQLite rows"]
+    Load --> Registry["build registry entries"]
+    Registry --> Group["group by normalized signature"]
+    Group --> Resolve["mark active vs shadowed"]
+    Resolve --> Connect["connect active entries only"]
+    Connect --> Discover["discover tools"]
+    Discover --> Health["health check every 30s"]
+    Health --> Reconnect["restart with backoff on runtime failure"]
 ```
 
-Important runtime details from the code:
+Important runtime details:
 
 - Tool discovery paginates through `client.listTools(...)` until there is no cursor or the 100-iteration safety cap is reached.
-- `transport.onclose` marks the handle as errored and can trigger a restart attempt.
-- `findAll()` returns database-backed server summaries, but the status and tool count are patched with live handle data when available.
+- `findAll()` returns both TOML and SQLite entries with resolved `effectiveState`.
+- `reloadManagedServers()` invalidates the TOML cache and re-runs runtime reconciliation; it does not delete SQLite rows.
+- `removeServer(serverKey)` only removes SQLite entries. TOML entries must be removed from `.kalio/config.toml`.
 
 ## Tool naming and dispatch
 
-Discovered MCP tools are not exposed to the model under their original server-local names.
-Each one is rewritten into a single global namespace:
+Discovered MCP tools are exposed under a prefixed global name:
 
 ```text
-mcp_<serverId>_<originalName>
+mcp_<serverKey>_<originalName>
 ```
 
-The runtime keeps the reverse mapping in `toolNameMap`, so dispatch can resolve the prefixed name back to `{ serverId, originalName }`.
+`serverKey` is origin-qualified, for example `toml::docs` or `sqlite::abc123`.
+`toolNameMap` keeps the reverse mapping so dispatch can resolve the prefixed
+name back to `{ serverId: serverKey, originalName }`.
 
 ```mermaid
 sequenceDiagram
@@ -80,57 +114,23 @@ sequenceDiagram
     MCP-->>Dispatch: connected MCPTool[]
     Dispatch-->>Chat: native + MCP ToolMeta[]
 
-    note over Chat: ChatService filters visibility before sending tools to the model
-
-    Chat->>Dispatch: dispatch(callId, mcp_serverId_name, args, ctx)
+    Chat->>Dispatch: dispatch(callId, mcp_serverKey_name, args, ctx)
     Dispatch->>MCP: resolveToolName(prefixedName)
-    Dispatch->>MCP: getToolByName(prefixedName)
-    alt MCP tool requires confirmation
-        Dispatch-->>Chat: emit tool:confirmation_required first
-    end
-    Dispatch->>MCP: callTool(serverId, originalName, args)
+    Dispatch->>MCP: callTool(serverKey, originalName, args)
     MCP->>Ext: client.callTool({ name, arguments })
     Ext-->>MCP: tool result
     MCP-->>Dispatch: data
-    Dispatch-->>Chat: ToolResult
 ```
-
-Current nuance:
-
-- `ToolDispatchService` is already capable of applying HITL confirmation to MCP tools.
-- The current discovery path sets discovered MCP tools to `requiresConfirmation: false`, so most MCP tools will run without a confirmation gate unless that metadata is changed upstream.
 
 ## Persona filtering
 
-The filter boundary is `ChatService.filterTools(...)`, not `MCPService`.
-That means MCP discovery remains global, while per-session visibility is decided only when a persona starts a turn.
-
-```mermaid
-flowchart LR
-    All[All tool metadata from ToolDispatchService] --> Split{split by name prefix}
-    Split --> Native[Native tools]
-    Split --> MCPTools[MCP tools]
-
-    Native --> NativeFilter{persona.allowedTools empty?}
-    NativeFilter -- yes --> NativeKeep[keep all native tools]
-    NativeFilter -- no --> NativeAllow[keep only native names present in allowedTools]
-
-    MCPTools --> Policy{persona.mcpPolicy}
-    Policy -- allow_all --> MCPKeep[keep all MCP tools]
-    Policy -- deny_all --> MCPDrop[drop all MCP tools]
-    Policy -- allow_list --> MCPAllow[keep only MCP names also present in allowedTools]
-
-    NativeKeep --> Merged[Merged filtered ToolMeta list]
-    NativeAllow --> Merged
-    MCPKeep --> Merged
-    MCPAllow --> Merged
-```
-
-This is the real behavior in code today:
+The filter boundary remains `ChatService.filterTools(...)`, not `MCPService`.
+MCP discovery is global; per-session visibility is decided when a persona starts
+a turn.
 
 - `allow_all` means all connected MCP tools are visible.
 - `deny_all` means none are visible.
-- `allow_list` uses concrete tool names in `persona.allowedTools`, including prefixed MCP names.
+- `allow_list` uses concrete prefixed MCP tool names in `persona.allowedTools`.
 
 ## REST surface
 
@@ -138,62 +138,58 @@ Current controller endpoints:
 
 | Method | Path | Behavior |
 | --- | --- | --- |
-| `GET` | `/mcp/servers` | List stored servers with live status merged in when present |
-| `POST` | `/mcp/servers` | Insert a row and immediately attempt connection |
-| `DELETE` | `/mcp/servers/:id` | Disconnect and remove the server |
-| `POST` | `/mcp/servers/:id/restart` | Force a reconnect cycle for one server |
+| `GET` | `/mcp/servers` | List visible TOML and SQLite entries with resolved state and live status |
+| `POST` | `/mcp/servers` | Insert a SQLite row and immediately reconcile runtime |
+| `DELETE` | `/mcp/servers/:serverKey` | Disconnect and remove a SQLite entry; TOML entries reject removal |
+| `POST` | `/mcp/servers/:serverKey/restart` | Force a reconnect cycle for one visible entry |
+| `POST` | `/mcp/servers/reload-config` | Reload TOML-managed config and reconcile runtime |
+| `POST` | `/mcp/servers/import/external/discover` | Discover external MCP configs and annotate equivalent entries |
+| `POST` | `/mcp/servers/import/external/apply` | Import selected entries into SQLite |
 | `GET` | `/mcp/tools` | Return only currently connected, discovered MCP tools |
 
-## Agent QA tool profile
+## External import semantics
 
-Architecture and AgentFlow validation should use a small, explicit MCP profile
-instead of relying on whatever tools happen to be connected:
+External import is no longer a hard dedupe gate.
 
-| Server | Purpose | Required for |
-| --- | --- | --- |
-| `mcp-dev-servers` | Kalio service lifecycle, logs, stack health, managed service restart | Full-stack architecture QA and live run recovery |
-| `mcp-playwright-orchestrator` | Browser flow execution, screenshots, visual/WCAG/focus/runtime audits | FE-started workflow proof and generated-site QA |
+- Equivalent config is reported as `equivalentToExisting`.
+- Equivalent entries remain selectable in the import modal.
+- Import still writes to SQLite with provenance such as `cursor`, `windsurf`, `codex`, `copilot`, or `manual`.
+- Conflict resolution happens later in the runtime registry, not during import discovery.
 
-Kalio can receive this profile in two ways, but only one is the normal
-Kalio-Forever development path:
+## Agent QA profile
 
-1. Manage the servers from TOML using
-   `docs/examples/kalio-agent-qa-mcp.config.toml` as the copy source. This is
-   the source of truth for Kalio-Forever dev.
-2. Import `.vscode/mcp.json` through Settings -> MCP Servers -> Import Existing
-   MCP Configs only for legacy/manual UI inspection or importer debugging.
-   `MCPExternalImportService` discovers the workspace `.vscode` config through
-   the `copilot` source entry.
+Architecture and AgentFlow validation should use a small, explicit MCP profile:
 
-Do not keep both TOML-managed and UI-imported duplicates active. Do not use
-`~/.codex/config.toml` as evidence for Kalio MCP configuration; it is a separate
-Codex-only config surface.
+| Server | Purpose |
+| --- | --- |
+| `mcp-dev-servers` | Kalio lifecycle, logs, stack health, managed service restart |
+| `mcp-playwright-orchestrator` | Browser flow execution, screenshots, visual/WCAG/focus/runtime audits |
 
-Agent personas used for testing should either use `mcpPolicy = "allow_all"` in a
-dedicated QA persona or an allow-list that includes only the prefixed tools from
-these two servers plus the native architecture/runtime tools needed for the run.
-General product personas should not receive this profile by default.
+For Kalio-Forever development, manage that profile primarily through
+`docs/examples/kalio-agent-qa-mcp.config.toml`. The repo `.vscode/mcp.json`
+remains a legacy/manual import source, not the canonical dev path. Do not use
+`~/.codex/config.toml` as evidence for Kalio MCP state.
 
 ## Status events
 
-The live service pushes status snapshots through the gateway reference using:
+The live service pushes status snapshots through:
 
 - `mcp:server:status`
 
-Payload includes:
+Payload currently includes:
 
 - `serverId`
+- `serverKey`
 - `serverName`
 - `status`
 - `toolCount`
 - optional `lastError`
 
-This is the main push-based observability channel for MCP connectivity in the current runtime.
-
 ## Current invariants and caveats
 
 - MCP startup must stay non-blocking for the main API boot path.
-- Only connected handles should contribute tools to `getAllTools()`.
-- Prefixed tool names must remain stable for persona allow-lists and chat history to stay meaningful.
-- Filtering belongs at the chat/session boundary, not in the discovery layer.
-- Connection errors and health-check failures must be persisted back to the DB summary, otherwise the admin UI will drift from runtime reality.
+- Only active connected handles should contribute tools to `getAllTools()`.
+- Equivalent TOML and SQLite entries must remain separately visible in API/UI.
+- Conflict resolution belongs in the registry layer, not in import discovery.
+- Removing TOML entries from runtime requires editing TOML, not deleting SQLite rows.
+- Prefixed tool names must remain stable enough for persona allow-lists and chat history to stay meaningful.
