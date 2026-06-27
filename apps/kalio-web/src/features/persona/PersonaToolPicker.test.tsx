@@ -43,12 +43,14 @@ const TOOL_FIXTURE: ToolMeta[] = [
     requiresConfirmation: false,
   },
   {
-    name: 'mcp_web_search',
+    name: 'mcp_toml::web_search',
     description: 'Search the web through MCP.',
     parameters: {},
     requiresConfirmation: false,
   },
 ];
+const LEGACY_MCP_TOOL = 'mcp_web_search';
+const CANONICAL_MCP_TOOL = 'mcp_toml::web_search';
 
 function installFetchMock(payload: ToolMeta[], failOnce = false) {
   const fetchMock = vi.fn(async () => {
@@ -127,8 +129,8 @@ describe('PersonaToolPicker', () => {
     });
 
     fireEvent.click(screen.getByTestId('mcp-policy-allow_list'));
-    await screen.findByTestId('tool-toggle-mcp_web_search');
-    fireEvent.click(screen.getByTestId('tool-toggle-mcp_web_search'));
+    await screen.findByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`);
+    fireEvent.click(screen.getByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`));
 
     await waitFor(() => {
       expect(screen.getByTestId('mcp-policy-allow_list').querySelector('input')).toBeChecked();
@@ -156,22 +158,43 @@ describe('PersonaToolPicker', () => {
     const user = userEvent.setup();
     installFetchMock(TOOL_FIXTURE);
 
-    render(<ToolPickerHarness initialSelected={['vfs_read_file', 'mcp_web_search']} initialPolicy="allow_list" />);
+    render(<ToolPickerHarness initialSelected={['vfs_read_file', CANONICAL_MCP_TOOL]} initialPolicy="allow_list" />);
 
-    await screen.findByTestId('tool-toggle-mcp_web_search');
+    await screen.findByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`);
     expect(screen.getByTestId('mcp-policy-allow_list').querySelector('input')).toBeChecked();
-    expect(screen.getByTestId('tool-toggle-mcp_web_search').querySelector('input')).toBeChecked();
+    expect(screen.getByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`).querySelector('input')).toBeChecked();
 
     await user.click(screen.getByTestId('mcp-policy-allow_all'));
     await user.click(screen.getByTestId('mcp-policy-allow_list'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('tool-toggle-mcp_web_search').querySelector('input')).not.toBeChecked();
+      expect(screen.getByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`).querySelector('input')).not.toBeChecked();
+    });
+  });
+
+  it('accepts legacy MCP allow-list names and normalizes them to canonical identifiers', async () => {
+    const user = userEvent.setup();
+    installFetchMock(TOOL_FIXTURE);
+
+    render(
+      <ToolPickerHarness
+        initialSelected={[LEGACY_MCP_TOOL]}
+        initialPolicy="allow_list"
+      />,
+    );
+
+    await screen.findByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`);
+    expect(screen.getByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`).querySelector('input')).toBeChecked();
+
+    await user.click(screen.getByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`).querySelector('input')).not.toBeChecked();
     });
   });
 
   it('shows read-only badges for grouped tools and MCP policy summaries', () => {
-    render(<PersonaToolBadges tools={['vfs_read_file', 'vfs_write_file', 'mcp_web_search']} mcpPolicy="allow_list" />);
+    render(<PersonaToolBadges tools={['vfs_read_file', 'vfs_write_file', LEGACY_MCP_TOOL]} mcpPolicy="allow_list" />);
 
     expect(screen.getByTitle('vfs_read_file, vfs_write_file')).toBeInTheDocument();
     expect(screen.getByTitle('mcp_web_search')).toHaveTextContent('MCP:1');
@@ -186,7 +209,7 @@ describe('PersonaToolPicker', () => {
   it('renders the no tools state when the catalog has no native tools', async () => {
     installFetchMock([
       {
-        name: 'mcp_web_search',
+        name: CANONICAL_MCP_TOOL,
         description: 'Search the web through MCP.',
         parameters: {},
         requiresConfirmation: false,

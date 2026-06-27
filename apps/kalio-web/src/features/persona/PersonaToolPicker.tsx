@@ -32,6 +32,36 @@ function deriveGroup(name: string): string {
   return key;
 }
 
+function toLegacyMcpToolName(toolName: string): string | null {
+  if (!toolName.startsWith('mcp_')) {
+    return null;
+  }
+
+  const body = toolName.slice(4);
+  const serverKeySeparator = body.indexOf('::');
+  if (serverKeySeparator < 0) {
+    return null;
+  }
+
+  const toolSeparator = body.lastIndexOf('_');
+  if (toolSeparator <= serverKeySeparator + 2 || toolSeparator === body.length - 1) {
+    return null;
+  }
+
+  const serverId = body.slice(serverKeySeparator + 2, toolSeparator);
+  const toolId = body.slice(toolSeparator + 1);
+  if (!serverId || !toolId) {
+    return null;
+  }
+
+  return `mcp_${serverId}_${toolId}`;
+}
+
+function isMcpToolSelected(selectedSet: Set<string>, toolName: string): boolean {
+  const legacy = toLegacyMcpToolName(toolName);
+  return selectedSet.has(toolName) || (legacy !== null && selectedSet.has(legacy));
+}
+
 interface Props {
   selected: string[];
   mcpPolicy: MCPPolicy;
@@ -128,10 +158,17 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
 
   const toggleMcpTool = (name: string) => {
     const next = new Set(selectedSet);
-    if (next.has(name)) {
+    const legacy = toLegacyMcpToolName(name);
+    if (next.has(name) || (legacy !== null && next.has(legacy))) {
       next.delete(name);
+      if (legacy !== null) {
+        next.delete(legacy);
+      }
     } else {
       next.add(name);
+      if (legacy !== null) {
+        next.delete(legacy);
+      }
     }
     onChange([...next], 'allow_list');
   };
@@ -313,7 +350,7 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
                     <input
                       type="checkbox"
                       className="checkbox checkbox-xs"
-                      checked={selectedSet.has(tool.name)}
+                      checked={isMcpToolSelected(selectedSet, tool.name)}
                       onChange={() => toggleMcpTool(tool.name)}
                     />
                     <span className="font-mono text-[11px] text-secondary/80 truncate">{tool.name}</span>
