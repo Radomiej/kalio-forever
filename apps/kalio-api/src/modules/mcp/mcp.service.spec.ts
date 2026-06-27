@@ -387,9 +387,9 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
   // --- Internal state helpers (accessed via unknown cast, no `any`) ---
   type ServiceInternals = {
-    toolNameMap: Map<string, { serverId: string; originalName: string }>;
+    toolNameMap: Map<string, { serverKey: string; originalName: string }>;
     handles: Map<string, { id: string; tools: MCPTool[]; status: string }>;
-    discoverTools(serverId: string, client: unknown): Promise<MCPTool[]>;
+    discoverTools(serverKey: string, client: unknown): Promise<MCPTool[]>;
   };
 
   describe('getToolByName()', () => {
@@ -399,14 +399,14 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
     it('returns undefined when tool is in toolNameMap but server handle does not exist', () => {
       const internals = service as unknown as ServiceInternals;
-      internals.toolNameMap.set('mcp_sqlite::s1_foo', { serverId: 'sqlite::s1', originalName: 'foo' });
+      internals.toolNameMap.set('mcp_sqlite::s1_foo', { serverKey: 'sqlite::s1', originalName: 'foo' });
       // No handle for 's1' → optional chain returns undefined
       expect(service.getToolByName('mcp_sqlite::s1_foo')).toBeUndefined();
     });
 
     it('returns undefined when server is present but tools array is empty (disconnected)', () => {
       const internals = service as unknown as ServiceInternals;
-      internals.toolNameMap.set('mcp_sqlite::s1_bar', { serverId: 'sqlite::s1', originalName: 'bar' });
+      internals.toolNameMap.set('mcp_sqlite::s1_bar', { serverKey: 'sqlite::s1', originalName: 'bar' });
       internals.handles.set('sqlite::s1', { id: 's1', tools: [], status: 'disconnected' });
       expect(service.getToolByName('mcp_sqlite::s1_bar')).toBeUndefined();
     });
@@ -420,7 +420,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
         serverId: 'sqlite::s1',
       };
       const internals = service as unknown as ServiceInternals;
-      internals.toolNameMap.set('mcp_sqlite::s1_baz', { serverId: 'sqlite::s1', originalName: 'baz' });
+      internals.toolNameMap.set('mcp_sqlite::s1_baz', { serverKey: 'sqlite::s1', originalName: 'baz' });
       internals.handles.set('sqlite::s1', { id: 's1', tools: [tool], status: 'connected' });
       expect(service.getToolByName('mcp_sqlite::s1_baz')).toStrictEqual(tool);
     });
@@ -434,8 +434,8 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
         serverId: 'toml::docs',
       };
       const internals = service as unknown as ServiceInternals;
-      internals.toolNameMap.set('mcp_toml::docs_search', { serverId: 'toml::docs', originalName: 'search' });
-      internals.toolNameMap.set('mcp_docs_search', { serverId: 'toml::docs', originalName: 'search' });
+      internals.toolNameMap.set('mcp_toml::docs_search', { serverKey: 'toml::docs', originalName: 'search' });
+      internals.toolNameMap.set('mcp_docs_search', { serverKey: 'toml::docs', originalName: 'search' });
       internals.handles.set('toml::docs', { id: 'docs', tools: [tool], status: 'connected' });
 
       expect(service.getToolByName('mcp_docs_search')).toStrictEqual(tool);

@@ -65,7 +65,7 @@ type MCPServerRow = typeof mcpServers.$inferSelect;
 export class MCPService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MCPService.name);
   private handles = new Map<string, ServerHandle>();
-  private toolNameMap = new Map<string, { serverId: string; originalName: string }>();
+  private toolNameMap = new Map<string, { serverKey: string; originalName: string }>();
   private healthTimer: ReturnType<typeof setInterval> | null = null;
   private gatewayRef?: { emitToAll(event: string, data: unknown): void };
 
@@ -101,23 +101,23 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   getToolByName(toolName: string): MCPTool | undefined {
     const ref = this.toolNameMap.get(toolName);
     if (!ref) return undefined;
-    const tools = this.handles.get(ref.serverId)?.tools ?? [];
+    const tools = this.handles.get(ref.serverKey)?.tools ?? [];
     return tools.find((tool) => (
-      tool.name === toolName || tool.name === `mcp_${ref.serverId}_${ref.originalName}`
+      tool.name === toolName || tool.name === `mcp_${ref.serverKey}_${ref.originalName}`
     ));
   }
 
-  getToolsForServer(serverId: string): MCPTool[] {
-    return this.handles.get(serverId)?.tools ?? [];
+  getToolsForServer(serverKey: string): MCPTool[] {
+    return this.handles.get(serverKey)?.tools ?? [];
   }
 
-  resolveToolName(prefixed: string): { serverId: string; originalName: string } | null {
+  resolveToolName(prefixed: string): { serverKey: string; originalName: string } | null {
     return this.toolNameMap.get(prefixed) ?? null;
   }
 
-  async callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<unknown> {
-    const handle = this.handles.get(serverId);
-    if (!handle || handle.status !== 'connected') throw new Error(`MCP server ${serverId} not connected`);
+  async callTool(serverKey: string, toolName: string, args: Record<string, unknown>): Promise<unknown> {
+    const handle = this.handles.get(serverKey);
+    if (!handle || handle.status !== 'connected') throw new Error(`MCP server ${serverKey} not connected`);
     return handle.client.callTool({ name: toolName, arguments: args });
   }
 
@@ -347,7 +347,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async discoverTools(serverId: string, client: Client): Promise<MCPTool[]> {
+  private async discoverTools(serverKey: string, client: Client): Promise<MCPTool[]> {
     const tools: MCPTool[] = [];
     let cursor: string | undefined;
     let iterations = 0;
@@ -355,35 +355,35 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     do {
       const result = await client.listTools(cursor ? { cursor } : undefined);
       for (const t of result.tools) {
-        const canonicalName = `mcp_${serverId}_${t.name}`;
-        this.toolNameMap.set(canonicalName, { serverId, originalName: t.name });
+        const canonicalName = `mcp_${serverKey}_${t.name}`;
+        this.toolNameMap.set(canonicalName, { serverKey, originalName: t.name });
 
         // TODO: legacy fallback - keep resolving old mcp_<serverId>_<tool> aliases for one release.
-        const legacyName = this.toLegacyPrefixedToolName(serverId, t.name);
+        const legacyName = this.toLegacyPrefixedToolName(serverKey, t.name);
         if (legacyName) {
-          this.toolNameMap.set(legacyName, { serverId, originalName: t.name });
+          this.toolNameMap.set(legacyName, { serverKey, originalName: t.name });
         }
         tools.push({
           name: canonicalName,
           description: t.description ?? '',
           parameters: (t.inputSchema ?? {}) as Record<string, unknown>,
           requiresConfirmation: false,
-          serverKey: serverId,
-          serverId,
+          serverKey,
+          serverId: serverKey,
         } satisfies MCPTool);
       }
       cursor = result.nextCursor;
       iterations++;
       if (iterations >= MAX_ITERATIONS) {
-        this.logger.warn(`[MCP] Tool discovery hit ${MAX_ITERATIONS}-iteration limit for ${serverId}, stopping pagination`);
+        this.logger.warn(`[MCP] Tool discovery hit ${MAX_ITERATIONS}-iteration limit for ${serverKey}, stopping pagination`);
         break;
       }
     } while (cursor);
     return tools;
   }
 
-  private toLegacyPrefixedToolName(serverId: string, originalName: string): string | null {
-    const parsed = parseServerKey(serverId);
+  private toLegacyPrefixedToolName(serverKey: string, originalName: string): string | null {
+    const parsed = parseServerKey(serverKey);
     if (!parsed) {
       return null;
     }
@@ -507,9 +507,9 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     return Object.keys(headers).length > 0 ? headers : undefined;
   }
 
-  private removeToolRefs(serverId: string): void {
+  private removeToolRefs(serverKey: string): void {
     for (const [name, info] of this.toolNameMap) {
-      if (info.serverId === serverId) this.toolNameMap.delete(name);
+      if (info.serverKey === serverKey) this.toolNameMap.delete(name);
     }
   }
 

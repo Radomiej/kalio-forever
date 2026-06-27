@@ -916,7 +916,7 @@ describe('ToolDispatchService', () => {
   describe('dispatch — MCP tool routing', () => {
     it('routes tool name to MCPService and returns success', async () => {
       const mcpService = {
-        resolveToolName: vi.fn().mockReturnValue({ serverId: 's1', originalName: 'search' }),
+        resolveToolName: vi.fn().mockReturnValue({ serverKey: 's1', originalName: 'search' }),
         callTool: vi.fn().mockResolvedValue({ results: [] }),
         getToolByName: vi.fn().mockReturnValue(
           { name: 'mcp_s1_search', description: 'search', parameters: {}, requiresConfirmation: false, serverId: 's1' },
@@ -938,7 +938,7 @@ describe('ToolDispatchService', () => {
 
     it('triggers HITL confirmation for MCP tool with requiresConfirmation=true', async () => {
       const mcpService = {
-        resolveToolName: vi.fn().mockReturnValue({ serverId: 's1', originalName: 'delete_file' }),
+        resolveToolName: vi.fn().mockReturnValue({ serverKey: 's1', originalName: 'delete_file' }),
         callTool: vi.fn().mockResolvedValue({ deleted: true }),
         getToolByName: vi.fn().mockReturnValue(
           { name: 'mcp_s1_delete_file', description: 'Deletes a file', parameters: {}, requiresConfirmation: true, serverId: 's1' },
@@ -970,7 +970,7 @@ describe('ToolDispatchService', () => {
 
     it('executes MCP tool without HITL when requiresConfirmation=false', async () => {
       const mcpService = {
-        resolveToolName: vi.fn().mockReturnValue({ serverId: 's1', originalName: 'list_files' }),
+        resolveToolName: vi.fn().mockReturnValue({ serverKey: 's1', originalName: 'list_files' }),
         callTool: vi.fn().mockResolvedValue({ files: [] }),
         getToolByName: vi.fn().mockReturnValue(
           { name: 'mcp_s1_list_files', description: 'Lists files', parameters: {}, requiresConfirmation: false, serverId: 's1' },
@@ -992,7 +992,7 @@ describe('ToolDispatchService', () => {
 
     it('returns error result when MCP callTool throws', async () => {
       const mcpService = {
-        resolveToolName: vi.fn().mockReturnValue({ serverId: 's1', originalName: 'broken_tool' }),
+        resolveToolName: vi.fn().mockReturnValue({ serverKey: 's1', originalName: 'broken_tool' }),
         callTool: vi.fn().mockRejectedValue(new Error('MCP connection lost')),
         getToolByName: vi.fn().mockReturnValue(
           { name: 'mcp_s1_broken_tool', description: 'Broken', parameters: {}, requiresConfirmation: false, serverId: 's1' },

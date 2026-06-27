@@ -65,7 +65,7 @@ export class ToolDispatchService {
 
     const entry = this.toolMap.get(toolName);
     if (!entry) {
-      // Route MCP tools: names follow mcp_{serverId}_{toolName} pattern
+      // Route MCP tools: names follow mcp_{serverKey}_{toolName} pattern, with legacy aliases still accepted.
       if (this.mcpService) {
         const mcpRef = this.mcpService.resolveToolName(toolName);
         if (mcpRef) {
@@ -78,7 +78,7 @@ export class ToolDispatchService {
             }
           }
           try {
-            const data = await this.mcpService.callTool(mcpRef.serverId, mcpRef.originalName, args);
+            const data = await this.mcpService.callTool(mcpRef.serverKey, mcpRef.originalName, args);
             return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
