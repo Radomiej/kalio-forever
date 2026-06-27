@@ -226,13 +226,13 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     await this.connectHandle(handle);
   }
 
-  private async resolveServerKey(serverKeyOrId: string): Promise<string | null> {
-    const parsed = parseServerKey(serverKeyOrId);
+  private async resolveServerKey(serverKeyOrLegacyId: string): Promise<string | null> {
+    const parsed = parseServerKey(serverKeyOrLegacyId);
     if (parsed) {
-      return serverKeyOrId;
+      return serverKeyOrLegacyId;
     }
 
-    const directCandidates = [`toml::${serverKeyOrId}`, `sqlite::${serverKeyOrId}`];
+    const directCandidates = [`toml::${serverKeyOrLegacyId}`, `sqlite::${serverKeyOrLegacyId}`];
     for (const candidate of directCandidates) {
       if (this.handles.has(candidate)) {
         return candidate;
@@ -242,10 +242,10 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     const [row] = await this.drizzle.db
       .select({ id: mcpServers.id })
       .from(mcpServers)
-      .where(eq(mcpServers.id, serverKeyOrId))
+      .where(eq(mcpServers.id, serverKeyOrLegacyId))
       .limit(1);
     if (row) {
-      return `sqlite::${serverKeyOrId}`;
+      return `sqlite::${serverKeyOrLegacyId}`;
     }
 
     if (!this.kalioConfig) {
@@ -253,8 +253,8 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     }
 
     const { config } = await this.kalioConfig.getEffectiveConfig();
-    if (Object.prototype.hasOwnProperty.call(config.mcp_servers ?? {}, serverKeyOrId)) {
-      return `toml::${serverKeyOrId}`;
+    if (Object.prototype.hasOwnProperty.call(config.mcp_servers ?? {}, serverKeyOrLegacyId)) {
+      return `toml::${serverKeyOrLegacyId}`;
     }
 
     return null;
