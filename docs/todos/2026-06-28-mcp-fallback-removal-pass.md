@@ -70,3 +70,4 @@ classDiagram
 
 - 2026-06-28: compatibility helpers are centralized and verified; no production MCP endpoint/client call sites still build on raw `id`.
 - 2026-06-28: this note intentionally does not remove fallback behavior yet.
+- 2026-06-28: AC-07 MCP e2e helper now requires canonical `serverKey` on returned servers and passed against the playwright stack.
