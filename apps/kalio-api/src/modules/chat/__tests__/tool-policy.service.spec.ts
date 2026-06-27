@@ -57,7 +57,7 @@ describe('ToolPolicyService', () => {
     expect(decision.allowedToolNames).toEqual(['vfs_read', 'fs_read']);
   });
 
-  it('allow-list personas can use legacy MCP names and still reach canonical MCP tools', async () => {
+  it('allow-list personas drop legacy MCP names instead of remapping them', async () => {
     const service = makeService(
       ['mcp_docs_search'],
       'allow_list',
@@ -69,10 +69,10 @@ describe('ToolPolicyService', () => {
     });
 
     expect(decision.source).toBe('persona');
-    expect(decision.allowedToolNames).toEqual(['mcp_toml::docs_search']);
+    expect(decision.allowedToolNames).toEqual([]);
   });
 
-  it('subagent explicit legacy MCP names resolve to canonical tool names', async () => {
+  it('subagent explicit legacy MCP names are ignored', async () => {
     const service = makeService(
       ['vfs_read'],
       'allow_all',
@@ -86,7 +86,7 @@ describe('ToolPolicyService', () => {
     });
 
     expect(decision.source).toBe('runtime-explicit');
-    expect(decision.allowedToolNames).toEqual(['mcp_toml::docs_search']);
+    expect(decision.allowedToolNames).toEqual([]);
   });
 
   it('agent-flow-branch intersects persona, slot policy, and runtime context', async () => {

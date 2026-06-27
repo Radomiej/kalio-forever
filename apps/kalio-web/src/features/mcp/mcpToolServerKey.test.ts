@@ -18,7 +18,7 @@ describe('mcpToolServerKey', () => {
     expect(toolBelongsToServerKey(tool, 'sqlite::legacy-docs')).toBe(false);
   });
 
-  it('falls back to legacy serverId when canonical serverKey is missing', () => {
+  it('does not treat legacy serverId-only tools as canonical', () => {
     const tool = {
       name: 'mcp_docs_search',
       description: 'legacy search',
@@ -27,7 +27,7 @@ describe('mcpToolServerKey', () => {
       requiresConfirmation: false,
     };
 
-    expect(getCanonicalMcpToolServerKey(tool)).toBe('sqlite::docs');
-    expect(toolBelongsToServerKey(tool, 'sqlite::docs')).toBe(true);
+    expect(getCanonicalMcpToolServerKey(tool)).toBe('');
+    expect(toolBelongsToServerKey(tool, 'sqlite::docs')).toBe(false);
   });
 });

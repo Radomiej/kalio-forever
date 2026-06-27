@@ -13,7 +13,7 @@ import type {
 import { PersonaService } from '../persona/persona.service';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { applyArchitectureCliToolPreferences } from './architecture-slot-tool-policy';
-import { hasLegacyMcpAlias, resolveToolAlias } from './mcp-tool-allow-list';
+import { resolveToolAlias } from './mcp-tool-allow-list';
 
 const HOST_FS_TOOL_NAMES = new Set(['fs_list', 'fs_read', 'fs_write', 'fs_grep', 'fs_delete']);
 const TERMINAL_TOOL_NAMES = new Set(['terminal_spawn', 'terminal_output', 'terminal_list']);
@@ -290,9 +290,7 @@ export class ToolPolicyService {
       filteredMcp = [];
     } else {
       const toolSet = new Set(allowedTools ?? []);
-      filteredMcp = mcpTools.filter((toolMeta) => (
-        toolSet.has(toolMeta.name) || hasLegacyMcpAlias(toolMeta.name, toolSet)
-      ));
+      filteredMcp = mcpTools.filter((toolMeta) => toolSet.has(toolMeta.name));
     }
 
     return [...filteredNative, ...filteredMcp];

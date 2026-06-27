@@ -1,10 +1,10 @@
 ## Summary
 
-One-release compatibility window for MCP/serverKey migration is still active.
+MCP/serverKey fallback removal is complete.
 Current production state:
-- canonical `serverKey` is already the primary surface for endpoints, client actions, and tool/status projections
-- legacy `serverId` remains only in narrow compatibility boundaries
-- those compatibility boundaries are centralized into dedicated helpers, which makes the future removal pass mechanical
+- canonical `serverKey` is the only lookup key used by MCP clients, allow-lists, and service resolution
+- legacy `serverId` is no longer used as a fallback path
+- payload aliases still emit `serverId` where existing external contracts expect it
 
 ## Current Architecture
 
@@ -14,10 +14,10 @@ flowchart LR
   UI --> H2["mcpToolAllowList.ts"]
   API["MCPService / ToolPolicyService"] --> H3["mcp-projections.ts"]
   API --> H4["mcp-tool-allow-list.ts"]
-  H1 -. legacy alias fallback .-> SID["serverId"]
-  H2 -. legacy alias fallback .-> SID
-  H3 -. compatibility payloads .-> SID
-  H4 -. compatibility allow-list .-> SID
+  H1 --> CANON["serverKey"]
+  H2 --> CANON
+  H3 -. payload alias .-> SID["serverId"]
+  H4 --> CANON
 ```
 
 ## Target Architecture
@@ -68,8 +68,8 @@ classDiagram
 
 ## Notes
 
-- 2026-06-28: compatibility helpers are centralized and verified; no production MCP endpoint/client call sites still build on raw `id`.
-- 2026-06-28: shared `@kalio/types` now makes `MCPTool.serverKey` canonical and required while keeping `serverId` as a compatibility-only alias; backend and web targeted tests plus typecheck/build passed.
-- 2026-06-28: this note intentionally does not remove fallback behavior yet.
+- 2026-06-28: fallback removal is implemented; backend and web targeted tests plus typecheck/build passed on the canonical-only lookup path.
+- 2026-06-28: shared `@kalio/types` makes `MCPTool.serverKey` canonical and required while `serverId` survives only as a payload alias.
+- 2026-06-28: the previous compatibility window is closed; no lookup or allow-list path should depend on `serverId`.
 - 2026-06-28: AC-07 MCP e2e helper now requires canonical `serverKey` on returned servers and passed against the playwright stack.
 - 2026-06-28: web search confirmed no direct `mcp:*` event consumers in `apps/kalio-web/src`, so the remaining `serverId` event aliases are transport contracts only, not active frontend call sites.

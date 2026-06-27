@@ -174,7 +174,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
   });
 
   describe('removeServer()', () => {
-    it('accepts legacy sqlite row id and removes row during compatibility fallback', async () => {
+    it('rejects legacy sqlite row ids after fallback removal', async () => {
       const db = (drizzleSvc as unknown as { db: ReturnType<typeof drizzle> }).db;
       await db.insert(schema.mcpServers).values({
         id: 'legacy-1',
@@ -186,9 +186,9 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
         createdAt: new Date(),
       });
 
-      await expect(service.removeServer('legacy-1')).resolves.not.toThrow();
+      await expect(service.removeServer('legacy-1')).rejects.toThrow('MCP server not found: legacy-1');
       const all = await service.findAll();
-      expect(all).toHaveLength(0);
+      expect(all.map((server) => server.serverKey)).toContain('sqlite::legacy-1');
     });
 
     it('does not throw when server not found in handles', async () => {
@@ -220,7 +220,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       await expect(service.removeServer('toml::docs')).rejects.toThrow('managed by .kalio/config.toml');
     });
 
-    it('resolves legacy TOML key before rejecting remove for managed config', async () => {
+    it('rejects legacy TOML keys after fallback removal', async () => {
       const kalioConfig = makeKalioConfigMock({
         docs: {
           command: 'npx',
@@ -228,10 +228,10 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       });
       service = new MCPService(drizzleSvc, kalioConfig as KalioConfigService);
 
-      await expect(service.removeServer('docs')).rejects.toThrow('managed by .kalio/config.toml');
+      await expect(service.removeServer('docs')).rejects.toThrow('MCP server not found: docs');
     });
 
-    it('prefers TOML over SQLite when both share the same raw key', async () => {
+    it('does not resolve raw keys when TOML and SQLite share the same id', async () => {
       const db = (drizzleSvc as unknown as { db: ReturnType<typeof drizzle> }).db;
       await db.insert(schema.mcpServers).values({
         id: 'docs',
@@ -250,7 +250,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       });
       service = new MCPService(drizzleSvc, kalioConfig as KalioConfigService);
 
-      await expect(service.removeServer('docs')).rejects.toThrow('managed by .kalio/config.toml');
+      await expect(service.removeServer('docs')).rejects.toThrow('MCP server not found: docs');
 
       const all = await service.findAll();
       expect(all.map((server) => server.serverKey)).toContain('sqlite::docs');
@@ -326,7 +326,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
   });
 
   describe('restartServer()', () => {
-    it('accepts legacy sqlite id when handle key is stored in runtime map', async () => {
+    it('rejects legacy sqlite ids when restarting runtime handles', async () => {
       const internals = service as unknown as {
         handles: Map<string, {
           serverKey: string;
@@ -367,10 +367,9 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
         signature: 'http:',
       });
 
-      await expect(service.restartServer('legacy-run')).resolves.not.toThrow();
-      expect(disconnectHandle).toHaveBeenCalledWith('sqlite::legacy-run');
-      expect(connectHandle).toHaveBeenCalledTimes(1);
-      expect(connectHandle).toHaveBeenCalledWith(expect.objectContaining({ serverKey: 'sqlite::legacy-run' }));
+      await expect(service.restartServer('legacy-run')).rejects.toThrow('MCP server not found: legacy-run');
+      expect(disconnectHandle).not.toHaveBeenCalled();
+      expect(connectHandle).not.toHaveBeenCalled();
 
       connectHandle.mockRestore();
       disconnectHandle.mockRestore();
@@ -519,7 +518,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       expect(service.getToolByName('mcp_sqlite::s1_baz')).toStrictEqual(tool);
     });
 
-    it('resolves legacy prefixed MCPTool names when a canonical serverKey is active', () => {
+    it('does not resolve legacy prefixed MCPTool names without an explicit alias map entry', () => {
       const tool: MCPTool = {
         name: 'mcp_toml::docs_search',
         description: 'search docs',
@@ -530,10 +529,10 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       };
       const internals = service as unknown as ServiceInternals;
       internals.toolNameMap.set('mcp_toml::docs_search', { serverKey: 'toml::docs', originalName: 'search' });
-      internals.toolNameMap.set('mcp_docs_search', { serverKey: 'toml::docs', originalName: 'search' });
       internals.handles.set('toml::docs', { id: 'docs', tools: [tool], status: 'connected' });
 
-      expect(service.getToolByName('mcp_docs_search')).toStrictEqual(tool);
+      expect(service.getToolByName('mcp_toml::docs_search')).toStrictEqual(tool);
+      expect(service.getToolByName('mcp_docs_search')).toBeUndefined();
     });
   });
 
@@ -559,7 +558,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       expect(tools[99].name).toBe('mcp_sqlite::s1_tool_100');
     });
 
-    it('stores legacy alias names for toml and sqlite serverKey-shaped handles', async () => {
+    it('stores only canonical tool names for toml and sqlite serverKey-shaped handles', async () => {
       const fakeClient = {
         listTools: vi.fn(async () => ({
           tools: [{ name: 'search', description: 'search docs', inputSchema: {} }],
@@ -576,7 +575,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       expect(canonicalTools[0]!.serverId).toBe('toml::docs');
 
       expect(internals.toolNameMap.has('mcp_toml::docs_search')).toBe(true);
-      expect(internals.toolNameMap.has('mcp_docs_search')).toBe(true);
+      expect(internals.toolNameMap.has('mcp_docs_search')).toBe(false);
     });
 
     it('stops early when server returns no nextCursor', async () => {
