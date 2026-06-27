@@ -14,7 +14,7 @@ describe('parseMcpJson', () => {
     });
     const result = parseMcpJson(json);
     expect(result).toHaveLength(1);
-    expect(result[0].key).toBe('my-server');
+    expect(result[0].serverKey).toBe('my-server');
     expect(result[0].dto.transport).toBe('http');
     expect(result[0].dto.url).toBe('https://mcp.example.com/sse');
     expect(result[0].dto.headers).toEqual({ Authorization: 'Bearer sk-abc' });
@@ -33,7 +33,7 @@ describe('parseMcpJson', () => {
     });
     const result = parseMcpJson(json);
     expect(result).toHaveLength(1);
-    expect(result[0].key).toBe('playwright');
+    expect(result[0].serverKey).toBe('playwright');
     expect(result[0].dto.transport).toBe('stdio');
     expect(result[0].dto.command).toBe('npx');
     expect(result[0].dto.args).toEqual(['@playwright/mcp@latest', '--headless']);
@@ -79,8 +79,8 @@ describe('parseMcpJson', () => {
     });
     const result = parseMcpJson(json);
     expect(result).toHaveLength(2);
-    expect(result[0].key).toBe('github');
-    expect(result[1].key).toBe('playwright');
+    expect(result[0].serverKey).toBe('github');
+    expect(result[1].serverKey).toBe('playwright');
   });
 
   it('uses entry name field when present', () => {
@@ -102,7 +102,7 @@ describe('parseMcpJson', () => {
     });
     const result = parseMcpJson(json);
     expect(result).toHaveLength(1);
-    expect(result[0].key).toBe('valid');
+    expect(result[0].serverKey).toBe('valid');
   });
 
   it('throws on invalid JSON', () => {
@@ -168,7 +168,7 @@ describe('parseMcpJson', () => {
     const result = parseMcpJson(json);
 
     expect(result).toHaveLength(1);
-    expect(result[0].key).toBe('valid');
+    expect(result[0].serverKey).toBe('valid');
   });
 
   it('skips stdio entries whose args array contains non-string values (REGRESSION)', () => {
@@ -182,7 +182,7 @@ describe('parseMcpJson', () => {
     const result = parseMcpJson(json);
 
     expect(result).toHaveLength(1);
-    expect(result[0].key).toBe('valid');
+    expect(result[0].serverKey).toBe('valid');
     expect(result[0].dto.args).toEqual(['server.py']);
   });
 });
