@@ -9,6 +9,7 @@ interface MCPPanelProps {
 
 /** Strip the `mcp_{serverId}_` prefix that the backend adds to tool names. */
 function cleanToolName(toolName: string, serverId: string, serverKey: string): string {
+  // TODO: legacy fallback - keep raw serverId tool prefixes visible until old tool metadata ages out.
   const prefixes = [`mcp_${serverId}_`, `mcp_${serverKey}_`];
   for (const prefix of prefixes) {
     if (toolName.startsWith(prefix)) return toolName.slice(prefix.length);
@@ -46,7 +47,7 @@ function ServerRow({ server, onRestart }: ServerRowProps) {
       )
       .catch(() => setTools([]))
       .finally(() => setLoadingTools(false));
-  }, [server.serverKey]);
+  }, [server.id, server.serverKey]);
 
   const toggle = () => {
     setOpen((v) => {

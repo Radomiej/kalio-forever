@@ -378,6 +378,7 @@ function launchAllowedToolNames(context: Record<string, unknown> | undefined): s
 }
 
 function hasLegacyMcpAlias(toolName: string, allowedTools: Set<string>): boolean {
+  // TODO: legacy fallback - accept old mcp_<serverId>_<tool> allow-list entries for one release.
   const legacy = toLegacyMcpToolName(toolName);
   return legacy ? allowedTools.has(legacy) : false;
 }
