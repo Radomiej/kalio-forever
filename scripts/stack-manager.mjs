@@ -24,6 +24,7 @@ const backendPortDefault = isProdProfile ? '4016' : '0';
 const frontendPortDefault = isProdProfile ? '6188' : '0';
 const backendPortArg = Number.parseInt(getArgValue(args, '--backend-port', backendPortDefault), 10);
 const frontendPortArg = Number.parseInt(getArgValue(args, '--frontend-port', frontendPortDefault), 10);
+const forceRestart = args.includes('--force-restart');
 const useDirectRuntime = args.includes('--runtime') && getArgValue(args, '--runtime', '') === 'direct';
 
 const apiDir = resolve(repoRoot, 'apps/kalio-api');
@@ -32,6 +33,12 @@ const webDir = resolve(repoRoot, 'apps/kalio-web');
 const webDistDir = resolve(webDir, 'dist');
 const workspaceRoot = resolve(repoRoot, 'data/workspaces-qa');
 const databasePath = resolve(repoRoot, 'data/kalio-qa.db');
+const backendDistCandidates = [
+  backendDist,
+  resolve(apiDir, 'dist/main.cjs'),
+  resolve(apiDir, 'dist/main.mjs'),
+];
+const frontendDistIndexCandidates = [resolve(webDistDir, 'index.html'), resolve(webDistDir, 'index.htm')];
 
 if (!Number.isInteger(backendPortArg) || backendPortArg < 0 || !Number.isInteger(frontendPortArg) || frontendPortArg < 0) {
   throw new Error('backend-port and frontend-port must be non-negative integers. Use 0 for an allocated free port.');
@@ -62,7 +69,7 @@ function getArgValue(argv, flag, fallback) {
 }
 
 function showUsage() {
-  console.log('Usage: node scripts/stack-manager.mjs <start|status|stop> [--json] [--profile prod] [--backend-port <port|0>] [--frontend-port <port|0>] [--skip-build] [--runtime direct] [--use-env-llm] [--force-env-llm] [--env-file <path>] [--data-root <path>] [--database-path <path>] [--workspace-root <path>] [--memory-db-path <path>] [--embedding-cache-dir <path>] [--provider xiaomimimo] [--model mimo-v2.5] [--base-url https://api.xiaomimimo.com/v1]');
+  console.log('Usage: node scripts/stack-manager.mjs <start|status|stop> [--json] [--profile prod] [--backend-port <port|0>] [--frontend-port <port|0>] [--skip-build] [--force-restart] [--runtime direct] [--use-env-llm] [--force-env-llm] [--env-file <path>] [--data-root <path>] [--database-path <path>] [--workspace-root <path>] [--memory-db-path <path>] [--embedding-cache-dir <path>] [--provider xiaomimimo] [--model mimo-v2.5] [--base-url https://api.xiaomimimo.com/v1]');
 }
 
 function resolveConfiguredPath(pathValue) {
@@ -199,6 +206,15 @@ function getPnpmLauncher() {
   }
 
   throw new Error('pnpm launcher not found. Re-run setup with pnpm available.');
+}
+
+function resolveBuiltArtifact(candidates) {
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function quoteShellArg(arg) {
@@ -464,7 +480,11 @@ async function detectKnownManagedPortConflicts() {
 }
 
 async function startStack() {
-  await clearIfRunning();
+  if (forceRestart) {
+    await forceRestartStack();
+  } else {
+    await clearIfRunning();
+  }
 
   if (args.includes('--skip-build') && (backendPortArg === 0 || frontendPortArg === 0)) {
     throw new Error('--skip-build requires explicit --backend-port and --frontend-port so the existing frontend bundle matches the running API URL.');
@@ -501,15 +521,26 @@ async function startStack() {
     }
     await buildStack(pnpm, backendEnv, frontendEnv);
   }
-  if (!existsSync(backendDist) || !existsSync(resolve(webDir, 'dist/index.html'))) {
-    throw new Error('Built stack requires backend and frontend dist artifacts. Run without --skip-build or run: pnpm build');
+  const resolvedBackendDist = resolveBuiltArtifact(backendDistCandidates);
+  const resolvedFrontendDist = resolveBuiltArtifact(frontendDistIndexCandidates);
+  if (!resolvedBackendDist || !resolvedFrontendDist) {
+    const apiDistCandidates = existsSync(resolve(apiDir, 'dist')) ? readdirSync(resolve(apiDir, 'dist')).join(', ') : '(dist missing)';
+    const webDistCandidates = existsSync(webDistDir) ? readdirSync(webDistDir).join(', ') : '(dist missing)';
+    throw new Error(
+      `Built stack artifacts missing. backend=${resolvedBackendDist ? 'found' : `missing [${backendDistCandidates.join(', ')}]`} `
+      + `frontend=${resolvedFrontendDist ? 'found' : `missing [${frontendDistIndexCandidates.join(', ')}]`} `
+      + `| dist(api): ${apiDistCandidates} | dist(web): ${webDistCandidates}. `
+      + `Run without --skip-build or run: pnpm build`,
+    );
   }
+
+  
 
   writeFrontendRuntimeConfig(frontendUrl, backendUrl);
 
   const frontendLauncher = resolveFrontendLauncher();
 
-  const backend = spawn(process.execPath, [backendDist], {
+  const backend = spawn(process.execPath, [resolvedBackendDist], {
     cwd: apiDir,
     env: {
       ...backendEnv,
@@ -565,7 +596,7 @@ async function startStack() {
     backend: {
       pid: backend.pid,
       cwd: apiDir,
-      command: `${process.execPath} ${backendDist}`,
+      command: `${process.execPath} ${resolvedBackendDist}`,
     },
     frontend: {
       pid: frontend.pid,
@@ -799,6 +830,26 @@ async function clearIfRunning() {
     return;
   }
   await stopStack();
+}
+
+async function forceRestartStack() {
+  const state = await refreshStatePortOwners(readState() ?? readLastState());
+  if (state && hasAliveChild(state, isProcessAlive)) {
+    await stopStack();
+  } else {
+    clearState();
+    clearLastState();
+  }
+
+  const portsToFree = [backendPortArg, frontendPortArg].filter((port) => Number.isInteger(port) && port > 0);
+  for (const port of portsToFree) {
+    const pid = await resolveListeningPid(port);
+    if (!pid) {
+      continue;
+    }
+    console.log(`[stack] force-restart: stopping pid ${pid} on port ${port}`);
+    await killProcessTree(pid);
+  }
 }
 
 function reportStateProcesses(state) {

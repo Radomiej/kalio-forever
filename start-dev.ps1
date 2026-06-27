@@ -5,9 +5,12 @@
 
 param(
     [switch]$UseMockLLM,
+    [switch]$ForceRestart,
     [int]$BackendPort = 3016,
     [int]$FrontendPort = 5188
 )
+
+$ForceRestart = $ForceRestart -or ($env:KALIO_FORCE_RESTART -in @('1', 'true', 'TRUE', 'True', 'yes', 'YES', 'Yes'));
 
 $root = $PSScriptRoot
 $api  = Join-Path $root "apps\kalio-api"
@@ -25,9 +28,56 @@ $FE_PORT = $FrontendPort
 $script:devStackMutex = $null
 $script:devStackMutexOwned = $false
 $devStackMutexName = "Global\KalioForever-DevStack-$BE_PORT-$FE_PORT"
-try {
+
+function Get-DevLauncherProcessIds {
+    param([int]$CurrentProcessId)
+
+    $escapedRoot = [Regex]::Escape($root)
+    @(
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.ProcessId -ne $CurrentProcessId -and
+                $_.CommandLine -and
+                $_.CommandLine -match $escapedRoot -and
+                $_.CommandLine -match 'start-dev\.ps1'
+            } |
+            Select-Object -ExpandProperty ProcessId
+    ) | Sort-Object -Unique
+}
+
+function Stop-DevLauncherProcesses {
+    param([int[]]$ProcessIds)
+
+    foreach ($processId in @($ProcessIds | Where-Object { $_ -gt 0 } | Sort-Object -Unique)) {
+        try {
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+            Write-Host "  [kill] stale dev launcher PID $processId" -ForegroundColor DarkYellow
+        } catch {
+            Write-Host "  [warn] could not stop stale dev launcher PID ${processId}: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
+function Try-AcquireDevStackMutex {
     $script:devStackMutex = [System.Threading.Mutex]::new($false, $devStackMutexName)
     $script:devStackMutexOwned = $script:devStackMutex.WaitOne(0, $false)
+    return $script:devStackMutexOwned
+}
+
+try {
+    $script:devStackMutexOwned = Try-AcquireDevStackMutex
+    if (-not $script:devStackMutexOwned) {
+        if ($ForceRestart) {
+            Write-Host "  Force restart requested; removing stale dev launcher state..." -ForegroundColor DarkYellow
+            Stop-DevLauncherProcesses -ProcessIds (Get-DevLauncherProcessIds -CurrentProcessId $PID)
+            if ($script:devStackMutex) {
+                try { $script:devStackMutex.Dispose() } catch { }
+                $script:devStackMutex = $null
+            }
+            Start-Sleep -Milliseconds 400
+            $script:devStackMutexOwned = Try-AcquireDevStackMutex
+        }
+    }
     if (-not $script:devStackMutexOwned) {
         $beHealthy = $false
         $feHealthy = $false
