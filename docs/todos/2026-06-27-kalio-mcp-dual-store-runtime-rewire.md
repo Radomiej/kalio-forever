@@ -83,6 +83,8 @@ flowchart TD
 - 2026-06-27: dual-store policy is intentionally fixed to `TOML > SQLite`; there is no manual winner override yet.
 - 2026-06-27: frontend allow-list and MCP panel now prefer canonical `serverKey` names; legacy `serverId` aliases remain only as temporary compatibility fallbacks and are marked with `TODO: legacy fallback`.
 - 2026-06-27: frontend canonical MCP surfaces are verified by `corepack pnpm --filter kalio-web exec vitest run src/features/mcp/MCPPanel.test.tsx src/features/settings/MCPSettingsPanel.test.tsx src/features/persona/PersonaToolPicker.test.tsx`.
+- 2026-06-27: `corepack pnpm --filter kalio-web run typecheck` and `corepack pnpm --filter kalio-web run build` both pass after the serverKey migration.
+- 2026-06-27: backend allow-list helper naming now uses `serverKeyPart` internally while keeping the one-release legacy alias path intact; verified by `tool-policy.service.spec.ts` and `kalio-api` typecheck.
 - 2026-06-27: Persona allow-list picker now normalizes unambiguous legacy `mcp_<serverId>_<tool>` entries to canonical `serverKey` names after MCP catalog load, so new saves drift toward the canonical format instead of preserving old names indefinitely.
 - 2026-06-27: Settings row keys now derive from canonical `serverKey` and store only; raw row `id` is no longer part of the React key surface.
 - 2026-06-27: MCP runtime status events now emit canonical `serverKey` in the legacy `serverId` field too, so the visible client payload no longer depends on raw row ids.

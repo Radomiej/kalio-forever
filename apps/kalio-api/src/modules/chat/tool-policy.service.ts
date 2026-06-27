@@ -387,7 +387,7 @@ function isServerKey(value: string): boolean {
   return value.startsWith('toml::') || value.startsWith('sqlite::');
 }
 
-function parsePrefixedMcpToolName(toolName: string): { serverIdPart: string; toolName: string } | null {
+function parsePrefixedMcpToolName(toolName: string): { serverKeyPart: string; toolName: string } | null {
   if (!toolName.startsWith('mcp_')) {
     return null;
   }
@@ -397,18 +397,18 @@ function parsePrefixedMcpToolName(toolName: string): { serverIdPart: string; too
     return null;
   }
   return {
-    serverIdPart: body.slice(0, separatorIndex),
+    serverKeyPart: body.slice(0, separatorIndex),
     toolName: body.slice(separatorIndex + 1),
   };
 }
 
 function toLegacyMcpToolName(toolName: string): string | null {
   const parsed = parsePrefixedMcpToolName(toolName);
-  if (!parsed || !isServerKey(parsed.serverIdPart)) {
+  if (!parsed || !isServerKey(parsed.serverKeyPart)) {
     return null;
   }
 
-  return `mcp_${parsed.serverIdPart.slice(parsed.serverIdPart.indexOf('::') + 2)}_${parsed.toolName}`;
+  return `mcp_${parsed.serverKeyPart.slice(parsed.serverKeyPart.indexOf('::') + 2)}_${parsed.toolName}`;
 }
 
 function resolveToolAlias(toolName: string, availableToolNames: Set<string>): string | null {
@@ -422,11 +422,11 @@ function resolveToolAlias(toolName: string, availableToolNames: Set<string>): st
   }
 
   const candidates = new Set<string>();
-  if (isServerKey(parsed.serverIdPart)) {
-    candidates.add(`mcp_${parsed.serverIdPart}_${parsed.toolName}`);
+  if (isServerKey(parsed.serverKeyPart)) {
+    candidates.add(`mcp_${parsed.serverKeyPart}_${parsed.toolName}`);
   } else {
-    candidates.add(`mcp_toml::${parsed.serverIdPart}_${parsed.toolName}`);
-    candidates.add(`mcp_sqlite::${parsed.serverIdPart}_${parsed.toolName}`);
+    candidates.add(`mcp_toml::${parsed.serverKeyPart}_${parsed.toolName}`);
+    candidates.add(`mcp_sqlite::${parsed.serverKeyPart}_${parsed.toolName}`);
   }
 
   for (const candidate of candidates) {
