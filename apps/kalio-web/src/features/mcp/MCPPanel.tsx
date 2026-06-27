@@ -37,6 +37,7 @@ function ServerRow({ server, onRestart }: ServerRowProps) {
     apiClient
       .get<MCPTool[]>('/api/mcp/tools')
       .then((r) =>
+        // TODO: legacy fallback - drop serverId once the one-release compatibility window closes.
         setTools(r.data.filter((t) => (t.serverKey ?? t.serverId) === server.serverKey)),
       )
       .catch(() => setTools([]))
