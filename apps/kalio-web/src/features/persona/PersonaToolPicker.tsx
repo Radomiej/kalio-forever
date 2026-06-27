@@ -58,6 +58,44 @@ function toLegacyMcpToolName(toolName: string): string | null {
   return `mcp_${serverId}_${toolId}`;
 }
 
+function normalizeMcpAllowList(selected: string[], mcpTools: ToolMeta[]): string[] {
+  const canonicalByLegacy = new Map<string, string>();
+  const ambiguousLegacies = new Set<string>();
+
+  for (const tool of mcpTools) {
+    const legacyName = toLegacyMcpToolName(tool.name);
+    if (!legacyName) {
+      continue;
+    }
+
+    const existing = canonicalByLegacy.get(legacyName);
+    if (existing && existing !== tool.name) {
+      ambiguousLegacies.add(legacyName);
+      continue;
+    }
+
+    if (!existing) {
+      canonicalByLegacy.set(legacyName, tool.name);
+    }
+  }
+
+  for (const legacyName of ambiguousLegacies) {
+    canonicalByLegacy.delete(legacyName);
+  }
+
+  const next: string[] = [];
+  const seen = new Set<string>();
+  for (const toolName of selected) {
+    const canonical = canonicalByLegacy.get(toolName) ?? toolName;
+    if (seen.has(canonical)) {
+      continue;
+    }
+    seen.add(canonical);
+    next.push(canonical);
+  }
+  return next;
+}
+
 function isMcpToolSelected(selectedSet: Set<string>, toolName: string): boolean {
   const legacy = toLegacyMcpToolName(toolName);
   return selectedSet.has(toolName) || (legacy !== null && selectedSet.has(legacy));
@@ -87,6 +125,19 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const normalizedSelected = normalizeMcpAllowList(selected, mcpTools);
+
+  useEffect(() => {
+    if (mcpPolicy !== 'allow_list' || mcpTools.length === 0) {
+      return;
+    }
+
+    if (normalizedSelected.length === selected.length && normalizedSelected.every((name, index) => name === selected[index])) {
+      return;
+    }
+
+    onChange(normalizedSelected, mcpPolicy);
+  }, [mcpPolicy, mcpTools, normalizedSelected, onChange, selected]);
 
   const load = useCallback(async () => {
     const controller = new AbortController();
@@ -129,9 +180,9 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
 
   useEffect(() => { void load(); }, [load]);
 
-  const selectedSet = new Set(selected);
+  const selectedSet = new Set(normalizedSelected);
   const allNativeNames = groups.flatMap((g) => g.tools.map((t) => t.name));
-  const mcpAllowListNames = selected.filter(n => n.startsWith('mcp_'));
+  const mcpAllowListNames = normalizedSelected.filter((n) => n.startsWith('mcp_'));
 
   const toggleTool = (name: string) => {
     const next = new Set(selectedSet);
@@ -180,10 +231,10 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
   const setPolicy = (policy: MCPPolicy) => {
     if (policy !== 'allow_list') {
       // strip mcp_* entries from skills when not using allow_list
-      const withoutMcp = selected.filter(n => !n.startsWith('mcp_'));
+      const withoutMcp = normalizedSelected.filter((n) => !n.startsWith('mcp_'));
       onChange(withoutMcp, policy);
     } else {
-      onChange(selected, policy);
+      onChange(normalizedSelected, policy);
     }
   };
 
