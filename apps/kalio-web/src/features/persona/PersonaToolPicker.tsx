@@ -32,6 +32,7 @@ function deriveGroup(name: string): string {
   return key;
 }
 
+// TODO: legacy fallback - accept persisted mcp_<serverId>_<tool> entries for one release.
 function toLegacyMcpToolName(toolName: string): string | null {
   if (!toolName.startsWith('mcp_')) {
     return null;

@@ -358,6 +358,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
         const canonicalName = `mcp_${serverId}_${t.name}`;
         this.toolNameMap.set(canonicalName, { serverId, originalName: t.name });
 
+        // TODO: legacy fallback - keep resolving old mcp_<serverId>_<tool> aliases for one release.
         const legacyName = this.toLegacyPrefixedToolName(serverId, t.name);
         if (legacyName) {
           this.toolNameMap.set(legacyName, { serverId, originalName: t.name });

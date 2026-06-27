@@ -81,3 +81,4 @@ flowchart TD
 
 - 2026-06-27: backend-focused service/db specs are still blocked in this environment by missing native `better-sqlite3` bindings, so full runtime/unit verification could not be completed.
 - 2026-06-27: dual-store policy is intentionally fixed to `TOML > SQLite`; there is no manual winner override yet.
+- 2026-06-27: frontend allow-list and MCP panel now prefer canonical `serverKey` names; legacy `serverId` aliases remain only as temporary compatibility fallbacks and are marked with `TODO: legacy fallback`.
