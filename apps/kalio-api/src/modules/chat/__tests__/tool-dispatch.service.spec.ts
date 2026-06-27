@@ -880,6 +880,37 @@ describe('ToolDispatchService', () => {
       expect(metas).toHaveLength(2);
       expect(metas.map(m => m.name)).toEqual(['tool_a', 'tool_b']);
     });
+
+    it('preserves canonical serverKey on MCP tool metas', async () => {
+      const mcpService = {
+        getAllTools: vi.fn().mockReturnValue([
+          {
+            name: 'mcp_toml::docs_search',
+            description: 'search docs',
+            serverKey: 'toml::docs',
+            serverId: 'toml::docs',
+            parameters: {},
+            requiresConfirmation: false,
+          },
+        ]),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [] },
+          { provide: MCPService, useValue: mcpService },
+        ],
+      }).compile();
+
+      const service = moduleRef.get(ToolDispatchService);
+      const metas = service.getToolMetas();
+      expect(metas).toEqual([
+        expect.objectContaining({
+          name: 'mcp_toml::docs_search',
+          serverKey: 'toml::docs',
+        }),
+      ]);
+    });
   });
 
   describe('dispatch — MCP tool routing', () => {

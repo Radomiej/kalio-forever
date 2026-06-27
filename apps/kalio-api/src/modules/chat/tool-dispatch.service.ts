@@ -39,6 +39,7 @@ export class ToolDispatchService {
       ? this.mcpService.getAllTools().map(t => ({
           name: t.name,
           description: t.description,
+          serverKey: t.serverKey,
           parameters: t.parameters,
           requiresConfirmation: t.requiresConfirmation,
         }))

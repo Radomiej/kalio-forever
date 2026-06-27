@@ -10,6 +10,14 @@ const mockTool: ToolMeta = {
   requiresConfirmation: false,
 };
 
+const mockMcpTool: ToolMeta = {
+  name: 'mcp_toml::docs_search',
+  description: 'Search docs',
+  serverKey: 'toml::docs',
+  parameters: {},
+  requiresConfirmation: false,
+};
+
 function makeDrizzle() {
   return {
     db: {
@@ -65,6 +73,23 @@ describe('ToolController', () => {
     it('returns tool meta list', () => {
       const result = controller.findAll();
       expect(result).toEqual([mockTool]);
+    });
+
+    it('keeps canonical serverKey on MCP tools returned by /api/tools', () => {
+      registry = makeRegistry([mockTool]);
+      controller = new ToolController(registry as never, drizzle as never, {
+        getAllTools: vi.fn().mockReturnValue([mockMcpTool]),
+      } as never);
+
+      const result = controller.findAll();
+
+      expect(result).toEqual([
+        mockTool,
+        expect.objectContaining({
+          name: 'mcp_toml::docs_search',
+          serverKey: 'toml::docs',
+        }),
+      ]);
     });
   });
 
