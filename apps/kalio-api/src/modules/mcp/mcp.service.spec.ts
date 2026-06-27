@@ -510,6 +510,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
         description: 'baz',
         parameters: {},
         requiresConfirmation: false,
+        serverKey: 'sqlite::s1',
         serverId: 'sqlite::s1',
       };
       const internals = service as unknown as ServiceInternals;
@@ -524,6 +525,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
         description: 'search docs',
         parameters: {},
         requiresConfirmation: false,
+        serverKey: 'toml::docs',
         serverId: 'toml::docs',
       };
       const internals = service as unknown as ServiceInternals;

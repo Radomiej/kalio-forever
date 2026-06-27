@@ -92,6 +92,7 @@ describe('MCPPanel', () => {
       {
         name: 'mcp_alpha::list_prompts',
         description: 'Legacy name',
+        serverKey: 'sqlite::alpha',
         serverId: 'sqlite::alpha',
         requiresConfirmation: false,
         parameters: {},

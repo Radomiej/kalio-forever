@@ -763,8 +763,8 @@ export interface MCPServer {
 export interface MCPTool {
   name: string;               // runtime name: "mcp_<serverKey>_<toolName>"
   description: string;
-  serverKey?: ID;             // canonical origin-qualified runtime key, e.g. "toml::docs" or "sqlite::abc123"
-  serverId: ID;               // legacy alias kept for one release while clients migrate
+  serverKey: ID;              // canonical origin-qualified runtime key, e.g. "toml::docs" or "sqlite::abc123"
+  serverId?: ID;              // legacy alias kept for one release while clients migrate
   requiresConfirmation: boolean;
   parameters: Record<string, unknown>;
 }
@@ -1083,10 +1083,10 @@ export interface SocketEvents {
   'agent:budget_invalidated': AgentBudgetApprovalInvalidated;
 
   // MCP — server → client
-  'mcp:server:status': { serverId: ID; serverKey: string; serverName: string; status: string; toolCount: number; lastError?: string };
-  'mcp:connected': { serverId: ID; serverName: string; toolCount: number };
-  'mcp:disconnected': { serverId: ID; reason: string };
-  'mcp:error': { serverId: ID; error: string };
+  'mcp:server:status': { serverKey: ID; serverId?: ID; serverName: string; status: string; toolCount: number; lastError?: string };
+  'mcp:connected': { serverKey: ID; serverId?: ID; serverName: string; toolCount: number };
+  'mcp:disconnected': { serverKey: ID; serverId?: ID; reason: string };
+  'mcp:error': { serverKey: ID; serverId?: ID; error: string };
 
   // Sessions — server → client
   'session:created': ChatSession;
