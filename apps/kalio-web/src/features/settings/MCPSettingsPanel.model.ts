@@ -8,7 +8,7 @@ import type {
 type LegacyManagedBy = 'toml';
 
 export type SettingsMCPServer = Omit<MCPServer, 'serverKey' | 'store' | 'originSource' | 'effectiveState' | 'conflictGroup'> & {
-  serverKey?: MCPServer['serverKey'];
+  serverKey: MCPServer['serverKey'];
   store?: MCPServer['store'];
   originSource?: MCPServer['originSource'];
   effectiveState?: MCPServer['effectiveState'];
@@ -65,7 +65,7 @@ function sanitizeForTestId(value: string): string {
 
 export function normalizeSettingsServer(server: SettingsMCPServer): SettingsMCPServerRow {
   const store = normalizeStore(server);
-  const serverKey = (server.serverKey?.trim() || server.id).trim();
+  const serverKey = server.serverKey.trim();
   const originSource = normalizeOriginSource(server, store);
   const effectiveState = normalizeEffectiveState(server, store);
   const conflictGroup = normalizeConflictGroup(server, serverKey);
