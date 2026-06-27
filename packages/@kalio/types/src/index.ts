@@ -374,6 +374,7 @@ export interface CreateSessionDto {
 export interface ToolMeta {
   name: string;
   description: string;
+  serverKey?: ID;               // canonical MCP server key when this tool originates from MCP
   parameters: Record<string, unknown>;  // JSON Schema
   requiresConfirmation: boolean;        // HITL gate flag
 }
