@@ -87,3 +87,5 @@ flowchart TD
 - 2026-06-27: MCP runtime status events now emit canonical `serverKey` in the legacy `serverId` field too, so the visible client payload no longer depends on raw row ids.
 - 2026-06-27: the remaining compatibility edges are intentional and narrow: `MCPPanel` tool filtering, persona allow-list normalization, and backend allow-list alias acceptance. They stay until the one-release window closes, then the fallback removal pass can delete them together.
 - 2026-06-27: Tool catalog canonicalization is now verified by focused web tests for the MCP bucket and `serverKey` badge, plus `kalio-web` typecheck/build.
+- 2026-06-27: backend MCP helper naming now uses `serverKey` in canonical lookup paths; only the explicit one-release alias bridges still mention legacy `serverId`.
+- 2026-06-27: targeted backend MCP runtime tests passed after the naming refactor: `tool-dispatch.service.spec.ts`, `mcp.service.spec.ts`, and `kalio-api` typecheck.
