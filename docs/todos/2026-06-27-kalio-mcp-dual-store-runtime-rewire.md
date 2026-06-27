@@ -93,3 +93,4 @@ flowchart TD
 - 2026-06-27: external import flow verification passed after the `sourceKey` rename: `mcp-external-import.service.spec.ts`, `MCPExternalImportModal.test.tsx`, `parseMcpJson.spec.ts`, plus `kalio-api` and `kalio-web` typecheck.
 - 2026-06-27: `resolveServerKey()` now enforces the intended `TOML > SQLite` precedence when both stores share the same raw key, and the regression test covers that conflict case.
 - 2026-06-27: backend MCP service spec now covers the conflicting raw-key precedence case in addition to the existing legacy sqlite/TOML compatibility tests.
+- 2026-06-27: `restartServer('docs')` no longer reuses a stale SQLite handle when TOML owns the same raw key; verified with `mcp.service.spec.ts` and `kalio-api` typecheck.
