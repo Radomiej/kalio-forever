@@ -85,3 +85,5 @@ flowchart TD
 - 2026-06-27: Persona allow-list picker now normalizes unambiguous legacy `mcp_<serverId>_<tool>` entries to canonical `serverKey` names after MCP catalog load, so new saves drift toward the canonical format instead of preserving old names indefinitely.
 - 2026-06-27: Settings row keys now derive from canonical `serverKey` and store only; raw row `id` is no longer part of the React key surface.
 - 2026-06-27: MCP runtime status events now emit canonical `serverKey` in the legacy `serverId` field too, so the visible client payload no longer depends on raw row ids.
+- 2026-06-27: the remaining compatibility edges are intentional and narrow: `MCPPanel` tool filtering, persona allow-list normalization, and backend allow-list alias acceptance. They stay until the one-release window closes, then the fallback removal pass can delete them together.
+- 2026-06-27: Tool catalog canonicalization is now verified by focused web tests for the MCP bucket and `serverKey` badge, plus `kalio-web` typecheck/build.
