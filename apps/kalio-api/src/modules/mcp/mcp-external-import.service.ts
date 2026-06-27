@@ -11,7 +11,7 @@ export interface ExternalMCPServerEntry {
   id: string;
   source: 'cursor' | 'windsurf' | 'codex' | 'copilot';
   configPath: string;
-  key: string;
+  sourceKey: string;
   dto: CreateMCPServerDto;
   details: {
     envKeys: string[];
@@ -172,21 +172,21 @@ export class MCPExternalImportService {
     }
 
     const entries: ExternalMCPServerEntry[] = [];
-    for (const [key, value] of Object.entries(container as Record<string, unknown>)) {
+    for (const [sourceKey, value] of Object.entries(container as Record<string, unknown>)) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         continue;
       }
       const entryObj = value as Record<string, unknown>;
-      const dto = this.toDto(key, entryObj, source);
+      const dto = this.toDto(sourceKey, entryObj, source);
       if (!dto) {
         continue;
       }
 
       entries.push({
-        id: `${source}:${configPath}:${key}`,
+        id: `${source}:${configPath}:${sourceKey}`,
         source,
         configPath,
-        key,
+        sourceKey,
         dto,
         details: {
           envKeys: this.readObjectKeys(entryObj['env']),
@@ -200,12 +200,12 @@ export class MCPExternalImportService {
   }
 
   private toDto(
-    key: string,
+    sourceKey: string,
     entry: Record<string, unknown>,
     source: ExternalMCPServerEntry['source'],
   ): CreateMCPServerDto | null {
     const type = this.readString(entry['type']);
-    const name = this.readString(entry['name']) ?? key;
+    const name = this.readString(entry['name']) ?? sourceKey;
     const url = this.readString(entry['url']);
     const command = this.readString(entry['command']);
 

@@ -5,7 +5,7 @@ interface ExternalMCPServerEntry {
   id: string;
   source: 'cursor' | 'windsurf' | 'codex' | 'copilot';
   configPath: string;
-  key: string;
+  sourceKey: string;
   serverKey?: string;
   store?: string;
   originSource?: string;
@@ -184,9 +184,11 @@ export function MCPExternalImportModal({ isOpen, onClose, onImported }: Props) {
                         ? `HTTP: ${entry.dto.url ?? ''}`
                         : `stdio: ${entry.dto.command ?? ''} ${(entry.dto.args ?? []).join(' ')}`}
                     </p>
-                    {(entry.serverKey || entry.effectiveState || entry.originSource || entry.key) && (
+                    {(entry.serverKey || entry.effectiveState || entry.originSource || entry.sourceKey) && (
                       <p className="text-[11px] text-base-content/60 mt-1">
-                        key: {entry.serverKey ?? entry.key}
+                        {entry.serverKey
+                          ? `serverKey: ${entry.serverKey} | sourceKey: ${entry.sourceKey}`
+                          : `sourceKey: ${entry.sourceKey}`}
                         {entry.effectiveState ? ` | state: ${entry.effectiveState}` : ''}
                         {entry.originSource ? ` | origin: ${entry.originSource}` : ''}
                       </p>

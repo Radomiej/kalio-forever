@@ -10,7 +10,7 @@ describe('MCPExternalImportModal', () => {
       id: 'cursor:/home/user/.config/Cursor/mcp.json:github',
       source: 'cursor' as const,
       configPath: '/home/user/.config/Cursor/mcp.json',
-      key: 'github',
+      sourceKey: 'github',
       dto: {
         name: 'github',
         transport: 'stdio',
@@ -24,7 +24,7 @@ describe('MCPExternalImportModal', () => {
       id: 'cursor:/home/user/.config/Cursor/mcp.json:filesystem',
       source: 'cursor' as const,
       configPath: '/home/user/.config/Cursor/mcp.json',
-      key: 'filesystem',
+      sourceKey: 'filesystem',
       serverKey: 'sqlite::filesystem',
       dto: {
         name: 'filesystem',
@@ -42,7 +42,7 @@ describe('MCPExternalImportModal', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders key fallback when serverKey is missing', async () => {
+  it('renders sourceKey fallback when serverKey is missing', async () => {
     const fetchMock = vi.spyOn(window, 'fetch').mockImplementation(async (url) => {
       if (String(url).endsWith('/api/mcp/servers/import/external/discover')) {
         return new Response(JSON.stringify(baseEntries), {
@@ -65,8 +65,8 @@ describe('MCPExternalImportModal', () => {
 
     await screen.findByText(/Import Existing MCP Configs/);
     expect(fetchMock).toHaveBeenCalled();
-    expect(screen.getByText('key: github')).toBeTruthy();
-    expect(screen.getByText('key: sqlite::filesystem | state: active | origin: cursor')).toBeTruthy();
+    expect(screen.getByText('sourceKey: github')).toBeTruthy();
+    expect(screen.getByText('serverKey: sqlite::filesystem | sourceKey: filesystem | state: active | origin: cursor')).toBeTruthy();
   });
 
   it('sends selected entry ids to apply endpoint and closes on success', async () => {

@@ -89,3 +89,5 @@ flowchart TD
 - 2026-06-27: Tool catalog canonicalization is now verified by focused web tests for the MCP bucket and `serverKey` badge, plus `kalio-web` typecheck/build.
 - 2026-06-27: backend MCP helper naming now uses `serverKey` in canonical lookup paths; only the explicit one-release alias bridges still mention legacy `serverId`.
 - 2026-06-27: targeted backend MCP runtime tests passed after the naming refactor: `tool-dispatch.service.spec.ts`, `mcp.service.spec.ts`, and `kalio-api` typecheck.
+- 2026-06-27: external import discovery now calls the source config identifier `sourceKey` so the UI no longer conflates it with canonical Kalio `serverKey`.
+- 2026-06-27: external import flow verification passed after the `sourceKey` rename: `mcp-external-import.service.spec.ts`, `MCPExternalImportModal.test.tsx`, `parseMcpJson.spec.ts`, plus `kalio-api` and `kalio-web` typecheck.
