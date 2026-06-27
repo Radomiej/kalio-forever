@@ -16,7 +16,11 @@ const readFileMock = vi.mocked(readFile);
 describe('MCPExternalImportService', () => {
   const existingServer: MCPServer = {
     id: 'existing-1',
+    serverKey: 'sqlite::existing-1',
     name: 'Existing GitHub',
+    store: 'sqlite',
+    originSource: 'manual',
+    effectiveState: 'active',
     transport: 'stdio',
     command: 'npx',
     args: ['-y', '@modelcontextprotocol/server-github'],
@@ -29,7 +33,11 @@ describe('MCPExternalImportService', () => {
     findAll: vi.fn(async () => [existingServer]),
     addServer: vi.fn(async (dto: CreateMCPServerDto) => ({
       id: `new-${dto.name}`,
+      serverKey: `sqlite::new-${dto.name}`,
       name: dto.name,
+      store: 'sqlite',
+      originSource: dto.originSource ?? 'manual',
+      effectiveState: 'active',
       transport: dto.transport,
       command: dto.command,
       url: dto.url,
@@ -77,16 +85,16 @@ describe('MCPExternalImportService', () => {
     });
   });
 
-  it('discovers entries from external configs and marks duplicates by effective signature', async () => {
+  it('discovers entries from external configs and marks equivalent existing configs by signature', async () => {
     const entries = await service.discover();
 
     expect(entries).toHaveLength(2);
     const github = entries.find((entry) => entry.key === 'github');
     const filesystem = entries.find((entry) => entry.key === 'filesystem');
 
-    expect(github?.duplicate).toBe(true);
+    expect(github?.equivalentToExisting).toBe(true);
     expect(github?.details.envKeys).toEqual(['GITHUB_TOKEN']);
-    expect(filesystem?.duplicate).toBe(false);
+    expect(filesystem?.equivalentToExisting).toBe(false);
     expect(filesystem?.dto.transport).toBe('stdio');
   });
 
@@ -111,7 +119,7 @@ describe('MCPExternalImportService', () => {
     expect(entries.map((entry) => entry.key)).toEqual(['bomServer']);
   });
 
-  it('applies only selected non-duplicate entries and reports skip/fail/import buckets', async () => {
+  it('applies selected entries even when equivalent config already exists and reports fail buckets', async () => {
     mcpService.addServer.mockRejectedValueOnce(new Error('connect failed'));
 
     const discovered = await service.discover();
@@ -124,15 +132,20 @@ describe('MCPExternalImportService', () => {
 
     const result = await service.apply([selectedGithubId, selectedFilesystemId, 'missing-id']);
 
-    expect(result.imported).toHaveLength(0);
-    expect(result.skipped).toEqual([{ id: selectedGithubId, reason: 'Server with equivalent config already exists' }]);
+    expect(result.imported).toEqual([
+      expect.objectContaining({
+        name: 'filesystem',
+        originSource: 'cursor',
+      }),
+    ]);
+    expect(result.skipped).toEqual([]);
     expect(result.failed).toEqual([
-      { id: selectedFilesystemId, reason: 'connect failed' },
+      { id: selectedGithubId, reason: 'connect failed' },
       { id: 'missing-id', reason: 'Entry was not found in current discovery snapshot' },
     ]);
   });
 
-  it('marks duplicate signatures within the same discovery scan and skips duplicate batch imports', async () => {
+  it('keeps duplicate signatures within the same discovery scan selectable and imports both', async () => {
     accessMock.mockImplementation(async (path) => {
       const normalized = String(path).toLowerCase();
       if (normalized.includes('.cursor') || normalized.includes('code\\user') || normalized.includes('code/user')) {
@@ -168,18 +181,16 @@ describe('MCPExternalImportService', () => {
 
     const entries = await service.discover();
 
-    expect(entries.map((entry) => ({ key: entry.key, duplicate: entry.duplicate }))).toEqual([
-      { key: 'localTools', duplicate: false },
-      { key: 'localToolsAgain', duplicate: true },
+    expect(entries.map((entry) => ({ key: entry.key, equivalentToExisting: entry.equivalentToExisting }))).toEqual([
+      { key: 'localTools', equivalentToExisting: false },
+      { key: 'localToolsAgain', equivalentToExisting: false },
     ]);
 
     const result = await service.apply(entries.map((entry) => entry.id));
 
-    expect(result.imported).toHaveLength(1);
-    expect(result.imported[0]?.name).toBe('localTools');
-    expect(result.skipped).toEqual([
-      { id: entries[1]?.id, reason: 'Server with equivalent config already exists' },
-    ]);
+    expect(result.imported).toHaveLength(2);
+    expect(result.imported.map((entry) => entry.name)).toEqual(['localTools', 'localToolsAgain']);
+    expect(result.skipped).toEqual([]);
   });
 
   it('discovers workspace VS Code MCP configs for the Kalio Settings import flow', async () => {

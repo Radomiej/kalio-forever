@@ -74,4 +74,35 @@ describe('DrizzleService AgentFlow bootstrap repair', () => {
     ]));
     sqlite.close();
   });
+
+  it('backfills new mcp_servers columns on an existing older table', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec(`
+      CREATE TABLE mcp_servers (
+        id text PRIMARY KEY NOT NULL,
+        name text NOT NULL,
+        transport text NOT NULL DEFAULT 'http',
+        url text,
+        command text,
+        args text,
+        env_vars text,
+        headers text,
+        enabled integer NOT NULL DEFAULT 1,
+        status text NOT NULL DEFAULT 'disconnected',
+        tool_count integer NOT NULL DEFAULT 0,
+        last_error text,
+        created_at integer NOT NULL
+      );
+    `);
+    const service = new DrizzleService(null as never);
+    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+
+    (service as unknown as { ensureMcpServerColumns: () => void }).ensureMcpServerColumns();
+
+    const columns = sqlite.prepare('PRAGMA table_info(mcp_servers)').all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'origin_source',
+    ]));
+    sqlite.close();
+  });
 });

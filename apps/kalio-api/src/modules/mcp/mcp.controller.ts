@@ -39,14 +39,14 @@ export class MCPController {
     return this.externalImportService.apply(Array.isArray(dto.entryIds) ? dto.entryIds : []);
   }
 
-  @Delete('servers/:id')
-  removeServer(@Param('id') id: string) {
-    return this.mcpService.removeServer(id);
+  @Delete('servers/:serverKey')
+  removeServer(@Param('serverKey') serverKey: string) {
+    return this.mcpService.removeServer(serverKey);
   }
 
-  @Post('servers/:id/restart')
-  restartServer(@Param('id') id: string) {
-    return this.mcpService.restartServer(id);
+  @Post('servers/:serverKey/restart')
+  restartServer(@Param('serverKey') serverKey: string) {
+    return this.mcpService.restartServer(serverKey);
   }
 
   @Get('tools')

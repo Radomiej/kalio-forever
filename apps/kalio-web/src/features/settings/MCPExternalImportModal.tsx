@@ -6,6 +6,11 @@ interface ExternalMCPServerEntry {
   source: 'cursor' | 'windsurf' | 'codex' | 'copilot';
   configPath: string;
   key: string;
+  serverKey?: string;
+  store?: string;
+  originSource?: string;
+  effectiveState?: string;
+  conflictGroup?: string | null;
   dto: {
     name: string;
     transport: 'stdio' | 'http';
@@ -17,7 +22,7 @@ interface ExternalMCPServerEntry {
     envKeys: string[];
     headerKeys: string[];
   };
-  duplicate: boolean;
+  equivalentToExisting: boolean;
 }
 
 interface ExternalMCPImportResult {
@@ -77,13 +82,13 @@ export function MCPExternalImportModal({ isOpen, onClose, onImported }: Props) {
   const canApply = selectedCount > 0 && !applying && !loading;
 
   const sortedEntries = useMemo(
-    () => [...entries].sort((a, b) => Number(a.duplicate) - Number(b.duplicate)),
+    () => [...entries].sort((a, b) => Number(a.equivalentToExisting) - Number(b.equivalentToExisting)),
     [entries],
   );
 
   const toggleByIndex = (index: number) => {
     const entry = sortedEntries[index];
-    if (!entry || entry.duplicate) {
+    if (!entry) {
       return;
     }
     setSelected((prev) => {
@@ -157,21 +162,21 @@ export function MCPExternalImportModal({ isOpen, onClose, onImported }: Props) {
               return (
                 <label
                   key={entry.id}
-                  className={`p-3 flex gap-3 ${entry.duplicate ? 'opacity-60' : 'cursor-pointer hover:bg-base-200/30'}`}
+                  className="p-3 flex gap-3 cursor-pointer hover:bg-base-200/30"
                 >
                   <input
                     type="checkbox"
                     className="checkbox checkbox-sm mt-1"
                     checked={isChecked}
                     onChange={() => toggleByIndex(index)}
-                    disabled={entry.duplicate}
                     data-testid={`mcp-external-check-${index}`}
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{entry.dto.name}</span>
                       <span className="badge badge-ghost badge-xs uppercase">{entry.source}</span>
-                      {entry.duplicate && <span className="badge badge-warning badge-xs">Already exists</span>}
+                      {entry.store && <span className="badge badge-ghost badge-xs uppercase">{entry.store}</span>}
+                      {entry.equivalentToExisting && <span className="badge badge-warning badge-xs">Equivalent to existing</span>}
                     </div>
                     <p className="text-[11px] text-base-content/55 font-mono mt-1 break-all">{entry.configPath}</p>
                     <p className="text-[11px] text-base-content/70 mt-1">
@@ -179,9 +184,21 @@ export function MCPExternalImportModal({ isOpen, onClose, onImported }: Props) {
                         ? `HTTP: ${entry.dto.url ?? ''}`
                         : `stdio: ${entry.dto.command ?? ''} ${(entry.dto.args ?? []).join(' ')}`}
                     </p>
+                    {(entry.serverKey || entry.effectiveState || entry.originSource) && (
+                      <p className="text-[11px] text-base-content/60 mt-1">
+                        key: {entry.serverKey ?? entry.key}
+                        {entry.effectiveState ? ` | state: ${entry.effectiveState}` : ''}
+                        {entry.originSource ? ` | origin: ${entry.originSource}` : ''}
+                      </p>
+                    )}
                     {(entry.details.envKeys.length > 0 || entry.details.headerKeys.length > 0) && (
                       <p className="text-[11px] text-base-content/60 mt-1">
                         env: {entry.details.envKeys.join(', ') || '-'} | headers: {entry.details.headerKeys.join(', ') || '-'}
+                      </p>
+                    )}
+                    {entry.equivalentToExisting && (
+                      <p className="text-[11px] text-warning mt-1" data-testid={`mcp-external-duplicate-${index}`}>
+                        Equivalent config already exists in Kalio. Selection is still allowed and imports as a separate SQLite entry.
                       </p>
                     )}
                   </div>

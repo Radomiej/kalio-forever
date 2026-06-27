@@ -19,7 +19,11 @@ import { MCPPanel } from './MCPPanel';
 
 const SERVER_ALPHA: MCPServer = {
   id: 'alpha',
+  serverKey: 'sqlite::alpha',
   name: 'Alpha',
+  store: 'sqlite',
+  originSource: 'manual',
+  effectiveState: 'active',
   transport: 'http',
   url: 'https://alpha.example.com/sse',
   status: 'connected',
@@ -29,7 +33,11 @@ const SERVER_ALPHA: MCPServer = {
 
 const SERVER_BETA: MCPServer = {
   id: 'beta',
+  serverKey: 'sqlite::beta',
   name: 'Beta',
+  store: 'sqlite',
+  originSource: 'manual',
+  effectiveState: 'active',
   transport: 'stdio',
   command: 'npx beta-mcp',
   status: 'error',
@@ -43,18 +51,27 @@ describe('MCPPanel', () => {
     vi.clearAllMocks();
   });
 
-  it('deduplicates loaded servers, shows counts, and opens settings from the header', async () => {
+  it('shows counts, keeps visible dual-store rows, and opens settings from the header', async () => {
     const user = userEvent.setup();
     apiGet.mockResolvedValueOnce({
-      data: [SERVER_ALPHA, { ...SERVER_ALPHA, toolCount: 999 }, SERVER_BETA],
+      data: [
+        SERVER_ALPHA,
+        {
+          ...SERVER_ALPHA,
+          id: 'alpha-toml',
+          serverKey: 'toml::alpha',
+          store: 'toml',
+          originSource: 'toml',
+          effectiveState: 'shadowed',
+        },
+        SERVER_BETA,
+      ],
     });
     const onOpenSettings = vi.fn();
 
     render(<MCPPanel onOpenSettings={onOpenSettings} />);
 
-    // The panel deduplicates by server id via Map insertion order, so the later duplicate
-    // wins and its toolCount (999) is what contributes to the header total.
-    expect(await screen.findByText('2 servers · 1000 tools')).toBeInTheDocument();
+    expect(await screen.findByText('3 servers · 5 tools')).toBeInTheDocument();
     expect(screen.getByText('Socket closed')).toBeInTheDocument();
 
     await user.click(screen.getByTestId('mcp-open-settings'));
@@ -65,23 +82,23 @@ describe('MCPPanel', () => {
     const user = userEvent.setup();
     const tools: MCPTool[] = [
       {
-        name: 'mcp_alpha_read_file',
+        name: 'mcp_sqlite::alpha_read_file',
         description: 'Read files',
-        serverId: 'alpha',
+        serverId: 'sqlite::alpha',
         requiresConfirmation: false,
         parameters: {},
       },
       {
         name: 'legacy::list_prompts',
         description: 'Legacy name',
-        serverId: 'alpha',
+        serverId: 'sqlite::alpha',
         requiresConfirmation: false,
         parameters: {},
       },
       {
-        name: 'mcp_beta_hidden_tool',
+        name: 'mcp_sqlite::beta_hidden_tool',
         description: 'Other server tool',
-        serverId: 'beta',
+        serverId: 'sqlite::beta',
         requiresConfirmation: false,
         parameters: {},
       },
@@ -118,7 +135,7 @@ describe('MCPPanel', () => {
     await user.click(screen.getByTestId('mcp-restart'));
 
     await waitFor(() => {
-      expect(apiPost).toHaveBeenCalledWith('/api/mcp/servers/alpha/restart');
+      expect(apiPost).toHaveBeenCalledWith('/api/mcp/servers/sqlite%3A%3Aalpha/restart');
       expect(apiGet).toHaveBeenCalledTimes(2);
     });
   });

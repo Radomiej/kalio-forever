@@ -737,10 +737,18 @@ export interface CreateAllowedPathDto {
 
 // ─── MCP ──────────────────────────────────────────────────────────────────────
 export type MCPServerStatus = 'connecting' | 'connected' | 'disconnected' | 'error' | 'stopped';
+export type MCPServerStore = 'toml' | 'sqlite';
+export type MCPServerOriginSource = 'toml' | 'manual' | 'cursor' | 'windsurf' | 'codex' | 'copilot';
+export type MCPServerEffectiveState = 'active' | 'shadowed' | 'conflict';
 
 export interface MCPServer {
   id: ID;
+  serverKey: string;
   name: string;
+  store: MCPServerStore;
+  originSource?: MCPServerOriginSource;
+  effectiveState: MCPServerEffectiveState;
+  conflictGroup?: string;
   transport: 'stdio' | 'http';
   url?: string;
   command?: string;
@@ -752,9 +760,9 @@ export interface MCPServer {
 }
 
 export interface MCPTool {
-  name: string;               // runtime name: "mcp_<serverId>_<toolName>"
+  name: string;               // runtime name: "mcp_<serverKey>_<toolName>"
   description: string;
-  serverId: ID;
+  serverId: ID;               // origin-qualified runtime id, e.g. "toml::docs" or "sqlite::abc123"
   requiresConfirmation: boolean;
   parameters: Record<string, unknown>;
 }
@@ -767,6 +775,7 @@ export interface CreateMCPServerDto {
   args?: string[];
   env?: Record<string, string>;
   headers?: Record<string, string>;
+  originSource?: Exclude<MCPServerOriginSource, 'toml'>;
 }
 
 // ─── RA-App DSL ───────────────────────────────────────────────────────────────
@@ -1072,7 +1081,7 @@ export interface SocketEvents {
   'agent:budget_invalidated': AgentBudgetApprovalInvalidated;
 
   // MCP — server → client
-  'mcp:server:status': { serverId: ID; serverName: string; status: string; toolCount: number; lastError?: string };
+  'mcp:server:status': { serverId: ID; serverKey: string; serverName: string; status: string; toolCount: number; lastError?: string };
   'mcp:connected': { serverId: ID; serverName: string; toolCount: number };
   'mcp:disconnected': { serverId: ID; reason: string };
   'mcp:error': { serverId: ID; error: string };

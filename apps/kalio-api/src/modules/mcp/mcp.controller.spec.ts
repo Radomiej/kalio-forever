@@ -25,7 +25,7 @@ describe('MCPController', () => {
       args: ['-y', '@modelcontextprotocol/server-github'],
     },
     details: { envKeys: ['GITHUB_TOKEN'], headerKeys: [] },
-    duplicate: false,
+    equivalentToExisting: false,
   }];
   const mcpService = {
     findAll: vi.fn(async () => servers),

@@ -168,6 +168,9 @@ export const mcpServers = sqliteTable('mcp_servers', {
   id:        text('id').primaryKey(),
   name:      text('name').notNull(),
   transport: text('transport', { enum: ['stdio', 'http'] }).notNull().default('http'),
+  originSource: text('origin_source', {
+    enum: ['manual', 'cursor', 'windsurf', 'codex', 'copilot'],
+  }).notNull().default('manual'),
   url:       text('url'),               // for http transport
   command:   text('command'),           // for stdio transport
   args:      text('args', { mode: 'json' }).$type<string[]>(),
