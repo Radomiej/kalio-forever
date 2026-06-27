@@ -89,6 +89,25 @@ describe('ToolPanel', () => {
     expect(screen.getByTitle('Requires confirmation (click to disable)')).toBeInTheDocument();
   });
 
+  it('groups MCP tools separately and shows their canonical serverKey badge', async () => {
+    apiGet.mockResolvedValue({
+      data: [
+        makeTool({
+          name: 'mcp_toml::docs_search',
+          description: 'Search docs',
+          serverKey: 'toml::docs',
+        }),
+        makeTool({ name: 'web_search' }),
+      ],
+    });
+
+    render(<ToolPanel />);
+
+    expect(await screen.findByText('2 tools')).toBeInTheDocument();
+    expect(screen.getByText('MCP')).toBeInTheDocument();
+    expect(screen.getByTitle('MCP serverKey: toml::docs')).toBeInTheDocument();
+  });
+
   it('reverts the optimistic toggle when the patch call fails', async () => {
     apiGet.mockResolvedValue({
       data: [makeTool({ name: 'dangerous_tool', requiresConfirmation: false })],

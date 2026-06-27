@@ -106,7 +106,14 @@ function ToolRow({ tool, onToggleConfirmation }: { tool: ToolMeta; onToggleConfi
           <div className="flex items-start gap-2">
             <Wrench size={12} className="mt-1 shrink-0 text-base-content/40" />
             <div className="flex-1 min-w-0">
-              <span className="font-mono text-xs text-primary">{tool.name}</span>
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="font-mono text-xs text-primary">{tool.name}</span>
+                {tool.serverKey && (
+                  <span className="badge badge-xs badge-ghost font-mono text-base-content/50" title={`MCP serverKey: ${tool.serverKey}`}>
+                    {tool.serverKey}
+                  </span>
+                )}
+              </div>
               {expanded && (
                 <>
                   <p className="text-xs text-base-content/60 mt-0.5 whitespace-normal">{tool.description}</p>

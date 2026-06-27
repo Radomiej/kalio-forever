@@ -69,6 +69,12 @@ export function groupToolsByPrefix(tools: ToolMeta[]): Array<{ label: string; to
     }
   }
 
+  const mcpTools = tools.filter((tool) => !assigned.has(tool.name) && tool.name.startsWith('mcp_'));
+  if (mcpTools.length > 0) {
+    mcpTools.forEach((tool) => assigned.add(tool.name));
+    groups.push({ label: 'MCP', tools: mcpTools });
+  }
+
   const rest = tools.filter((tool) => !assigned.has(tool.name));
   if (rest.length > 0) {
     groups.push({ label: 'Other', tools: rest });
