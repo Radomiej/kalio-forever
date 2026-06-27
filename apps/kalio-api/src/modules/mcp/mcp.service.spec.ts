@@ -380,6 +380,22 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       internals.handles.set('sqlite::s1', { id: 's1', tools: [tool], status: 'connected' });
       expect(service.getToolByName('mcp_sqlite::s1_baz')).toStrictEqual(tool);
     });
+
+    it('resolves legacy prefixed MCPTool names when a canonical serverKey is active', () => {
+      const tool: MCPTool = {
+        name: 'mcp_toml::docs_search',
+        description: 'search docs',
+        parameters: {},
+        requiresConfirmation: false,
+        serverId: 'toml::docs',
+      };
+      const internals = service as unknown as ServiceInternals;
+      internals.toolNameMap.set('mcp_toml::docs_search', { serverId: 'toml::docs', originalName: 'search' });
+      internals.toolNameMap.set('mcp_docs_search', { serverId: 'toml::docs', originalName: 'search' });
+      internals.handles.set('toml::docs', { id: 'docs', tools: [tool], status: 'connected' });
+
+      expect(service.getToolByName('mcp_docs_search')).toStrictEqual(tool);
+    });
   });
 
   describe('discoverTools() — pagination safety cap', () => {
@@ -402,6 +418,24 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       expect(tools).toHaveLength(100);
       expect(tools[0].name).toBe('mcp_sqlite::s1_tool_1');
       expect(tools[99].name).toBe('mcp_sqlite::s1_tool_100');
+    });
+
+    it('stores legacy alias names for toml and sqlite serverKey-shaped handles', async () => {
+      const fakeClient = {
+        listTools: vi.fn(async () => ({
+          tools: [{ name: 'search', description: 'search docs', inputSchema: {} }],
+          nextCursor: undefined,
+        })),
+      };
+
+      const internals = service as unknown as ServiceInternals;
+      const canonicalTools = await internals.discoverTools('toml::docs', fakeClient);
+
+      expect(canonicalTools).toHaveLength(1);
+      expect(canonicalTools[0]!.name).toBe('mcp_toml::docs_search');
+
+      expect(internals.toolNameMap.has('mcp_toml::docs_search')).toBe(true);
+      expect(internals.toolNameMap.has('mcp_docs_search')).toBe(true);
     });
 
     it('stops early when server returns no nextCursor', async () => {

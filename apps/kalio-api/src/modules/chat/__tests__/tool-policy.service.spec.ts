@@ -15,7 +15,12 @@ const allTools: ToolMeta[] = [
   { name: 'terminal_spawn', description: 'Terminal', parameters: {}, requiresConfirmation: true },
 ];
 
-function makeService(personaAllowed: string[], mcpPolicy: 'allow_all' | 'deny_all' = 'allow_all'): ToolPolicyService {
+function makeService(
+  personaAllowed: string[],
+  mcpPolicy: 'allow_all' | 'deny_all' | 'allow_list' = 'allow_all',
+  extraTools: ToolMeta[] = [],
+): ToolPolicyService {
+  const tools = [...allTools, ...extraTools];
   const personaService = {
     getSessionConfig: vi.fn().mockResolvedValue({
       systemPrompt: 'base',
@@ -27,7 +32,7 @@ function makeService(personaAllowed: string[], mcpPolicy: 'allow_all' | 'deny_al
     }),
   } as unknown as PersonaService;
   const toolDispatch = {
-    getToolMetas: vi.fn().mockReturnValue(allTools),
+    getToolMetas: vi.fn().mockReturnValue(tools),
   } as unknown as ToolDispatchService;
   return new ToolPolicyService(personaService, toolDispatch);
 }
@@ -50,6 +55,38 @@ describe('ToolPolicyService', () => {
     });
     expect(decision.source).toBe('runtime-explicit');
     expect(decision.allowedToolNames).toEqual(['vfs_read', 'fs_read']);
+  });
+
+  it('allow-list personas can use legacy MCP names and still reach canonical MCP tools', async () => {
+    const service = makeService(
+      ['mcp_docs_search'],
+      'allow_list',
+      [{ name: 'mcp_toml::docs_search', description: 'MCP docs search', parameters: {}, requiresConfirmation: false }],
+    );
+    const decision = await service.decide({
+      runtimeKind: 'chat',
+      personaId: 'qa',
+    });
+
+    expect(decision.source).toBe('persona');
+    expect(decision.allowedToolNames).toEqual(['mcp_toml::docs_search']);
+  });
+
+  it('subagent explicit legacy MCP names resolve to canonical tool names', async () => {
+    const service = makeService(
+      ['vfs_read'],
+      'allow_all',
+      [{ name: 'mcp_toml::docs_search', description: 'MCP docs search', parameters: {}, requiresConfirmation: false }],
+    );
+    const decision = await service.decide({
+      runtimeKind: 'subagent',
+      personaId: 'qa',
+      explicitToolNames: ['mcp_docs_search'],
+      architectureContext: { projectPath: 'C:\\demo' },
+    });
+
+    expect(decision.source).toBe('runtime-explicit');
+    expect(decision.allowedToolNames).toEqual(['mcp_toml::docs_search']);
   });
 
   it('agent-flow-branch intersects persona, slot policy, and runtime context', async () => {

@@ -101,7 +101,10 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   getToolByName(toolName: string): MCPTool | undefined {
     const ref = this.toolNameMap.get(toolName);
     if (!ref) return undefined;
-    return this.handles.get(ref.serverId)?.tools.find((t) => t.name === toolName);
+    const tools = this.handles.get(ref.serverId)?.tools ?? [];
+    return tools.find((tool) => (
+      tool.name === toolName || tool.name === `mcp_${ref.serverId}_${ref.originalName}`
+    ));
   }
 
   getToolsForServer(serverId: string): MCPTool[] {
@@ -352,10 +355,15 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     do {
       const result = await client.listTools(cursor ? { cursor } : undefined);
       for (const t of result.tools) {
-        const prefixed = `mcp_${serverId}_${t.name}`;
-        this.toolNameMap.set(prefixed, { serverId, originalName: t.name });
+        const canonicalName = `mcp_${serverId}_${t.name}`;
+        this.toolNameMap.set(canonicalName, { serverId, originalName: t.name });
+
+        const legacyName = this.toLegacyPrefixedToolName(serverId, t.name);
+        if (legacyName) {
+          this.toolNameMap.set(legacyName, { serverId, originalName: t.name });
+        }
         tools.push({
-          name: prefixed,
+          name: canonicalName,
           description: t.description ?? '',
           parameters: (t.inputSchema ?? {}) as Record<string, unknown>,
           requiresConfirmation: false,
@@ -370,6 +378,15 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       }
     } while (cursor);
     return tools;
+  }
+
+  private toLegacyPrefixedToolName(serverId: string, originalName: string): string | null {
+    const parsed = parseServerKey(serverId);
+    if (!parsed) {
+      return null;
+    }
+
+    return `mcp_${parsed.id}_${originalName}`;
   }
 
   private async healthCheckAll(): Promise<void> {
