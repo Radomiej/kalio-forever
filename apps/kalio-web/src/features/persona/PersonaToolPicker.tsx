@@ -49,13 +49,13 @@ function toLegacyMcpToolName(toolName: string): string | null {
     return null;
   }
 
-  const serverId = body.slice(serverKeySeparator + 2, toolSeparator);
+  const legacyServerId = body.slice(serverKeySeparator + 2, toolSeparator);
   const toolId = body.slice(toolSeparator + 1);
-  if (!serverId || !toolId) {
+  if (!legacyServerId || !toolId) {
     return null;
   }
 
-  return `mcp_${serverId}_${toolId}`;
+  return `mcp_${legacyServerId}_${toolId}`;
 }
 
 function normalizeMcpAllowList(selected: string[], mcpTools: ToolMeta[]): string[] {
