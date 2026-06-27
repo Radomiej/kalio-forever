@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { RefreshCw, ChevronDown, ChevronRight, Wrench, Settings, AlertCircle } from 'lucide-react';
 import { apiClient } from '../../services/apiClient';
 import type { MCPServer, MCPTool } from '@kalio/types';
+import { toolBelongsToServerKey } from './mcpToolServerKey';
 
 interface MCPPanelProps {
   onOpenSettings: () => void;
@@ -36,10 +37,7 @@ function ServerRow({ server, onRestart }: ServerRowProps) {
     setLoadingTools(true);
     apiClient
       .get<MCPTool[]>('/api/mcp/tools')
-      .then((r) =>
-        // TODO: legacy fallback - drop serverId once the one-release compatibility window closes.
-        setTools(r.data.filter((t) => (t.serverKey ?? t.serverId) === server.serverKey)),
-      )
+      .then((r) => setTools(r.data.filter((t) => toolBelongsToServerKey(t, server.serverKey))))
       .catch(() => setTools([]))
       .finally(() => setLoadingTools(false));
   }, [server.serverKey]);
