@@ -1,5 +1,4 @@
 import { Logger } from '@nestjs/common';
-import { env, pipeline } from '@huggingface/transformers';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -39,6 +38,30 @@ type FeatureExtractionPipelineFactory = (
   options?: FeatureExtractionPipelineOptions
 ) => Promise<FeatureExtractor>;
 
+type TransformersDependency = {
+  env: {
+    cacheDir: string;
+    allowRemoteModels: boolean;
+  };
+  pipeline: FeatureExtractionPipelineFactory;
+};
+
+let transformersRuntime: Promise<TransformersDependency> | null = null;
+
+async function loadTransformersRuntime(): Promise<TransformersDependency> {
+  if (!transformersRuntime) {
+    transformersRuntime = import('@huggingface/transformers').then((mod) => {
+      const dependency = mod as unknown as TransformersDependency;
+      if (typeof dependency.pipeline !== 'function') {
+        throw new Error('Invalid transformers runtime: missing pipeline factory');
+      }
+      return dependency;
+    });
+  }
+
+  return transformersRuntime;
+}
+
 interface LocalTransformersEmbeddingProviderConfig {
   model: string;
   dimensions: number;
@@ -61,12 +84,11 @@ export class LocalTransformersEmbeddingProvider implements IEmbeddingProvider {
   private readonly logger = new Logger(LocalTransformersEmbeddingProvider.name);
   private extractor: Promise<FeatureExtractor> | null = null;
   private activeBackend: ActiveLocalEmbeddingBackend | null = null;
+  private readonly cacheDir: string;
 
   constructor(private readonly config: LocalTransformersEmbeddingProviderConfig) {
-    const cacheDir = path.resolve(this.config.cacheDir);
-    fs.mkdirSync(cacheDir, { recursive: true });
-    env.cacheDir = cacheDir;
-    env.allowRemoteModels = this.config.allowRemoteModels ?? false;
+    this.cacheDir = path.resolve(this.config.cacheDir);
+    fs.mkdirSync(this.cacheDir, { recursive: true });
   }
 
   static isMissingLocalModelError(err: unknown): boolean {
@@ -86,7 +108,9 @@ export class LocalTransformersEmbeddingProvider implements IEmbeddingProvider {
   }
 
   private async createExtractor(): Promise<FeatureExtractor> {
-    const pipelineFactory = pipeline as unknown as FeatureExtractionPipelineFactory;
+    const { env, pipeline: pipelineFactory } = await loadTransformersRuntime();
+    env.cacheDir = this.cacheDir;
+    env.allowRemoteModels = this.config.allowRemoteModels ?? false;
 
     if (this.config.backend === 'webgpu') {
       const extractor = await pipelineFactory('feature-extraction', this.config.model, this.buildPipelineOptions('webgpu', 'fp16'));

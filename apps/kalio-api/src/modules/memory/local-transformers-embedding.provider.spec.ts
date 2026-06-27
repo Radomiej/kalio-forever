@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { env } from '@huggingface/transformers';
 import {
   DEFAULT_LOCAL_EMBEDDING_BACKEND,
   DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
@@ -7,15 +6,17 @@ import {
   LocalTransformersEmbeddingProvider,
 } from './local-transformers-embedding.provider';
 
+const mockedHuggingFaceEnv = {
+  cacheDir: '',
+  allowRemoteModels: false,
+};
+
 const { pipelineMock } = vi.hoisted(() => ({
   pipelineMock: vi.fn(),
 }));
 
 vi.mock('@huggingface/transformers', () => ({
-  env: {
-    cacheDir: '',
-    allowRemoteModels: false,
-  },
+  env: mockedHuggingFaceEnv,
   pipeline: pipelineMock,
 }));
 
@@ -30,8 +31,8 @@ function makeProvider(backend: 'auto' | 'webgpu' | 'cpu' = DEFAULT_LOCAL_EMBEDDI
 
 beforeEach(() => {
   pipelineMock.mockReset();
-  env.allowRemoteModels = false;
-  env.cacheDir = '';
+  mockedHuggingFaceEnv.allowRemoteModels = false;
+  mockedHuggingFaceEnv.cacheDir = '';
 });
 
 describe('LocalTransformersEmbeddingProvider', () => {
