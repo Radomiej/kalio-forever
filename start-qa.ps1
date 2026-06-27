@@ -2,6 +2,7 @@
 # Runs dist-only API + vite preview on fixed ports with isolated AppData profile.
 # Usage:
 #   .\start-qa.ps1              # build dist, then start
+#   .\start-qa.ps1 -ForceRestart # force-stop prior QA stack/state before start
 #   .\start-qa.ps1 -SkipBuild   # start from existing dist
 #   .\start-qa.ps1 -UseMockLLM  # ignore .env LLM and force mock provider
 # Stop: Ctrl+C in this console, or `pnpm qa:stop`
@@ -10,6 +11,7 @@ param(
     [switch]$Rebuild,
     [switch]$SkipBuild,
     [switch]$UseMockLLM,
+    [switch]$ForceRestart,
     [int]$BackendPort = 3316,
     [int]$FrontendPort = 5288
 )
@@ -78,6 +80,10 @@ $stackArgs = @(
 
 if ($SkipBuild) {
     $stackArgs += "--skip-build"
+}
+
+if ($ForceRestart) {
+    $stackArgs += "--force-restart"
 }
 
 if (-not $UseMockLLM) {
