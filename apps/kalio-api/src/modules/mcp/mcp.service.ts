@@ -5,8 +5,8 @@ import {
   OnModuleInit,
   Optional,
 } from '@nestjs/common';
-import { nanoid } from 'nanoid';
 import { eq } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -119,7 +119,18 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   async addServer(dto: CreateMCPServerDto): Promise<MCPServer> {
-    const id = nanoid();
+    const id = this.makeServerId(dto);
+    const existing = (await this.drizzle.db
+      .select({ id: mcpServers.id })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, id))
+      .limit(1))[0];
+
+    if (existing) {
+      await this.reconcileRuntime();
+      return await this.findServerByKey(buildServerKey('sqlite', id));
+    }
+
     const now = new Date();
     await this.drizzle.db.insert(mcpServers).values({
       id,
@@ -139,17 +150,55 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     return await this.findServerByKey(buildServerKey('sqlite', id));
   }
 
+  private makeServerId(dto: CreateMCPServerDto): string {
+    const normalized = {
+      name: dto.name.trim(),
+      transport: dto.transport ?? 'http',
+      url: dto.url?.trim() ?? null,
+      command: dto.command?.trim() ?? null,
+      args: (dto.args ?? []).map((arg) => arg.trim()),
+      env: this.sortDictionary(dto.env),
+      headers: this.sortDictionary(dto.headers),
+      originSource: dto.originSource ?? 'manual',
+    };
+
+    const name = dto.name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-+|-+$)/g, '');
+    const suffix = createHash('sha256').update(JSON.stringify(normalized)).digest('base64url').slice(0, 10);
+    return `${name || 'mcp-server'}-${suffix}`;
+  }
+
+  private sortDictionary(input?: Record<string, string>): Record<string, string> | null {
+    if (!input || Object.keys(input).length === 0) {
+      return null;
+    }
+    return Object.keys(input)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = input[key];
+        return acc;
+      }, {} as Record<string, string>);
+  }
+
   async removeServer(serverKey: string): Promise<void> {
-    const parsed = parseServerKey(serverKey);
+    const resolvedServerKey = await this.resolveServerKey(serverKey);
+    if (!resolvedServerKey) {
+      throw new Error(`MCP server not found: ${serverKey}`);
+    }
+
+    const parsed = parseServerKey(resolvedServerKey);
     if (!parsed) {
       throw new Error(`MCP server not found: ${serverKey}`);
     }
     if (parsed.store === 'toml') {
-      throw new Error(`MCP server ${serverKey} is managed by .kalio/config.toml`);
+      throw new Error(`MCP server ${resolvedServerKey} is managed by .kalio/config.toml`);
     }
-    await this.disconnectHandle(serverKey);
-    this.handles.delete(serverKey);
-    this.removeToolRefs(serverKey);
+    await this.disconnectHandle(resolvedServerKey);
+    this.handles.delete(resolvedServerKey);
+    this.removeToolRefs(resolvedServerKey);
     await this.drizzle.db.delete(mcpServers).where(eq(mcpServers.id, parsed.id));
     await this.reconcileRuntime();
   }
@@ -161,12 +210,51 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   async restartServer(serverKey: string): Promise<void> {
-    const handle = this.handles.get(serverKey);
+    const resolvedServerKey = await this.resolveServerKey(serverKey);
+    if (!resolvedServerKey) {
+      throw new Error(`MCP server not found: ${serverKey}`);
+    }
+
+    const handle = this.handles.get(resolvedServerKey);
     if (!handle) throw new Error(`MCP server not found: ${serverKey}`);
-    await this.disconnectHandle(serverKey);
+    await this.disconnectHandle(resolvedServerKey);
     handle.restartCount = 0;
     handle.permanentError = false;
     await this.connectHandle(handle);
+  }
+
+  private async resolveServerKey(serverKeyOrId: string): Promise<string | null> {
+    const parsed = parseServerKey(serverKeyOrId);
+    if (parsed) {
+      return serverKeyOrId;
+    }
+
+    const directCandidates = [`toml::${serverKeyOrId}`, `sqlite::${serverKeyOrId}`];
+    for (const candidate of directCandidates) {
+      if (this.handles.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    const [row] = await this.drizzle.db
+      .select({ id: mcpServers.id })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, serverKeyOrId))
+      .limit(1);
+    if (row) {
+      return `sqlite::${serverKeyOrId}`;
+    }
+
+    if (!this.kalioConfig) {
+      return null;
+    }
+
+    const { config } = await this.kalioConfig.getEffectiveConfig();
+    if (Object.prototype.hasOwnProperty.call(config.mcp_servers ?? {}, serverKeyOrId)) {
+      return `toml::${serverKeyOrId}`;
+    }
+
+    return null;
   }
 
   private async connectHandle(handle: ServerHandle): Promise<void> {

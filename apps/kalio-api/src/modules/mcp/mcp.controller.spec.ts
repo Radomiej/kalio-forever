@@ -74,8 +74,8 @@ describe('MCPController', () => {
       externalImportService as unknown as MCPExternalImportService,
     );
 
-    await expect(controller.removeServer('server-1')).resolves.toBeUndefined();
-    expect(mcpService.removeServer).toHaveBeenCalledWith('server-1');
+    await expect(controller.removeServer('sqlite::server-1')).resolves.toBeUndefined();
+    expect(mcpService.removeServer).toHaveBeenCalledWith('sqlite::server-1');
   });
 
   it('delegates config reload to the service', async () => {
@@ -94,8 +94,19 @@ describe('MCPController', () => {
       externalImportService as unknown as MCPExternalImportService,
     );
 
-    await expect(controller.restartServer('server-1')).resolves.toBeUndefined();
-    expect(mcpService.restartServer).toHaveBeenCalledWith('server-1');
+    await expect(controller.restartServer('sqlite::server-1')).resolves.toBeUndefined();
+    expect(mcpService.restartServer).toHaveBeenCalledWith('sqlite::server-1');
+  });
+
+  it('accepts legacy serverId input and forwards it unchanged for compatibility', async () => {
+    const legacyId = 'github';
+    const controller = new MCPController(
+      mcpService as unknown as MCPService,
+      externalImportService as unknown as MCPExternalImportService,
+    );
+
+    await expect(controller.removeServer(legacyId)).resolves.toBeUndefined();
+    expect(mcpService.removeServer).toHaveBeenCalledWith(legacyId);
   });
 
   it('delegates tool listing to the service', async () => {
