@@ -75,7 +75,7 @@ flowchart TD
 - [x] `corepack pnpm --filter kalio-web typecheck`
 - [x] `corepack pnpm --filter kalio-api test -- src/modules/mcp/mcp-external-import.service.spec.ts src/modules/mcp/mcp.controller.spec.ts`
 - [x] `corepack pnpm --filter kalio-web test -- src/features/settings/MCPSettingsPanel.test.tsx src/features/mcp/MCPPanel.test.tsx`
-- [ ] `corepack pnpm --filter kalio-api test -- src/modules/mcp/mcp.service.spec.ts src/database/drizzle.service.spec.ts`
+- [x] `corepack pnpm --filter kalio-api exec vitest run src/modules/mcp/mcp.service.spec.ts src/database/drizzle.service.spec.ts`
 
 ## Notes
 
