@@ -39,20 +39,20 @@ export function MCPImportJsonTab({ onSubmit, onCancel }: Props) {
         return;
       }
       setEntries(result);
-      setSelected(new Set(result.map((e) => e.key)));
+      setSelected(new Set(result.map((e) => e.serverKey)));
       setParsed(true);
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Parse failed.');
     }
   };
 
-  const toggleEntry = (key: string) => {
+  const toggleEntry = (serverKey: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
+      if (next.has(serverKey)) {
+        next.delete(serverKey);
       } else {
-        next.add(key);
+        next.add(serverKey);
       }
       return next;
     });
@@ -62,12 +62,12 @@ export function MCPImportJsonTab({ onSubmit, onCancel }: Props) {
     if (selected.size === entries.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(entries.map((e) => e.key)));
+      setSelected(new Set(entries.map((e) => e.serverKey)));
     }
   };
 
   const handleConnect = async () => {
-    const toConnect = entries.filter((e) => selected.has(e.key));
+    const toConnect = entries.filter((e) => selected.has(e.serverKey));
     if (toConnect.length === 0) return;
 
     setSubmitting(true);
@@ -81,7 +81,7 @@ export function MCPImportJsonTab({ onSubmit, onCancel }: Props) {
         await onSubmit(entry.dto);
         anySuccess = true;
       } catch (err) {
-        errors[entry.key] = err instanceof Error ? err.message : 'Failed to connect';
+        errors[entry.serverKey] = err instanceof Error ? err.message : 'Failed to connect';
       }
     }
 
@@ -159,22 +159,22 @@ export function MCPImportJsonTab({ onSubmit, onCancel }: Props) {
           <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
             {entries.map((entry) => (
               <label
-                key={entry.key}
+                key={entry.serverKey}
                 className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-base-300/40"
               >
                 <input
                   type="checkbox"
                   className="checkbox checkbox-sm"
-                  checked={selected.has(entry.key)}
-                  onChange={() => toggleEntry(entry.key)}
-                  data-testid={`mcp-import-check-${entry.key}`}
+                  checked={selected.has(entry.serverKey)}
+                  onChange={() => toggleEntry(entry.serverKey)}
+                  data-testid={`mcp-import-check-${entry.serverKey}`}
                 />
                 <div className="flex-1 min-w-0">
                   <span className="text-sm truncate block">{entry.dto.name}</span>
                   <span className="text-xs text-base-content/50 font-mono">{entry.dto.transport}</span>
                 </div>
-                {submitErrors[entry.key] && (
-                  <span className="text-xs text-error shrink-0">{submitErrors[entry.key]}</span>
+                {submitErrors[entry.serverKey] && (
+                  <span className="text-xs text-error shrink-0">{submitErrors[entry.serverKey]}</span>
                 )}
               </label>
             ))}

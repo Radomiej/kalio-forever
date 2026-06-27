@@ -1,7 +1,7 @@
 import type { CreateMCPServerDto } from '@kalio/types';
 
 export interface ParsedMCPEntry {
-  key: string;
+  serverKey: string;
   dto: CreateMCPServerDto;
 }
 
@@ -122,7 +122,7 @@ export function parseMcpJson(raw: string): ParsedMCPEntry[] {
       }
     }
 
-    results.push({ key: serverKey, dto });
+    results.push({ serverKey, dto });
   }
 
   return results;
