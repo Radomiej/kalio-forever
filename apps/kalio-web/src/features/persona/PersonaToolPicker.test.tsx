@@ -74,14 +74,17 @@ function ToolPickerHarness({ initialSelected, initialPolicy }: { initialSelected
   const [mcpPolicy, setMcpPolicy] = useState<MCPPolicy>(initialPolicy);
 
   return (
-    <PersonaToolPicker
-      selected={selected}
-      mcpPolicy={mcpPolicy}
-      onChange={(tools, policy) => {
-        setSelected(tools);
-        setMcpPolicy(policy);
-      }}
-    />
+    <>
+      <PersonaToolPicker
+        selected={selected}
+        mcpPolicy={mcpPolicy}
+        onChange={(tools, policy) => {
+          setSelected(tools);
+          setMcpPolicy(policy);
+        }}
+      />
+      <output data-testid="selected-tools">{selected.join(',')}</output>
+    </>
   );
 }
 
@@ -185,6 +188,10 @@ describe('PersonaToolPicker', () => {
 
     await screen.findByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`);
     expect(screen.getByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`).querySelector('input')).toBeChecked();
+    await waitFor(() => {
+      expect(screen.getByTestId('selected-tools')).toHaveTextContent(CANONICAL_MCP_TOOL);
+      expect(screen.getByTestId('selected-tools')).not.toHaveTextContent(LEGACY_MCP_TOOL);
+    });
 
     await user.click(screen.getByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`));
 
