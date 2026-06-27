@@ -89,8 +89,8 @@ describe('MCPExternalImportService', () => {
     const entries = await service.discover();
 
     expect(entries).toHaveLength(2);
-    const github = entries.find((entry) => entry.key === 'github');
-    const filesystem = entries.find((entry) => entry.key === 'filesystem');
+    const github = entries.find((entry) => entry.sourceKey === 'github');
+    const filesystem = entries.find((entry) => entry.sourceKey === 'filesystem');
 
     expect(github?.equivalentToExisting).toBe(true);
     expect(github?.details.envKeys).toEqual(['GITHUB_TOKEN']);
@@ -116,15 +116,15 @@ describe('MCPExternalImportService', () => {
 
     const entries = await service.discover();
 
-    expect(entries.map((entry) => entry.key)).toEqual(['bomServer']);
+    expect(entries.map((entry) => entry.sourceKey)).toEqual(['bomServer']);
   });
 
   it('applies selected entries even when equivalent config already exists and reports fail buckets', async () => {
     mcpService.addServer.mockRejectedValueOnce(new Error('connect failed'));
 
     const discovered = await service.discover();
-    const githubId = discovered.find((entry) => entry.key === 'github')?.id;
-    const filesystemId = discovered.find((entry) => entry.key === 'filesystem')?.id;
+    const githubId = discovered.find((entry) => entry.sourceKey === 'github')?.id;
+    const filesystemId = discovered.find((entry) => entry.sourceKey === 'filesystem')?.id;
     expect(githubId).toBeDefined();
     expect(filesystemId).toBeDefined();
     const selectedGithubId = githubId as string;
@@ -181,9 +181,9 @@ describe('MCPExternalImportService', () => {
 
     const entries = await service.discover();
 
-    expect(entries.map((entry) => ({ key: entry.key, equivalentToExisting: entry.equivalentToExisting }))).toEqual([
-      { key: 'localTools', equivalentToExisting: false },
-      { key: 'localToolsAgain', equivalentToExisting: false },
+    expect(entries.map((entry) => ({ sourceKey: entry.sourceKey, equivalentToExisting: entry.equivalentToExisting }))).toEqual([
+      { sourceKey: 'localTools', equivalentToExisting: false },
+      { sourceKey: 'localToolsAgain', equivalentToExisting: false },
     ]);
 
     const result = await service.apply(entries.map((entry) => entry.id));
@@ -236,7 +236,7 @@ describe('MCPExternalImportService', () => {
 
     const entries = await service.discover();
 
-    expect(entries.map((entry) => entry.key)).toEqual([
+    expect(entries.map((entry) => entry.sourceKey)).toEqual([
       'mcp-dev-servers',
       'mcp-playwright-orchestrator',
     ]);
