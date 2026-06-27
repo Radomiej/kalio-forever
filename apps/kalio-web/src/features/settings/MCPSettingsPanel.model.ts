@@ -78,7 +78,7 @@ export function normalizeSettingsServer(server: SettingsMCPServer): SettingsMCPS
     originSource,
     effectiveState,
     conflictGroup,
-    rowKey: `${serverKey}:${store}:${server.id}`,
+    rowKey: `${serverKey}:${store}`,
     testIdSuffix,
     readonly: store === 'toml',
   };
