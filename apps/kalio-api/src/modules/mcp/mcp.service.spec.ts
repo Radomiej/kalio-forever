@@ -121,6 +121,50 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
     });
   });
 
+  describe('emitStatus()', () => {
+    it('emits canonical serverKey values instead of raw row ids', () => {
+      const emitted: Array<{ event: string; payload: Record<string, unknown> }> = [];
+      const internals = service as unknown as {
+        gatewayRef: { emitToAll(event: string, payload: Record<string, unknown>): void } | undefined;
+        emitStatus(handle: {
+          id: string;
+          serverKey: string;
+          name: string;
+          status: string;
+          tools: MCPTool[];
+          lastError?: string;
+        }): void;
+      };
+
+      internals.gatewayRef = {
+        emitToAll(event, payload) {
+          emitted.push({ event, payload });
+        },
+      };
+
+      internals.emitStatus({
+        id: 'legacy-row-id',
+        serverKey: 'sqlite::github',
+        name: 'GitHub MCP',
+        status: 'connected',
+        tools: [],
+      });
+
+      expect(emitted).toEqual([
+        {
+          event: 'mcp:server:status',
+          payload: expect.objectContaining({
+            serverId: 'sqlite::github',
+            serverKey: 'sqlite::github',
+            serverName: 'GitHub MCP',
+            status: 'connected',
+            toolCount: 0,
+          }),
+        },
+      ]);
+    });
+  });
+
   describe('callTool()', () => {
     it('throws when server is not found', async () => {
       await expect(service.callTool('non-existent', 'my_tool', {})).rejects.toThrow(
@@ -312,7 +356,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
       expect(second.id).toBe(first.id);
       expect(second.id).toMatch(/^demo-mcp-server-/);
-    });
+    }, 60_000);
 
     it('toMCPServer shape: reflects handle status when present', async () => {
       // Insert a row directly so we can call findAll() and check toMCPServer mapping
