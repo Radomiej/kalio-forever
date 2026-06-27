@@ -48,7 +48,7 @@ function openDb(): SeedDb {
   return db;
 }
 
-function seedParentAgentFlowBubbleFixture(): { sessionId: string; childSessionId: string; title: string } {
+function seedParentAgentFlowBubbleFixture(): { sessionId: string; childSessionId: string; runId: string; title: string } {
   const stamp = Date.now();
   const sessionId = `e2e-agentflow-parent-${stamp}`;
   const childSessionId = `e2e-agentflow-child-${stamp}`;
@@ -145,7 +145,7 @@ function seedParentAgentFlowBubbleFixture(): { sessionId: string; childSessionId
     });
 
     seed();
-    return { sessionId, childSessionId, title };
+    return { sessionId, childSessionId, runId, title };
   } finally {
     db.close();
   }
@@ -318,16 +318,20 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       const agentFlowCall = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]');
       await expect(agentFlowCall).toBeVisible({ timeout: 10_000 });
       await expect(agentFlowCall.getByTestId('sub-agentflow-result')).toContainText('waiting_on_orchestrator');
+      await expect(agentFlowCall.getByTestId('sub-agentflow-result')).toContainText('Waiting on orchestrator');
       await expect(agentFlowCall.getByTestId('sub-agentflow-result')).toContainText('handoffs');
       await expect(agentFlowCall.getByTestId('sub-agentflow-result')).toContainText('1');
       await expect(agentFlowCall.getByTestId('sub-agentflow-result')).toContainText('Goal Guard is waiting for external QA evidence');
+      await expect(agentFlowCall.getByTestId(`resume-agentflow-${fixture.runId}`)).toContainText('Resume AgentFlow');
       await agentFlowCall.getByRole('button', { name: /toggle agentflow details/i }).click();
       await expect(agentFlowCall.getByTestId('sub-agentflow-result')).toContainText('Resume with manual QA evidence');
       await expect(agentFlowCall.getByTestId('open-agentflow-canvas')).toBeVisible();
       await agentFlowCall.getByTestId('open-agentflow-canvas').click();
       await expect(page.getByTestId('agentflow-canvas-section')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('agentflow-canvas-section')).toContainText('waiting_on_orchestrator');
+      await expect(page.getByTestId('agentflow-canvas-section')).toContainText('Waiting on orchestrator');
       await expect(page.getByTestId('agentflow-canvas-section')).toContainText('Goal Guard is waiting for external QA evidence');
+      await expect(page.getByTestId('agentflow-canvas-section').getByText('Resume AgentFlow')).toBeVisible();
 
       await page.getByTestId('talk-sidebar-graph-entry').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });

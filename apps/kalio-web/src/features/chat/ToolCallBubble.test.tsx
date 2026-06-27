@@ -29,6 +29,7 @@ vi.mock('../../services/apiClient', async () => {
     apiClient: {
       ...actual.apiClient,
       get: vi.fn(),
+      post: vi.fn(),
     },
   };
 });
@@ -66,6 +67,8 @@ function makeActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
 beforeEach(() => {
   vi.mocked(apiClient.get).mockReset();
   vi.mocked(apiClient.get).mockRejectedValue(new Error('unexpected apiClient.get call'));
+  vi.mocked(apiClient.post).mockReset();
+  vi.mocked(apiClient.post).mockRejectedValue(new Error('unexpected apiClient.post call'));
   useSessionStore.setState({
     activeSessionId: null,
     sessions: [],
@@ -903,6 +906,52 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
     expect(result).toHaveTextContent('Resume with Playwright QA evidence.');
     expect(result).toHaveTextContent('flow:return_to_orchestrator');
     expect(result).toHaveTextContent('First supervision handoff.');
+  });
+
+  it('renders the generic resume action for a waiting AgentFlow result', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce({
+      data: {
+        run: {
+          id: 'flow-resume',
+          parentSessionId: 'session-1',
+          childSessionId: 'arch-flow-resume-root',
+          openChatSessionId: 'arch-flow-resume-root',
+          openGraphRunId: 'flow-resume',
+          flowDefinitionId: 'goal_guard_delivery_loop',
+          status: 'running',
+          startMode: 'durable',
+          returnMode: 'summary',
+          createdAt: 1,
+          updatedAt: 2,
+        },
+        events: [],
+      },
+    });
+
+    render(
+      <HistoryToolCallBubble
+        toolName="run_sub_agentflow"
+        content={JSON.stringify({
+          flowRunId: 'flow-resume',
+          childSessionId: 'arch-flow-resume-root',
+          status: 'waiting_on_orchestrator',
+          summary: 'Goal Guard is waiting for orchestrator input.',
+          decisions: [],
+          nextActions: ['Resume AgentFlow with the next instruction.'],
+          artifacts: [],
+          openChatSessionId: 'arch-flow-resume-root',
+          openGraphRunId: 'flow-resume',
+        })}
+        args={{ flowId: 'goal_guard_delivery_loop', goal: 'Build project' }}
+      />,
+    );
+
+    expect(screen.getByTestId('sub-agentflow-result')).toHaveTextContent('Waiting on orchestrator');
+    fireEvent.click(screen.getByTestId('resume-agentflow-flow-resume'));
+
+    await waitFor(() => {
+      expect(apiClient.post).toHaveBeenCalledWith('/api/agent-flows/runs/flow-resume/resume', { input: 'Continue.' });
+    });
   });
 
   it('refreshes a durable run_sub_agentflow history block from the AgentFlow run snapshot', async () => {

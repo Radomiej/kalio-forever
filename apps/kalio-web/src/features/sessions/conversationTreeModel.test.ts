@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage, ChatSession } from '@kalio/types';
+import type { ChatMessage, ChatSession, RuntimeActivitySnapshot } from '@kalio/types';
 import { buildConversationTreeModel } from './conversationTreeModel';
 import { countDescendantRuntimeStates } from './sessionRowRuntimeState';
+import { mergeRuntimeSessionStatusSnapshots } from '../../store/agentRuntimeSelectors';
 
 function makeSession(overrides: Partial<ChatSession>): ChatSession {
   return {
@@ -29,6 +30,32 @@ function makeWorkflowEnvelopeMessage(sessionId: string): ChatMessage {
       trace: [],
       routeHops: [],
     },
+  };
+}
+
+function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot {
+  return {
+    sessionId,
+    active: false,
+    turnId: 'turn-1',
+    queueLength: 0,
+    pendingConfirmations: [],
+    pendingBudgetApprovals: [],
+    toolActivities: [],
+    childExecutions: [],
+    updatedAt: 22,
+    run: {
+      id: 'run-1',
+      sessionId,
+      turnId: 'turn-1',
+      phase: 'tool_running',
+      status: 'waiting_on_orchestrator',
+      retryCount: 0,
+      safeResume: true,
+      startedAt: 21,
+      updatedAt: 22,
+      lastHeartbeatAt: 22,
+    } as unknown as RuntimeActivitySnapshot['run'],
   };
 }
 
@@ -234,6 +261,72 @@ describe('buildConversationTreeModel', () => {
     );
 
     expect(model.renderableSessions.map((session) => session.id)).toEqual([host.id, branch.id]);
+    expect(counts).toEqual({ pending: 0, running: 0, waiting: 1 });
+  });
+
+  it('counts a child waiting_on_orchestrator runtime snapshot as waiting descendant state', () => {
+    const host = makeSession({
+      id: 'host',
+      title: 'Workflow host',
+      updatedAt: 20,
+    });
+    const branch = makeSession({
+      id: 'branch-orchestrator',
+      title: 'Architecture Debate: Orchestrator',
+      kind: 'subagent',
+      parentSessionId: 'host',
+      createdAt: 22,
+      updatedAt: 22,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'orchestrator',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'orchestrator',
+          displayLabel: 'Orchestrator',
+          sessionSurface: 'conversation-branch',
+        },
+      },
+    });
+
+    const model = buildConversationTreeModel({
+      activeSessionId: host.id,
+      originFilter: 'all',
+      pendingBudgetApprovals: {},
+      pendingConfirmations: {},
+      queuedDepthBySession: {},
+      sessionAgentTurns: {},
+      sessionMessages: {
+        [host.id]: [makeWorkflowEnvelopeMessage(host.id)],
+        [branch.id]: [],
+      },
+      sessionStatusSnapshots: {},
+      runtimeActivitySnapshots: {
+        [branch.id]: makeWaitingRuntimeSnapshot(branch.id),
+      },
+      sidebarSessions: [host, branch],
+      activeAgentLoops: {},
+    });
+    const mergedSessionStatusSnapshots = mergeRuntimeSessionStatusSnapshots({}, {
+      [branch.id]: makeWaitingRuntimeSnapshot(branch.id),
+    });
+
+    const counts = countDescendantRuntimeStates(
+      host.id,
+      model.childSessionsByParent,
+      {},
+      {},
+      new Set(),
+      {},
+      mergedSessionStatusSnapshots,
+      {},
+      {
+        [host.id]: [makeWorkflowEnvelopeMessage(host.id)],
+        [branch.id]: [],
+      },
+      model.architectureSessionRuntimeStates,
+    );
+
     expect(counts).toEqual({ pending: 0, running: 0, waiting: 1 });
   });
 });

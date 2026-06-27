@@ -388,6 +388,31 @@ describe('ChatGateway', () => {
     expect(toolDispatch.resolveConfirmation).not.toHaveBeenCalled();
   });
 
+  it('REGRESSION: child-session stream events do not grant budget approval rights to the initiator', async () => {
+    (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
+      emit('chat:chunk', {
+        sessionId: 'child-session',
+        messageId: 'msg-child-1',
+        delta: 'child says hello',
+        done: false,
+      });
+    });
+
+    await gateway.handleChatSend(client as never, {
+      sessionId: 'session-1',
+      content: 'delegate this task',
+      personaId: 'default',
+    });
+
+    gateway.handleAgentBudgetApprove(client as never, {
+      requestId: 'budget-child-stream',
+      sessionId: 'child-session',
+      decision: 'allow_ten',
+    });
+
+    expect(agentBudgetApprovals.resolveApproval).not.toHaveBeenCalled();
+  });
+
   it('REGRESSION: child HITL events grant immediate confirm rights to the initiating socket', async () => {
     const pending: ToolConfirmationRequest = {
       requestId: 'req-child-live',

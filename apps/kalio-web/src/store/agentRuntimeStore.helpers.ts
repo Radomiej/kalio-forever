@@ -297,7 +297,8 @@ export function runtimeSnapshotHasActiveSessionRuntime(
     return false;
   }
 
-  if (snapshot.run?.status === 'active') {
+  const runStatus = snapshot.run?.status as string | undefined;
+  if (runStatus === 'active' || runStatus === 'waiting_on_orchestrator') {
     return true;
   }
 

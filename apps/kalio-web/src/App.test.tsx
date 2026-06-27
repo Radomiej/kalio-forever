@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App';
 import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
+import type { RuntimeActivitySnapshot } from '@kalio/types';
 
 const CONFIG_WITH_API_KEY: LLMConfigWithSource = {
   provider: 'mock',
@@ -18,6 +19,7 @@ const {
   setBackendConfig,
   loadConversationSessions,
   loadRuntimeWatchlist,
+  preloadRuntimeWatchSessionHistory,
   identifyWatchedSession,
   replaceBaselineWatchedSessions,
   resetSessionWatchConnectionEpoch,
@@ -32,6 +34,7 @@ const {
   setBackendConfig: vi.fn(),
   loadConversationSessions: vi.fn(),
   loadRuntimeWatchlist: vi.fn(),
+  preloadRuntimeWatchSessionHistory: vi.fn().mockResolvedValue(undefined),
   identifyWatchedSession: vi.fn(),
   replaceBaselineWatchedSessions: vi.fn(),
   resetSessionWatchConnectionEpoch: vi.fn(),
@@ -45,12 +48,14 @@ const {
   agentStoreState: {
     pendingConfirmations: {} as Record<string, unknown>,
     pendingBudgetApprovals: {} as Record<string, unknown>,
+    runtimeActivitySnapshots: {} as Record<string, unknown>,
   },
   sessionStoreState: {
     sessions: [] as Array<{ id: string; updatedAt: number; title?: string; kind?: string; parentSessionId?: string }>,
     activeSessionId: null as string | null,
     messages: [] as Array<{ id: string }>,
     agentTurns: [] as Array<{ id: string }>,
+    sessionMessages: {} as Record<string, Array<{ id: string; sessionId: string; role: string; content: string; createdAt: number }>>,
   },
 }));
 
@@ -190,6 +195,7 @@ vi.mock('./store/sessionStore', () => ({
     activeSessionId: string | null;
     messages: Array<{ id: string }>;
     agentTurns: Array<{ id: string }>;
+    sessionMessages: Record<string, Array<{ id: string; sessionId: string; role: string; content: string; createdAt: number }>>;
     setActiveSession: typeof setActiveSession;
     setSessions: typeof setSessions;
   }) => unknown) => {
@@ -204,6 +210,7 @@ vi.mock('./store/sessionStore', () => ({
       activeSessionId: sessionStoreState.activeSessionId,
       messages: sessionStoreState.messages,
       agentTurns: sessionStoreState.agentTurns,
+      sessionMessages: sessionStoreState.sessionMessages,
       setActiveSession,
       setSessions,
     };
@@ -212,6 +219,7 @@ vi.mock('./store/sessionStore', () => ({
     getState: () => ({
       sessions: sessionStoreState.sessions,
       activeSessionId: sessionStoreState.activeSessionId,
+      sessionMessages: sessionStoreState.sessionMessages,
     }),
   }),
 }));
@@ -232,6 +240,10 @@ vi.mock('./services/sessionBootstrap', () => ({
   loadRuntimeWatchlist,
 }));
 
+vi.mock('./features/chat/runtimeWatchHistoryBootstrap', () => ({
+  preloadRuntimeWatchSessionHistory,
+}));
+
 vi.mock('./services/sessionWatchRegistry', () => ({
   identifyWatchedSession,
   replaceBaselineWatchedSessions,
@@ -249,10 +261,12 @@ vi.mock('./store/agentStore', () => ({
   useAgentStore: (selector: (state: {
     pendingConfirmations: Record<string, unknown>;
     pendingBudgetApprovals: Record<string, unknown>;
+    runtimeActivitySnapshots: Record<string, unknown>;
     setCanvasOpen: typeof setCanvasOpen;
   }) => unknown) => selector({
     pendingConfirmations: agentStoreState.pendingConfirmations,
     pendingBudgetApprovals: agentStoreState.pendingBudgetApprovals,
+    runtimeActivitySnapshots: agentStoreState.runtimeActivitySnapshots,
     setCanvasOpen,
   }),
 }));
@@ -267,6 +281,32 @@ vi.mock('./features/settings/settingsStore', () => ({
   useSettingsStore: (selector: (state: { setBackendConfig: typeof setBackendConfig }) => unknown) => selector({ setBackendConfig }),
 }));
 
+function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot {
+  return {
+    sessionId,
+    active: false,
+    turnId: 'turn-1',
+    queueLength: 0,
+    pendingConfirmations: [],
+    pendingBudgetApprovals: [],
+    toolActivities: [],
+    childExecutions: [],
+    updatedAt: 2,
+    run: {
+      id: 'run-1',
+      sessionId,
+      turnId: 'turn-1',
+      phase: 'tool_running',
+      status: 'waiting_on_orchestrator',
+      retryCount: 0,
+      safeResume: true,
+      startedAt: 1,
+      updatedAt: 2,
+      lastHeartbeatAt: 2,
+    } as unknown as RuntimeActivitySnapshot['run'],
+  };
+}
+
 describe('App view state persistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -274,6 +314,7 @@ describe('App view state persistence', () => {
     localStorage.clear();
     agentStoreState.pendingConfirmations = {};
     agentStoreState.pendingBudgetApprovals = {};
+    agentStoreState.runtimeActivitySnapshots = {};
     sessionStoreState.sessions = [
       { id: 'session-1', title: 'Session 1', updatedAt: Date.now() - 60_000 },
       { id: 'session-2', updatedAt: Date.now() - 48 * 60 * 60 * 1000 },
@@ -281,6 +322,7 @@ describe('App view state persistence', () => {
     sessionStoreState.activeSessionId = null;
     sessionStoreState.messages = [];
     sessionStoreState.agentTurns = [];
+    sessionStoreState.sessionMessages = {};
     setActiveSession.mockReset();
     setSessions.mockReset();
     identifyWatchedSession.mockReset();
@@ -290,6 +332,8 @@ describe('App view state persistence', () => {
     reconnectHandlers.length = 0;
     loadConversationSessions.mockReset();
     loadRuntimeWatchlist.mockReset();
+    preloadRuntimeWatchSessionHistory.mockReset();
+    preloadRuntimeWatchSessionHistory.mockResolvedValue(undefined);
     loadConversationSessions.mockResolvedValue([
       { id: 'session-1', title: 'Session 1', updatedAt: Date.now() },
       { id: 'agent-child-1', title: 'Agent child', updatedAt: Date.now(), kind: 'subagent', parentSessionId: 'session-1' },
@@ -528,8 +572,24 @@ describe('App view state persistence', () => {
   it('prioritizes pending approval badge over completed talk activity', () => {
     localStorage.setItem('kalio:last-talk-active-at', String(Date.now() - 10 * 60_000));
     agentStoreState.pendingConfirmations = {
-      requestA: {},
-      requestB: {},
+      'session-1': [
+        {
+          requestId: 'request-a',
+          toolCallId: 'call-a',
+          sessionId: 'session-1',
+          toolName: 'fs_write',
+          args: {},
+          timeoutMs: 30_000,
+        },
+        {
+          requestId: 'request-b',
+          toolCallId: 'call-b',
+          sessionId: 'session-1',
+          toolName: 'fs_write',
+          args: {},
+          timeoutMs: 30_000,
+        },
+      ],
     };
     agentStoreState.pendingBudgetApprovals = {};
 
@@ -540,6 +600,19 @@ describe('App view state persistence', () => {
     expect(badge).toHaveAttribute('title', '2 approvals waiting');
     expect(badge).toHaveClass('badge-warning');
     expect(badge).toHaveClass('animate-pulse');
+  });
+
+  it('uses runtime attention count for the Talk badge when a child session is waiting on the orchestrator', () => {
+    agentStoreState.runtimeActivitySnapshots = {
+      'session-1': makeWaitingRuntimeSnapshot('session-1'),
+    };
+
+    render(<App />);
+
+    const badge = screen.getByTestId('nav-talk-activity-count');
+    expect(badge).toHaveTextContent('1');
+    expect(badge).toHaveAttribute('title', '1 runtime item needs attention');
+    expect(badge).toHaveClass('badge-warning');
   });
 
   it('identifies only watched roots during bootstrap so Home can replay live HITL state', async () => {
@@ -559,10 +632,17 @@ describe('App view state persistence', () => {
       expect(loadConversationSessions).toHaveBeenCalledWith();
     });
     expect(setSessions).toHaveBeenCalledWith([
-      sessionsFromApi[1],
       sessionsFromApi[0],
+      sessionsFromApi[1],
     ]);
     expect(replaceBaselineWatchedSessions).toHaveBeenCalledWith(['session-1'], 'bootstrap-watchlist');
+    expect(preloadRuntimeWatchSessionHistory).toHaveBeenCalledWith(expect.objectContaining({
+      sessions: expect.arrayContaining([
+        sessionsFromApi[0],
+        sessionsFromApi[1],
+      ]),
+      runtimeWatchTargets: [{ sessionId: 'session-1', reasons: ['pending_confirmation'] }],
+    }));
     expect(identifyWatchedSession).not.toHaveBeenCalledWith('agent-child-1', expect.any(String), expect.anything());
   });
 
@@ -576,6 +656,14 @@ describe('App view state persistence', () => {
       expect(resetSessionWatchConnectionEpoch).toHaveBeenCalledWith('socket-reconnect');
       expect(loadRuntimeWatchlist).toHaveBeenCalledWith({ force: true });
       expect(replaceBaselineWatchedSessions).toHaveBeenCalledWith(['session-1'], 'reconnect-watchlist');
+      expect(preloadRuntimeWatchSessionHistory).toHaveBeenCalledWith(expect.objectContaining({
+        sessions: expect.arrayContaining([
+          expect.objectContaining({ id: 'agent-child-1', kind: 'subagent', parentSessionId: 'session-1' }),
+          expect.objectContaining({ id: 'session-1', title: 'Session 1' }),
+        ]),
+        runtimeWatchTargets: [{ sessionId: 'session-1', reasons: ['active'] }],
+        force: true,
+      }));
     });
   });
 
@@ -592,7 +680,7 @@ describe('App view state persistence', () => {
     });
   });
 
-  it('merges bootstrap sessions without dropping newer local ones when the api response arrives late', async () => {
+  it('preserves pending host sessions when the bootstrap response arrives late', async () => {
     let resolveSessions!: (value: Array<{ id: string; updatedAt: number; title?: string; kind?: string; parentSessionId?: string }>) => void;
     loadConversationSessions.mockImplementation(() => new Promise((resolve) => {
       resolveSessions = resolve;
@@ -602,7 +690,7 @@ describe('App view state persistence', () => {
     render(<App />);
 
     sessionStoreState.sessions = [
-      { id: 'session-local-new', title: 'Local New', updatedAt: 10 },
+      { id: 'pending-host-session:temp-1', title: 'Local New', updatedAt: 10 },
     ];
 
     const delayedSessions = [
@@ -615,7 +703,7 @@ describe('App view state persistence', () => {
 
     await waitFor(() => {
       expect(setSessions).toHaveBeenCalledWith([
-        { id: 'session-local-new', title: 'Local New', updatedAt: 10 },
+        { id: 'pending-host-session:temp-1', title: 'Local New', updatedAt: 10 },
         ...delayedSessions,
       ]);
     });

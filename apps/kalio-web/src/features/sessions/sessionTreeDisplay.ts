@@ -303,17 +303,21 @@ export function sessionStatusSnapshotToRuntimeState(
   if (!snapshot) {
     return null;
   }
+  const runStatus = snapshot.run?.status as string | undefined;
   if (snapshot.run?.status === 'completed' || snapshot.run?.phase === 'completed') {
     return 'done';
   }
   if (snapshot.run?.status === 'failed' || snapshot.run?.phase === 'failed') {
     return 'error';
   }
-  if (snapshot.run?.status === 'interrupted') {
+  if (runStatus === 'interrupted') {
     return 'stopped';
   }
-  if (snapshot.run?.status === 'interrupted_needs_retry') {
+  if (runStatus === 'interrupted_needs_retry') {
     return 'stopped';
+  }
+  if (runStatus === 'waiting_on_orchestrator') {
+    return 'waiting';
   }
   if ((snapshot.queueLength ?? 0) > 0) {
     return 'pending';

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentFlowRunSnapshot, AgentFlowRunStatus, CLIAgentSessionStatus, RuntimeChildExecutionStatus, SocketEvents } from '@kalio/types';
+import type { AgentBudgetApprovalRequest, AgentFlowRunSnapshot, AgentFlowRunStatus, CLIAgentSessionStatus, RuntimeChildExecutionStatus, SocketEvents } from '@kalio/types';
 import {
   buildRuntimeActivitySnapshot,
   buildRuntimeActivitySnapshotBatch,
@@ -127,6 +127,139 @@ describe('buildRuntimeActivitySnapshot', () => {
       ]);
     },
   );
+
+  it('projects a reconstructed waiting AgentFlow child with stable ids and child-session label', async () => {
+    const flowSnapshot = makeAgentFlowSnapshot('session-1');
+    flowSnapshot.run.status = 'waiting_on_orchestrator';
+    flowSnapshot.run.summary = undefined;
+    flowSnapshot.run.checkpoint = {
+      goal: 'Build and verify.',
+      continuation: {
+        reason: 'return_to_orchestrator',
+        pendingNodeIds: ['goal-master'],
+        visitCounts: { implementer: 1 },
+        waitingNodeId: 'goal-master',
+        message: 'Waiting on orchestrator.',
+      },
+    };
+
+    const sessionTree = {
+      rootSessionId: 'session-1',
+      sessionIds: ['session-1', 'flow-chat-1'],
+      directChildIdsBySessionId: { 'session-1': ['flow-chat-1'], 'flow-chat-1': [] },
+      descendantIdsBySessionId: { 'session-1': ['flow-chat-1'], 'flow-chat-1': [] },
+      childSessionsById: {
+        'flow-chat-1': {
+          id: 'flow-chat-1',
+          parentSessionId: 'session-1',
+          parentToolCallId: 'call-flow-1',
+          kind: 'agent-flow',
+          title: 'Goal Guard',
+          personaId: 'default',
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      },
+    } satisfies RuntimeSnapshotSessionTree;
+
+    const batch = await buildRuntimeActivitySnapshotBatch({
+      rootSessionId: 'session-1',
+      sessionTree,
+      statusesBySessionId: {
+        'session-1': makeStatus('session-1'),
+        'flow-chat-1': makeStatus('flow-chat-1'),
+      },
+      pipeline: {
+        getSessionStatusWithRun: vi.fn().mockResolvedValue(makeStatus('session-1')),
+      },
+      toolDispatch: {
+        getPendingConfirmations: vi.fn().mockReturnValue([]),
+      },
+      agentBudgetApprovals: {
+        getPendingApprovals: vi.fn().mockReturnValue([]),
+      },
+      sessionsService: {
+        listChildren: vi.fn(),
+        get: vi.fn().mockImplementation(async (sessionId: string) => (
+          sessionId === 'flow-chat-1'
+            ? sessionTree.childSessionsById['flow-chat-1']
+            : { id: 'session-1', personaId: 'default', kind: 'chat' }
+        )),
+        getMessages: vi.fn(),
+      },
+      agentFlowRuntime: {
+        run: vi.fn(),
+        findByParentSessionId: vi.fn().mockResolvedValue([flowSnapshot]),
+      },
+    });
+
+    expect(batch.snapshotsBySessionId['session-1'].childExecutions).toEqual([
+      expect.objectContaining({
+        id: 'flow-run-1',
+        kind: 'agent_flow',
+        parentSessionId: 'session-1',
+        childSessionId: 'flow-chat-1',
+        flowRunId: 'graph-run-1',
+        label: 'Goal Guard',
+        status: 'waiting',
+      }),
+    ]);
+  });
+
+  it('preserves pending budget approval when the session also has max-tools failure state', async () => {
+    const status = {
+      ...makeStatus('session-1'),
+      active: false,
+      run: {
+        id: 'run-1',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        phase: 'failed',
+        status: 'failed',
+        retryCount: 0,
+        safeResume: false,
+        startedAt: 111,
+        updatedAt: 112,
+        lastHeartbeatAt: 112,
+      },
+    } satisfies SocketEvents['session:status'];
+    const pendingBudgetApproval: AgentBudgetApprovalRequest = {
+      requestId: 'budget-1',
+      sessionId: 'session-1',
+      scope: 'chat',
+      usedIterations: 60,
+      currentLimit: 60,
+      suggestedNextLimit: 70,
+      requestedBy: 'agent',
+    };
+
+    const snapshot = await buildRuntimeActivitySnapshot({
+      sessionId: 'session-1',
+      status,
+      pipeline: {
+        getSessionStatusWithRun: vi.fn().mockResolvedValue(status),
+      },
+      toolDispatch: {
+        getPendingConfirmations: vi.fn().mockReturnValue([]),
+      },
+      agentBudgetApprovals: {
+        getPendingApprovals: vi.fn().mockReturnValue([pendingBudgetApproval]),
+      },
+      sessionsService: {
+        listChildren: vi.fn().mockResolvedValue([]),
+        get: vi.fn(),
+        getMessages: vi.fn(),
+      },
+      agentFlowRuntime: {
+        run: vi.fn(),
+        findByParentSessionId: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    expect(snapshot.pendingBudgetApprovals).toEqual([pendingBudgetApproval]);
+    expect(snapshot.pendingConfirmations).toEqual([]);
+    expect(snapshot.run?.status).toBe('failed');
+  });
 
   it.each([
     ['completed', 'completed'],

@@ -15,6 +15,7 @@ import { AgentFlowConversationCard, buildAgentFlowPreviews } from './CanvasPanel
 import { buildSubagentPreviews, SubagentConversationCard } from './CanvasPanel.Subagents';
 import { buildCliChildPreviews, CliChildConversationCanvasCard } from './CanvasPanel.CliChildren';
 import { SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
+import { AgentFlowResumeAction, isResumableAgentFlowStatus } from '../agent-flow/AgentFlowResumeAction';
 import { filterRenderableSessions } from '../sessions/sessionRenderableFilter';
 import { architectureRunIdForSession, sameArchitectureRunId } from '../sessions/sessionTreeDisplay';
 import { resolveLiveTurnState } from './liveTurnState';
@@ -363,6 +364,9 @@ export function CanvasPanel() {
                 <section data-testid="agentflow-canvas-section">
                   <p className="mb-2 text-[10px] uppercase tracking-wide text-base-content/40">AgentFlow</p>
                   <SubAgentFlowResultBlock result={focusedSubAgentFlowResult} />
+                  {isResumableAgentFlowStatus(focusedSubAgentFlowResult.status) && (
+                    <AgentFlowResumeAction flowRunId={focusedSubAgentFlowResult.flowRunId} />
+                  )}
                 </section>
               )}
 

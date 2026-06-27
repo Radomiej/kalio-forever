@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { ArchitectureChatRunSummary, ArchitectureGraphProjection } from '@kalio/types';
+import type { ArchitectureChatRunSummary, ArchitectureGraphProjection, ChatSession } from '@kalio/types';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
 
 type ArchitectureRunWithGraph = ArchitectureChatRunSummary & {
@@ -179,6 +179,172 @@ describe('ArchitectureRunTimeline', () => {
     expect(onOpenStep).not.toHaveBeenCalled();
   });
 
+  it('renders the orchestrator actor label while keeping router semantics in secondary metadata', () => {
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-orchestrator',
+      schemaId: 'Architecture Debate',
+      status: 'running',
+      routeHops: [],
+      graphNodes: [
+        {
+          id: 'orchestrator',
+          sessionId: 'arch-run-orchestrator-orchestrator',
+          label: 'Orchestrator',
+          kind: 'router',
+          status: 'running',
+          eventIds: ['run-orchestrator:event:1'],
+        },
+      ],
+      graphEdges: [
+        { id: 'e1', fromNodeId: 'orchestrator', toNodeId: 'final-artifact' },
+      ],
+      trace: [
+        {
+          speaker: 'router',
+          sessionId: 'arch-run-orchestrator-orchestrator',
+          content: 'Route to final artifact.',
+          eventId: 'run-orchestrator:event:1',
+          nodeId: 'orchestrator',
+          nextNodeId: 'final-artifact',
+        },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    const card = screen.getByTestId('architecture-route-router');
+    expect(card).toHaveTextContent('Orchestrator');
+    expect(card).toHaveTextContent('router');
+    expect(card).toHaveTextContent('to final-artifact');
+  });
+
+  it('infers the orchestrator label from degraded router content when graph labels are missing', () => {
+    const run: ArchitectureChatRunSummary = {
+      runId: 'run-router-fallback',
+      schemaId: 'Architecture Debate',
+      status: 'running',
+      routeHops: [],
+      trace: [
+        {
+          speaker: 'router',
+          content: '### Router\n\nRoute: runtime_fallback -> researcher\n\nOrchestrator hit a recoverable branch error: Sub-agent timed out after 300000ms.',
+          eventId: 'run-router-fallback:event:1',
+          nodeId: 'router',
+          nextNodeId: 'researcher',
+        },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Orchestrator');
+    expect(screen.getByTestId('architecture-route-router')).toHaveTextContent('Orchestrator');
+    expect(screen.getByTestId('architecture-route-router')).toHaveTextContent('router');
+  });
+
+  it('uses router branch session labels for degraded merge steps when the run sessions carry them', () => {
+    const run: ArchitectureChatRunSummary = {
+      runId: 'run-router-session-labels',
+      schemaId: 'Architecture Debate',
+      status: 'completed',
+      routeHops: [],
+      trace: [
+        {
+          speaker: 'router',
+          content: '### Router\n\nRoute: runtime_fallback -> researcher\n\nOrchestrator hit a recoverable branch error: Sub-agent timed out after 300000ms.',
+          eventId: 'run-router-session-labels:event:1',
+          nodeId: 'router',
+          nextNodeId: 'researcher',
+        },
+        {
+          speaker: 'participant',
+          content: 'Researcher completed the evidence pass.',
+          eventId: 'run-router-session-labels:event:2',
+          nodeId: 'researcher',
+          nextNodeId: 'router',
+        },
+        {
+          speaker: 'router',
+          content: '### Router\n\nRoute: agent -> final-artifact\n\nMerged the selected branch output.',
+          eventId: 'run-router-session-labels:event:3',
+          nodeId: 'router',
+          nextNodeId: 'final-artifact',
+        },
+      ],
+    };
+    const runSessions: ChatSession[] = [
+      {
+        id: 'arch-run-router-session-labels-orchestrator',
+        personaId: 'orchestrator',
+        title: 'Architecture Debate: Orchestrator',
+        kind: 'subagent',
+        parentSessionId: 'arch-run-router-session-labels-root',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'orchestrator',
+          architectureContext: {
+            architectureRunId: 'run-router-session-labels',
+            schemaId: 'architecture_debate',
+            schemaName: 'Architecture Debate',
+            roleSlotId: 'orchestrator',
+            roleSlotType: 'router',
+            roleLabel: 'Orchestrator',
+            displayLabel: 'Orchestrator',
+          },
+        },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'arch-run-router-session-labels-synthesizer',
+        personaId: 'synthesizer',
+        title: 'Architecture Debate: Synthesizer',
+        kind: 'subagent',
+        parentSessionId: 'arch-run-router-session-labels-root',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'synthesizer',
+          architectureContext: {
+            architectureRunId: 'run-router-session-labels',
+            schemaId: 'architecture_debate',
+            schemaName: 'Architecture Debate',
+            roleSlotId: 'synthesizer',
+            roleSlotType: 'router',
+            roleLabel: 'Synthesizer',
+            displayLabel: 'Synthesizer',
+          },
+        },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ];
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        runSessions={runSessions}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Orchestrator');
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Synthesizer');
+    expect(screen.getAllByTestId('architecture-route-router')[1]).toHaveTextContent('Synthesizer');
+  });
+
   it('keeps graph node session ids when matching trace steps do not carry them', () => {
     const onOpenBranch = vi.fn();
     const onOpenStep = vi.fn();
@@ -291,7 +457,7 @@ describe('ArchitectureRunTimeline', () => {
       />,
     );
 
-    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Router');
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Orchestrator');
     expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Sub-agents 5');
     expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Finalizer');
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('Parallel sub-agents');

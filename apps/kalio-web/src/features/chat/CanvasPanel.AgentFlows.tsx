@@ -3,6 +3,7 @@ import type { ChatMessage, ChatSession, RuntimeChildExecution, SubAgentFlowResul
 import type { ToolActivity } from '../../store/agentStore';
 import { SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
 import { extractSubAgentFlowResult } from './ToolCallBubble.parsers';
+import { AgentFlowResumeAction, isResumableAgentFlowStatus } from '../agent-flow/AgentFlowResumeAction';
 
 export interface AgentFlowCanvasPreview {
   flowRunId: string;
@@ -143,6 +144,9 @@ export function AgentFlowConversationCard({
         </button>
       </div>
       {preview.result && <SubAgentFlowResultBlock result={preview.result} />}
+      {isResumableAgentFlowStatus(preview.result?.status ?? preview.status) && (
+        <AgentFlowResumeAction flowRunId={preview.flowRunId} />
+      )}
     </div>
   );
 }

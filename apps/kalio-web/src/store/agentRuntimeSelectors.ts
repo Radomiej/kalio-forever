@@ -1,11 +1,16 @@
 import type {
   AgentBudgetApprovalRequest,
   AgentRunContext,
+  ChatMessage,
+  ChatSession,
   RuntimeActivitySnapshot,
   SocketEvents,
   ToolConfirmationRequest,
 } from '@kalio/types';
-import { sessionStatusSnapshotToRuntimeState } from '../features/sessions/sessionTreeDisplay';
+import {
+  buildArchitectureSessionRuntimeStates,
+  sessionStatusSnapshotToRuntimeState,
+} from '../features/sessions/sessionTreeDisplay';
 
 type LiveSessionLoopSeed = {
   sessionId: string;
@@ -30,6 +35,37 @@ export interface RunningLoopSummary {
   agentRun?: AgentRunContext;
 }
 
+export type RuntimeAttentionKind =
+  | 'hitl'
+  | 'budget'
+  | 'runtime_waiting'
+  | 'runtime_timeout'
+  | 'runtime_error';
+
+export interface RuntimeAttentionItem {
+  id: string;
+  sessionId: string;
+  kind: RuntimeAttentionKind;
+  label: string;
+  detail: string;
+  actionable: boolean;
+  priority: number;
+}
+
+export interface RuntimeContinuationAction {
+  id: string;
+  sessionId: string;
+  parentSessionId: string;
+  flowRunId: string;
+  label: string;
+  detail: string;
+  input: string;
+  actionable: boolean;
+  priority: number;
+}
+
+const RECENT_RUNTIME_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 function runtimeSnapshotToSessionStatus(
   snapshot: RuntimeActivitySnapshot,
 ): SocketEvents['session:status'] {
@@ -44,6 +80,177 @@ function runtimeSnapshotToSessionStatus(
 
 function isLiveSessionState(state: ReturnType<typeof sessionStatusSnapshotToRuntimeState>): boolean {
   return state === 'pending' || state === 'running' || state === 'waiting';
+}
+
+function compactAttentionText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function sessionAttentionLabel(
+  sessionId: string,
+  sessionsById: Map<string, ChatSession>,
+): string {
+  const title = sessionsById.get(sessionId)?.title?.trim();
+  return title && title.length > 0 ? title : `Session ${sessionId.slice(0, 8)}`;
+}
+
+function canProjectPersistedRuntimeEvidence(session: ChatSession | undefined): boolean {
+  if (!session) {
+    return false;
+  }
+
+  if (Date.now() - session.updatedAt > RECENT_RUNTIME_ATTENTION_WINDOW_MS) {
+    return false;
+  }
+
+  if (session.parentSessionId) {
+    return true;
+  }
+
+  if (session.kind === 'subagent' || session.kind === 'cli-agent' || session.kind === 'agent-flow') {
+    return true;
+  }
+
+  return session.runtimeContext?.runtimeKind === 'agent-flow-branch'
+    || session.runtimeContext?.runtimeKind === 'agent-flow-root'
+    || session.runtimeContext?.runtimeKind === 'cli-agent';
+}
+
+function extractArchitectureEvidence(run: ChatMessage['architectureRun'] | undefined): string | null {
+  if (!run) {
+    return null;
+  }
+  for (let index = run.trace.length - 1; index >= 0; index -= 1) {
+    const reason = run.trace[index]?.incompleteReason?.trim();
+    if (reason) {
+      return reason;
+    }
+  }
+  return null;
+}
+
+function extractToolResultEvidence(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    const recoverableRuntimeError = parsed['recoverableRuntimeError'];
+    if (typeof recoverableRuntimeError === 'string' && recoverableRuntimeError.trim().length > 0) {
+      return recoverableRuntimeError.trim();
+    }
+    const errorMessage = parsed['errorMessage'];
+    if (typeof errorMessage === 'string' && errorMessage.trim().length > 0) {
+      return errorMessage.trim();
+    }
+    const toolResultErrorMessage = parsed['toolResultErrorMessage'];
+    if (typeof toolResultErrorMessage === 'string' && toolResultErrorMessage.trim().length > 0) {
+      return toolResultErrorMessage.trim();
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function extractLatestVisibleRuntimeEvidence(
+  messages: ChatMessage[] | undefined,
+  snapshot: RuntimeActivitySnapshot | undefined,
+): string | null {
+  const safeMessages = messages ?? [];
+  for (let index = safeMessages.length - 1; index >= 0; index -= 1) {
+    const message = safeMessages[index];
+    if (!message) {
+      continue;
+    }
+    if (message.role === 'assistant' && message.content.trim().length > 0) {
+      return compactAttentionText(message.content);
+    }
+    if (message.role === 'tool_result' && message.content.trim().length > 0) {
+      const evidence = extractToolResultEvidence(message.content);
+      if (evidence) {
+        return compactAttentionText(evidence);
+      }
+    }
+    const architectureEvidence = extractArchitectureEvidence(message.architectureRun);
+    if (architectureEvidence) {
+      return compactAttentionText(architectureEvidence);
+    }
+  }
+
+  const lastChildOutput = [...(snapshot?.childExecutions ?? [])]
+    .reverse()
+    .map((execution) => execution.lastOutput?.trim())
+    .find((output): output is string => Boolean(output && output.length > 0));
+  return lastChildOutput ? compactAttentionText(lastChildOutput) : null;
+}
+
+function classifyRuntimeEvidence(
+  evidence: string | null,
+): Pick<RuntimeAttentionItem, 'kind' | 'detail' | 'priority'> | null {
+  if (!evidence) {
+    return null;
+  }
+
+  const normalized = evidence.toLowerCase();
+  if (
+    normalized.includes('tool budget ended')
+    || normalized.includes('max tools')
+    || normalized.includes('max tool')
+    || normalized.includes('maxtoolattempt')
+  ) {
+    return {
+      kind: 'runtime_error',
+      detail: 'Tool budget reached before the branch could finish.',
+      priority: 10,
+    };
+  }
+
+  if (normalized.includes('timed out') || normalized.includes('timeout')) {
+    const timeoutMatch = /(?:sub-agent failed:\s*)?(sub-agent timed out after [^.]+\.?)/i.exec(evidence);
+    return {
+      kind: 'runtime_timeout',
+      detail: compactAttentionText(timeoutMatch?.[1] ?? evidence),
+      priority: 5,
+    };
+  }
+
+  if (
+    normalized.includes('failed')
+    || normalized.includes('error')
+    || normalized.includes('blocked')
+    || normalized.includes('cancelled')
+  ) {
+    return {
+      kind: 'runtime_error',
+      detail: compactAttentionText(evidence),
+      priority: 15,
+    };
+  }
+
+  return null;
+}
+
+function waitingDetail(
+  snapshot: RuntimeActivitySnapshot | undefined,
+  waitingLabel?: string | null,
+): string {
+  const runStatus = snapshot?.run?.status as string | undefined;
+  if (runStatus === 'waiting_on_orchestrator') {
+    return 'Waiting on orchestrator';
+  }
+  if (waitingLabel && waitingLabel.trim().length > 0) {
+    return `Waiting on ${waitingLabel.trim()}`;
+  }
+  return 'Runtime waiting';
+}
+
+function setRuntimeAttentionItem(
+  itemsBySessionId: Map<string, RuntimeAttentionItem>,
+  nextItem: RuntimeAttentionItem,
+): void {
+  const current = itemsBySessionId.get(nextItem.sessionId);
+  if (!current || nextItem.priority < current.priority) {
+    itemsBySessionId.set(nextItem.sessionId, nextItem);
+  }
 }
 
 export function mergeRuntimeSessionStatusSnapshots(
@@ -156,6 +363,217 @@ export function selectPendingApprovalCount(params: {
     .reduce((total, entries) => total + normalizePendingEntries(entries).length, 0);
 
   return confirmationCount + budgetApprovalCount;
+}
+
+export function selectRuntimeAttentionItems(params: {
+  pendingConfirmations?: Record<string, ToolConfirmationRequest[] | ToolConfirmationRequest> | null;
+  pendingBudgetApprovals?: Record<string, AgentBudgetApprovalRequest[] | AgentBudgetApprovalRequest> | null;
+  runtimeActivitySnapshots?: Record<string, RuntimeActivitySnapshot> | null;
+  sessions?: ChatSession[] | null;
+  sessionMessages?: Record<string, ChatMessage[]> | null;
+}): RuntimeAttentionItem[] {
+  const approvalItems: RuntimeAttentionItem[] = [];
+  const actionableSessionIds = new Set<string>();
+  const pendingConfirmations = params.pendingConfirmations ?? {};
+  const pendingBudgetApprovals = params.pendingBudgetApprovals ?? {};
+
+  Object.values(pendingConfirmations).forEach((entries) => {
+    normalizePendingEntries(entries).forEach((confirmation) => {
+      approvalItems.push({
+        id: `hitl:${confirmation.requestId}`,
+        sessionId: confirmation.sessionId,
+        kind: 'hitl',
+        label: confirmation.toolName,
+        detail: 'Awaiting confirmation',
+        actionable: true,
+        priority: 0,
+      });
+      actionableSessionIds.add(confirmation.sessionId);
+    });
+  });
+
+  Object.values(pendingBudgetApprovals).forEach((entries) => {
+    normalizePendingEntries(entries).forEach((approval) => {
+      approvalItems.push({
+        id: `budget:${approval.requestId}`,
+        sessionId: approval.sessionId,
+        kind: 'budget',
+        label: approval.scope === 'chat' ? 'Budget approval' : 'Agent budget approval',
+        detail: 'Budget approval required',
+        actionable: true,
+        priority: 0,
+      });
+      actionableSessionIds.add(approval.sessionId);
+    });
+  });
+
+  const sessions = params.sessions ?? [];
+  const sessionMessages = params.sessionMessages ?? {};
+  const runtimeActivitySnapshots = params.runtimeActivitySnapshots ?? {};
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const architectureSessionRuntimeStates = buildArchitectureSessionRuntimeStates(sessions, sessionMessages);
+  const runtimeItemsBySessionId = new Map<string, RuntimeAttentionItem>();
+
+  sessions.forEach((session) => {
+    if (actionableSessionIds.has(session.id)) {
+      return;
+    }
+
+    const snapshot = runtimeActivitySnapshots[session.id];
+    const runtimeState = snapshot
+      ? sessionStatusSnapshotToRuntimeState(runtimeSnapshotToSessionStatus(snapshot))
+      : null;
+    const architectureState = architectureSessionRuntimeStates.get(session.id) ?? null;
+    const evidence = extractLatestVisibleRuntimeEvidence(sessionMessages[session.id], snapshot);
+    const classifiedEvidence = classifyRuntimeEvidence(evidence);
+    const label = sessionAttentionLabel(session.id, sessionsById);
+    const persistedRuntimeEvidence = canProjectPersistedRuntimeEvidence(session);
+
+    if (
+      classifiedEvidence
+      && (
+        runtimeState === 'waiting'
+        || runtimeState === 'running'
+        || runtimeState === 'error'
+        || architectureState === 'waiting'
+        || architectureState === 'error'
+        || Boolean(snapshot)
+        || persistedRuntimeEvidence
+      )
+    ) {
+      setRuntimeAttentionItem(runtimeItemsBySessionId, {
+        id: `${classifiedEvidence.kind}:${session.id}`,
+        sessionId: session.id,
+        kind: classifiedEvidence.kind,
+        label,
+        detail: classifiedEvidence.detail,
+        actionable: false,
+        priority: classifiedEvidence.priority,
+      });
+      return;
+    }
+
+    if (runtimeState === 'error' || architectureState === 'error') {
+      setRuntimeAttentionItem(runtimeItemsBySessionId, {
+        id: `runtime_error:${session.id}`,
+        sessionId: session.id,
+        kind: 'runtime_error',
+        label,
+        detail: 'Runtime error',
+        actionable: false,
+        priority: 20,
+      });
+      return;
+    }
+
+    if (runtimeState === 'waiting' || architectureState === 'waiting') {
+      setRuntimeAttentionItem(runtimeItemsBySessionId, {
+        id: `runtime_waiting:${session.id}`,
+        sessionId: session.id,
+        kind: 'runtime_waiting',
+        label,
+        detail: waitingDetail(snapshot),
+        actionable: false,
+        priority: 30,
+      });
+    }
+  });
+
+  Object.values(runtimeActivitySnapshots).forEach((snapshot) => {
+    snapshot.childExecutions.forEach((execution) => {
+      const targetSessionId = execution.childSessionId ?? snapshot.sessionId;
+      if (
+        actionableSessionIds.has(targetSessionId)
+        || runtimeItemsBySessionId.has(targetSessionId)
+      ) {
+        return;
+      }
+
+      const label = sessionAttentionLabel(targetSessionId, sessionsById);
+      const classifiedEvidence = classifyRuntimeEvidence(compactAttentionText(execution.lastOutput ?? ''));
+
+      if (classifiedEvidence && (execution.status === 'failed' || execution.status === 'blocked')) {
+        setRuntimeAttentionItem(runtimeItemsBySessionId, {
+          id: `${classifiedEvidence.kind}:${targetSessionId}`,
+          sessionId: targetSessionId,
+          kind: classifiedEvidence.kind,
+          label,
+          detail: classifiedEvidence.detail,
+          actionable: false,
+          priority: classifiedEvidence.priority,
+        });
+        return;
+      }
+
+      if (execution.status === 'waiting') {
+        setRuntimeAttentionItem(runtimeItemsBySessionId, {
+          id: `runtime_waiting:${targetSessionId}`,
+          sessionId: targetSessionId,
+          kind: 'runtime_waiting',
+          label,
+          detail: execution.kind === 'agent_flow'
+            ? 'Waiting on orchestrator'
+            : waitingDetail(undefined, execution.label),
+          actionable: false,
+          priority: 30,
+        });
+      }
+    });
+  });
+
+  return [
+    ...approvalItems.sort((left, right) => left.id.localeCompare(right.id)),
+    ...[...runtimeItemsBySessionId.values()].sort((left, right) => {
+      if (left.priority === right.priority) {
+        return left.label.localeCompare(right.label);
+      }
+      return left.priority - right.priority;
+    }),
+  ];
+}
+
+export function selectRuntimeContinuationActions(params: {
+  runtimeActivitySnapshots?: Record<string, RuntimeActivitySnapshot> | null;
+  sessions?: ChatSession[] | null;
+  sessionMessages?: Record<string, ChatMessage[]> | null;
+}): RuntimeContinuationAction[] {
+  const sessionsById = new Map((params.sessions ?? []).map((session) => [session.id, session]));
+  const actionsByFlowRunId = new Map<string, RuntimeContinuationAction>();
+
+  Object.values(params.runtimeActivitySnapshots ?? {}).forEach((snapshot) => {
+    snapshot.childExecutions.forEach((execution) => {
+      if (
+        execution.kind !== 'agent_flow'
+        || execution.status !== 'waiting'
+        || !execution.flowRunId
+      ) {
+        return;
+      }
+
+      const childSession = sessionsById.get(execution.childSessionId);
+      const label = childSession?.title?.trim()
+        || execution.label?.trim()
+        || sessionAttentionLabel(execution.childSessionId, sessionsById);
+      actionsByFlowRunId.set(execution.flowRunId, {
+        id: `agent_flow_resume:${execution.flowRunId}`,
+        sessionId: execution.childSessionId,
+        parentSessionId: execution.parentSessionId,
+        flowRunId: execution.flowRunId,
+        label,
+        detail: 'Waiting on orchestrator',
+        input: 'Continue.',
+        actionable: true,
+        priority: 25,
+      });
+    });
+  });
+
+  return [...actionsByFlowRunId.values()].sort((left, right) => {
+    if (left.priority === right.priority) {
+      return left.label.localeCompare(right.label);
+    }
+    return left.priority - right.priority;
+  });
 }
 
 export function selectPendingConfirmationsForSession(params: {

@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, Circle, GitBranch, Loader2, Route, ShieldCheck, XCircle } from 'lucide-react';
-import { architectureSessionIdForRunSlot, type ArchitectureChatRunSummary } from '@kalio/types';
+import { architectureSessionIdForRunSlot, type ArchitectureChatRunSummary, type ChatSession } from '@kalio/types';
 import { architectureTraceActivitySummary, compactArchitectureTraceContent } from './architectureChatSummary';
 import {
   buildTimelineStages,
@@ -12,6 +12,7 @@ import {
   type TraceStage,
   type TraceStep,
 } from './ArchitectureRunTimeline.stages';
+import { architectureContextStringField } from '../sessions/architectureSessionContext';
 
 function compact(step: TraceStep): string {
   return compactArchitectureTraceContent(step.content, step.speaker).replace(/\s+/g, ' ').trim();
@@ -91,15 +92,72 @@ function resolveBranchSessionId(
   return stepSessionCandidates(runId, step).find((sessionId) => canOpenBranchSession(sessionId));
 }
 
+function normalizeArchitectureKey(value: string | undefined): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase().replace(/_/g, '-');
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function sessionDisplayLabel(session: ChatSession): string | undefined {
+  return architectureContextStringField(session, 'displayLabel')
+    ?? architectureContextStringField(session, 'roleLabel')
+    ?? session.title.split(':').at(-1)?.trim()
+    ?? undefined;
+}
+
+function routerSessionForStep(
+  step: TraceStep,
+  runSessions: ReadonlyArray<ChatSession> | undefined,
+): ChatSession | undefined {
+  if (!runSessions || step.speaker !== 'router') {
+    return undefined;
+  }
+  const routerSessions = runSessions.filter((session) => architectureContextStringField(session, 'roleSlotType') === 'router');
+  if (routerSessions.length === 0) {
+    return undefined;
+  }
+
+  const resolvedLabel = normalizeArchitectureKey(nodeLabel(step));
+  if (resolvedLabel) {
+    const matchingLabelSession = routerSessions.find((session) => normalizeArchitectureKey(sessionDisplayLabel(session)) === resolvedLabel);
+    if (matchingLabelSession) {
+      return matchingLabelSession;
+    }
+  }
+
+  const stepNodeId = normalizeArchitectureKey(step.nodeId);
+  if (stepNodeId && stepNodeId !== 'router') {
+    const matchingSlotSession = routerSessions.find((session) => normalizeArchitectureKey(session.runtimeContext?.architectureSlotId) === stepNodeId);
+    if (matchingSlotSession) {
+      return matchingSlotSession;
+    }
+  }
+
+  const nextNodeId = normalizeArchitectureKey(step.nextNodeId);
+  if (nextNodeId === 'final-artifact') {
+    const mergeSession = routerSessions.find((session) => normalizeArchitectureKey(session.runtimeContext?.architectureSlotId) !== 'orchestrator');
+    if (mergeSession) {
+      return mergeSession;
+    }
+  }
+
+  return routerSessions.find((session) => normalizeArchitectureKey(session.runtimeContext?.architectureSlotId) === 'orchestrator')
+    ?? routerSessions[0];
+}
+
 function RouterStep({
   step,
   label,
+  routeLabel,
   openableSessionId,
   onOpenBranch,
   onOpenStep,
 }: {
   step: TraceStep | undefined;
   label: string;
+  routeLabel?: string;
   openableSessionId?: string;
   onOpenBranch: (sessionId: string) => void;
   onOpenStep: (step: TraceStep) => void;
@@ -131,6 +189,10 @@ function RouterStep({
       <div className="flex items-center gap-2">
         <Route size={12} className="text-amber-300" />
         <span className="text-xs font-medium text-base-content">{label}</span>
+        <span className="rounded bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-mono text-amber-200">router</span>
+        {routeLabel && (
+          <span className="text-[10px] font-mono text-base-content/60">{routeLabel}</span>
+        )}
         {step?.nextNodeId && (
           <span className="text-[10px] font-mono text-base-content/70">to {step.nextNodeId}</span>
         )}
@@ -176,12 +238,14 @@ function RouterStep({
 function AgentStep({
   runId,
   step,
+  label,
   canOpenBranchSession,
   onOpenBranch,
   onOpenStep,
 }: {
   runId: string;
   step: TraceStep;
+  label: string;
   canOpenBranchSession: (sessionId: string | undefined) => boolean;
   onOpenBranch: (sessionId: string) => void;
   onOpenStep: (step: TraceStep) => void;
@@ -206,7 +270,7 @@ function AgentStep({
     >
       <div className="flex items-center gap-2">
         <GitBranch size={12} className="text-sky-300" />
-        <span className="truncate text-xs font-medium text-base-content">{nodeLabel(step)}</span>
+        <span className="truncate text-xs font-medium text-base-content">{label}</span>
         <StatusBadge status={status} />
       </div>
       {step && (
@@ -219,15 +283,15 @@ function AgentStep({
 }
 
 function ParallelBranches({
-  runId,
   steps,
-  canOpenBranchSession,
+  labelForStep,
+  sessionIdForStep,
   onOpenBranch,
   onOpenStep,
 }: {
-  runId: string;
   steps: TraceStep[];
-  canOpenBranchSession: (sessionId: string | undefined) => boolean;
+  labelForStep: (step: TraceStep) => string;
+  sessionIdForStep: (step: TraceStep) => string | undefined;
   onOpenBranch: (sessionId: string) => void;
   onOpenStep: (step: TraceStep) => void;
 }) {
@@ -242,7 +306,7 @@ function ParallelBranches({
       </div>
       <div className="grid gap-1.5 sm:grid-cols-2">
         {steps.map((step) => {
-          const openableBranchSessionId = resolveBranchSessionId(runId, step, canOpenBranchSession);
+          const openableBranchSessionId = sessionIdForStep(step);
           const status = statusForStep(step);
           return (
           <button
@@ -261,7 +325,7 @@ function ParallelBranches({
             }}
           >
             <div className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate text-[11px] font-medium text-base-content">{nodeLabel(step)}</span>
+              <span className="truncate text-[11px] font-medium text-base-content">{labelForStep(step)}</span>
               <StatusBadge status={status} />
             </div>
             {step && (
@@ -366,12 +430,14 @@ export function ArchitectureRunTimeline({
   onOpenBranch,
   onOpenStep,
   knownBranchSessionIds,
+  runSessions,
 }: {
   run: ArchitectureChatRunSummary;
   onOpenCanvas: () => void;
   onOpenBranch: (sessionId: string) => void;
   onOpenStep?: (focus: { eventId?: string; nodeId?: string }) => void;
   knownBranchSessionIds?: ReadonlySet<string>;
+  runSessions?: ReadonlyArray<ChatSession>;
 }) {
   const stages = buildTimelineStages(run);
   const routers = stages
@@ -381,16 +447,41 @@ export function ArchitectureRunTimeline({
   const finalRouter = routers.at(-1);
   const hasParallelStage = stages.some((stage) => stage.kind === 'parallel');
   const hasMerge = hasParallelStage && Boolean(finalRouter && finalRouter !== firstRouter);
-  const shellSegments = stages.map(stageSegment);
   const stepCount = graphStepCount(run);
   const canOpenBranchSession = (sessionId: string | undefined) => (
     typeof sessionId === 'string'
     && sessionId.trim().length > 0
     && (knownBranchSessionIds === undefined || knownBranchSessionIds.has(sessionId))
   );
+  const displayLabelForStep = (step: TraceStep): string => {
+    if (step.speaker === 'finalizer') {
+      return 'Finalizer';
+    }
+    if (step.speaker !== 'router') {
+      return nodeLabel(step);
+    }
+    const routerSession = routerSessionForStep(step, runSessions);
+    const routerSessionLabel = routerSession ? sessionDisplayLabel(routerSession) : undefined;
+    if (routerSessionLabel) {
+      return routerSessionLabel;
+    }
+    const routerNodeId = normalizeArchitectureKey(step.nodeId);
+    if (!routerNodeId || routerNodeId === 'router') {
+      return nodeLabel(step);
+    }
+    return routerNodeId.startsWith('router-') ? 'Router' : nodeLabel(step);
+  };
+  const openableSessionIdForStep = (step: TraceStep): string | undefined => (
+    resolveBranchSessionId(run.runId, step, canOpenBranchSession)
+    ?? ((): string | undefined => {
+      const routerSession = routerSessionForStep(step, runSessions);
+      return canOpenBranchSession(routerSession?.id) ? routerSession?.id : undefined;
+    })()
+  );
   const openStep = (step: TraceStep) => {
     onOpenStep?.(stepFocus(step));
   };
+  const shellSegments = stages.map((stage) => stageSegment(stage, displayLabelForStep));
 
   return (
     <div
@@ -422,9 +513,9 @@ export function ArchitectureRunTimeline({
             return (
               <ParallelBranches
                 key={`parallel-${index}`}
-                runId={run.runId}
                 steps={stage.steps}
-                canOpenBranchSession={canOpenBranchSession}
+                labelForStep={displayLabelForStep}
+                sessionIdForStep={openableSessionIdForStep}
                 onOpenBranch={onOpenBranch}
                 onOpenStep={openStep}
               />
@@ -438,6 +529,7 @@ export function ArchitectureRunTimeline({
                   key={step.eventId ?? `${step.nodeId}-${index}`}
                   runId={run.runId}
                   step={step}
+                  label={displayLabelForStep(step)}
                   canOpenBranchSession={canOpenBranchSession}
                   onOpenBranch={onOpenBranch}
                   onOpenStep={openStep}
@@ -445,17 +537,19 @@ export function ArchitectureRunTimeline({
               );
             }
             if (step.speaker === 'router') {
-              const label = hasParallelStage && step === firstRouter
-                ? 'Router dispatch'
+              const label = displayLabelForStep(step);
+              const routeLabel = hasParallelStage && step === firstRouter
+                ? 'dispatch'
                 : step === finalRouter && hasMerge
-                  ? 'Router merge'
-                  : nodeLabel(step);
+                  ? 'merge'
+                  : 'route';
               return (
                 <RouterStep
                   key={step.eventId ?? `${step.nodeId}-${index}`}
                   step={step}
                   label={label}
-                  openableSessionId={resolveBranchSessionId(run.runId, step, canOpenBranchSession)}
+                  routeLabel={routeLabel}
+                  openableSessionId={openableSessionIdForStep(step)}
                   onOpenBranch={onOpenBranch}
                   onOpenStep={openStep}
                 />
@@ -466,7 +560,7 @@ export function ArchitectureRunTimeline({
                 <FinalizerStep
                   key={step.eventId ?? `${step.nodeId}-${index}`}
                   step={step}
-                  openableSessionId={resolveBranchSessionId(run.runId, step, canOpenBranchSession)}
+                  openableSessionId={openableSessionIdForStep(step)}
                   onOpenBranch={onOpenBranch}
                   onOpenStep={openStep}
                 />

@@ -2,8 +2,21 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@kalio/types';
 import { useSessionStore } from '../../../store/sessionStore';
+import { useAgentStore } from '../../../store/agentStore';
+import { apiClient } from '../../../services/apiClient';
 import { ExecutionGraphInspector } from './ExecutionGraphInspector';
 import type { ExecutionGraphNode, ExecutionGraphNodePayload } from './executionGraphModel';
+
+vi.mock('../../../services/apiClient', async () => {
+  const actual = await vi.importActual<typeof import('../../../services/apiClient')>('../../../services/apiClient');
+  return {
+    ...actual,
+    apiClient: {
+      ...actual.apiClient,
+      post: vi.fn(),
+    },
+  };
+});
 
 function makePromptNode(): ExecutionGraphNode {
   const message: ChatMessage = {
@@ -54,6 +67,9 @@ function makeNode(payload: ExecutionGraphNodePayload, overrides: Partial<Executi
 
 describe('ExecutionGraphInspector', () => {
   beforeEach(() => {
+    vi.mocked(apiClient.post).mockReset();
+    vi.mocked(apiClient.post).mockRejectedValue(new Error('unexpected apiClient.post call'));
+    useAgentStore.setState({ runtimeActivitySnapshots: {} });
     useSessionStore.setState({
       sessions: [
         { id: 'branch-session-1234567890', personaId: 'default', title: 'Architecture branch', createdAt: 1, updatedAt: 1 },
@@ -537,6 +553,93 @@ describe('ExecutionGraphInspector', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open child graph' }));
 
     expect(setActiveSession).toHaveBeenCalledWith('flow-child-1');
+  });
+
+  it('resumes a waiting AgentFlow node from the inspector action', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce({
+      data: {
+        run: {
+          id: 'flow-1',
+          parentSessionId: 'session-1',
+          childSessionId: 'flow-child-1',
+          openChatSessionId: 'flow-child-1',
+          openGraphRunId: 'flow-1',
+          flowDefinitionId: 'goal_guard_delivery_loop',
+          status: 'running',
+          startMode: 'durable',
+          returnMode: 'summary',
+          createdAt: 1,
+          updatedAt: 2,
+        },
+        events: [],
+      },
+    });
+    useAgentStore.setState({
+      runtimeActivitySnapshots: {
+        'session-1': {
+          sessionId: 'session-1',
+          active: false,
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          childExecutions: [
+            {
+              id: 'child-flow-1',
+              kind: 'agent_flow',
+              parentSessionId: 'session-1',
+              childSessionId: 'flow-child-1',
+              flowRunId: 'flow-1',
+              label: 'Goal Guard',
+              status: 'waiting',
+              updatedAt: 2,
+            },
+          ],
+          toolActivities: [],
+          updatedAt: 2,
+        },
+      },
+    });
+
+    render(
+      <ExecutionGraphInspector
+        activeSessionId="session-1"
+        inspectorWidth={360}
+        selectedConfirmation={null}
+        selectedNode={{
+          id: 'agent-flow:flow-1',
+          kind: 'agent-flow',
+          title: 'Sub AgentFlow',
+          subtitle: 'flow-1 / waiting_on_orchestrator',
+          status: 'running',
+          column: 1,
+          row: 0,
+          x: 0,
+          y: 0,
+          width: 220,
+          height: 140,
+          sessionId: 'flow-child-1',
+          callId: 'call-flow-1',
+          payload: {
+            kind: 'agent-flow',
+            childExecutionKind: 'sub_agentflow',
+            result: null,
+            childSessionId: 'flow-child-1',
+            graphRunId: 'flow-1',
+            inputPrompt: 'Verify delivery',
+          },
+        }}
+        onOpenSessionInConversation={undefined}
+        setActiveSession={vi.fn()}
+        removePendingConfirmation={vi.fn()}
+        setPendingMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Waiting on orchestrator')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('resume-agentflow-flow-1'));
+
+    expect(apiClient.post).toHaveBeenCalledWith('/api/agent-flows/runs/flow-1/resume', { input: 'Continue.' });
   });
 
   it('shows an awaiting reply state for a final response node without a message yet', () => {
