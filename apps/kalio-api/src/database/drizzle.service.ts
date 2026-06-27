@@ -169,15 +169,11 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
-    if (!this.migrationSqlContainsColumn(migrationsFolder, '0000_init', 'origin_source')) {
-      return null;
-    }
-
     if (!this.migrationSqlContainsColumn(migrationsFolder, '0017_mcp_server_origin_source', 'origin_source')) {
       return null;
     }
 
-    return 'Detected migration drift: mcp_servers.origin_source already exists in 0000_init.sql and is also added in 0017_mcp_server_origin_source. '
+    return 'Detected migration drift: mcp_servers.origin_source is present in an existing schema while migration 0017_mcp_server_origin_source also wants to add it. '
       + 'This is a schema-history mismatch and should be visible as a startup warning instead of a silent migration fallback.';
   }
 
@@ -198,8 +194,12 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
 
-    const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as { entries?: Array<{ tag?: string }> };
-    return (journal.entries ?? []).some((entry) => entry.tag === tag);
+    try {
+      const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as { entries?: Array<{ tag?: string }> };
+      return (journal.entries ?? []).some((entry) => entry.tag === tag);
+    } catch {
+      return false;
+    }
   }
 
   private tableExists(tableName: string): boolean {
