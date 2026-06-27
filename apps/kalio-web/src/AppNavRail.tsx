@@ -12,14 +12,16 @@ const NAV: { id: ActiveSection; icon: ReactNode; label: string }[] = [
 
 export function AppNavRail({
   activeSection,
-  pendingConfirmationCount,
+  talkAttentionCount,
+  talkAttentionTitle,
   recentTalkCount,
   onGoHome,
   onOpenSettings,
   onSelectSection,
 }: {
   activeSection: ActiveSection;
-  pendingConfirmationCount: number;
+  talkAttentionCount: number;
+  talkAttentionTitle: string;
   recentTalkCount: number;
   onGoHome: () => void;
   onOpenSettings: () => void;
@@ -63,24 +65,24 @@ export function AppNavRail({
           >
             {item.icon}
           </button>
-          {item.id === 'talk' && activeSection !== 'talk' && (pendingConfirmationCount > 0 || recentTalkCount > 0) && (
+          {item.id === 'talk' && activeSection !== 'talk' && (talkAttentionCount > 0 || recentTalkCount > 0) && (
             <span
               className={`absolute -top-1 -right-1 badge badge-xs pointer-events-none ${
-                pendingConfirmationCount > 0
+                talkAttentionCount > 0
                   ? 'badge-warning animate-pulse'
                   : 'badge-info'
               }`}
-              title={pendingConfirmationCount > 0
-                ? `${pendingConfirmationCount} approval${pendingConfirmationCount === 1 ? '' : 's'} waiting`
+              title={talkAttentionCount > 0
+                ? talkAttentionTitle
                 : `${recentTalkCount} completed or updated chat${recentTalkCount === 1 ? '' : 's'} since last Talk activity`}
-              aria-label={pendingConfirmationCount > 0
-                ? `${pendingConfirmationCount} approval${pendingConfirmationCount === 1 ? '' : 's'} waiting`
+              aria-label={talkAttentionCount > 0
+                ? talkAttentionTitle
                 : `${recentTalkCount} completed or updated chat${recentTalkCount === 1 ? '' : 's'} since last Talk activity`}
               data-testid="nav-talk-activity-count"
             >
-              {(pendingConfirmationCount > 0 ? pendingConfirmationCount : recentTalkCount) > 99
+              {(talkAttentionCount > 0 ? talkAttentionCount : recentTalkCount) > 99
                 ? '99+'
-                : pendingConfirmationCount > 0 ? pendingConfirmationCount : recentTalkCount}
+                : talkAttentionCount > 0 ? talkAttentionCount : recentTalkCount}
             </span>
           )}
         </div>

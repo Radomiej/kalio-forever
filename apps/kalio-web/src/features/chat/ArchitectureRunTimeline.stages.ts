@@ -16,6 +16,10 @@ export function nodeLabel(step: TraceStep): string {
   if (step.plannedLabel) {
     return step.plannedLabel;
   }
+  const inferredRouterLabel = inferRouterActorLabel(step);
+  if (inferredRouterLabel) {
+    return inferredRouterLabel;
+  }
   const raw = step.nodeId ?? step.nextNodeId ?? step.speaker;
   return raw
     .split(/[-_]/)
@@ -65,11 +69,14 @@ export function graphStepCount(run: ArchitectureChatRunSummary): number {
   return (run as ArchitectureRunSummaryWithGraph).graphNodes?.length ?? run.trace.length;
 }
 
-export function stageSegment(stage: TraceStage): { label: string; tone: string } {
+export function stageSegment(
+  stage: TraceStage,
+  resolveLabel?: (step: TraceStep) => string,
+): { label: string; tone: string } {
   if (stage.kind === 'parallel') {
     return { label: `Sub-agents ${stage.steps.length}`, tone: 'text-sky-200 bg-sky-400/10 border-sky-400/20' };
   }
-  return { label: routeSegmentLabel(stage.step), tone: routeSegmentTone(stage.step) };
+  return { label: routeSegmentLabel(stage.step, resolveLabel?.(stage.step)), tone: routeSegmentTone(stage.step) };
 }
 
 export function stepFocus(step: TraceStep): { eventId?: string; nodeId?: string } {
@@ -190,9 +197,10 @@ function nextNodeIdForGraphNode(nodeId: string, run: ArchitectureRunSummaryWithG
   return edge?.toNodeId;
 }
 
-function routeSegmentLabel(step: TraceStep): string {
+function routeSegmentLabel(step: TraceStep, labelOverride?: string): string {
+  if (labelOverride) return labelOverride;
   if (step.speaker === 'participant') return nodeLabel(step);
-  if (step.speaker === 'router') return 'Router';
+  if (step.speaker === 'router') return nodeLabel(step);
   if (step.speaker === 'finalizer') return 'Finalizer';
   return nodeLabel(step);
 }
@@ -202,4 +210,17 @@ function routeSegmentTone(step: TraceStep): string {
   if (step.speaker === 'router') return 'text-amber-200 bg-amber-400/10 border-amber-400/20';
   if (step.speaker === 'finalizer') return 'text-emerald-200 bg-emerald-400/10 border-emerald-400/20';
   return 'text-base-content bg-base-100/50 border-base-content/20';
+}
+
+function inferRouterActorLabel(step: TraceStep): string | undefined {
+  if (step.speaker !== 'router') {
+    return undefined;
+  }
+  const normalizedNodeId = step.nodeId?.trim().toLowerCase();
+  if (normalizedNodeId && normalizedNodeId !== 'router') {
+    return undefined;
+  }
+  const match = /(?:^|\n\n)([A-Z][A-Za-z0-9 _-]{1,48})\s+(?:completed a bounded evidence pass|hit a recoverable branch error)\b/m.exec(step.content);
+  const candidate = match?.[1]?.trim();
+  return candidate && candidate.toLowerCase() !== 'router' ? candidate : undefined;
 }

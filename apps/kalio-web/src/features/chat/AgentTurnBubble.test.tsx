@@ -5,6 +5,7 @@ import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { ToolActivity } from '../../store/agentStore';
 import type { AgentTurn, AgentTurnItem } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
+import { apiClient } from '../../services/apiClient';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -77,6 +78,17 @@ vi.mock('../../services/eventBus', () => ({
   },
 }));
 
+vi.mock('../../services/apiClient', async () => {
+  const actual = await vi.importActual<typeof import('../../services/apiClient')>('../../services/apiClient');
+  return {
+    ...actual,
+    apiClient: {
+      ...actual.apiClient,
+      post: vi.fn(),
+    },
+  };
+});
+
 vi.mock('../../components/markdown/MarkdownViewer', () => ({
   MarkdownViewer: ({ content }: { content: string }) => <div data-testid="markdown-viewer">{content}</div>,
 }));
@@ -139,6 +151,8 @@ describe('AgentTurnBubble', () => {
     mockAgentStoreState.sessionStatusSnapshots = {};
     mockAgentStoreState.runtimeActivitySnapshots = {};
     mockAgentStoreState.removePendingBudgetApproval.mockClear();
+    vi.mocked(apiClient.post).mockReset();
+    vi.mocked(apiClient.post).mockRejectedValue(new Error('unexpected apiClient.post call'));
   });
 
   it('renders agent turn bubble with data-testid', () => {
@@ -179,6 +193,61 @@ describe('AgentTurnBubble', () => {
     mockMessages.push(makeMsg({ id: 'msg-1', content: '**bold** text' }));
     render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }])} toolActivities={[]} />);
     expect(screen.getByTestId('markdown-viewer')).toHaveTextContent('**bold** text');
+  });
+
+  it('renders a runtime-only AgentFlow continuation action for the active turn', async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce({
+      data: {
+        run: {
+          id: 'flow-run-1',
+          parentSessionId: 's1',
+          childSessionId: 'flow-child-1',
+          openChatSessionId: 'flow-child-1',
+          openGraphRunId: 'flow-run-1',
+          flowDefinitionId: 'goal_guard_delivery_loop',
+          status: 'running',
+          startMode: 'durable',
+          returnMode: 'summary',
+          createdAt: 1,
+          updatedAt: 2,
+        },
+        events: [],
+      },
+    });
+    mockSessions = [
+      { id: 's1', personaId: 'default', title: 'Main session', createdAt: 1, updatedAt: 1 },
+      { id: 'flow-child-1', personaId: 'default', title: 'Goal Guard AgentFlow', kind: 'agent-flow', parentSessionId: 's1', createdAt: 2, updatedAt: 2 },
+    ];
+    mockAgentStoreState.runtimeActivitySnapshots = {
+      s1: {
+        sessionId: 's1',
+        childExecutions: [
+          {
+            id: 'child-flow-1',
+            kind: 'agent_flow',
+            parentSessionId: 's1',
+            childSessionId: 'flow-child-1',
+            flowRunId: 'flow-run-1',
+            label: 'Goal Guard',
+            status: 'waiting',
+            updatedAt: 2,
+          },
+        ],
+        toolActivities: [],
+        activeAgentRuns: [],
+        queuedDepth: 0,
+        generatedAt: 2,
+      },
+    };
+
+    render(<AgentTurnBubble turn={makeTurn([], false)} toolActivities={[]} />);
+
+    expect(screen.getByTestId('turn-agentflow-continuation-flow-run-1')).toHaveTextContent('Goal Guard AgentFlow');
+    expect(screen.getByTestId('turn-agentflow-continuation-flow-run-1')).toHaveTextContent('Waiting on orchestrator');
+
+    fireEvent.click(screen.getByTestId('resume-agentflow-flow-run-1'));
+
+    expect(apiClient.post).toHaveBeenCalledWith('/api/agent-flows/runs/flow-run-1/resume', { input: 'Continue.' });
   });
 
   it('REGRESSION: prefers renderedMessages over raw store scaffold text for branch transcript output', () => {

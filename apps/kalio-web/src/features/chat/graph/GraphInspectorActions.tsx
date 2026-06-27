@@ -3,8 +3,11 @@ import { CheckCircle2, ExternalLink, PauseCircle, Send, XCircle } from 'lucide-r
 import type { ToolConfirmationRequest } from '@kalio/types';
 import { eventBus } from '../../../services/eventBus';
 import { useSessionStore } from '../../../store/sessionStore';
+import { useAgentStore } from '../../../store/agentStore';
+import { selectRuntimeContinuationActions } from '../../../store/agentRuntimeSelectors';
 import type { ExecutionGraphNode } from './executionGraphModel';
 import { activateConversationSession } from '../activeConversationSession';
+import { AgentFlowResumeAction } from '../../agent-flow/AgentFlowResumeAction';
 
 interface GraphInspectorActionsProps {
   node: ExecutionGraphNode;
@@ -29,6 +32,20 @@ export function GraphInspectorActions({
 }: GraphInspectorActionsProps) {
   const [cliActionNotice, setCliActionNotice] = useState<string | null>(null);
   const sessions = useSessionStore((state) => state.sessions);
+  const sessionMessages = useSessionStore((state) => state.sessionMessages);
+  const runtimeActivitySnapshots = useAgentStore((state) => state.runtimeActivitySnapshots);
+  let agentFlowContinuationAction = null;
+  if (node.payload.kind === 'agent-flow') {
+    const agentFlowPayload = node.payload;
+    agentFlowContinuationAction = selectRuntimeContinuationActions({
+        runtimeActivitySnapshots,
+        sessions,
+        sessionMessages,
+      }).find((action) => (
+        action.flowRunId === agentFlowPayload.graphRunId
+        || action.sessionId === agentFlowPayload.childSessionId
+      )) ?? null
+  }
   const childSessionExists = useSessionStore((state) => (
     node.sessionId != null && state.sessions.some((session) => session.id === node.sessionId)
   ));
@@ -126,19 +143,24 @@ export function GraphInspectorActions({
         </>
       )}
       {isAgentFlowChildNode && (
-        <button
-          type="button"
-          className="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-sm font-medium transition-colors hover:bg-base-200"
-          onClick={() => {
-            if (!node.sessionId) return;
-            openConversation(node.sessionId, 'canvas');
-          }}
-        >
-          <span className="flex items-center justify-center gap-2">
-            <ExternalLink size={14} />
-            Open child graph
-          </span>
-        </button>
+        <>
+          <button
+            type="button"
+            className="w-full rounded-xl border border-base-300 bg-base-100 px-4 py-3 text-sm font-medium transition-colors hover:bg-base-200"
+            onClick={() => {
+              if (!node.sessionId) return;
+              openConversation(node.sessionId, 'canvas');
+            }}
+          >
+            <span className="flex items-center justify-center gap-2">
+              <ExternalLink size={14} />
+              Open child graph
+            </span>
+          </button>
+          {agentFlowContinuationAction && (
+            <AgentFlowResumeAction flowRunId={agentFlowContinuationAction.flowRunId} />
+          )}
+        </>
       )}
       {selectedConfirmation && (
         <>

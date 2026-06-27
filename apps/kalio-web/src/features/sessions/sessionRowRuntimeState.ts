@@ -36,6 +36,7 @@ export function sessionRuntimeState(
   const safePendingBudgetApprovals = pendingBudgetApprovals ?? {};
   const safeActiveLoopSessionIds = activeLoopSessionIds ?? new Set<string>();
   const safeQueuedDepthBySession = queuedDepthBySession ?? {};
+  const safeSessionStatusSnapshots = sessionStatusSnapshots ?? {};
   const safeSessionAgentTurns = sessionAgentTurns ?? {};
   const safeSessionMessages = sessionMessages ?? {};
   if (safePendingConfirmations[sessionId] || safePendingBudgetApprovals[sessionId]) {
@@ -56,7 +57,7 @@ export function sessionRuntimeState(
       : null;
   const terminalState = [architectureState, workflowEnvelopeState, turnTerminalState]
     .find(isTerminalRuntimeState) ?? null;
-  const snapshotState = sessionStatusSnapshotToRuntimeState(sessionStatusSnapshots[sessionId]);
+  const snapshotState = sessionStatusSnapshotToRuntimeState(safeSessionStatusSnapshots[sessionId]);
   if (snapshotState) {
     if (!isTerminalRuntimeState(snapshotState) && terminalState) {
       return terminalState;

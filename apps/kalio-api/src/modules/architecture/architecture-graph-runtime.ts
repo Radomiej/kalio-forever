@@ -1259,7 +1259,21 @@ class ArchitectureGraphRuntime {
     }
     if (event === 'tool:confirmation_required') {
       this.push('human_gate', `${slot.label} requested HITL approval for ${this.toolName(payload)}.`, {
-        actionSummary: architectureActionSummaryForEvent('human_gate', 'role'),
+        actionSummary: 'Waiting for tool confirmation.',
+        nodeId: node.id,
+        roleSlotId: slot.id,
+        data: this.branchStreamEventData(event, payload),
+      });
+      return;
+    }
+    if (event === 'agent:budget_required') {
+      const usedIterations = this.numberField(payload, 'usedIterations');
+      const currentLimit = this.numberField(payload, 'currentLimit');
+      const usage = usedIterations !== undefined && currentLimit !== undefined
+        ? ` (${usedIterations}/${currentLimit})`
+        : '';
+      this.push('human_gate', `${slot.label} requested more tool budget${usage}.`, {
+        actionSummary: 'Waiting for budget approval.',
         nodeId: node.id,
         roleSlotId: slot.id,
         data: this.branchStreamEventData(event, payload),
@@ -1305,6 +1319,10 @@ class ArchitectureGraphRuntime {
       toolName: this.stringField(payload, 'toolName'),
       status: this.stringField(payload, 'status'),
       errorMessage: this.stringField(payload, 'message') ?? this.stringField(payload, 'errorMessage'),
+      usedIterations: this.numberField(payload, 'usedIterations'),
+      currentLimit: this.numberField(payload, 'currentLimit'),
+      suggestedNextLimit: this.numberField(payload, 'suggestedNextLimit'),
+      requestedBy: this.stringField(payload, 'requestedBy'),
       toolPath: args ? this.firstStringField(args, ['path', 'filePath', 'targetPath', 'workdir']) : undefined,
     };
   }
@@ -1320,6 +1338,11 @@ class ArchitectureGraphRuntime {
   private stringField(payload: Record<string, unknown>, key: string): string | undefined {
     const value = payload[key];
     return typeof value === 'string' && value.length > 0 ? value : undefined;
+  }
+
+  private numberField(payload: Record<string, unknown>, key: string): number | undefined {
+    const value = payload[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
   }
 
   private firstStringField(payload: Record<string, unknown>, keys: string[]): string | undefined {

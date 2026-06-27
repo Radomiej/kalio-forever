@@ -41,6 +41,7 @@ import { CLIChildConversationCard } from './CLIChildConversationCard';
 import { isCliChildDelegationTool } from './cliChildProjection.model';
 import { useCLIChildProjection } from './CLIChildConversationCard.hooks';
 import { useSessionStore } from '../../store/sessionStore';
+import { AgentFlowResumeAction, isResumableAgentFlowStatus } from '../agent-flow/AgentFlowResumeAction';
 
 export { extractRAAppBlock } from './ToolCallBubble.parsers';
 
@@ -427,7 +428,17 @@ export function HistoryToolCallBubble({
           />
         )}
         {!showsCliChildCard && cliSessionSnapshot && <CLIAgentSessionStatusBlock snapshot={cliSessionSnapshot} />}
-        {displayedSubAgentFlowResult && <SubAgentFlowResultBlock result={displayedSubAgentFlowResult} />}
+        {displayedSubAgentFlowResult && (
+          <>
+            <SubAgentFlowResultBlock result={displayedSubAgentFlowResult} />
+            {isResumableAgentFlowStatus(displayedSubAgentFlowResult.status) && (
+              <AgentFlowResumeAction
+                flowRunId={displayedSubAgentFlowResult.flowRunId}
+                onResumed={(snapshot) => setRefreshedSubAgentFlowResult(subAgentFlowResultFromSnapshot(snapshot))}
+              />
+            )}
+          </>
+        )}
         {subagentResult && <SubagentResultBlock key={subagentResult.childSessionId} result={subagentResult} />}
         {imageResult && <ImageResultRenderer data={imageResult} />}
         {webSearchResult && <WebSearchResultRenderer data={webSearchResult} />}

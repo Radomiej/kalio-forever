@@ -295,14 +295,16 @@ function buildChildExecutionsForSession(params: {
   const childExecutions: SocketEvents['session:runtime_snapshot']['childExecutions'] = [];
 
   (params.agentFlowSnapshotsByParentSessionId[params.sessionId] ?? []).forEach((snapshot) => {
+    const childSessionId = snapshot.run.openChatSessionId ?? snapshot.run.childSessionId;
+    const childSessionTitle = params.sessionTree.childSessionsById[childSessionId]?.title;
     childExecutions.push({
       id: snapshot.run.id,
       kind: 'agent_flow',
       parentSessionId: snapshot.run.parentSessionId,
-      childSessionId: snapshot.run.openChatSessionId ?? snapshot.run.childSessionId,
+      childSessionId,
       parentToolCallId: snapshot.run.parentToolCallId,
       flowRunId: snapshot.run.openGraphRunId ?? snapshot.run.id,
-      label: snapshot.run.summary,
+      label: snapshot.run.summary ?? childSessionTitle,
       status: mapAgentFlowStatus(snapshot.run.status),
       updatedAt: snapshot.run.updatedAt ?? params.updatedAt,
     });

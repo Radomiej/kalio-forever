@@ -177,14 +177,20 @@ function releaseLiveTurn(
 export function sessionStatusKeepsSessionLive(
   snapshot: SocketEvents['session:status'],
 ): boolean {
-  return snapshot.active || (snapshot.queueLength ?? 0) > 0 || snapshot.run?.status === 'active';
+  const runStatus = snapshot.run?.status as string | undefined;
+  return snapshot.active
+    || (snapshot.queueLength ?? 0) > 0
+    || runStatus === 'active'
+    || runStatus === 'waiting_on_orchestrator';
 }
 
 export function runtimeSnapshotKeepsSessionLive(
   snapshot: RuntimeActivitySnapshot,
 ): boolean {
+  const runStatus = snapshot.run?.status as string | undefined;
   return snapshot.active
-    || snapshot.run?.status === 'active'
+    || runStatus === 'active'
+    || runStatus === 'waiting_on_orchestrator'
     || snapshot.queueLength > 0
     || snapshot.toolActivities.some((activity) => (
       activity.status === 'running' || activity.status === 'pending_confirmation'

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { ChatSession, RuntimeActivitySnapshot } from '@kalio/types';
+import type { ChatMessage, ChatSession, RuntimeActivitySnapshot } from '@kalio/types';
 import type { LlmActivity, ToolActivity } from '../../store/agentStore';
 
 type AgentStateShape = {
@@ -12,6 +12,13 @@ type AgentStateShape = {
     args: Record<string, unknown>;
     timeoutMs: number;
     agentRun?: { label?: string };
+  }>>;
+  pendingBudgetApprovals: Record<string, Array<{
+    requestId: string;
+    sessionId: string;
+    scope?: 'chat' | 'agent';
+    usedIterations: number;
+    currentLimit: number;
   }>>;
   toolActivities: ToolActivity[];
   llmActivities: LlmActivity[];
@@ -27,10 +34,12 @@ type AgentStateShape = {
 
 type SessionStateShape = {
   sessions: ChatSession[];
+  sessionMessages: Record<string, ChatMessage[]>;
 };
 
-const { stopTurn, agentState, sessionState } = vi.hoisted(() => ({
+const { stopTurn, resumeAgentFlowRun, agentState, sessionState } = vi.hoisted(() => ({
   stopTurn: vi.fn(),
+  resumeAgentFlowRun: vi.fn(),
   agentState: {
     pendingConfirmations: {} as Record<string, Array<{
       requestId: string;
@@ -40,6 +49,13 @@ const { stopTurn, agentState, sessionState } = vi.hoisted(() => ({
       args: Record<string, unknown>;
       timeoutMs: number;
       agentRun?: { label?: string };
+    }>>,
+    pendingBudgetApprovals: {} as Record<string, Array<{
+      requestId: string;
+      sessionId: string;
+      scope?: 'chat' | 'agent';
+      usedIterations: number;
+      currentLimit: number;
     }>>,
     toolActivities: [] as ToolActivity[],
     llmActivities: [] as LlmActivity[],
@@ -54,6 +70,7 @@ const { stopTurn, agentState, sessionState } = vi.hoisted(() => ({
   } satisfies AgentStateShape,
   sessionState: {
     sessions: [] as ChatSession[],
+    sessionMessages: {} as Record<string, ChatMessage[]>,
   } satisfies SessionStateShape,
 }));
 
@@ -71,6 +88,10 @@ vi.mock('../../services/eventBus', () => ({
     confirmTool: vi.fn(),
     cancelTool: vi.fn(),
   },
+}));
+
+vi.mock('../agent-flow/agentFlow.api', () => ({
+  resumeAgentFlowRun,
 }));
 
 vi.mock('../chat/ToolActivityRow', () => ({
@@ -104,10 +125,37 @@ function makeToolActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
   };
 }
 
+function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot {
+  return {
+    sessionId,
+    active: false,
+    turnId: 'turn-1',
+    queueLength: 0,
+    pendingConfirmations: [],
+    pendingBudgetApprovals: [],
+    toolActivities: [],
+    childExecutions: [],
+    updatedAt: 1,
+    run: {
+      id: 'run-1',
+      sessionId,
+      turnId: 'turn-1',
+      phase: 'tool_running',
+      status: 'waiting_on_orchestrator',
+      retryCount: 0,
+      safeResume: true,
+      startedAt: 1,
+      updatedAt: 1,
+      lastHeartbeatAt: 1,
+    } as unknown as RuntimeActivitySnapshot['run'],
+  };
+}
+
 describe('ConversationManagerPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     agentState.pendingConfirmations = {};
+    agentState.pendingBudgetApprovals = {};
     agentState.toolActivities = [];
     agentState.llmActivities = [];
     agentState.sessionToolActivities = {};
@@ -115,6 +163,7 @@ describe('ConversationManagerPanel', () => {
     agentState.runtimeActivitySnapshots = {};
     agentState.clearInactiveActivities = vi.fn();
     sessionState.sessions = [];
+    sessionState.sessionMessages = {};
   });
 
   it('shows the empty state and lets the user navigate back to chat', () => {
@@ -182,6 +231,103 @@ describe('ConversationManagerPanel', () => {
     expect(screen.getByTestId('active-loop-session-1')).toHaveTextContent('Cats Session');
     fireEvent.click(screen.getByTestId('stop-loop-session-1'));
     expect(stopTurn).toHaveBeenCalledWith('session-1');
+  });
+
+  it('renders non-actionable runtime waiting rows and opens the owning conversation', () => {
+    const onOpenSession = vi.fn();
+    sessionState.sessions = [makeSession('session-1', 'Architecture Debate: Orchestrator')];
+    sessionState.sessionMessages = {
+      'session-1': [],
+    };
+    agentState.runtimeActivitySnapshots = {
+      'session-1': makeWaitingRuntimeSnapshot('session-1'),
+    };
+
+    render(<ConversationManagerPanel onOpenSession={onOpenSession} />);
+
+    const row = screen.getByTestId('runtime-attention-session-1');
+    expect(row).toHaveTextContent('Architecture Debate: Orchestrator');
+    expect(row).toHaveTextContent('Waiting on orchestrator');
+
+    fireEvent.click(row);
+    expect(onOpenSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('renders a resumable AgentFlow action and posts a generic resume request', () => {
+    resumeAgentFlowRun.mockResolvedValue({
+      run: {
+        id: 'flow-run-1',
+        parentSessionId: 'parent-session',
+        childSessionId: 'arch-flow-run-1-root',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'running',
+        startMode: 'durable',
+        returnMode: 'summary',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [],
+    });
+    sessionState.sessions = [
+      makeSession('parent-session', 'Parent chat'),
+      makeSession('arch-flow-run-1-root', 'Goal Guard'),
+    ];
+    agentState.runtimeActivitySnapshots = {
+      'parent-session': {
+        sessionId: 'parent-session',
+        active: false,
+        turnId: 'turn-1',
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [],
+        toolActivities: [],
+        childExecutions: [{
+          id: 'flow-run-1',
+          kind: 'agent_flow',
+          parentSessionId: 'parent-session',
+          childSessionId: 'arch-flow-run-1-root',
+          flowRunId: 'flow-run-1',
+          label: 'Goal Guard waiting',
+          status: 'waiting',
+          updatedAt: 2,
+        }],
+        updatedAt: 2,
+      },
+    };
+
+    render(<ConversationManagerPanel />);
+
+    expect(screen.getByTestId('runtime-continuation-flow-run-1')).toHaveTextContent('Goal Guard');
+    expect(screen.getByTestId('runtime-continuation-flow-run-1')).toHaveTextContent('Waiting on orchestrator');
+    fireEvent.click(screen.getByRole('button', { name: 'Resume AgentFlow' }));
+
+    expect(resumeAgentFlowRun).toHaveBeenCalledWith('flow-run-1', { input: 'Continue.' });
+  });
+
+  it('surfaces timeout evidence instead of leaving the active panel empty behind a warning badge', () => {
+    sessionState.sessions = [makeSession('session-1', 'Architecture Debate: Orchestrator')];
+    sessionState.sessionMessages = {
+      'session-1': [{
+        id: 'assistant-timeout',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: 'Sub-agent failed: Sub-agent timed out after 300000ms.',
+        createdAt: 2,
+      }],
+    };
+    agentState.runtimeActivitySnapshots = {
+      'session-1': {
+        ...makeWaitingRuntimeSnapshot('session-1'),
+        updatedAt: 2,
+      },
+    };
+
+    render(<ConversationManagerPanel />);
+
+    expect(screen.getByTestId('runtime-attention-session-1')).toHaveTextContent('Sub-agent timed out');
+    expect(screen.queryByText(/No active agent runs/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume AgentFlow' })).not.toBeInTheDocument();
+    expect(resumeAgentFlowRun).not.toHaveBeenCalled();
   });
 
   it('splits running and finished tool rows and shows llm activity counts', () => {

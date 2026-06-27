@@ -43,7 +43,8 @@ import {
 } from './services/sessionWatchRegistry';
 import { useSettingsStore } from './features/settings/settingsStore';
 import { activateConversationSession } from './features/chat/activeConversationSession';
-import { selectPendingApprovalCount } from './store/agentRuntimeSelectors';
+import { preloadRuntimeWatchSessionHistory } from './features/chat/runtimeWatchHistoryBootstrap';
+import { selectRuntimeAttentionItems } from './store/agentRuntimeSelectors';
 import { mergeSessionsPreservingLocal } from './features/sessions/mergeSessionsPreservingLocal';
 
 const TALK_VIEW_OPTIONS: ReadonlyArray<{ id: TalkView; label: string; icon: React.ReactNode }> = [
@@ -66,15 +67,27 @@ export function App() {
 
   const openSettings = (tab?: string) => { setSettingsInitialTab(tab); setSettingsOpen(true); };
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
-  const { sessions, activeSessionId, setActiveSession, setSessions } = useSessionStore();
+  const { sessions, activeSessionId, sessionMessages, setActiveSession, setSessions } = useSessionStore();
   const recentTalkCount = recentTalkBadgeCount(sessions, lastTalkActiveAt);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
-  const pendingConfirmationCount = selectPendingApprovalCount({
+  const runtimeActivitySnapshots = useAgentStore((s) => s.runtimeActivitySnapshots);
+  const talkAttentionItems = selectRuntimeAttentionItems({
     pendingConfirmations,
     pendingBudgetApprovals,
+    runtimeActivitySnapshots,
+    sessions,
+    sessionMessages,
   });
-  const hasPendingConfirmation = pendingConfirmationCount > 0;
+  const talkAttentionCount = talkAttentionItems.length;
+  const approvalAttentionCount = talkAttentionItems.filter((item) => item.kind === 'hitl' || item.kind === 'budget').length;
+  const runtimeAttentionCount = talkAttentionCount - approvalAttentionCount;
+  const talkAttentionTitle = approvalAttentionCount > 0 && runtimeAttentionCount === 0
+    ? `${approvalAttentionCount} approval${approvalAttentionCount === 1 ? '' : 's'} waiting`
+    : approvalAttentionCount === 0 && runtimeAttentionCount > 0
+      ? `${runtimeAttentionCount} runtime item${runtimeAttentionCount === 1 ? '' : 's'} needs attention`
+      : `${talkAttentionCount} attention item${talkAttentionCount === 1 ? '' : 's'} waiting`;
+  const hasTalkAttention = talkAttentionCount > 0;
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
   const bootstrapFetchSeqRef = useRef(0);
 
@@ -110,6 +123,10 @@ export function App() {
           setSessions(mergedSessions);
         }
         replaceBaselineWatchedSessions(runtimeWatchTargets.map((target) => target.sessionId), 'bootstrap-watchlist');
+        void preloadRuntimeWatchSessionHistory({
+          sessions: mergedSessions,
+          runtimeWatchTargets,
+        });
         identifyWatchedSession(useSessionStore.getState().activeSessionId, 'bootstrap-active-session', { sticky: true });
       })
       .catch((err: unknown) => {
@@ -132,6 +149,11 @@ export function App() {
           const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, sessionsFromApi);
           setSessions(mergedSessions);
           replaceBaselineWatchedSessions(runtimeWatchTargets.map((target) => target.sessionId), 'reconnect-watchlist');
+          void preloadRuntimeWatchSessionHistory({
+            sessions: mergedSessions,
+            runtimeWatchTargets,
+            force: true,
+          });
           identifyWatchedSession(useSessionStore.getState().activeSessionId, 'reconnect-active-session', { sticky: true });
         })
         .catch((err: unknown) => {
@@ -246,7 +268,8 @@ export function App() {
       {/* ── Icon rail ── */}
       <AppNavRail
         activeSection={activeSection}
-        pendingConfirmationCount={pendingConfirmationCount}
+        talkAttentionCount={talkAttentionCount}
+        talkAttentionTitle={talkAttentionTitle}
         recentTalkCount={recentTalkCount}
         onGoHome={goHome}
         onOpenSettings={() => openSettings()}
@@ -302,11 +325,11 @@ export function App() {
                   >
                     <span className="relative inline-flex items-center">
                       {t.icon}
-                      {t.id === 'agents' && hasPendingConfirmation && (
+                      {t.id === 'agents' && hasTalkAttention && (
                         <span
                           className="absolute -right-1 -top-1 inline-block w-1.5 h-1.5 rounded-full bg-warning animate-pulse"
                           data-testid="active-tab-pending-dot"
-                          title="Awaiting confirmation"
+                          title="Needs attention"
                         />
                       )}
                     </span>

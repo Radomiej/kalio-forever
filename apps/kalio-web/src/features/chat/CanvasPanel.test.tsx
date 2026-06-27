@@ -194,8 +194,9 @@ const sessionState: MockSessionState = {
   },
 };
 
-const { mockApiGet } = vi.hoisted(() => ({
+const { mockApiGet, mockApiPost } = vi.hoisted(() => ({
   mockApiGet: vi.fn(),
+  mockApiPost: vi.fn(),
 }));
 
 const { mockIdentifySession } = vi.hoisted(() => ({
@@ -203,7 +204,7 @@ const { mockIdentifySession } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../services/apiClient', () => ({
-  apiClient: { get: mockApiGet },
+  apiClient: { get: mockApiGet, post: mockApiPost },
 }));
 
 vi.mock('../../services/eventBus', () => ({
@@ -224,6 +225,7 @@ vi.mock('../../store/sessionStore', () => ({
 describe('CanvasPanel subagent grouping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockApiPost.mockRejectedValue(new Error('unexpected apiClient.post call'));
     agentState.toolActivities = [
       {
         callId: 'master-call',
@@ -1299,6 +1301,124 @@ describe('CanvasPanel subagent grouping', () => {
 
     fireEvent.click(screen.getByTestId('canvas-open-agentflow-graph-flow-run-1'));
     expect(agentState.setCanvasFocus).toHaveBeenCalledWith({ kind: 'architecture-run', runId: 'flow-linked-graph' });
+  });
+
+  it('shows the resume action in the focused AgentFlow canvas section', async () => {
+    agentState.activeAgentLoops = {};
+    agentState.toolActivities = [];
+    agentState.canvasFocus = { kind: 'architecture-run', runId: 'flow-linked-graph' };
+    sessionState.messages = [
+      { id: 'm1', sessionId: 'session-1', role: 'user', content: 'build with goal guard', createdAt: 1 },
+      {
+        id: 'tool-agentflow-1',
+        sessionId: 'session-1',
+        role: 'tool_result',
+        toolCallId: 'agentflow-call-1',
+        content: JSON.stringify({
+          flowRunId: 'flow-run-1',
+          childSessionId: 'flow-child-source',
+          status: 'waiting_on_orchestrator',
+          summary: 'Goal Guard returned work to the Implementer.',
+          decisions: [],
+          nextActions: [],
+          artifacts: [],
+          openChatSessionId: 'flow-linked-chat',
+          openGraphRunId: 'flow-linked-graph',
+        }),
+        createdAt: 2,
+      },
+    ];
+    sessionState.sessionMessages = { 'session-1': sessionState.messages };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'flow-linked-chat',
+        personaId: 'default',
+        title: 'Goal Guard AgentFlow',
+        kind: 'agent-flow',
+        parentSessionId: 'session-1',
+        parentToolCallId: 'agentflow-call-1',
+        createdAt: 2,
+        updatedAt: 3,
+      },
+    ];
+
+    render(<CanvasPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('agentflow-canvas-section')).toBeDefined());
+    expect(screen.getByTestId('agentflow-canvas-section')).toHaveTextContent('Waiting on orchestrator');
+    expect(screen.getByTestId('agentflow-canvas-section')).toHaveTextContent('Resume AgentFlow');
+  });
+
+  it('shows the same resume action for a hydrated waiting AgentFlow preview', async () => {
+    mockApiPost.mockResolvedValueOnce({
+      data: {
+        run: {
+          id: 'flow-run-1',
+          parentSessionId: 'session-1',
+          childSessionId: 'flow-linked-chat',
+          openChatSessionId: 'flow-linked-chat',
+          openGraphRunId: 'flow-linked-graph',
+          flowDefinitionId: 'goal_guard_delivery_loop',
+          status: 'running',
+          startMode: 'durable',
+          returnMode: 'summary',
+          createdAt: 1,
+          updatedAt: 2,
+        },
+        events: [],
+      },
+    });
+    agentState.activeAgentLoops = {};
+    agentState.toolActivities = [];
+    agentState.runtimeActivitySnapshots = {
+      'session-1': {
+        sessionId: 'session-1',
+        active: false,
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [],
+        childExecutions: [
+          {
+            id: 'child-flow-1',
+            kind: 'agent_flow',
+            parentSessionId: 'session-1',
+            childSessionId: 'flow-linked-chat',
+            parentToolCallId: 'agentflow-call-1',
+            flowRunId: 'flow-run-1',
+            label: 'Goal Guard',
+            status: 'waiting',
+            updatedAt: 3,
+          },
+        ],
+        toolActivities: [],
+        updatedAt: 3,
+      },
+    };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'flow-linked-chat',
+        personaId: 'default',
+        title: 'Goal Guard AgentFlow',
+        kind: 'agent-flow',
+        parentSessionId: 'session-1',
+        parentToolCallId: 'agentflow-call-1',
+        createdAt: 2,
+        updatedAt: 3,
+      },
+    ];
+
+    render(<CanvasPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('canvas-agentflow-card-flow-run-1')).toBeDefined());
+    expect(screen.getByTestId('canvas-agentflow-card-flow-run-1')).toHaveTextContent('Waiting on orchestrator');
+
+    fireEvent.click(screen.getByTestId('resume-agentflow-flow-run-1'));
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/api/agent-flows/runs/flow-run-1/resume', { input: 'Continue.' });
+    });
   });
 
   it('subscribes to child sessions and shows live streamed child responses before REST history catches up', async () => {

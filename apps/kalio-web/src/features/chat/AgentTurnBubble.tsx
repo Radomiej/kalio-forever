@@ -7,7 +7,7 @@ import type { AgentTurn } from '../../store/sessionStore';
 import type { ToolActivity } from '../../store/agentStore';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
 import { LiveToolCallBubble, HistoryToolCallBubble } from './ToolCallBubble';
-import { extractCLIAgentResult, extractCLIAgentSessionSnapshot, extractPersistedToolResultMeta } from './ToolCallBubble.parsers';
+import { extractCLIAgentResult, extractCLIAgentSessionSnapshot, extractPersistedToolResultMeta, extractSubAgentFlowResult } from './ToolCallBubble.parsers';
 import {
   isCliChildToolName,
   resolveCLIChildProjectionStatus,
@@ -25,7 +25,9 @@ import {
   mergeRuntimeQueuedDepthBySession,
   mergeRuntimeSessionStatusSnapshots,
   selectLiveSessionIds,
+  selectRuntimeContinuationActions,
 } from '../../store/agentRuntimeSelectors';
+import { AgentFlowResumeAction } from '../agent-flow/AgentFlowResumeAction';
 
 interface Props {
   turn: AgentTurn;
@@ -132,6 +134,19 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
       });
     }
   }
+  const toolResultAgentFlowRunIds = new Set(
+    [...toolResultByCallId.values()]
+      .map((toolResult) => extractSubAgentFlowResult(toolResult.parsed)?.flowRunId)
+      .filter((flowRunId): flowRunId is string => typeof flowRunId === 'string'),
+  );
+  const turnContinuationActions = selectRuntimeContinuationActions({
+    runtimeActivitySnapshots,
+    sessions,
+    sessionMessages,
+  }).filter((action) => (
+    !toolResultAgentFlowRunIds.has(action.flowRunId)
+    && (action.parentSessionId === turn.sessionId || action.sessionId === turn.sessionId)
+  ));
 
   const workflowTurnProjection = resolveWorkflowTurnProjection(turn, turnMessages, toolArgsByCallId);
   const architectureRun = workflowTurnProjection.architectureRun;
@@ -200,6 +215,11 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
     turnArchitectureRun,
     turnBranchSessionIds,
   ]);
+  const architectureRunSessions = useMemo(() => (
+    turnArchitectureRun
+      ? sessions.filter((session) => sameArchitectureRunId(architectureRunIdForSession(session), turnArchitectureRun.runId))
+      : []
+  ), [sessions, turnArchitectureRun]);
 
   return (
     <div data-testid="agent-turn-bubble" className="flex justify-start mb-2 w-full">
@@ -214,6 +234,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
               <ArchitectureRunTimeline
                 run={turnArchitectureRun}
                 knownBranchSessionIds={knownBranchSessionIds}
+                runSessions={architectureRunSessions}
                 onOpenCanvas={() => {
                   setCanvasFocus({ kind: 'architecture-run', runId: turnArchitectureRun.runId });
                 }}
@@ -365,6 +386,23 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
                     ? 'Reached iteration limit'
                     : turn.error.message}
               </span>
+            </div>
+          )}
+          {turnContinuationActions.length > 0 && (
+            <div className="space-y-2">
+              {turnContinuationActions.map((action) => (
+                <div
+                  key={action.id}
+                  className="rounded-lg border border-warning/25 bg-warning/10 px-3 py-2"
+                  data-testid={`turn-agentflow-continuation-${action.flowRunId}`}
+                >
+                  <div className="mb-2">
+                    <div className="text-xs font-medium text-base-content/85">{action.label}</div>
+                    <p className="text-[11px] text-base-content/55">{action.detail}</p>
+                  </div>
+                  <AgentFlowResumeAction flowRunId={action.flowRunId} />
+                </div>
+              ))}
             </div>
           )}
           {pendingBudgetApprovalsForTurn.length > 0 && !turn.done && (

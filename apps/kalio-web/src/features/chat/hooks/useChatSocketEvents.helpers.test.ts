@@ -8,6 +8,33 @@ import {
   type ReconnectUiState,
 } from './useChatSocketEvents.helpers';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
+import type { RuntimeActivitySnapshot } from '@kalio/types';
+
+function makeWaitingRuntimeSnapshot(sessionId: string, turnId = 'turn-1'): RuntimeActivitySnapshot {
+  return {
+    sessionId,
+    active: false,
+    turnId,
+    queueLength: 0,
+    pendingConfirmations: [],
+    pendingBudgetApprovals: [],
+    toolActivities: [],
+    childExecutions: [],
+    updatedAt: 10,
+    run: {
+      id: 'run-1',
+      sessionId,
+      turnId,
+      phase: 'tool_running',
+      status: 'waiting_on_orchestrator',
+      retryCount: 0,
+      safeResume: true,
+      startedAt: 1,
+      updatedAt: 10,
+      lastHeartbeatAt: 10,
+    } as unknown as RuntimeActivitySnapshot['run'],
+  };
+}
 
 function runConnectionEventSequence(
   initialConnectionState: ChatConnectionState,
@@ -204,6 +231,10 @@ describe('terminal runtime cleanup guards', () => {
     })).toBe(true);
   });
 
+  it('keeps runtime snapshots live while the run is waiting_on_orchestrator', () => {
+    expect(runtimeSnapshotKeepsSessionLive(makeWaitingRuntimeSnapshot('session-1'))).toBe(true);
+  });
+
   it('materializes a workflow live turn from an inactive parent snapshot with a running child', () => {
     const addActiveAgentLoop = vi.fn();
     const startAgentTurn = vi.fn();
@@ -229,6 +260,31 @@ describe('terminal runtime cleanup guards', () => {
           }],
           updatedAt: 10,
         },
+        bufferedSessionStatusSnapshots: [],
+        latestSessionStatusSnapshot: undefined,
+      },
+      {
+        hasActiveLoopForSession: () => false,
+        getSessionActiveTurnId: () => null,
+        addActiveAgentLoop,
+        startAgentTurn,
+        setAwaitingFirstChunk,
+      },
+    );
+
+    expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-workflow');
+    expect(startAgentTurn).toHaveBeenCalledWith('turn-workflow', 'session-1');
+    expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
+  });
+
+  it('materializes a workflow live turn from waiting_on_orchestrator runtime state after hydration', () => {
+    const addActiveAgentLoop = vi.fn();
+    const startAgentTurn = vi.fn();
+    const setAwaitingFirstChunk = vi.fn();
+
+    materializeLiveTurnFromHydratedRuntimeState(
+      {
+        runtimeSnapshot: makeWaitingRuntimeSnapshot('session-1', 'turn-workflow'),
         bufferedSessionStatusSnapshots: [],
         latestSessionStatusSnapshot: undefined,
       },

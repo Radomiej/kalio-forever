@@ -12,6 +12,13 @@ function statusTone(status: SubAgentFlowResult['status']): string {
   return 'text-info';
 }
 
+function statusLabel(status: SubAgentFlowResult['status']): string | null {
+  if (status === 'waiting_on_orchestrator') {
+    return 'Waiting on orchestrator';
+  }
+  return null;
+}
+
 export function SubAgentFlowResultBlock({ result }: { result: SubAgentFlowResult }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const openChatId = result.openChatSessionId ?? result.childSessionId;
@@ -27,7 +34,12 @@ export function SubAgentFlowResultBlock({ result }: { result: SubAgentFlowResult
         <span className="text-base-content/35">flow</span>
         <span className="truncate">{result.flowRunId}</span>
         <span className="text-base-content/35">status</span>
-        <span className={statusTone(result.status)}>{result.status}</span>
+        <span className={statusTone(result.status)}>
+          {result.status}
+          {statusLabel(result.status) && (
+            <span className="ml-2 text-warning/80">{statusLabel(result.status)}</span>
+          )}
+        </span>
         <span className="text-base-content/35">chat</span>
         <span className="truncate">{openChatId}</span>
         <span className="text-base-content/35">graph</span>

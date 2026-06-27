@@ -18,6 +18,9 @@ import type {
 } from './architect.types';
 import type { LLMConfigWithSource } from '../settings/llm-panel.types';
 import { normalizeArchitectureSchemas } from './architect.schema';
+import { resumeAgentFlowRun as resumeAgentFlowRunApi } from '../agent-flow/agentFlow.api';
+
+export { resumeAgentFlowRun } from '../agent-flow/agentFlow.api';
 
 export async function getArchitectureSchemas(): Promise<ArchitectSchema[]> {
   const { data } = await apiClient.get<unknown>('/api/architecture-registry/schemas');
@@ -337,7 +340,7 @@ export async function resumeGoalGuardAgentFlowRunWithQualityGate(
     summary: gate.summary.trim(),
     ...(gate.artifactPath?.trim() ? { artifacts: [gate.artifactPath.trim()] } : {}),
   };
-  const { data: snapshot } = await apiClient.post<AgentFlowRunSnapshot>(`/api/agent-flows/runs/${runId}/resume`, {
+  const snapshot = await resumeAgentFlowRunApi(runId, {
     input: `Resume after external ${normalizedGate.source} QA evidence: ${normalizedGate.summary}`,
     context: {
       ...(context ?? {}),

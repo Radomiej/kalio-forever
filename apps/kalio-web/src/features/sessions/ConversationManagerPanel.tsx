@@ -1,11 +1,18 @@
-import { BotMessageSquare, Zap, Brain, StopCircle } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, BotMessageSquare, Zap, Brain, StopCircle, Play } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 import type { LlmActivity } from '../../store/agentStore';
 import { ToolActivityRow } from '../chat/ToolActivityRow';
 import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
 import { HomeHitlInbox } from '../landing/HomeHitlInbox';
-import { selectPendingApprovalCount, selectRunningLoops } from '../../store/agentRuntimeSelectors';
+import { resumeAgentFlowRun } from '../agent-flow/agentFlow.api';
+import {
+  selectPendingApprovalCount,
+  selectRuntimeContinuationActions,
+  selectRunningLoops,
+  selectRuntimeAttentionItems,
+} from '../../store/agentRuntimeSelectors';
 
 export function ConversationManagerPanel({
   onNavigate,
@@ -18,8 +25,26 @@ export function ConversationManagerPanel({
   const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
   const clearInactiveActivities = useAgentStore((s) => s.clearInactiveActivities);
   const sessions = useSessionStore((s) => s.sessions);
+  const sessionMessages = useSessionStore((s) => s.sessionMessages);
+  const [resumingFlowRunId, setResumingFlowRunId] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
 
   const runningLoops = selectRunningLoops({ runtimeActivitySnapshots });
+  const attentionItems = selectRuntimeAttentionItems({
+    pendingConfirmations,
+    pendingBudgetApprovals,
+    runtimeActivitySnapshots,
+    sessions,
+    sessionMessages,
+  });
+  const continuationActions = selectRuntimeContinuationActions({
+    runtimeActivitySnapshots,
+    sessions,
+    sessionMessages,
+  });
+  const continuationSessionIds = new Set(continuationActions.map((action) => action.sessionId));
+  const runtimeAttentionItems = attentionItems
+    .filter((item) => !item.actionable && !continuationSessionIds.has(item.sessionId));
   const pendingConfirmationCount = selectPendingApprovalCount({
     pendingConfirmations,
     pendingBudgetApprovals,
@@ -34,12 +59,38 @@ export function ConversationManagerPanel({
   const hasLiveRuntime = runningLoops.length > 0 || hasRunningLlmActivity;
   const inactiveLlmCount = llmActivities.filter((a) => a.status !== 'running').length;
   const inactiveCount = done.length + inactiveLlmCount;
+  const hasAttention = attentionItems.length > 0;
+  const hasContinuationActions = continuationActions.length > 0;
+  const openAttentionSession = (sessionId: string) => {
+    if (onOpenSession) {
+      onOpenSession(sessionId);
+      return;
+    }
+    onNavigate?.();
+  };
+  const resumeContinuation = (flowRunId: string, input: string) => {
+    if (resumingFlowRunId === flowRunId) {
+      return;
+    }
+    setResumingFlowRunId(flowRunId);
+    setResumeError(null);
+    void resumeAgentFlowRun(flowRunId, { input })
+      .catch((err: unknown) => {
+        console.error('[ConversationManagerPanel] failed to resume AgentFlow run', err instanceof Error ? err : new Error(String(err)));
+        setResumeError('Resume request failed. Reconnect and retry.');
+      })
+      .finally(() => {
+        setResumingFlowRunId((current) => (current === flowRunId ? null : current));
+      });
+  };
 
   const isEmpty = runningLoops.length === 0
     && !hasRunningLlmActivity
     && toolActivities.length === 0
     && llmActivities.length === 0
-    && pendingConfirmationCount === 0;
+    && pendingConfirmationCount === 0
+    && runtimeAttentionItems.length === 0
+    && continuationActions.length === 0;
 
   if (isEmpty) {
     return (
@@ -56,6 +107,72 @@ export function ConversationManagerPanel({
       {pendingConfirmationCount > 0 && (
         <div className="shrink-0 px-2 pt-2">
           <HomeHitlInbox onOpenSession={onOpenSession ?? onNavigate ?? (() => undefined)} />
+        </div>
+      )}
+
+      {continuationActions.length > 0 && (
+        <div className="shrink-0 px-2 pt-2 pb-1 flex flex-col gap-1">
+          <p className="text-[10px] uppercase tracking-wider text-base-content/30 px-2 pb-0.5">Runtime actions</p>
+          {continuationActions.map((action) => (
+            <div
+              key={action.id}
+              className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-left"
+              data-testid={`runtime-continuation-${action.flowRunId}`}
+            >
+              <Play size={12} className="mt-0.5 shrink-0 text-warning" />
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left"
+                onClick={() => openAttentionSession(action.sessionId)}
+              >
+                <div className="truncate text-xs font-medium text-base-content/85">{action.label}</div>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-base-content/55">{action.detail}</p>
+              </button>
+              <button
+                type="button"
+                className="btn btn-warning btn-xs h-7 min-h-0 shrink-0 px-2"
+                onClick={() => resumeContinuation(action.flowRunId, action.input)}
+                disabled={resumingFlowRunId === action.flowRunId}
+              >
+                Resume AgentFlow
+              </button>
+            </div>
+          ))}
+          {resumeError && (
+            <p className="px-2 text-[11px] text-error">{resumeError}</p>
+          )}
+          {(runtimeAttentionItems.length > 0 || runningLoops.length > 0 || active.length > 0 || done.length > 0 || llmActivities.length > 0) && (
+            <div className="border-t border-base-300/40 mt-1" />
+          )}
+        </div>
+      )}
+
+      {runtimeAttentionItems.length > 0 && (
+        <div className="shrink-0 px-2 pt-2 pb-1 flex flex-col gap-1">
+          <p className="text-[10px] uppercase tracking-wider text-base-content/30 px-2 pb-0.5">Runtime attention</p>
+          {runtimeAttentionItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="flex items-start gap-2 rounded-lg border border-warning/25 bg-warning/8 px-2.5 py-2 text-left transition-colors hover:border-warning/40 hover:bg-warning/12"
+              data-testid={`runtime-attention-${item.sessionId}`}
+              onClick={() => openAttentionSession(item.sessionId)}
+            >
+              <AlertTriangle
+                size={12}
+                className={`mt-0.5 shrink-0 ${
+                  item.kind === 'runtime_waiting' ? 'text-warning' : 'text-error'
+                }`}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-medium text-base-content/85">{item.label}</div>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-base-content/55">{item.detail}</p>
+              </div>
+            </button>
+          ))}
+          {(runningLoops.length > 0 || active.length > 0 || done.length > 0 || llmActivities.length > 0) && (
+            <div className="border-t border-base-300/40 mt-1" />
+          )}
         </div>
       )}
 
@@ -98,6 +215,11 @@ export function ConversationManagerPanel({
           <>
             <Zap size={12} className="text-sky-400 animate-pulse" />
             <span className="text-xs text-sky-400 font-medium">Agent running</span>
+          </>
+        ) : hasAttention || hasContinuationActions ? (
+          <>
+            <AlertTriangle size={12} className="text-warning" />
+            <span className="text-xs text-warning font-medium">Needs attention</span>
           </>
         ) : (
           <>
