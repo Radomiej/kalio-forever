@@ -29,6 +29,7 @@ import {
   resolveRegistryEntries,
   type MCPResolvedRegistryEntry,
 } from './mcp-registry.utils';
+import { buildLegacyMcpToolName, buildMcpServerStatusPayload, buildMcpToolPayload } from './mcp-projections';
 
 const HEALTH_CHECK_MS = 30_000;
 const BASE_RESTART_MS = 2_000;
@@ -357,18 +358,11 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
         this.toolNameMap.set(canonicalName, { serverKey, originalName: t.name });
 
         // TODO: legacy fallback - keep resolving old mcp_<serverId>_<tool> aliases for one release.
-        const legacyName = this.toLegacyPrefixedToolName(serverKey, t.name);
+        const legacyName = buildLegacyMcpToolName(serverKey, t.name);
         if (legacyName) {
           this.toolNameMap.set(legacyName, { serverKey, originalName: t.name });
         }
-        tools.push({
-          name: canonicalName,
-          description: t.description ?? '',
-          parameters: (t.inputSchema ?? {}) as Record<string, unknown>,
-          requiresConfirmation: false,
-          serverKey,
-          serverId: serverKey,
-        } satisfies MCPTool);
+        tools.push(buildMcpToolPayload(serverKey, t));
       }
       cursor = result.nextCursor;
       iterations++;
@@ -378,15 +372,6 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       }
     } while (cursor);
     return tools;
-  }
-
-  private toLegacyPrefixedToolName(serverKey: string, originalName: string): string | null {
-    const parsed = parseServerKey(serverKey);
-    if (!parsed) {
-      return null;
-    }
-
-    return `mcp_${parsed.id}_${originalName}`;
   }
 
   private async healthCheckAll(): Promise<void> {
@@ -417,14 +402,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   private emitStatus(handle: ServerHandle): void {
-    this.gatewayRef?.emitToAll('mcp:server:status', {
-      serverId: handle.serverKey,
-      serverKey: handle.serverKey,
-      serverName: handle.name,
-      status: handle.status,
-      toolCount: handle.tools.length,
-      lastError: handle.lastError,
-    });
+    this.gatewayRef?.emitToAll('mcp:server:status', buildMcpServerStatusPayload(handle));
   }
 
   private async persistStatus(handle: ServerHandle): Promise<void> {
