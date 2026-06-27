@@ -368,6 +368,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
           description: t.description ?? '',
           parameters: (t.inputSchema ?? {}) as Record<string, unknown>,
           requiresConfirmation: false,
+          serverKey: serverId,
           serverId,
         } satisfies MCPTool);
       }
