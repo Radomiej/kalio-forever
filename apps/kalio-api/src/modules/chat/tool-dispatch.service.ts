@@ -65,7 +65,7 @@ export class ToolDispatchService {
 
     const entry = this.toolMap.get(toolName);
     if (!entry) {
-      // Route MCP tools: names follow mcp_{serverKey}_{toolName} pattern, with legacy aliases still accepted.
+      // Route MCP tools by their canonical mcp_{serverKey}_{toolName} names.
       if (this.mcpService) {
         const mcpRef = this.mcpService.resolveToolName(toolName);
         if (mcpRef) {

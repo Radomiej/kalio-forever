@@ -1,5 +1,4 @@
 import type { MCPTool } from '@kalio/types';
-import { parseServerKey } from './mcp-registry.utils';
 
 interface MCPToolDiscoveryResult {
   name: string;
@@ -13,15 +12,6 @@ interface MCPStatusHandle {
   status: string;
   tools: MCPTool[];
   lastError?: string;
-}
-
-export function buildLegacyMcpToolName(serverKey: string, originalName: string): string | null {
-  const parsed = parseServerKey(serverKey);
-  if (!parsed) {
-    return null;
-  }
-
-  return `mcp_${parsed.id}_${originalName}`;
 }
 
 export function buildMcpToolPayload(serverKey: string, tool: MCPToolDiscoveryResult): MCPTool {

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { MCPPolicy, ToolMeta } from '@kalio/types';
 import { getNativeToolGroupKey } from '../tools/tool.utils';
-import { isMcpToolSelected, normalizeMcpAllowList, toLegacyMcpToolName } from './mcpToolAllowList';
+import { isMcpToolSelected, normalizeMcpAllowList } from './mcpToolAllowList';
 
 const GROUP_LABELS: Record<string, string> = {
   vfs: 'VFS',
@@ -142,17 +142,10 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
 
   const toggleMcpTool = (name: string) => {
     const next = new Set(selectedSet);
-    const legacy = toLegacyMcpToolName(name);
-    if (next.has(name) || (legacy !== null && next.has(legacy))) {
+    if (next.has(name)) {
       next.delete(name);
-      if (legacy !== null) {
-        next.delete(legacy);
-      }
     } else {
       next.add(name);
-      if (legacy !== null) {
-        next.delete(legacy);
-      }
     }
     onChange([...next], 'allow_list');
   };

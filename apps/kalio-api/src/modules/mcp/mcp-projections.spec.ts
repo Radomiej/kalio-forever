@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildLegacyMcpToolName, buildMcpServerStatusPayload, buildMcpToolPayload } from './mcp-projections';
+import { buildMcpServerStatusPayload, buildMcpToolPayload } from './mcp-projections';
 
 describe('mcp-projections', () => {
-  it('projects MCP tools with canonical and legacy server identifiers', () => {
+  it('projects MCP tools with canonical server identifiers', () => {
     const tool = buildMcpToolPayload('toml::docs', {
       name: 'search',
       description: 'Search docs',
@@ -17,10 +17,9 @@ describe('mcp-projections', () => {
       serverKey: 'toml::docs',
       serverId: 'toml::docs',
     });
-    expect(buildLegacyMcpToolName('toml::docs', 'search')).toBe('mcp_docs_search');
   });
 
-  it('projects MCP server status with both canonical and legacy server identifiers', () => {
+  it('projects MCP server status with canonical server identifiers', () => {
     expect(
       buildMcpServerStatusPayload({
         serverKey: 'sqlite::alpha',

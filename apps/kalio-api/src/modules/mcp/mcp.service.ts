@@ -29,7 +29,7 @@ import {
   resolveRegistryEntries,
   type MCPResolvedRegistryEntry,
 } from './mcp-registry.utils';
-import { buildLegacyMcpToolName, buildMcpServerStatusPayload, buildMcpToolPayload } from './mcp-projections';
+import { buildMcpServerStatusPayload, buildMcpToolPayload } from './mcp-projections';
 
 const HEALTH_CHECK_MS = 30_000;
 const BASE_RESTART_MS = 2_000;
@@ -228,35 +228,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async resolveServerKey(serverKeyOrLegacyId: string): Promise<string | null> {
-    const parsed = parseServerKey(serverKeyOrLegacyId);
-    if (parsed) {
-      return serverKeyOrLegacyId;
-    }
-
-    if (this.kalioConfig) {
-      const { config } = await this.kalioConfig.getEffectiveConfig();
-      if (Object.prototype.hasOwnProperty.call(config.mcp_servers ?? {}, serverKeyOrLegacyId)) {
-        return `toml::${serverKeyOrLegacyId}`;
-      }
-    }
-
-    const directCandidates = [`toml::${serverKeyOrLegacyId}`, `sqlite::${serverKeyOrLegacyId}`];
-    for (const candidate of directCandidates) {
-      if (this.handles.has(candidate)) {
-        return candidate;
-      }
-    }
-
-    const [row] = await this.drizzle.db
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, serverKeyOrLegacyId))
-      .limit(1);
-    if (row) {
-      return `sqlite::${serverKeyOrLegacyId}`;
-    }
-
-    return null;
+    return parseServerKey(serverKeyOrLegacyId) ? serverKeyOrLegacyId : null;
   }
 
   private async connectHandle(handle: ServerHandle): Promise<void> {
@@ -356,12 +328,6 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       for (const t of result.tools) {
         const canonicalName = `mcp_${serverKey}_${t.name}`;
         this.toolNameMap.set(canonicalName, { serverKey, originalName: t.name });
-
-        // TODO: legacy fallback - keep resolving old mcp_<serverId>_<tool> aliases for one release.
-        const legacyName = buildLegacyMcpToolName(serverKey, t.name);
-        if (legacyName) {
-          this.toolNameMap.set(legacyName, { serverKey, originalName: t.name });
-        }
         tools.push(buildMcpToolPayload(serverKey, t));
       }
       cursor = result.nextCursor;
