@@ -103,13 +103,19 @@ export class ToolPolicyService {
       case 'subagent': {
         if (explicitNames && explicitNames.length > 0) {
           const allowsAllNative = (personaConfig?.allowedTools ?? []).length === 0;
-          candidateNames = new Set(explicitNames.filter((name) => (
-            toolByName.has(name)
-            && (allowsAllNative || personaNames.has(name) || name.startsWith('mcp_'))
-          )));
+          const resolvedExplicit = explicitNames
+            .map((name) => resolveToolAlias(name, new Set(toolByName.keys())));
+          candidateNames = new Set(
+            resolvedExplicit
+              .filter((name): name is string => name !== null)
+              .filter((name) => (allowsAllNative || personaNames.has(name) || name.startsWith('mcp_'))),
+          );
           source = 'runtime-explicit';
-          for (const name of explicitNames) {
-            if (!candidateNames.has(name) && toolByName.has(name)) {
+          for (const name of resolvedExplicit) {
+            if (!name || !toolByName.has(name)) {
+              continue;
+            }
+            if (!candidateNames.has(name)) {
               denied.push({
                 name,
                 reason: personaNames.has(name) ? 'not_in_runtime_explicit_list' : 'not_in_persona_allowlist',
@@ -283,7 +289,9 @@ export class ToolPolicyService {
       filteredMcp = [];
     } else {
       const toolSet = new Set(allowedTools ?? []);
-      filteredMcp = mcpTools.filter((toolMeta) => toolSet.has(toolMeta.name));
+      filteredMcp = mcpTools.filter((toolMeta) => (
+        toolSet.has(toolMeta.name) || hasLegacyMcpAlias(toolMeta.name, toolSet)
+      ));
     }
 
     return [...filteredNative, ...filteredMcp];
@@ -367,4 +375,63 @@ function launchAllowedToolNames(context: Record<string, unknown> | undefined): s
     return undefined;
   }
   return raw.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+}
+
+function hasLegacyMcpAlias(toolName: string, allowedTools: Set<string>): boolean {
+  const legacy = toLegacyMcpToolName(toolName);
+  return legacy ? allowedTools.has(legacy) : false;
+}
+
+function isServerKey(value: string): boolean {
+  return value.startsWith('toml::') || value.startsWith('sqlite::');
+}
+
+function parsePrefixedMcpToolName(toolName: string): { serverIdPart: string; toolName: string } | null {
+  if (!toolName.startsWith('mcp_')) {
+    return null;
+  }
+  const body = toolName.slice(4);
+  const separatorIndex = body.lastIndexOf('_');
+  if (separatorIndex <= 0 || separatorIndex === body.length - 1) {
+    return null;
+  }
+  return {
+    serverIdPart: body.slice(0, separatorIndex),
+    toolName: body.slice(separatorIndex + 1),
+  };
+}
+
+function toLegacyMcpToolName(toolName: string): string | null {
+  const parsed = parsePrefixedMcpToolName(toolName);
+  if (!parsed || !isServerKey(parsed.serverIdPart)) {
+    return null;
+  }
+
+  return `mcp_${parsed.serverIdPart.slice(parsed.serverIdPart.indexOf('::') + 2)}_${parsed.toolName}`;
+}
+
+function resolveToolAlias(toolName: string, availableToolNames: Set<string>): string | null {
+  if (availableToolNames.has(toolName)) {
+    return toolName;
+  }
+
+  const parsed = parsePrefixedMcpToolName(toolName);
+  if (!parsed) {
+    return null;
+  }
+
+  const candidates = new Set<string>();
+  if (isServerKey(parsed.serverIdPart)) {
+    candidates.add(`mcp_${parsed.serverIdPart}_${parsed.toolName}`);
+  } else {
+    candidates.add(`mcp_toml::${parsed.serverIdPart}_${parsed.toolName}`);
+    candidates.add(`mcp_sqlite::${parsed.serverIdPart}_${parsed.toolName}`);
+  }
+
+  for (const candidate of candidates) {
+    if (availableToolNames.has(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
 }
