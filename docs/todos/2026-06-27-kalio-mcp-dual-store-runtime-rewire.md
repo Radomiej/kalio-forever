@@ -92,6 +92,7 @@ flowchart TD
 - 2026-06-28: `MCPPanel` tool filtering now routes through `mcpToolServerKey.ts`, so the one-release serverId fallback is centralized in a single helper instead of an inline component branch.
 - 2026-06-28: persona MCP allow-list normalization now routes through `mcpToolAllowList.ts`; verified by `PersonaToolPicker.test.tsx`, `mcpToolAllowList.test.ts`, `kalio-web` typecheck, and `kalio-web` build.
 - 2026-06-28: backend chat allow-list matching now routes through `mcp-tool-allow-list.ts`; verified by `mcp-tool-allow-list.spec.ts`, `tool-policy.service.spec.ts`, and `kalio-api` typecheck.
+- 2026-06-28: backend MCP tool/status payload projection now routes through `mcp-projections.ts`; verified by `mcp-projections.spec.ts`, `mcp.service.spec.ts`, and `kalio-api` typecheck.
 - 2026-06-28: post-centralization audit found no remaining production MCP endpoint/client call sites building on raw `id`; only intentional one-release fallback shims and shared legacy alias fields remain.
 - 2026-06-27: Tool catalog canonicalization is now verified by focused web tests for the MCP bucket and `serverKey` badge, plus `kalio-web` typecheck/build.
 - 2026-06-27: backend MCP helper naming now uses `serverKey` in canonical lookup paths; only the explicit one-release alias bridges still mention legacy `serverId`.
