@@ -156,6 +156,7 @@ export function ConversationManagerPanel({
               type="button"
               className="flex items-start gap-2 rounded-lg border border-warning/25 bg-warning/8 px-2.5 py-2 text-left transition-colors hover:border-warning/40 hover:bg-warning/12"
               data-testid={`runtime-attention-${item.sessionId}`}
+              aria-label={`${item.label}. ${item.detail}`}
               onClick={() => openAttentionSession(item.sessionId)}
             >
               <AlertTriangle
@@ -166,7 +167,12 @@ export function ConversationManagerPanel({
               />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-xs font-medium text-base-content/85">{item.label}</div>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-base-content/55">{item.detail}</p>
+                <p
+                  data-testid={`runtime-attention-detail-${item.sessionId}`}
+                  className="mt-0.5 max-h-14 overflow-hidden text-[11px] leading-relaxed text-base-content/55 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]"
+                >
+                  {item.detail}
+                </p>
               </div>
             </button>
           ))}

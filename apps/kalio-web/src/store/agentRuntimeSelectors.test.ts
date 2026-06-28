@@ -275,6 +275,31 @@ describe('agentRuntimeSelectors', () => {
     ]);
   });
 
+  it('falls back to runtime waiting when assistant prose mentions errors or blockers without runtime evidence', () => {
+    const runtimeActivitySnapshots = {
+      'session-1': makeWaitingRuntimeSnapshot('session-1'),
+    };
+
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots,
+      sessions: [makeSession('session-1', 'AI capabilities inquiry')],
+      sessionMessages: {
+        'session-1': [makeAssistantMessage(
+          'session-1',
+          'Escalate critical events to you immediately (e.g., errors, blockers, decisions needed).',
+        )],
+      },
+    })).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-1',
+        kind: 'runtime_waiting',
+        label: 'AI capabilities inquiry',
+        detail: 'Waiting on orchestrator',
+        actionable: false,
+      }),
+    ]);
+  });
+
   it('keeps recent child-session timeout evidence visible after reload without a live runtime snapshot', () => {
     expect(selectRuntimeAttentionItems({
       sessions: [{
@@ -297,6 +322,24 @@ describe('agentRuntimeSelectors', () => {
         detail: 'Sub-agent timed out after 300000ms.',
       }),
     ]);
+  });
+
+  it('does not surface persisted runtime attention from generic assistant prose after reload', () => {
+    expect(selectRuntimeAttentionItems({
+      sessions: [{
+        ...makeSession('session-1', 'AI capabilities inquiry'),
+        updatedAt: Date.now() - 1_000,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-root',
+        },
+      }],
+      sessionMessages: {
+        'session-1': [makeAssistantMessage(
+          'session-1',
+          'Escalate critical events to you immediately (e.g., errors, blockers, decisions needed).',
+        )],
+      },
+    })).toEqual([]);
   });
 
   it('keeps recent agent-flow root timeout evidence visible after reload when runtime context marks the root as durable', () => {

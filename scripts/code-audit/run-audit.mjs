@@ -20,6 +20,7 @@ import { mkdir, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractRegressionReviewLeads } from './regression-checks.mjs';
+import { extractStringBusinessLogicHits } from './string-business-logic-checks.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,6 +157,7 @@ async function fileStats(files) {
   let silentCatchHits = [];
   let anyHits = [];
   let regressionReviewLeads = [];
+  let stringBusinessLogicHits = [];
 
   for (const f of files) {
     let text;
@@ -166,6 +168,7 @@ async function fileStats(files) {
     const relativeFile = path.relative(REPO_ROOT, f).replaceAll('\\', '/');
     silentCatchHits.push(...extractSilentCatchHits(text, relativeFile));
     regressionReviewLeads.push(...extractRegressionReviewLeads(text, relativeFile));
+    stringBusinessLogicHits.push(...extractStringBusinessLogicHits(text, relativeFile));
     const anyCount = countAnyHits(text);
     if (anyCount > 0) {
       anyHits.push({ file: relativeFile, count: anyCount });
@@ -173,7 +176,7 @@ async function fileStats(files) {
   }
   rows.sort((a, b) => b.lines - a.lines);
   anyHits.sort((a, b) => b.count - a.count);
-  return { rows, silentCatchHits, anyHits, regressionReviewLeads };
+  return { rows, silentCatchHits, anyHits, regressionReviewLeads, stringBusinessLogicHits };
 }
 
 async function governanceDocStats() {

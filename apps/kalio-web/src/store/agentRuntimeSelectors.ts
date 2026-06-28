@@ -11,6 +11,16 @@ import {
   buildArchitectureSessionRuntimeStates,
   sessionStatusSnapshotToRuntimeState,
 } from '../features/sessions/sessionTreeDisplay';
+import {
+  classifyRuntimeEvidence,
+  compactRuntimeAttentionText,
+  extractLatestVisibleRuntimeEvidence,
+} from './agentRuntimeEvidence';
+import {
+  canProjectPersistedRuntimeEvidence,
+  sessionAttentionLabel,
+  waitingDetail,
+} from './agentRuntimeAttentionSupport';
 
 type LiveSessionLoopSeed = {
   sessionId: string;
@@ -64,8 +74,6 @@ export interface RuntimeContinuationAction {
   priority: number;
 }
 
-const RECENT_RUNTIME_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1000;
-
 function runtimeSnapshotToSessionStatus(
   snapshot: RuntimeActivitySnapshot,
 ): SocketEvents['session:status'] {
@@ -80,167 +88,6 @@ function runtimeSnapshotToSessionStatus(
 
 function isLiveSessionState(state: ReturnType<typeof sessionStatusSnapshotToRuntimeState>): boolean {
   return state === 'pending' || state === 'running' || state === 'waiting';
-}
-
-function compactAttentionText(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-function sessionAttentionLabel(
-  sessionId: string,
-  sessionsById: Map<string, ChatSession>,
-): string {
-  const title = sessionsById.get(sessionId)?.title?.trim();
-  return title && title.length > 0 ? title : `Session ${sessionId.slice(0, 8)}`;
-}
-
-function canProjectPersistedRuntimeEvidence(session: ChatSession | undefined): boolean {
-  if (!session) {
-    return false;
-  }
-
-  if (Date.now() - session.updatedAt > RECENT_RUNTIME_ATTENTION_WINDOW_MS) {
-    return false;
-  }
-
-  if (session.parentSessionId) {
-    return true;
-  }
-
-  if (session.kind === 'subagent' || session.kind === 'cli-agent' || session.kind === 'agent-flow') {
-    return true;
-  }
-
-  return session.runtimeContext?.runtimeKind === 'agent-flow-branch'
-    || session.runtimeContext?.runtimeKind === 'agent-flow-root'
-    || session.runtimeContext?.runtimeKind === 'cli-agent';
-}
-
-function extractArchitectureEvidence(run: ChatMessage['architectureRun'] | undefined): string | null {
-  if (!run) {
-    return null;
-  }
-  for (let index = run.trace.length - 1; index >= 0; index -= 1) {
-    const reason = run.trace[index]?.incompleteReason?.trim();
-    if (reason) {
-      return reason;
-    }
-  }
-  return null;
-}
-
-function extractToolResultEvidence(content: string): string | null {
-  try {
-    const parsed = JSON.parse(content) as Record<string, unknown>;
-    const recoverableRuntimeError = parsed['recoverableRuntimeError'];
-    if (typeof recoverableRuntimeError === 'string' && recoverableRuntimeError.trim().length > 0) {
-      return recoverableRuntimeError.trim();
-    }
-    const errorMessage = parsed['errorMessage'];
-    if (typeof errorMessage === 'string' && errorMessage.trim().length > 0) {
-      return errorMessage.trim();
-    }
-    const toolResultErrorMessage = parsed['toolResultErrorMessage'];
-    if (typeof toolResultErrorMessage === 'string' && toolResultErrorMessage.trim().length > 0) {
-      return toolResultErrorMessage.trim();
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-function extractLatestVisibleRuntimeEvidence(
-  messages: ChatMessage[] | undefined,
-  snapshot: RuntimeActivitySnapshot | undefined,
-): string | null {
-  const safeMessages = messages ?? [];
-  for (let index = safeMessages.length - 1; index >= 0; index -= 1) {
-    const message = safeMessages[index];
-    if (!message) {
-      continue;
-    }
-    if (message.role === 'assistant' && message.content.trim().length > 0) {
-      return compactAttentionText(message.content);
-    }
-    if (message.role === 'tool_result' && message.content.trim().length > 0) {
-      const evidence = extractToolResultEvidence(message.content);
-      if (evidence) {
-        return compactAttentionText(evidence);
-      }
-    }
-    const architectureEvidence = extractArchitectureEvidence(message.architectureRun);
-    if (architectureEvidence) {
-      return compactAttentionText(architectureEvidence);
-    }
-  }
-
-  const lastChildOutput = [...(snapshot?.childExecutions ?? [])]
-    .reverse()
-    .map((execution) => execution.lastOutput?.trim())
-    .find((output): output is string => Boolean(output && output.length > 0));
-  return lastChildOutput ? compactAttentionText(lastChildOutput) : null;
-}
-
-function classifyRuntimeEvidence(
-  evidence: string | null,
-): Pick<RuntimeAttentionItem, 'kind' | 'detail' | 'priority'> | null {
-  if (!evidence) {
-    return null;
-  }
-
-  const normalized = evidence.toLowerCase();
-  if (
-    normalized.includes('tool budget ended')
-    || normalized.includes('max tools')
-    || normalized.includes('max tool')
-    || normalized.includes('maxtoolattempt')
-  ) {
-    return {
-      kind: 'runtime_error',
-      detail: 'Tool budget reached before the branch could finish.',
-      priority: 10,
-    };
-  }
-
-  if (normalized.includes('timed out') || normalized.includes('timeout')) {
-    const timeoutMatch = /(?:sub-agent failed:\s*)?(sub-agent timed out after [^.]+\.?)/i.exec(evidence);
-    return {
-      kind: 'runtime_timeout',
-      detail: compactAttentionText(timeoutMatch?.[1] ?? evidence),
-      priority: 5,
-    };
-  }
-
-  if (
-    normalized.includes('failed')
-    || normalized.includes('error')
-    || normalized.includes('blocked')
-    || normalized.includes('cancelled')
-  ) {
-    return {
-      kind: 'runtime_error',
-      detail: compactAttentionText(evidence),
-      priority: 15,
-    };
-  }
-
-  return null;
-}
-
-function waitingDetail(
-  snapshot: RuntimeActivitySnapshot | undefined,
-  waitingLabel?: string | null,
-): string {
-  const runStatus = snapshot?.run?.status as string | undefined;
-  if (runStatus === 'waiting_on_orchestrator') {
-    return 'Waiting on orchestrator';
-  }
-  if (waitingLabel && waitingLabel.trim().length > 0) {
-    return `Waiting on ${waitingLabel.trim()}`;
-  }
-  return 'Runtime waiting';
 }
 
 function setRuntimeAttentionItem(
@@ -490,7 +337,10 @@ export function selectRuntimeAttentionItems(params: {
       }
 
       const label = sessionAttentionLabel(targetSessionId, sessionsById);
-      const classifiedEvidence = classifyRuntimeEvidence(compactAttentionText(execution.lastOutput ?? ''));
+      const classifiedEvidence = classifyRuntimeEvidence({
+        source: 'child_output',
+        text: compactRuntimeAttentionText(execution.lastOutput ?? ''),
+      });
 
       if (classifiedEvidence && (execution.status === 'failed' || execution.status === 'blocked')) {
         setRuntimeAttentionItem(runtimeItemsBySessionId, {

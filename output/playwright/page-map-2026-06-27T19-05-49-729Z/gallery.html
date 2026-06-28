@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kalio Page Map Gallery</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #10161f;
+        --panel: #182230;
+        --panel-2: #1f2c3d;
+        --text: #e7eef8;
+        --muted: #9cb0c8;
+        --accent: #21b0f3;
+        --border: rgba(126, 160, 199, 0.18);
+        --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Arial, sans-serif;
+        background:
+          radial-gradient(circle at top, rgba(33, 176, 243, 0.12), transparent 34%),
+          linear-gradient(180deg, #0d131b 0%, var(--bg) 100%);
+        color: var(--text);
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .shell {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 32px 24px 48px;
+      }
+
+      .hero {
+        display: grid;
+        gap: 18px;
+        margin-bottom: 28px;
+      }
+
+      .hero-card {
+        background: rgba(24, 34, 48, 0.82);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        padding: 24px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(16px);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(28px, 3vw, 46px);
+        line-height: 1.05;
+      }
+
+      .subtitle {
+        margin: 0;
+        color: var(--muted);
+        max-width: 920px;
+        line-height: 1.6;
+      }
+
+      .links,
+      .filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        text-decoration: none;
+        font-size: 14px;
+      }
+
+      button.chip {
+        cursor: pointer;
+      }
+
+      button.chip.active {
+        background: rgba(33, 176, 243, 0.18);
+        border-color: rgba(33, 176, 243, 0.38);
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px;
+      }
+
+      .stat {
+        padding: 16px 18px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border);
+      }
+
+      .stat strong {
+        display: block;
+        font-size: 28px;
+        margin-bottom: 6px;
+      }
+
+      .gallery {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 18px;
+      }
+
+      .card {
+        display: flex;
+        flex-direction: column;
+        min-height: 100%;
+        overflow: hidden;
+        border-radius: 22px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        text-decoration: none;
+      }
+
+      .thumb-wrap {
+        aspect-ratio: 16 / 10;
+        overflow: hidden;
+        background: #0a1018;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .thumb-wrap img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .meta {
+        display: grid;
+        gap: 10px;
+        padding: 16px 18px 20px;
+      }
+
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow span:last-child {
+        color: var(--accent);
+      }
+
+      .meta h2 {
+        margin: 0;
+        font-size: 18px;
+        line-height: 1.25;
+      }
+
+      .meta p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.5;
+        font-size: 14px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="hero-card">
+          <h1>Kalio Page Map Gallery</h1>
+          <p class="subtitle">
+            Thumbnail browser for the full page-map capture. This pack covers the main shell, Talk subviews,
+            Tools tabs, Mind tabs, Architect, Observability, and all Settings tabs.
+          </p>
+        </div>
+        <div class="hero-card links">
+          <a class="chip" href="./README.md">README Index</a>
+          <a class="chip" href="./ia-map.md">IA Map</a>
+          <a class="chip" href="../rich-state-historical-2026-06-27T19-49-07-933Z/README.md">Rich State Pack</a>
+          <a class="chip" href="../rich-state-2026-06-27T19-44-10-640Z/README.md">Raw Live-State Pack</a>
+        </div>
+        <div class="hero-card stats">
+          <div class="stat">
+            <strong>25</strong>
+            Full screenshots
+          </div>
+          <div class="stat">
+            <strong>6</strong>
+            Main section groups
+          </div>
+          <div class="stat">
+            <strong>12</strong>
+            Settings tabs
+          </div>
+        </div>
+        <div class="hero-card filters">
+          <button class="chip active" data-filter="all" type="button">All</button>
+          <button class="chip" data-filter="landing" type="button">Landing</button>
+          <button class="chip" data-filter="talk" type="button">Talk</button>
+          <button class="chip" data-filter="tools" type="button">Tools</button>
+          <button class="chip" data-filter="mind" type="button">Mind</button>
+          <button class="chip" data-filter="architect" type="button">Architect / Observe</button>
+          <button class="chip" data-filter="settings" type="button">Settings</button>
+        </div>
+      </section>
+
+      <section class="gallery" id="gallery">
+        <a class="card" data-group="landing" href="./01-home-landing.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./01-home-landing.png" alt="Home Landing"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>01</span><span>Landing</span></div>
+            <h2>Home Landing</h2>
+            <p>Top-level landing page with quick chat and app tiles.</p>
+          </div>
+        </a>
+        <a class="card" data-group="talk" href="./02-talk-conversation.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./02-talk-conversation.png" alt="Talk Conversation"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>02</span><span>Talk</span></div>
+            <h2>Talk Conversation</h2>
+            <p>Conversation view with sidebar and active chat shell.</p>
+          </div>
+        </a>
+        <a class="card" data-group="talk" href="./03-talk-execution-graph.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./03-talk-execution-graph.png" alt="Talk Execution Graph"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>03</span><span>Talk</span></div>
+            <h2>Talk Execution Graph</h2>
+            <p>Execution graph mode inside the Talk section.</p>
+          </div>
+        </a>
+        <a class="card" data-group="talk" href="./04-talk-active-agent-runs.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./04-talk-active-agent-runs.png" alt="Talk Active Agent Runs"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>04</span><span>Talk</span></div>
+            <h2>Talk Active Agent Runs</h2>
+            <p>Talk sidebar switched from conversations to active runs.</p>
+          </div>
+        </a>
+        <a class="card" data-group="tools" href="./05-tools-native.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./05-tools-native.png" alt="Tools Native"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>05</span><span>Tools</span></div>
+            <h2>Tools Native</h2>
+            <p>Native tools tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="tools" href="./06-tools-mcp.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./06-tools-mcp.png" alt="Tools MCP"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>06</span><span>Tools</span></div>
+            <h2>Tools MCP</h2>
+            <p>MCP tools tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="tools" href="./07-tools-raapp.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./07-tools-raapp.png" alt="Tools RAApp"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>07</span><span>Tools</span></div>
+            <h2>Tools RAApp</h2>
+            <p>RAApp tools tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="mind" href="./08-mind-memory.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./08-mind-memory.png" alt="Mind Memory"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>08</span><span>Mind</span></div>
+            <h2>Mind Memory</h2>
+            <p>Memory tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="mind" href="./09-mind-files.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./09-mind-files.png" alt="Mind Files"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>09</span><span>Mind</span></div>
+            <h2>Mind Files</h2>
+            <p>Workspace files tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="mind" href="./10-mind-skills.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./10-mind-skills.png" alt="Mind Skills"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>10</span><span>Mind</span></div>
+            <h2>Mind Skills</h2>
+            <p>Skills list and editor split view.</p>
+          </div>
+        </a>
+        <a class="card" data-group="mind" href="./11-mind-personas.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./11-mind-personas.png" alt="Mind Personas"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>11</span><span>Mind</span></div>
+            <h2>Mind Personas</h2>
+            <p>Persona management tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="architect" href="./12-architect.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./12-architect.png" alt="Architect"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>12</span><span>Architect</span></div>
+            <h2>Architect</h2>
+            <p>Architecture editor and inspector.</p>
+          </div>
+        </a>
+        <a class="card" data-group="architect" href="./13-observability.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./13-observability.png" alt="Observability"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>13</span><span>Observe</span></div>
+            <h2>Observability</h2>
+            <p>Observability page.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./14-settings-llm.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./14-settings-llm.png" alt="Settings LLM"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>14</span><span>Settings</span></div>
+            <h2>Settings LLM</h2>
+            <p>LLM settings tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./15-settings-runtime.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./15-settings-runtime.png" alt="Settings Runtime"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>15</span><span>Settings</span></div>
+            <h2>Settings Runtime</h2>
+            <p>Runtime settings tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./16-settings-conversation.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./16-settings-conversation.png" alt="Settings Conversation"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>16</span><span>Settings</span></div>
+            <h2>Settings Conversation</h2>
+            <p>Conversation settings tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./17-settings-hitl.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./17-settings-hitl.png" alt="Settings HITL"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>17</span><span>Settings</span></div>
+            <h2>Settings HITL</h2>
+            <p>HITL approvals tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./18-settings-audit-retention.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./18-settings-audit-retention.png" alt="Settings Audit Retention"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>18</span><span>Settings</span></div>
+            <h2>Settings Audit Retention</h2>
+            <p>Audit retention tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./19-settings-embeddings.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./19-settings-embeddings.png" alt="Settings Embeddings"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>19</span><span>Settings</span></div>
+            <h2>Settings Embeddings</h2>
+            <p>Embeddings tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./20-settings-web-search.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./20-settings-web-search.png" alt="Settings Web Search"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>20</span><span>Settings</span></div>
+            <h2>Settings Web Search</h2>
+            <p>Web search tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./21-settings-image-generation.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./21-settings-image-generation.png" alt="Settings Image Generation"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>21</span><span>Settings</span></div>
+            <h2>Settings Image Generation</h2>
+            <p>Image generation tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./22-settings-cli-agents.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./22-settings-cli-agents.png" alt="Settings CLI Agents"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>22</span><span>Settings</span></div>
+            <h2>Settings CLI Agents</h2>
+            <p>CLI agents tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./23-settings-mcp-servers.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./23-settings-mcp-servers.png" alt="Settings MCP Servers"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>23</span><span>Settings</span></div>
+            <h2>Settings MCP Servers</h2>
+            <p>MCP servers tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./24-settings-allowed-paths.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./24-settings-allowed-paths.png" alt="Settings Allowed Paths"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>24</span><span>Settings</span></div>
+            <h2>Settings Allowed Paths</h2>
+            <p>Allowed paths tab.</p>
+          </div>
+        </a>
+        <a class="card" data-group="settings" href="./25-settings-telegram.png">
+          <div class="thumb-wrap"><img loading="lazy" src="./25-settings-telegram.png" alt="Settings Telegram"></div>
+          <div class="meta">
+            <div class="eyebrow"><span>25</span><span>Settings</span></div>
+            <h2>Settings Telegram</h2>
+            <p>Telegram tab.</p>
+          </div>
+        </a>
+      </section>
+    </main>
+
+    <script>
+      const buttons = document.querySelectorAll("[data-filter]");
+      const cards = document.querySelectorAll(".card[data-group]");
+
+      buttons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const target = button.getAttribute("data-filter");
+          buttons.forEach((chip) => chip.classList.toggle("active", chip === button));
+          cards.forEach((card) => {
+            const show = target === "all" || card.getAttribute("data-group") === target;
+            card.classList.toggle("hidden", !show);
+          });
+        });
+      });
+    </script>
+  </body>
+</html>

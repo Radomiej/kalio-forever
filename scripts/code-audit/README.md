@@ -21,6 +21,7 @@ slow (downloads to npm cache), subsequent runs are fast.
 |---|---|---|
 | built-in scanner | file sizes, silent catches, `any` types | `file-stats.json` |
 | regression review leads | Portal-style review leads for TODO/HACK/workaround, literal UI copy, locale branches, browser dialogs, and search/domain-list drift | `file-stats.json` |
+| string-business-logic leads | warning queue for message-text and other free-form text parsing branches in business code | `file-stats.json` |
 | governance scanner | README / CONTRIBUTING / CODE_OF_CONDUCT / agent-doc drift | `docs-governance.json` |
 | `madge` | circular dependencies | `madge-circular.json` |
 | `jscpd` | copy/paste detection | `jscpd/jscpd-report.json` |
@@ -67,13 +68,37 @@ These rows are review leads, not automatic failures. The report caps this sectio
 at 60 rows and expects reviewers to suppress false positives with a concrete
 reason rather than treating every match as a bug.
 
+## String-driven business logic leads
+
+The built-in scanner also emits dedicated warnings for code paths that appear to
+steer business/runtime behavior from human-readable strings instead of typed
+contracts.
+
+Current heuristics flag:
+
+- `error.message` comparisons or substring checks such as `===`, `includes()`,
+  `startsWith()`, `endsWith()`, `match()`, and normalized
+  `toLowerCase().includes()`
+- free-form `content`, `prompt`, `text`, `title`, `label`, `name`, or
+  `description` parsing with `includes()`, `startsWith()`, `endsWith()`,
+  `match()`, or normalized `toLowerCase().includes()`
+- substring parsing on identifier-like fields such as `id`, `sessionId`,
+  `runId`, or `schemaId`
+
+These are warnings, not auto-failures. The expected fix direction is to prefer
+machine-readable `code` values, enums, discriminated unions, or typed result
+objects. Human-readable message text should stay in logging and UI, not in
+branching logic. Typed discriminated unions such as `status === 'done'` are not
+the target of this heuristic when they are the contract.
+
 ## Severity rules
 
 Aligned with AGENTS.md architecture rules:
 
 - 🔴 CRITICAL — file > hard limit (Controller 250, Service 400, Module 120, React 350), silent catch in critical path, circular dep > 3 modules
 - 🟡 HIGH     — file > soft limit (Controller 150, Service 300, Module 80, React 200), silent catch non-critical, circular dep
-- 🟢 MEDIUM   — `any` hotspot (≥ 5/file), duplicate clone, unused export
+- 🟡 HIGH     — message-text error branching in business/runtime code
+- 🟢 MEDIUM   — `any` hotspot (≥ 5/file), duplicate clone, unused export, free-form text parsing branch
 - ⚪ LOW      — `any` ≥ 1
 
 ## File limits (from AGENTS.md)
