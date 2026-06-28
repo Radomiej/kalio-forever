@@ -330,6 +330,51 @@ describe('ConversationManagerPanel', () => {
     expect(resumeAgentFlowRun).not.toHaveBeenCalled();
   });
 
+  it('does not render generic assistant summary text as runtime attention detail', () => {
+    sessionState.sessions = [makeSession('session-1', 'AI capabilities inquiry')];
+    sessionState.sessionMessages = {
+      'session-1': [{
+        id: 'assistant-summary',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: 'Escalate critical events to you immediately (e.g., errors, blockers, decisions needed).',
+        createdAt: 2,
+      }],
+    };
+    agentState.runtimeActivitySnapshots = {
+      'session-1': makeWaitingRuntimeSnapshot('session-1'),
+    };
+
+    render(<ConversationManagerPanel />);
+
+    const row = screen.getByTestId('runtime-attention-session-1');
+    expect(row).toHaveTextContent('Waiting on orchestrator');
+    expect(row).not.toHaveTextContent('Escalate critical events');
+  });
+
+  it('keeps long runtime attention details compact while exposing the full detail in the accessible name', () => {
+    const longDetail = 'Runtime failed: ' + 'The child run exhausted the browser tool window. '.repeat(6).trim();
+    sessionState.sessions = [makeSession('session-1', 'QA Guard')];
+    sessionState.sessionMessages = {
+      'session-1': [{
+        id: 'assistant-runtime-error',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: longDetail,
+        createdAt: 2,
+      }],
+    };
+    agentState.runtimeActivitySnapshots = {
+      'session-1': makeWaitingRuntimeSnapshot('session-1'),
+    };
+
+    render(<ConversationManagerPanel />);
+
+    const row = screen.getByTestId('runtime-attention-session-1');
+    expect(row).toHaveAttribute('aria-label', `QA Guard. ${longDetail}`);
+    expect(screen.getByTestId('runtime-attention-detail-session-1')).toHaveClass('max-h-14', 'overflow-hidden');
+  });
+
   it('splits running and finished tool rows and shows llm activity counts', () => {
     agentState.toolActivities = [
       makeToolActivity({ callId: 'call-running', toolName: 'web_search', status: 'running' }),

@@ -104,7 +104,7 @@ export function collectKnipRows(report, pkg) {
 }
 
 async function main() {
-  const fileStats = await readJson('file-stats.json', { rows: [], silentCatchHits: [], anyHits: [], regressionReviewLeads: [] });
+  const fileStats = await readJson('file-stats.json', { rows: [], silentCatchHits: [], anyHits: [], regressionReviewLeads: [], stringBusinessLogicHits: [] });
   const governance = await readJson('docs-governance.json', { docs: {}, findings: [] });
   
   // Merge all madge outputs
@@ -173,6 +173,16 @@ async function main() {
     Fix: 'Review against AGENTS.md and UI/API centralization rules; suppress only with clear rationale',
   }));
 
+  // --- String-driven business logic leads ------------------------------------
+  const stringLogicRows = (fileStats.stringBusinessLogicHits ?? []).slice(0, 80).map((h) => ({
+    Severity: h.severity === 'HIGH' ? '🟡 HIGH' : h.severity === 'MEDIUM' ? '🟢 MEDIUM' : '⚪ LOW',
+    File: h.file,
+    Line: h.line,
+    Check: h.check,
+    Match: h.match,
+    Fix: 'Replace text-driven branching with error codes, enums, discriminated unions, or typed result objects',
+  }));
+
   // --- Circular deps ---------------------------------------------------------
   const circularRows = madgeOutputs.slice(0, 20).map((cycle, i) => ({
     '#': i + 1,
@@ -218,9 +228,10 @@ async function main() {
         + silentRows.filter((r) => r.Severity.includes('HIGH')).length
         + circularRows.filter((r) => r.Severity.includes('HIGH')).length
         + governanceRows.filter((r) => r.Severity.includes('HIGH')).length
-        + regressionRows.filter((r) => r.Severity.includes('HIGH')).length,
-    medium: anyRows.filter((r) => r.Severity.includes('MEDIUM')).length + dupRows.length + deadRows.filter((r) => r.Severity.includes('MEDIUM')).length + governanceRows.filter((r) => r.Severity.includes('MEDIUM')).length + regressionRows.filter((r) => r.Severity.includes('MEDIUM')).length,
-    low: anyRows.filter((r) => r.Severity.includes('LOW')).length + deadRows.filter((r) => r.Severity.includes('LOW')).length + regressionRows.filter((r) => r.Severity.includes('LOW')).length,
+        + regressionRows.filter((r) => r.Severity.includes('HIGH')).length
+        + stringLogicRows.filter((r) => r.Severity.includes('HIGH')).length,
+    medium: anyRows.filter((r) => r.Severity.includes('MEDIUM')).length + dupRows.length + deadRows.filter((r) => r.Severity.includes('MEDIUM')).length + governanceRows.filter((r) => r.Severity.includes('MEDIUM')).length + regressionRows.filter((r) => r.Severity.includes('MEDIUM')).length + stringLogicRows.filter((r) => r.Severity.includes('MEDIUM')).length,
+    low: anyRows.filter((r) => r.Severity.includes('LOW')).length + deadRows.filter((r) => r.Severity.includes('LOW')).length + regressionRows.filter((r) => r.Severity.includes('LOW')).length + stringLogicRows.filter((r) => r.Severity.includes('LOW')).length,
   };
 
   const date = new Date().toISOString().slice(0, 10);
@@ -277,9 +288,21 @@ async function main() {
       Fix: r.Fix,
     });
   }
+  for (const r of stringLogicRows.filter((x) => x.Severity.includes('HIGH'))) {
+    prio.push({
+      '#': prio.length + 1,
+      Severity: r.Severity,
+      Target: `${r.File}:${r.Line}`,
+      Type: 'string-business-logic',
+      Metric: r.Check,
+      Limit: 'typed contract',
+      Principle: 'Branch on machine-readable contracts, not message text',
+      Fix: r.Fix,
+    });
+  }
 
   // --- Write JSON ------------------------------------------------------------
-  const jsonOut = { date, counts, godRows, silentRows, anyRows, regressionRows, circularRows, dupRows, deadRows, governanceRows, prio };
+  const jsonOut = { date, counts, godRows, silentRows, anyRows, regressionRows, stringLogicRows, circularRows, dupRows, deadRows, governanceRows, prio };
   await writeFile(path.join(OUT_DIR, `${date}-report.json`), JSON.stringify(jsonOut, null, 2));
 
   // --- Write Markdown --------------------------------------------------------
@@ -324,6 +347,10 @@ ${anyRows.length ? mdTable(['Severity', 'File', 'Count', 'Fix'], anyRows) : '_No
 ## Regression review leads
 
 ${regressionRows.length ? mdTable(['Severity', 'File', 'Line', 'Check', 'Match', 'Fix'], regressionRows) : '_No regression review leads detected._'}
+
+## String-driven business logic leads
+
+${stringLogicRows.length ? mdTable(['Severity', 'File', 'Line', 'Check', 'Match', 'Fix'], stringLogicRows) : '_No string-driven business logic leads detected._'}
 
 ## Circular dependencies (madge)
 

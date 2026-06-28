@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { buildSpawnCommand, extractSilentCatchHits } from './run-audit.mjs';
 import { collectKnipRows } from './aggregate.mjs';
 import { extractRegressionReviewLeads } from './regression-checks.mjs';
+import { extractStringBusinessLogicHits } from './string-business-logic-checks.mjs';
 
 test('extractSilentCatchHits detects comment-only catch bodies', () => {
   const text = [
@@ -80,4 +81,63 @@ test('extractRegressionReviewLeads detects Portal-style review leads', () => {
       [4, 'workaround-marker'],
     ],
   );
+});
+
+test('extractStringBusinessLogicHits detects message-text branching', () => {
+  const text = [
+    "const stopped = error.message === CLI_AGENT_STOPPED_ERROR;",
+    "if (error.message.toLowerCase().includes('timed out')) return 'timeout';",
+    "if (message.includes('final-artifact')) return 'done';",
+    "return logger.error(error.message);",
+  ].join('\n');
+
+  const hits = extractStringBusinessLogicHits(text, 'apps/kalio-api/src/modules/subagent-runtime.service.ts');
+
+  assert.deepEqual(
+    hits.map((hit) => [hit.line, hit.check, hit.severity]),
+    [
+      [1, 'error-message-branch', 'HIGH'],
+      [2, 'normalized-error-message-branch', 'HIGH'],
+      [3, 'message-text-branch', 'HIGH'],
+    ],
+  );
+});
+
+test('extractStringBusinessLogicHits detects free-form text parsing branches', () => {
+  const text = [
+    "if (prompt.toLowerCase().includes('architecture review')) return true;",
+    "const shouldFinalize = content.startsWith('FINAL:');",
+    "const sameRun = sessionId.includes('-finalizer');",
+  ].join('\n');
+
+  const hits = extractStringBusinessLogicHits(text, 'apps/kalio-web/src/store/runtime-panel.ts');
+
+  assert.deepEqual(
+    hits.map((hit) => [hit.line, hit.check, hit.severity]),
+    [
+      [1, 'normalized-free-form-text-branch', 'MEDIUM'],
+      [2, 'free-form-text-branch', 'MEDIUM'],
+      [3, 'identifier-fragment-branch', 'MEDIUM'],
+    ],
+  );
+});
+
+test('extractStringBusinessLogicHits ignores typed-contract style status comparisons', () => {
+  const text = [
+    "if (status === 'pending') return false;",
+    "const shouldShow = panel !== 'chat';",
+    "if (message.role === 'assistant') return false;",
+  ].join('\n');
+
+  const hits = extractStringBusinessLogicHits(text, 'apps/kalio-web/src/store/runtime-panel.ts');
+
+  assert.equal(hits.length, 0);
+});
+
+test('extractStringBusinessLogicHits ignores test files', () => {
+  const text = "expect(prompt.toLowerCase().includes('architecture')).toBe(true);";
+
+  const hits = extractStringBusinessLogicHits(text, 'apps/kalio-web/src/store/runtime-panel.test.ts');
+
+  assert.equal(hits.length, 0);
 });
