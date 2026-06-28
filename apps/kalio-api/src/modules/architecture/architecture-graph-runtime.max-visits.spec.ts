@@ -107,7 +107,9 @@ describe('createArchitectureGraphEvents max visit guards', () => {
       type: 'router_decision',
       message: expect.stringContaining('returned control to the orchestrator'),
       nodeId: 'goal-master',
+      reasonCode: 'return_to_orchestrator',
       data: expect.objectContaining({
+        reasonCode: 'return_to_orchestrator',
         pendingNodeIds: ['implementer'],
         returnToOrchestrator: true,
         visitCounts: { 'goal-master': 1 },
@@ -176,7 +178,7 @@ describe('createArchitectureGraphEvents max visit guards', () => {
     };
     const roleExecutor: ArchitectureRoleExecutor = {
       execute: vi.fn(async ({ branchSessionId, personaId, run: activeRun, slot }) => ({
-        message: 'Worker needs another pass. route_to(worker, continue)',
+        message: 'Worker needs another pass.',
         data: {
           branchSessionId,
           personaId,
@@ -200,7 +202,9 @@ describe('createArchitectureGraphEvents max visit guards', () => {
     expect(events).toContainEqual(expect.objectContaining({
       type: 'router_decision',
       message: expect.stringContaining('max node visits'),
+      reasonCode: 'max_node_visits',
       data: expect.objectContaining({
+        reasonCode: 'max_node_visits',
         maxNodeVisits: 1,
         pendingNodeIds: ['worker'],
         visitCounts: { worker: 1 },
@@ -290,7 +294,7 @@ describe('createArchitectureGraphEvents max visit guards', () => {
         }
         return {
           message: slot.id === 'orchestrator'
-            ? 'Orchestrator routes the next branch. route_to(researcher, continue)'
+            ? 'Orchestrator routes the next branch.'
             : 'Researcher completed the bounded pass.',
           data: {
             branchSessionId,

@@ -35,13 +35,20 @@ export interface CLIAgentRunResult extends CLIAgentResult {
   failureCode?: CLIAgentSemanticFailureCode;
 }
 
-export function applySemanticCliOutcome(result: CLIAgentResult | CLIAgentRunResult): CLIAgentRunResult {
+export function applySemanticCliOutcome(
+  result: (CLIAgentResult & { failureCode?: CLIAgentSemanticFailureCode }) | CLIAgentRunResult,
+): CLIAgentRunResult {
   if ('rawExitCode' in result && 'outcome' in result) {
     return result;
   }
 
   const rawExitCode = result.exitCode;
-  const failureCode = detectSemanticFailureCode(result.agentId, result.output);
+  const failureCode = isSemanticFailureCode(result.failureCode)
+    ? result.failureCode
+    // TODO: legacy fallback for adapters that still expose auth failures only through non-zero CLI output.
+    : rawExitCode === 0
+      ? undefined
+      : detectSemanticFailureCode(result.agentId, result.output);
   const outcome = rawExitCode === 0 && !failureCode ? 'completed' : 'failed';
 
   return {
@@ -51,6 +58,10 @@ export function applySemanticCliOutcome(result: CLIAgentResult | CLIAgentRunResu
     outcome,
     ...(failureCode ? { failureCode } : {}),
   };
+}
+
+function isSemanticFailureCode(value: unknown): value is CLIAgentSemanticFailureCode {
+  return value === 'auth_required';
 }
 
 function detectSemanticFailureCode(

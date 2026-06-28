@@ -160,6 +160,59 @@ describe('SubagentRuntimeService nested subagents', () => {
     );
   });
 
+  it('passes structured output contract into the child turn and returns provider structured output', async () => {
+    const structuredOutput = {
+      name: 'architecture_final_artifact',
+      schema: { type: 'object', properties: { status: { enum: ['accepted', 'blocked'] } }, required: ['status'] },
+      strict: true,
+    };
+    const outputValue = {
+      status: 'blocked',
+      blockingReason: 'Missing verification evidence.',
+      evidence: [],
+      answer: 'Final typed answer.',
+    };
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([
+        { type: 'structured_output', value: outputValue } as unknown as InternalLLMChunk,
+        { type: 'done' },
+      ])),
+      getConfig: vi.fn().mockResolvedValue({ provider: 'mock', model: 'mock', apiKey: '', baseUrl: '', source: 'env' }),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue({ id: 'prompt-1' }),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const runtime = buildSubagentRuntime(
+      llmSource,
+      makeProcessor(sessionManager) as unknown as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn(() => []) } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', allowedTools: [], skillIds: [], mcpPolicy: 'deny_all', kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-structured',
+      objective: 'produce a typed final artifact contract',
+      structuredOutput,
+      availableTools: [],
+      timeoutMs: 1000,
+      vfsMode: 'isolated',
+      copyOutputs: false,
+      emit: vi.fn(),
+    });
+
+    expect(result.structuredOutput).toEqual(outputValue);
+    expect(result.result).toBe('Final typed answer.');
+    expect(llmSource.stream).toHaveBeenCalledWith(expect.objectContaining({ structuredOutput }));
+  });
+
   it('tells no-tool subagents to return plain text instead of raw tool-call markup', async () => {
     const llmSource: ILLMSource = {
       stream: vi.fn(() => streamFrom([

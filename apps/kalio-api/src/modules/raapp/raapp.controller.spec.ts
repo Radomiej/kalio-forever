@@ -370,7 +370,7 @@ describe('RAAppController', () => {
       expect(result).toBeInstanceOf(StreamableFile);
     });
 
-    it('maps missing release versions to NotFoundException', () => {
+    it('does not map missing release versions to NotFoundException from message text alone', () => {
       const group = { slug: 'my-app', displayName: 'My App', currentVersion: null, draft: null, history: [] };
       mockVersioningService.getGroupBySlug.mockReturnValue(group);
       mockVersioningService.downloadRelease.mockImplementation(() => {
@@ -383,7 +383,7 @@ describe('RAAppController', () => {
             downloadRelease: (slug: string, version: string, res: { set: ReturnType<typeof vi.fn> }) => StreamableFile;
           }
         ).downloadRelease('my-app', '9.9.9', { set: vi.fn() }),
-      ).toThrow(NotFoundException);
+      ).not.toThrow(NotFoundException);
     });
 
     it('maps release-not-found error codes to NotFoundException without relying on message text', () => {

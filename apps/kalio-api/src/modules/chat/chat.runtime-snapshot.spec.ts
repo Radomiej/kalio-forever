@@ -373,7 +373,10 @@ describe('buildRuntimeActivitySnapshot', () => {
         getMessages: vi.fn().mockResolvedValue([]),
       },
       cliAgentSessionRuntime: {
-        getStatus: vi.fn().mockRejectedValue(new Error('CLI_AGENT_SESSION_METADATA_MISSING: cli-child-1')),
+        getStatus: vi.fn().mockRejectedValue(Object.assign(
+          new Error('CLI metadata missing for child session.'),
+          { code: 'CLI_AGENT_SESSION_METADATA_MISSING' },
+        )),
         stopSession: vi.fn(),
       },
       logger,

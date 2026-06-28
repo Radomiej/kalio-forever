@@ -44,12 +44,20 @@ Key ownership rules:
 
 | Area | Owns | Notes |
 | --- | --- | --- |
-| Kalio Web | Rendering, editor draft state, run controls, visual projections | It does not execute LLM/tool work. |
-| Chat | Session isolation, parent/child lineage, persisted messages | Chat is a projection surface, not the architecture source of truth. |
+| Kalio Web | Rendering, editor draft state, run controls, visual projections | It does not execute LLM/tool work and must not infer runtime status from message text or opaque ID prefixes. |
+| Chat | Session isolation, parent/child lineage, persisted messages | Chat is a projection surface; turn/chat status must come from backend runtime snapshots and durable events. |
 | Architecture Registry | Seed schemas and user-created variants | User graph edits are persisted by saving a variant. |
 | Architecture Runtime | Graph node execution, routing, status, events | Runtime state is observable as timeline, graph, and chat projection. |
 | AgentFlow Runtime | Durable nested flow facade | Current adapter is the architecture runtime. |
 | Tool Dispatch | Tool policy, confirmation, MCP/CLI/VFS integration | Tool availability is policy-driven per context/persona. |
+
+## Runtime Contract Boundary
+
+The backend runtime event history is the source of truth for workflow state. UI projections must consume explicit fields such as `status`, `reasonCode`, `errorCode`, `failure`, `evidence`, `runtimeDecision`, `runId`, `nodeId`, `parentToolCallId`, and `architectureRunId`.
+
+Human-readable fields such as `message`, `detail`, `summary`, `actionSummary`, tool output prose, and LLM text are display-only. They cannot drive retry, finalization, terminal-state routing, graph hydration, or chat/session status.
+
+When an LLM is expected to produce a machine decision, the runtime must request a structured output that maps to the typed contract instead of parsing free-form assistant prose.
 
 ## Work Flow
 
@@ -125,7 +133,7 @@ sequenceDiagram
   end
 
   AR->>Q: review evidence and route
-  Q-->>AR: route_to(nextNodeId) or final approval
+  Q-->>AR: structured routerOutput route or typed final approval
   AR-->>FE: events, graph projection, chat projection
   FE-->>U: active node, visit counts, artifacts, final status
 ```

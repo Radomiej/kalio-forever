@@ -42,10 +42,17 @@ export interface UsageChunk {
   totalTokens?: number;
 }
 
+/** Provider-native structured output parsed from a schema-bound response. */
+export interface StructuredOutputChunk {
+  type: 'structured_output';
+  value: unknown;
+}
+
 export type InternalLLMChunk =
   | TextDeltaChunk
   | ThinkingDeltaChunk
   | ToolCallChunk
   | DoneChunk
   | ToolArgProgressChunk
-  | UsageChunk;
+  | UsageChunk
+  | StructuredOutputChunk;

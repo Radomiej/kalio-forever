@@ -22,11 +22,32 @@ import {
 import type { CLIAgentRunLimits, RunCliAgentRequest } from './cli-agent.types';
 import { CLIAgentPtyService } from './cli-agent-pty.service';
 import { applySemanticCliOutcome, type CLIAgentRunResult } from './cli-agent-outcome';
+import { createWorkflowError } from '../../common/utils/workflow-error.util';
 export type { ProgressEmitFn } from './cli-agent.types';
 export { applySemanticCliOutcome, type CLIAgentRunResult, type CLIAgentSemanticFailureCode } from './cli-agent-outcome';
 
 export const CLI_AGENT_STOPPED_ERROR = 'CLI_AGENT_STOPPED';
 const WINDOWS_TEMP_PROMPT_THRESHOLD = 7_000;
+
+function createCliStoppedError(): Error {
+  return createWorkflowError('CLI_AGENT_STOPPED', CLI_AGENT_STOPPED_ERROR, {
+    source: 'cli-agent',
+    retryable: false,
+  });
+}
+
+function createCliTimeoutError(agentId: string, limits: CLIAgentRunLimits, kind: 'idle' | 'hard'): Error {
+  return createWorkflowError(
+    'TIMEOUT',
+    kind === 'idle'
+      ? `CLI agent "${agentId}" idle timed out after ${limits.inactivityTimeoutMs}ms`
+      : `CLI agent "${agentId}" hard timed out after ${limits.hardTimeoutMs}ms`,
+    {
+      source: kind === 'idle' ? 'cli-agent-idle-timeout' : 'cli-agent-hard-timeout',
+    },
+  );
+}
+
 interface ActiveRunState {
   sessionId: string;
   agentId: string;
@@ -135,7 +156,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
    * @param request  See {@link RunCliAgentRequest} for field docs.
    */
   async run(request: RunCliAgentRequest): Promise<CLIAgentRunResult> {
-    const { agentId, prompt, workdir, callId, sessionId, emitFn } = request;
+    const { agentId, prompt, workdir, callId, sessionId, turnId, emitFn } = request;
     const adapter = this.adapters.get(agentId);
     if (!adapter) {
       throw new Error(`Unknown CLI agent: "${agentId}". Available: ${[...this.adapters.keys()].join(', ')}`);
@@ -226,7 +247,13 @@ export class CLIAgentService implements OnApplicationBootstrap {
         }
 
         if (emitFn) {
-          emitFn('cli_agent:progress', { callId, sessionId, agentId, chunk: str });
+          emitFn('cli_agent:progress', {
+            callId,
+            sessionId,
+            ...(turnId ? { turnId } : {}),
+            agentId,
+            chunk: str,
+          });
         }
         resetIdleTimer();
       };
@@ -264,15 +291,11 @@ export class CLIAgentService implements OnApplicationBootstrap {
         void this.terminateActiveRun(activeRunState);
 
         if (reason === 'stopped') {
-          reject(new Error(CLI_AGENT_STOPPED_ERROR));
+          reject(createCliStoppedError());
           return;
         }
 
-        reject(new Error(
-          reason === 'idle-timeout'
-            ? `CLI agent "${agentId}" idle timed out after ${limits.inactivityTimeoutMs}ms`
-            : `CLI agent "${agentId}" hard timed out after ${limits.hardTimeoutMs}ms`,
-        ));
+        reject(createCliTimeoutError(agentId, limits, reason === 'idle-timeout' ? 'idle' : 'hard'));
       };
 
       activeRunState.requestStop = () => {
@@ -291,7 +314,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
         cleanup();
 
         if (activeRunState.stopRequested) {
-          reject(new Error(CLI_AGENT_STOPPED_ERROR));
+          reject(createCliStoppedError());
           return;
         }
 
@@ -467,6 +490,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
         workdir: request.workdir,
         callId: request.callId,
         sessionId: request.sessionId,
+        turnId: request.turnId,
         inactivityTimeoutMs: limits.inactivityTimeoutMs,
         hardTimeoutMs: limits.hardTimeoutMs,
         maxOutputChars,
@@ -484,7 +508,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
               stopSignalled = true;
               activeRunState.stopRequested = true;
               void this.terminateActiveRun(activeRunState);
-              stopReject?.(new Error(CLI_AGENT_STOPPED_ERROR));
+              stopReject?.(createCliStoppedError());
             },
           };
           this.activeRuns.set(request.sessionId, activeRunState);
@@ -504,7 +528,7 @@ export class CLIAgentService implements OnApplicationBootstrap {
       const codexAgentMessage = extractCodexAgentMessage(result.output);
 
       if (this.activeRuns.get(request.sessionId)?.stopRequested) {
-        throw new Error(CLI_AGENT_STOPPED_ERROR);
+        throw createCliStoppedError();
       }
 
       return applySemanticCliOutcome(codexAgentMessage ? { ...result, output: codexAgentMessage } : result);

@@ -1,4 +1,4 @@
-import type { ArchitectureExecutionEvent, ArchitectureRoleSlot, ArchitectureRun, ArchitectureSchema, ToolMeta } from '@kalio/types';
+import type { ArchitectureExecutionEvent, ArchitectureRoleSlot, ArchitectureRouterOutput, ArchitectureRun, ArchitectureSchema, ToolMeta } from '@kalio/types';
 import { describe, expect, it, vi } from 'vitest';
 import type { RunSubagentRequest, SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { buildArchitectureSlotToolPolicy } from '../chat/architecture-slot-tool-policy';
@@ -20,6 +20,21 @@ function expectSlotPolicy(
     architectureContext,
     incomingEvents,
   }));
+}
+
+function routeOutput(targetNodeId: string, response: string): ArchitectureRouterOutput {
+  return {
+    selectedStrategy: targetNodeId,
+    mergedDecision: response,
+    acceptedInputs: [],
+    rejectedInputs: [],
+    unresolvedConflicts: [],
+    risks: [],
+    confidence: 0.82,
+    nextAction: 'route_to',
+    targetNodeId,
+    response,
+  };
 }
 
 describe('ArchitectureRoleExecutorService', () => {
@@ -178,6 +193,54 @@ describe('ArchitectureRoleExecutorService', () => {
     expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[2]?.[0].model).toBe('mimo-v2.5-router-override');
   });
 
+  it('requests provider structured output for router and finalizer technical slots', async () => {
+    const strategicSchema = getSchema();
+    const routerSlot = strategicSchema.roleSlots.find((slot) => slot.slotType === 'router');
+    const goalMasterSchema = getGoalMasterSchema();
+    const finalizerSlot = goalMasterSchema.roleSlots.find((slot) => slot.slotType === 'finalizer');
+    if (!routerSlot || !finalizerSlot) {
+      throw new Error('Expected router and finalizer slots');
+    }
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'structured contract result',
+        taskId: 'task-structured',
+        childSessionId: 'branch-structured',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    await service.execute({
+      schema: strategicSchema,
+      run: createRun('subagent_execution'),
+      slot: routerSlot,
+      branchSessionId: 'branch-router',
+      personaId: routerSlot.defaultPersonaId,
+    });
+    await service.execute({
+      schema: goalMasterSchema,
+      run: {
+        ...createRun('subagent_execution'),
+        branchSessionIds: { finalizer: 'branch-finalizer' },
+      },
+      slot: finalizerSlot,
+      branchSessionId: 'branch-finalizer',
+      personaId: finalizerSlot.defaultPersonaId,
+    });
+
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].structuredOutput).toEqual(
+      expect.objectContaining({ name: 'architecture_router_output', strict: true }),
+    );
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[1]?.[0].structuredOutput).toEqual(
+      expect.objectContaining({ name: 'architecture_final_artifact', strict: true }),
+    );
+  });
+
   it('turns exhausted architecture read loops into bounded evidence output', async () => {
     const schema = getSchema();
     const slot = schema.roleSlots[0];
@@ -206,6 +269,7 @@ describe('ArchitectureRoleExecutorService', () => {
           vfsSessionId: 'root-1',
           copiedFiles: [],
           durationMs: 42,
+          reasonCode: 'max_steps' as const,
         };
       }),
     };
@@ -591,8 +655,11 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     expect(result.message).toContain('hit a recoverable branch error');
-    expect(result.message).toContain('route_to(implementer');
     expect(result.data.recoverableRuntimeError).toBe('Sub-agent timed out after 1200000ms');
+    expect(result.data.route_to).toEqual({
+      targetNodeId: 'implementer',
+      response: 'recoverable branch error after partial tool evidence; inspect worktree and continue',
+    });
     expect(result.data.toolEvidence).toMatchObject({
       toolCallCount: 1,
       toolResultCount: 1,
@@ -1101,10 +1168,7 @@ describe('ArchitectureRoleExecutorService', () => {
     expect(call?.objective).toContain('CLI backend policy:');
     expect(call?.objective).toContain('Allowed CLI backends: gemini, copilot, codex.');
     expect(call?.objective).toContain('set agentId explicitly from this policy');
-    expect(result.data.route_to).toEqual({
-      targetNodeId: 'implementer',
-      response: 'next step ready',
-    });
+    expect(result.data.route_to).toBeUndefined();
   });
 
   it('keeps orchestrator routing-only by default even when CLI agents are globally available', async () => {
@@ -1679,7 +1743,7 @@ describe('ArchitectureRoleExecutorService', () => {
     expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0]?.slotPolicy?.allowedToolNames).not.toEqual(
       expect.arrayContaining(['run_subagent', 'spawn_subagent', 'message_subagent']),
     );
-    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].objective).toContain('route_to(targetNodeId, response)');
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].objective).toContain('routerOutput.nextAction="route_to"');
     expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].objective).toContain('do not call run_subagent, spawn_subagent, or message_subagent');
 
     await service.execute({
@@ -2103,7 +2167,7 @@ describe('ArchitectureRoleExecutorService', () => {
     expect(result.data.stream).not.toHaveProperty('events');
   });
 
-  it('parses route_to responses that contain parentheses', async () => {
+  it('ignores prose route_to responses even when they contain a valid-looking target', async () => {
     const schema = getSchema();
     const slot = schema.roleSlots[0];
     if (!slot) throw new Error('Expected slot');
@@ -2130,13 +2194,10 @@ describe('ArchitectureRoleExecutorService', () => {
       outgoingNodeIds: ['router'],
     });
 
-    expect(result.data.route_to).toEqual({
-      targetNodeId: 'router',
-      response: 'Use option (A) and preserve validation notes (required).',
-    });
+    expect(result.data.route_to).toBeUndefined();
   });
 
-  it('parses named route_to target arguments from router outputs', async () => {
+  it('ignores prose nextAction route_to target arguments from router outputs', async () => {
     const schema = getSchema();
     const slot = schema.roleSlots[0];
     if (!slot) throw new Error('Expected slot');
@@ -2163,35 +2224,17 @@ describe('ArchitectureRoleExecutorService', () => {
       outgoingNodeIds: ['router'],
     });
 
-    expect(result.data.route_to).toEqual({
-      targetNodeId: 'router',
-      response: 'response={"reason":"evidence missing"}',
-    });
+    expect(result.data.route_to).toBeUndefined();
   });
 
   it('routes from structured routerOutput nextAction when route_to prose is missing', async () => {
     const schema = getSchema();
     const slot = schema.roleSlots[0];
     if (!slot) throw new Error('Expected slot');
-    const subagentRuntime: SubagentRuntimePort = {
-      runSubagent: vi.fn(async () => ({
-        result: [
-          'The failed build requires another implementation pass.',
-          '```json',
-          JSON.stringify({
-            selectedStrategy: 'implementer',
-            mergedDecision: 'Send the QA failure back to implementation.',
-            acceptedInputs: [],
-            rejectedInputs: [],
-            unresolvedConflicts: [],
-            risks: [],
-            confidence: 0.82,
-            nextAction: 'route_to',
-            targetNodeId: 'implementer',
-            response: 'Fix the failed build without adding dependencies.',
-          }),
-          '```',
-        ].join('\n'),
+  const subagentRuntime: SubagentRuntimePort = {
+    runSubagent: vi.fn(async () => ({
+        result: 'The failed build requires another implementation pass.',
+        structuredOutput: routeOutput('implementer', 'Fix the failed build without adding dependencies.'),
         taskId: 'task-1',
         childSessionId: 'branch-1',
         parentSessionId: 'root-1',
@@ -2218,7 +2261,7 @@ describe('ArchitectureRoleExecutorService', () => {
     });
   });
 
-  it('keeps prose route_to precedence over structured routerOutput routes', async () => {
+  it('prefers structured routerOutput routes over conflicting prose route_to text', async () => {
     const schema = getSchema();
     const slot = schema.roleSlots[0];
     if (!slot) throw new Error('Expected slot');
@@ -2227,11 +2270,7 @@ describe('ArchitectureRoleExecutorService', () => {
         result: [
           'route_to(router, preserve explicit route)',
           '```json',
-          JSON.stringify({
-            nextAction: 'route_to',
-            targetNodeId: 'implementer',
-            response: 'Do not use this structured fallback.',
-          }),
+          JSON.stringify(routeOutput('implementer', 'Use the structured route.')),
           '```',
         ].join('\n'),
         taskId: 'task-1',
@@ -2255,8 +2294,8 @@ describe('ArchitectureRoleExecutorService', () => {
     });
 
     expect(result.data.route_to).toEqual({
-      targetNodeId: 'router',
-      response: 'preserve explicit route',
+      targetNodeId: 'implementer',
+      response: 'Use the structured route.',
     });
   });
 
@@ -2269,11 +2308,7 @@ describe('ArchitectureRoleExecutorService', () => {
         result: [
           'The answer includes routing-shaped JSON for an unavailable node.',
           '```json',
-          JSON.stringify({
-            nextAction: 'route_to',
-            targetNodeId: 'implementer',
-            response: 'This target is not available from here.',
-          }),
+          JSON.stringify(routeOutput('implementer', 'This target is not available from here.')),
           '```',
         ].join('\n'),
         taskId: 'task-1',
@@ -2717,14 +2752,14 @@ describe('ArchitectureRoleExecutorService', () => {
     const schema = getGoalMasterSchema();
     const finalizer = schema.roleSlots.find((slot) => slot.slotType === 'finalizer');
     if (!finalizer) throw new Error('Expected finalizer slot');
-    const subagentRuntime: SubagentRuntimePort = {
-      runSubagent: vi.fn(async () => ({
-        result: [
-          'Build verification is incomplete.',
-          '```json',
-          '{"status":"blocked","blockingReason":"Missing post-change build log.","evidence":["src/runtimeProof.ts exists"]}',
-          '```',
-        ].join('\n'),
+  const subagentRuntime: SubagentRuntimePort = {
+    runSubagent: vi.fn(async () => ({
+        result: 'Build verification is incomplete.',
+        structuredOutput: {
+          status: 'blocked',
+          blockingReason: 'Missing post-change build log.',
+          evidence: ['src/runtimeProof.ts exists'],
+        },
         taskId: 'task-finalizer',
         childSessionId: 'branch-finalizer',
         parentSessionId: 'root-1',

@@ -1,8 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import type { CLIAgentResult, CLIAgentSessionSnapshot, ChatMessage, ToolCallRequest, ToolResult } from '@kalio/types';
+import type {
+  CLIAgentResult,
+  CLIAgentSessionSnapshot,
+  CLIAgentSessionStatus,
+  ChatMessage,
+  ToolCallRequest,
+  ToolResult,
+} from '@kalio/types';
 import { nanoid } from 'nanoid';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
-import { CLIAgentService, CLI_AGENT_STOPPED_ERROR, type CLIAgentRunResult } from './cli-agent.service';
+import { CLIAgentService, type CLIAgentRunResult } from './cli-agent.service';
 import { CLIAgentConfigService } from './cli-agent-config.service';
 import { CLIAgentSessionService } from './cli-agent-session.service';
 import {
@@ -12,10 +19,18 @@ import {
   getWorktreeStatusSummary,
   hasMissingAcceptanceEvidence,
 } from './cli-agent-worktree-summary';
+import { createWorkflowError, isWorkflowError } from '../../common/utils/workflow-error.util';
 
 const SESSION_OUTPUT_LIMIT = 6_000;
 const HISTORY_MESSAGE_LIMIT = 8;
 const MAX_AUTO_RECOVERY_ATTEMPTS = 3;
+const CLI_AGENT_SESSION_STATUSES = new Set<CLIAgentSessionStatus>([
+  'idle',
+  'running',
+  'completed',
+  'failed',
+  'stopped',
+]);
 
 interface SpawnSessionParams {
   parentSessionId: string;
@@ -97,7 +112,10 @@ export class CLIAgentSessionRuntimeService {
 
     const metadata = await this.sessions.loadSessionMetadata(childSession.id);
     if (!metadata) {
-      throw new Error(`CLI_AGENT_SESSION_METADATA_MISSING: ${childSession.id}`);
+      throw createWorkflowError('CLI_AGENT_SESSION_METADATA_MISSING', `CLI metadata missing for child session ${childSession.id}.`, {
+        source: 'cli-agent-session-runtime',
+        retryable: false,
+      });
     }
 
     await this.assertAllowedWorkdir(metadata.workdir);
@@ -138,7 +156,10 @@ export class CLIAgentSessionRuntimeService {
 
     const metadata = await this.sessions.loadSessionMetadata(childSessionId);
     if (!metadata) {
-      throw new Error(`CLI_AGENT_SESSION_METADATA_MISSING: ${childSessionId}`);
+      throw createWorkflowError('CLI_AGENT_SESSION_METADATA_MISSING', `CLI metadata missing for child session ${childSessionId}.`, {
+        source: 'cli-agent-session-runtime',
+        retryable: false,
+      });
     }
 
     const history = await this.sessions.listMessages(childSessionId);
@@ -292,6 +313,7 @@ export class CLIAgentSessionRuntimeService {
         workdir: params.snapshot.workdir,
         callId: params.callId,
         sessionId: params.snapshot.childSessionId,
+        turnId: params.turnId,
         timeoutMs: params.timeoutMs,
         emitFn: params.emit
           ? (event, data) => {
@@ -320,6 +342,7 @@ export class CLIAgentSessionRuntimeService {
       params.emit?.('cli_agent:progress', {
         callId: params.callId,
         sessionId: params.snapshot.childSessionId,
+        turnId: params.turnId,
         agentId: params.snapshot.agentId,
         chunk: `\n[Kalio auto-recovery] ${recoveryPrompt}\n`,
       });
@@ -444,8 +467,7 @@ export class CLIAgentSessionRuntimeService {
   ): Promise<CLIAgentSessionSnapshot> {
     const current = this.runtimeEntries.get(childSessionId)?.snapshot;
     const error = err instanceof Error ? err : new Error(String(err));
-    const stopped = error.message === CLI_AGENT_STOPPED_ERROR;
-    if (stopped) {
+    if (isWorkflowError(error, 'CLI_AGENT_STOPPED')) {
       const activeEmit = this.runtimeEntries.get(childSessionId)?.emit ?? emit;
       return this.finalizeStopped(childSessionId, callId, turnId, activeEmit);
     }
@@ -593,7 +615,7 @@ export class CLIAgentSessionRuntimeService {
         typeof parsed['parentSessionId'] !== 'string' ||
         typeof parsed['agentId'] !== 'string' ||
         typeof parsed['workdir'] !== 'string' ||
-        typeof parsed['status'] !== 'string' ||
+        !isCliAgentSessionStatus(parsed['status']) ||
         typeof parsed['lastPrompt'] !== 'string' ||
         typeof parsed['updatedAt'] !== 'number'
       ) {
@@ -605,7 +627,7 @@ export class CLIAgentSessionRuntimeService {
         parentSessionId: parsed['parentSessionId'],
         agentId: parsed['agentId'],
         workdir: parsed['workdir'],
-        status: parsed['status'] as CLIAgentSessionSnapshot['status'],
+        status: parsed['status'],
         lastPrompt: parsed['lastPrompt'],
         updatedAt: parsed['updatedAt'],
         startedAt: typeof parsed['startedAt'] === 'number' ? parsed['startedAt'] : undefined,
@@ -743,7 +765,12 @@ export class CLIAgentSessionRuntimeService {
   }
 }
 
+function isCliAgentSessionStatus(value: unknown): value is CLIAgentSessionStatus {
+  return typeof value === 'string' && CLI_AGENT_SESSION_STATUSES.has(value as CLIAgentSessionStatus);
+}
+
 function isIdleTimeoutError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /\bidle timed out\b/i.test(message);
+  return isWorkflowError(err, 'TIMEOUT')
+    && typeof (err as { source?: unknown }).source === 'string'
+    && (err as { source: string }).source === 'cli-agent-idle-timeout';
 }

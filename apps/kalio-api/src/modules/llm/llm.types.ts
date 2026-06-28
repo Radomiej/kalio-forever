@@ -3,7 +3,7 @@
  * Keeping these in a dedicated file breaks the circular dependency:
  *   llm.service.ts ↔ providers/provider-factory.ts ↔ providers/*.ts
  */
-import type { LLMStreamChunk, LLMToolCall } from '@kalio/types';
+import type { LLMStreamChunk, LLMStructuredOutputRequest, LLMToolCall } from '@kalio/types';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 
 /** Single tool definition passed to the LLM. */
@@ -23,6 +23,10 @@ export interface StreamChatOptions {
   onToolArgChunk?: (toolName: string, deltaChars: number) => void;
   /** Optional per-request model override. Does not mutate the active provider config. */
   modelOverride?: string;
+  /** Optional provider-native JSON-schema response contract. */
+  structuredOutput?: LLMStructuredOutputRequest;
+  /** Called once with parsed provider-native structured output when requested. */
+  onStructuredOutput?: (value: unknown) => void;
   abortSignal?: AbortSignal;
 }
 

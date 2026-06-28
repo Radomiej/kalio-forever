@@ -186,7 +186,7 @@ describe('agent-flow-launch-context', () => {
     expect(merged).not.toHaveProperty('parentSessionId');
   });
 
-  it('loads architecture run context from arch root session in parent chain', async () => {
+  it('loads architecture run context from typed parent session architecture context', async () => {
     const deps = makeDeps({
       sessions: {
         'arch-run-1-implementer': {
@@ -194,6 +194,9 @@ describe('agent-flow-launch-context', () => {
         },
         'arch-run-1-root': {
           parentSessionId: 'chat-parent',
+          architectureContext: {
+            architectureRunId: 'run-1',
+          },
         },
       },
       architectureRuns: {

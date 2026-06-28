@@ -1,4 +1,4 @@
-import type { ArchitectureExecutionEvent, ArchitectureSchema, ChatMessage, ChatSession, CreateSessionDto } from '@kalio/types';
+import type { ArchitectureExecutionEvent, ArchitectureRouterOutput, ArchitectureSchema, ChatMessage, ChatSession, CreateSessionDto } from '@kalio/types';
 import { describe, expect, it, vi } from 'vitest';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { ChatService } from '../chat/chat.service';
@@ -163,11 +163,12 @@ describe('Architecture graph runtime LLM integration', () => {
         { id: 'router-final', fromNodeId: 'router', toNodeId: 'final-artifact' },
       ],
     };
+    const routerScriptedRoute = routerRouteMessage('final-artifact', 'Router scripted merge');
     const scriptedPrompt = [
       'Run the scripted show.',
       '[[mock:script]]',
       'when("Slot: Pragmatist") wait(4) return("Pragmatist scripted response")',
-      'when("Slot: Router") return("route_to(final-artifact, Router scripted merge)")',
+      `when("Slot: Router") return('${routerScriptedRoute}')`,
       'when("Slot: Finalizer") return("Final scripted answer")',
       '[[/mock:script]]',
     ].join('\n');
@@ -183,13 +184,13 @@ describe('Architecture graph runtime LLM integration', () => {
     expect(run.status).toBe('completed');
     expect(delay).toHaveBeenCalledWith(4);
     expect(semanticEventForNode(events, 'pragmatist')?.message).toBe('Pragmatist scripted response');
-    expect(semanticEventForNode(events, 'router')?.message).toBe('route_to(final-artifact, Router scripted merge)');
+    expect(semanticEventForNode(events, 'router')?.message).toBe(routerScriptedRoute);
     expect(semanticEventForNode(events, 'final-artifact')?.message).toBe('Final scripted answer');
     const chatMessages = runtime.getChat(run.id)?.messages.map((message) => message.content) ?? [];
     expect(chatMessages[0]).toContain('Architecture run created for: Run the scripted show.');
     expect(chatMessages.slice(1)).toEqual([
       'Pragmatist scripted response',
-      'route_to(final-artifact, Router scripted merge)',
+      routerScriptedRoute,
       'Final scripted answer',
     ]);
   });
@@ -376,6 +377,27 @@ function semanticEventForNode(
   ));
 }
 
+function routerRouteMessage(targetNodeId: string, response: string, summary = response): string {
+  const routerOutput: ArchitectureRouterOutput = {
+    selectedStrategy: targetNodeId,
+    mergedDecision: summary,
+    acceptedInputs: [],
+    rejectedInputs: [],
+    unresolvedConflicts: [],
+    risks: [],
+    confidence: 0.82,
+    nextAction: 'route_to',
+    targetNodeId,
+    response,
+  };
+  return [
+    summary,
+    '```json',
+    JSON.stringify(routerOutput),
+    '```',
+  ].join('\n');
+}
+
 function createSubagentRuntime(chat: ChatService): SubagentRuntimePort {
   return {
     async runSubagent(request: RunSubagentRequest): Promise<RunSubagentResult> {
@@ -482,7 +504,7 @@ class StatefulDeliveryLoopLLMSource implements ILLMSource {
 
   private responseFor(prompt: string): string {
     if (prompt.includes('Slot: Orchestrator')) {
-      return 'Orchestrator defined acceptance criteria and routes to implementation. route_to(implementer, start delivery)';
+      return routerRouteMessage('implementer', 'start delivery', 'Orchestrator defined acceptance criteria and routes to implementation.');
     }
     if (prompt.includes('Slot: Implementer')) {
       return 'Implementer prepared React/Vite/Tailwind changes for the salon site.';
@@ -501,8 +523,8 @@ class StatefulDeliveryLoopLLMSource implements ILLMSource {
     if (prompt.includes('Slot: Goal Master')) {
       this.goalMasterVisits += 1;
       return this.goalMasterVisits === 1
-        ? 'Goal Master found missing build evidence. route_to(implementer, fix verification gap)'
-        : 'Goal Master accepts verified build evidence. route_to(final-artifact, accepted)';
+        ? routerRouteMessage('implementer', 'fix verification gap', 'Goal Master found missing build evidence.')
+        : routerRouteMessage('final-artifact', 'accepted', 'Goal Master accepts verified build evidence.');
     }
     if (prompt.includes('Slot: Finalizer')) {
       return 'Verified completion report: implementation, tests, and Goal Master acceptance are complete.';
@@ -525,7 +547,7 @@ class GoalMasterScenarioLLMSource implements ILLMSource {
 
   private responseFor(prompt: string): string {
     if (prompt.includes('Slot: Orchestrator')) {
-      return 'Orchestrator defined acceptance criteria and routes to implementation. route_to(implementer, start delivery)';
+      return routerRouteMessage('implementer', 'start delivery', 'Orchestrator defined acceptance criteria and routes to implementation.');
     }
     if (prompt.includes('Slot: Implementer')) {
       return 'Implementer delivered a concrete implementation plan and source changes.';
@@ -538,8 +560,8 @@ class GoalMasterScenarioLLMSource implements ILLMSource {
     }
     if (prompt.includes('Slot: Goal Master')) {
       return this.scenario === 'accept-immediately'
-        ? 'Goal Master accepts complete evidence. route_to(final-artifact, accepted)'
-        : 'Goal Master rejects because evidence is still incomplete. route_to(implementer, continue)';
+        ? routerRouteMessage('final-artifact', 'accepted', 'Goal Master accepts complete evidence.')
+        : routerRouteMessage('implementer', 'continue', 'Goal Master rejects because evidence is still incomplete.');
     }
     if (prompt.includes('Slot: Finalizer')) {
       return 'Verified completion report: Goal Guard accepted the implementation.';
@@ -569,7 +591,7 @@ class EvidenceProducingSubagentRuntime implements SubagentRuntimePort {
 
   private resultForSlot(slot: string, request: RunSubagentRequest): string {
     if (slot === 'orchestrator') {
-      return 'Orchestrator routes to implementation. route_to(implementer, start deterministic evidence path)';
+      return routerRouteMessage('implementer', 'start deterministic evidence path', 'Orchestrator routes to implementation.');
     }
     if (slot === 'implementer') {
       emitToolResult(request, 'vfs_write', { filePath: 'evidence/proof.json', bytesWritten: 42 });
@@ -585,7 +607,7 @@ class EvidenceProducingSubagentRuntime implements SubagentRuntimePort {
     }
     if (slot === 'goal_master') {
       emitToolResult(request, 'vfs_read', { filePath: 'evidence/proof.json', content: '{"ok":true}' });
-      return 'Goal Master accepts visible write/read evidence. route_to(final-artifact, accepted)';
+      return routerRouteMessage('final-artifact', 'accepted', 'Goal Master accepts visible write/read evidence.');
     }
     if (slot === 'finalizer') {
       return 'Production evidence path accepted with vfs_write and vfs_read proof.';

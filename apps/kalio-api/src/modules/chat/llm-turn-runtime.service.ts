@@ -45,14 +45,20 @@ export class LLMTurnRuntimeService {
     let emptyNoToolRetries = 0;
     let emptyNoToolRetriesExhausted = false;
     let latestText = '';
+    let latestStructuredOutput: unknown;
+    let hasStructuredOutput = false;
     let lastMessageId = request.firstMessageId ?? nanoid();
     const auditDomain = request.auditDomain ?? (request.runtimeKind === 'chat' ? 'chat' : 'subagent');
+    const structuredOutputResult = (): Partial<Pick<LLMAgentLoopResult, 'structuredOutput'>> => (
+      hasStructuredOutput ? { structuredOutput: latestStructuredOutput } : {}
+    );
 
     while (iteration < currentLimit) {
       if (request.abortSignal.aborted) {
         return {
           lastMessageId,
           finalText: latestText,
+          ...structuredOutputResult(),
           iterationCount: iteration,
           finalLimit: currentLimit,
           exhausted: false,
@@ -122,8 +128,14 @@ export class LLMTurnRuntimeService {
         messageId,
         model: request.model,
         abortSignal: request.abortSignal,
+        structuredOutput: request.structuredOutput,
       })) {
         if (request.abortSignal.aborted) break;
+        if (chunk.type === 'structured_output') {
+          latestStructuredOutput = chunk.value;
+          hasStructuredOutput = true;
+          continue;
+        }
         if (chunk.type === 'usage') {
           usage = {
             promptTokens: chunk.promptTokens,
@@ -204,7 +216,7 @@ export class LLMTurnRuntimeService {
       }
 
       if (state.toolCalls.length === 0) {
-        const hasAssistantOutput = state.text.trim().length > 0 || state.thinking.trim().length > 0;
+        const hasAssistantOutput = state.text.trim().length > 0 || state.thinking.trim().length > 0 || hasStructuredOutput;
         if (!hasAssistantOutput && maxEmptyNoToolRetries > 0) {
           emptyNoToolRetries++;
           if (emptyNoToolRetries <= maxEmptyNoToolRetries) {
@@ -220,6 +232,7 @@ export class LLMTurnRuntimeService {
         return {
           lastMessageId,
           finalText: latestText,
+          ...structuredOutputResult(),
           iterationCount: iteration,
           finalLimit: currentLimit,
           exhausted: false,
@@ -247,6 +260,7 @@ export class LLMTurnRuntimeService {
     return {
       lastMessageId,
       finalText: latestText,
+      ...structuredOutputResult(),
       iterationCount: iteration,
       finalLimit: currentLimit,
       exhausted: true,

@@ -16,6 +16,7 @@ import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
 import { TurnState } from './turn-state';
+import { createWorkflowError, isWorkflowError } from '../../common/utils/workflow-error.util';
 
 const DEFAULT_MAX_ITERATIONS = 8;
 
@@ -32,12 +33,13 @@ function subagentErrorCode(error: Error): ChatErrorCode {
       || code === 'LLM_PROVIDER_DOWN'
       || code === 'LLM_QUOTA'
       || code === 'LLM_BAD_TOOL_ARGS'
+      || code === 'LLM_BAD_STRUCTURED_OUTPUT'
       || code === 'MAX_ITERATIONS_REACHED'
     ) {
       return code;
     }
   }
-  if (error.message.toLowerCase().includes('timed out')) {
+  if (isWorkflowError(error, 'TIMEOUT') || isWorkflowError(error, 'SUBAGENT_TIMEOUT')) {
     return 'LLM_TIMEOUT';
   }
   return 'LLM_ERROR';
@@ -278,7 +280,9 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     try {
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => {
-          const error = new Error(`Sub-agent timed out after ${request.timeoutMs}ms`);
+          const error = createWorkflowError('SUBAGENT_TIMEOUT', `Sub-agent timed out after ${request.timeoutMs}ms`, {
+            source: 'subagent-runtime',
+          });
           controller.abort(error);
           reject(error);
         }, request.timeoutMs);
@@ -334,6 +338,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           emit: trackingEmit ?? (() => undefined),
           maxIterations,
           rawXmlToolNames: assembledContext.toolMetas.map((tool) => tool.name),
+          structuredOutput: request.structuredOutput,
           auditDomain: 'subagent',
           auditMetadata: { ...llmAuditData, ...(request.auditContext ?? {}) },
           firstMessageId: `subagent-${agentRun.agentRunId}`,
@@ -376,9 +381,10 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           }) as SubagentCopiedFile[]
         : [];
 
+      const structuredDisplayText = displayTextFromStructuredOutput(loopResult.structuredOutput);
       const baseResultText = loopResult.exhausted
         ? this.exhaustedLoopResultText(maxIterations, loopResult.finalText || streamedText.trim())
-        : loopResult.finalText || streamedText.trim() || 'Sub-agent completed with no output.';
+        : loopResult.finalText || streamedText.trim() || structuredDisplayText || 'Sub-agent completed with no output.';
       let completionMessageId = loopResult.lastMessageId;
       if (loopResult.exhausted || baseResultText === 'Sub-agent completed with no output.') {
         const completionState = new TurnState();
@@ -407,6 +413,9 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         taskId,
         childSessionId,
         parentSessionId: request.parentSessionId,
+        status: loopResult.exhausted ? 'failed' : 'completed',
+        structuredOutput: loopResult.structuredOutput,
+        reasonCode: loopResult.exhausted ? 'max_steps' : undefined,
         vfsMode: request.vfsMode,
         vfsSessionId,
         copiedFiles,
@@ -486,4 +495,18 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       return null;
     }
   }
+}
+
+function displayTextFromStructuredOutput(output: unknown): string | null {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    return null;
+  }
+  const record = output as Record<string, unknown>;
+  for (const key of ['answer', 'response', 'message', 'finalAnswer']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
 }

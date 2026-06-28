@@ -83,13 +83,19 @@ Current heuristics flag:
   `description` parsing with `includes()`, `startsWith()`, `endsWith()`,
   `match()`, or normalized `toLowerCase().includes()`
 - substring parsing on identifier-like fields such as `id`, `sessionId`,
-  `runId`, or `schemaId`
+  `runId`, `schemaId`, `toolCallId`, `messageId`, `taskId`, or `nodeId`
+- `.equals(...)`-style string matching, kept as a generic warning even though
+  JavaScript strings do not normally expose this method
 
 These are warnings, not auto-failures. The expected fix direction is to prefer
 machine-readable `code` values, enums, discriminated unions, or typed result
 objects. Human-readable message text should stay in logging and UI, not in
 branching logic. Typed discriminated unions such as `status === 'done'` are not
 the target of this heuristic when they are the contract.
+
+Runtime/projection paths additionally treat ID-fragment parsing as HIGH severity,
+because `toolCallId`, `messageId`, `taskId`, `nodeId`, `sessionId`, and `runId`
+prefixes are opaque identifiers, not workflow state machines.
 
 ## Severity rules
 

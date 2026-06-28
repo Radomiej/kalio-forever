@@ -19,6 +19,8 @@ export interface RunCliAgentRequest {
   callId: string;
   /** Chat session — included in progress events. */
   sessionId: string;
+  /** Optional agent turn ID used to attach CLI stream chunks to the chat turn lifecycle. */
+  turnId?: string;
   /** Optional: called with 'cli_agent:progress' for each stdout/stderr chunk. */
   emitFn?: ProgressEmitFn;
   /** Optional inactivity timeout override in ms. */

@@ -27,11 +27,13 @@ export interface CLIChildProjection {
   childSessionId: string;
   parentSessionId: string;
   parentCallId: string;
+  turnId?: string;
   agentId: string;
   status: CLIChildProjectionStatus;
   lastOutput: string;
   childTitle?: string;
   toolName: string;
+  isPending?: boolean;
 }
 
 export function isCliChildDelegationTool(toolName: string): boolean {
@@ -140,12 +142,22 @@ export function projectionFromSession(
     childSessionId: session.id,
     parentSessionId: session.parentSessionId,
     parentCallId: session.parentToolCallId,
-    agentId: session.title.split(' CLI')[0] ?? 'copilot',
+    agentId: agentIdFromSession(session),
     status: 'running',
     lastOutput: '',
     childTitle: session.title,
     toolName,
   };
+}
+
+function agentIdFromSession(session: ChatSession): string {
+  const typedAgentId = session.runtimeContext?.cliAgentContext?.agentId?.trim();
+  if (typedAgentId) {
+    return typedAgentId;
+  }
+  // TODO: legacy fallback for CLI sessions created before runtimeContext.cliAgentContext existed.
+  const legacyTitleMatch = /^(codex|gemini|copilot|claude)\s+CLI\b/i.exec(session.title.trim());
+  return legacyTitleMatch?.[1]?.toLowerCase() ?? 'copilot';
 }
 
 export function projectionFromToolResult(
@@ -269,6 +281,7 @@ export function mergeCLIChildProjectionSources(params: {
     childSessionId: runtimeProjection.childSessionId,
     parentSessionId: runtimeProjection.parentSessionId || storedProjection.parentSessionId,
     parentCallId: runtimeProjection.parentCallId || storedProjection.parentCallId,
+    turnId: runtimeProjection.turnId ?? storedProjection.turnId,
     agentId: runtimeProjection.agentId !== 'copilot'
       ? runtimeProjection.agentId
       : storedProjection.agentId || runtimeProjection.agentId,
@@ -278,6 +291,7 @@ export function mergeCLIChildProjectionSources(params: {
       : storedProjection.lastOutput,
     childTitle: storedProjection.childTitle ?? runtimeProjection.childTitle,
     toolName: storedProjection.toolName || runtimeProjection.toolName,
+    isPending: runtimeProjection.isPending === true || storedProjection.isPending === true,
   };
 }
 

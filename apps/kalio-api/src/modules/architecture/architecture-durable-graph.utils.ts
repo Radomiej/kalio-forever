@@ -65,11 +65,6 @@ export function normalizeCliStatus(
   return undefined;
 }
 
-export function eventIdFromToolCallId(callId: string): string {
-  const architecturePrefix = callId.match(/^architecture:[^:]+:(.+)$/);
-  return architecturePrefix?.[1] ?? callId;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

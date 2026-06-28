@@ -17,8 +17,9 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import type { RAAppSummary, RAAppGroup } from '@kalio/types';
 import { RAAppService } from './raapp.service';
-import { RAAppVersioningService, RAAPP_RELEASE_NOT_FOUND_CODE, deriveSlug } from './raapp-versioning.service';
+import { RAAppVersioningService, deriveSlug } from './raapp-versioning.service';
 import type { LoadedRAApp } from './raapp.service';
+import { isWorkflowError } from '../../common/utils/workflow-error.util';
 
 @Controller('ra-apps')
 export class RAAppController {
@@ -79,8 +80,7 @@ export class RAAppController {
       ({ stream, filename } = this.versioningService.downloadRelease(slug, version));
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      const code = (err as NodeJS.ErrnoException | undefined)?.code;
-      if (code === RAAPP_RELEASE_NOT_FOUND_CODE || error.message.includes('Release version not found')) {
+      if (isWorkflowError(err, 'RAAPP_RELEASE_NOT_FOUND')) {
         throw new NotFoundException(error.message);
       }
       throw err;

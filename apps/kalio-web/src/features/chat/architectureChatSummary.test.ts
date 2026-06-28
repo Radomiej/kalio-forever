@@ -1285,6 +1285,7 @@ describe('findArchitectureRunInMessages', () => {
             name: 'run_subagent',
             args: {
               architectureRunId: 'run-1',
+              schemaName: 'Strategic Decision Council',
               nodeId: 'pragmatist',
               roleSlotId: 'pragmatist',
               childSessionId: 'branch-pragmatist',

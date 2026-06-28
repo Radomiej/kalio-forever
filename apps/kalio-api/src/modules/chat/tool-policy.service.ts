@@ -109,7 +109,10 @@ export class ToolPolicyService {
           candidateNames = new Set(
             resolvedExplicit
               .filter((name): name is string => name !== null)
-              .filter((name) => (allowsAllNative || personaNames.has(name) || name.startsWith('mcp_'))),
+              .filter((name) => {
+                const tool = toolByName.get(name);
+                return allowsAllNative || personaNames.has(name) || isMcpToolMeta(tool);
+              }),
           );
           source = 'runtime-explicit';
           for (const name of resolvedExplicit) {
@@ -277,8 +280,8 @@ export class ToolPolicyService {
     allowedTools?: string[],
     mcpPolicy: MCPPolicy = 'allow_all',
   ): ToolMeta[] {
-    const nativeTools = tools.filter((toolMeta) => !toolMeta.name.startsWith('mcp_'));
-    const mcpTools = tools.filter((toolMeta) => toolMeta.name.startsWith('mcp_'));
+    const nativeTools = tools.filter((toolMeta) => !isMcpToolMeta(toolMeta));
+    const mcpTools = tools.filter((toolMeta) => isMcpToolMeta(toolMeta));
     const filteredNative = !allowedTools || allowedTools.length === 0
       ? nativeTools
       : nativeTools.filter((toolMeta) => allowedTools.includes(toolMeta.name));
@@ -374,4 +377,8 @@ function launchAllowedToolNames(context: Record<string, unknown> | undefined): s
     return undefined;
   }
   return raw.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+}
+
+function isMcpToolMeta(toolMeta: ToolMeta | undefined): boolean {
+  return typeof toolMeta?.serverKey === 'string' && toolMeta.serverKey.trim().length > 0;
 }

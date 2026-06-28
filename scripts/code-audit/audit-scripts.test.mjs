@@ -108,6 +108,7 @@ test('extractStringBusinessLogicHits detects free-form text parsing branches', (
     "if (prompt.toLowerCase().includes('architecture review')) return true;",
     "const shouldFinalize = content.startsWith('FINAL:');",
     "const sameRun = sessionId.includes('-finalizer');",
+    "if ('done'.equals(statusMessage)) return true;",
   ].join('\n');
 
   const hits = extractStringBusinessLogicHits(text, 'apps/kalio-web/src/store/runtime-panel.ts');
@@ -118,7 +119,22 @@ test('extractStringBusinessLogicHits detects free-form text parsing branches', (
       [1, 'normalized-free-form-text-branch', 'MEDIUM'],
       [2, 'free-form-text-branch', 'MEDIUM'],
       [3, 'identifier-fragment-branch', 'MEDIUM'],
+      [4, 'string-equals-branch', 'MEDIUM'],
     ],
+  );
+});
+
+test('extractStringBusinessLogicHits treats runtime ID-derived control-flow as high severity', () => {
+  const text = "if (toolCallId.startsWith('architecture:')) return 'running';";
+
+  const hits = extractStringBusinessLogicHits(
+    text,
+    'apps/kalio-web/src/features/chat/graph/executionGraphHydration.ts',
+  );
+
+  assert.deepEqual(
+    hits.map((hit) => [hit.line, hit.check, hit.severity]),
+    [[1, 'identifier-fragment-branch', 'HIGH']],
   );
 });
 
@@ -127,6 +143,12 @@ test('extractStringBusinessLogicHits ignores typed-contract style status compari
     "if (status === 'pending') return false;",
     "const shouldShow = panel !== 'chat';",
     "if (message.role === 'assistant') return false;",
+    "const errorMessage = typeof d['errorMessage'] === 'string' ? d['errorMessage'] : undefined;",
+    "return { errorMessage: typeof d['toolResultErrorMessage'] === 'string' ? d['toolResultErrorMessage'] : undefined };",
+    "if (isWorkflowError(error, 'TIMEOUT')) return 'retry';",
+    "if (failure.code === 'RATE_LIMITED') return 'retry';",
+    "if (reasonCode === 'max_steps') return 'waiting';",
+    "if (runtimeDecision?.reasonCode === 'final_artifact_accepted') return true;",
   ].join('\n');
 
   const hits = extractStringBusinessLogicHits(text, 'apps/kalio-web/src/store/runtime-panel.ts');

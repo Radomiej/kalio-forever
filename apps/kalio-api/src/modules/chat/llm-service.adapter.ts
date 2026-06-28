@@ -114,8 +114,12 @@ export class LLMServiceAdapter implements ILLMSource {
           sessionId: params.sessionId,
           messageId: params.messageId,
           modelOverride: params.model,
+          structuredOutput: params.structuredOutput,
           abortSignal: controller.signal,
           onToolArgChunk,
+          onStructuredOutput: (value) => {
+            enqueue({ type: 'structured_output', value });
+          },
           onChunk: (chunk) => {
           if (chunk.usage) {
             enqueue({

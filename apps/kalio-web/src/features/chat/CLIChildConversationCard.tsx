@@ -52,7 +52,7 @@ export function CLIChildConversationCard({
     projection?.childSessionId != null && state.sessions.some((session) => session.id === projection.childSessionId)
   ));
 
-  if (!projection || projection.childSessionId.startsWith('pending-')) {
+  if (!projection || projection.isPending === true) {
     if (!projection) return null;
     return (
       <div

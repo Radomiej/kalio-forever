@@ -20,10 +20,17 @@ describe('cliChildProjection.model', () => {
     const session: ChatSession = {
       id: 'cli-child-1',
       personaId: 'default',
-      title: 'codex CLI: inspect repo',
+      title: 'Implementation worker',
       kind: 'cli-agent',
       parentSessionId: 'parent-1',
       parentToolCallId: 'call-1',
+      runtimeContext: {
+        runtimeKind: 'chat',
+        cliAgentContext: {
+          agentId: 'codex',
+          workdir: 'C:\\Projekty\\target',
+        },
+      },
       createdAt: 1,
       updatedAt: 1,
     };
@@ -31,7 +38,26 @@ describe('cliChildProjection.model', () => {
       childSessionId: 'cli-child-1',
       parentSessionId: 'parent-1',
       parentCallId: 'call-1',
+      agentId: 'codex',
       status: 'running',
+    });
+  });
+
+  it('does not derive agentId from arbitrary CLI child titles', () => {
+    const session: ChatSession = {
+      id: 'cli-child-1',
+      personaId: 'default',
+      title: 'Implementation worker',
+      kind: 'cli-agent',
+      parentSessionId: 'parent-1',
+      parentToolCallId: 'call-1',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    expect(projectionFromSession(session)).toMatchObject({
+      agentId: 'copilot',
+      childTitle: 'Implementation worker',
     });
   });
 

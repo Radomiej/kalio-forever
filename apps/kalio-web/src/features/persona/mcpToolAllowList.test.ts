@@ -3,10 +3,22 @@ import type { ToolMeta } from '@kalio/types';
 import { isMcpToolSelected, normalizeMcpAllowList } from './mcpToolAllowList';
 
 describe('mcpToolAllowList', () => {
-  it('drops legacy MCP allow-list entries instead of remapping them', () => {
+  it('preserves native tools while normalizing MCP allow-list entries', () => {
     const tools = [
       { name: 'mcp_toml::docs_search' },
       { name: 'mcp_toml::docs_reindex' },
+    ] satisfies Pick<ToolMeta, 'name'>[];
+
+    expect(normalizeMcpAllowList(['vfs_read_file', 'mcp_docs_search'], tools)).toEqual([
+      'vfs_read_file',
+      'mcp_toml::docs_search',
+    ]);
+  });
+
+  it('drops ambiguous legacy MCP aliases instead of guessing a canonical tool', () => {
+    const tools = [
+      { name: 'mcp_toml::docs_search' },
+      { name: 'mcp_sqlite::docs_search' },
     ] satisfies Pick<ToolMeta, 'name'>[];
 
     expect(normalizeMcpAllowList(['mcp_docs_search'], tools)).toEqual([]);

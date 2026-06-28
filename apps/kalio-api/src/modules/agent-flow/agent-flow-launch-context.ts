@@ -87,16 +87,6 @@ function mergeAllowanceRecords(
   }
 }
 
-function parseArchitectureRunIdFromRootSession(sessionId: string): string | undefined {
-  const prefix = 'arch-';
-  const suffix = '-root';
-  if (!sessionId.startsWith(prefix) || !sessionId.endsWith(suffix)) {
-    return undefined;
-  }
-  const runId = sessionId.slice(prefix.length, -suffix.length);
-  return runId.length > 0 ? runId : undefined;
-}
-
 function isOrchestratorRestricted(context: Record<string, unknown> | undefined): boolean {
   const restriction = context?.['orchestratorScopeRestriction'];
   return restriction === true
@@ -160,7 +150,7 @@ export async function resolveParentAllowanceBaseline(
         extractAllowanceContext(session.runtimeContext?.architectureContext),
       );
 
-      const architectureRunId = parseArchitectureRunIdFromRootSession(currentSessionId);
+      const architectureRunId = session.runtimeContext?.architectureContext?.architectureRunId;
       if (architectureRunId) {
         const run = await deps.architectureRuntime.findRunDurable(architectureRunId);
         mergeAllowanceRecords(baseline, extractAllowanceContext(run?.context));

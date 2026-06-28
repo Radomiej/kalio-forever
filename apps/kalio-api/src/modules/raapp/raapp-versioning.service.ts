@@ -29,6 +29,7 @@ import yaml from 'js-yaml';
 import type { RAAppGroup, RAAppVersionInfo, RAAppMetaSummary } from '@kalio/types';
 import type { RAAppMeta } from './raapp.service';
 import { archiveDirectoryToZip } from './zip-archive.util';
+import { createWorkflowError } from '../../common/utils/workflow-error.util';
 
 export const RAAPP_RELEASE_NOT_FOUND_CODE = 'RAAPP_RELEASE_NOT_FOUND';
 const RAAPP_SLUG_PATTERN = /^[a-z0-9-]+$/;
@@ -86,9 +87,10 @@ function metaToSummary(meta: RAAppMeta): RAAppMetaSummary {
 }
 
 function createReleaseNotFoundError(message: string): NodeJS.ErrnoException {
-  const error = new Error(message) as NodeJS.ErrnoException;
-  error.code = RAAPP_RELEASE_NOT_FOUND_CODE;
-  return error;
+  return createWorkflowError('RAAPP_RELEASE_NOT_FOUND', message, {
+    source: 'raapp-versioning',
+    retryable: false,
+  }) as NodeJS.ErrnoException;
 }
 
 function isValidRAAppSlug(slug: string): boolean {

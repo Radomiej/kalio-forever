@@ -52,6 +52,31 @@ export class MockLLMProvider implements ILLMProvider {
   ): Promise<LLMToolCall[]> {
     const { sessionId, messageId, onChunk, abortSignal } = options;
     const lastMessage = getLastUserMessageText(messages);
+    if (options.structuredOutput?.name === 'architecture_router_output') {
+      const targetNodeId = firstAvailableNextNode(lastMessage);
+      options.onStructuredOutput?.({
+        selectedStrategy: targetNodeId ?? 'finalize',
+        mergedDecision: 'Mock structured routing decision.',
+        acceptedInputs: [],
+        rejectedInputs: [],
+        unresolvedConflicts: [],
+        risks: [],
+        confidence: 0.5,
+        nextAction: targetNodeId ? 'route_to' : 'finalize',
+        targetNodeId,
+        response: 'Mock structured routing decision.',
+      });
+      return [];
+    }
+    if (options.structuredOutput?.name === 'architecture_final_artifact') {
+      options.onStructuredOutput?.({
+        status: 'accepted',
+        blockingReason: null,
+        evidence: ['Mock structured final artifact.'],
+        answer: 'Mock structured final artifact.',
+      });
+      return [];
+    }
     if (lastMessage.includes(MOCK_GOAL_GUARD_VFS_SUCCESS_TRIGGER)) {
       if (
         lastMessage.includes('Slot: Implementer')
@@ -233,4 +258,10 @@ export class MockLLMProvider implements ILLMProvider {
     }
     return [];
   }
+}
+
+function firstAvailableNextNode(message: string): string | null {
+  const match = /Available next nodes:\s*([^\n]+)/.exec(message);
+  const first = match?.[1]?.split(',')[0]?.trim();
+  return first && /^[A-Za-z0-9_.:-]+$/.test(first) ? first : null;
 }

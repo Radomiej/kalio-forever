@@ -37,7 +37,7 @@ describe('focusExecutionGraphMessages', () => {
       message({
         id: 'a1',
         role: 'assistant',
-        toolCalls: [{ id: 'architecture:run-3:event-a', name: 'run_subagent', args: {} }],
+        toolCalls: [{ id: 'architecture:run-3:event-a', name: 'run_subagent', args: { architectureRunId: 'run-3' } }],
         createdAt: 2,
       }),
       message({
@@ -57,7 +57,7 @@ describe('focusExecutionGraphMessages', () => {
     expect(focused.messages).toBe(messages);
   });
 
-  it('still extracts the latest architecture run id from result history when no prompt block exists', () => {
+  it('still extracts the latest architecture run id from structured result metadata when no prompt block exists', () => {
     const messages = [
       message({ id: 'u1', role: 'user', content: 'Resume the current chat', createdAt: 1 }),
       message({
@@ -70,6 +70,13 @@ describe('focusExecutionGraphMessages', () => {
         id: 'r1',
         role: 'tool_result',
         toolCallId: 'architecture:run-9:event-1',
+        architectureRun: {
+          runId: 'run-9',
+          schemaId: 'goal-guard',
+          status: 'completed',
+          trace: [],
+          routeHops: [],
+        },
         content: 'finished',
         createdAt: 3,
       }),
@@ -82,13 +89,13 @@ describe('focusExecutionGraphMessages', () => {
     expect(focused.messages).toBe(messages);
   });
 
-  it('reads the latest architecture run id from tool call ids even without a tool result', () => {
+  it('reads the latest architecture run id from typed tool call args even without a tool result', () => {
     const messages = [
       message({ id: 'u1', role: 'user', content: 'Inspect the branch', createdAt: 1 }),
       message({
         id: 'a1',
         role: 'assistant',
-        toolCalls: [{ id: 'architecture:run-12:event-1', name: 'run_subagent', args: {} }],
+        toolCalls: [{ id: 'architecture:run-12:event-1', name: 'run_subagent', args: { architectureRunId: 'run-12' } }],
         createdAt: 2,
       }),
     ];

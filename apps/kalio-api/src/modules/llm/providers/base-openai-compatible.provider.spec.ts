@@ -99,6 +99,59 @@ describe('BaseOpenAICompatibleProvider', () => {
   });
 
   describe('buildHeaders()', () => {
+    it('sends provider-native json_schema response_format and returns parsed structured output', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'route this' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const structuredOutput = {
+        name: 'architecture_router_output',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            nextAction: { const: 'route_to' },
+            targetNodeId: { type: 'string' },
+          },
+          required: ['nextAction', 'targetNodeId'],
+        },
+        strict: true,
+      };
+      const onStructuredOutput = vi.fn();
+      const mockStream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"{\\"nextAction\\":\\"route_to\\","}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"\\"targetNodeId\\":\\"implementer\\"}"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await provider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+        structuredOutput,
+        onStructuredOutput,
+      });
+
+      const requestInit = mockFetch.mock.calls[0]?.[1] as RequestInit | undefined;
+      const body = JSON.parse(String(requestInit?.body)) as Record<string, unknown>;
+
+      expect(body['response_format']).toEqual({
+        type: 'json_schema',
+        json_schema: structuredOutput,
+      });
+      expect(onStructuredOutput).toHaveBeenCalledWith({
+        nextAction: 'route_to',
+        targetNodeId: 'implementer',
+      });
+    });
+
     it('REGRESSION: omits Authorization when the API key is empty', async () => {
       const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
       const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];

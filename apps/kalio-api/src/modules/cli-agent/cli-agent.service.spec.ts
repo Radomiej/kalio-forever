@@ -111,7 +111,7 @@ describe('CLIAgentService', () => {
     expect(result.agentId).toBe('copilot');
   });
 
-  it('treats auth-required CLI output as failed even when the process exits 0', async () => {
+  it('does not treat zero-exit auth-looking CLI output as failed without typed failure code', async () => {
     const fakeProc = makeFakeProc();
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
 
@@ -129,10 +129,9 @@ describe('CLIAgentService', () => {
 
     await expect(runPromise).resolves.toMatchObject({
       agentId: 'claude',
-      exitCode: 1,
+      exitCode: 0,
       rawExitCode: 0,
-      outcome: 'failed',
-      failureCode: 'auth_required',
+      outcome: 'completed',
       output: expect.stringContaining('Authentication required'),
     });
   });
@@ -234,7 +233,7 @@ describe('CLIAgentService', () => {
       durationMs: 50,
     });
 
-    const result = await service.run({ agentId: 'codex', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's', timeoutMs: 60_000 });
+    const result = await service.run({ agentId: 'codex', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's', turnId: 'turn-codex', timeoutMs: 60_000 });
 
     expect(result.output).toBe('KALIO_CODEX_OK');
     expect(childProcess.spawn).not.toHaveBeenCalled();
@@ -259,6 +258,7 @@ describe('CLIAgentService', () => {
       workdir: '/w',
       callId: 'c',
       sessionId: 's',
+      turnId: 'turn-codex',
       inactivityTimeoutMs: 180_000,
     }));
   });
@@ -404,13 +404,21 @@ describe('CLIAgentService', () => {
     const fakeProc = makeFakeProc();
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
     const emitFn = vi.fn();
-    const p = service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'callId', sessionId: 'sess-1', emitFn });
+    const p = service.run({
+      agentId: 'copilot',
+      prompt: 'task',
+      workdir: '/w',
+      callId: 'callId',
+      sessionId: 'sess-1',
+      turnId: 'turn-1',
+      emitFn,
+    });
     await new Promise((r) => setTimeout(r, 0));
     fakeProc.stdout.emit('data', Buffer.from('hello'));
     fakeProc.emit('close', 0);
     await p;
     expect(emitFn).toHaveBeenCalledWith('cli_agent:progress',
-      expect.objectContaining({ callId: 'callId', sessionId: 'sess-1', agentId: 'copilot', chunk: 'hello' }));
+      expect.objectContaining({ callId: 'callId', sessionId: 'sess-1', turnId: 'turn-1', agentId: 'copilot', chunk: 'hello' }));
   });
 
   it('passes model override from config into the adapter args', async () => {

@@ -9,7 +9,7 @@ import { ContextStats, type ContextPreviewStatus } from './ContextStats';
 import { TokenBadge } from './TokenBadge';
 import type { ArchitectSchema } from '../architect/architect.types';
 import { NewChatScreen } from './launch/NewChatScreen';
-import { isPendingHostSessionId } from './pendingHostSession';
+import { isPendingHostSession } from './pendingHostSession';
 import { compactArchitectureTraceContent, findArchitectureRunInMessages } from './architectureChatSummary';
 import { architectureSlotIdForSession, sessionStatusSnapshotToRuntimeState } from '../sessions/sessionTreeDisplay';
 import type { LiveTurnState } from './liveTurnState';
@@ -312,7 +312,7 @@ export function ChatSessionHeader({
   vfsRefreshSignal,
 }: ChatSessionHeaderProps) {
   const architectureLabel = resolveArchitectureLabel(activeSession, messages);
-  const pendingHostSession = isPendingHostSessionId(activeSessionId);
+  const pendingHostSession = isPendingHostSession(activeSession);
 
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
@@ -398,7 +398,7 @@ export function ChatWelcomeScreen({
     return <PendingChildSessionScreen activeSession={activeSession} />;
   }
 
-  const launchBusy = isStreaming || isPendingHostSessionId(activeSessionId ?? activeSession?.id ?? null);
+  const launchBusy = isStreaming || isPendingHostSession(activeSession);
 
   return (
     <NewChatScreen

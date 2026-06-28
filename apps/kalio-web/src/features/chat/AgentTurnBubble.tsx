@@ -477,6 +477,6 @@ function finalAnswerForArchitectureRun(
   }
   const finalizer = [...run.trace]
     .reverse()
-    .find((step) => step.speaker === 'finalizer' && step.content.trim().length > 0);
-  return finalizer?.content.trim() ?? null;
+    .find((step) => step.speaker === 'finalizer' && (step.content ?? '').trim().length > 0);
+  return finalizer?.content?.trim() ?? null;
 }

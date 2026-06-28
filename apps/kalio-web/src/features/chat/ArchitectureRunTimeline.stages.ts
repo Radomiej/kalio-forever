@@ -220,7 +220,7 @@ function inferRouterActorLabel(step: TraceStep): string | undefined {
   if (normalizedNodeId && normalizedNodeId !== 'router') {
     return undefined;
   }
-  const match = /(?:^|\n\n)([A-Z][A-Za-z0-9 _-]{1,48})\s+(?:completed a bounded evidence pass|hit a recoverable branch error)\b/m.exec(step.content);
+  const match = /(?:^|\n\n)([A-Z][A-Za-z0-9 _-]{1,48})\s+(?:completed a bounded evidence pass|hit a recoverable branch error)\b/m.exec(step.content ?? '');
   const candidate = match?.[1]?.trim();
   return candidate && candidate.toLowerCase() !== 'router' ? candidate : undefined;
 }

@@ -21,7 +21,7 @@ describe('extractExecutionGraphHydrationStatus', () => {
         role: 'tool_result',
         toolCallId: 'architecture:run-1:event-1',
         content: JSON.stringify({
-          taskId: 'architecture:run-1:event:1',
+          architectureRunId: 'run-1',
           childSessionId: 'branch-1',
         }),
       }),
@@ -61,7 +61,7 @@ describe('extractExecutionGraphHydrationStatus', () => {
         role: 'tool_result',
         toolCallId: 'architecture:run-1:event-1',
         content: JSON.stringify({
-          taskId: 'architecture:run-1:event:1',
+          architectureRunId: 'run-1',
           childSessionId: 'branch-1',
         }),
       }),
@@ -95,7 +95,7 @@ describe('extractExecutionGraphHydrationStatus', () => {
         role: 'tool_result',
         toolCallId: 'architecture:run-1:event-1',
         content: JSON.stringify({
-          taskId: 'architecture:run-1:event:1',
+          architectureRunId: 'run-1',
           childSessionId: 'branch-1',
         }),
       }),
@@ -126,14 +126,14 @@ describe('extractExecutionGraphHydrationStatus', () => {
     });
   });
 
-  it('accepts persisted architecture results whose task id is a raw event id', () => {
+  it('accepts persisted architecture results with typed architecture run metadata', () => {
     const parentMessages = [
       message({
         id: 'result-1',
         role: 'tool_result',
         toolCallId: 'architecture:run-1:event-1',
         content: JSON.stringify({
-          taskId: 'event-1',
+          architectureRunId: 'run-1',
           childSessionId: 'branch-1',
         }),
       }),

@@ -1,6 +1,23 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { DrizzleService } from './drizzle.service';
+
+function createMigrationsFolder(journalTags: string[]): string {
+  const folder = mkdtempSync(join(tmpdir(), 'kalio-migrations-'));
+  mkdirSync(join(folder, 'meta'), { recursive: true });
+  writeFileSync(
+    join(folder, 'meta', '_journal.json'),
+    JSON.stringify({ entries: journalTags.map((tag) => ({ tag })) }),
+  );
+  writeFileSync(
+    join(folder, '0017_mcp_server_origin_source.sql'),
+    "ALTER TABLE `mcp_servers` ADD COLUMN `origin_source` text NOT NULL DEFAULT 'manual';",
+  );
+  return folder;
+}
 
 describe('DrizzleService AgentFlow bootstrap repair', () => {
   it('backfills new agent_flow_runs columns on an existing older table', () => {
@@ -104,5 +121,62 @@ describe('DrizzleService AgentFlow bootstrap repair', () => {
       'origin_source',
     ]));
     sqlite.close();
+  });
+
+  it('does not warn when origin_source column and migration journal agree', () => {
+    const sqlite = new Database(':memory:');
+    const migrationsFolder = createMigrationsFolder(['0017_mcp_server_origin_source']);
+    sqlite.exec(`
+      CREATE TABLE mcp_servers (
+        id text PRIMARY KEY NOT NULL,
+        origin_source text NOT NULL DEFAULT 'manual'
+      );
+    `);
+    const service = new DrizzleService(null as never);
+    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+
+    expect((service as unknown as { describeMigrationDrift: (folder: string) => string | null }).describeMigrationDrift(migrationsFolder)).toBeNull();
+
+    sqlite.close();
+    rmSync(migrationsFolder, { recursive: true, force: true });
+  });
+
+  it('warns when origin_source column exists but its migration is missing from the journal', () => {
+    const sqlite = new Database(':memory:');
+    const migrationsFolder = createMigrationsFolder([]);
+    sqlite.exec(`
+      CREATE TABLE mcp_servers (
+        id text PRIMARY KEY NOT NULL,
+        origin_source text NOT NULL DEFAULT 'manual'
+      );
+    `);
+    const service = new DrizzleService(null as never);
+    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+
+    expect((service as unknown as { describeMigrationDrift: (folder: string) => string | null }).describeMigrationDrift(migrationsFolder)).toContain(
+      'mcp_servers.origin_source exists before migration 0017_mcp_server_origin_source is recorded',
+    );
+
+    sqlite.close();
+    rmSync(migrationsFolder, { recursive: true, force: true });
+  });
+
+  it('warns when migration journal records origin_source but the column is missing', () => {
+    const sqlite = new Database(':memory:');
+    const migrationsFolder = createMigrationsFolder(['0017_mcp_server_origin_source']);
+    sqlite.exec(`
+      CREATE TABLE mcp_servers (
+        id text PRIMARY KEY NOT NULL
+      );
+    `);
+    const service = new DrizzleService(null as never);
+    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+
+    expect((service as unknown as { describeMigrationDrift: (folder: string) => string | null }).describeMigrationDrift(migrationsFolder)).toContain(
+      'migration 0017_mcp_server_origin_source is recorded but mcp_servers.origin_source is missing',
+    );
+
+    sqlite.close();
+    rmSync(migrationsFolder, { recursive: true, force: true });
   });
 });

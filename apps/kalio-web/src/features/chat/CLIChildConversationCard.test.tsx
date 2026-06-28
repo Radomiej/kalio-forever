@@ -107,6 +107,42 @@ describe('CLIChildConversationCard', () => {
     expect(screen.getByTestId('cli-child-stop-cli-child-1')).toBeInTheDocument();
   });
 
+  it('renders pending state from projection metadata instead of child session id prefix', () => {
+    useAgentStore.setState({
+      runtimeActivitySnapshots: {},
+      cliChildProjections: {
+        'placeholder-call-1': {
+          childSessionId: 'placeholder-call-1',
+          parentSessionId: 'parent-1',
+          parentCallId: 'call-1',
+          agentId: 'codex',
+          status: 'running',
+          lastOutput: 'starting...',
+          toolName: 'spawn_cli_agent',
+          isPending: true,
+        },
+      },
+      cliAgentOutput: { 'call-1': 'starting...' },
+    });
+    useSessionStore.setState({
+      sessions: [],
+      activeSessionId: 'parent-1',
+      setActiveSession: vi.fn(),
+      setPendingMessage: vi.fn(),
+    });
+
+    render(
+      <CLIChildConversationCard
+        toolName="spawn_cli_agent"
+        parentSessionId="parent-1"
+        parentCallId="call-1"
+      />,
+    );
+
+    expect(screen.getByTestId('cli-child-card-pending')).toBeInTheDocument();
+    expect(screen.getByTestId('cli-child-card-pending')).toHaveTextContent('Starting codex CLI child');
+  });
+
   it('renders a runtime-snapshot child even when the legacy projection store is empty', () => {
     useAgentStore.setState({
       runtimeActivitySnapshots: {

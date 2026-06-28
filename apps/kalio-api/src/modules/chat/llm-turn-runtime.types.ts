@@ -1,4 +1,4 @@
-import type { AgentRunContext, LLMContent, SessionRuntimeKind, ToolMeta } from '@kalio/types';
+import type { AgentRunContext, LLMContent, LLMStructuredOutputRequest, SessionRuntimeKind, ToolMeta } from '@kalio/types';
 import type { EmitFn } from './interfaces/stream-context.interface';
 
 export type LLMRuntimeKind = Extract<SessionRuntimeKind, 'chat' | 'subagent' | 'agent-flow-branch'>;
@@ -28,6 +28,7 @@ export interface LLMAgentLoopRequest {
   maxIterations: number;
   maxEmptyNoToolRetries?: number;
   rawXmlToolNames?: string[];
+  structuredOutput?: LLMStructuredOutputRequest;
   auditMetadata?: Record<string, unknown>;
   auditDomain?: 'chat' | 'subagent';
   firstMessageId?: string;
@@ -40,6 +41,7 @@ export interface LLMAgentLoopRequest {
 export interface LLMAgentLoopResult {
   lastMessageId: string;
   finalText: string;
+  structuredOutput?: unknown;
   iterationCount: number;
   finalLimit: number;
   exhausted: boolean;

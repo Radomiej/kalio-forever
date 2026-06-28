@@ -22,6 +22,13 @@ describe('reconstructDurableArchitectureGraph', () => {
           sessionId: `${runId}-router`,
           role: 'assistant',
           content: '### Router\nRoute: router -> final-artifact',
+          architectureRun: {
+            runId,
+            schemaId: 'strategic-decision-council',
+            status: 'completed',
+            trace: [],
+            routeHops: [],
+          },
           createdAt: 101,
         },
         {
@@ -70,6 +77,13 @@ describe('reconstructDurableArchitectureGraph', () => {
           sessionId: `arch-${runId}-root`,
           role: 'assistant',
           content: '### Finalizer\nVerified completion report.',
+          architectureRun: {
+            runId,
+            schemaId: 'goal-master-delivery-loop',
+            status: 'completed',
+            trace: [],
+            routeHops: [],
+          },
           createdAt: 105,
         },
       ],
@@ -185,6 +199,13 @@ describe('reconstructDurableArchitectureGraph', () => {
           sessionId: `arch-${runId}-root`,
           role: 'assistant',
           content: '### Finalizer\nVerified completion report.',
+          architectureRun: {
+            runId,
+            schemaId: 'goal-master-delivery-loop',
+            status: 'completed',
+            trace: [],
+            routeHops: [],
+          },
           createdAt: 106,
         },
       ],
@@ -291,6 +312,13 @@ describe('reconstructDurableArchitectureGraph', () => {
           sessionId: `arch-${runId}-root`,
           role: 'assistant',
           content: '### Finalizer\nVerified completion report.',
+          architectureRun: {
+            runId,
+            schemaId: 'not-a-real-schema',
+            status: 'completed',
+            trace: [],
+            routeHops: [],
+          },
           createdAt: 101,
         },
       ],
@@ -353,7 +381,30 @@ describe('reconstructDurableArchitectureGraph', () => {
 
 function createPersistedSessions(messagesBySession: Record<string, ChatMessage[]>): SessionsService {
   return {
-    list: vi.fn(async () => Object.keys(messagesBySession).map((id) => ({ id }))),
+    list: vi.fn(async () => Object.entries(messagesBySession).map(([id, messages]) => ({
+      id,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch' as const,
+        architectureContext: {
+          architectureRunId: inferFixtureArchitectureRunId(messages),
+        },
+      },
+    }))),
     getMessages: vi.fn(async (sessionId: string) => messagesBySession[sessionId] ?? []),
   } as unknown as SessionsService;
+}
+
+function inferFixtureArchitectureRunId(messages: ChatMessage[]): string | undefined {
+  for (const message of messages) {
+    if (message.architectureRun?.runId) {
+      return message.architectureRun.runId;
+    }
+    for (const toolCall of message.toolCalls ?? []) {
+      const runId = toolCall.args['architectureRunId'];
+      if (typeof runId === 'string') {
+        return runId;
+      }
+    }
+  }
+  return undefined;
 }

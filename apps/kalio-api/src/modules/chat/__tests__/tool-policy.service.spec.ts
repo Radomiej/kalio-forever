@@ -57,7 +57,7 @@ describe('ToolPolicyService', () => {
     expect(decision.allowedToolNames).toEqual(['vfs_read', 'fs_read']);
   });
 
-  it('allow-list personas drop legacy MCP names instead of remapping them', async () => {
+  it('allow-list personas translate unique legacy MCP names at the read boundary', async () => {
     const service = makeService(
       ['mcp_docs_search'],
       'allow_list',
@@ -69,10 +69,10 @@ describe('ToolPolicyService', () => {
     });
 
     expect(decision.source).toBe('persona');
-    expect(decision.allowedToolNames).toEqual([]);
+    expect(decision.allowedToolNames).toEqual(['mcp_toml::docs_search']);
   });
 
-  it('subagent explicit legacy MCP names are ignored', async () => {
+  it('subagent explicit legacy MCP names translate when canonical target is unique', async () => {
     const service = makeService(
       ['vfs_read'],
       'allow_all',
@@ -86,7 +86,49 @@ describe('ToolPolicyService', () => {
     });
 
     expect(decision.source).toBe('runtime-explicit');
+    expect(decision.allowedToolNames).toEqual(['mcp_toml::docs_search']);
+  });
+
+  it('does not allow native tools only because their name uses the legacy mcp prefix', async () => {
+    const service = makeService(
+      ['vfs_read'],
+      'allow_all',
+      [{ name: 'mcp_fake_native', description: 'Not actually MCP', parameters: {}, requiresConfirmation: false }],
+    );
+
+    const decision = await service.decide({
+      runtimeKind: 'subagent',
+      personaId: 'qa',
+      explicitToolNames: ['mcp_fake_native'],
+    });
+
     expect(decision.allowedToolNames).toEqual([]);
+    expect(decision.denied).toContainEqual({
+      name: 'mcp_fake_native',
+      reason: 'not_in_persona_allowlist',
+    });
+  });
+
+  it('classifies MCP tools by serverKey instead of name prefix', async () => {
+    const service = makeService(
+      [],
+      'deny_all',
+      [{
+        name: 'docs_search',
+        description: 'MCP docs search',
+        parameters: {},
+        requiresConfirmation: false,
+        serverKey: 'toml::docs',
+      }],
+    );
+
+    const decision = await service.decide({
+      runtimeKind: 'chat',
+      personaId: 'qa',
+    });
+
+    expect(decision.allowedToolNames).toEqual(allTools.map((tool) => tool.name));
+    expect(decision.allowedToolNames).not.toContain('docs_search');
   });
 
   it('agent-flow-branch intersects persona, slot policy, and runtime context', async () => {

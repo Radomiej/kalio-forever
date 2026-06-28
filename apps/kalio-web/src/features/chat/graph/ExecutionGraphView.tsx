@@ -209,7 +209,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
   const hasActiveLoopForSession = (sessionId: string) => runningLoops.some((loop) => loop.sessionId === sessionId);
   const runningToolActivities = toolActivities.filter((activity) => isLiveTool(activity));
   const sessionTitleById = new Map(sessions.map((session) => [session.id, session.title]));
-  const activeArchitectureRunId = architectureRunIdFromRootSession(activeSessionId);
+  const activeArchitectureRunId = architectureRunIdFromRootSession(activeSession);
   const graphSurfaceClassName = 'flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.08),_transparent_42%),linear-gradient(rgba(56,189,248,0.06)_1px,_transparent_1px),linear-gradient(90deg,_rgba(56,189,248,0.06)_1px,_transparent_1px)] bg-[length:100%_100%,32px_32px,32px_32px] bg-[#0a1220] p-4';
   const focusedGraph = focusExecutionGraphMessages(messages, focusMode);
   const hydrationStatus = extractExecutionGraphHydrationStatus(focusedGraph.messages, sessionMessages);

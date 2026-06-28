@@ -10,7 +10,18 @@ interface CreatePendingHostSessionParams {
 }
 
 export function isPendingHostSessionId(sessionId: string | null | undefined): boolean {
+  // TODO: legacy fallback for local placeholder sessions created before runtimeContext.pendingHostSession.
   return typeof sessionId === 'string' && sessionId.startsWith(PENDING_HOST_SESSION_PREFIX);
+}
+
+export function isPendingHostSession(session: ChatSession | null | undefined): boolean {
+  if (!session) {
+    return false;
+  }
+  if (session.runtimeContext?.pendingHostSession === true) {
+    return true;
+  }
+  return isPendingHostSessionId(session.id);
 }
 
 export function createPendingHostSession({
@@ -23,7 +34,11 @@ export function createPendingHostSession({
     id: `${PENDING_HOST_SESSION_PREFIX}${crypto.randomUUID()}`,
     personaId,
     title,
-    ...(runtimeContext ? { runtimeContext } : {}),
+    runtimeContext: {
+      ...(runtimeContext ?? { runtimeKind: 'chat' as const }),
+      runtimeKind: runtimeContext?.runtimeKind ?? 'chat',
+      pendingHostSession: true,
+    },
     createdAt: now,
     updatedAt: now,
   };

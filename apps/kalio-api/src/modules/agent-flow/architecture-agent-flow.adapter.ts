@@ -11,12 +11,13 @@ import type {
   ResumeAgentFlowRunDto,
   RunSubAgentFlowArgs,
   SubAgentFlowResult,
+  WorkflowEvidence,
+  WorkflowRuntimeDecision,
 } from '@kalio/types';
 import { ArchitectureRuntimeService } from '../architecture/architecture-runtime.service';
 import { isCompletedCliChildStatus } from '../architecture/architecture-cli-child-status';
 import type { AgentFlowRuntimePort } from './agent-flow-runtime.port';
 import {
-  finalArtifactLegacyTextDeclaresBlockingStatus,
   finalArtifactStatusFromData,
 } from './architecture-final-artifact-status';
 import { normalizeFlowEventType, normalizeFlowLifecycle } from './agent-flow-trace-mapping';
@@ -177,6 +178,11 @@ function mapTraceEvents(events: ArchitectureExecutionEvent[]): AgentFlowTraceIte
     type: normalizeFlowEventType(event),
     lifecycle: normalizeFlowLifecycle(event),
     message: event.message,
+    reasonCode: event.reasonCode,
+    errorCode: event.errorCode,
+    failure: event.failure,
+    evidence: event.evidence,
+    runtimeDecision: event.runtimeDecision,
     nodeId: event.nodeId,
     roleSlotId: event.roleSlotId,
     route: event.route,
@@ -262,10 +268,7 @@ function latestAttemptEvents(events: ArchitectureExecutionEvent[]): Architecture
 function hasBlockingFinalArtifact(events: ArchitectureExecutionEvent[]): boolean {
   const finalArtifact = findFinalArtifactEvent(events);
   const status = finalArtifactStatusFromData(finalArtifact?.data);
-  if (status) {
-    return status === 'blocked' || status === 'rejected' || status === 'incomplete';
-  }
-  return finalArtifactLegacyTextDeclaresBlockingStatus(finalArtifact?.message);
+  return status === 'blocked' || status === 'rejected' || status === 'incomplete';
 }
 
 function hasPassedExternalQualityGate(args: RunSubAgentFlowArgs | undefined): boolean {
@@ -302,7 +305,6 @@ function unresolvedCliChildSessions(events: ArchitectureExecutionEvent[], args?:
 function hasLaterIndependentHostVerification(events: ArchitectureExecutionEvent[]): boolean {
   let hasHostWrite = false;
   let hasBuildEvidence = false;
-  let hasTerminalEvidence = false;
 
   for (const event of events) {
     if (
@@ -320,13 +322,13 @@ function hasLaterIndependentHostVerification(events: ArchitectureExecutionEvent[
         hasBuildEvidence ||= eventToolName === 'terminal_spawn'
           || eventToolName === 'terminal_output';
       }
+      if (hasTypedBuildAndGitEvidence(event)) return true;
       if (hasHostWrite && hasBuildEvidence) return true;
       continue;
     }
-    if (hasTextHostVerificationEvidence(event)) {
+    if (hasTypedBuildAndGitEvidence(event)) {
       return true;
     }
-    const message = event.message.toLowerCase();
     const toolEvidence = isRecord(event.data?.toolEvidence) ? event.data.toolEvidence : undefined;
     if (!toolEvidence) {
       continue;
@@ -342,49 +344,45 @@ function hasLaterIndependentHostVerification(events: ArchitectureExecutionEvent[
       name === 'terminal_spawn'
       || name === 'terminal_output'
     ));
-    hasTerminalEvidence ||= successfulToolNames.some((name) => (
-      (name === 'terminal_spawn'
-      || name === 'terminal_output')
-      && hasBuildAndGitEvidenceText(message)
-    ));
     if (hasHostWrite && hasBuildEvidence) return true;
-    if (hasTerminalEvidence) return true;
   }
 
   return false;
 }
 
-function hasTextHostVerificationEvidence(event: ArchitectureExecutionEvent): boolean {
-  const message = event.message.toLowerCase();
-  const isTerminalVerifier = event.type === 'final_artifact'
-    || (
-      (event.type === 'router_output' || event.type === 'router_decision')
-      && (event.roleSlotId === 'goal_master' || event.nodeId === 'goal-master')
-      && event.route?.nextNodeId === 'final-artifact'
-    );
-  if (!isTerminalVerifier) return false;
-  return hasBuildAndGitEvidenceText(message);
+function eventEvidence(event: ArchitectureExecutionEvent): WorkflowEvidence[] {
+  const dataEvidence = Array.isArray(event.data?.evidence)
+    ? event.data.evidence.filter(isWorkflowEvidence)
+    : [];
+  return [
+    ...(event.evidence ?? []),
+    ...dataEvidence,
+  ];
 }
 
-function hasBuildAndGitEvidenceText(message: string): boolean {
-  const hasBuildPass = (
-    message.includes('build passed')
-    || message.includes('build passes')
-    || message.includes('build exit 0')
-    || message.includes('build exited 0')
-    || message.includes('exit code 0')
-    || message.includes('exited 0')
-  );
-  const hasHostRepoState = (
-    message.includes('git status')
-    || message.includes('branch is ')
-    || message.includes('branch `')
-    || message.includes('branch **')
-  );
-  return hasBuildPass && hasHostRepoState;
+function eventRuntimeDecision(event: ArchitectureExecutionEvent): WorkflowRuntimeDecision | undefined {
+  const dataDecision = isWorkflowRuntimeDecision(event.data?.runtimeDecision)
+    ? event.data.runtimeDecision
+    : undefined;
+  return event.runtimeDecision ?? dataDecision;
 }
 
-function hasTextFinalizationAcceptance(event: ArchitectureExecutionEvent): boolean {
+function hasTypedBuildAndGitEvidence(event: ArchitectureExecutionEvent): boolean {
+  const evidence = eventEvidence(event);
+  const hasBuildPass = evidence.some((item) => (
+    item.kind === 'BUILD_RESULT'
+    && item.status === 'passed'
+    && (
+      !isRecord(item.data)
+      || item.data['exitCode'] === undefined
+      || item.data['exitCode'] === 0
+    )
+  ));
+  const hasGitStatus = evidence.some((item) => item.kind === 'GIT_STATUS' && item.status === 'passed');
+  return hasBuildPass && hasGitStatus;
+}
+
+function hasTypedFinalizationAcceptance(event: ArchitectureExecutionEvent): boolean {
   if (
     event.type !== 'router_decision'
     && event.type !== 'router_output'
@@ -394,16 +392,44 @@ function hasTextFinalizationAcceptance(event: ArchitectureExecutionEvent): boole
   if (event.roleSlotId !== 'goal_master' && event.nodeId !== 'goal-master') {
     return false;
   }
-  const message = event.message.toLowerCase();
-  const declaresFinalArtifact = message.includes('final-artifact') || message.includes('final artifact');
-  const declaresAcceptance = (
-    message.includes(' go ')
-    || message.includes('go --')
-    || message.includes('delivery accepted')
-    || message.includes('accepted verified')
-    || message.includes('status: go')
-  );
-  return declaresFinalArtifact && declaresAcceptance && hasBuildAndGitEvidenceText(message);
+  const decision = eventRuntimeDecision(event);
+  const acceptsFinalArtifact = decision?.accepted === true
+    && decision.reasonCode === 'final_artifact_accepted'
+    && (decision.nextNodeId === undefined || decision.nextNodeId === 'final-artifact');
+  return acceptsFinalArtifact && hasTypedBuildAndGitEvidence(event);
+}
+
+function isWorkflowEvidence(value: unknown): value is WorkflowEvidence {
+  return isRecord(value)
+    && (
+      value['kind'] === 'BUILD_RESULT'
+      || value['kind'] === 'GIT_STATUS'
+      || value['kind'] === 'FINAL_ARTIFACT'
+      || value['kind'] === 'QUALITY_GATE'
+      || value['kind'] === 'TOOL_RESULT'
+      || value['kind'] === 'CLI_CHILD'
+      || value['kind'] === 'VFS_WRITE'
+      || value['kind'] === 'VFS_READ'
+    )
+    && (
+      value['status'] === 'passed'
+      || value['status'] === 'failed'
+      || value['status'] === 'blocked'
+      || value['status'] === 'unknown'
+    );
+}
+
+function isWorkflowRuntimeDecision(value: unknown): value is WorkflowRuntimeDecision {
+  return isRecord(value)
+    && (
+      value['status'] === 'queued'
+      || value['status'] === 'running'
+      || value['status'] === 'waiting_on_orchestrator'
+      || value['status'] === 'done'
+      || value['status'] === 'failed'
+      || value['status'] === 'cancelled'
+      || value['status'] === 'blocked'
+    );
 }
 
 function hasFinalizationMissingBlocker(
@@ -418,7 +444,7 @@ function hasFinalizationMissingBlocker(
     && event.route.nextNodeId !== 'final-artifact'
   ));
   if (!lastRuntimeFallback) return false;
-  return events.some((event) => event.createdAt <= lastRuntimeFallback.createdAt && hasTextFinalizationAcceptance(event));
+  return events.some((event) => event.createdAt <= lastRuntimeFallback.createdAt && hasTypedFinalizationAcceptance(event));
 }
 
 function hasUnresolvedCliChildren(events: ArchitectureExecutionEvent[], args?: RunSubAgentFlowArgs): boolean {
@@ -542,9 +568,10 @@ function maxStepContinuation(events: ArchitectureExecutionEvent[]): AgentFlowCon
     if (event?.type !== 'router_decision' || !isRecord(event.data)) {
       continue;
     }
+    const reasonCode = event.reasonCode ?? event.data.reasonCode;
     const pendingNodeIds = stringArray(event.data['pendingNodeIds']);
-    const isReturnToOrchestrator = event.data['returnToOrchestrator'] === true;
-    const isMaxStepContinuation = typeof event.data['maxSteps'] === 'number';
+    const isReturnToOrchestrator = reasonCode === 'return_to_orchestrator';
+    const isMaxStepContinuation = reasonCode === 'max_steps';
     if (pendingNodeIds.length === 0 || (!isMaxStepContinuation && !isReturnToOrchestrator)) {
       continue;
     }
