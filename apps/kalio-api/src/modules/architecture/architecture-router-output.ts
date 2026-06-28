@@ -68,7 +68,7 @@ export function createArchitectureRouterOutput(params: {
   };
 }
 
-function parseRouterOutputFromText(text: string): ArchitectureRouterOutput | null {
+export function parseRouterOutputFromText(text: string): ArchitectureRouterOutput | null {
   const candidates = [
     ...extractFencedJsonBlocks(text),
     ...extractTaggedJsonBlocks(text, 'routerOutput'),
@@ -164,8 +164,21 @@ function isRouterOutput(value: unknown): value is ArchitectureRouterOutput {
     && (
       nextAction === 'finalize'
       || nextAction === 'ask_human'
+      || nextAction === 'route_to'
       || nextAction === 'run_more_research'
       || nextAction === 'rerun_with_different_personas'
+    )
+    && (
+      nextAction !== 'route_to'
+      || typeof value['targetNodeId'] === 'string'
+    )
+    && (
+      typeof value['targetNodeId'] === 'undefined'
+      || typeof value['targetNodeId'] === 'string'
+    )
+    && (
+      typeof value['response'] === 'undefined'
+      || typeof value['response'] === 'string'
     );
 }
 

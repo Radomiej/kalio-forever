@@ -31,6 +31,7 @@ export interface CLIAgentPtyRunRequest {
   workdir: string;
   callId: string;
   sessionId: string;
+  turnId?: string;
   inactivityTimeoutMs: number;
   hardTimeoutMs?: number;
   maxOutputChars: number;
@@ -71,6 +72,7 @@ export class CLIAgentPtyService {
         request.emitFn?.('cli_agent:progress', {
           callId: request.callId,
           sessionId: request.sessionId,
+          ...(request.turnId ? { turnId: request.turnId } : {}),
           agentId: request.agentId,
           chunk: cleanedChunk,
         });

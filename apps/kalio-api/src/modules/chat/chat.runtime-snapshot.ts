@@ -15,6 +15,7 @@ import type { ToolDispatchService } from './tool-dispatch.service';
 import type { AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port';
 import type { CLIAgentSessionRuntimePort } from '../cli-agent/cli-agent-session-runtime.port';
 import { readPendingRAAppLaunchIntent } from './raapp-launch-intent';
+import { isWorkflowError } from '../../common/utils/workflow-error.util';
 
 interface RuntimeSnapshotLogger {
   warn(message: string): void;
@@ -56,7 +57,7 @@ interface RuntimeActivitySnapshotBatchDeps extends Omit<RuntimeActivitySnapshotD
 type UnresolvedToolCall = { callId: string; toolName: string; args: Record<string, unknown> };
 
 function isCliMetadataMissingError(error: unknown): boolean {
-  return error instanceof Error && error.message.startsWith('CLI_AGENT_SESSION_METADATA_MISSING:');
+  return isWorkflowError(error, 'CLI_AGENT_SESSION_METADATA_MISSING');
 }
 
 function mapAgentFlowStatus(status: AgentFlowRunStatus): RuntimeChildExecutionStatus {

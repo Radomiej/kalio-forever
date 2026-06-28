@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChatAttachment, LLMContextPreview } from '@kalio/types';
+import type { ChatAttachment, ChatSession, LLMContextPreview } from '@kalio/types';
 import type { TokenCount } from '../../../services/tokenCounter';
 import { apiClient } from '../../../services/apiClient';
-import { isPendingHostSessionId } from '../pendingHostSession';
+import { isPendingHostSession, isPendingHostSessionId } from '../pendingHostSession';
 
 export interface ContextPreviewStatus {
   loading: boolean;
@@ -12,6 +12,7 @@ export interface ContextPreviewStatus {
 
 interface UseContextPreviewOptions {
   sessionId: string | null;
+  session?: ChatSession | null;
   personaId: string | null;
   draftUserMessage?: string;
   attachments?: ChatAttachment[];
@@ -47,6 +48,7 @@ function tokenCountFromPreview(preview: LLMContextPreview): TokenCount {
 
 export function useContextPreview({
   sessionId,
+  session,
   personaId,
   draftUserMessage,
   attachments,
@@ -71,7 +73,7 @@ export function useContextPreview({
   }, []);
 
   useEffect(() => {
-    if (!sessionId || !personaId || isPendingHostSessionId(sessionId)) {
+    if (!sessionId || !personaId || isPendingHostSession(session) || isPendingHostSessionId(sessionId)) {
       requestSeqRef.current += 1;
       setPreview(null);
       setTokenCount(null);
@@ -110,7 +112,7 @@ export function useContextPreview({
     }, 150);
 
     return () => window.clearTimeout(timeout);
-  }, [attachments, attachmentsSignature, draftUserMessage, manualRefreshKey, personaId, refreshKey, sessionId]);
+  }, [attachments, attachmentsSignature, draftUserMessage, manualRefreshKey, personaId, refreshKey, session, sessionId]);
 
   return {
     preview,

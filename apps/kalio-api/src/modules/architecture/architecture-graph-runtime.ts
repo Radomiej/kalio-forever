@@ -3,6 +3,7 @@ import type { ArchitectureRoleExecutionInput, ArchitectureRoleExecutor } from '.
 import { architectureActionFieldsForEvent, architectureActionSummaryForEvent } from './architecture-action-summary';
 import { isCompletedCliChildStatus } from './architecture-cli-child-status';
 import { createArchitectureRouterOutput } from './architecture-router-output';
+import { isWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
 
 type GraphRuntimeOptions = {
   schema: ArchitectureSchema;
@@ -22,6 +23,11 @@ type EventOptions = {
   roleSlotId?: string;
   route?: ArchitectureRouteDecision;
   routerOutput?: ArchitectureRouterOutput;
+  reasonCode?: ArchitectureExecutionEvent['reasonCode'];
+  errorCode?: ArchitectureExecutionEvent['errorCode'];
+  failure?: ArchitectureExecutionEvent['failure'];
+  evidence?: ArchitectureExecutionEvent['evidence'];
+  runtimeDecision?: ArchitectureExecutionEvent['runtimeDecision'];
   data?: Record<string, unknown>;
 };
 
@@ -29,11 +35,6 @@ type AgentRouteRequest = {
   targetNodeId: string;
   response?: string;
 };
-
-const SUBAGENT_INCOMPLETE_MARKER = 'without producing a final answer';
-const RECOVERABLE_RUNTIME_ERROR_MARKER = 'recoverable runtime error';
-const RECOVERABLE_BRANCH_ERROR_MARKER = 'recoverable branch error';
-const DEGRADED_MARKER = 'degraded after recoverable';
 
 export async function createArchitectureGraphEvents(options: GraphRuntimeOptions): Promise<ArchitectureExecutionEvent[]> {
   const runtime = new ArchitectureGraphRuntime(options);
@@ -129,7 +130,9 @@ class ArchitectureGraphRuntime {
           actionSummary: architectureActionSummaryForEvent('router_decision', orchestratorHandoff.node.kind),
           nodeId: orchestratorHandoff.node.id,
           roleSlotId: orchestratorHandoff.node.roleSlotId,
+          reasonCode: 'return_to_orchestrator',
           data: {
+            reasonCode: 'return_to_orchestrator',
             pendingNodeIds: orchestratorHandoff.pendingNodeIds,
             returnToOrchestrator: true,
             visitCounts: Object.fromEntries(this.nodeVisitCounts.entries()),
@@ -160,12 +163,15 @@ class ArchitectureGraphRuntime {
       const pendingNodeIds = ready.length > 0
         ? ready.map((node) => node.id)
         : Array.from(maxVisitBlockedNodeIds);
+      const reasonCode = ready.length > 0 ? 'max_steps' : 'max_node_visits';
       const reason = ready.length > 0
         ? `Runtime stopped after ${maxSteps} graph steps.`
         : `Runtime stopped after reaching max node visits.`;
       this.push('router_decision', reason, {
         actionSummary: architectureActionSummaryForEvent('router_decision'),
+        reasonCode,
         data: {
+          reasonCode,
           maxNodeVisits,
           maxSteps,
           pendingNodeIds,
@@ -262,10 +268,13 @@ class ArchitectureGraphRuntime {
     outgoingNodeIds: string[],
     error: unknown,
   ): string[] {
+    const failure = workflowFailureFromError(error);
     const message = `${node.label} degraded after recoverable runtime error: ${this.errorMessage(error)}`;
     const selectedNodeIds = this.incompleteContinuationNodeIds(outgoingNodeIds, node.behavior?.convergeToNodeId);
     const data = {
       runtimeGuard: 'recoverable_node_error',
+      errorCode: failure.code,
+      failure,
       errorMessage: this.errorMessage(error),
       incomingNodeIds: this.incomingNodeIdsFor(node.id),
       outgoingNodeIds,
@@ -278,6 +287,8 @@ class ArchitectureGraphRuntime {
         actionSummary: architectureActionSummaryForEvent('participant_output', 'role'),
         nodeId: node.id,
         roleSlotId: node.roleSlotId,
+        errorCode: failure.code,
+        failure,
         route: {
           source: 'runtime_fallback',
           fromNodeId: node.id,
@@ -297,6 +308,8 @@ class ArchitectureGraphRuntime {
         actionSummary: architectureActionSummaryForEvent('final_artifact', 'artifact'),
         nodeId: node.id,
         roleSlotId: node.roleSlotId,
+        errorCode: failure.code,
+        failure,
         data,
       });
       return selectedNodeIds;
@@ -306,6 +319,8 @@ class ArchitectureGraphRuntime {
       actionSummary: architectureActionSummaryForEvent('router_decision', node.kind),
       nodeId: node.id,
       roleSlotId: node.roleSlotId,
+      errorCode: failure.code,
+      failure,
       route: {
         source: 'runtime_fallback',
         fromNodeId: node.id,
@@ -407,7 +422,7 @@ class ArchitectureGraphRuntime {
     if (!toolContract.ok) {
       throw new Error(`Architecture tool executor ${slot.id} completed without required tool evidence: ${toolContract.reason}`);
     }
-    const incompleteReason = this.incompleteResultReason(result.message)
+    const incompleteReason = this.incompleteResultReason(result.data)
       ?? this.incompleteToolExecutorReason(slot, result.data, this.events);
     const selectedNodeIds = incompleteReason
       ? this.incompleteContinuationNodeIds(outgoingNodeIds)
@@ -482,7 +497,7 @@ class ArchitectureGraphRuntime {
       node.behavior?.convergeToNodeId,
       outgoingNodeIds,
     );
-    const incompleteReason = this.incompleteResultReason(result.message);
+    const incompleteReason = this.incompleteResultReason(result.data);
     const routeRequest = this.routeRequest(result.data);
     const canAgentRouteOverride = node.behavior?.mode !== 'fan_out_all';
     const hasAgentRoute = canAgentRouteOverride
@@ -685,23 +700,17 @@ class ArchitectureGraphRuntime {
     return outgoingNodeIds;
   }
 
-  private incompleteResultReason(message: string): string | undefined {
-    const normalized = message.trim().toLowerCase();
-    if (
-      normalized.startsWith('sub-agent stopped')
-      || normalized.startsWith('subagent stopped')
-      || normalized.startsWith('sub-agent exhausted')
-      || normalized.startsWith('subagent exhausted')
-      || normalized.startsWith(SUBAGENT_INCOMPLETE_MARKER)
-    ) {
-      return 'Subagent exhausted its tool loop without producing a final answer.';
+  private incompleteResultReason(data: Record<string, unknown> | undefined): string | undefined {
+    if (!this.isRecord(data)) return undefined;
+    if (typeof data['incompleteReason'] === 'string' && data['incompleteReason'].trim().length > 0) {
+      return data['incompleteReason'];
     }
-    if (
-      normalized.includes(RECOVERABLE_RUNTIME_ERROR_MARKER)
-      || normalized.includes(RECOVERABLE_BRANCH_ERROR_MARKER)
-      || normalized.includes(DEGRADED_MARKER)
-    ) {
+    const failure = this.isRecord(data['failure']) ? data['failure'] : undefined;
+    if (failure?.['retryable'] === true || this.isRecoverableWorkflowErrorCode(data['errorCode'])) {
       return 'Recoverable runtime error prevented this node from producing a final answer.';
+    }
+    if (data['boundedToolLoopExhausted'] === true || data['reasonCode'] === 'max_steps') {
+      return 'Subagent exhausted its tool loop without producing a final answer.';
     }
     return undefined;
   }
@@ -712,11 +721,9 @@ class ArchitectureGraphRuntime {
   }
 
   private isRecoverableNodeError(error: unknown): boolean {
-    const message = this.errorMessage(error).toLowerCase();
-    return message.includes('429')
-      || message.includes('too many requests')
-      || message.includes('rate limit')
-      || message.includes('timeout');
+    return isWorkflowError(error, 'RATE_LIMITED')
+      || isWorkflowError(error, 'TIMEOUT')
+      || isWorkflowError(error, 'PROVIDER_UNAVAILABLE');
   }
 
   private errorMessage(error: unknown): string {
@@ -999,8 +1006,14 @@ class ArchitectureGraphRuntime {
   }
 
   private isIncompleteEvent(event: ArchitectureExecutionEvent): boolean {
-    return this.incompleteResultReason(event.message) !== undefined
-      || (this.isRecord(event.data) && typeof event.data['incompleteReason'] === 'string');
+    return this.incompleteResultReason(event.data) !== undefined;
+  }
+
+  private isRecoverableWorkflowErrorCode(value: unknown): boolean {
+    return value === 'RATE_LIMITED'
+      || value === 'TIMEOUT'
+      || value === 'PROVIDER_UNAVAILABLE'
+      || value === 'SUBAGENT_TIMEOUT';
   }
 
   private toolExecutorContract(
@@ -1221,6 +1234,11 @@ class ArchitectureGraphRuntime {
       roleSlotId: options.roleSlotId,
       route: options.route,
       routerOutput: options.routerOutput,
+      reasonCode: options.reasonCode,
+      errorCode: options.errorCode,
+      failure: options.failure,
+      evidence: options.evidence,
+      runtimeDecision: options.runtimeDecision,
       data: options.data,
       createdAt: this.options.now + this.sequence,
     };

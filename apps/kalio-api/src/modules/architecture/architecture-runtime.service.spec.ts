@@ -9,6 +9,7 @@ import type { ArchitectureRoleExecutor } from './architecture-role-executor';
 import { ArchitectureRegistryService } from './architecture-registry.service';
 import { createArchitectureGraphEvents } from './architecture-graph-runtime';
 import { ArchitectureRuntimeService } from './architecture-runtime.service';
+import { createWorkflowError } from '../../common/utils/workflow-error.util';
 
 describe('ArchitectureRuntimeService', () => {
   it('creates a deterministic completed run with chat branches, router, and final artifact events', async () => {
@@ -316,7 +317,7 @@ describe('ArchitectureRuntimeService', () => {
     expect(sessions.get).toHaveBeenCalledWith('parent-chat');
   });
 
-  it('infers local project scope from a Windows path in the prompt when explicit scope is absent', async () => {
+  it('does not infer local project scope from prompt text when explicit scope is absent', async () => {
     const { service } = createService();
 
     const run = await service.createRun({
@@ -330,9 +331,9 @@ describe('ArchitectureRuntimeService', () => {
 
     expect(run.context).toMatchObject({
       parentSessionId: 'parent-chat',
-      projectPath: 'C:\\Projekty\\FamilyQuest',
-      executionCwd: 'C:\\Projekty\\FamilyQuest',
     });
+    expect(run.context?.['projectPath']).toBeUndefined();
+    expect(run.context?.['executionCwd']).toBeUndefined();
   });
 
   it('adds only enabled CLI agents to architecture runtime context', async () => {
@@ -687,7 +688,9 @@ describe('ArchitectureRuntimeService', () => {
     const { service, executor } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
       if (slot.id === 'innovator') {
-        throw new Error('429 Too Many Requests');
+        throw createWorkflowError('RATE_LIMITED', 'provider throttled branch execution', {
+          source: 'llm-provider',
+        });
       }
       return {
         message: `${slot.label} branch completed for: ${run.prompt}`,
@@ -715,7 +718,11 @@ describe('ArchitectureRuntimeService', () => {
         nodeId: 'innovator',
         data: expect.objectContaining({
           runtimeGuard: 'recoverable_node_error',
-          errorMessage: '429 Too Many Requests',
+          errorCode: 'RATE_LIMITED',
+          failure: expect.objectContaining({
+            code: 'RATE_LIMITED',
+            retryable: true,
+          }),
           incompleteReason: 'Recoverable runtime error prevented this node from producing a final answer.',
         }),
       }),
@@ -730,7 +737,9 @@ describe('ArchitectureRuntimeService', () => {
     const baseSchema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop')!;
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
       if (slot.id === 'goal_master') {
-        throw new Error('429 Too Many Requests');
+        throw createWorkflowError('RATE_LIMITED', 'provider throttled goal master', {
+          source: 'llm-provider',
+        });
       }
       return {
         message: `${slot.label} branch completed for: ${run.prompt}`,
@@ -771,6 +780,7 @@ describe('ArchitectureRuntimeService', () => {
       }),
       data: expect.objectContaining({
         runtimeGuard: 'recoverable_node_error',
+        errorCode: 'RATE_LIMITED',
       }),
     });
     expect(events.some((event) => event.type === 'final_artifact')).toBe(false);
@@ -795,7 +805,9 @@ describe('ArchitectureRuntimeService', () => {
     };
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
       if (slot.id === 'finalizer') {
-        throw new Error('429 Too Many Requests');
+        throw createWorkflowError('RATE_LIMITED', 'provider throttled finalizer', {
+          source: 'llm-provider',
+        });
       }
       return {
         message: 'Auditor found README.md and MainMenu.tsx evidence.',
@@ -1467,8 +1479,10 @@ describe('ArchitectureRuntimeService', () => {
     expect(events.at(-1)).toMatchObject({
       type: 'router_decision',
       message: 'Runtime stopped after 5 graph steps.',
+      reasonCode: 'max_steps',
     });
     expect(events.at(-1)?.data).toMatchObject({
+      reasonCode: 'max_steps',
       maxNodeVisits: 10,
       maxSteps: 5,
     });
@@ -3019,7 +3033,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.slotType === 'tool_executor' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? { reasonCode: 'max_steps', routeToNodeId: 'final-artifact' } : {}),
       },
     }));
 
@@ -3105,7 +3119,17 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.slotType === 'tool_executor' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master'
+          ? {
+              errorCode: 'RATE_LIMITED',
+              failure: {
+                code: 'RATE_LIMITED',
+                message: '429 Too Many Requests',
+                retryable: true,
+              },
+              routeToNodeId: 'final-artifact',
+            }
+          : {}),
       },
     }));
 
@@ -4142,6 +4166,7 @@ describe('ArchitectureRuntimeService', () => {
           sequence: 3,
           nodeId: 'router',
           roleSlotId: 'router',
+          reasonCode: 'max_steps',
           messagePreview: 'Runtime stopped after 5 graph steps.',
           route: {
             source: 'runtime_fallback',
@@ -4395,6 +4420,7 @@ describe('ArchitectureRuntimeService', () => {
           name: 'spawn_cli_agent',
           args: {
             architectureRunId: runId,
+            schemaId: 'goal-master-delivery-loop',
             nodeId: 'implementer',
             roleSlotId: 'implementer',
             agentId: 'copilot',
@@ -4418,7 +4444,13 @@ describe('ArchitectureRuntimeService', () => {
         createdAt: createdAt + 2,
       },
     ];
-    sessions.list.mockResolvedValue([{ id: `arch-${runId}-implementer` }]);
+    sessions.list.mockResolvedValue([{
+      id: `arch-${runId}-implementer`,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureContext: { architectureRunId: runId },
+      },
+    }]);
     sessions.getMessages.mockResolvedValue(persistedMessages);
     audit.listEntries.mockResolvedValue([
       auditRow({

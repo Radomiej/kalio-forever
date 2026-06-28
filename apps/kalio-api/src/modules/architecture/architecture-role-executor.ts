@@ -3,6 +3,7 @@ import type {
   ArchitectureExecutionEvent,
   ArchitectureExecutionMode,
   ArchitectureContextPolicy,
+  ArchitectureRouterOutput,
   ArchitectureRoleSlot,
   ArchitectureRun,
   ArchitectureSchema,
@@ -10,11 +11,19 @@ import type {
 } from '@kalio/types';
 import { buildArchitectureSlotToolPolicy } from '../chat/architecture-slot-tool-policy';
 import { SUBAGENT_RUNTIME, type SubagentEmit, type SubagentRuntimePort } from '../tool/subagent-runtime.port';
-import { FINAL_ARTIFACT_CONTRACT_INSTRUCTION, parseFinalArtifactContract } from './architecture-final-artifact-contract';
+import { FINAL_ARTIFACT_CONTRACT_INSTRUCTION } from './architecture-final-artifact-contract';
 import { summarizeArchitectureIncomingEvent } from './architecture-incoming-event-summary';
+import {
+  finalArtifactContractFromLegacyText,
+  finalArtifactContractFromStructuredOutput,
+  legacyTextRouteToCall,
+  structuredRouteToCall,
+} from './architecture-structured-output';
+import { structuredOutputForArchitectureSlot } from './architecture-structured-output-contracts';
 import { createArchitectureBranchStreamHook, type ArchitectureBranchStreamSnapshot } from './architecture-stream-hooks';
 import { PersonaService } from '../persona/persona.service';
 import { CredentialsService } from '../credentials/credentials.service';
+import { workflowFailureFromError } from '../../common/utils/workflow-error.util';
 
 export const ARCHITECTURE_ROLE_EXECUTOR = Symbol('ARCHITECTURE_ROLE_EXECUTOR');
 
@@ -142,6 +151,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         architectureContext: input.run.context,
         timeoutMs: this.timeoutMsForSlot(input),
         maxIterations: await this.maxIterationsForSlot(input),
+        structuredOutput: structuredOutputForArchitectureSlot(input.slot),
         vfsMode: 'shared',
         copyOutputs: false,
         autoApproveTools: this.autoApproveToolsForSlot(input),
@@ -153,16 +163,19 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       if (toolEvidence.toolCallCount === 0 && toolEvidence.toolResultCount === 0) {
         throw error;
       }
+      const failure = workflowFailureFromError(error);
       const message = architectureRecoverableErrorMessage(input, error, toolEvidence);
       return {
         message,
         data: {
           ...this.baseData(input, 'subagent_execution'),
           boundedToolLoopExhausted: true,
-          recoverableRuntimeError: error instanceof Error ? error.message : String(error),
+          errorCode: failure.code,
+          failure,
+          recoverableRuntimeError: failure.message,
           response: message,
-          ...this.routeData(message, input.outgoingNodeIds ?? []),
-          ...this.finalArtifactData(input, message),
+          ...this.recoverableRouteData(input, 'recoverable branch error after partial tool evidence; inspect worktree and continue'),
+          ...this.finalArtifactData(input, message, undefined),
           stream: compactStreamSnapshot(streamSnapshot),
           toolEvidence,
         },
@@ -171,18 +184,21 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
 
     const streamSnapshot = streamHook.snapshot();
     const toolEvidence = summarizeToolEvidence(streamSnapshot);
-    const message = architectureSlotMessage(input, result.result, toolEvidence);
-    const boundedToolLoopExhausted = message !== result.result;
+    const boundedToolLoopExhausted = result.reasonCode === 'max_steps';
+    const message = architectureSlotMessage(input, result.result, toolEvidence, boundedToolLoopExhausted);
 
     return {
       message,
       data: {
         ...this.baseData(input, 'subagent_execution'),
         boundedToolLoopExhausted,
+        reasonCode: result.reasonCode,
+        errorCode: result.errorCode,
+        failure: result.failure,
         durationMs: result.durationMs,
         response: message,
-        ...this.routeData(message, input.outgoingNodeIds ?? []),
-        ...this.finalArtifactData(input, message),
+        ...this.routeData(message, result.structuredOutput, input.outgoingNodeIds ?? [], input, boundedToolLoopExhausted),
+        ...this.finalArtifactData(input, message, result.structuredOutput),
         rawSubagentResult: boundedToolLoopExhausted ? result.result : undefined,
         stream: compactStreamSnapshot(streamSnapshot),
         toolEvidence,
@@ -610,7 +626,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
   ): string {
     if (slot.slotType === 'judge') {
       const routeHint = outgoingNodeIds.length > 0
-        ? `Available next nodes are ${outgoingNodeIds.join(', ')}. If acceptance evidence is incomplete, route to the continuation node with route_to(<nodeId>, reason). Route to the final artifact only when incoming graph outputs prove the goal is complete.`
+        ? `Available next nodes are ${outgoingNodeIds.join(', ')}. If acceptance evidence is incomplete, set routerOutput.nextAction to "route_to", routerOutput.targetNodeId to the continuation node, and routerOutput.response to the reason. Route to the final artifact only when incoming graph outputs prove the goal is complete.`
         : 'Explain whether the incoming graph outputs prove the goal is complete.';
       return [
         'Act as a strict Goal Master judge.',
@@ -622,7 +638,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       ].join(' ');
     }
     if (slot.slotType === 'router') {
-      const contract = 'Also include a fenced JSON routerOutput object with selectedStrategy, mergedDecision, acceptedInputs, rejectedInputs, unresolvedConflicts, risks, confidence, and nextAction.';
+      const contract = 'Also include a fenced JSON routerOutput object with selectedStrategy, mergedDecision, acceptedInputs, rejectedInputs, unresolvedConflicts, risks, confidence, and nextAction. When nextAction is "route_to", include targetNodeId and response.';
       if (this.isOrchestrationSlot(slot)) {
         const llmSubagentRule = canUseOrchestratorSubagents
           ? 'LLM sub-agents may be used only for focused checks when a graph node is not the right execution target.'
@@ -633,14 +649,14 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
             ? 'CLI agents are not available in this run. Use Kalio sub-agent tools only for focused checks when a graph node is not the right execution target.'
             : 'CLI agents and LLM sub-agent tools are unavailable for this orchestrator slot; route to the next architecture node instead.';
         const routingRule = canUseOrchestratorSubagents
-          ? 'When the next graph node is known, prefer route_to(targetNodeId, response) over spawning another child.'
-          : 'This run keeps orchestration inside the architecture graph: do not call run_subagent, spawn_subagent, or message_subagent from the orchestrator. Choose the next architecture node with route_to(targetNodeId, response) and let that node execute the work.';
+          ? 'When the next graph node is known, prefer a structured routerOutput route over spawning another child.'
+          : 'This run keeps orchestration inside the architecture graph: do not call run_subagent, spawn_subagent, or message_subagent from the orchestrator. Choose the next architecture node with routerOutput.nextAction="route_to" and routerOutput.targetNodeId, then let that node execute the work.';
         return outgoingNodeIds.length > 0
-          ? `Act as the delivery orchestrator. Define acceptance criteria, decompose the goal into concrete steps, then route graph execution. ${agentMap} ${routingRule} Route to the next implementation node with route_to(targetNodeId, response) once the next step is clear. Do not claim files, tests, or completion unless visible tool output proves them. ${contract}`
+          ? `Act as the delivery orchestrator. Define acceptance criteria, decompose the goal into concrete steps, then route graph execution. ${agentMap} ${routingRule} Route to the next implementation node with structured routerOutput once the next step is clear. Do not claim files, tests, or completion unless visible tool output proves them. ${contract}`
           : `Act as the delivery orchestrator. Define acceptance criteria, decompose the goal into concrete steps, then route graph execution. ${agentMap} ${routingRule} Do not claim files, tests, or completion unless visible tool output proves them. ${contract}`;
       }
       return outgoingNodeIds.length > 0
-        ? `Act as a graph router. Synthesize only the incoming outputs. Do not claim files, tools, or capabilities unless incoming outputs explicitly prove them. When choosing a specific next node, include one line exactly like route_to(targetNodeId, response). ${contract}`
+        ? `Act as a graph router. Synthesize only the incoming outputs. Do not claim files, tools, or capabilities unless incoming outputs explicitly prove them. When choosing a specific next node, emit structured routerOutput with nextAction="route_to", targetNodeId, and response. ${contract}`
         : `Act as a graph router. Synthesize only the incoming outputs and explain the routing decision. Do not claim files, tools, or capabilities unless incoming outputs explicitly prove them. ${contract}`;
     }
     if (slot.slotType === 'finalizer') {
@@ -689,12 +705,23 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       );
   }
 
-  private routeData(message: string, outgoingNodeIds: string[]): Record<string, unknown> {
-    const parsedRoute = parseRouteToCall(message);
+  private routeData(
+    message: string,
+    structuredOutput: unknown,
+    outgoingNodeIds: string[],
+    input: ArchitectureRoleExecutionInput,
+    boundedToolLoopExhausted: boolean,
+  ): Record<string, unknown> {
+    const parsedRoute = structuredRouteToCall(structuredOutput)
+      // TODO: legacy fallback for older subagent runtimes that only persisted router JSON in assistant text.
+      ?? legacyTextRouteToCall(message);
     if (!parsedRoute || !outgoingNodeIds.includes(parsedRoute.targetNodeId)) {
-      return {};
+      return boundedToolLoopExhausted
+        ? this.recoverableRouteData(input, 'bounded evidence pass completed; synthesize from collected tool evidence')
+        : {};
     }
     return {
+      routerOutput: parsedRoute.routerOutput,
       route_to: {
         targetNodeId: parsedRoute.targetNodeId,
         response: parsedRoute.response && parsedRoute.response.length > 0 ? parsedRoute.response : message,
@@ -702,11 +729,43 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     };
   }
 
-  private finalArtifactData(input: ArchitectureRoleExecutionInput, message: string): Record<string, unknown> {
+  private recoverableRouteData(input: ArchitectureRoleExecutionInput, response: string): Record<string, unknown> {
+    const nextNode = input.slot.slotType === 'router' ? input.outgoingNodeIds?.[0] : undefined;
+    if (!nextNode) {
+      return {};
+    }
+    const routerOutput: ArchitectureRouterOutput = {
+      selectedStrategy: nextNode,
+      mergedDecision: response,
+      acceptedInputs: [],
+      rejectedInputs: [],
+      unresolvedConflicts: [],
+      risks: [],
+      confidence: 0.45,
+      nextAction: 'route_to',
+      targetNodeId: nextNode,
+      response,
+    };
+    return {
+      routerOutput,
+      route_to: {
+        targetNodeId: nextNode,
+        response,
+      },
+    };
+  }
+
+  private finalArtifactData(
+    input: ArchitectureRoleExecutionInput,
+    message: string,
+    structuredOutput: unknown,
+  ): Record<string, unknown> {
     if (input.slot.slotType !== 'finalizer') {
       return {};
     }
-    const parsed = parseFinalArtifactContract(message);
+    const parsed = finalArtifactContractFromStructuredOutput(structuredOutput)
+      // TODO: legacy fallback for older subagent runtimes that only persisted finalArtifact JSON in assistant text.
+      ?? finalArtifactContractFromLegacyText(message);
     if (!parsed) {
       return {};
     }
@@ -754,200 +813,14 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
   }
 }
 
-function parseRouteToCall(message: string): { targetNodeId: string; response?: string } | null {
-  const proseRoute = parseRouteToCallFromProse(message);
-  if (proseRoute) {
-    return proseRoute;
-  }
-  return parseRouteToCallFromStructuredOutput(message);
-}
-
-function parseRouteToCallFromProse(message: string): { targetNodeId: string; response?: string } | null {
-  const marker = 'route_to(';
-  const start = message.toLowerCase().indexOf(marker);
-  if (start < 0) {
-    return null;
-  }
-
-  const bodyStart = start + marker.length;
-  let depth = 1;
-  let bodyEnd = -1;
-  for (let index = bodyStart; index < message.length; index += 1) {
-    const char = message[index];
-    if (char === '(') {
-      depth += 1;
-    } else if (char === ')') {
-      depth -= 1;
-      if (depth === 0) {
-        bodyEnd = index;
-        break;
-      }
-    }
-  }
-  if (bodyEnd < 0) {
-    return null;
-  }
-
-  const body = message.slice(bodyStart, bodyEnd);
-  const commaIndex = body.indexOf(',');
-  const rawTarget = commaIndex >= 0 ? body.slice(0, commaIndex) : body;
-  const targetNodeId = normalizedRouteTarget(rawTarget);
-  if (!/^[A-Za-z0-9_.:-]+$/.test(targetNodeId)) {
-    return null;
-  }
-  const response = commaIndex >= 0 ? body.slice(commaIndex + 1).trim() : undefined;
-  return { targetNodeId, response };
-}
-
-function parseRouteToCallFromStructuredOutput(message: string): { targetNodeId: string; response?: string } | null {
-  const candidates = [
-    ...extractFencedJsonBlocks(message),
-    ...extractTaggedJsonBlocks(message, 'routerOutput'),
-    ...extractTaggedJsonBlocks(message, 'router_output'),
-  ];
-  for (const candidate of candidates) {
-    const parsed = parseStructuredRouteOutputCandidate(candidate);
-    if (parsed) {
-      return parsed;
-    }
-  }
-  return null;
-}
-
-function parseStructuredRouteOutputCandidate(raw: string): { targetNodeId: string; response?: string } | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-
-  const output = routeOutputCandidate(parsed);
-  if (!output) {
-    return null;
-  }
-  const nextAction = output['nextAction'];
-  if (typeof nextAction !== 'string' || nextAction.toLowerCase() !== 'route_to') {
-    return null;
-  }
-  const targetNodeIdValue = typeof output['targetNodeId'] === 'string'
-    ? output['targetNodeId']
-    : typeof output['nodeId'] === 'string'
-      ? output['nodeId']
-      : undefined;
-  if (typeof targetNodeIdValue !== 'string') {
-    return null;
-  }
-  const targetNodeId = targetNodeIdValue.trim();
-  if (!/^[A-Za-z0-9_.:-]+$/.test(targetNodeId)) {
-    return null;
-  }
-  const explicitResponse = typeof output['response'] === 'string' && output['response'].trim().length > 0
-    ? output['response'].trim()
-    : undefined;
-  const mergedDecision = typeof output['mergedDecision'] === 'string' && output['mergedDecision'].trim().length > 0
-    ? output['mergedDecision'].trim()
-    : undefined;
-
-  return {
-    targetNodeId,
-    response: explicitResponse ?? mergedDecision,
-  };
-}
-
-function routeOutputCandidate(value: unknown): Record<string, unknown> | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  if (isStructuredRouteOutput(value)) {
-    return value;
-  }
-  if (isRecord(value['routerOutput'])) {
-    return isStructuredRouteOutput(value['routerOutput']) ? value['routerOutput'] : null;
-  }
-  return null;
-}
-
-function isStructuredRouteOutput(value: unknown): value is Record<string, unknown> {
-  return isRecord(value)
-    && (typeof value['nextAction'] === 'string')
-    && (
-      typeof value['targetNodeId'] === 'string'
-      || typeof value['nodeId'] === 'string'
-    )
-    && (
-      typeof value['mergedDecision'] === 'undefined'
-      || typeof value['mergedDecision'] === 'string'
-    )
-    && (
-      typeof value['response'] === 'undefined'
-      || typeof value['response'] === 'string'
-    );
-}
-
-function extractFencedJsonBlocks(text: string): string[] {
-  return [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1]?.trim() ?? '');
-}
-
-function extractTaggedJsonBlocks(text: string, tag: string): string[] {
-  const tagIndex = text.toLowerCase().indexOf(tag.toLowerCase());
-  if (tagIndex < 0) {
-    return [];
-  }
-  const braceIndex = text.indexOf('{', tagIndex);
-  if (braceIndex < 0) {
-    return [];
-  }
-  const block = balancedJsonObject(text, braceIndex);
-  return block ? [block] : [];
-}
-
-function balancedJsonObject(text: string, startIndex: number): string | null {
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = startIndex; index < text.length; index += 1) {
-    const char = text[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char === '\\') {
-      escaped = true;
-      continue;
-    }
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-    if (char === '{') {
-      depth += 1;
-    } else if (char === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        return text.slice(startIndex, index + 1);
-      }
-    }
-  }
-  return null;
-}
-
-function normalizedRouteTarget(rawTarget: string): string {
-  const trimmed = rawTarget.trim();
-  const namedTarget = trimmed.match(/^(?:targetNodeId|nodeId)\s*=\s*['"]?([^'"]+)['"]?$/i);
-  return (namedTarget?.[1] ?? trimmed).trim();
-}
-
 function architectureSlotMessage(
   input: ArchitectureRoleExecutionInput,
   rawMessage: string,
   toolEvidence: ArchitectureToolEvidence,
+  boundedToolLoopExhausted = false,
 ): string {
   if (
-    !isExhaustedSubagentResult(rawMessage)
+    !boundedToolLoopExhausted
     || input.slot.slotType === 'tool_executor'
     || toolEvidence.toolResultCount === 0
   ) {
@@ -961,11 +834,6 @@ function architectureSlotMessage(
   const paths = evidencePaths.length > 0
     ? `Evidence paths: ${evidencePaths.slice(0, 8).join(', ')}.`
     : '';
-  const nextNode = input.outgoingNodeIds?.[0];
-  const route = input.slot.slotType === 'router' && nextNode
-    ? `\nroute_to(${nextNode}, bounded evidence pass completed; synthesize from collected tool evidence)`
-    : '';
-
   if (input.slot.slotType === 'router') {
     return [
       `${input.slot.label} completed a bounded evidence pass.`,
@@ -973,7 +841,6 @@ function architectureSlotMessage(
       paths,
       'Risk: the router did not produce a full narrative before the tool budget ended.',
       'Next step: synthesize from collected evidence and continue to the selected node.',
-      route,
     ].filter((part) => part.length > 0).join(' ');
   }
 
@@ -987,18 +854,22 @@ function architectureSlotMessage(
   ].filter((part) => part.length > 0).join(' ');
 }
 
+const USER_RECOMMENDATION_SLOT_IDS = new Set(['user_advocate', 'ux_researcher']);
+const CRITIC_RECOMMENDATION_SLOT_IDS = new Set(['shadow', 'devil_advocate', 'research_critic', 'critic', 'reviewer', 'qa_quality']);
+const INNOVATOR_RECOMMENDATION_SLOT_IDS = new Set(['innovator']);
+const ANALYST_RECOMMENDATION_SLOT_IDS = new Set(['analyst', 'technical_researcher', 'repo_researcher']);
+
 function boundedRecommendationForSlot(slot: ArchitectureRoleSlot): string {
-  const text = `${slot.id} ${slot.label} ${slot.description}`.toLowerCase();
-  if (text.includes('advocate') || text.includes('user')) {
+  if (USER_RECOMMENDATION_SLOT_IDS.has(slot.id)) {
     return 'prioritize the user-visible improvement with the clearest evidence and lowest onboarding friction';
   }
-  if (text.includes('critic') || text.includes('devil') || text.includes('shadow')) {
+  if (CRITIC_RECOMMENDATION_SLOT_IDS.has(slot.id) || slot.slotType === 'critic') {
     return 'prefer the option with the smallest regression surface and explicit fallback behavior';
   }
-  if (text.includes('innovator')) {
+  if (INNOVATOR_RECOMMENDATION_SLOT_IDS.has(slot.id)) {
     return 'choose the improvement that makes the demo feel more intentional without touching core runtime logic';
   }
-  if (text.includes('analyst') || text.includes('data') || text.includes('cost')) {
+  if (ANALYST_RECOMMENDATION_SLOT_IDS.has(slot.id)) {
     return 'choose the improvement supported by the most direct file evidence and easiest verification path';
   }
   return 'choose the lowest-risk improvement supported by the collected project evidence';
@@ -1017,17 +888,11 @@ function architectureRecoverableErrorMessage(
   const paths = evidencePaths.length > 0
     ? `Evidence paths: ${evidencePaths.slice(0, 8).join(', ')}.`
     : '';
-  const nextNode = input.outgoingNodeIds?.[0];
-  const route = input.slot.slotType === 'router' && nextNode
-    ? `\nroute_to(${nextNode}, recoverable branch error after partial tool evidence; inspect worktree and continue)`
-    : '';
-
   return [
     `${input.slot.label} hit a recoverable branch error: ${errorMessage}.`,
     `Partial tool evidence: ${toolEvidence.toolResultCount} result(s), ${toolEvidence.toolCallCount} call(s), successful=${successful}.`,
     paths,
     'Conclusion: continue the architecture with explicit verification of the visible worktree instead of discarding the child-agent work.',
-    route,
   ].filter((part) => part.length > 0).join(' ');
 }
 
@@ -1064,10 +929,6 @@ function localProjectPathFromContext(context: Record<string, unknown> | undefine
 
 function trimTrailingSlash(value: string): string {
   return value.replace(/[\\/]+$/, '');
-}
-
-function isExhaustedSubagentResult(message: string): boolean {
-  return message.includes('without producing a final answer');
 }
 
 function compactStreamSnapshot(snapshot: ArchitectureBranchStreamSnapshot): Record<string, unknown> {

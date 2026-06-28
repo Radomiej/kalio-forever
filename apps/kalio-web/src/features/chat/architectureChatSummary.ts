@@ -125,10 +125,9 @@ export function findArchitectureRunInMessages(messages: ChatMessage[]): Architec
   const runId = toolCalls[0].args['architectureRunId'] as string;
   const schemaLabel = typeof toolCalls[0].args['schemaName'] === 'string'
     ? toolCalls[0].args['schemaName']
-    : messages
-      .find((message) => message.role === 'user')
-      ?.content.match(/\[Architecture:\s*([^\]]+)\]/)?.[1]
-      ?? 'architecture-run';
+    : typeof toolCalls[0].args['schemaId'] === 'string'
+      ? toolCalls[0].args['schemaId']
+      : 'architecture-run';
   const resultByCallId = new Map<string, SubagentToolResult>();
   messages
     .filter((message) => message.role === 'tool_result' && message.toolCallId)
@@ -440,6 +439,7 @@ function toSubagentToolCall(
     args: {
       objective: `${speakerLabel(message.speaker, message.roleSlotId)} branch for: ${result.run.prompt}`,
       architectureRunId: result.run.id,
+      architectureEventId: message.eventId,
       schemaName: schemaLabel,
       nodeId: message.route?.fromNodeId,
       roleSlotId: message.roleSlotId,

@@ -6,6 +6,7 @@ import type { CLIAgentConfigService } from './cli-agent-config.service';
 import type { CLIAgentSessionService } from './cli-agent-session.service';
 import { CLIAgentSessionRuntimeService } from './cli-agent-session-runtime.service';
 import { CLI_AGENT_STOPPED_ERROR, type CLIAgentRunResult } from './cli-agent.service';
+import { createWorkflowError } from '../../common/utils/workflow-error.util';
 
 const { getWorktreeStatusSummaryMock } = vi.hoisted(() => ({
   getWorktreeStatusSummaryMock: vi.fn(),
@@ -43,6 +44,20 @@ function makeRunResult(overrides: Partial<CLIAgentRunResult> = {}): CLIAgentRunR
     outcome: exitCode === 0 ? 'completed' : 'failed',
     ...overrides,
   };
+}
+
+function makeIdleTimeoutError(): Error {
+  return createWorkflowError('TIMEOUT', 'CLI agent idle timed out.', {
+    source: 'cli-agent-idle-timeout',
+    retryable: true,
+  });
+}
+
+function makeStoppedError(): Error {
+  return createWorkflowError('CLI_AGENT_STOPPED', CLI_AGENT_STOPPED_ERROR, {
+    source: 'cli-agent',
+    retryable: false,
+  });
 }
 
 describe('CLIAgentSessionRuntimeService', () => {
@@ -101,12 +116,21 @@ describe('CLIAgentSessionRuntimeService', () => {
       isAllowed: vi.fn().mockResolvedValue(true),
     } as unknown as AllowedPathsService;
     vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
-    vi.mocked(cliAgent.run).mockResolvedValue(makeRunResult({
-      agentId: 'codex',
-      output: 'build passed',
-      exitCode: 0,
-      durationMs: 42,
-    }));
+    vi.mocked(cliAgent.run).mockImplementation(async (request) => {
+      request.emitFn?.('cli_agent:progress', {
+        callId: request.callId,
+        sessionId: request.sessionId,
+        turnId: request.turnId,
+        agentId: request.agentId,
+        chunk: 'build chunk',
+      });
+      return makeRunResult({
+        agentId: 'codex',
+        output: 'build passed',
+        exitCode: 0,
+        durationMs: 42,
+      });
+    });
     const emit = vi.fn();
     const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
 
@@ -129,6 +153,13 @@ describe('CLIAgentSessionRuntimeService', () => {
       expect(emit).toHaveBeenCalledWith('tool:result', expect.objectContaining({ sessionId: 'cli-child-1' }));
       expect(emit).toHaveBeenCalledWith('agent:done', expect.objectContaining({ sessionId: 'cli-child-1' }));
     });
+    const runRequest = vi.mocked(cliAgent.run).mock.calls[0]?.[0];
+    expect(runRequest?.turnId).toMatch(/^cli-turn-cli-run-/);
+    expect(emit).toHaveBeenCalledWith('cli_agent:progress', expect.objectContaining({
+      sessionId: 'cli-child-1',
+      turnId: runRequest?.turnId,
+      chunk: 'build chunk',
+    }));
   });
 
   it('rejects continueSession when the stored workdir is no longer allowed', async () => {
@@ -182,6 +213,40 @@ describe('CLIAgentSessionRuntimeService', () => {
     });
   });
 
+  it('ignores persisted CLI child snapshots with invalid typed status', async () => {
+    vi.mocked(sessions.loadLatestToolResult).mockResolvedValue({
+      id: 'tool-result-1',
+      sessionId: 'cli-child-1',
+      role: 'tool_result',
+      toolCallId: 'cli-run-1',
+      content: JSON.stringify({
+        childSessionId: 'cli-child-1',
+        parentSessionId: 'sess-parent',
+        agentId: 'codex',
+        workdir: 'C:/repo',
+        status: 'finished',
+        lastPrompt: 'Change files',
+        updatedAt: 20,
+        lastOutput: 'build passed',
+        lastExitCode: 0,
+      }),
+      createdAt: 20,
+    });
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    const status = await service.getStatus('sess-parent', 'cli-child-1');
+
+    expect(status).toMatchObject({
+      childSessionId: 'cli-child-1',
+      parentSessionId: 'sess-parent',
+      agentId: 'codex',
+      workdir: 'C:/repo',
+      status: 'idle',
+      lastOutput: undefined,
+      lastExitCode: undefined,
+    });
+  });
+
   it('auto-recovers a durable CLI session after idle timeout when enabled', async () => {
     allowedPaths = {
       isAllowed: vi.fn().mockResolvedValue(true),
@@ -201,7 +266,7 @@ describe('CLIAgentSessionRuntimeService', () => {
     });
     vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
     vi.mocked(cliAgent.run)
-      .mockRejectedValueOnce(new Error('CLI agent "copilot" idle timed out after 900000ms'))
+      .mockRejectedValueOnce(makeIdleTimeoutError())
       .mockResolvedValueOnce(makeRunResult({ agentId: 'copilot', output: 'done', exitCode: 0, durationMs: 10 }));
     const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
 
@@ -237,7 +302,7 @@ describe('CLIAgentSessionRuntimeService', () => {
     });
     vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
     vi.mocked(cliAgent.run)
-      .mockRejectedValueOnce(new Error('CLI agent "copilot" idle timed out after 900000ms'))
+      .mockRejectedValueOnce(makeIdleTimeoutError())
       .mockResolvedValueOnce(makeRunResult({ agentId: 'copilot', output: 'done', exitCode: 0, durationMs: 10 }));
     const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
 
@@ -272,10 +337,10 @@ describe('CLIAgentSessionRuntimeService', () => {
     });
     vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
     vi.mocked(cliAgent.run)
-      .mockRejectedValueOnce(new Error('CLI agent "copilot" idle timed out after 900000ms'))
-      .mockRejectedValueOnce(new Error('CLI agent "copilot" idle timed out after 900000ms'))
-      .mockRejectedValueOnce(new Error('CLI agent "copilot" idle timed out after 900000ms'))
-      .mockRejectedValueOnce(new Error('CLI agent "copilot" idle timed out after 900000ms'));
+      .mockRejectedValueOnce(makeIdleTimeoutError())
+      .mockRejectedValueOnce(makeIdleTimeoutError())
+      .mockRejectedValueOnce(makeIdleTimeoutError())
+      .mockRejectedValueOnce(makeIdleTimeoutError());
     const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
 
     await service.spawnSession({
@@ -304,13 +369,19 @@ describe('CLIAgentSessionRuntimeService', () => {
       exitCode: 0,
       durationMs: 10,
     }));
-    getWorktreeStatusSummaryMock.mockResolvedValue([
-      'Worktree status after CLI agent: clean.',
-      '',
-      'Acceptance hints:',
-      '- expected changed files present in worktree: 0/2',
-      '- missing expected changed files: package.json, src/App.tsx',
-    ].join('\n'));
+    getWorktreeStatusSummaryMock.mockResolvedValue({
+      summary: [
+        'Worktree status after CLI agent: clean.',
+        '',
+        'Acceptance hints:',
+        '- expected changed files present in worktree: 0/2',
+        '- missing expected changed files: package.json, src/App.tsx',
+      ].join('\n'),
+      changedPaths: [],
+      expectedChangedFiles: ['package.json', 'src/App.tsx'],
+      matchedExpectedChangedFiles: [],
+      missingExpectedChangedFiles: ['package.json', 'src/App.tsx'],
+    });
 
     const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
 
@@ -334,6 +405,55 @@ describe('CLIAgentSessionRuntimeService', () => {
     expect(saved.status).toBe('failed');
     expect(saved.exitCode).toBe(1);
     expect(saved.output).toContain('missing expected changed files: package.json, src/App.tsx');
+  });
+
+  it('does not fail a zero-exit CLI turn from acceptance summary text alone', async () => {
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    } as unknown as AllowedPathsService;
+    vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
+    vi.mocked(cliAgent.run).mockResolvedValue(makeRunResult({
+      agentId: 'gemini',
+      output: 'Updated files.',
+      exitCode: 0,
+      durationMs: 10,
+    }));
+    getWorktreeStatusSummaryMock.mockResolvedValue({
+      summary: [
+        'Worktree status after CLI agent:',
+        '- M package.json',
+        '',
+        'Acceptance hints:',
+        '- missing expected changed files: stale text that must not drive status',
+      ].join('\n'),
+      changedPaths: ['package.json'],
+      expectedChangedFiles: ['package.json'],
+      matchedExpectedChangedFiles: ['package.json'],
+      missingExpectedChangedFiles: [],
+    });
+
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    await service.spawnSession({
+      parentSessionId: 'sess-parent',
+      parentToolCallId: 'call-cli-tools',
+      prompt: 'Build the site',
+      workdir: 'C:/repo',
+      agentId: 'gemini',
+      acceptanceHints: {
+        expectedChangedFiles: ['package.json'],
+      },
+    });
+
+    await vi.waitFor(() => expect(sessions.saveToolResult).toHaveBeenCalled());
+    const saved = JSON.parse(vi.mocked(sessions.saveToolResult).mock.calls[0]?.[2] ?? '{}') as {
+      status?: string;
+      exitCode?: number;
+      output?: string;
+    };
+    expect(saved.status).toBe('completed');
+    expect(saved.exitCode).toBe(0);
+    expect(saved.output).toContain('stale text that must not drive status');
   });
 
   it('marks a semantic auth failure as failed even when the raw CLI exit code is 0', async () => {
@@ -391,7 +511,7 @@ describe('CLIAgentSessionRuntimeService', () => {
         }),
     );
     vi.mocked(cliAgent.stop).mockImplementation(() => {
-      rejectRun?.(new Error(CLI_AGENT_STOPPED_ERROR));
+      rejectRun?.(makeStoppedError());
       return true;
     });
 
@@ -441,7 +561,7 @@ describe('CLIAgentSessionRuntimeService', () => {
         }),
     );
     vi.mocked(cliAgent.stop).mockImplementation(() => {
-      rejectRun?.(new Error(CLI_AGENT_STOPPED_ERROR));
+      rejectRun?.(makeStoppedError());
       return true;
     });
 

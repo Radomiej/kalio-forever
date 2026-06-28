@@ -83,6 +83,7 @@ export function useCLIChildCardState(params: {
           lastOutput: liveOutput,
           childTitle: childSession?.title ?? projectionState?.childTitle,
           toolName: params.toolName,
+          isPending: true,
         };
       }
       return projectionState;
@@ -109,6 +110,7 @@ export function useCLIChildCardState(params: {
       ),
       childTitle: childSession?.title ?? projectionState?.childTitle,
       toolName: params.toolName,
+      isPending: projectionState?.isPending === true && !childSession,
     };
   }, [
     agentId,

@@ -1,4 +1,4 @@
-import type { LLMConfig, ToolMeta } from '@kalio/types';
+import type { LLMConfig, LLMStructuredOutputRequest, ToolMeta } from '@kalio/types';
 import type { InternalLLMChunk } from './llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 
@@ -9,6 +9,7 @@ export interface LLMSourceParams {
   messageId: string;
   model?: string;
   abortSignal?: AbortSignal;
+  structuredOutput?: LLMStructuredOutputRequest;
 }
 
 /**

@@ -32,12 +32,46 @@ const STRING_BUSINESS_LOGIC_RULES = [
   {
     check: 'identifier-fragment-branch',
     severity: 'MEDIUM',
-    pattern: /\b(?:id|sessionId|runId|schemaId)\b[^\r\n;]{0,120}(?:includes\s*\(|startsWith\s*\(|endsWith\s*\(|match\s*\()/,
+    pattern: /\b(?:id|sessionId|runId|schemaId|toolCallId|messageId|taskId|nodeId)\b\s*(?:\?\.)?\.\s*(?:includes|startsWith|endsWith|match)\s*\(/,
+  },
+  {
+    check: 'string-equals-branch',
+    severity: 'MEDIUM',
+    pattern: /(?:['"`][^'"`]*['"`]|\b(?:message|content|prompt|text|label|title|name|summary|description)\b[^\r\n;]{0,120})\.equals\s*\(/,
   },
 ];
 
 function isIgnoredFile(relativeFile) {
   return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(relativeFile);
+}
+
+function isRuntimeControlPath(relativeFile) {
+  return [
+    'apps/kalio-api/src/modules/architecture/',
+    'apps/kalio-api/src/modules/agent-flow/',
+    'apps/kalio-api/src/modules/chat/',
+    'apps/kalio-api/src/modules/cli-agent/',
+    'apps/kalio-api/src/modules/tool/',
+    'apps/kalio-api/src/modules/raapp/',
+    'apps/kalio-web/src/features/chat/graph/',
+    'apps/kalio-web/src/store/agentRuntime',
+    'apps/kalio-web/src/features/sessions/session',
+  ].some((prefix) => relativeFile.startsWith(prefix));
+}
+
+function severityFor(rule, relativeFile) {
+  if (rule.check === 'identifier-fragment-branch' && isRuntimeControlPath(relativeFile)) {
+    return 'HIGH';
+  }
+  return rule.severity;
+}
+
+function isTypeGuardLine(rule, line) {
+  if (rule.check !== 'message-text-branch') {
+    return false;
+  }
+  return /\btypeof\b[^\r\n;]*(?:errorMessage|failureMessage|statusMessage)[^\r\n;]*===\s*['"`]string['"`]/.test(line)
+    || /(?:errorMessage|failureMessage|statusMessage)\s*:\s*typeof\b[^\r\n;]*===\s*['"`]string['"`]/.test(line);
 }
 
 export function extractStringBusinessLogicHits(text, relativeFile = '') {
@@ -54,12 +88,13 @@ export function extractStringBusinessLogicHits(text, relativeFile = '') {
       const pattern = new RegExp(rule.pattern.source, rule.pattern.flags);
       const match = pattern.exec(line);
       if (!match) continue;
+      if (isTypeGuardLine(rule, line)) continue;
 
       hits.push({
         file: relativeFile,
         line: index + 1,
         check: rule.check,
-        severity: rule.severity,
+        severity: severityFor(rule, relativeFile),
         match: match[0].trim().slice(0, 160),
       });
       break;

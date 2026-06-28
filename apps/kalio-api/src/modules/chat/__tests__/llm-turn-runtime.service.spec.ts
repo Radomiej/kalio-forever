@@ -12,6 +12,56 @@ async function* streamFrom(chunks: InternalLLMChunk[]): AsyncIterable<InternalLL
 }
 
 describe('LLMTurnRuntimeService', () => {
+  it('returns provider structured output without routing it through display chunk handlers', async () => {
+    const structuredOutput = {
+      name: 'architecture_router_output',
+      schema: { type: 'object', properties: { nextAction: { const: 'route_to' } }, required: ['nextAction'] },
+      strict: true,
+    };
+    const outputValue = { nextAction: 'route_to', targetNodeId: 'implementer' };
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([
+        { type: 'structured_output', value: outputValue } as unknown as InternalLLMChunk,
+        { type: 'done' },
+      ])),
+    };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }],
+        unboundedHistoryCount: 1,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const processor = {
+      process: vi.fn(async () => undefined),
+    } satisfies Pick<StreamProcessorService, 'process'>;
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      processor as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      { dispatch: vi.fn() } as unknown as ToolDispatchService,
+    );
+
+    const result = await runtime.runAgentLoop({
+      runtimeKind: 'agent-flow-branch',
+      sessionId: 'sid',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [],
+      structuredOutput,
+      abortSignal: new AbortController().signal,
+      emit: vi.fn() as EmitFn,
+      maxIterations: 1,
+    });
+
+    expect(result.structuredOutput).toEqual(outputValue);
+    expect(llmSource.stream).toHaveBeenCalledWith(expect.objectContaining({ structuredOutput }));
+    expect(processor.process).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'structured_output' }),
+      expect.any(Object),
+    );
+  });
+
   it('routes every internal stream through llmSource.stream', async () => {
     const llmSource: ILLMSource = {
       stream: vi.fn(() => streamFrom([

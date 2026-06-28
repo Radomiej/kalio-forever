@@ -8,6 +8,7 @@ interface FakeStream {
   chunks: LLMStreamChunk[];
   toolCalls: LLMToolCall[];
   error?: Error;
+  structuredOutput?: unknown;
 }
 
 function makeLLM(plan: FakeStream): LLMService {
@@ -15,9 +16,10 @@ function makeLLM(plan: FakeStream): LLMService {
     async (
       _msgs: unknown,
       _tools: unknown,
-      options: { onChunk: (c: LLMStreamChunk) => void },
+      options: { onChunk: (c: LLMStreamChunk) => void; onStructuredOutput?: (value: unknown) => void },
     ): Promise<LLMToolCall[]> => {
       for (const c of plan.chunks) options.onChunk(c);
+      if (plan.structuredOutput !== undefined) options.onStructuredOutput?.(plan.structuredOutput);
       if (plan.error) throw plan.error;
       return plan.toolCalls;
     },
@@ -78,6 +80,32 @@ describe('LLMServiceAdapter', () => {
       expect.any(Array),
       expect.objectContaining({ modelOverride: 'mimo-v2.5' }),
     );
+  });
+
+  it('passes structured output schema to LLMService and emits structured_output chunk', async () => {
+    const structuredOutput = {
+      name: 'architecture_router_output',
+      schema: { type: 'object', properties: { nextAction: { const: 'route_to' } }, required: ['nextAction'] },
+      strict: true,
+    };
+    const value = { nextAction: 'route_to', targetNodeId: 'implementer' };
+    const llm = makeLLM({ chunks: [], toolCalls: [], structuredOutput: value });
+    const adapter = new LLMServiceAdapter(llm);
+
+    const out = await collect(adapter.stream({
+      ...baseParams,
+      structuredOutput,
+    }));
+
+    expect(llm.streamChat).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(Array),
+      expect.objectContaining({ structuredOutput }),
+    );
+    expect(out).toEqual([
+      { type: 'structured_output', value },
+      { type: 'done' },
+    ]);
   });
 
   it('emits tool_call chunks before done', async () => {

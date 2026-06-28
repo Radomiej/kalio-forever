@@ -249,9 +249,6 @@ export function isArchitectureWorkflowContainerSession(session: ChatSession): bo
   if (session.kind === 'agent-flow') {
     return true;
   }
-  if (session.id.startsWith('arch-')) {
-    return true;
-  }
   return session.title.trim().toLowerCase().startsWith('architecture:');
 }
 
@@ -415,11 +412,7 @@ function isLegacyTechnicalArchitectureSession(session: ChatSession): boolean {
 
 function looksLikeArchitectureBranchSession(session: ChatSession): boolean {
   return session.kind === 'subagent'
-    && (
-      session.runtimeContext?.runtimeKind === 'agent-flow-branch'
-      || session.id.startsWith('arch-')
-      || session.parentSessionId?.startsWith('arch-') === true
-    );
+    && session.runtimeContext?.runtimeKind === 'agent-flow-branch';
 }
 
 function technicalArchitectureSessionHints(session: ChatSession): string[] {

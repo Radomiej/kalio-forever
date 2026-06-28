@@ -200,6 +200,7 @@ export function ChatInterface() {
   }, []);
   const contextPreview = useContextPreview({
     sessionId: activeSessionId,
+    session: activeSession,
     personaId: conversationShellState.mode === 'launch-form'
       ? selectedPersonaId
       : activeSession?.personaId ?? null,

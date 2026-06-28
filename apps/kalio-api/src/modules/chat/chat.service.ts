@@ -25,6 +25,7 @@ function getChatErrorCode(err: unknown): ChatErrorCode {
       code === 'LLM_PROVIDER_DOWN' ||
       code === 'LLM_QUOTA' ||
       code === 'LLM_BAD_TOOL_ARGS' ||
+      code === 'LLM_BAD_STRUCTURED_OUTPUT' ||
       code === 'MAX_ITERATIONS_REACHED'
     ) {
       return code;

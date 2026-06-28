@@ -78,6 +78,7 @@ export function handleCliChildToolResult(
 export function handleCliChildProgress(deps: CliChildSocketDeps, payload: {
   callId: string;
   sessionId?: string;
+  turnId?: string;
   agentId: string;
   chunk: string;
 }): void {
@@ -91,6 +92,7 @@ export function handleCliChildProgress(deps: CliChildSocketDeps, payload: {
   if (existing) {
     deps.updateCLIChildProjection(existing.childSessionId, {
       status: 'running',
+      ...(payload.turnId ? { turnId: payload.turnId } : {}),
       lastOutput: cliAgentOutput[payload.callId] ?? '',
     });
     return;
@@ -105,6 +107,7 @@ export function handleCliChildProgress(deps: CliChildSocketDeps, payload: {
     childSessionId: payload.sessionId,
     parentSessionId: childSession.parentSessionId,
     parentCallId: childSession.parentToolCallId,
+    ...(payload.turnId ? { turnId: payload.turnId } : {}),
     agentId: payload.agentId,
     status: 'running',
     lastOutput: payload.chunk,

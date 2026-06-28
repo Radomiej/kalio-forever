@@ -391,18 +391,21 @@ describe('useChatSocketEvents CLI child projections', () => {
       fire('cli_agent:progress', {
         callId: 'call-cli-1',
         sessionId: 'cli-child-1',
+        turnId: 'turn-cli-1',
         agentId: 'codex',
         chunk: 'line-1\n',
       });
       fire('cli_agent:progress', {
         callId: 'call-cli-1',
         sessionId: 'cli-child-1',
+        turnId: 'turn-cli-1',
         agentId: 'codex',
         chunk: 'line-2\n',
       });
     });
 
     expect(useAgentStore.getState().cliChildProjections['cli-child-1']?.lastOutput).toBe('line-1\nline-2\n');
+    expect(useAgentStore.getState().cliChildProjections['cli-child-1']?.turnId).toBe('turn-cli-1');
   });
 
   it('rebuilds CLI child projections and re-identifies child sessions after reconnect', async () => {

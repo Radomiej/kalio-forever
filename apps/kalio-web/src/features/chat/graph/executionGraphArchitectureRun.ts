@@ -218,6 +218,5 @@ export function architectureRunContainsMessage(run: ArchitectureRun, message: Ch
     return true;
   }
 
-  const messageId = message.id;
-  return run.trace.some((step) => step.eventId && messageId.includes(step.eventId));
+  return run.trace.some((step) => step.eventId && message.id === step.eventId);
 }

@@ -21,6 +21,30 @@ function makeTurn(overrides: Partial<AgentTurn> = {}): AgentTurn {
 
 describe('replaceArchitectureRunTurn', () => {
   it('replaces a rebuilt history turn for the same architecture run even when prompt ids differ', () => {
+    const currentMessages: ChatMessage[] = [
+      {
+        id: 'architecture:run-1:text:event-2',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: 'Previous workflow result',
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          trace: [],
+          routeHops: [],
+        },
+        createdAt: 1,
+      },
+      {
+        id: 'tool-host',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'architecture:run-1:event-1', name: 'run_subagent', args: { architectureRunId: 'run-1' } }],
+        createdAt: 2,
+      },
+    ];
     const currentTurns: AgentTurn[] = [
       makeTurn({
         id: 'history-turn-0',
@@ -47,6 +71,7 @@ describe('replaceArchitectureRunTurn', () => {
     });
 
     const turns = replaceArchitectureRunTurn({
+      currentMessages,
       currentTurns,
       promptMessageId: 'local-user',
       runId: 'run-1',
@@ -69,6 +94,7 @@ describe('replaceArchitectureRunTurn', () => {
     });
 
     const turns = replaceArchitectureRunTurn({
+      currentMessages: [],
       currentTurns: [staleTurn],
       promptMessageId: 'local-user',
       runId: 'run-2',
@@ -84,6 +110,20 @@ describe('replaceArchitectureRunTurn', () => {
       promptMessageId: 'user-keep',
       items: [{ kind: 'text', messageId: 'architecture:run-keep:text:event-1' }],
     });
+    const currentMessages: ChatMessage[] = [{
+      id: 'architecture:run-keep:text:event-1',
+      sessionId: 'session-1',
+      role: 'assistant',
+      content: 'Keep this run.',
+      architectureRun: {
+        runId: 'run-keep',
+        schemaId: 'strategic-decision-council',
+        status: 'completed',
+        trace: [],
+        routeHops: [],
+      },
+      createdAt: 1,
+    }];
     const nextTurn = makeTurn({
       id: 'architecture-turn-run-3',
       promptMessageId: 'user-3',
@@ -91,6 +131,7 @@ describe('replaceArchitectureRunTurn', () => {
     });
 
     const turns = replaceArchitectureRunTurn({
+      currentMessages,
       currentTurns: [keepTurn],
       promptMessageId: 'user-3',
       runId: 'run-3',
@@ -128,6 +169,13 @@ describe('resolveArchitectureRunTurnUpdate', () => {
         sessionId: 'session-1',
         role: 'assistant',
         content: 'Previous workflow result',
+        architectureRun: {
+          runId: 'run-old',
+          schemaId: 'strategic-decision-council',
+          status: 'completed',
+          trace: [],
+          routeHops: [],
+        },
         createdAt: 1,
       },
       {
@@ -142,6 +190,13 @@ describe('resolveArchitectureRunTurnUpdate', () => {
         sessionId: 'session-1',
         role: 'assistant',
         content: 'Stale current run projection',
+        architectureRun: {
+          runId: 'run-new',
+          schemaId: 'strategic-decision-council',
+          status: 'running',
+          trace: [],
+          routeHops: [],
+        },
         createdAt: 3,
       },
     ];
@@ -173,6 +228,13 @@ describe('resolveArchitectureRunTurnUpdate', () => {
             sessionId: 'session-1',
             role: 'assistant',
             content: 'Current workflow result',
+            architectureRun: {
+              runId: 'run-new',
+              schemaId: 'strategic-decision-council',
+              status: 'running',
+              trace: [],
+              routeHops: [],
+            },
             createdAt: 4,
           },
         ],

@@ -1,10 +1,14 @@
 import type {
   AgentRunContext,
   ArchitectureSlotToolPolicy,
+  LLMStructuredOutputRequest,
   SocketEvents,
   SubagentCopiedFile,
   ToolMeta,
   VFSMode,
+  WorkflowErrorCode,
+  WorkflowFailure,
+  WorkflowReasonCode,
 } from '@kalio/types';
 
 export const SUBAGENT_RUNTIME = Symbol('SUBAGENT_RUNTIME');
@@ -31,13 +35,19 @@ export interface RunSubagentRequest {
   copyTargetPrefix?: string;
   emit?: SubagentEmit;
   parentAgentRun?: AgentRunContext;
+  structuredOutput?: LLMStructuredOutputRequest;
 }
 
 export interface RunSubagentResult {
   result: string;
+  structuredOutput?: unknown;
   taskId: string;
   childSessionId: string;
   parentSessionId: string;
+  status?: 'completed' | 'failed' | 'cancelled';
+  reasonCode?: WorkflowReasonCode;
+  errorCode?: WorkflowErrorCode;
+  failure?: WorkflowFailure;
   vfsMode: VFSMode;
   vfsSessionId: string;
   copiedFiles: SubagentCopiedFile[];

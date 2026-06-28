@@ -545,4 +545,33 @@ describe('ArchitectureRunTimeline', () => {
     expect(onOpenBranch).not.toHaveBeenCalled();
     expect(onOpenStep).toHaveBeenCalledWith({ eventId: undefined, nodeId: 'analyst' });
   });
+
+  it('renders trace steps without prose content instead of crashing on string cleanup', () => {
+    const run: ArchitectureChatRunSummary = {
+      runId: 'run-missing-content',
+      schemaId: 'strategic-decision-council',
+      status: 'running',
+      routeHops: [],
+      trace: [
+        {
+          speaker: 'finalizer',
+          content: undefined as unknown as string,
+          eventId: 'run-missing-content:event:9',
+          nodeId: 'final-artifact',
+        },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent(
+      'Final answer produced from the routed graph outputs.',
+    );
+  });
 });

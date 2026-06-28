@@ -84,6 +84,11 @@ export interface ArchitectureRuntimeContext extends Record<string, unknown> {
   executionCwd?: string;
 }
 
+export interface CLIAgentRuntimeContext {
+  agentId: string;
+  workdir: string;
+}
+
 export function architectureSessionPrefixForRun(runId: ID): ID {
   const normalizedRunId = runId.trim();
   return normalizedRunId.startsWith('arch-') ? normalizedRunId : `arch-${normalizedRunId}`;
@@ -107,9 +112,11 @@ export interface SessionRuntimeContext {
   explicitToolNames?: string[];
   systemPromptProfile?: SystemPromptProfile;
   toolPolicyProfile?: ToolPolicyProfile;
+  pendingHostSession?: boolean;
   architectureSlotId?: ID;
   architectureSlotPolicy?: ArchitectureSlotToolPolicy;
   architectureContext?: ArchitectureRuntimeContext;
+  cliAgentContext?: CLIAgentRuntimeContext;
 }
 
 type ContextPreviewBase = {
@@ -179,6 +186,13 @@ export interface LLMStreamChunk {
   thinking?: boolean;
   /** Provider-reported usage when available from a terminal stream chunk. */
   usage?: { promptTokens: number; completionTokens: number; totalTokens?: number };
+}
+
+export interface LLMStructuredOutputRequest {
+  name: string;
+  schema: Record<string, unknown>;
+  strict?: boolean;
+  description?: string;
 }
 
 export interface LLMToolCall {
@@ -387,6 +401,75 @@ export type AgentFlowRunStatus = 'queued' | 'running' | 'waiting_on_orchestrator
 export type AgentFlowReturnMode = 'summary' | 'full_trace' | 'artifacts_only';
 export type AgentFlowStartMode = 'durable' | 'blocking';
 export type AgentFlowPhase = 'strategy' | 'research' | 'debate' | 'build' | 'qa' | 'hitl' | 'custom';
+export type WorkflowReasonCode =
+  | 'user_stop'
+  | 'system_stop'
+  | 'max_steps'
+  | 'max_node_visits'
+  | 'return_to_orchestrator'
+  | 'runtime_pause'
+  | 'runtime_missing'
+  | 'runtime_stalled'
+  | 'unresolved_cli_children'
+  | 'return_to_orchestrator_cap_exceeded'
+  | 'resume_failed'
+  | 'missing_final_artifact'
+  | 'finalization_missing'
+  | 'final_artifact_blocker'
+  | 'final_artifact_accepted'
+  | 'external_quality_gate_passed'
+  | 'external_quality_gate_failed';
+export type WorkflowErrorCode =
+  | 'RATE_LIMITED'
+  | 'TIMEOUT'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'PROVIDER_UNAUTHORIZED'
+  | 'INVALID_ARGUMENT'
+  | 'CONTRACT_VIOLATION'
+  | 'CLI_AGENT_SESSION_METADATA_MISSING'
+  | 'CLI_AGENT_STOPPED'
+  | 'SUBAGENT_TIMEOUT'
+  | 'RAAPP_RELEASE_NOT_FOUND'
+  | 'UNKNOWN';
+export type WorkflowEvidenceKind =
+  | 'BUILD_RESULT'
+  | 'GIT_STATUS'
+  | 'FINAL_ARTIFACT'
+  | 'QUALITY_GATE'
+  | 'TOOL_RESULT'
+  | 'CLI_CHILD'
+  | 'VFS_WRITE'
+  | 'VFS_READ';
+export type WorkflowEvidenceStatus = 'passed' | 'failed' | 'blocked' | 'unknown';
+
+export interface WorkflowFailure {
+  code: WorkflowErrorCode;
+  source?: string;
+  retryable: boolean;
+  message: string;
+}
+
+export interface WorkflowEvidence {
+  kind: WorkflowEvidenceKind;
+  source?: string;
+  status: WorkflowEvidenceStatus;
+  data?: Record<string, unknown>;
+}
+
+export interface WorkflowRuntimeDecision {
+  status: AgentFlowRunStatus;
+  reasonCode?: WorkflowReasonCode;
+  accepted?: boolean;
+  nextNodeId?: ID;
+  message?: string;
+}
+
+export interface WorkflowEventData extends Record<string, unknown> {
+  reasonCode?: WorkflowReasonCode;
+  errorCode?: WorkflowErrorCode;
+  failure?: WorkflowFailure;
+  runtimeDecision?: WorkflowRuntimeDecision;
+}
 
 export interface AgentRunContext {
   agentRunId: ID;
@@ -468,10 +551,15 @@ export interface AgentFlowTraceItem {
   type: string;
   lifecycle?: AgentFlowLifecycleEvent;
   message: string;
+  reasonCode?: WorkflowReasonCode;
+  errorCode?: WorkflowErrorCode;
+  failure?: WorkflowFailure;
+  evidence?: WorkflowEvidence[];
+  runtimeDecision?: WorkflowRuntimeDecision;
   nodeId?: string;
   roleSlotId?: string;
   route?: ArchitectureRouteDecision;
-  data?: Record<string, unknown>;
+  data?: WorkflowEventData;
   status?: AgentFlowRunStatus;
   createdAt: Timestamp;
 }
@@ -557,6 +645,9 @@ export interface AgentFlowRun {
   nodeVisitCounts?: Record<ID, number>;
   maxIterations?: number;
   waitingForNodeId?: ID;
+  reasonCode?: WorkflowReasonCode;
+  errorCode?: WorkflowErrorCode;
+  failure?: WorkflowFailure;
   returnToOrchestratorCount?: number;
   checkpoint?: AgentFlowCheckpoint;
   summary?: string;
@@ -1041,6 +1132,7 @@ export interface SocketEvents {
       | 'LLM_PROVIDER_DOWN'
       | 'LLM_QUOTA'
       | 'LLM_BAD_TOOL_ARGS'
+      | 'LLM_BAD_STRUCTURED_OUTPUT'
       | 'TOOL_ERROR'
       | 'INTERRUPTED'
       | 'QUEUE_FULL'
@@ -1098,7 +1190,7 @@ export interface SocketEvents {
   'session:identify': { sessionId: ID };
 
   // CLI Agent streaming — server → client
-  'cli_agent:progress': { callId: ID; sessionId: ID; agentId: string; chunk: string };
+  'cli_agent:progress': { callId: ID; sessionId: ID; turnId?: ID; agentId: string; chunk: string };
 
   // Tool argument generation progress — server → client
   // Emitted ~once per second while the LLM streams tool call arguments (before tool:start).
@@ -1613,6 +1705,9 @@ export interface ArchitectureRun {
   rootSessionId?: ID;
   branchSessionIds?: Record<string, ID>;
   status: ArchitectureRunStatus;
+  reasonCode?: WorkflowReasonCode;
+  errorCode?: WorkflowErrorCode;
+  failure?: WorkflowFailure;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   completedAt?: Timestamp;
@@ -1632,6 +1727,7 @@ export interface ArchitectureRouteDecision {
 export type ArchitectureRouterNextAction =
   | 'finalize'
   | 'ask_human'
+  | 'route_to'
   | 'run_more_research'
   | 'rerun_with_different_personas';
 
@@ -1657,6 +1753,8 @@ export interface ArchitectureRouterOutput {
   risks: ArchitectureRouterRisk[];
   confidence: number;
   nextAction: ArchitectureRouterNextAction;
+  targetNodeId?: ID;
+  response?: string;
 }
 
 export interface ArchitectureRouteHop {
@@ -1679,7 +1777,12 @@ export interface ArchitectureExecutionEvent {
   roleSlotId?: string;
   route?: ArchitectureRouteDecision;
   routerOutput?: ArchitectureRouterOutput;
-  data?: Record<string, unknown>;
+  reasonCode?: WorkflowReasonCode;
+  errorCode?: WorkflowErrorCode;
+  failure?: WorkflowFailure;
+  evidence?: WorkflowEvidence[];
+  runtimeDecision?: WorkflowRuntimeDecision;
+  data?: WorkflowEventData;
   createdAt: Timestamp;
 }
 

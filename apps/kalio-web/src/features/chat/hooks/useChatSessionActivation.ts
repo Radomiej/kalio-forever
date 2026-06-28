@@ -8,7 +8,7 @@ import { identifyWatchedSession } from '../../../services/sessionWatchRegistry';
 import { buildCallIdToNameFromMessages, buildTurnsFromHistory } from '../chatUtils';
 import { rebuildCLIChildProjectionsFromMessages } from '../cliChildProjection.model';
 import { hydrateActiveConversationSession } from '../activeConversationSession';
-import { isPendingHostSessionId } from '../pendingHostSession';
+import { isPendingHostSession, isPendingHostSessionId } from '../pendingHostSession';
 import {
   materializeLiveTurnFromHydratedRuntimeState,
 } from './useChatSocketEvents.helpers';
@@ -51,7 +51,8 @@ export function useChatSessionActivation({
 
   useEffect(() => {
     if (!activeSessionId) return;
-    if (isPendingHostSessionId(activeSessionId)) return;
+    const activeSession = useSessionStore.getState().sessions.find((session) => session.id === activeSessionId);
+    if (isPendingHostSession(activeSession) || isPendingHostSessionId(activeSessionId)) return;
 
     identifyWatchedSession(activeSessionId, 'session-activation-active', { sticky: true });
 

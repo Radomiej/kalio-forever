@@ -4,7 +4,7 @@ import type { SessionHistoryFetchResult, SessionHistoryMeta, SessionHistoryWindo
 import { useSessionStore } from '../../store/sessionStore';
 import { hydrateSessionHistoryIntoStore } from './historyHydration';
 import { createAndActivateHostSession } from './launch/sessionLaunchShared';
-import { isPendingHostSessionId } from './pendingHostSession';
+import { isPendingHostSession, isPendingHostSessionId } from './pendingHostSession';
 import { normalizeConversationSessionId } from '../sessions/sessionTreeDisplay';
 import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
 
@@ -130,7 +130,10 @@ export async function activateConversationSession({
 }: ActivateConversationSessionParams): Promise<string> {
   const targetSessionId = normalizeConversationSessionSelection(sessionId, sessions);
   setActiveSession(targetSessionId);
-  persistActiveConversationSessionId(targetSessionId);
+  const sessionById = sessions instanceof Map ? sessions : new Map(sessions.map((session) => [session.id, session]));
+  if (!isPendingHostSession(sessionById.get(targetSessionId))) {
+    persistActiveConversationSessionId(targetSessionId);
+  }
   await onActivated?.(targetSessionId, reason);
   return targetSessionId;
 }

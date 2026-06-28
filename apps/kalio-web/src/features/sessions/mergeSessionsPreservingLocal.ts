@@ -1,11 +1,11 @@
 import type { ChatSession } from '@kalio/types';
-import { isPendingHostSessionId } from '../chat/pendingHostSession';
+import { isPendingHostSession } from '../chat/pendingHostSession';
 
 export function mergeSessionsPreservingLocal(current: ChatSession[], incoming: ChatSession[]): ChatSession[] {
   const currentById = new Map(current.map((session) => [session.id, session] as const));
   const incomingIds = new Set(incoming.map((session) => session.id));
   const pendingLocalSessions = current.filter((session) => (
-    isPendingHostSessionId(session.id) && !incomingIds.has(session.id)
+    isPendingHostSession(session) && !incomingIds.has(session.id)
   ));
 
   return [

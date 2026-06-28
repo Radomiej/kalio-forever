@@ -35,12 +35,9 @@ function normalizeFtsQuery(query: string): string {
   return terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(' ');
 }
 
-function isDuplicateColumnError(err: unknown, columnName: string): boolean {
-  return (
-    err instanceof Error &&
-    /\bduplicate column name\b/i.test(err.message) &&
-    err.message.includes(columnName)
-  );
+function tableHasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: unknown }>;
+  return rows.some((row) => row.name === columnName);
 }
 
 // ── VectorStoreService ───────────────────────────────────────────────────────
@@ -77,14 +74,9 @@ export class VectorStoreService {
       )
     `);
 
-    // Migrate existing DBs that were created before embedding_model column was added
-    try {
+    if (!tableHasColumn(this.db, 'memories', 'embedding_model')) {
       this.db.exec(`ALTER TABLE memories ADD COLUMN embedding_model TEXT NOT NULL DEFAULT ''`);
-    } catch (err) {
-      if (!isDuplicateColumnError(err, 'embedding_model')) {
-        this.logger.error('Failed to migrate memories.embedding_model column', err);
-        throw err;
-      }
+    } else {
       this.logger.debug('memories.embedding_model column already exists; migration skipped');
     }
 

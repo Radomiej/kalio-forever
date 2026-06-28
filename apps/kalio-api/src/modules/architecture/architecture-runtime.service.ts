@@ -17,6 +17,7 @@ import type {
   ArchitectureSchemaEdge,
   ArchitectureSchemaNode,
   CreateArchitectureRunDto,
+  WorkflowReasonCode,
 } from '@kalio/types';
 import { SessionsService } from '../chat/sessions.service';
 import { SessionManagerService } from '../chat/session-manager.service';
@@ -197,10 +198,9 @@ export class ArchitectureRuntimeService {
   private async normalizeCreateRunDto(dto: CreateArchitectureRunDto): Promise<CreateArchitectureRunDto> {
     const validated = this.validateCreateRunDto(dto);
     const inheritedContext = await this.inheritAllowanceContext(validated.context);
-    const contextWithPromptScope = this.addPromptProjectScope(inheritedContext, validated.prompt);
     return {
       ...validated,
-      ...(contextWithPromptScope ? { context: contextWithPromptScope } : {}),
+      ...(inheritedContext ? { context: inheritedContext } : {}),
     };
   }
 
@@ -247,33 +247,6 @@ export class ArchitectureRuntimeService {
     }
 
     return baseline;
-  }
-
-  private addPromptProjectScope(
-    context: Record<string, unknown> | undefined,
-    prompt: string,
-  ): Record<string, unknown> | undefined {
-    if (this.hasProjectScope(context)) {
-      return context;
-    }
-    const inferredProjectPath = inferLocalProjectPathFromPrompt(prompt);
-    if (!inferredProjectPath) {
-      return context;
-    }
-    return {
-      ...(context ?? {}),
-      projectPath: inferredProjectPath,
-      executionCwd: inferredProjectPath,
-    };
-  }
-
-  private hasProjectScope(context: Record<string, unknown> | undefined): boolean {
-    const projectPath = context?.['projectPath'];
-    if (typeof projectPath === 'string' && projectPath.trim().length > 0) {
-      return true;
-    }
-    const executionCwd = context?.['executionCwd'];
-    return typeof executionCwd === 'string' && executionCwd.trim().length > 0;
   }
 
   private addVfsEvidenceToContext(
@@ -376,6 +349,7 @@ export class ArchitectureRuntimeService {
     const stoppedRun: ArchitectureRun = {
       ...run,
       status: 'cancelled',
+      reasonCode: 'user_stop',
       updatedAt: now,
       completedAt: now,
     };
@@ -389,6 +363,7 @@ export class ArchitectureRuntimeService {
       type: 'run_stopped',
       message: 'Architecture run stopped by user.',
       actionSummary: architectureActionSummaryForEvent('run_stopped'),
+      reasonCode: 'user_stop',
       data: {
         reasonCode: 'user_stop',
         stoppedByUser: true,
@@ -804,6 +779,12 @@ export class ArchitectureRuntimeService {
         sequence: event.sequence,
         nodeId: event.nodeId,
         roleSlotId: event.roleSlotId,
+        prompt: event.type === 'run_created' ? run.prompt : undefined,
+        reasonCode: event.reasonCode,
+        errorCode: event.errorCode,
+        failure: event.failure,
+        evidence: event.evidence,
+        runtimeDecision: event.runtimeDecision,
         incompleteReason: typeof event.data?.['incompleteReason'] === 'string' ? event.data['incompleteReason'] : undefined,
         runtimeGuard: typeof event.data?.['runtimeGuard'] === 'string' ? event.data['runtimeGuard'] : undefined,
         toolEvidence: this.toolEvidenceForAudit(event),
@@ -896,13 +877,16 @@ export class ArchitectureRuntimeService {
     const eventTypes = records
       .map((record) => this.stringField(record, 'eventType'))
       .filter((type): type is string => Boolean(type));
-    const events = records
-      .map((record) => ({
-        type: this.stringField(record, 'eventType'),
-        message: this.stringField(record, 'messagePreview') ?? '',
-      }))
-      .filter((event): event is { type: string; message: string } =>
-        event.type !== undefined && this.isArchitectureExecutionEventType(event.type));
+    const events: Array<{ type: string; reasonCode?: WorkflowReasonCode }> = [];
+    for (const record of records) {
+      const type = this.stringField(record, 'eventType');
+      if (!type || !this.isArchitectureExecutionEventType(type)) continue;
+      events.push({
+        type,
+        reasonCode: this.workflowReasonCodeField(record, 'reasonCode')
+          ?? this.workflowReasonCodeField(this.recordField(record, 'data'), 'reasonCode'),
+      });
+    }
     const hasFinalArtifact = eventTypes.includes('final_artifact');
     const hasError = Boolean(error);
     const status: ArchitectureRun['status'] = hasError ? 'failed' : hasFinalArtifact ? 'completed' : this.statusFromEventSummary(events);
@@ -931,11 +915,11 @@ export class ArchitectureRuntimeService {
     }
     return this.statusFromEventSummary(events.map((event) => ({
       type: event.type,
-      message: event.message,
+      reasonCode: this.reasonCodeForEvent(event),
     })));
   }
 
-  private statusFromEventSummary(events: Array<{ type: string; message: string }>): ArchitectureRun['status'] {
+  private statusFromEventSummary(events: Array<{ type: string; reasonCode?: WorkflowReasonCode }>): ArchitectureRun['status'] {
     for (let index = events.length - 1; index >= 0; index -= 1) {
       const event = events[index];
       if (event?.type === 'run_stopped') {
@@ -943,8 +927,7 @@ export class ArchitectureRuntimeService {
       }
       if (
         event?.type === 'router_decision'
-        && event.message.startsWith('Runtime stopped after ')
-        && (event.message.includes(' graph steps.') || event.message.includes('max node visits'))
+        && (event.reasonCode === 'max_steps' || event.reasonCode === 'max_node_visits')
       ) {
         return 'failed';
       }
@@ -994,6 +977,11 @@ export class ArchitectureRuntimeService {
         roleSlotId: this.stringField(data, 'roleSlotId'),
         route,
         routerOutput,
+        reasonCode: this.workflowReasonCodeField(data, 'reasonCode'),
+        errorCode: this.workflowErrorCodeField(data, 'errorCode'),
+        failure: this.workflowFailureField(data, 'failure'),
+        evidence: this.workflowEvidenceArrayField(data, 'evidence'),
+        runtimeDecision: this.workflowRuntimeDecisionField(data, 'runtimeDecision'),
         data,
         createdAt: row.createdAt,
       };
@@ -1029,12 +1017,17 @@ export class ArchitectureRuntimeService {
 
   private promptFromAudit(records: Array<Record<string, unknown>>): string | undefined {
     const created = records.find((record) => record.eventType === 'run_created');
+    const prompt = created ? this.stringField(created, 'prompt') : undefined;
+    if (prompt) {
+      return prompt;
+    }
     const message = created ? this.stringField(created, 'messagePreview') : undefined;
     const prefix = 'Architecture run created for: ';
     if (!message) {
       return undefined;
     }
-    return message.startsWith(prefix) ? message.slice(prefix.length) : message;
+    // TODO: legacy fallback - older audit rows only persisted messagePreview; prompt is now a structured audit field.
+    return message.slice(0, prefix.length) === prefix ? message.slice(prefix.length) : message;
   }
 
   private executionModeFromAudit(record: Record<string, unknown>): ArchitectureExecutionMode {
@@ -1055,6 +1048,84 @@ export class ArchitectureRuntimeService {
   private numberField(record: Record<string, unknown>, key: string): number | undefined {
     const value = record[key];
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  }
+
+  private recordField(record: Record<string, unknown> | undefined, key: string): Record<string, unknown> | undefined {
+    if (!record) return undefined;
+    const value = record[key];
+    return this.isPlainRecord(value) ? value : undefined;
+  }
+
+  private workflowReasonCodeField(record: Record<string, unknown> | undefined, key: string): WorkflowReasonCode | undefined {
+    const value = record?.[key];
+    return typeof value === 'string' && this.isWorkflowReasonCode(value) ? value : undefined;
+  }
+
+  private workflowErrorCodeField(record: Record<string, unknown>, key: string): ArchitectureExecutionEvent['errorCode'] {
+    const value = record[key];
+    return typeof value === 'string' && this.isWorkflowErrorCode(value) ? value : undefined;
+  }
+
+  private workflowFailureField(record: Record<string, unknown>, key: string): ArchitectureExecutionEvent['failure'] {
+    const value = record[key];
+    if (!this.isPlainRecord(value)) return undefined;
+    const code = this.workflowErrorCodeField(value, 'code');
+    const message = this.stringField(value, 'message');
+    const retryable = value['retryable'];
+    if (!code || !message || typeof retryable !== 'boolean') return undefined;
+    const source = this.stringField(value, 'source');
+    return { code, message, retryable, ...(source ? { source } : {}) };
+  }
+
+  private workflowEvidenceArrayField(record: Record<string, unknown>, key: string): ArchitectureExecutionEvent['evidence'] {
+    const value = record[key];
+    if (!Array.isArray(value)) return undefined;
+    const evidence = value
+      .map((item) => this.workflowEvidenceField(item))
+      .filter((item): item is NonNullable<ArchitectureExecutionEvent['evidence']>[number] => item !== undefined);
+    return evidence.length > 0 ? evidence : undefined;
+  }
+
+  private workflowEvidenceField(value: unknown): NonNullable<ArchitectureExecutionEvent['evidence']>[number] | undefined {
+    if (!this.isPlainRecord(value)) return undefined;
+    const kind = value['kind'];
+    const status = value['status'];
+    if (!this.isWorkflowEvidenceKind(kind) || !this.isWorkflowEvidenceStatus(status)) return undefined;
+    const source = this.stringField(value, 'source');
+    const data = this.recordField(value, 'data');
+    return { kind, status, ...(source ? { source } : {}), ...(data ? { data } : {}) };
+  }
+
+  private workflowRuntimeDecisionField(record: Record<string, unknown>, key: string): ArchitectureExecutionEvent['runtimeDecision'] {
+    const value = record[key];
+    if (!this.isPlainRecord(value)) return undefined;
+    const status = value['status'];
+    if (
+      status !== 'queued'
+      && status !== 'running'
+      && status !== 'waiting_on_orchestrator'
+      && status !== 'done'
+      && status !== 'failed'
+      && status !== 'cancelled'
+      && status !== 'blocked'
+    ) {
+      return undefined;
+    }
+    const reasonCode = this.workflowReasonCodeField(value, 'reasonCode');
+    const nextNodeId = this.stringField(value, 'nextNodeId');
+    const message = this.stringField(value, 'message');
+    const accepted = value['accepted'];
+    return {
+      status,
+      ...(reasonCode ? { reasonCode } : {}),
+      ...(typeof accepted === 'boolean' ? { accepted } : {}),
+      ...(nextNodeId ? { nextNodeId } : {}),
+      ...(message ? { message } : {}),
+    };
+  }
+
+  private reasonCodeForEvent(event: ArchitectureExecutionEvent): WorkflowReasonCode | undefined {
+    return event.reasonCode ?? this.workflowReasonCodeField(event.data, 'reasonCode');
   }
 
   private routeDecisionField(record: Record<string, unknown>, key: string): ArchitectureRouteDecision | undefined {
@@ -1098,6 +1169,58 @@ export class ArchitectureRuntimeService {
       || value === 'run_stopped';
   }
 
+  private isWorkflowReasonCode(value: string): value is WorkflowReasonCode {
+    return value === 'user_stop'
+      || value === 'system_stop'
+      || value === 'max_steps'
+      || value === 'max_node_visits'
+      || value === 'return_to_orchestrator'
+      || value === 'runtime_pause'
+      || value === 'runtime_missing'
+      || value === 'runtime_stalled'
+      || value === 'unresolved_cli_children'
+      || value === 'return_to_orchestrator_cap_exceeded'
+      || value === 'resume_failed'
+      || value === 'missing_final_artifact'
+      || value === 'finalization_missing'
+      || value === 'final_artifact_blocker'
+      || value === 'final_artifact_accepted'
+      || value === 'external_quality_gate_passed'
+      || value === 'external_quality_gate_failed';
+  }
+
+  private isWorkflowErrorCode(value: string): value is NonNullable<ArchitectureExecutionEvent['errorCode']> {
+    return value === 'RATE_LIMITED'
+      || value === 'TIMEOUT'
+      || value === 'PROVIDER_UNAVAILABLE'
+      || value === 'PROVIDER_UNAUTHORIZED'
+      || value === 'INVALID_ARGUMENT'
+      || value === 'CONTRACT_VIOLATION'
+      || value === 'CLI_AGENT_SESSION_METADATA_MISSING'
+      || value === 'CLI_AGENT_STOPPED'
+      || value === 'SUBAGENT_TIMEOUT'
+      || value === 'RAAPP_RELEASE_NOT_FOUND'
+      || value === 'UNKNOWN';
+  }
+
+  private isWorkflowEvidenceKind(value: unknown): value is NonNullable<ArchitectureExecutionEvent['evidence']>[number]['kind'] {
+    return value === 'BUILD_RESULT'
+      || value === 'GIT_STATUS'
+      || value === 'FINAL_ARTIFACT'
+      || value === 'QUALITY_GATE'
+      || value === 'TOOL_RESULT'
+      || value === 'CLI_CHILD'
+      || value === 'VFS_WRITE'
+      || value === 'VFS_READ';
+  }
+
+  private isWorkflowEvidenceStatus(value: unknown): value is NonNullable<ArchitectureExecutionEvent['evidence']>[number]['status'] {
+    return value === 'passed'
+      || value === 'failed'
+      || value === 'blocked'
+      || value === 'unknown';
+  }
+
   private isArchitectureRouteDecision(value: unknown): value is ArchitectureRouteDecision {
     return this.isPlainRecord(value)
       && (value.source === 'agent' || value.source === 'router' || value.source === 'parallel' || value.source === 'runtime_fallback')
@@ -1124,8 +1247,21 @@ export class ArchitectureRuntimeService {
       && (
         value.nextAction === 'finalize'
         || value.nextAction === 'ask_human'
+        || value.nextAction === 'route_to'
         || value.nextAction === 'run_more_research'
         || value.nextAction === 'rerun_with_different_personas'
+      )
+      && (
+        value.nextAction !== 'route_to'
+        || typeof value.targetNodeId === 'string'
+      )
+      && (
+        value.targetNodeId === undefined
+        || typeof value.targetNodeId === 'string'
+      )
+      && (
+        value.response === undefined
+        || typeof value.response === 'string'
       );
   }
 
@@ -1421,11 +1557,3 @@ export class ArchitectureRuntimeService {
 
 }
 
-function inferLocalProjectPathFromPrompt(prompt: string): string | undefined {
-  const quotedMatch = prompt.match(/["']([A-Za-z]:\\[^"'\r\n]+)["']/);
-  if (quotedMatch?.[1]) {
-    return quotedMatch[1].trim();
-  }
-  const plainMatch = prompt.match(/\b([A-Za-z]:\\[^\s"'`]+)\b/);
-  return plainMatch?.[1]?.trim();
-}

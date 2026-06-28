@@ -804,7 +804,7 @@ describe('ArchitectureAgentFlowAdapter', () => {
     expect(snapshot?.result?.nextActions).toContain('Wait for linked CLI child agents to complete before accepting the AgentFlow result.');
   });
 
-  it('allows finalization when a later verifier terminal evidence proves child work even if an earlier child is still running', async () => {
+  it('allows finalization when later typed verifier evidence proves child work even if an earlier child is still running', async () => {
     const run: ArchitectureRun = {
       id: 'run-final-with-verifier-terminal-evidence',
       schemaId: 'goal-master-delivery-loop',
@@ -845,9 +845,23 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 2,
         type: 'participant_output',
-        message: 'Verifier validated terminal build output and got commit. Build passed, git status branch is clean.',
+        message: 'Verifier validated terminal build output and repository state.',
         nodeId: 'verifier',
         roleSlotId: 'verifier',
+        evidence: [
+          {
+            kind: 'BUILD_RESULT',
+            source: 'terminal_output',
+            status: 'passed',
+            data: { exitCode: 0 },
+          },
+          {
+            kind: 'GIT_STATUS',
+            source: 'git',
+            status: 'passed',
+            data: { clean: true },
+          },
+        ],
         data: {
           toolEvidence: {
             toolCallCount: 1,
@@ -890,6 +904,120 @@ describe('ArchitectureAgentFlowAdapter', () => {
     expect(snapshot?.result?.status).toBe('done');
     expect(snapshot?.events.some((event) => event.type === 'flow:unresolved_cli_children')).toBe(false);
     expect(snapshot?.result?.nextActions).not.toContain('Wait for linked CLI child agents to complete before accepting the AgentFlow result.');
+  });
+
+  it('does not accept finalization from status text without typed runtime decision', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-text-only-finalization',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Continue after external QA',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-text-only-finalization-root',
+      status: 'running',
+      createdAt: 1,
+      updatedAt: 12,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-goal-master',
+        runId: run.id,
+        sequence: 1,
+        type: 'router_decision',
+        message: 'Status: GO. Delivery accepted with build passes, git status clean, and final-artifact requested.',
+        nodeId: 'goal-master',
+        roleSlotId: 'goal_master',
+        route: {
+          source: 'runtime_fallback',
+          fromNodeId: 'goal-master',
+          selectedNodeIds: ['implementer'],
+          rejectedNodeIds: ['final-artifact'],
+          nextNodeId: 'implementer',
+          response: 'CLI child implementation is incomplete: child status is failed.',
+        },
+        createdAt: 10,
+      },
+      {
+        id: 'event-return',
+        runId: run.id,
+        sequence: 2,
+        type: 'router_decision',
+        message: 'Goal Master returned control to the orchestrator.',
+        reasonCode: 'return_to_orchestrator',
+        nodeId: 'goal-master',
+        roleSlotId: 'goal_master',
+        data: {
+          reasonCode: 'return_to_orchestrator',
+          returnToOrchestrator: true,
+          pendingNodeIds: ['implementer'],
+          visitCounts: { implementer: 3, 'goal-master': 3 },
+        },
+        createdAt: 12,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRun: vi.fn().mockReturnValue(run),
+      findRunDurable: vi.fn(),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-text-only-finalization', {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Continue after external QA',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('waiting_on_orchestrator');
+    expect(snapshot?.result).toBeUndefined();
+    expect(snapshot?.events.some((event) => event.type === 'flow:finalization_missing')).toBe(false);
+  });
+
+  it('does not block a completed final artifact from blocker prose without typed status data', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-final-artifact-text-blocker',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Implement with build proof',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-final-artifact-text-blocker-root',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 12,
+      completedAt: 12,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-final',
+        runId: run.id,
+        sequence: 1,
+        type: 'final_artifact',
+        message: 'Status: blocked. Blocker: missing post-change build log.',
+        nodeId: 'final-artifact',
+        roleSlotId: 'finalizer',
+        createdAt: 12,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRun: vi.fn().mockReturnValue(run),
+      findRunDurable: vi.fn().mockResolvedValue(run),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-final-artifact-text-blocker', {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Implement with build proof',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('done');
+    expect(snapshot?.result?.status).toBe('done');
+    expect(snapshot?.events.some((event) => event.type === 'flow:final_artifact_blocker')).toBe(false);
   });
 
   it('does not finalize when the final artifact contract declares unresolved blockers', async () => {
@@ -1669,9 +1797,23 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 2,
         type: 'router_output',
-        message: 'Goal Master accepted external QA: build exited 0, git status shows only the intended files, and branch is demo49. route_to(final-artifact, accepted)',
+        message: 'Goal Master accepted typed external QA evidence. route_to(final-artifact, accepted)',
         nodeId: 'goal-master',
         roleSlotId: 'goal_master',
+        evidence: [
+          {
+            kind: 'BUILD_RESULT',
+            source: 'terminal_output',
+            status: 'passed',
+            data: { exitCode: 0 },
+          },
+          {
+            kind: 'GIT_STATUS',
+            source: 'git',
+            status: 'passed',
+            data: { clean: true },
+          },
+        ],
         route: {
           source: 'agent',
           fromNodeId: 'goal-master',
@@ -1808,7 +1950,7 @@ describe('ArchitectureAgentFlowAdapter', () => {
     expect(snapshot?.events.some((event) => event.type === 'flow:unresolved_cli_children')).toBe(false);
   });
 
-  it('allows finalization when later final artifact text carries host verification evidence', async () => {
+  it('allows finalization when later final artifact carries typed host verification evidence', async () => {
     const run: ArchitectureRun = {
       id: 'run-final-with-final-artifact-host-proof',
       schemaId: 'goal-master-delivery-loop',
@@ -1865,9 +2007,23 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 3,
         type: 'final_artifact',
-        message: 'Verified delivery accepted: build exited 0, git status shows only the intended file, and branch is demo60.',
+        message: 'Verified delivery accepted with typed host evidence.',
         nodeId: 'final-artifact',
         roleSlotId: 'finalizer',
+        evidence: [
+          {
+            kind: 'BUILD_RESULT',
+            source: 'terminal_output',
+            status: 'passed',
+            data: { exitCode: 0 },
+          },
+          {
+            kind: 'GIT_STATUS',
+            source: 'git',
+            status: 'passed',
+            data: { clean: true },
+          },
+        ],
         createdAt: 20,
       },
     ];
@@ -2088,7 +2244,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         sequence: 3,
         type: 'router_decision',
         message: 'Runtime stopped after 2 graph steps.',
+        reasonCode: 'max_steps',
         data: {
+          reasonCode: 'max_steps',
           maxSteps: 2,
           pendingNodeIds: ['implementer'],
           visitCounts: { orchestrator: 1, 'goal-master': 1 },
@@ -2151,8 +2309,10 @@ describe('ArchitectureAgentFlowAdapter', () => {
         sequence: 1,
         type: 'router_decision',
         message: 'Goal Master returned control to the orchestrator.',
+        reasonCode: 'return_to_orchestrator',
         nodeId: 'goal-master',
         data: {
+          reasonCode: 'return_to_orchestrator',
           returnToOrchestrator: true,
           pendingNodeIds: ['implementer'],
           visitCounts: { implementer: 1, 'goal-master': 1 },
@@ -2216,9 +2376,30 @@ describe('ArchitectureAgentFlowAdapter', () => {
         runId: run.id,
         sequence: 1,
         type: 'router_decision',
-        message: 'Status: GO. Delivery accepted with build passes, git status clean, and final-artifact requested.',
+        message: 'Goal Master accepted typed finalization evidence.',
         nodeId: 'goal-master',
         roleSlotId: 'goal_master',
+        reasonCode: 'final_artifact_accepted',
+        runtimeDecision: {
+          status: 'done',
+          reasonCode: 'final_artifact_accepted',
+          accepted: true,
+          nextNodeId: 'final-artifact',
+        },
+        evidence: [
+          {
+            kind: 'BUILD_RESULT',
+            source: 'terminal_output',
+            status: 'passed',
+            data: { exitCode: 0 },
+          },
+          {
+            kind: 'GIT_STATUS',
+            source: 'git',
+            status: 'passed',
+            data: { clean: true },
+          },
+        ],
         route: {
           source: 'runtime_fallback',
           fromNodeId: 'goal-master',
@@ -2245,9 +2426,11 @@ describe('ArchitectureAgentFlowAdapter', () => {
         sequence: 3,
         type: 'router_decision',
         message: 'Goal Master returned control to the orchestrator.',
+        reasonCode: 'return_to_orchestrator',
         nodeId: 'goal-master',
         roleSlotId: 'goal_master',
         data: {
+          reasonCode: 'return_to_orchestrator',
           returnToOrchestrator: true,
           pendingNodeIds: ['implementer'],
           visitCounts: { implementer: 3, 'goal-master': 3 },
@@ -2300,7 +2483,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         sequence: 1,
         type: 'router_decision',
         message: 'Runtime stopped after 2 graph steps.',
+        reasonCode: 'max_steps',
         data: {
+          reasonCode: 'max_steps',
           maxSteps: 2,
           pendingNodeIds: ['implementer'],
           visitCounts: { orchestrator: 1, 'goal-master': 1 },
@@ -2347,7 +2532,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         sequence: 1,
         type: 'router_decision',
         message: 'Runtime stopped after 1 graph steps.',
+        reasonCode: 'max_steps',
         data: {
+          reasonCode: 'max_steps',
           maxSteps: 1,
           pendingNodeIds: ['goal-master'],
           visitCounts: { implementer: 1 },
@@ -2393,7 +2580,9 @@ describe('ArchitectureAgentFlowAdapter', () => {
         sequence: 1,
         type: 'router_decision',
         message: 'Goal Guard returned control to the orchestrator for QA evidence.',
+        reasonCode: 'return_to_orchestrator',
         data: {
+          reasonCode: 'return_to_orchestrator',
           returnToOrchestrator: true,
           pendingNodeIds: ['orchestrator'],
           visitCounts: { implementer: 1, 'goal-master': 1 },

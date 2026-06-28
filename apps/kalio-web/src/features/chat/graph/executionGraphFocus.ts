@@ -69,14 +69,9 @@ function architectureRunIdForMessage(message: ChatMessage): string | null {
     if (typeof runId === 'string') {
       return runId;
     }
-    const callRunId = call.id.match(/^architecture:([^:]+):/)?.[1];
-    if (callRunId) {
-      return callRunId;
-    }
   }
 
-  const toolRunId = message.toolCallId?.match(/^architecture:([^:]+):/)?.[1];
-  return toolRunId ?? null;
+  return null;
 }
 
 function messageReferencesArchitecture(message: ChatMessage): boolean {

@@ -67,14 +67,17 @@ export function extractExecutionGraphHydrationStatus(
 
 export function extractArchitectureBranchSessionIds(messages: ChatMessage[]): string[] {
   const sessionIds = new Set<string>();
+  const architectureToolCallIds = new Set(messages
+    .flatMap((message) => message.toolCalls ?? [])
+    .filter((toolCall) => typeof toolCall.args['architectureRunId'] === 'string')
+    .map((toolCall) => toolCall.id));
   messages
     .filter((message) => message.role === 'tool_result')
     .forEach((message) => {
       const parsed = parseRecord(message.content);
       const childSessionId = parsed?.['childSessionId'];
-      const taskId = parsed?.['taskId'];
-      const isArchitectureResult = message.toolCallId?.startsWith('architecture:')
-        || (typeof taskId === 'string' && taskId.startsWith('architecture:'));
+      const isArchitectureResult = typeof parsed?.['architectureRunId'] === 'string'
+        || (typeof message.toolCallId === 'string' && architectureToolCallIds.has(message.toolCallId));
       if (typeof childSessionId === 'string' && isArchitectureResult) {
         sessionIds.add(childSessionId);
       }

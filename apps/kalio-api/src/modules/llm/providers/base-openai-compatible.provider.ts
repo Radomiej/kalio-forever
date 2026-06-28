@@ -12,7 +12,8 @@ export type LLMProviderErrorCode =
   | 'LLM_AUTH'
   | 'LLM_PROVIDER_DOWN'
   | 'LLM_QUOTA'
-  | 'LLM_BAD_TOOL_ARGS';
+  | 'LLM_BAD_TOOL_ARGS'
+  | 'LLM_BAD_STRUCTURED_OUTPUT';
 
 export class LLMProviderError extends Error {
   constructor(
@@ -72,6 +73,9 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
             function: { name: t.name, description: t.description, parameters: t.parameters },
           }))
         : undefined,
+      response_format: options.structuredOutput
+        ? { type: 'json_schema', json_schema: options.structuredOutput }
+        : undefined,
       ...this.buildThinkingParams(),
     });
 
@@ -89,6 +93,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
     const toolCalls: LLMToolCall[] = [];
     const toolCallBuffers: Record<string, { name: string; argsRaw: string }> = {};
+    let structuredOutputRaw = '';
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -133,7 +138,11 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
           const content = delta['content'];
           if (typeof content === 'string' && content) {
-            onChunk({ delta: content, done: false, sessionId, messageId });
+            if (options.structuredOutput) {
+              structuredOutputRaw += content;
+            } else {
+              onChunk({ delta: content, done: false, sessionId, messageId });
+            }
           }
 
           // Thinking / reasoning tokens (DeepSeek R1 / MiMo style)
@@ -181,6 +190,15 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       toolCalls.push({ id: uniqueToolCallId(), name: buf.name, args });
     }
 
+    if (options.structuredOutput && !abortSignal?.aborted && structuredOutputRaw.trim().length > 0) {
+      options.onStructuredOutput?.(this.parseStructuredOutput(structuredOutputRaw));
+    } else if (options.structuredOutput && !abortSignal?.aborted && toolCalls.length === 0) {
+      throw new LLMProviderError(
+        'LLM_BAD_STRUCTURED_OUTPUT',
+        `[${this.providerName}] Structured output response was empty`,
+      );
+    }
+
     this.logger.debug(`[${this.providerName}] Streaming complete`, {
       toolCallsCount: toolCalls.length,
     });
@@ -219,6 +237,18 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
   private readNumber(value: unknown): number | undefined {
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  }
+
+  private parseStructuredOutput(raw: string): unknown {
+    const trimmed = raw.trim();
+    try {
+      return JSON.parse(trimmed) as unknown;
+    } catch {
+      throw new LLMProviderError(
+        'LLM_BAD_STRUCTURED_OUTPUT',
+        `[${this.providerName}] Structured output response was not valid JSON`,
+      );
+    }
   }
 
   private async fetchStreamingResponse(body: string, abortSignal?: AbortSignal): Promise<Response> {

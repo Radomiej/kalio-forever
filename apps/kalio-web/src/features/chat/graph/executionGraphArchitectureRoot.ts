@@ -1,5 +1,4 @@
 import {
-  architectureSessionPrefixForRun,
   type ArchitectureGraphProjection,
   type ArchitectureRunStatus,
   type ChatMessage,
@@ -16,9 +15,8 @@ type ToolEvidence = {
   successfulToolNames: string[];
 };
 
-export function architectureRunIdFromRootSession(sessionId: string | null): string | null {
-  const match = sessionId?.match(/^arch-(.+)-root$/);
-  return match?.[1] ?? null;
+export function architectureRunIdFromRootSession(session: ChatSession | null | undefined): string | null {
+  return session?.runtimeContext?.architectureContext?.architectureRunId ?? null;
 }
 
 export function buildArchitectureRootGraphModel(input: {
@@ -238,10 +236,18 @@ function stringArray(value: unknown): string[] {
 }
 
 function branchSessionMap(runId: string, rootSessionId: string, sessions: ChatSession[]): Map<string, string> {
-  const sessionPrefix = `${architectureSessionPrefixForRun(runId)}-`;
   const pairs = sessions
-    .filter((session) => session.kind === 'subagent' && session.parentSessionId === rootSessionId && session.id.startsWith(sessionPrefix))
-    .map((session): [string, string] => [normalizeNodeId(session.id.slice(sessionPrefix.length)), session.id]);
+    .filter((session) => (
+      session.kind === 'subagent'
+      && session.parentSessionId === rootSessionId
+      && session.runtimeContext?.architectureContext?.architectureRunId === runId
+    ))
+    .map((session): [string, string] | null => {
+      const nodeId = session.runtimeContext?.architectureContext?.roleSlotId
+        ?? session.runtimeContext?.architectureSlotId;
+      return nodeId ? [normalizeNodeId(nodeId), session.id] : null;
+    })
+    .filter((pair): pair is [string, string] => pair !== null);
   const result = new Map(pairs);
   const finalizerSessionId = result.get('finalizer');
   if (finalizerSessionId && !result.has('final-artifact')) {

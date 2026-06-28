@@ -36,7 +36,7 @@ export function architectureTraceActivitySummary(
   return 'Branch completed its role-specific response.';
 }
 
-export function compactArchitectureTraceContent(content: string, speaker: TraceSpeaker): string {
+export function compactArchitectureTraceContent(content: string | null | undefined, speaker: TraceSpeaker): string {
   const cleaned = stripArchitectureRuntimeScaffold(content);
   if (cleaned) {
     return cleaned;
@@ -44,8 +44,9 @@ export function compactArchitectureTraceContent(content: string, speaker: TraceS
   return architectureTraceActivitySummary(speaker);
 }
 
-export function stripArchitectureRuntimeScaffold(content: string): string {
-  const normalized = content
+export function stripArchitectureRuntimeScaffold(content: string | null | undefined): string {
+  const source = typeof content === 'string' ? content : '';
+  const normalized = source
     .replace(/^\[MockLLM\]\s*Echo:\s*/i, '')
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, ' ')
     .replace(/\r\n/g, '\n');

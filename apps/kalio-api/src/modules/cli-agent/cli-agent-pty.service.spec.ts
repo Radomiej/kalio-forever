@@ -75,6 +75,7 @@ describe('CLIAgentPtyService', () => {
       workdir: 'C:/repo',
       callId: 'call-1',
       sessionId: 'session-1',
+      turnId: 'turn-1',
       inactivityTimeoutMs: 60_000,
       maxOutputChars: 16_000,
       emitFn,
@@ -100,6 +101,7 @@ describe('CLIAgentPtyService', () => {
     expect(emitFn).toHaveBeenCalledWith('cli_agent:progress', {
       callId: 'call-1',
       sessionId: 'session-1',
+      turnId: 'turn-1',
       agentId: 'codex',
       chunk: 'KALIO_CODEX_OK',
     });

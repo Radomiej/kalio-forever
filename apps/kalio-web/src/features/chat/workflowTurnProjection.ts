@@ -33,7 +33,12 @@ export function resolveWorkflowTurnProjection(
       .find((runId): runId is string => typeof runId === 'string' && runId.trim().length > 0)
     ?? null;
   const architectureMessages = architectureRunId
-    ? messages.filter((message) => {
+    ? (() => {
+      const architectureToolCallIds = new Set(messages
+        .flatMap((message) => message.toolCalls ?? [])
+        .filter((toolCall) => toolCall.args['architectureRunId'] === architectureRunId)
+        .map((toolCall) => toolCall.id));
+      return messages.filter((message) => {
         if (message.architectureRun?.runId === architectureRunId) {
           return true;
         }
@@ -43,11 +48,12 @@ export function resolveWorkflowTurnProjection(
             && toolCall.args['architectureRunId'] === architectureRunId
           ));
         }
-        if (message.role === 'tool_result' && message.toolCallId?.startsWith(`architecture:${architectureRunId}:`)) {
+        if (message.role === 'tool_result' && typeof message.toolCallId === 'string' && architectureToolCallIds.has(message.toolCallId)) {
           return true;
         }
         return false;
-      })
+      });
+    })()
     : turnMessages;
   const persistedArchitectureMessage = [...architectureMessages]
     .reverse()

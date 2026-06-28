@@ -1,14 +1,12 @@
-import type { ArchitectureGraphProjection, ArchitectureSchema, ChatMessage } from '@kalio/types';
+import type { ArchitectureGraphProjection, ArchitectureSchema, ChatMessage, ChatSession } from '@kalio/types';
 import type { SessionsService } from '../chat/sessions.service';
 import type { ArchitectureRegistryService } from './architecture-registry.service';
 import { architectureActionFieldsForEvent } from './architecture-action-summary';
 import { isCompletedCliChildStatus } from './architecture-cli-child-status';
-import { architectureSessionIdForRunSlot, architectureSessionPrefixForRun } from './architecture-session-ids';
+import { architectureSessionIdForRunSlot } from './architecture-session-ids';
 import {
-  eventIdFromToolCallId,
   isCliAgentToolName,
   normalizeCliStatus,
-  normalizeIdentifier,
   parseJsonObject,
   stringField,
   targetPathsFrom,
@@ -30,28 +28,23 @@ export async function reconstructDurableArchitectureGraph(
 async function findPersistedArchitectureMessages(runId: string, sessions: SessionsService): Promise<ChatMessage[]> {
   const messages: ChatMessage[] = [];
   const chatSessions = await sessions.list({ includeArchived: true });
-  const sessionPrefix = `${architectureSessionPrefixForRun(runId)}-`;
   for (const session of chatSessions) {
-    if (!session.id.includes(runId) && !session.parentSessionId?.includes(sessionPrefix)) {
-      const sessionMessages = await sessions.getMessages(session.id);
-      if (sessionMessages.some((message) => messageReferencesArchitectureRun(message, runId))) {
-        messages.push(...sessionMessages);
-      }
+    const sessionMessages = await sessions.getMessages(session.id);
+    if (sessionReferencesArchitectureRun(session, runId)) {
+      messages.push(...sessionMessages);
       continue;
     }
-    messages.push(...await sessions.getMessages(session.id));
+    messages.push(...sessionMessages.filter((message) => messageReferencesArchitectureRun(message, runId)));
   }
   return messages;
 }
 
+function sessionReferencesArchitectureRun(session: ChatSession, runId: string): boolean {
+  return session.runtimeContext?.architectureContext?.architectureRunId === runId;
+}
+
 function messageReferencesArchitectureRun(message: ChatMessage, runId: string): boolean {
-  const sessionPrefix = `${architectureSessionPrefixForRun(runId)}-`;
-  if (
-    message.architectureRun?.runId === runId
-    || message.id.includes(`architecture:${runId}:`)
-    || message.sessionId.includes(runId)
-    || message.content.includes(sessionPrefix)
-  ) {
+  if (message.architectureRun?.runId === runId) {
     return true;
   }
 
@@ -63,7 +56,7 @@ function reconstructGraphFromMessages(
   messages: ChatMessage[],
   registry: ArchitectureRegistryService,
 ): ArchitectureGraphProjection | null {
-  const scopedMessages = messages.filter((message) => messageReferencesArchitectureRun(message, runId));
+  const scopedMessages = messages;
   const persistedSummary = [...scopedMessages].reverse().find((message) => message.architectureRun?.runId === runId)?.architectureRun;
   const schema = schemaForPersistedRun(persistedSummary?.schemaId, scopedMessages, registry);
   if (!schema) {
@@ -82,7 +75,7 @@ function reconstructGraphFromMessages(
       return;
     }
     completedNodeIds.add(nodeId);
-    eventIdsByNodeId.set(nodeId, [...(eventIdsByNodeId.get(nodeId) ?? []), eventIdFromToolCallId(toolCall.id)]);
+    eventIdsByNodeId.set(nodeId, [...(eventIdsByNodeId.get(nodeId) ?? []), eventIdFromToolCall(toolCall)]);
   });
 
   scopedMessages.forEach((message) => {
@@ -131,6 +124,12 @@ function reconstructGraphFromMessages(
     routeHops,
     childAgents: reconstructChildAgents(runId, schema, scopedMessages),
   };
+}
+
+function eventIdFromToolCall(toolCall: NonNullable<ChatMessage['toolCalls']>[number]): string {
+  return stringField(toolCall.args, 'architectureEventId')
+    ?? stringField(toolCall.args, 'eventId')
+    ?? toolCall.id;
 }
 
 function sessionIdForNode(runId: string, slotOrNodeId: string | undefined): string | undefined {
@@ -188,12 +187,12 @@ function reconstructChildAgents(
         continue;
       }
       const previous = childAgents.get(childSessionId);
-      const parent = inferParentFromToolCall(runId, schema, message.sessionId, toolCall.args);
+      const parent = inferParentFromToolCall(schema, toolCall.args);
       childAgents.set(childSessionId, {
         id: childSessionId,
         parentNodeId: parent.nodeId ?? previous?.parentNodeId,
         parentRoleSlotId: parent.roleSlotId ?? previous?.parentRoleSlotId,
-        parentEventId: eventIdFromToolCallId(toolCall.id),
+        parentEventId: eventIdFromToolCall(toolCall),
         kind: 'cli-agent',
         backend: stringField(result, 'agentId') ?? stringField(toolCall.args, 'agentId') ?? previous?.backend,
         status: latestCliStatus(previous, normalizeCliStatus(stringField(result, 'status')), message.createdAt),
@@ -209,22 +208,20 @@ function reconstructChildAgents(
     }
     const snapshot = parseJsonObject(message.content);
     const childSessionId = snapshot ? stringField(snapshot, 'childSessionId') : undefined;
-    const parentSessionId = snapshot ? stringField(snapshot, 'parentSessionId') : undefined;
     if (
       !snapshot
       || !childSessionId
-      || !parentSessionId?.includes(`${architectureSessionPrefixForRun(runId)}-`)
       || !isCliAgentSnapshot(snapshot)
     ) {
       continue;
     }
     const previous = childAgents.get(childSessionId);
-    const parent = inferParentFromToolCall(runId, schema, parentSessionId, {});
+    const parent = inferParentFromToolCall(schema, snapshot);
     childAgents.set(childSessionId, {
       id: childSessionId,
       parentNodeId: previous?.parentNodeId ?? parent.nodeId,
       parentRoleSlotId: previous?.parentRoleSlotId ?? parent.roleSlotId,
-      parentEventId: previous?.parentEventId ?? (typeof message.toolCallId === 'string' ? eventIdFromToolCallId(message.toolCallId) : message.id),
+      parentEventId: previous?.parentEventId ?? message.id,
       kind: 'cli-agent',
       backend: previous?.backend ?? stringField(snapshot, 'agentId'),
       status: latestCliStatus(previous, normalizeCliStatus(stringField(snapshot, 'status')), message.createdAt),
@@ -262,32 +259,23 @@ function latestCliStatus(
 }
 
 function inferParentFromToolCall(
-  runId: string,
   schema: ArchitectureSchema,
-  sessionId: string,
   args: Record<string, unknown>,
 ): { nodeId?: string; roleSlotId?: string } {
   const explicitNodeId = stringField(args, 'nodeId');
   const explicitRoleSlotId = stringField(args, 'roleSlotId');
-  if (explicitNodeId || explicitRoleSlotId) {
-    return { nodeId: explicitNodeId, roleSlotId: explicitRoleSlotId };
-  }
-
-  const sessionPrefix = `${architectureSessionPrefixForRun(runId)}-`;
-  const branchSuffix = sessionId.startsWith(sessionPrefix)
-    ? sessionId.slice(sessionPrefix.length)
-    : undefined;
-  if (!branchSuffix) {
+  if (!explicitNodeId && !explicitRoleSlotId) {
     return {};
   }
-
-  const normalizedSuffix = normalizeIdentifier(branchSuffix);
   const node = schema.nodes.find((candidate) => (
-    normalizeIdentifier(candidate.id) === normalizedSuffix
-    || normalizeIdentifier(candidate.roleSlotId ?? '') === normalizedSuffix
+    candidate.id === explicitNodeId
+    || candidate.roleSlotId === explicitRoleSlotId
+    || candidate.id === explicitRoleSlotId
   ));
-
-  return node ? { nodeId: node.id, roleSlotId: node.roleSlotId } : {};
+  return {
+    nodeId: explicitNodeId ?? node?.id,
+    roleSlotId: explicitRoleSlotId ?? node?.roleSlotId,
+  };
 }
 
 function schemaForPersistedRun(
@@ -302,14 +290,16 @@ function schemaForPersistedRun(
     }
   }
 
-  const userHeader = messages.find((message) => message.role === 'user')
-    ?.content.match(/^\[Architecture:\s*([^\]]+)\]/i)?.[1]?.trim()
-    ?? messages.find((message) => message.role === 'user')
-      ?.content.match(/^Architecture:\s*([^\r\n]+?)(?:\s+v\d+(?:\.\d+)*|\r?\n|$)/i)?.[1]?.trim();
-  if (userHeader) {
-    return registry.findAll().find((schema) => (
-      schema.id === userHeader || schema.name.toLowerCase() === userHeader.toLowerCase()
-    )) ?? null;
+  const toolCallSchemaId = messages
+    .flatMap((message) => message.toolCalls ?? [])
+    .map((toolCall) => toolCall.args['schemaId'])
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    ?.trim();
+  if (toolCallSchemaId) {
+    const schema = registry.findOne(toolCallSchemaId);
+    if (schema) {
+      return schema;
+    }
   }
 
   const toolCallSchemaName = messages
@@ -317,13 +307,9 @@ function schemaForPersistedRun(
     .map((toolCall) => toolCall.args['schemaName'])
     .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
     ?.trim();
-  if (!toolCallSchemaName) {
-    return null;
-  }
-
-  return registry.findAll().find((schema) => (
-    schema.id === toolCallSchemaName || schema.name.toLowerCase() === toolCallSchemaName.toLowerCase()
-  )) ?? null;
+  return toolCallSchemaName
+    ? registry.findAll().find((schema) => schema.id === toolCallSchemaName || schema.name === toolCallSchemaName) ?? null
+    : null;
 }
 
 function reconstructRouteHops(
@@ -341,7 +327,7 @@ function reconstructRouteHops(
       return;
     }
     hops.push({
-      eventId: eventIdFromToolCallId(toolCall.id),
+      eventId: eventIdFromToolCall(toolCall),
       source: 'agent',
       fromNodeId: nodeId,
       toNodeId: routerNodeId,

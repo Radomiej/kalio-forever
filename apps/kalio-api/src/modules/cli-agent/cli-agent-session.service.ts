@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { ChatMessage, ChatSession, ChatSessionKind, LLMToolCall } from '@kalio/types';
+import type { ChatMessage, ChatSession, ChatSessionKind, LLMToolCall, SessionRuntimeContext } from '@kalio/types';
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { DrizzleService } from '../../database/drizzle.service';
@@ -90,14 +90,47 @@ export class CLIAgentSessionService {
   }
 
   async saveSessionMetadata(sessionId: string, metadata: CLIAgentSessionMetadata): Promise<void> {
-    await this.insertMessage({
-      sessionId,
-      role: 'system',
-      content: `${CLI_AGENT_METADATA_PREFIX}${JSON.stringify(metadata)}`,
-    });
+    const [row] = await this.drizzle.db
+      .select({
+        runtimeContext: sessions.runtimeContext,
+        parentSessionId: sessions.parentSessionId,
+        parentToolCallId: sessions.parentToolCallId,
+      })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+
+    if (!row) {
+      return;
+    }
+
+    const runtimeContext: SessionRuntimeContext = {
+      ...(row.runtimeContext ?? { runtimeKind: 'cli-agent' as const }),
+      runtimeKind: 'cli-agent',
+      parentSessionId: row.runtimeContext?.parentSessionId ?? row.parentSessionId ?? undefined,
+      parentToolCallId: row.runtimeContext?.parentToolCallId ?? row.parentToolCallId ?? undefined,
+      toolPolicyProfile: row.runtimeContext?.toolPolicyProfile ?? 'cli-agent',
+      cliAgentContext: metadata,
+    };
+
+    await this.drizzle.db
+      .update(sessions)
+      .set({ runtimeContext, updatedAt: new Date() })
+      .where(eq(sessions.id, sessionId));
   }
 
   async loadSessionMetadata(sessionId: string): Promise<CLIAgentSessionMetadata | null> {
+    const [sessionRow] = await this.drizzle.db
+      .select({ runtimeContext: sessions.runtimeContext })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+
+    const runtimeMetadata = cliAgentMetadataFromRuntimeContext(sessionRow?.runtimeContext);
+    if (runtimeMetadata) {
+      return runtimeMetadata;
+    }
+
     const rows = await this.drizzle.db
       .select({ content: messages.content })
       .from(messages)
@@ -105,6 +138,7 @@ export class CLIAgentSessionService {
       .orderBy(desc(messages.createdAt));
 
     for (const row of rows) {
+      // TODO: legacy fallback for CLI sessions created before metadata moved to typed runtimeContext.
       if (!row.content.startsWith(CLI_AGENT_METADATA_PREFIX)) {
         continue;
       }
@@ -286,4 +320,20 @@ export class CLIAgentSessionService {
       updatedAt: toMs(row.updatedAt),
     };
   }
+}
+
+function cliAgentMetadataFromRuntimeContext(
+  runtimeContext: SessionRuntimeContext | null | undefined,
+): CLIAgentSessionMetadata | null {
+  if (!runtimeContext || runtimeContext.runtimeKind !== 'cli-agent') {
+    return null;
+  }
+  const metadata = runtimeContext.cliAgentContext;
+  if (!metadata || typeof metadata.agentId !== 'string' || typeof metadata.workdir !== 'string') {
+    return null;
+  }
+  return {
+    agentId: metadata.agentId,
+    workdir: metadata.workdir,
+  };
 }

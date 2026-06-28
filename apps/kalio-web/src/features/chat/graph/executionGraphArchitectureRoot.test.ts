@@ -3,9 +3,25 @@ import { describe, expect, it } from 'vitest';
 import { architectureRunIdFromRootSession, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
 
 describe('buildArchitectureRootGraphModel', () => {
-  it('derives architecture run ids from root session ids only when the naming convention matches', () => {
-    expect(architectureRunIdFromRootSession('arch-run-42-root')).toBe('run-42');
-    expect(architectureRunIdFromRootSession('session-1')).toBeNull();
+  it('derives architecture run ids from typed root session runtime context', () => {
+    expect(architectureRunIdFromRootSession({
+      id: 'arch-run-42-root',
+      personaId: 'default',
+      title: 'Architecture root',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureContext: { architectureRunId: 'run-42' },
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    })).toBe('run-42');
+    expect(architectureRunIdFromRootSession({
+      id: 'session-1',
+      personaId: 'default',
+      title: 'Plain chat',
+      createdAt: 1,
+      updatedAt: 1,
+    })).toBeNull();
   });
 
   it('lays out routed architecture nodes left-to-right instead of stacking all roles vertically', () => {
@@ -85,6 +101,14 @@ describe('buildArchitectureRootGraphModel', () => {
           title: 'Goal Master branch',
           kind: 'subagent',
           parentSessionId: 'arch-run-42-root',
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureSlotId: 'goal_master',
+            architectureContext: {
+              architectureRunId: 'run-42',
+              roleSlotId: 'goal_master',
+            },
+          },
           createdAt: 1,
           updatedAt: 1,
         },
@@ -94,6 +118,14 @@ describe('buildArchitectureRootGraphModel', () => {
           title: 'Materializer branch',
           kind: 'subagent',
           parentSessionId: 'arch-run-42-root',
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureSlotId: 'materializer',
+            architectureContext: {
+              architectureRunId: 'run-42',
+              roleSlotId: 'materializer',
+            },
+          },
           createdAt: 1,
           updatedAt: 1,
         },
@@ -181,6 +213,14 @@ describe('buildArchitectureRootGraphModel', () => {
           title: 'Strategic Decision Council: Finalizer',
           kind: 'subagent',
           parentSessionId: 'arch-run-final-root',
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureSlotId: 'finalizer',
+            architectureContext: {
+              architectureRunId: 'run-final',
+              roleSlotId: 'finalizer',
+            },
+          },
           createdAt: 1,
           updatedAt: 1,
         },

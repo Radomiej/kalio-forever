@@ -1,18 +1,3 @@
-const BLOCKING_FINAL_ARTIFACT_PATTERNS = [
-  /\bwe\s+cannot\s+accept\b/i,
-  /\bcannot\s+accept\b/i,
-  /\bnot\s+acceptable\b/i,
-  /build verification\s*[—-]\s*incomplete/i,
-  /\bverification\s*[—-]\s*incomplete\b/i,
-  /\bno\s+post-change\s+build\s+proof\b/i,
-  /\bmissing\s+post-change\s+build\s+log\b/i,
-  /\bmissing\s+build\s+(?:proof|evidence|log)\b/i,
-  /\bstatus\s*:\s*blocked\b/i,
-  /\bblocker\s*:/i,
-  /\bblocker\s+remains\b/i,
-  /\bsingle\s+blocker\b/i,
-];
-
 export type ArchitectureFinalArtifactStatus = 'accepted' | 'blocked' | 'rejected' | 'incomplete';
 
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
@@ -33,9 +18,4 @@ export function finalArtifactStatusFromData(data: Record<string, unknown> | unde
     return 'incomplete';
   }
   return undefined;
-}
-
-export function finalArtifactLegacyTextDeclaresBlockingStatus(message: string | undefined): boolean {
-  if (!message) return false;
-  return BLOCKING_FINAL_ARTIFACT_PATTERNS.some((pattern) => pattern.test(message));
 }

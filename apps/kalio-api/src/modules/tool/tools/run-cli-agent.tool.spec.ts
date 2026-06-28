@@ -17,8 +17,9 @@ function makeAllowedPaths(isAllowed: boolean): AllowedPathsService {
   return { isAllowed: vi.fn().mockResolvedValue(isAllowed) } as unknown as AllowedPathsService;
 }
 
-function makeCLIAgentService(result?: Partial<{ output: string; exitCode: number; durationMs: number; agentId: string; outcome: 'completed' | 'failed'; failureCode: string }>): CLIAgentService {
-  const defaults = { output: '', exitCode: 0, durationMs: 100, agentId: 'copilot' };
+function makeCLIAgentService(result?: Partial<{ output: string; exitCode: number; rawExitCode: number; durationMs: number; agentId: string; outcome: 'completed' | 'failed'; failureCode: 'auth_required' }>): CLIAgentService {
+  const defaults = { output: '', exitCode: 0, rawExitCode: 0, durationMs: 100, agentId: 'copilot', outcome: 'completed' as const };
+  const runResult = { ...defaults, ...result, outcome: result?.outcome ?? defaults.outcome };
   return {
     getAdapter: vi.fn().mockReturnValue({ displayName: 'Copilot CLI' }),
     listAll: vi.fn().mockResolvedValue([
@@ -26,7 +27,7 @@ function makeCLIAgentService(result?: Partial<{ output: string; exitCode: number
       { id: 'gemini', displayName: 'Gemini CLI', available: true },
       { id: 'codex', displayName: 'Codex CLI', available: true },
     ]),
-    run: vi.fn().mockResolvedValue(applySemanticCliOutcome({ ...defaults, ...result })),
+    run: vi.fn().mockResolvedValue(applySemanticCliOutcome(runResult)),
   } as unknown as CLIAgentService;
 }
 
