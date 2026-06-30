@@ -25,7 +25,7 @@ export function buildArchitectureParentChatMessages(
   const branchEvents = events.filter((event) => (
     event.type === 'participant_output'
     && typeof event.roleSlotId === 'string'
-    && !isSyntheticParallelMessage(event.message)
+    && !isSyntheticParallelMessage(eventMessage(event))
   ));
   const toolCalls = branchEvents.map((event) => toSubagentToolCall(schema, run, event));
   if (toolCalls.length > 0) {
@@ -49,7 +49,7 @@ export function buildArchitectureParentChatMessages(
 
   const textEvents = events.filter((event) => (
     (event.type === 'router_decision' || event.type === 'final_artifact' || event.type === 'run_stopped')
-    && !isSyntheticParallelMessage(event.message)
+    && !isSyntheticParallelMessage(eventMessage(event))
   ));
   messages.push(...textEvents.map((event, index) => ({
     id: `architecture:${run.id}:text:${event.id}`,
@@ -83,7 +83,7 @@ function toSubagentToolResult(
   event: ArchitectureExecutionEvent,
 ): SubagentToolResult {
   return {
-    result: event.message,
+    result: eventMessage(event),
     taskId: event.id,
     childSessionId: branchSessionId(run, event),
     parentSessionId,
@@ -124,7 +124,7 @@ function formatParentChatText(run: ArchitectureRun, event: ArchitectureExecution
     : null;
   const failureReason = failureReasonFromEvent(event);
   const incompleteReason = incompleteReasonFromEvent(event);
-  const body = stripRuntimeScaffold(event.message)
+  const body = stripRuntimeScaffold(eventMessage(event))
     || (event.type === 'final_artifact'
       ? 'Final answer produced from the routed graph outputs.'
       : 'Router completed synthesis for the next graph node.');
@@ -146,6 +146,10 @@ function formatRunStoppedText(run: ArchitectureRun, event: ArchitectureExecution
     reason ? `Reason: ${reason}` : null,
     reasonCode ? `Reason code: ${reasonCode}` : null,
   ].filter(Boolean).join('\n\n');
+}
+
+function eventMessage(event: ArchitectureExecutionEvent): string {
+  return typeof event.message === 'string' ? event.message : '';
 }
 
 function speakerLabel(roleSlotId: string | undefined): string {
@@ -203,14 +207,14 @@ function isSyntheticParallelMessage(content: string): boolean {
 }
 
 function failureReasonFromEvent(event: ArchitectureExecutionEvent): string | null {
-  if (event.type !== 'router_decision' || event.message !== 'Architecture run failed.') {
+  if (event.type !== 'router_decision') {
     return null;
   }
-  const error = event.data?.['error'];
-  if (typeof error !== 'string' || error.trim().length === 0) {
-    return null;
-  }
-  const firstLine = error.replace(/\r\n/g, '\n').split('\n').find((line) => line.trim().length > 0)?.trim();
+  const error = workflowFailureMessage(event.failure)
+    ?? workflowFailureMessage(event.data?.failure)
+    // TODO: legacy fallback - older persisted router failure events stored only data.error.
+    ?? stringValue(event.data?.['error']);
+  const firstLine = firstNonEmptyLine(error);
   if (!firstLine) {
     return null;
   }
@@ -230,7 +234,7 @@ function runStoppedReasonFromEvent(event: ArchitectureExecutionEvent): string | 
   if (typeof reason === 'string' && reason.trim().length > 0) {
     return reason.trim();
   }
-  const message = event.message.trim();
+  const message = eventMessage(event).trim();
   return message.length > 0 ? message : null;
 }
 
@@ -244,4 +248,19 @@ function runStoppedReasonCodeFromEvent(event: ArchitectureExecutionEvent): strin
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function workflowFailureMessage(value: unknown): string | null {
+  if (!isPlainRecord(value)) {
+    return null;
+  }
+  return stringValue(value['message']);
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function firstNonEmptyLine(value: string | null): string | null {
+  return value?.replace(/\r\n/g, '\n').split('\n').find((line) => line.trim().length > 0)?.trim() ?? null;
 }

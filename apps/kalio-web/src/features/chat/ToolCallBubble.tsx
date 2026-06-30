@@ -57,12 +57,14 @@ function subAgentFlowResultFromSnapshot(snapshot: AgentFlowRunSnapshot): SubAgen
   if (snapshot.result) {
     return {
       ...snapshot.result,
+      flowDefinitionId: snapshot.result.flowDefinitionId ?? snapshot.run.flowDefinitionId,
       returnToOrchestratorCount: snapshot.result.returnToOrchestratorCount
         ?? snapshot.run.returnToOrchestratorCount,
     };
   }
   return {
     flowRunId: snapshot.run.id,
+    flowDefinitionId: snapshot.run.flowDefinitionId,
     childSessionId: snapshot.run.childSessionId,
     status: snapshot.run.status,
     summary: snapshot.run.summary ?? `AgentFlow ${snapshot.run.flowDefinitionId} is ${snapshot.run.status}.`,

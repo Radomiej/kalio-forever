@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { ChevronDown, BrainCircuit } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
@@ -8,18 +8,18 @@ interface MessageBubbleProps {
   message: ChatMessage;
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
-  const { streamingChunks, thinkingChunks } = useSessionStore();
+export const MessageBubble = memo(function MessageBubble({ message }: MessageBubbleProps) {
+  const liveContent = useSessionStore((state) => state.streamingChunks[message.id] ?? '');
+  const liveThinking = useSessionStore((state) => state.thinkingChunks[message.id] ?? '');
   const [thinkingOpen, setThinkingOpen] = useState(false);
 
   const isUser = message.role === 'user';
   const isStreaming = message.streaming === true;
 
   const displayContent = isStreaming
-    ? (streamingChunks[message.id] ?? '')
+    ? liveContent
     : message.content;
 
-  const liveThinking = thinkingChunks[message.id] ?? '';
   const historicalThinking = message.thinking ?? '';
   const thinkingContent = liveThinking || historicalThinking;
   const hasThinking = thinkingContent.length > 0;
@@ -94,5 +94,5 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       </div>
     </div>
   );
-}
+});
 

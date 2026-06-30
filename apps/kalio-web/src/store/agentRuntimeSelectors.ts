@@ -13,7 +13,6 @@ import {
 } from '../features/sessions/sessionTreeDisplay';
 import {
   classifyRuntimeEvidence,
-  compactRuntimeAttentionText,
   extractLatestVisibleRuntimeEvidence,
 } from './agentRuntimeEvidence';
 import {
@@ -98,6 +97,15 @@ function setRuntimeAttentionItem(
   if (!current || nextItem.priority < current.priority) {
     itemsBySessionId.set(nextItem.sessionId, nextItem);
   }
+}
+
+function recoveredRunDetail(snapshot: RuntimeActivitySnapshot): string | null {
+  if (snapshot.run?.status !== 'interrupted_needs_retry') {
+    return null;
+  }
+  return snapshot.run.safeResume
+    ? 'Backend restarted during LLM work. Retry is safe from the current transcript.'
+    : 'Backend restarted during tool execution. Manual retry avoids duplicate tool execution.';
 }
 
 export function mergeRuntimeSessionStatusSnapshots(
@@ -275,6 +283,7 @@ export function selectRuntimeAttentionItems(params: {
     const classifiedEvidence = classifyRuntimeEvidence(evidence);
     const label = sessionAttentionLabel(session.id, sessionsById);
     const persistedRuntimeEvidence = canProjectPersistedRuntimeEvidence(session);
+    const recoveredDetail = snapshot ? recoveredRunDetail(snapshot) : null;
 
     if (
       classifiedEvidence
@@ -296,6 +305,19 @@ export function selectRuntimeAttentionItems(params: {
         detail: classifiedEvidence.detail,
         actionable: false,
         priority: classifiedEvidence.priority,
+      });
+      return;
+    }
+
+    if (recoveredDetail) {
+      setRuntimeAttentionItem(runtimeItemsBySessionId, {
+        id: `runtime_error:${session.id}`,
+        sessionId: session.id,
+        kind: 'runtime_error',
+        label,
+        detail: recoveredDetail,
+        actionable: false,
+        priority: 18,
       });
       return;
     }
@@ -337,20 +359,15 @@ export function selectRuntimeAttentionItems(params: {
       }
 
       const label = sessionAttentionLabel(targetSessionId, sessionsById);
-      const classifiedEvidence = classifyRuntimeEvidence({
-        source: 'child_output',
-        text: compactRuntimeAttentionText(execution.lastOutput ?? ''),
-      });
-
-      if (classifiedEvidence && (execution.status === 'failed' || execution.status === 'blocked')) {
+      if (execution.status === 'failed' || execution.status === 'blocked') {
         setRuntimeAttentionItem(runtimeItemsBySessionId, {
-          id: `${classifiedEvidence.kind}:${targetSessionId}`,
+          id: `runtime_error:${targetSessionId}`,
           sessionId: targetSessionId,
-          kind: classifiedEvidence.kind,
+          kind: 'runtime_error',
           label,
-          detail: classifiedEvidence.detail,
+          detail: execution.status === 'blocked' ? 'Child execution blocked' : 'Child execution failed',
           actionable: false,
-          priority: classifiedEvidence.priority,
+          priority: 15,
         });
         return;
       }

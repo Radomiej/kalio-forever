@@ -22,6 +22,7 @@ export function buildMcpToolPayload(serverKey: string, tool: MCPToolDiscoveryRes
     requiresConfirmation: false,
     serverKey,
     serverId: serverKey,
+    aliases: [`mcp_${tool.name}`],
   } satisfies MCPTool;
 }
 

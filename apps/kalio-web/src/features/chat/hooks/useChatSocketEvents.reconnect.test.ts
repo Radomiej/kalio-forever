@@ -5,6 +5,34 @@ import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
 
+function makeWorkflowEnvelopeProjection() {
+  return {
+    chat: {
+      runId: 'run-live',
+      messages: [
+        {
+          id: 'finalizer-1',
+          eventId: 'event-finalizer',
+          speaker: 'finalizer' as const,
+          content: 'Final answer.',
+          roleSlotId: 'finalizer',
+          createdAt: 5,
+        },
+      ],
+    },
+    events: [],
+    graph: {
+      runId: 'run-live',
+      schemaId: 'strategic-decision-council',
+      schemaName: 'Strategic Decision Council',
+      status: 'completed' as const,
+      nodes: [],
+      edges: [],
+      routeHops: [],
+    },
+  };
+}
+
 describe('handleSocketReconnect', () => {
   beforeEach(() => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -49,7 +77,6 @@ describe('handleSocketReconnect', () => {
     const setAgentTurns = vi.fn((turns, sessionId?: string | null) => {
       useSessionStore.getState().setAgentTurns(turns, sessionId);
     });
-
     handleSocketReconnect({
       cliChild: {
         upsertCLIChildProjection: vi.fn(),
@@ -511,6 +538,7 @@ describe('handleSocketReconnect', () => {
     const setAgentTurns = vi.fn((turns, sessionId?: string | null) => {
       useSessionStore.getState().setAgentTurns(turns, sessionId);
     });
+    const fetchArchitectureRunProjection = vi.fn(async () => makeWorkflowEnvelopeProjection());
 
     handleSocketReconnect({
       cliChild: {
@@ -546,6 +574,7 @@ describe('handleSocketReconnect', () => {
         throw new Error('sessions unavailable');
       },
       fetchMessages,
+      fetchArchitectureRunProjection,
     });
 
     await waitFor(() => expect(fetchMessages).toHaveBeenCalledWith('session-1'));
@@ -583,6 +612,7 @@ describe('handleSocketReconnect', () => {
     const setAgentTurns = vi.fn((turns, sessionId?: string | null) => {
       useSessionStore.getState().setAgentTurns(turns, sessionId);
     });
+    const fetchArchitectureRunProjection = vi.fn(async () => makeWorkflowEnvelopeProjection());
 
     handleSocketReconnect({
       cliChild: {
@@ -613,6 +643,7 @@ describe('handleSocketReconnect', () => {
       setMessages,
       setAgentTurns,
       hasActiveLoopForSession: () => true,
+      fetchArchitectureRunProjection,
       fetchMessages: async () => [
         {
           id: 'user-1',

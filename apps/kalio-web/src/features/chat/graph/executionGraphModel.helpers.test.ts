@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatSession, Persona } from '@kalio/types';
+import type { ChatMessage, ChatSession, Persona } from '@kalio/types';
 import type { ToolActivity } from '../../../store/agentStore';
 import type { AgentTurn } from '../../../store/sessionStore';
 import {
@@ -9,6 +9,7 @@ import {
   extractArtifactFromData,
   extractCLIAgentSessionResult,
   extractSubagentContextPrompt,
+  getFinalAnswerMessage,
   getTurnStatus,
   statusFromActivity,
 } from './executionGraphModel.helpers';
@@ -217,6 +218,35 @@ describe('executionGraphModel.helpers', () => {
     expect(getTurnStatus(turn, snapshots)).toBe('error');
   });
 
+  it('ignores malformed final-answer content instead of crashing graph projection', () => {
+    const turn = makeTurn({
+      done: true,
+      items: [
+        { kind: 'text', messageId: 'bad-final' },
+        { kind: 'text', messageId: 'good-final' },
+      ],
+    });
+    const messages = new Map<string, ChatMessage>([
+      ['bad-final', {
+        id: 'bad-final',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: undefined as unknown as string,
+        createdAt: 1,
+      }],
+      ['good-final', {
+        id: 'good-final',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: 'Final answer from typed turn.',
+        createdAt: 2,
+      }],
+    ]);
+
+    expect(() => getFinalAnswerMessage(turn, messages)).not.toThrow();
+    expect(getFinalAnswerMessage(turn, messages)?.id).toBe('good-final');
+  });
+
   it('builds copied file artifacts with readable labels and byte previews', () => {
     expect(buildCopiedFileArtifact({
       fromPath: 'wireframe.svg',
@@ -228,6 +258,19 @@ describe('executionGraphModel.helpers', () => {
       label: 'wireframe.svg',
       subtitle: 'sub-agents/child-session-1/wireframe.svg',
       path: 'sub-agents/child-session-1/wireframe.svg',
+      preview: '128 bytes copied',
+    });
+  });
+
+  it('builds copied file artifact fallbacks when copied-file target path is missing', () => {
+    expect(buildCopiedFileArtifact({
+      fromPath: 'wireframe.svg',
+      sizeBytes: 128,
+    } as never)).toMatchObject({
+      id: 'artifact:wireframe.svg',
+      kind: 'file',
+      label: 'wireframe.svg',
+      subtitle: 'wireframe.svg',
       preview: '128 bytes copied',
     });
   });

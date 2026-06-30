@@ -3,6 +3,7 @@ import type { AgentTurn } from '../../store/sessionStore';
 import type { SessionHistoryFetchResult, SessionHistoryMeta, SessionHistoryWindow } from './sessionHistoryApi';
 import { useSessionStore } from '../../store/sessionStore';
 import { hydrateSessionHistoryIntoStore } from './historyHydration';
+import type { FetchArchitectureRunProjection } from './architectureReloadHydration';
 import { createAndActivateHostSession } from './launch/sessionLaunchShared';
 import { isPendingHostSession, isPendingHostSessionId } from './pendingHostSession';
 import { normalizeConversationSessionId } from '../sessions/sessionTreeDisplay';
@@ -33,6 +34,7 @@ export interface SharedConversationHydrationDeps {
   getSessionActiveTurnId: (sessionId: string) => string | null;
   hasActiveLoopForSession: (sessionId: string) => boolean;
   fetchMessages?: (sessionId: string) => Promise<SessionHistoryFetchResult>;
+  fetchArchitectureRunProjection?: FetchArchitectureRunProjection;
 }
 
 interface ActivateConversationSessionParams {
@@ -104,6 +106,7 @@ export async function hydrateActiveConversationSession({
   getSessionActiveTurnId,
   hasActiveLoopForSession,
   fetchMessages,
+  fetchArchitectureRunProjection,
 }: HydrateActiveConversationSessionParams): Promise<ChatMessage[] | null> {
   void mode;
   return hydrateSessionHistoryIntoStore({
@@ -118,6 +121,7 @@ export async function hydrateActiveConversationSession({
     getSessionActiveTurnId,
     hasActiveLoopForSession,
     fetchMessages: fetchMessages ?? fetchConversationSessionMessages,
+    fetchArchitectureRunProjection,
   });
 }
 

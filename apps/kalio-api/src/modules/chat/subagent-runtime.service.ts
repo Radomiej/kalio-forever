@@ -17,6 +17,7 @@ import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
 import { TurnState } from './turn-state';
 import { createWorkflowError, isWorkflowError } from '../../common/utils/workflow-error.util';
+import { RAW_XML_TOOL_CALL_COMPAT_TOOL_NAME } from './raw-tool-call.parser';
 
 const DEFAULT_MAX_ITERATIONS = 8;
 
@@ -337,15 +338,47 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           abortSignal: controller.signal,
           emit: trackingEmit ?? (() => undefined),
           maxIterations,
-          rawXmlToolNames: assembledContext.toolMetas.map((tool) => tool.name),
+          rawXmlToolNames: assembledContext.toolMetas.some((tool) => tool.name === RAW_XML_TOOL_CALL_COMPAT_TOOL_NAME)
+            ? [RAW_XML_TOOL_CALL_COMPAT_TOOL_NAME]
+            : [],
           structuredOutput: request.structuredOutput,
           auditDomain: 'subagent',
           auditMetadata: { ...llmAuditData, ...(request.auditContext ?? {}) },
           firstMessageId: `subagent-${agentRun.agentRunId}`,
           messageIdPrefix: `subagent-${agentRun.agentRunId}`,
           callbacks: {
-            onIterationLimitReached: async ({ iterationCount, currentLimit }) => (
-              this.agentBudgetApprovals.requestAdditionalBudget(
+            onBeforeIteration: async (iteration, messageId, currentLimit) => {
+              trackingEmit?.('agent:budget_progress', {
+                sessionId: childSessionId,
+                turnId,
+                messageId,
+                usedIterations: iteration,
+                currentLimit,
+                status: 'running',
+                runtimeKind,
+                personaId,
+                agentRun,
+                nodeId: typeof request.auditContext?.nodeId === 'string' ? request.auditContext.nodeId : undefined,
+                roleSlotId: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : undefined,
+                updatedAt: Date.now(),
+              });
+            },
+            onIterationLimitReached: async ({ iterationCount, currentLimit }) => {
+              trackingEmit?.('agent:budget_progress', {
+                sessionId: childSessionId,
+                turnId,
+                messageId: `subagent-${agentRun.agentRunId}`,
+                usedIterations: iterationCount,
+                currentLimit,
+                status: 'exhausted',
+                runtimeKind,
+                personaId,
+                agentRun,
+                nodeId: typeof request.auditContext?.nodeId === 'string' ? request.auditContext.nodeId : undefined,
+                roleSlotId: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : undefined,
+                updatedAt: Date.now(),
+              });
+              return this.agentBudgetApprovals.requestAdditionalBudget(
                 {
                   sessionId: childSessionId,
                   turnId,
@@ -366,8 +399,8 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
                   roleSlotId: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : undefined,
                   requestedBy: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : 'subagent',
                 },
-              )
-            ),
+              );
+            },
           },
         }),
         timeoutPromise,

@@ -99,6 +99,7 @@ export function extractSubAgentFlowResult(data: unknown): SubAgentFlowResult | n
 
   return {
     flowRunId: data['flowRunId'],
+    flowDefinitionId: typeof data['flowDefinitionId'] === 'string' ? data['flowDefinitionId'] : undefined,
     parentSessionId: typeof data['parentSessionId'] === 'string' ? data['parentSessionId'] : undefined,
     parentToolCallId: typeof data['parentToolCallId'] === 'string' ? data['parentToolCallId'] : undefined,
     childSessionId: data['childSessionId'],

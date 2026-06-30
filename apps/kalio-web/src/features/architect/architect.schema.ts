@@ -158,11 +158,21 @@ function readNodeBehavior(raw: Record<string, unknown>): ArchitectNode['behavior
   return {
     mode,
     fanOut: readFanOutMode(readString(value, ['fanOut'], undefined)),
-    convergeToNodeId: readString(value, ['convergeToNodeId'], undefined),
     maxBranches: readNumber(value, 'maxBranches', Number.NaN) || undefined,
     scoringPolicy: readScoringPolicy(readString(value, ['scoringPolicy'], undefined)),
     description: readString(value, ['description'], undefined),
   };
+}
+
+function readNodeToolOverride(raw: Record<string, unknown>): ArchitectNode['toolOverride'] | undefined {
+  const value = raw['toolOverride'];
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const allowedToolNames = readStringArray(value, 'allowedToolNames')
+    ?.map((name) => name.trim())
+    .filter(Boolean);
+  return allowedToolNames ? { allowedToolNames } : undefined;
 }
 
 function readSlotType(value: string | undefined): ArchitectureRoleSlot['slotType'] | undefined {
@@ -214,6 +224,7 @@ function normalizeNode(raw: unknown, index: number): ArchitectNode {
     role: readString(raw, ['role', 'type'], undefined),
     roleSlotId,
     maxToolAttempts: hasFiniteNumber(raw, 'maxToolAttempts') ? readNumber(raw, 'maxToolAttempts', 0) : undefined,
+    toolOverride: readNodeToolOverride(raw),
     behavior: readNodeBehavior(raw),
     personaId: readString(raw, ['personaId', 'persona', 'defaultPersonaId'], undefined),
     description: readString(raw, ['description', 'summary'], undefined),
@@ -245,6 +256,8 @@ function applyTopLevelEdges(schema: ArchitectSchema, raw: Record<string, unknown
       fromNodeId: source,
       toNodeId: target,
       label: readString(edge, ['label'], undefined),
+      selection: readEdgeSelection(readString(edge, ['selection'], undefined)),
+      returnToOrchestrator: readBoolean(edge, 'returnToOrchestrator', undefined),
     });
     bySource.set(source, [...(bySource.get(source) ?? []), target]);
   }
@@ -257,6 +270,13 @@ function applyTopLevelEdges(schema: ArchitectSchema, raw: Record<string, unknown
       connections: [...new Set([...node.connections, ...(bySource.get(node.id) ?? [])])],
     })),
   };
+}
+
+function readEdgeSelection(value: string | undefined): ArchitectureSchemaEdge['selection'] | undefined {
+  if (value === 'default' || value === 'converge' || value === 'continuation') {
+    return value;
+  }
+  return undefined;
 }
 
 export function normalizeArchitectureSchema(raw: unknown, index = 0): ArchitectSchema {

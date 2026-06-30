@@ -67,15 +67,19 @@ export function renderArchitectureRunProjection({
   const routeSteps = architectureRouteSteps(run);
   routeSteps.forEach(({ hop, traceStep }, index) => {
     const layout = architectureRouteLayout(routeSteps, index);
-    const fromLabel = traceStep?.visitIndex ? `${hop.fromNodeId} #${traceStep.visitIndex}` : hop.fromNodeId;
-    const branchSessionId = traceStep?.sessionId ?? traceStep?.stream?.branchSessionId;
+    const fromNodeLabel = architectureNodeDisplayLabel(run, hop.fromNodeId);
+    const fromLabel = traceStep?.visitIndex ? `${fromNodeLabel} #${traceStep.visitIndex}` : fromNodeLabel;
+    const toLabel = architectureNodeDisplayLabel(run, hop.toNodeId);
+    const branchSessionId = hop.source === 'parallel'
+      ? architectureNodeSessionId(run, hop.toNodeId) ?? traceStep?.sessionId ?? traceStep?.stream?.branchSessionId
+      : traceStep?.sessionId ?? traceStep?.stream?.branchSessionId;
     const routeNode = addNode({
       id: `architecture-route:${finalMessage.id}:${index}`,
       kind: 'architecture-run',
-      title: architectureRouteTitle(traceStep, hop.source),
-      subtitle: `${fromLabel} -> ${hop.toNodeId}`,
+      title: architectureRouteTitle(run, traceStep, hop),
+      subtitle: `${fromLabel} -> ${toLabel}`,
       detail: architectureRouteDetail(traceStep),
-      status: architectureExecutionStatus(run.status, traceStep?.stream?.status),
+      status: architectureExecutionStatus(run.status, traceStep?.stream?.status, traceStep?.status),
       column: branchMaxColumn + 2 + layout.column,
       row: startRow + layout.row,
       turnId: turn.id,
@@ -115,7 +119,14 @@ export function renderArchitectureRunProjection({
 function architectureExecutionStatus(
   runStatus: ArchitectureRun['status'],
   streamStatus?: NonNullable<TraceStep['stream']>['status'],
+  traceStatus?: TraceStep['status'],
 ) {
+  if (traceStatus === 'failed' || traceStatus === 'cancelled') return 'error' as const;
+  if (traceStatus === 'done') return 'success' as const;
+  if (traceStatus === 'queued') return 'idle' as const;
+  if (traceStatus === 'running' || traceStatus === 'waiting_on_orchestrator' || traceStatus === 'blocked') {
+    return 'running' as const;
+  }
   if (runStatus === 'failed' || runStatus === 'cancelled' || streamStatus === 'failed') {
     return 'error' as const;
   }
@@ -176,16 +187,39 @@ function architectureRouteSourceForTraceStep(step: TraceStep): RouteHop['source'
   return 'agent';
 }
 
-function architectureRouteTitle(traceStep: TraceStep | undefined, source: string): string {
-  if (!traceStep?.nodeId) {
-    return source;
+function architectureRouteTitle(run: ArchitectureRun, traceStep: TraceStep | undefined, hop: RouteHop): string {
+  if (hop.source === 'parallel') {
+    return architectureNodeDisplayLabel(run, hop.toNodeId);
   }
 
-  return traceStep.nodeId
+  if (!traceStep?.nodeId) {
+    return hop.source;
+  }
+
+  return architectureNodeDisplayLabel(run, traceStep.nodeId);
+}
+
+function architectureNodeDisplayLabel(run: ArchitectureRun, nodeId: string): string {
+  const graphNodeLabel = run.graphNodes
+    ?.find((node) => node.id === nodeId)
+    ?.label
+    ?.trim();
+  if (graphNodeLabel) {
+    return graphNodeLabel;
+  }
+
+  return nodeId
     .split(/[-_]/)
     .filter(Boolean)
     .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
     .join(' ');
+}
+
+function architectureNodeSessionId(run: ArchitectureRun, nodeId: string): string | undefined {
+  const sessionId = run.graphNodes
+    ?.find((node) => node.id === nodeId)
+    ?.sessionId;
+  return typeof sessionId === 'string' && sessionId.trim().length > 0 ? sessionId : undefined;
 }
 
 function architectureRouteDetail(

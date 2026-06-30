@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
   CreateMCPServerDto,
   MCPServer,
@@ -11,6 +12,8 @@ export interface MCPRegistryComparableConfig {
   url?: string;
   command?: string;
   args?: string[];
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
 }
 
 export interface MCPRegistryEntryMeta extends MCPRegistryComparableConfig {
@@ -47,19 +50,62 @@ export function parseServerKey(serverKey: string): { store: MCPServerStore; id: 
   return null;
 }
 
-export function buildMcpSignature(config: MCPRegistryComparableConfig): string {
-  if (config.transport === 'http') {
-    return `http:${config.url ?? ''}`;
-  }
-  return `stdio:${config.command ?? ''}:${(config.args ?? []).join('\u0000')}`;
+export function makeMcpServerId(dto: CreateMCPServerDto): string {
+  const normalized = {
+    name: dto.name.trim(),
+    transport: dto.transport ?? 'http',
+    url: dto.url?.trim() ?? null,
+    command: dto.command?.trim() ?? null,
+    args: (dto.args ?? []).map((arg) => arg.trim()),
+    env: sortDictionary(dto.env),
+    headers: sortDictionary(dto.headers),
+    originSource: dto.originSource ?? 'manual',
+  };
+
+  const name = dto.name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-+|-+$)/g, '');
+  const suffix = createHash('sha256').update(JSON.stringify(normalized)).digest('base64url').slice(0, 10);
+  return `${name || 'mcp-server'}-${suffix}`;
 }
 
-export function buildMcpSignatureFromServer(server: Pick<MCPServer, 'transport' | 'url' | 'command' | 'args'>): string {
+export function buildMcpSignature(config: MCPRegistryComparableConfig): string {
+  const context = `env:${stableRecordSignature(config.env)}:headers:${stableRecordSignature(config.headers)}`;
+  if (config.transport === 'http') {
+    return `http:${config.url ?? ''}:${context}`;
+  }
+  return `stdio:${config.command ?? ''}:${(config.args ?? []).join('\u0000')}:${context}`;
+}
+
+export function buildMcpSignatureFromServer(
+  server: Pick<MCPServer, 'transport' | 'url' | 'command' | 'args'> & Partial<Pick<CreateMCPServerDto, 'env' | 'headers'>>,
+): string {
   return buildMcpSignature(server);
 }
 
-export function buildMcpSignatureFromDto(dto: Pick<CreateMCPServerDto, 'transport' | 'url' | 'command' | 'args'>): string {
+export function buildMcpSignatureFromDto(dto: Pick<CreateMCPServerDto, 'transport' | 'url' | 'command' | 'args' | 'env' | 'headers'>): string {
   return buildMcpSignature(dto);
+}
+
+function stableRecordSignature(record: Record<string, string> | undefined): string {
+  if (!record || Object.keys(record).length === 0) {
+    return '';
+  }
+  return JSON.stringify(Object.entries(record).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function sortDictionary(input?: Record<string, string>): Record<string, string> | null {
+  if (!input || Object.keys(input).length === 0) {
+    return null;
+  }
+  return Object.keys(input)
+    .sort()
+    .reduce((acc, key) => {
+      acc[key] = input[key];
+      return acc;
+    }, {} as Record<string, string>);
 }
 
 export function resolveRegistryEntries(entries: MCPRegistryEntryMeta[]): MCPResolvedRegistryEntry[] {

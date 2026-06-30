@@ -169,7 +169,7 @@ export class SessionPipelineService {
         this.active.delete(sessionId);
       }
       // Drop queued items too — user explicitly stopped this session
-      this.queues.delete(sessionId);
+      this.dropQueuedItems(sessionId);
     });
   }
 
@@ -185,7 +185,7 @@ export class SessionPipelineService {
       if (slot) {
         this.chat.abort(sessionId);
       }
-      this.queues.delete(sessionId);
+      this.dropQueuedItems(sessionId);
       return slot;
     });
 
@@ -201,7 +201,7 @@ export class SessionPipelineService {
 
     await this.mutex.runExclusive(sessionId, async () => {
       this.active.delete(sessionId);
-      this.queues.delete(sessionId);
+      this.dropQueuedItems(sessionId);
     });
   }
 
@@ -245,6 +245,24 @@ export class SessionPipelineService {
   abortAll(sessionId: string): void {
     if (this.active.has(sessionId)) {
       this.chat.abort(sessionId);
+    }
+    this.dropQueuedItems(sessionId);
+  }
+
+  private dropQueuedItems(sessionId: string): void {
+    const queue = this.queues.get(sessionId);
+    if (!queue || queue.length === 0) {
+      this.queues.delete(sessionId);
+      return;
+    }
+
+    for (const item of queue) {
+      item.emit('chat:error', {
+        sessionId,
+        code: 'QUEUE_DROPPED',
+        message: 'Queued turn was dropped because the session was stopped.',
+        hadContent: false,
+      });
     }
     this.queues.delete(sessionId);
   }

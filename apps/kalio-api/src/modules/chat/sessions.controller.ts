@@ -6,6 +6,7 @@ import type {
   ContextPreviewRequest,
   CreateSessionDto,
   LLMContextPreview,
+  RuntimeWatchTarget,
   SessionRuntimeContext,
 } from '@kalio/types';
 import type { Response } from 'express';
@@ -15,7 +16,7 @@ import { SessionsService } from './sessions.service';
 import { RunJournalService } from './run-journal.service';
 import { ContextPreviewService } from './context-preview.service';
 import { SessionPipelineService } from './session-pipeline.service';
-import { SessionRuntimeWatchlistService, type RuntimeWatchTarget } from './session-runtime-watchlist.service';
+import { SessionRuntimeWatchlistService } from './session-runtime-watchlist.service';
 
 const PUBLIC_ARCHITECTURE_CONTEXT_KEYS = new Set([
   'projectPath',

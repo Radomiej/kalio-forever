@@ -1,9 +1,348 @@
 import type { ArchitectureRoleExecutor } from './architecture-role-executor';
-import type { ArchitectureRun, ArchitectureSchema } from '@kalio/types';
+import type { ArchitectureRouterOutput, ArchitectureRun, ArchitectureSchema } from '@kalio/types';
 import { describe, expect, it, vi } from 'vitest';
 import { createArchitectureGraphEvents } from './architecture-graph-runtime';
 
 describe('createArchitectureGraphEvents max visit guards', () => {
+  it('ignores legacy routeToNodeId data without typed routerOutput', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'legacy-route-data-runtime',
+      name: 'Legacy Route Data Runtime',
+      description: 'Schema where legacy route fields must not drive graph routing.',
+      version: '0.1.0',
+      roleSlots: [{
+        id: 'router',
+        label: 'Router',
+        description: 'Returns legacy route data only.',
+        slotType: 'router',
+        defaultPersonaId: 'orchestrator',
+        allowedPersonaTags: ['routing'],
+        required: true,
+        canOverrideAtRunStart: true,
+      }],
+      nodes: [
+        { id: 'router', label: 'Router', kind: 'router', roleSlotId: 'router', behavior: { mode: 'choose_one' } },
+        { id: 'fallback', label: 'Fallback', kind: 'artifact' },
+        { id: 'legacy-target', label: 'Legacy Target', kind: 'artifact' },
+      ],
+      edges: [
+        { id: 'router-fallback', fromNodeId: 'router', toNodeId: 'fallback' },
+        { id: 'router-legacy', fromNodeId: 'router', toNodeId: 'legacy-target' },
+      ],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-legacy-route-data',
+      schemaId: schema.id,
+      prompt: 'Ignore legacy route data.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 10 },
+      rootSessionId: 'root-legacy-route-data',
+      branchSessionIds: { router: 'arch-run-legacy-route-data-router' },
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(async () => ({
+        message: 'Legacy route field should be display-only.',
+        data: {
+          routeToNodeId: 'legacy-target',
+          response: 'legacy route request',
+        },
+      })),
+    };
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'dev',
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'router_decision',
+      nodeId: 'router',
+      route: expect.objectContaining({
+        source: 'router',
+        selectedNodeIds: ['fallback'],
+        nextNodeId: 'fallback',
+      }),
+      data: expect.objectContaining({
+        selectedNodeIds: ['fallback'],
+      }),
+    }));
+  });
+
+  it('does not let display-only incompleteReason override typed route output', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'display-incomplete-route-runtime',
+      name: 'Display Incomplete Route Runtime',
+      description: 'Schema where display-only incomplete text must not drive routing.',
+      version: '0.1.0',
+      roleSlots: [{
+        id: 'worker',
+        label: 'Worker',
+        description: 'Returns typed route output plus display text.',
+        slotType: 'participant',
+        defaultPersonaId: 'dev',
+        allowedPersonaTags: ['dev'],
+        required: true,
+        canOverrideAtRunStart: true,
+      }],
+      nodes: [
+        { id: 'worker', label: 'Worker', kind: 'role', roleSlotId: 'worker' },
+        { id: 'fallback', label: 'Fallback', kind: 'artifact' },
+        { id: 'typed-target', label: 'Typed Target', kind: 'artifact' },
+      ],
+      edges: [
+        { id: 'worker-fallback', fromNodeId: 'worker', toNodeId: 'fallback' },
+        { id: 'worker-target', fromNodeId: 'worker', toNodeId: 'typed-target' },
+      ],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-display-incomplete-route',
+      schemaId: schema.id,
+      prompt: 'Use typed route output.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 10 },
+      rootSessionId: 'root-display-incomplete-route',
+      branchSessionIds: { worker: 'arch-run-display-incomplete-route-worker' },
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(async () => ({
+        message: 'Worker produced a typed route.',
+        data: {
+          incompleteReason: 'Display-only note that should not route the graph.',
+          routerOutput: {
+            selectedStrategy: 'typed-route',
+            mergedDecision: 'Route to typed target.',
+            acceptedInputs: [],
+            rejectedInputs: [],
+            unresolvedConflicts: [],
+            risks: [],
+            confidence: 0.91,
+            nextAction: 'route_to',
+            targetNodeId: 'typed-target',
+            response: 'typed route wins',
+          } satisfies ArchitectureRouterOutput,
+        },
+      })),
+    };
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'dev',
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'participant_output',
+      nodeId: 'worker',
+      route: expect.objectContaining({
+        source: 'agent',
+        selectedNodeIds: ['typed-target'],
+        nextNodeId: 'typed-target',
+        response: 'typed route wins',
+      }),
+      data: expect.objectContaining({
+        selectedNodeIds: ['typed-target'],
+      }),
+    }));
+  });
+
+  it('uses explicit edge selection metadata for convergence routing', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'edge-selection-convergence-runtime',
+      name: 'Edge Selection Convergence Runtime',
+      description: 'Schema where edge metadata owns convergence routing.',
+      version: '0.1.0',
+      roleSlots: [],
+      nodes: [
+        { id: 'router', label: 'Router', kind: 'router', behavior: { mode: 'rank_then_merge' } },
+        { id: 'decoy', label: 'Decoy', kind: 'artifact' },
+        { id: 'artifact', label: 'Artifact', kind: 'artifact' },
+      ],
+      edges: [
+        { id: 'router-decoy', fromNodeId: 'router', toNodeId: 'decoy' },
+        { id: 'router-artifact', fromNodeId: 'router', toNodeId: 'artifact', selection: 'converge' },
+      ],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-edge-selection-convergence',
+      schemaId: schema.id,
+      prompt: 'Use edge selection metadata.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 10 },
+      rootSessionId: 'root-edge-selection-convergence',
+      branchSessionIds: {},
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(),
+    };
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'dev',
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'router_decision',
+      nodeId: 'router',
+      route: expect.objectContaining({
+        source: 'router',
+        selectedNodeIds: ['artifact'],
+        rejectedNodeIds: ['decoy'],
+        nextNodeId: 'artifact',
+      }),
+      data: expect.objectContaining({
+        selectedNodeIds: ['artifact'],
+      }),
+    }));
+  });
+
+  it('does not use node-level convergeToNodeId as routing fallback without edge selection metadata', async () => {
+    const legacyBehavior = { mode: 'rank_then_merge' as const, convergeToNodeId: 'artifact' };
+    const schema: ArchitectureSchema = {
+      id: 'legacy-node-convergence-runtime',
+      name: 'Legacy Node Convergence Runtime',
+      description: 'Schema where legacy node convergence hints are display-only without edge metadata.',
+      version: '0.1.0',
+      roleSlots: [],
+      nodes: [
+        {
+          id: 'router',
+          label: 'Router',
+          kind: 'router',
+          behavior: legacyBehavior,
+        },
+        { id: 'decoy', label: 'Decoy', kind: 'artifact' },
+        { id: 'artifact', label: 'Artifact', kind: 'artifact' },
+      ],
+      edges: [
+        { id: 'router-decoy', fromNodeId: 'router', toNodeId: 'decoy' },
+        { id: 'router-artifact', fromNodeId: 'router', toNodeId: 'artifact' },
+      ],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-legacy-node-convergence',
+      schemaId: schema.id,
+      prompt: 'Ignore node-level convergence fallback.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 10 },
+      rootSessionId: 'root-legacy-node-convergence',
+      branchSessionIds: {},
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(),
+    };
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'dev',
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'router_decision',
+      nodeId: 'router',
+      route: expect.objectContaining({
+        source: 'router',
+        selectedNodeIds: ['decoy'],
+        rejectedNodeIds: ['artifact'],
+        nextNodeId: 'decoy',
+      }),
+      data: expect.objectContaining({
+        selectedNodeIds: ['decoy'],
+      }),
+    }));
+    const routerEvent = events.find((event) => event.type === 'router_decision' && event.nodeId === 'router');
+    expect(routerEvent?.route?.convergeToNodeId).toBeUndefined();
+    expect(routerEvent?.data).not.toMatchObject({
+      convergeToNodeId: 'artifact',
+    });
+  });
+
   it('pauses on a selected return-to-orchestrator edge instead of executing the next node', async () => {
     const schema: ArchitectureSchema = {
       id: 'return-to-orchestrator-runtime',
@@ -87,8 +426,7 @@ describe('createArchitectureGraphEvents max visit guards', () => {
         return {
           message: 'Goal Master requires another implementation pass.',
           data: {
-            routeToNodeId: 'implementer',
-            response: 'needs another pass',
+            ...routerData('implementer', 'needs another pass'),
           },
         };
       }),
@@ -185,8 +523,7 @@ describe('createArchitectureGraphEvents max visit guards', () => {
           rootSessionId: activeRun.rootSessionId,
           slotType: slot.slotType,
           executionMode: activeRun.executionMode,
-          routeToNodeId: 'worker',
-          response: 'continue',
+          ...routerData('worker', 'continue'),
         },
       })),
     };
@@ -302,7 +639,7 @@ describe('createArchitectureGraphEvents max visit guards', () => {
             rootSessionId: activeRun.rootSessionId,
             slotType: slot.slotType,
             executionMode: activeRun.executionMode,
-            ...(slot.id === 'orchestrator' ? { routeToNodeId: 'researcher', response: 'continue' } : {}),
+            ...(slot.id === 'orchestrator' ? routerData('researcher', 'continue') : {}),
           },
         };
       }),
@@ -331,4 +668,225 @@ describe('createArchitectureGraphEvents max visit guards', () => {
       }),
     }));
   });
+
+  it('surfaces tool confirmation requests as human gate events with explicit summary', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'tool-confirmation-human-gate-runtime',
+      name: 'Tool Confirmation Human Gate Runtime',
+      description: 'Schema that exposes branch tool confirmation as architecture events.',
+      version: '0.1.0',
+      roleSlots: [{
+        id: 'orchestrator',
+        label: 'Orchestrator',
+        description: 'Requests a destructive tool confirmation.',
+        slotType: 'judge',
+        defaultPersonaId: 'orchestrator',
+        allowedPersonaTags: ['review'],
+        required: true,
+        canOverrideAtRunStart: true,
+      }],
+      nodes: [
+        { id: 'orchestrator', label: 'Orchestrator', kind: 'router', roleSlotId: 'orchestrator', behavior: { mode: 'choose_one' } },
+        { id: 'final', label: 'Final', kind: 'artifact' },
+      ],
+      edges: [
+        { id: 'orchestrator-final', fromNodeId: 'orchestrator', toNodeId: 'final' },
+      ],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-tool-confirmation-human-gate',
+      schemaId: schema.id,
+      prompt: 'Expose tool confirmation requests immediately.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 10 },
+      rootSessionId: 'root-tool-confirmation-human-gate',
+      branchSessionIds: {
+        orchestrator: 'arch-run-tool-confirmation-human-gate-orchestrator',
+      },
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(async ({ branchSessionId, emit }) => {
+        emit?.('tool:confirmation_required', {
+          requestId: 'confirm-1',
+          sessionId: branchSessionId,
+          toolName: 'vfs_delete',
+          args: {
+            path: 'C:\\Projekty\\kalio-forever\\tmp\\stale.txt',
+          },
+        });
+        return {
+          message: 'Orchestrator is waiting for confirmation.',
+          data: routerData('final', 'pause for confirmation'),
+        };
+      }),
+    };
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'dev',
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'human_gate',
+      nodeId: 'orchestrator',
+      roleSlotId: 'orchestrator',
+      actionSummary: 'Waiting for tool confirmation.',
+      message: 'Orchestrator requested HITL approval for vfs_delete.',
+      data: expect.objectContaining({
+        kind: 'branch_stream',
+        event: 'tool:confirmation_required',
+        sessionId: 'arch-run-tool-confirmation-human-gate-orchestrator',
+        toolName: 'vfs_delete',
+        toolPath: 'C:\\Projekty\\kalio-forever\\tmp\\stale.txt',
+      }),
+    }));
+  });
+
+  it('omits invalid budget counters from branch human gate summaries and data', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'budget-human-gate-invalid-counters-runtime',
+      name: 'Budget Human Gate Invalid Counters Runtime',
+      description: 'Schema that ignores invalid branch budget counters in human-gate summaries.',
+      version: '0.1.0',
+      roleSlots: [{
+        id: 'orchestrator',
+        label: 'Orchestrator',
+        description: 'Requests more budget with malformed counters.',
+        slotType: 'judge',
+        defaultPersonaId: 'orchestrator',
+        allowedPersonaTags: ['review'],
+        required: true,
+        canOverrideAtRunStart: true,
+      }],
+      nodes: [
+        { id: 'orchestrator', label: 'Orchestrator', kind: 'router', roleSlotId: 'orchestrator', behavior: { mode: 'choose_one' } },
+        { id: 'final', label: 'Final', kind: 'artifact' },
+      ],
+      edges: [
+        { id: 'orchestrator-final', fromNodeId: 'orchestrator', toNodeId: 'final' },
+      ],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-budget-human-gate-invalid-counters',
+      schemaId: schema.id,
+      prompt: 'Ignore malformed budget counters.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 10 },
+      rootSessionId: 'root-budget-human-gate-invalid-counters',
+      branchSessionIds: {
+        orchestrator: 'arch-run-budget-human-gate-invalid-counters-orchestrator',
+      },
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(async ({ branchSessionId, emit }) => {
+        emit?.('agent:budget_required', {
+          requestId: 'budget-invalid-1',
+          sessionId: branchSessionId,
+          scope: 'agent-flow-branch',
+          usedIterations: Number.POSITIVE_INFINITY,
+          currentLimit: '8',
+          suggestedNextLimit: 18,
+          requestedBy: 'orchestrator',
+        });
+        return {
+          message: 'Orchestrator requested more tool budget.',
+          data: routerData('final', 'pause for budget approval'),
+        };
+      }),
+    };
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'dev',
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'human_gate',
+      nodeId: 'orchestrator',
+      roleSlotId: 'orchestrator',
+      actionSummary: 'Waiting for budget approval.',
+      message: 'Orchestrator requested more tool budget.',
+      data: expect.objectContaining({
+        kind: 'branch_stream',
+        event: 'agent:budget_required',
+        requestedBy: 'orchestrator',
+        suggestedNextLimit: 18,
+      }),
+    }));
+    expect(events).not.toContainEqual(expect.objectContaining({
+      type: 'human_gate',
+      message: expect.stringContaining('(Infinity/8)'),
+    }));
+
+    const budgetGate = events.find((event) => (
+      event.type === 'human_gate'
+      && event.nodeId === 'orchestrator'
+      && event.data?.['event'] === 'agent:budget_required'
+    ));
+    expect(budgetGate?.data).toEqual(expect.not.objectContaining({
+      usedIterations: expect.any(Number),
+      currentLimit: expect.anything(),
+    }));
+  });
 });
+
+function routerData(targetNodeId: string, response = targetNodeId): { routerOutput: ArchitectureRouterOutput } {
+  return {
+    routerOutput: {
+      selectedStrategy: targetNodeId,
+      mergedDecision: response,
+      acceptedInputs: [],
+      rejectedInputs: [],
+      unresolvedConflicts: [],
+      risks: [],
+      confidence: 1,
+      nextAction: 'route_to',
+      targetNodeId,
+      response,
+    },
+  };
+}

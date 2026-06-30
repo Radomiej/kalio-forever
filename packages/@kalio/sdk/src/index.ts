@@ -15,6 +15,7 @@ export type CompleteHandler = (payload: SocketEvents['chat:complete']) => void;
 export type ErrorHandler = (payload: SocketEvents['chat:error']) => void;
 export type ConfirmationHandler = (req: ToolConfirmationRequest) => void;
 export type ConfirmationInvalidatedHandler = (payload: ToolConfirmationInvalidated) => void;
+export type BudgetProgressHandler = (payload: SocketEvents['agent:budget_progress']) => void;
 export type BudgetApprovalHandler = (payload: AgentBudgetApprovalRequest) => void;
 export type BudgetApprovalInvalidatedHandler = (payload: AgentBudgetApprovalInvalidated) => void;
 export type ToolStartHandler = (payload: SocketEvents['tool:start']) => void;
@@ -246,6 +247,16 @@ export class KalioSDK {
     };
     this.socket.on('agent:budget_required', wrappedHandler);
     return () => this.socket.off('agent:budget_required', wrappedHandler);
+  }
+
+  onAgentBudgetProgress(handler: BudgetProgressHandler): () => void {
+    const wrappedHandler = (payload: SocketEvents['agent:budget_progress']) => {
+      console.groupCollapsed(`[Thread] BUDGET PROGRESS sessionId=${payload.sessionId} used=${payload.usedIterations}/${payload.currentLimit}`);
+      console.groupEnd();
+      handler(payload);
+    };
+    this.socket.on('agent:budget_progress', wrappedHandler);
+    return () => this.socket.off('agent:budget_progress', wrappedHandler);
   }
 
   onAgentBudgetInvalidated(handler: BudgetApprovalInvalidatedHandler): () => void {

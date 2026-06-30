@@ -126,11 +126,10 @@ export class CLIAgentSessionService {
       .where(eq(sessions.id, sessionId))
       .limit(1);
 
-    const runtimeMetadata = cliAgentMetadataFromRuntimeContext(sessionRow?.runtimeContext);
-    if (runtimeMetadata) {
-      return runtimeMetadata;
-    }
+    return cliAgentMetadataFromRuntimeContext(sessionRow?.runtimeContext);
+  }
 
+  async migrateLegacySessionMetadata(sessionId: string): Promise<CLIAgentSessionMetadata | null> {
     const rows = await this.drizzle.db
       .select({ content: messages.content })
       .from(messages)
@@ -138,22 +137,13 @@ export class CLIAgentSessionService {
       .orderBy(desc(messages.createdAt));
 
     for (const row of rows) {
-      // TODO: legacy fallback for CLI sessions created before metadata moved to typed runtimeContext.
-      if (!row.content.startsWith(CLI_AGENT_METADATA_PREFIX)) {
+      const metadata = legacyCliAgentMetadataFromContent(row.content);
+      if (!metadata) {
         continue;
       }
 
-      try {
-        const parsed = JSON.parse(row.content.slice(CLI_AGENT_METADATA_PREFIX.length)) as Record<string, unknown>;
-        if (typeof parsed['agentId'] === 'string' && typeof parsed['workdir'] === 'string') {
-          return {
-            agentId: parsed['agentId'],
-            workdir: parsed['workdir'],
-          };
-        }
-      } catch {
-        continue;
-      }
+      await this.saveSessionMetadata(sessionId, metadata);
+      return metadata;
     }
 
     return null;
@@ -336,4 +326,29 @@ function cliAgentMetadataFromRuntimeContext(
     agentId: metadata.agentId,
     workdir: metadata.workdir,
   };
+}
+
+function legacyCliAgentMetadataFromContent(content: string): CLIAgentSessionMetadata | null {
+  if (content.slice(0, CLI_AGENT_METADATA_PREFIX.length) !== CLI_AGENT_METADATA_PREFIX) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(content.slice(CLI_AGENT_METADATA_PREFIX.length)) as unknown;
+    if (!isPlainRecord(parsed)) {
+      return null;
+    }
+    const agentId = parsed['agentId'];
+    const workdir = parsed['workdir'];
+    if (typeof agentId !== 'string' || typeof workdir !== 'string') {
+      return null;
+    }
+    return { agentId, workdir };
+  } catch {
+    return null;
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

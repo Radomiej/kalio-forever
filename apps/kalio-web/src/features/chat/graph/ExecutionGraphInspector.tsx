@@ -14,8 +14,9 @@ function shortId(value: string): string {
   return value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
 }
 
-function shortNodeLabel(value: string): string {
-  return value
+function shortNodeLabel(value: string | null | undefined): string {
+  const source = typeof value === 'string' ? value : 'unknown';
+  return source
     .replace(/^architecture-root:/, '')
     .replace(/^node:/, '')
     .replace(/[_-]+/g, ' ')

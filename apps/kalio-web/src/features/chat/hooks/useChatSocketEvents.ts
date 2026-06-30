@@ -42,6 +42,8 @@ export function useChatSocketEvents({
   const {
     setPendingConfirmation,
     setPendingBudgetApproval,
+    setToolBudgetProgress,
+    clearToolBudgetProgress,
     removePendingConfirmation,
     removePendingBudgetApproval,
     setToolArgProgress,
@@ -137,6 +139,12 @@ export function useChatSocketEvents({
     });
 
     const offError = eventBus.onError((payload) => {
+      if (payload.code === 'QUEUE_DROPPED') {
+        console.debug('[EventBus] chat:error', payload);
+        useAgentStore.getState().setQueuedDepth(payload.sessionId, 0);
+        return;
+      }
+
       if (payload.code === 'INTERRUPTED') {
         console.debug('[EventBus] chat:error', payload);
       } else {
@@ -209,6 +217,10 @@ export function useChatSocketEvents({
 
     const offBudgetRequired = eventBus.onAgentBudgetRequired?.((req) => {
       setPendingBudgetApproval?.(req.sessionId, req);
+    });
+
+    const offBudgetProgress = eventBus.onAgentBudgetProgress?.((progress) => {
+      setToolBudgetProgress?.(progress);
     });
 
     const offConfirmationInvalidated = eventBus.onToolConfirmationInvalidated((payload) => {
@@ -306,6 +318,7 @@ export function useChatSocketEvents({
 
     const offAgentDone = eventBus.onAgentDone((payload) => {
       removeActiveAgentLoop(payload.sessionId, payload.agentRun);
+      clearToolBudgetProgress?.(payload.sessionId);
       clearToolArgProgressTracking(payload.sessionId);
       finalizeAgentTurn(payload.sessionId);
       if (hasPendingChunksForSession(payload.sessionId)) {
@@ -434,6 +447,7 @@ export function useChatSocketEvents({
       offError();
       offConfirmation();
       offBudgetRequired?.();
+      offBudgetProgress?.();
       offConfirmationInvalidated();
       offBudgetInvalidated?.();
       offToolStart();
@@ -455,6 +469,7 @@ export function useChatSocketEvents({
     appendChunk,
     appendCLIAgentChunk,
     clearCLIAgentOutput,
+    clearToolBudgetProgress,
     clearToolActivities,
     finalizeAgentTurn,
     finalizeChunk,
@@ -477,6 +492,7 @@ export function useChatSocketEvents({
     setError,
     setPendingConfirmation,
     setPendingBudgetApproval,
+    setToolBudgetProgress,
     setQueuedDepth,
     recordSessionStatusSnapshot,
     setRuntimeActivitySnapshot,

@@ -37,7 +37,7 @@ describe('Architecture graph runtime LLM integration', () => {
           label: 'Router 1',
           kind: 'router' as const,
           roleSlotId: 'router',
-          behavior: { mode: 'choose_one' as const, convergeToNodeId: 'artifact' },
+          behavior: { mode: 'choose_one' as const },
         },
         {
           id: 'artifact',
@@ -148,7 +148,7 @@ describe('Architecture graph runtime LLM integration', () => {
           label: 'Router',
           kind: 'router' as const,
           roleSlotId: 'router',
-          behavior: { mode: 'choose_one' as const, convergeToNodeId: 'final-artifact' },
+          behavior: { mode: 'choose_one' as const },
         },
         {
           id: 'final-artifact',
@@ -197,8 +197,7 @@ describe('Architecture graph runtime LLM integration', () => {
 
   it('runs a dry Goal Master delivery loop with MockLLM rejection before final acceptance', async () => {
     const source = new StatefulDeliveryLoopLLMSource();
-    const harness = createMockChatHarness(undefined, source);
-    const roleExecutor = new ArchitectureRoleExecutorService(createSubagentRuntime(harness.chat));
+    const roleExecutor = new ArchitectureRoleExecutorService(createStructuredSourceSubagentRuntime(source));
     const sessions = createSessionStore();
     const runtime = new ArchitectureRuntimeService(
       new ArchitectureRegistryService(),
@@ -237,8 +236,7 @@ describe('Architecture graph runtime LLM integration', () => {
 
   it('runs a dry Goal Master delivery loop with immediate MockLLM acceptance', async () => {
     const source = new GoalMasterScenarioLLMSource('accept-immediately');
-    const harness = createMockChatHarness(undefined, source);
-    const roleExecutor = new ArchitectureRoleExecutorService(createSubagentRuntime(harness.chat));
+    const roleExecutor = new ArchitectureRoleExecutorService(createStructuredSourceSubagentRuntime(source));
     const sessions = createSessionStore();
     const runtime = new ArchitectureRuntimeService(
       new ArchitectureRegistryService(),
@@ -270,8 +268,7 @@ describe('Architecture graph runtime LLM integration', () => {
 
   it('fails a dry Goal Master delivery loop when MockLLM keeps rejecting past the step guard', async () => {
     const source = new GoalMasterScenarioLLMSource('reject-forever');
-    const harness = createMockChatHarness(undefined, source);
-    const roleExecutor = new ArchitectureRoleExecutorService(createSubagentRuntime(harness.chat));
+    const roleExecutor = new ArchitectureRoleExecutorService(createStructuredSourceSubagentRuntime(source));
     const sessions = createSessionStore();
     const runtime = new ArchitectureRuntimeService(
       new ArchitectureRegistryService(),
@@ -294,7 +291,8 @@ describe('Architecture graph runtime LLM integration', () => {
     const goalDecisions = events.filter((event) => event.nodeId === 'goal-master' && event.type === 'router_decision');
     const stopEvent = events.find((event) => (
       event.type === 'router_decision'
-      && event.message.startsWith('Runtime stopped after 8 graph steps.')
+      && event.reasonCode === 'max_steps'
+      && event.data?.['maxSteps'] === 8
     ));
 
     expect(run.status).toBe('failed');
@@ -378,7 +376,29 @@ function semanticEventForNode(
 }
 
 function routerRouteMessage(targetNodeId: string, response: string, summary = response): string {
-  const routerOutput: ArchitectureRouterOutput = {
+  const routerOutput = routerStructuredOutput(targetNodeId, response, summary);
+  return [
+    summary,
+    '```json',
+    JSON.stringify(routerOutput),
+    '```',
+  ].join('\n');
+}
+
+type ScriptedLLMResponse = {
+  text: string;
+  structuredOutput?: ArchitectureRouterOutput;
+};
+
+function routerRouteResponse(targetNodeId: string, response: string, summary = response): ScriptedLLMResponse {
+  return {
+    text: summary,
+    structuredOutput: routerStructuredOutput(targetNodeId, response, summary),
+  };
+}
+
+function routerStructuredOutput(targetNodeId: string, response: string, summary = response): ArchitectureRouterOutput {
+  return {
     selectedStrategy: targetNodeId,
     mergedDecision: summary,
     acceptedInputs: [],
@@ -390,12 +410,6 @@ function routerRouteMessage(targetNodeId: string, response: string, summary = re
     targetNodeId,
     response,
   };
-  return [
-    summary,
-    '```json',
-    JSON.stringify(routerOutput),
-    '```',
-  ].join('\n');
 }
 
 function createSubagentRuntime(chat: ChatService): SubagentRuntimePort {
@@ -421,6 +435,45 @@ function createSubagentRuntime(chat: ChatService): SubagentRuntimePort {
         parentSessionId: request.parentSessionId,
         vfsMode: request.vfsMode,
         vfsSessionId: request.childSessionId ?? `child-${request.parentToolCallId}`,
+        copiedFiles: [],
+        durationMs: 1,
+      };
+    },
+  };
+}
+
+function createStructuredSourceSubagentRuntime(source: ILLMSource): SubagentRuntimePort {
+  return {
+    async runSubagent(request: RunSubagentRequest): Promise<RunSubagentResult> {
+      const text: string[] = [];
+      let structuredOutput: unknown;
+      const childSessionId = request.childSessionId ?? `child-${request.parentToolCallId}`;
+      const messages: ContextManagedLLMMessage[] = [{ role: 'user', content: request.objective }];
+      const streamParams: LLMSourceParams = {
+        messages,
+        tools: request.availableTools ?? [],
+        sessionId: childSessionId,
+        messageId: `message-${request.parentToolCallId}`,
+        ...(request.model ? { model: request.model } : {}),
+        ...(request.structuredOutput ? { structuredOutput: request.structuredOutput } : {}),
+      };
+      for await (const chunk of source.stream(streamParams)) {
+        if (chunk.type === 'text_delta') {
+          text.push(chunk.delta);
+        }
+        if (chunk.type === 'structured_output') {
+          structuredOutput = chunk.value;
+        }
+      }
+      return {
+        result: text.join('').trim(),
+        structuredOutput,
+        taskId: `task-${request.parentToolCallId}`,
+        childSessionId,
+        parentSessionId: request.parentSessionId,
+        status: 'completed',
+        vfsMode: request.vfsMode,
+        vfsSessionId: childSessionId,
         copiedFiles: [],
         durationMs: 1,
       };
@@ -498,38 +551,45 @@ class StatefulDeliveryLoopLLMSource implements ILLMSource {
     const prompt = lastUserPrompt(params.messages);
     this.prompts.push(prompt);
     const response = this.responseFor(prompt);
-    yield { type: 'text_delta', delta: response };
+    yield { type: 'text_delta', delta: response.text };
+    if (response.structuredOutput) {
+      yield { type: 'structured_output', value: response.structuredOutput };
+    }
     yield { type: 'done' };
   }
 
-  private responseFor(prompt: string): string {
+  private responseFor(prompt: string): ScriptedLLMResponse {
     if (prompt.includes('Slot: Orchestrator')) {
-      return routerRouteMessage('implementer', 'start delivery', 'Orchestrator defined acceptance criteria and routes to implementation.');
+      return routerRouteResponse('implementer', 'start delivery', 'Orchestrator defined acceptance criteria and routes to implementation.');
     }
     if (prompt.includes('Slot: Implementer')) {
-      return 'Implementer prepared React/Vite/Tailwind changes for the salon site.';
+      return { text: 'Implementer prepared React/Vite/Tailwind changes for the salon site.' };
     }
     if (prompt.includes('Slot: Verifier')) {
-      return this.testerVisits === 0
-        ? 'Verifier read files but build evidence is still missing.'
-        : 'Verifier confirmed npm install and npm run build evidence.';
+      return {
+        text: this.testerVisits === 0
+          ? 'Verifier read files but build evidence is still missing.'
+          : 'Verifier confirmed npm install and npm run build evidence.',
+      };
     }
     if (prompt.includes('Slot: Tester')) {
       this.testerVisits += 1;
-      return this.testerVisits === 1
-        ? 'Tester found missing build evidence and weak points.'
-        : 'Tester verified npm run build passed and deployment files exist.';
+      return {
+        text: this.testerVisits === 1
+          ? 'Tester found missing build evidence and weak points.'
+          : 'Tester verified npm run build passed and deployment files exist.',
+      };
     }
     if (prompt.includes('Slot: Goal Master')) {
       this.goalMasterVisits += 1;
       return this.goalMasterVisits === 1
-        ? routerRouteMessage('implementer', 'fix verification gap', 'Goal Master found missing build evidence.')
-        : routerRouteMessage('final-artifact', 'accepted', 'Goal Master accepts verified build evidence.');
+        ? routerRouteResponse('implementer', 'fix verification gap', 'Goal Master found missing build evidence.')
+        : routerRouteResponse('final-artifact', 'accepted', 'Goal Master accepts verified build evidence.');
     }
     if (prompt.includes('Slot: Finalizer')) {
-      return 'Verified completion report: implementation, tests, and Goal Master acceptance are complete.';
+      return { text: 'Verified completion report: implementation, tests, and Goal Master acceptance are complete.' };
     }
-    return 'Unhandled dry loop slot.';
+    return { text: 'Unhandled dry loop slot.' };
   }
 }
 
@@ -541,32 +601,36 @@ class GoalMasterScenarioLLMSource implements ILLMSource {
   async *stream(params: LLMSourceParams): AsyncIterable<InternalLLMChunk> {
     const prompt = lastUserPrompt(params.messages);
     this.prompts.push(prompt);
-    yield { type: 'text_delta', delta: this.responseFor(prompt) };
+    const response = this.responseFor(prompt);
+    yield { type: 'text_delta', delta: response.text };
+    if (response.structuredOutput) {
+      yield { type: 'structured_output', value: response.structuredOutput };
+    }
     yield { type: 'done' };
   }
 
-  private responseFor(prompt: string): string {
+  private responseFor(prompt: string): ScriptedLLMResponse {
     if (prompt.includes('Slot: Orchestrator')) {
-      return routerRouteMessage('implementer', 'start delivery', 'Orchestrator defined acceptance criteria and routes to implementation.');
+      return routerRouteResponse('implementer', 'start delivery', 'Orchestrator defined acceptance criteria and routes to implementation.');
     }
     if (prompt.includes('Slot: Implementer')) {
-      return 'Implementer delivered a concrete implementation plan and source changes.';
+      return { text: 'Implementer delivered a concrete implementation plan and source changes.' };
     }
     if (prompt.includes('Slot: Verifier')) {
-      return 'Verifier confirmed read evidence and build output.';
+      return { text: 'Verifier confirmed read evidence and build output.' };
     }
     if (prompt.includes('Slot: Tester')) {
-      return 'Tester confirmed deploy artifact and no remaining weak points.';
+      return { text: 'Tester confirmed deploy artifact and no remaining weak points.' };
     }
     if (prompt.includes('Slot: Goal Master')) {
       return this.scenario === 'accept-immediately'
-        ? routerRouteMessage('final-artifact', 'accepted', 'Goal Master accepts complete evidence.')
-        : routerRouteMessage('implementer', 'continue', 'Goal Master rejects because evidence is still incomplete.');
+        ? routerRouteResponse('final-artifact', 'accepted', 'Goal Master accepts complete evidence.')
+        : routerRouteResponse('implementer', 'continue', 'Goal Master rejects because evidence is still incomplete.');
     }
     if (prompt.includes('Slot: Finalizer')) {
-      return 'Verified completion report: Goal Guard accepted the implementation.';
+      return { text: 'Verified completion report: Goal Guard accepted the implementation.' };
     }
-    return 'Unhandled dry loop slot.';
+    return { text: 'Unhandled dry loop slot.' };
   }
 }
 

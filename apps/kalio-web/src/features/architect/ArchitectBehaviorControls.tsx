@@ -1,9 +1,8 @@
 import type { ArchitectureNodeBehaviorMode, ArchitectureNodeFanOutMode, ArchitectureNodeScoringPolicy } from '@kalio/types';
-import type { ArchitectNode, ArchitectSchema } from './architect.types';
+import type { ArchitectNode } from './architect.types';
 
 interface ArchitectBehaviorControlsProps {
   node: ArchitectNode;
-  schema: ArchitectSchema | null;
   onChange: (nodeId: string, behavior: NonNullable<ArchitectNode['behavior']>) => void;
 }
 
@@ -27,9 +26,8 @@ const SCORING_POLICIES: ReadonlyArray<{ value: ArchitectureNodeScoringPolicy; la
   { value: 'custom', label: 'Custom' },
 ];
 
-export function ArchitectBehaviorControls({ node, schema, onChange }: ArchitectBehaviorControlsProps) {
+export function ArchitectBehaviorControls({ node, onChange }: ArchitectBehaviorControlsProps) {
   const behavior = node.behavior ?? defaultBehaviorForKind(node.kind);
-  const targetNodes = schema?.nodes.filter((candidate) => candidate.id !== node.id) ?? [];
   const showSelection = behavior.mode === 'choose_one' || behavior.mode === 'rank_then_merge';
 
   const update = (patch: Partial<NonNullable<ArchitectNode['behavior']>>) => {
@@ -110,21 +108,6 @@ export function ArchitectBehaviorControls({ node, schema, onChange }: ArchitectB
         </div>
       )}
 
-      <div className="mt-2 form-control gap-1">
-        <label className="label-text text-xs font-semibold text-base-content/70">Converges to</label>
-        <select
-          aria-label="Node converge target"
-          className="select select-bordered select-sm h-9 min-h-9 w-full"
-          value={behavior.convergeToNodeId ?? ''}
-          onChange={(event) => update({ convergeToNodeId: event.target.value || undefined })}
-          data-testid="architect-node-converge-target"
-        >
-          <option value="">Use outgoing edges</option>
-          {targetNodes.map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
-          ))}
-        </select>
-      </div>
     </section>
   );
 }

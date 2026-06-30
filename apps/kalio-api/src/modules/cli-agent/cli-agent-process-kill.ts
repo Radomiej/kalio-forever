@@ -44,17 +44,13 @@ function killWindowsProcessTree(pid: number): Promise<void> {
       'taskkill',
       ['/F', '/T', '/PID', String(pid)],
       { windowsHide: true, timeout: 5000 },
-      (err, _stdout, stderr) => {
+      (err) => {
         if (!err) {
           resolve();
           return;
         }
 
-        const lowerStderr = (stderr ?? '').toLowerCase();
-        const notFound = lowerStderr.includes('not found')
-          || lowerStderr.includes('no running instance')
-          || lowerStderr.includes('does not exist');
-        if (notFound) {
+        if (isProcessMissing(pid)) {
           resolve();
           return;
         }
@@ -63,4 +59,17 @@ function killWindowsProcessTree(pid: number): Promise<void> {
       },
     );
   });
+}
+
+function isProcessMissing(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (err) {
+    return isNodeErrnoException(err) && err.code === 'ESRCH';
+  }
+}
+
+function isNodeErrnoException(value: unknown): value is NodeJS.ErrnoException {
+  return value instanceof Error && typeof (value as NodeJS.ErrnoException).code === 'string';
 }

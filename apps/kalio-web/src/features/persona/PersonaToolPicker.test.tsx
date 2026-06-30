@@ -8,43 +8,52 @@ import { PersonaToolPicker, PersonaToolBadges } from './PersonaToolPicker';
 const TOOL_FIXTURE: ToolMeta[] = [
   {
     name: 'vfs_read_file',
+    domain: 'vfs',
     description: 'Read files from the virtual filesystem.',
     parameters: {},
     requiresConfirmation: false,
   },
   {
     name: 'fs_search',
+    domain: 'file_system',
     description: 'Search the filesystem.',
     parameters: {},
     requiresConfirmation: true,
   },
   {
     name: 'run_subagent',
+    domain: 'subagent',
     description: 'Spawn a subagent.',
     parameters: {},
     requiresConfirmation: false,
   },
   {
     name: 'spawn_cli_agent',
+    domain: 'cli_agent',
     description: 'Start a durable CLI child.',
     parameters: {},
     requiresConfirmation: false,
   },
   {
     name: 'run_sub_agentflow',
+    domain: 'agent_workflow',
     description: 'Run a child workflow.',
     parameters: {},
     requiresConfirmation: false,
   },
   {
     name: 'escalate',
+    domain: 'security_audit',
     description: 'Escalate an issue for review.',
     parameters: {},
     requiresConfirmation: false,
   },
   {
     name: 'mcp_toml::web_search',
+    domain: 'mcp',
     description: 'Search the web through MCP.',
+    serverKey: 'toml::web',
+    aliases: ['mcp_web_search'],
     parameters: {},
     requiresConfirmation: false,
   },
@@ -175,6 +184,35 @@ describe('PersonaToolPicker', () => {
     });
   });
 
+  it('keeps MCP allow-list selections when native All and None controls change native tools', async () => {
+    const user = userEvent.setup();
+    installFetchMock(TOOL_FIXTURE);
+
+    render(
+      <ToolPickerHarness
+        initialSelected={['vfs_read_file', CANONICAL_MCP_TOOL]}
+        initialPolicy="allow_list"
+      />,
+    );
+
+    await screen.findByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`);
+
+    await user.click(screen.getByTestId('tools-enable-all'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('selected-tools')).toHaveTextContent(CANONICAL_MCP_TOOL);
+      expect(screen.getByTestId('selected-tools')).toHaveTextContent('spawn_cli_agent');
+    });
+
+    await user.click(screen.getByTestId('tools-disable-all'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('selected-tools')).toHaveTextContent(CANONICAL_MCP_TOOL);
+      expect(screen.getByTestId('selected-tools')).not.toHaveTextContent('vfs_read_file');
+      expect(screen.getByTestId('selected-tools')).not.toHaveTextContent('spawn_cli_agent');
+    });
+  });
+
   it('accepts legacy MCP allow-list names and normalizes them to canonical identifiers', async () => {
     const user = userEvent.setup();
     installFetchMock(TOOL_FIXTURE);
@@ -200,6 +238,27 @@ describe('PersonaToolPicker', () => {
     });
   });
 
+  it('normalizes legacy MCP entries without clearing native selections from persisted allow-lists', async () => {
+    installFetchMock(TOOL_FIXTURE);
+
+    render(
+      <ToolPickerHarness
+        initialSelected={['vfs_read_file', LEGACY_MCP_TOOL]}
+        initialPolicy="allow_list"
+      />,
+    );
+
+    await screen.findByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`);
+
+    expect(screen.getByTestId('tool-toggle-vfs_read_file').querySelector('input')).toBeChecked();
+    expect(screen.getByTestId(`tool-toggle-${CANONICAL_MCP_TOOL}`).querySelector('input')).toBeChecked();
+    await waitFor(() => {
+      expect(screen.getByTestId('selected-tools')).toHaveTextContent('vfs_read_file');
+      expect(screen.getByTestId('selected-tools')).toHaveTextContent(CANONICAL_MCP_TOOL);
+      expect(screen.getByTestId('selected-tools')).not.toHaveTextContent(LEGACY_MCP_TOOL);
+    });
+  });
+
   it('shows read-only badges for grouped tools and MCP policy summaries', () => {
     render(<PersonaToolBadges tools={['vfs_read_file', 'vfs_write_file', LEGACY_MCP_TOOL]} mcpPolicy="allow_list" />);
 
@@ -217,7 +276,10 @@ describe('PersonaToolPicker', () => {
     installFetchMock([
       {
         name: CANONICAL_MCP_TOOL,
+        domain: 'mcp',
         description: 'Search the web through MCP.',
+        serverKey: 'toml::web',
+        aliases: [LEGACY_MCP_TOOL],
         parameters: {},
         requiresConfirmation: false,
       },

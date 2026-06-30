@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useAgentStore } from './agentStore';
-import type { ToolResult } from '@kalio/types';
+import type { RuntimeActivitySnapshot, ToolResult } from '@kalio/types';
 
 // Regression test for: Tool activity status mapping in ChatInterface
 // Issue: The status mapping in ChatInterface.tsx should handle all ToolResult statuses correctly
@@ -322,5 +322,80 @@ describe('agentStore - queued depth', () => {
 
     store.setQueuedDepth('session-1', 0);
     expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(0);
+  });
+});
+
+describe('agentStore - runtime snapshot ingestion', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      runtimeActivitySnapshots: {},
+      sessionStatusSnapshots: {},
+      sessionToolActivities: {},
+      toolActivities: [],
+    });
+  });
+
+  function makeRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot {
+    return {
+      sessionId,
+      active: true,
+      turnId: 'turn-1',
+      queueLength: 0,
+      pendingConfirmations: [],
+      pendingBudgetApprovals: [],
+      toolActivities: [],
+      childExecutions: [],
+      updatedAt: 2,
+      run: {
+        id: 'run-1',
+        sessionId,
+        turnId: 'turn-1',
+        phase: 'tool_running',
+        status: 'active',
+        retryCount: 0,
+        safeResume: true,
+        startedAt: 1,
+        updatedAt: 2,
+        lastHeartbeatAt: 2,
+      },
+    };
+  }
+
+  it('ignores malformed runtime snapshot session ids without throwing', () => {
+    const store = useAgentStore.getState();
+    const malformedSnapshot = {
+      ...makeRuntimeSnapshot('session-1'),
+      sessionId: 42,
+    } as unknown as RuntimeActivitySnapshot;
+
+    expect(() => store.setRuntimeActivitySnapshot(malformedSnapshot)).not.toThrow();
+    expect(useAgentStore.getState().runtimeActivitySnapshots).toEqual({});
+  });
+
+  it('stores valid runtime snapshots after session id narrowing', () => {
+    const store = useAgentStore.getState();
+    const snapshot = makeRuntimeSnapshot('session-1');
+
+    store.setRuntimeActivitySnapshot(snapshot);
+
+    expect(useAgentStore.getState().runtimeActivitySnapshots['session-1']).toMatchObject({
+      sessionId: 'session-1',
+      active: true,
+    });
+  });
+
+  it('does not publish a new store state for duplicate runtime snapshots', () => {
+    const store = useAgentStore.getState();
+    const snapshot = makeRuntimeSnapshot('session-1');
+
+    store.setRuntimeActivitySnapshot(snapshot);
+    const firstState = useAgentStore.getState();
+
+    store.setRuntimeActivitySnapshot(snapshot);
+    const secondState = useAgentStore.getState();
+
+    expect(secondState.runtimeActivitySnapshots).toBe(firstState.runtimeActivitySnapshots);
+    expect(secondState.toolActivities).toBe(firstState.toolActivities);
+    expect(secondState.sessionToolActivities).toBe(firstState.sessionToolActivities);
   });
 });

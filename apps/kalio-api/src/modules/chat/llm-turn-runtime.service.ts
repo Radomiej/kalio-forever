@@ -73,7 +73,7 @@ export class LLMTurnRuntimeService {
         ? (request.firstMessageId ?? (request.messageIdPrefix ? `${request.messageIdPrefix}` : nanoid()))
         : nanoid();
       lastMessageId = messageId;
-      await request.callbacks?.onBeforeIteration?.(iteration, messageId);
+      await request.callbacks?.onBeforeIteration?.(iteration, messageId, currentLimit);
 
       const state = new TurnState();
       const ctx: StreamContext = {
@@ -86,7 +86,7 @@ export class LLMTurnRuntimeService {
         state,
         emit: request.emit,
         agentRun: request.agentRun,
-        rawXmlToolNames: request.rawXmlToolNames ?? request.toolMetas.map((tool) => tool.name),
+        rawXmlToolNames: request.rawXmlToolNames,
       };
 
       const { history, unboundedHistoryCount } = await this.sessionManager.loadHistoryForLLM(request.sessionId, {
@@ -333,7 +333,7 @@ export class LLMTurnRuntimeService {
     toolCall: { id: string; name: string; args: Record<string, unknown> },
   ): Record<string, unknown> {
     const auditArgs = { ...toolCall.args, ...(request.auditMetadata ?? {}) };
-    const base = toAuditToolCallData(toolCall.id, toolCall.name, auditArgs);
+    const base = toAuditToolCallData(toolCall.id, toolCall.name, auditArgs, this.findToolMeta(request, toolCall.name));
     if (!request.agentRun) return base;
     return {
       ...base,
@@ -349,7 +349,7 @@ export class LLMTurnRuntimeService {
     result: import('@kalio/types').ToolResult,
   ): Record<string, unknown> {
     const auditArgs = { ...toolCall.args, ...(request.auditMetadata ?? {}) };
-    const base = toAuditToolResultData(toolCall.id, toolCall.name, result, auditArgs);
+    const base = toAuditToolResultData(toolCall.id, toolCall.name, result, auditArgs, this.findToolMeta(request, toolCall.name));
     if (!request.agentRun) return base;
     return {
       ...base,
@@ -357,6 +357,10 @@ export class LLMTurnRuntimeService {
       parentSessionId: request.agentRun.parentSessionId,
       parentToolCallId: request.agentRun.parentToolCallId,
     };
+  }
+
+  private findToolMeta(request: LLMAgentLoopRequest, toolName: string): import('@kalio/types').ToolMeta | undefined {
+    return request.toolMetas.find((tool) => tool.name === toolName || tool.aliases?.some((alias) => alias === toolName));
   }
 
   private toolStartPayload(

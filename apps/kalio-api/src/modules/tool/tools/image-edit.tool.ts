@@ -95,6 +95,7 @@ function resolveVersionedPath(existingPaths: string[], requestedPath: string): s
 @Injectable()
 @Tool({
   name: 'image_edit',
+  domain: 'image',
   description: `Generate or edit images using Gemini (via CometAPI) with VFS reference images.
 
 ALWAYS use this tool (not image_generate) when the user:

@@ -1,14 +1,13 @@
 import type { ChatMessage, RuntimeActivitySnapshot } from '@kalio/types';
 
 export type RuntimeEvidenceSource =
-  | 'assistant'
   | 'tool_result'
-  | 'architecture'
-  | 'child_output';
+  | 'architecture';
 
 export interface RuntimeEvidence {
   source: RuntimeEvidenceSource;
   text: string;
+  code: string;
 }
 
 export interface RuntimeEvidenceClassification {
@@ -17,31 +16,10 @@ export interface RuntimeEvidenceClassification {
   priority: number;
 }
 
-const TOOL_BUDGET_MARKERS = [
-  'tool budget ended',
-  'max tools',
-  'max tool',
-  'maxtoolattempt',
-] as const;
-
-const TRUSTED_ASSISTANT_RUNTIME_MARKERS = [
-  'sub-agent failed:',
-  'sub-agent timed out after',
-  'runtime failed:',
-  'runtime error:',
-  'agentflow failed:',
-  'agentflow blocked:',
-  'cli child failed:',
-  'child execution failed:',
-  'tool execution failed:',
-] as const;
-
-const GENERIC_RUNTIME_FAILURE_MARKERS = [
-  'failed',
-  'error',
-  'blocked',
-  'cancelled',
-] as const;
+const TIMEOUT_ERROR_CODES = new Set([
+  'TIMEOUT',
+  'SUBAGENT_TIMEOUT',
+]);
 
 export function compactRuntimeAttentionText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -52,41 +30,51 @@ function extractArchitectureEvidence(run: ChatMessage['architectureRun'] | undef
     return null;
   }
   for (let index = run.trace.length - 1; index >= 0; index -= 1) {
-    const reason = run.trace[index]?.incompleteReason?.trim();
-    if (reason) {
+    const step = run.trace[index];
+    if (!step) {
+      continue;
+    }
+    if (step.stream?.status === 'failed') {
       return {
         source: 'architecture',
-        text: compactRuntimeAttentionText(reason),
+        code: 'ARCHITECTURE_STREAM_FAILED',
+        text: compactRuntimeAttentionText(step.detail ?? step.content ?? 'Architecture stream failed'),
       };
     }
   }
   return null;
 }
 
-function extractToolResultEvidence(content: string): RuntimeEvidence | null {
+function firstStringField(record: Record<string, unknown>, fields: string[]): string | undefined {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function extractToolResultEvidence(content: unknown): RuntimeEvidence | null {
+  if (typeof content !== 'string' || content.trim().length === 0) {
+    return null;
+  }
+
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>;
-    const recoverableRuntimeError = parsed['recoverableRuntimeError'];
-    if (typeof recoverableRuntimeError === 'string' && recoverableRuntimeError.trim().length > 0) {
-      return {
-        source: 'tool_result',
-        text: compactRuntimeAttentionText(recoverableRuntimeError),
-      };
-    }
-    const errorMessage = parsed['errorMessage'];
-    if (typeof errorMessage === 'string' && errorMessage.trim().length > 0) {
-      return {
-        source: 'tool_result',
-        text: compactRuntimeAttentionText(errorMessage),
-      };
-    }
-    const toolResultErrorMessage = parsed['toolResultErrorMessage'];
-    if (typeof toolResultErrorMessage === 'string' && toolResultErrorMessage.trim().length > 0) {
-      return {
-        source: 'tool_result',
-        text: compactRuntimeAttentionText(toolResultErrorMessage),
-      };
-    }
+    const code = firstStringField(parsed, ['toolResultErrorCode', 'errorCode', 'code']);
+    if (!code) return null;
+    const message = firstStringField(parsed, [
+      'recoverableRuntimeError',
+      'toolResultErrorMessage',
+      'errorMessage',
+      'message',
+    ]);
+    return {
+      source: 'tool_result',
+      code,
+      text: compactRuntimeAttentionText(message ?? code),
+    };
   } catch {
     return null;
   }
@@ -94,13 +82,9 @@ function extractToolResultEvidence(content: string): RuntimeEvidence | null {
   return null;
 }
 
-function isTrustedAssistantRuntimeEvidence(normalized: string): boolean {
-  return TRUSTED_ASSISTANT_RUNTIME_MARKERS.some((marker) => normalized.includes(marker));
-}
-
 export function extractLatestVisibleRuntimeEvidence(
   messages: ChatMessage[] | undefined,
-  snapshot: RuntimeActivitySnapshot | undefined,
+  _snapshot: RuntimeActivitySnapshot | undefined,
 ): RuntimeEvidence | null {
   const safeMessages = messages ?? [];
   for (let index = safeMessages.length - 1; index >= 0; index -= 1) {
@@ -108,13 +92,7 @@ export function extractLatestVisibleRuntimeEvidence(
     if (!message) {
       continue;
     }
-    if (message.role === 'assistant' && message.content.trim().length > 0) {
-      return {
-        source: 'assistant',
-        text: compactRuntimeAttentionText(message.content),
-      };
-    }
-    if (message.role === 'tool_result' && message.content.trim().length > 0) {
+    if (message.role === 'tool_result') {
       const evidence = extractToolResultEvidence(message.content);
       if (evidence) {
         return evidence;
@@ -126,16 +104,7 @@ export function extractLatestVisibleRuntimeEvidence(
     }
   }
 
-  const lastChildOutput = [...(snapshot?.childExecutions ?? [])]
-    .reverse()
-    .map((execution) => execution.lastOutput?.trim())
-    .find((output): output is string => Boolean(output && output.length > 0));
-  return lastChildOutput
-    ? {
-      source: 'child_output',
-      text: compactRuntimeAttentionText(lastChildOutput),
-    }
-    : null;
+  return null;
 }
 
 export function classifyRuntimeEvidence(
@@ -145,41 +114,17 @@ export function classifyRuntimeEvidence(
     return null;
   }
 
-  const normalized = evidence.text.toLowerCase();
-
-  if (TOOL_BUDGET_MARKERS.some((marker) => normalized.includes(marker))) {
-    return {
-      kind: 'runtime_error',
-      detail: 'Tool budget reached before the branch could finish.',
-      priority: 10,
-    };
-  }
-
-  const trustedFailureSource = evidence.source !== 'assistant'
-    || isTrustedAssistantRuntimeEvidence(normalized);
-
-  if (normalized.includes('timed out') || normalized.includes('timeout')) {
-    if (!trustedFailureSource) {
-      return null;
-    }
-    const timeoutMatch = /(?:sub-agent failed:\s*)?(sub-agent timed out after [^.]+\.?)/i.exec(evidence.text);
+  if (TIMEOUT_ERROR_CODES.has(evidence.code)) {
     return {
       kind: 'runtime_timeout',
-      detail: compactRuntimeAttentionText(timeoutMatch?.[1] ?? evidence.text),
+      detail: evidence.text,
       priority: 5,
     };
   }
 
-  if (GENERIC_RUNTIME_FAILURE_MARKERS.some((marker) => normalized.includes(marker))) {
-    if (!trustedFailureSource) {
-      return null;
-    }
-    return {
-      kind: 'runtime_error',
-      detail: evidence.text,
-      priority: 15,
-    };
-  }
-
-  return null;
+  return {
+    kind: 'runtime_error',
+    detail: evidence.text,
+    priority: 15,
+  };
 }

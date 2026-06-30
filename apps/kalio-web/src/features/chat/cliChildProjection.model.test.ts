@@ -262,4 +262,50 @@ describe('cliChildProjection.model', () => {
       toolName: 'spawn_cli_agent',
     });
   });
+
+  it('falls back to stored CLI output when runtime child output is malformed', () => {
+    const projection = selectCLIChildProjectionFromSources({
+      runtimeActivitySnapshots: {
+        'parent-1': {
+          sessionId: 'parent-1',
+          active: true,
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [{
+            id: 'child-exec-1',
+            kind: 'cli_agent',
+            parentSessionId: 'parent-1',
+            childSessionId: 'cli-child-1',
+            parentToolCallId: 'call-1',
+            label: 'copilot',
+            status: 'running',
+            lastOutput: { text: 'bad runtime payload' } as never,
+            updatedAt: 1,
+          }],
+          updatedAt: 1,
+        },
+      },
+      cliChildProjections: {
+        'cli-child-1': {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'parent-1',
+          parentCallId: 'call-1',
+          agentId: 'codex',
+          status: 'failed',
+          lastOutput: 'stored tail',
+          childTitle: 'codex CLI',
+          toolName: 'spawn_cli_agent',
+        },
+      },
+      parentCallId: 'call-1',
+    });
+
+    expect(projection).toMatchObject({
+      childSessionId: 'cli-child-1',
+      status: 'running',
+      lastOutput: 'stored tail',
+    });
+  });
 });

@@ -104,6 +104,7 @@ describe('DoneHandler', () => {
     const ctx = {
       ...makeCtx(state),
       agentRun: { agentRunId: 'sub-1', agentType: 'subagent' as const },
+      rawXmlToolNames: ['run_cli_agent'],
     };
 
     await handler.handle({ type: 'done' }, ctx);
@@ -118,6 +119,63 @@ describe('DoneHandler', () => {
         },
       }),
     ]);
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledWith(
+      'sid-04',
+      'mid-04',
+      state,
+      { turnId: 'turn-04', promptMessageId: 'user-04' },
+    );
+  });
+
+  it('does not convert non-compat raw XML tool-call text even if the tool name is provided', async () => {
+    const state = new TurnState();
+    state.appendText([
+      '<tool_call>',
+      '<name>vfs_write</name>',
+      '<parameters>',
+      '<filePath>README.md</filePath>',
+      '<content>unsafe</content>',
+      '</parameters>',
+      '</tool_call>',
+    ].join(''));
+    const ctx = {
+      ...makeCtx(state),
+      agentRun: { agentRunId: 'sub-1', agentType: 'subagent' as const },
+      rawXmlToolNames: ['run_cli_agent', 'vfs_write'],
+    };
+
+    await handler.handle({ type: 'done' }, ctx);
+
+    expect(ctx.state.text).toContain('<tool_call>');
+    expect(ctx.state.toolCalls).toEqual([]);
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledWith(
+      'sid-04',
+      'mid-04',
+      state,
+      { turnId: 'turn-04', promptMessageId: 'user-04' },
+    );
+  });
+
+  it('leaves subagent raw XML text as display text without explicit raw XML allow-list', async () => {
+    const state = new TurnState();
+    state.appendText([
+      '<tool_call>',
+      '<name>run_cli_agent</name>',
+      '<parameters>',
+      '<agentId>gemini</agentId>',
+      '<prompt>Inspect the project.</prompt>',
+      '</parameters>',
+      '</tool_call>',
+    ].join(''));
+    const ctx = {
+      ...makeCtx(state),
+      agentRun: { agentRunId: 'sub-1', agentType: 'subagent' as const },
+    };
+
+    await handler.handle({ type: 'done' }, ctx);
+
+    expect(ctx.state.text).toContain('<tool_call>');
+    expect(ctx.state.toolCalls).toEqual([]);
     expect(sessionManager.persistAssistantMessage).toHaveBeenCalledWith(
       'sid-04',
       'mid-04',

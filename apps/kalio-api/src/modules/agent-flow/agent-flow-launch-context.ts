@@ -1,6 +1,5 @@
-import type { RunSubAgentFlowArgs } from '@kalio/types';
+import type { ArchitectureRun, RunSubAgentFlowArgs } from '@kalio/types';
 import type { SessionsService } from '../chat/sessions.service';
-import type { ArchitectureRuntimeService } from '../architecture/architecture-runtime.service';
 
 const ALLOWANCE_CONTEXT_KEYS = [
   'projectPath',
@@ -38,7 +37,9 @@ const BLOCKED_LAUNCH_KEYS = new Set([
 
 export interface AgentFlowLaunchContextDeps {
   sessions: Pick<SessionsService, 'get'>;
-  architectureRuntime: Pick<ArchitectureRuntimeService, 'findRunDurable'>;
+  architectureRuntime: {
+    findRunDurable(id: string): Promise<Pick<ArchitectureRun, 'context'> | null>;
+  };
 }
 
 export function extractAllowanceContext(

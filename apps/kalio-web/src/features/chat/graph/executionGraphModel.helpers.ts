@@ -325,7 +325,11 @@ export function getFinalAnswerMessage(turn: AgentTurn, messageById: Map<string, 
 
   const candidates = textMessageIds
     .map((messageId) => messageById.get(messageId) ?? null)
-    .filter((message): message is ChatMessage => message !== null && message.content.trim().length > 0);
+    .filter((message): message is ChatMessage => (
+      message !== null
+      && typeof message.content === 'string'
+      && message.content.trim().length > 0
+    ));
 
   return candidates.at(-1) ?? null;
 }
@@ -412,12 +416,17 @@ export function buildToolCycleLabel(toolCount: number): string {
 }
 
 export function buildCopiedFileArtifact(file: SubagentCopiedFile): ExecutionGraphArtifact {
+  const path = typeof file.toPath === 'string' && file.toPath.trim().length > 0
+    ? file.toPath
+    : typeof file.fromPath === 'string' && file.fromPath.trim().length > 0
+      ? file.fromPath
+      : 'copied-file';
   return {
-    id: `artifact:${file.toPath}`,
+    id: `artifact:${path}`,
     kind: 'file',
-    label: basename(file.toPath),
-    subtitle: file.toPath,
-    path: file.toPath,
+    label: basename(path),
+    subtitle: path,
+    path,
     preview: `${file.sizeBytes} bytes copied`,
     payload: file,
   };

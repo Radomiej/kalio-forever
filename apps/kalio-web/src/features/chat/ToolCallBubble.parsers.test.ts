@@ -55,6 +55,7 @@ describe('ToolCallBubble.parsers', () => {
   it('rejects invalid sub-agent flow payloads and accepts the bounded runtime shape', () => {
     expect(extractSubAgentFlowResult({
       flowRunId: 'flow-1',
+      flowDefinitionId: 'goal_guard_delivery_loop',
       parentSessionId: 'parent-1',
       parentToolCallId: 'call-1',
       childSessionId: 'child-1',
@@ -67,6 +68,7 @@ describe('ToolCallBubble.parsers', () => {
 
     expect(extractSubAgentFlowResult({
       flowRunId: 'flow-1',
+      flowDefinitionId: 'goal_guard_delivery_loop',
       parentSessionId: 'parent-1',
       parentToolCallId: 'call-1',
       childSessionId: 'child-1',
@@ -118,6 +120,7 @@ describe('ToolCallBubble.parsers', () => {
 
     expect(extractSubAgentFlowResult({
       flowRunId: 'flow-1',
+      flowDefinitionId: 'goal_guard_delivery_loop',
       parentSessionId: 'parent-1',
       parentToolCallId: 'call-1',
       childSessionId: 'child-1',
@@ -142,6 +145,7 @@ describe('ToolCallBubble.parsers', () => {
       openGraphRunId: 'graph-1',
     })).toMatchObject({
       flowRunId: 'flow-1',
+      flowDefinitionId: 'goal_guard_delivery_loop',
       parentSessionId: 'parent-1',
       parentToolCallId: 'call-1',
       childSessionId: 'child-1',

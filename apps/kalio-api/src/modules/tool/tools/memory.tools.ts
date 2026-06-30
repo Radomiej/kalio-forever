@@ -86,6 +86,7 @@ async function resolvePersonaId(drizzle: DrizzleService, sessionId: string): Pro
 @Injectable()
 @ConfirmedTool({
   name: 'memory_ingest',
+  domain: 'memory',
   description:
     'Store a text passage in the long-term memory for the active persona. ' +
     'The text is chunked, embedded, and indexed for future retrieval. ' +
@@ -128,6 +129,7 @@ export class MemoryIngestTool {
 @Injectable()
 @Tool({
   name: 'memory_search',
+  domain: 'memory',
   description:
     'Search long-term memory for passages related to a query. ' +
     'Returns the most relevant chunks with relevance scores. ' +
@@ -172,6 +174,7 @@ export class MemorySearchTool {
 @Injectable()
 @ConfirmedTool({
   name: 'memory_ingest_conversation',
+  domain: 'memory',
   description:
     'Ingest an entire conversation (list of messages) into long-term memory for the active persona. ' +
     'Messages are grouped into contextual blocks before embedding. ' +

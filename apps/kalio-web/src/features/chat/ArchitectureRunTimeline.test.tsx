@@ -9,6 +9,29 @@ type ArchitectureRunWithGraph = ArchitectureChatRunSummary & {
 };
 
 describe('ArchitectureRunTimeline', () => {
+  it('renders a partial trace step without throwing when typed projection fields are missing', () => {
+    const partialStep = {
+      content: 'Partial runtime event during reconnect.',
+      eventId: 'run-partial:event:1',
+    } as unknown as ArchitectureChatRunSummary['trace'][number];
+    const run: ArchitectureChatRunSummary = {
+      runId: 'run-partial',
+      schemaId: 'five-minds-council',
+      status: 'running',
+      routeHops: [],
+      trace: [partialStep],
+    };
+
+    expect(() => render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    )).not.toThrow();
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Unknown');
+  });
+
   it('surfaces router contract confidence, next action, and fallback status', () => {
     const run: ArchitectureChatRunSummary = {
       runId: 'run-1',
@@ -224,7 +247,7 @@ describe('ArchitectureRunTimeline', () => {
     expect(card).toHaveTextContent('to final-artifact');
   });
 
-  it('infers the orchestrator label from degraded router content when graph labels are missing', () => {
+  it('does not infer router labels from degraded router content when typed metadata is missing', () => {
     const run: ArchitectureChatRunSummary = {
       runId: 'run-router-fallback',
       schemaId: 'Architecture Debate',
@@ -249,8 +272,10 @@ describe('ArchitectureRunTimeline', () => {
       />,
     );
 
-    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Orchestrator');
-    expect(screen.getByTestId('architecture-route-router')).toHaveTextContent('Orchestrator');
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Router');
+    expect(screen.getByTestId('architecture-route-shell')).not.toHaveTextContent('Orchestrator');
+    expect(screen.getByTestId('architecture-route-router')).toHaveTextContent('Router');
+    expect(screen.getByTestId('architecture-route-router')).not.toHaveTextContent('Orchestrator');
     expect(screen.getByTestId('architecture-route-router')).toHaveTextContent('router');
   });
 

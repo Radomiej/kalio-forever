@@ -4,11 +4,13 @@ import type {
   AgentRunContext,
   RuntimeToolActivity,
   SocketEvents,
+  ToolBudgetProgress,
   ToolMeta,
   ToolConfirmationRequest,
   ToolResult,
 } from '@kalio/types';
 import type { CLIChildProjection } from '../features/chat/cliChildProjection.model';
+import type { ToolActivityStatus } from './agentRuntimeTypes';
 import { areSessionStatusSnapshotsEquivalent } from './sessionStatusSnapshot';
 import {
   patchRuntimeChildExecution,
@@ -30,7 +32,11 @@ import {
   applyRuntimeActivitySnapshotSync,
 } from './agentRuntimeStore.mutators';
 
-export type ToolActivityStatus = 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'cancelled' | 'expired';
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+export type { ToolActivityStatus } from './agentRuntimeTypes';
 
 export interface ToolActivity {
   callId: string;
@@ -100,6 +106,8 @@ interface AgentState {
   setStreaming: (streaming: boolean, messageId?: string, sessionId?: string | null) => void;
   setPendingConfirmation: (sessionId: string, req: ToolConfirmationRequest | null) => void;
   setPendingBudgetApproval: (sessionId: string, req: AgentBudgetApprovalRequest | null) => void;
+  setToolBudgetProgress: (progress: ToolBudgetProgress) => void;
+  clearToolBudgetProgress: (sessionId: string) => void;
   removePendingConfirmation: (sessionId: string, requestId: string) => void;
   removePendingBudgetApproval: (sessionId: string, requestId: string) => void;
   setAvailableTools: (tools: ToolMeta[]) => void;
@@ -269,6 +277,34 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
     set((s) => applyPendingConfirmationUpsert(s, sessionId, req)),
   setPendingBudgetApproval: (sessionId, req) =>
     set((s) => applyPendingBudgetApprovalUpsert(s, sessionId, req)),
+  setToolBudgetProgress: (progress) =>
+    set((s) => ({
+      runtimeActivitySnapshots: updateRuntimeSnapshot(
+        s.runtimeActivitySnapshots,
+        progress.sessionId,
+        (snapshot) => ({
+          ...snapshot,
+          active: progress.status !== 'waiting',
+          turnId: progress.turnId ?? snapshot.turnId,
+          toolBudgetProgress: progress,
+          updatedAt: progress.updatedAt,
+        }),
+        { createIfMissing: true },
+      ),
+    })),
+  clearToolBudgetProgress: (sessionId) =>
+    set((s) => ({
+      runtimeActivitySnapshots: updateRuntimeSnapshot(
+        s.runtimeActivitySnapshots,
+        sessionId,
+        (snapshot) => {
+          const next = { ...snapshot, updatedAt: Date.now() };
+          delete next.toolBudgetProgress;
+          return next;
+        },
+        { createIfMissing: false },
+      ),
+    })),
   removePendingConfirmation: (sessionId, requestId) =>
     set((s) => applyPendingConfirmationRemoval(s, sessionId, requestId)),
   removePendingBudgetApproval: (sessionId, requestId) =>
@@ -699,7 +735,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
 
   setSessionStatusSnapshot: (snapshot) =>
     set((s) => {
-      if (!snapshot.sessionId.trim()) {
+      if (!isNonEmptyString(snapshot.sessionId)) {
         return s;
       }
       if (areSessionStatusSnapshotsEquivalent(s.sessionStatusSnapshots[snapshot.sessionId], snapshot)) {
@@ -715,14 +751,14 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
 
   setRuntimeActivitySnapshot: (snapshot) =>
     set((s) => {
-      if (!snapshot.sessionId.trim()) {
+      if (!isNonEmptyString(snapshot.sessionId)) {
         return s;
       }
       return applyRuntimeActivitySnapshotSync(s, snapshot, toolActivityFromRuntime);
     }),
 
   recordSessionStatusSnapshot: (snapshot) => {
-    if (!snapshot.sessionId.trim()) {
+    if (!isNonEmptyString(snapshot.sessionId)) {
       return;
     }
 
@@ -733,7 +769,7 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
   },
 
   consumeBufferedSessionStatusSnapshots: (sessionId) => {
-    if (!sessionId.trim()) {
+    if (!isNonEmptyString(sessionId)) {
       return [];
     }
 

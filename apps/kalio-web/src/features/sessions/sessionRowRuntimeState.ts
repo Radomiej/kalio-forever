@@ -1,9 +1,6 @@
 import type { ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
 import {
-  architectureRunIdForSession,
-  architectureSlotIdForSession,
-  isTechnicalArchitectureSession,
   visibleConversationTreeChildren,
   sessionStatusSnapshotToRuntimeState,
   type SessionRuntimeState,
@@ -21,7 +18,7 @@ function isLiveMetadataRuntimeState(
 }
 
 export function sessionRuntimeState(
-  session: ChatSession | null,
+  _session: ChatSession | null,
   sessionId: string,
   pendingConfirmations: Record<string, unknown>,
   pendingBudgetApprovals: Record<string, unknown>,
@@ -78,14 +75,6 @@ export function sessionRuntimeState(
   }
   if (workflowEnvelopeState) {
     return workflowEnvelopeState;
-  }
-  if (
-    session
-    && architectureRunIdForSession(session)
-    && architectureSlotIdForSession(session)
-    && !isTechnicalArchitectureSession(session)
-  ) {
-    return 'pending';
   }
   return null;
 }

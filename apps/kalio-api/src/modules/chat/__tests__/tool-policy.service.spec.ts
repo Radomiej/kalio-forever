@@ -37,6 +37,26 @@ function makeService(
   return new ToolPolicyService(personaService, toolDispatch);
 }
 
+function makeServiceWithToolCatalog(
+  personaAllowed: string[],
+  toolCatalog: ToolMeta[],
+): ToolPolicyService {
+  const personaService = {
+    getSessionConfig: vi.fn().mockResolvedValue({
+      systemPrompt: 'base',
+      model: 'mock',
+      allowedTools: personaAllowed,
+      skillIds: [],
+      mcpPolicy: 'allow_all',
+      kv: {},
+    }),
+  } as unknown as PersonaService;
+  const toolDispatch = {
+    getToolMetas: vi.fn().mockReturnValue(toolCatalog),
+  } as unknown as ToolDispatchService;
+  return new ToolPolicyService(personaService, toolDispatch);
+}
+
 describe('ToolPolicyService', () => {
   it('chat uses exactly persona.allowedTools', async () => {
     const service = makeService(['vfs_read', 'vfs_list']);
@@ -57,11 +77,39 @@ describe('ToolPolicyService', () => {
     expect(decision.allowedToolNames).toEqual(['vfs_read', 'fs_read']);
   });
 
+  it('subagent treats an explicit empty tool list as no tools', async () => {
+    const service = makeService(['vfs_read', 'run_subagent']);
+    const decision = await service.decide({
+      runtimeKind: 'subagent',
+      personaId: 'qa',
+      explicitToolNames: [],
+      explicitTools: [],
+    });
+
+    expect(decision.source).toBe('runtime-explicit');
+    expect(decision.allowedToolNames).toEqual([]);
+  });
+
+  it('subagent resolves explicit runtime tools even when they are absent from the global catalog', async () => {
+    const explicitTool = { name: 'run_cli_agent', description: 'CLI', parameters: {}, requiresConfirmation: true };
+    const service = makeServiceWithToolCatalog([], []);
+    const decision = await service.decide({
+      runtimeKind: 'subagent',
+      personaId: 'qa',
+      explicitToolNames: ['run_cli_agent'],
+      explicitTools: [explicitTool],
+    });
+
+    expect(decision.source).toBe('runtime-explicit');
+    expect(decision.allowedToolNames).toEqual(['run_cli_agent']);
+    expect(decision.tools).toEqual([explicitTool]);
+  });
+
   it('allow-list personas translate unique legacy MCP names at the read boundary', async () => {
     const service = makeService(
       ['mcp_docs_search'],
       'allow_list',
-      [{ name: 'mcp_toml::docs_search', description: 'MCP docs search', parameters: {}, requiresConfirmation: false }],
+      [{ name: 'mcp_toml::docs_search', aliases: ['mcp_docs_search'], description: 'MCP docs search', parameters: {}, requiresConfirmation: false, serverKey: 'toml::docs' }],
     );
     const decision = await service.decide({
       runtimeKind: 'chat',
@@ -76,7 +124,7 @@ describe('ToolPolicyService', () => {
     const service = makeService(
       ['vfs_read'],
       'allow_all',
-      [{ name: 'mcp_toml::docs_search', description: 'MCP docs search', parameters: {}, requiresConfirmation: false }],
+      [{ name: 'mcp_toml::docs_search', aliases: ['mcp_docs_search'], description: 'MCP docs search', parameters: {}, requiresConfirmation: false, serverKey: 'toml::docs' }],
     );
     const decision = await service.decide({
       runtimeKind: 'subagent',
@@ -87,6 +135,20 @@ describe('ToolPolicyService', () => {
 
     expect(decision.source).toBe('runtime-explicit');
     expect(decision.allowedToolNames).toEqual(['mcp_toml::docs_search']);
+  });
+
+  it('does not translate legacy MCP names without explicit alias metadata', async () => {
+    const service = makeService(
+      ['mcp_docs_search'],
+      'allow_list',
+      [{ name: 'mcp_toml::docs_search', description: 'MCP docs search', parameters: {}, requiresConfirmation: false, serverKey: 'toml::docs' }],
+    );
+    const decision = await service.decide({
+      runtimeKind: 'chat',
+      personaId: 'qa',
+    });
+
+    expect(decision.allowedToolNames).toEqual([]);
   });
 
   it('does not allow native tools only because their name uses the legacy mcp prefix', async () => {
@@ -223,6 +285,22 @@ describe('ToolPolicyService', () => {
     expect(decision.denied).toContainEqual({ name: 'spawn_cli_agent', reason: 'cli_unavailable' });
   });
 
+  it('denies CLI-domain tools when CLI is unavailable even if the tool name changes', async () => {
+    const service = makeService(
+      ['delegate_cli', 'vfs_read'],
+      'allow_all',
+      [{ name: 'delegate_cli', description: 'Delegate to CLI', parameters: {}, requiresConfirmation: false, domain: 'cli_agent' }],
+    );
+    const decision = await service.decide({
+      runtimeKind: 'chat',
+      personaId: 'p1',
+      architectureContext: { architectureCliAgentsEnabled: false },
+    });
+
+    expect(decision.allowedToolNames).toEqual(['vfs_read']);
+    expect(decision.denied).toContainEqual({ name: 'delegate_cli', reason: 'cli_unavailable' });
+  });
+
   it('denies run_subagent when subagent depth limit is exceeded', async () => {
     const service = makeService(['run_subagent', 'vfs_read']);
     const decision = await service.decide({
@@ -232,6 +310,22 @@ describe('ToolPolicyService', () => {
     });
     expect(decision.allowedToolNames).toEqual(['vfs_read']);
     expect(decision.denied).toContainEqual({ name: 'run_subagent', reason: 'subagent_depth_limit' });
+  });
+
+  it('denies subagent-domain tools when subagent depth limit is exceeded even if the tool name changes', async () => {
+    const service = makeService(
+      ['delegate_child', 'vfs_read'],
+      'allow_all',
+      [{ name: 'delegate_child', description: 'Delegate child work', parameters: {}, requiresConfirmation: false, domain: 'subagent' }],
+    );
+    const decision = await service.decide({
+      runtimeKind: 'subagent',
+      personaId: 'p1',
+      subagentDepth: 2,
+    });
+
+    expect(decision.allowedToolNames).toEqual(['vfs_read']);
+    expect(decision.denied).toContainEqual({ name: 'delegate_child', reason: 'subagent_depth_limit' });
   });
 
   it('QA persona with projectPath includes host FS tools in agent-flow-branch', async () => {
@@ -283,6 +377,24 @@ describe('ToolPolicyService', () => {
         { name: 'fs_list', reason: 'missing_project_path' },
       ]),
     );
+  });
+
+  it('denies file-system-domain tools without projectPath even if the tool name changes', async () => {
+    const service = makeService(
+      ['project_read', 'vfs_read'],
+      'allow_all',
+      [{ name: 'project_read', description: 'Read host project', parameters: {}, requiresConfirmation: false, domain: 'file_system' }],
+    );
+    const decision = await service.decide({
+      runtimeKind: 'agent-flow-branch',
+      personaId: 'qa',
+      slotPolicy: {
+        allowedToolNames: ['vfs_read', 'project_read'],
+      },
+    });
+
+    expect(decision.allowedToolNames).toEqual(['vfs_read']);
+    expect(decision.denied).toContainEqual({ name: 'project_read', reason: 'missing_project_path' });
   });
 
   it('agent-flow-branch with inherited projectPath allows host FS and terminal tools', async () => {

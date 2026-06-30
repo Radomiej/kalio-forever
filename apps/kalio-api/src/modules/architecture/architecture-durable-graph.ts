@@ -57,7 +57,8 @@ function reconstructGraphFromMessages(
   registry: ArchitectureRegistryService,
 ): ArchitectureGraphProjection | null {
   const scopedMessages = messages;
-  const persistedSummary = [...scopedMessages].reverse().find((message) => message.architectureRun?.runId === runId)?.architectureRun;
+  const persistedSummaryMessage = [...scopedMessages].reverse().find((message) => message.architectureRun?.runId === runId);
+  const persistedSummary = persistedSummaryMessage?.architectureRun;
   const schema = schemaForPersistedRun(persistedSummary?.schemaId, scopedMessages, registry);
   if (!schema) {
     return null;
@@ -78,22 +79,15 @@ function reconstructGraphFromMessages(
     eventIdsByNodeId.set(nodeId, [...(eventIdsByNodeId.get(nodeId) ?? []), eventIdFromToolCall(toolCall)]);
   });
 
-  scopedMessages.forEach((message) => {
-    if (message.role !== 'assistant') {
-      return;
-    }
-    if (/^###\s+Router\b/im.test(message.content)) {
-      eventIdsByNodeId.set('router', [...(eventIdsByNodeId.get('router') ?? []), message.id]);
-    }
-    if (/^###\s+Finalizer\b/im.test(message.content)) {
-      completedNodeIds.add(primaryFinalNodeId(schema));
-      eventIdsByNodeId.set(primaryFinalNodeId(schema), [...(eventIdsByNodeId.get(primaryFinalNodeId(schema)) ?? []), message.id]);
-    }
-  });
+  if (persistedSummary?.status === 'completed' && persistedSummaryMessage) {
+    const finalNodeId = primaryFinalNodeId(schema);
+    completedNodeIds.add(finalNodeId);
+    eventIdsByNodeId.set(finalNodeId, [...(eventIdsByNodeId.get(finalNodeId) ?? []), persistedSummaryMessage.id]);
+  }
 
   const routeHops = persistedSummary?.routeHops.length
     ? persistedSummary.routeHops
-    : reconstructRouteHops(schema, branchToolCalls, scopedMessages);
+    : reconstructRouteHops(schema, branchToolCalls);
 
   routeHops.forEach((hop) => {
     completedNodeIds.add(hop.fromNodeId);
@@ -315,11 +309,9 @@ function schemaForPersistedRun(
 function reconstructRouteHops(
   schema: ArchitectureSchema,
   branchToolCalls: NonNullable<ChatMessage['toolCalls']>,
-  messages: ChatMessage[],
 ): NonNullable<ArchitectureGraphProjection['routeHops']> {
   const hops: NonNullable<ArchitectureGraphProjection['routeHops']> = [];
   const routerNodeId = primaryRouterNodeId(schema);
-  const finalNodeId = primaryFinalNodeId(schema);
 
   branchToolCalls.forEach((toolCall) => {
     const nodeId = typeof toolCall.args['nodeId'] === 'string' ? toolCall.args['nodeId'] : null;
@@ -333,16 +325,6 @@ function reconstructRouteHops(
       toNodeId: routerNodeId,
     });
   });
-
-  const routerMessage = messages.find((message) => message.role === 'assistant' && /^###\s+Router\b/im.test(message.content));
-  if (routerMessage) {
-    hops.push({
-      eventId: routerMessage.id,
-      source: 'router',
-      fromNodeId: routerNodeId,
-      toNodeId: finalNodeId,
-    });
-  }
 
   return hops;
 }

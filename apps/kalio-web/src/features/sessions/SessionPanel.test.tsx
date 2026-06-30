@@ -6,7 +6,7 @@ import type { ChatMessage, ChatSession, Persona } from '@kalio/types';
 import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
 import type { AgentTurn } from '../../store/sessionStore';
 
-// ── Mocks ─────────────────────────────────────────────────────────────────────
+// â”€â”€ Mocks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const mockSetSessions = vi.fn();
 const mockSetActiveSession = vi.fn();
@@ -29,7 +29,7 @@ function chooseOriginFilter(filterId: 'all' | 'user' | 'agent' | 'archived'): vo
 }
 
 const mockPersonas: Persona[] = [
-  { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You are…', model: 'claude', allowedTools: [], skillIds: [], mcpPolicy: 'allow_all', ...DEFAULT_TEST_PERSONA_AVATAR, createdAt: 0, updatedAt: 0 },
+  { id: 'p1', name: 'Dev Assistant', systemPrompt: 'You areâ€¦', model: 'claude', allowedTools: [], skillIds: [], mcpPolicy: 'allow_all', ...DEFAULT_TEST_PERSONA_AVATAR, createdAt: 0, updatedAt: 0 },
 ];
 
 const mockState: {
@@ -117,7 +117,7 @@ vi.mock('../../services/apiClient', () => ({
   },
 }));
 
-// ── agentStore mock ───────────────────────────────────────────────────────────
+// â”€â”€ agentStore mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const mockSetPendingConfirmation = vi.hoisted(() => vi.fn());
 const mockSetPendingBudgetApproval = vi.hoisted(() => vi.fn());
@@ -159,7 +159,7 @@ vi.mock('../../store/agentStore', () => ({
   ),
 }));
 
-// ── formatRelativeTime unit tests ─────────────────────────────────────────────
+// â”€â”€ formatRelativeTime unit tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('formatRelativeTime', () => {
   it('returns "just now" for < 1 minute', () => {
@@ -188,8 +188,7 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime(ts)).toBe(new Date(ts).toLocaleDateString());
   });
 });
-
-// ── SessionPanel component tests ──────────────────────────────────────────────
+// â”€â”€ SessionPanel component tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('SessionPanel', () => {
   beforeEach(() => {
@@ -308,7 +307,7 @@ describe('SessionPanel', () => {
   it('does not show badge for default persona (no name found)', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/api/personas'));
-    // s2 uses personaId 'default' which has no persona in mockPersonas → no badge
+    // s2 uses personaId 'default' which has no persona in mockPersonas â†’ no badge
     const badges = screen.queryAllByText('default');
     expect(badges).toHaveLength(0);
   });
@@ -617,7 +616,7 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:pragmatist',
           architectureSlotId: 'pragmatist',
-          architectureContext: { roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
         },
         createdAt: now - 4000,
         updatedAt: now - 4000,
@@ -632,7 +631,7 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:innovator',
           architectureSlotId: 'innovator',
-          architectureContext: { roleSlotId: 'innovator', displayLabel: 'Innovator' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'innovator', displayLabel: 'Innovator' },
         },
         createdAt: now - 3000,
         updatedAt: now - 3000,
@@ -647,7 +646,7 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:analyst',
           architectureSlotId: 'analyst',
-          architectureContext: { roleSlotId: 'analyst', displayLabel: 'Analyst' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'analyst', displayLabel: 'Analyst' },
         },
         createdAt: now - 2000,
         updatedAt: now - 2000,
@@ -662,7 +661,7 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:shadow',
           architectureSlotId: 'shadow',
-          architectureContext: { roleSlotId: 'shadow', displayLabel: 'Shadow' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'shadow', displayLabel: 'Shadow' },
         },
         createdAt: now - 1000,
         updatedAt: now - 1000,
@@ -824,7 +823,7 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:analyst',
           architectureSlotId: 'analyst',
-          architectureContext: { roleSlotId: 'analyst', displayLabel: 'Analyst' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'analyst', displayLabel: 'Analyst' },
         },
         createdAt: now - 1000,
         updatedAt: now - 1000,
@@ -868,7 +867,7 @@ describe('SessionPanel', () => {
     expect(screen.getByTestId('session-pending-confirmation-arch-run-analyst')).toBeTruthy();
   });
 
-  it('shows real architecture descendants as pending before reload metadata hydrates', async () => {
+  it('does not mark architecture descendants pending before typed reload metadata hydrates', async () => {
     const now = Date.now();
     const architectureSessions: ChatSession[] = [
       { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 3000, updatedAt: now - 3000 },
@@ -895,7 +894,7 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:analyst',
           architectureSlotId: 'analyst',
-          architectureContext: { roleSlotId: 'analyst', displayLabel: 'Analyst' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'analyst', displayLabel: 'Analyst' },
         },
         createdAt: now - 1000,
         updatedAt: now - 1000,
@@ -917,11 +916,11 @@ describe('SessionPanel', () => {
     expect(toggle).toHaveTextContent('1');
     fireEvent.click(toggle);
     expect(screen.queryByTestId('session-pending-arch-run-root')).toBeNull();
-    expect(screen.getByTestId('session-pending-arch-run-analyst')).toBeTruthy();
-    expect(screen.getByTestId('session-descendant-activity-host')).toHaveTextContent('1 pending');
+    expect(screen.queryByTestId('session-pending-arch-run-analyst')).toBeNull();
+    expect(screen.queryByTestId('session-descendant-activity-host')).toBeNull();
   });
 
-  it('shows the host row as pending when workflow descendants exist but only fallback status is available', async () => {
+  it('does not show the host row as pending when workflow descendants only have fallback metadata', async () => {
     const now = Date.now();
     const architectureSessions: ChatSession[] = [
       { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 3000, updatedAt: now - 3000 },
@@ -948,7 +947,7 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:analyst',
           architectureSlotId: 'analyst',
-          architectureContext: { roleSlotId: 'analyst', displayLabel: 'Analyst' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'analyst', displayLabel: 'Analyst' },
         },
         createdAt: now - 1000,
         updatedAt: now - 1000,
@@ -969,8 +968,9 @@ describe('SessionPanel', () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
 
-    expect(screen.getByTestId('session-pending-host')).toBeTruthy();
-    expect(screen.getByTestId('session-descendant-activity-host')).toHaveTextContent('1 pending');
+    expect(screen.getByTestId('session-done-host')).toBeTruthy();
+    expect(screen.queryByTestId('session-pending-host')).toBeNull();
+    expect(screen.queryByTestId('session-descendant-activity-host')).toBeNull();
   });
 
   it('keeps the host row running while workflow-envelope metadata still reports a live run', async () => {
@@ -1164,7 +1164,7 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:innovator',
           architectureSlotId: 'innovator',
-          architectureContext: { displayLabel: 'Innovator' },
+          architectureContext: { architectureRunId: 'run-live', displayLabel: 'Innovator' },
         },
         createdAt: now - 1000,
         updatedAt: now - 1000,
@@ -1234,7 +1234,7 @@ describe('SessionPanel', () => {
         parentSessionId: 'arch-run-root',
         runtimeContext: {
           runtimeKind: 'agent-flow-branch',
-          architectureContext: { roleSlotType: 'router', displayLabel: 'Router' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotType: 'router', displayLabel: 'Router' },
         },
         createdAt: now - 3000,
         updatedAt: now - 3000,
@@ -1248,7 +1248,7 @@ describe('SessionPanel', () => {
         runtimeContext: {
           runtimeKind: 'agent-flow-branch',
           architectureSlotId: 'finalizer',
-          architectureContext: { displayLabel: 'Finalizer' },
+          architectureContext: { architectureRunId: 'run-live', displayLabel: 'Finalizer' },
         },
         createdAt: now - 2000,
         updatedAt: now - 2000,
@@ -1263,7 +1263,7 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:pragmatist',
           architectureSlotId: 'pragmatist',
-          architectureContext: { roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
         },
         createdAt: now - 1000,
         updatedAt: now - 1000,
@@ -1344,7 +1344,7 @@ describe('SessionPanel', () => {
         runtimeContext: {
           runtimeKind: 'agent-flow-branch',
           architectureSlotId: 'pragmatist',
-          architectureContext: { roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
         },
         createdAt: now - 3_000,
         updatedAt: now - 3_000,
@@ -1359,7 +1359,7 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:innovator',
           architectureSlotId: 'innovator',
-          architectureContext: { roleSlotId: 'innovator', displayLabel: 'Innovator' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'innovator', displayLabel: 'Innovator' },
         },
         createdAt: now - 2_000,
         updatedAt: now - 2_000,
@@ -1373,7 +1373,7 @@ describe('SessionPanel', () => {
         runtimeContext: {
           runtimeKind: 'agent-flow-branch',
           architectureSlotId: 'finalizer',
-          architectureContext: { displayLabel: 'Finalizer' },
+          architectureContext: { architectureRunId: 'run-live', displayLabel: 'Finalizer' },
         },
         createdAt: now - 1_000,
         updatedAt: now - 1_000,
@@ -1541,7 +1541,7 @@ describe('SessionPanel', () => {
     expect(screen.queryByText('Strategic Decision Council: Finalizer')).toBeNull();
   });
 
-  it('hides legacy technical architecture sessions when only the id/title still marks them as router or finalizer', async () => {
+  it('does not infer technical architecture sessions from id/title without runtime context', async () => {
     const now = Date.now();
     const architectureSessions: ChatSession[] = [
       { id: 'host', personaId: 'default', title: 'Workflow host', createdAt: now - 5_000, updatedAt: now - 5_000 },
@@ -1595,8 +1595,8 @@ describe('SessionPanel', () => {
 
     fireEvent.click(screen.getByTestId('toggle-session-children-host'));
 
-    expect(screen.queryByText('Architecture Debate: Orchestrator')).toBeNull();
-    expect(screen.queryByText('Architecture Debate: Finalizer')).toBeNull();
+    expect(screen.getByText('Architecture Debate: Orchestrator')).toBeTruthy();
+    expect(screen.getByText('Architecture Debate: Finalizer')).toBeTruthy();
     expect(screen.getByText('Architecture Debate: Analyst')).toBeTruthy();
   });
 
@@ -1805,7 +1805,7 @@ describe('SessionPanel', () => {
         runtimeContext: {
           runtimeKind: 'agent-flow-branch',
           architectureSlotId: 'router',
-          architectureContext: { roleSlotId: 'router', displayLabel: 'Router' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'router', displayLabel: 'Router' },
         },
         createdAt: now - 3_000,
         updatedAt: now - 3_000,
@@ -1819,7 +1819,7 @@ describe('SessionPanel', () => {
         runtimeContext: {
           runtimeKind: 'agent-flow-branch',
           architectureSlotId: 'pragmatist',
-          architectureContext: { roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
         },
         createdAt: now - 2_000,
         updatedAt: now - 2_000,
@@ -1833,7 +1833,7 @@ describe('SessionPanel', () => {
         runtimeContext: {
           runtimeKind: 'agent-flow-branch',
           architectureSlotId: 'finalizer',
-          architectureContext: { roleSlotId: 'finalizer', displayLabel: 'Finalizer' },
+          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'finalizer', displayLabel: 'Finalizer' },
         },
         createdAt: now - 1_000,
         updatedAt: now - 1_000,
@@ -2876,14 +2876,14 @@ describe('SessionPanel', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // REGRESSION: orphaned pendingConfirmations on session deletion
 //
 // Root cause: removeSession() removes the session from the list but does NOT
 // clean up the corresponding pendingConfirmations entry in agentStore. The
 // dangling entry leaks memory and could cause key errors if the session id is
 // ever reused or if the store is iterated.
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('REGRESSION: pendingConfirmations cleaned up on session delete', () => {
   it('deleting a session calls setPendingConfirmation(id, null)', async () => {
@@ -2927,4 +2927,3 @@ describe('REGRESSION: pendingConfirmations cleaned up on session delete', () => 
     await waitFor(() => expect(mockSetPendingBudgetApproval).toHaveBeenCalledWith('s2', null));
   });
 });
-

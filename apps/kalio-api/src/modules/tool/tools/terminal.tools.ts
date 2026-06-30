@@ -44,6 +44,7 @@ function getIdArg(args: ToolCallRequest['args']): string {
 @Injectable()
 @Tool({
   name: 'terminal_spawn',
+  domain: 'terminal',
   description:
     'Spawn a long-running terminal process in the background. ' +
     'Returns a session ID — use terminal_output to read its stdout/stderr and terminal_kill to stop it. ' +
@@ -89,6 +90,7 @@ export class TerminalSpawnTool {
 @Injectable()
 @Tool({
   name: 'terminal_list',
+  domain: 'terminal',
   description: 'List all active and recently exited terminal sessions.',
   parameters: {
     type: 'object',
@@ -108,6 +110,7 @@ export class TerminalListTool {
 @Injectable()
 @Tool({
   name: 'terminal_output',
+  domain: 'terminal',
   description: 'Get the buffered output (stdout + stderr) of a terminal session.',
   parameters: {
     type: 'object',
@@ -137,6 +140,7 @@ export class TerminalOutputTool {
 @Injectable()
 @Tool({
   name: 'terminal_kill',
+  domain: 'terminal',
   description: 'Send SIGTERM to a running terminal session.',
   parameters: {
     type: 'object',

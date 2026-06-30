@@ -440,6 +440,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     activeLoopSessionIds,
     queuedDepthBySession: effectiveQueuedDepthBySession,
     sessionStatusSnapshots: effectiveSessionStatusSnapshots,
+    runtimeActivitySnapshots: runtimeActivitySnapshots ?? {},
     sessionAgentTurns: sessionAgentTurns ?? {},
     sessionMessages: sessionMessages ?? {},
     sessionToolActivities: sessionToolActivities ?? {},

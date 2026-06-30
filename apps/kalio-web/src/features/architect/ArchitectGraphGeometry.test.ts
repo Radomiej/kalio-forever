@@ -31,7 +31,7 @@ describe('ArchitectGraphGeometry', () => {
     const plain = makeNode({ kind: 'router' });
     const withBehavior = makeNode({
       kind: 'router',
-      behavior: { mode: 'rank_then_merge', fanOut: 'sequential', convergeToNodeId: 'node' },
+      behavior: { mode: 'rank_then_merge', fanOut: 'sequential' },
     });
 
     expect(getNodeDimensions(withBehavior).height).toBeGreaterThan(getNodeDimensions(plain).height);

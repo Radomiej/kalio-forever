@@ -4,7 +4,7 @@ import { createArchitectureRouterOutput } from './architecture-router-output';
 import { ArchitectureRegistryService } from './architecture-registry.service';
 
 describe('createArchitectureRouterOutput', () => {
-  it('uses a contract-shaped fenced JSON router output from agent text', () => {
+  it('ignores contract-shaped fenced JSON router output from agent text', () => {
     const schema = getSchema();
     const node = schema.nodes.find((candidate) => candidate.id === 'router');
     if (!node) throw new Error('Expected router node');
@@ -58,13 +58,13 @@ describe('createArchitectureRouterOutput', () => {
     });
 
     expect(output).toMatchObject({
-      selectedStrategy: 'contract-first',
-      mergedDecision: 'Ship renderer contracts before implementation merge.',
-      confidence: 0.82,
+      selectedStrategy: 'final-artifact',
+      mergedDecision: expect.stringContaining('route_to(final-artifact, Ship the contract first.)'),
+      confidence: 0.7,
       nextAction: 'finalize',
     });
-    expect(output.acceptedInputs[0]?.insight).toBe('Start with a narrow interface.');
-    expect(output.rejectedInputs[0]?.whyRejected).toBe('Too risky for demo.');
+    expect(output.acceptedInputs[0]?.insight).toBe('Input from Pragmatist');
+    expect(output.rejectedInputs).toEqual([]);
   });
 
   it('falls back to deterministic route metadata when no valid contract is present', () => {

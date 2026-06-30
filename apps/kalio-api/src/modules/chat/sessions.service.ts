@@ -185,7 +185,7 @@ export class SessionsService {
   }
 
   async generateTitle(id: string): Promise<{ title: string }> {
-    await this.assertExists(id);
+    const row = await this.getRow(id);
     const history = await this.repo.loadHistory(id);
     const firstUser = history.find((message) => message.role === 'user');
     if (!firstUser) {
@@ -194,7 +194,7 @@ export class SessionsService {
     }
 
     const generated = await this.tryGenerateConversationTitle(id, history);
-    const title = normalizeGeneratedTitle(generated) ?? deriveFallbackTitle(history);
+    const title = normalizeGeneratedTitle(generated) ?? deriveFallbackTitle(history, row.runtimeContext);
     await this.update(id, { title });
     return { title };
   }
@@ -339,7 +339,11 @@ function normalizedUserPrompt(history: ChatMessage[]): string {
   return firstUser ? stripArchitecturePrefix(normalizeConversationLine(firstUser.content)) : '';
 }
 
-function normalizeConversationLine(content: string): string {
+function normalizeConversationLine(content: unknown): string {
+  if (typeof content !== 'string') {
+    return '';
+  }
+
   return content.replace(/\s+/g, ' ').trim();
 }
 
@@ -367,15 +371,16 @@ function normalizeGeneratedTitle(raw: string | null | undefined): string | null 
   return bounded.length > 0 ? bounded : null;
 }
 
-function deriveFallbackTitle(history: ChatMessage[]): string {
+function deriveFallbackTitle(history: ChatMessage[], runtimeContext: SessionRuntimeContext | null | undefined): string {
   const firstUser = normalizedUserPrompt(history);
   if (!firstUser) {
     return DEFAULT_SESSION_TITLE;
   }
 
-  const projectName = projectNameFromPrompt(firstUser);
-  if (/(architektur|architecture)/iu.test(firstUser) && projectName) {
-    return normalizeGeneratedTitle(`Architecture Review ${projectName}`) ?? DEFAULT_SESSION_TITLE;
+  const projectName = projectNameFromRuntimeContext(runtimeContext);
+  if (/(architektur|architecture)/iu.test(firstUser)) {
+    const architectureTitle = projectName ? `Architecture Review ${projectName}` : 'Architecture Review';
+    return normalizeGeneratedTitle(architectureTitle) ?? DEFAULT_SESSION_TITLE;
   }
 
   const firstSentence = firstUser.split(/[.!?]/u).find((segment) => segment.trim().length > 0)?.trim() ?? firstUser;
@@ -396,12 +401,13 @@ function stripArchitecturePrefix(content: string): string {
   return content.replace(/^\[Architecture:\s*[^\]]+\]\s*/i, '').trim();
 }
 
-function projectNameFromPrompt(content: string): string | null {
-  const windowsPathMatch = content.match(/[A-Za-z]:\\(?:[^\\\s]+\\)*([^\\\s]+)/u);
-  if (windowsPathMatch?.[1]) {
-    return windowsPathMatch[1];
+function projectNameFromRuntimeContext(runtimeContext: SessionRuntimeContext | null | undefined): string | null {
+  const projectPath = projectPathFromRuntimeContext(runtimeContext);
+  if (!projectPath) {
+    return null;
   }
-  return null;
+  const normalized = projectPath.replaceAll('\\', '/').split('/').filter(Boolean);
+  return normalized.at(-1) ?? null;
 }
 
 function titleTokenCase(token: string): string {

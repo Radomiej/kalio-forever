@@ -472,6 +472,48 @@ describe('BaseOpenAICompatibleProvider', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
+    it('maps structured provider quota errors by API error code', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: vi.fn().mockResolvedValue(JSON.stringify({
+          error: {
+            code: 'insufficient_quota',
+            message: 'Billing hard limit reached.',
+            type: 'insufficient_quota',
+          },
+        })),
+      });
+
+      await expect(provider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+      })).rejects.toMatchObject({ code: 'LLM_QUOTA' });
+    });
+
+    it('does not classify plain text error bodies as quota failures', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: vi.fn().mockResolvedValue('Request rejected while checking quota policy.'),
+      });
+
+      await expect(provider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+      })).rejects.toMatchObject({ code: 'LLM_ERROR' });
+    });
+
     it('rejects malformed streamed tool arguments instead of executing empty args', async () => {
       const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
       const tools = [{ name: 'vfs_write', description: 'Write a file', parameters: {} }];

@@ -36,7 +36,7 @@ export async function mockScriptDelay(ms: number): Promise<void> {
   await defaultDelay(ms);
 }
 
-export function contentToText(content: ContextManagedLLMMessage['content']): string {
+function contentToText(content: ContextManagedLLMMessage['content']): string {
   if (typeof content === 'string') {
     return content;
   }
@@ -277,12 +277,14 @@ export function hasTool(tools: LLMToolDef[], name: string): boolean {
 }
 
 export function hasPriorToolResult(messages: ContextManagedLLMMessage[], toolName: string, targetPath?: string): boolean {
-  const needle = `"name":"${toolName}"`;
   return messages.some((message) => {
     const role = String(message.role);
     if (role !== 'tool' && role !== 'tool_result') return false;
-    const text = contentToText(message.content);
-    return text.includes(needle) || (targetPath !== undefined && text.includes(targetPath));
+    const result = parseToolResultObject(message.content);
+    if (result?.['name'] !== toolName) {
+      return false;
+    }
+    return targetPath === undefined || recordContainsStringValue(result, targetPath);
   });
 }
 
@@ -295,7 +297,7 @@ export function hasPriorAssistantToolCall(messages: ContextManagedLLMMessage[], 
       const pathArg = toolCall.args['path'];
       return typeof pathArg === 'string'
         ? pathArg === targetPath
-        : JSON.stringify(toolCall.args).includes(targetPath);
+        : recordContainsStringValue(toolCall.args, targetPath);
     });
   });
 }
@@ -303,9 +305,39 @@ export function hasPriorAssistantToolCall(messages: ContextManagedLLMMessage[], 
 export function hasPriorAgentFlowResult(messages: ContextManagedLLMMessage[]): boolean {
   return messages.some((message) => {
     if (message.role !== 'tool') return false;
-    const text = contentToText(message.content);
-    return text.includes('"flowRunId"') && text.includes('"childSessionId"');
+    const result = parseToolResultObject(message.content);
+    return typeof result?.['flowRunId'] === 'string'
+      && typeof result['childSessionId'] === 'string';
   });
+}
+
+function parseToolResultObject(content: ContextManagedLLMMessage['content']): Record<string, unknown> | null {
+  if (typeof content !== 'string') {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    return isPlainRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function recordContainsStringValue(value: unknown, expected: string): boolean {
+  if (typeof value === 'string') {
+    return value === expected;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => recordContainsStringValue(item, expected));
+  }
+  if (isPlainRecord(value)) {
+    return Object.values(value).some((item) => recordContainsStringValue(item, expected));
+  }
+  return false;
 }
 
 export function emitText(options: StreamChatOptions, text: string): void {

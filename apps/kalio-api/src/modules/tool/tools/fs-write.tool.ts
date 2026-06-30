@@ -24,6 +24,7 @@ function getContentArg(args: ToolCallRequest['args']): string {
 @Injectable()
 @Tool({
   name: 'fs_write',
+  domain: 'file_system',
   description: 'Write content to a file on the local filesystem. Use this for real project files under allowed directories. Path must be inside an allowed directory.',
   parameters: {
     type: 'object',

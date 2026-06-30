@@ -9,6 +9,7 @@ type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) =>
 describe('terminateCliAgentProcess', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('returns immediately when process already has exitCode', async () => {
@@ -53,6 +54,7 @@ describe('terminateCliAgentProcess', () => {
   it('falls back to SIGTERM when taskkill fails with unexpected error', async () => {
     const kill = vi.fn();
     const onWarn = vi.fn();
+    vi.spyOn(process, 'kill').mockReturnValue(true);
     vi.mocked(childProcess.execFile).mockImplementation(((
       _file: string,
       _args: readonly string[],
@@ -77,15 +79,18 @@ describe('terminateCliAgentProcess', () => {
     );
   });
 
-  it('does not SIGTERM when Windows taskkill reports process missing', async () => {
+  it('does not SIGTERM when Windows taskkill fails and the OS reports the process missing', async () => {
     const kill = vi.fn();
+    vi.spyOn(process, 'kill').mockImplementation((() => {
+      throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+    }) as typeof process.kill);
     vi.mocked(childProcess.execFile).mockImplementation(((
       _file: string,
       _args: readonly string[],
       _options: Record<string, unknown>,
       callback: ExecFileCallback,
     ) => {
-      callback?.(new Error('not found'), '', 'The process with PID 9999 was not found.');
+      callback?.(new Error('taskkill failed'), '', 'taskkill did not terminate the process');
       return {} as never;
     }) as unknown as typeof childProcess.execFile);
 
@@ -96,6 +101,32 @@ describe('terminateCliAgentProcess', () => {
     });
 
     expect(kill).not.toHaveBeenCalled();
+    expect(process.kill).toHaveBeenCalledWith(9999, 0);
+  });
+
+  it('does not SIGTERM when Windows taskkill fails after the OS reports the PID is missing', async () => {
+    const kill = vi.fn();
+    vi.spyOn(process, 'kill').mockImplementation((() => {
+      throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+    }) as typeof process.kill);
+    vi.mocked(childProcess.execFile).mockImplementation(((
+      _file: string,
+      _args: readonly string[],
+      _options: Record<string, unknown>,
+      callback: ExecFileCallback,
+    ) => {
+      callback?.(new Error('taskkill failed'), '', 'localized taskkill error');
+      return {} as never;
+    }) as unknown as typeof childProcess.execFile);
+
+    await terminateCliAgentProcess({
+      proc: { pid: 9999, kill },
+      platform: 'win32',
+      agentId: 'copilot',
+    });
+
+    expect(kill).not.toHaveBeenCalled();
+    expect(process.kill).toHaveBeenCalledWith(9999, 0);
   });
 
   it('falls back to SIGTERM directly on non-Windows', async () => {

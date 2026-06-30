@@ -30,16 +30,23 @@ import type {
   ArchitectSchema,
   ExternalQualityGateInput,
   NodeKindOverrideMap,
+  NodeToolOverrideMap,
   PersonaOverrideMap,
 } from './architect.types';
 import type { LLMConfigWithSource } from '../settings/llm-panel.types';
-import type { ArchitectureContextPolicyOverride, ArchitectureNodeKind, ArchitectureSchemaNode } from '@kalio/types';
+import type {
+  ArchitectureContextPolicyOverride,
+  ArchitectureNodeKind,
+  ArchitectureSchemaEdgeSelection,
+  ArchitectureSchemaNode,
+} from '@kalio/types';
 import {
   applyGraphDraft,
   chooseInitialSchema,
   createDraftNode,
   EMPTY_GRAPH_DRAFT,
   findNode,
+  setEdgeSelection,
   toSchemaNodes,
   toggleEdge,
   type GraphDraft,
@@ -225,6 +232,19 @@ export function ArchitectPage() {
     });
   };
 
+  const setNodeToolOverride = (nodeId: string, toolOverride?: NodeToolOverrideMap[string]) => {
+    const originalValue = selectedSchema?.nodes.find((node) => node.id === nodeId)?.toolOverride;
+    setGraphDraft((current) => {
+      const next = { ...current.nodeToolOverrides };
+      if (JSON.stringify(originalValue ?? null) === JSON.stringify(toolOverride ?? null)) {
+        delete next[nodeId];
+      } else if (toolOverride) {
+        next[nodeId] = toolOverride;
+      }
+      return { ...current, nodeToolOverrides: next };
+    });
+  };
+
   const setContextPolicyOverride = (slotId: string, override: ArchitectureContextPolicyOverride) => {
     setContextPolicyOverrides((current) => {
       const next = { ...current };
@@ -283,6 +303,20 @@ export function ArchitectPage() {
     }));
     setSelectedNodeId(toNodeId);
     setSelectedSlotId(null);
+  };
+
+  const setGraphEdgeSelection = (
+    fromNodeId: string,
+    toNodeId: string,
+    selection?: ArchitectureSchemaEdgeSelection,
+  ) => {
+    if (!editableSchema || fromNodeId === toNodeId) {
+      return;
+    }
+    setGraphDraft((current) => ({
+      ...current,
+      edges: setEdgeSelection(editableSchema, current.edges, fromNodeId, toNodeId, selection),
+    }));
   };
 
   const autoLayoutGraph = () => {
@@ -630,6 +664,8 @@ export function ArchitectPage() {
           onNodeKindOverride={setNodeKindOverride}
           onNodeBehaviorOverride={setNodeBehaviorOverride}
           onNodeMaxToolAttemptsOverride={setNodeMaxToolAttemptsOverride}
+          onNodeToolOverride={setNodeToolOverride}
+          onEdgeSelectionOverride={setGraphEdgeSelection}
           onCollapsedChange={setInspectorCollapsed}
           onContextPolicyOverride={setContextPolicyOverride}
         />

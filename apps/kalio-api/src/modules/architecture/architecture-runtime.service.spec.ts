@@ -1,5 +1,5 @@
 import { BadRequestException, Logger } from '@nestjs/common';
-import type { ArchitectureExecutionEvent, ArchitectureRun, ArchitectureSchema, ChatMessage, ChatSession, CreateArchitectureRunDto, CreateSessionDto, LLMToolCall } from '@kalio/types';
+import type { ArchitectureExecutionEvent, ArchitectureRouterOutput, ArchitectureRun, ArchitectureSchema, ChatMessage, ChatSession, CreateArchitectureRunDto, CreateSessionDto, LLMToolCall } from '@kalio/types';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionsService } from '../chat/sessions.service';
 import type { SessionManagerService } from '../chat/session-manager.service';
@@ -364,7 +364,7 @@ describe('ArchitectureRuntimeService', () => {
     });
   });
 
-  it('uses routerPolicy to mark rejected fallback routes as needing more research', async () => {
+  it('uses routerPolicy to route rejected fallback paths into typed research follow-up', async () => {
     const { service } = createService();
     const schema = routerPolicySchema({
       mustAddressCriticFindings: true,
@@ -379,9 +379,10 @@ describe('ArchitectureRuntimeService', () => {
 
     const routerEvent = semanticEvents(service.getEvents(run.id)).find((event) => event.nodeId === 'router');
     expect(routerEvent?.routerOutput).toMatchObject({
-      selectedStrategy: 'artifact',
+      selectedStrategy: 'research',
+      targetNodeId: 'research',
       rejectedInputs: [
-        expect.objectContaining({ fromSlot: 'research' }),
+        expect.objectContaining({ fromSlot: 'artifact' }),
       ],
       unresolvedConflicts: [
         expect.stringContaining('Research'),
@@ -390,6 +391,11 @@ describe('ArchitectureRuntimeService', () => {
         expect.objectContaining({ sourceSlot: 'shadow' }),
       ],
       nextAction: 'run_more_research',
+    });
+    expect(routerEvent?.route).toMatchObject({
+      selectedNodeIds: ['research'],
+      rejectedNodeIds: ['artifact'],
+      nextNodeId: 'research',
     });
     expect(routerEvent?.routerOutput?.confidence).toBeLessThan(0.55);
   });
@@ -414,6 +420,212 @@ describe('ArchitectureRuntimeService', () => {
       unresolvedConflicts: [
         expect.stringContaining('Research'),
       ],
+    });
+  });
+
+  it('turns typed ask_human router decisions into a human gate instead of finalizing by fallback route', async () => {
+    const { service } = createService();
+    const schema = routerPolicySchema({
+      mustAddressCriticFindings: true,
+      canReturnNeedsMoreResearch: false,
+    });
+
+    const run = await service.createRun({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Pause for a human when routing conflicts remain unresolved.',
+      schema,
+    });
+    const events = service.getEvents(run.id);
+    const humanGate = events.find((event) => event.type === 'human_gate');
+
+    expect(humanGate).toMatchObject({
+      nodeId: 'router',
+      reasonCode: 'runtime_pause',
+      runtimeDecision: {
+        status: 'waiting_on_orchestrator',
+        reasonCode: 'runtime_pause',
+      },
+    });
+    expect(events.some((event) => event.type === 'final_artifact')).toBe(false);
+    expect(run.status).toBe('running');
+  });
+
+  it('turns router-role structured ask_human output into a human gate instead of finalizing by fallback route', async () => {
+    const { service, executor } = createService();
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
+      const baseData = {
+        branchSessionId,
+        personaId,
+        sessionPersonaId: personaId,
+        rootSessionId: run.rootSessionId,
+        slotType: slot.slotType,
+        executionMode: run.executionMode,
+      };
+      if (slot.slotType !== 'router') {
+        return {
+          message: `${slot.label} branch prepared for: ${run.prompt}`,
+          data: baseData,
+        };
+      }
+      const routerOutput: ArchitectureRouterOutput = {
+        selectedStrategy: 'human-review',
+        mergedDecision: 'Human approval is required before finalization.',
+        acceptedInputs: [],
+        rejectedInputs: [],
+        unresolvedConflicts: ['Research and critique disagree about release readiness.'],
+        risks: [],
+        confidence: 0.42,
+        nextAction: 'ask_human',
+      };
+      return {
+        message: 'Human approval is required before finalization.',
+        data: {
+          ...baseData,
+          routerOutput,
+        },
+      };
+    });
+
+    const run = await service.createRun({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Pause the subagent router for human approval.',
+      executionMode: 'subagent_execution',
+    });
+    const events = service.getEvents(run.id);
+    const humanGate = events.find((event) => event.type === 'human_gate' && event.nodeId === 'router');
+
+    expect(humanGate).toMatchObject({
+      roleSlotId: 'router',
+      reasonCode: 'runtime_pause',
+      runtimeDecision: {
+        status: 'waiting_on_orchestrator',
+        reasonCode: 'runtime_pause',
+      },
+    });
+    expect(events.some((event) => event.type === 'final_artifact')).toBe(false);
+    expect(run.status).toBe('running');
+  });
+
+  it('turns router-role structured rerun_with_different_personas output into a runtime pause', async () => {
+    const { service, executor } = createService();
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
+      const baseData = {
+        branchSessionId,
+        personaId,
+        sessionPersonaId: personaId,
+        rootSessionId: run.rootSessionId,
+        slotType: slot.slotType,
+        executionMode: run.executionMode,
+      };
+      if (slot.slotType !== 'router') {
+        return {
+          message: `${slot.label} branch prepared for: ${run.prompt}`,
+          data: baseData,
+        };
+      }
+      const routerOutput: ArchitectureRouterOutput = {
+        selectedStrategy: 'persona-rerun',
+        mergedDecision: 'A different persona set is required before finalization.',
+        acceptedInputs: [],
+        rejectedInputs: [],
+        unresolvedConflicts: ['The current persona set did not cover release risk.'],
+        risks: [],
+        confidence: 0.39,
+        nextAction: 'rerun_with_different_personas',
+      };
+      return {
+        message: 'A different persona set is required before finalization.',
+        data: {
+          ...baseData,
+          routerOutput,
+        },
+      };
+    });
+
+    const run = await service.createRun({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Pause for a persona rerun instead of finalizing.',
+      executionMode: 'subagent_execution',
+    });
+    const events = service.getEvents(run.id);
+    const humanGate = events.find((event) => event.type === 'human_gate' && event.nodeId === 'router');
+
+    expect(humanGate).toMatchObject({
+      roleSlotId: 'router',
+      reasonCode: 'runtime_pause',
+      routerOutput: {
+        nextAction: 'rerun_with_different_personas',
+      },
+      runtimeDecision: {
+        status: 'waiting_on_orchestrator',
+        reasonCode: 'runtime_pause',
+      },
+      data: {
+        nextAction: 'rerun_with_different_personas',
+      },
+    });
+    expect(events.some((event) => event.type === 'final_artifact')).toBe(false);
+    expect(run.status).toBe('running');
+  });
+
+  it('routes router-role structured run_more_research output through its typed target node', async () => {
+    const { service, executor } = createService();
+    const schema = routerPolicySchema({
+      mustAddressCriticFindings: true,
+      canReturnNeedsMoreResearch: true,
+    });
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => {
+      const baseData = {
+        branchSessionId,
+        personaId,
+        sessionPersonaId: personaId,
+        rootSessionId: run.rootSessionId,
+        slotType: slot.slotType,
+        executionMode: run.executionMode,
+      };
+      if (slot.slotType !== 'router') {
+        return {
+          message: `${slot.label} branch prepared for: ${run.prompt}`,
+          data: baseData,
+        };
+      }
+      const routerOutput: ArchitectureRouterOutput = {
+        selectedStrategy: 'research',
+        targetNodeId: 'research',
+        mergedDecision: 'Run a research follow-up before finalization.',
+        acceptedInputs: [],
+        rejectedInputs: [{ fromSlot: 'artifact', insight: 'Artifact needs stronger evidence.' }],
+        unresolvedConflicts: ['Release readiness requires more evidence.'],
+        risks: [],
+        confidence: 0.48,
+        nextAction: 'run_more_research',
+      };
+      return {
+        message: 'Run a research follow-up before finalization.',
+        data: {
+          ...baseData,
+          routerOutput,
+        },
+      };
+    });
+
+    const run = await service.createRun({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Route the subagent router toward more research.',
+      executionMode: 'subagent_execution',
+      schema,
+    });
+    const routerEvent = semanticEvents(service.getEvents(run.id)).find((event) => event.nodeId === 'router');
+
+    expect(routerEvent?.routerOutput).toMatchObject({
+      nextAction: 'run_more_research',
+      selectedStrategy: 'research',
+      targetNodeId: 'research',
+    });
+    expect(routerEvent?.route).toMatchObject({
+      selectedNodeIds: ['research'],
+      rejectedNodeIds: ['artifact'],
+      nextNodeId: 'research',
     });
   });
 
@@ -899,7 +1111,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-async-finalizer-block', 'running') }
           : slot.slotType === 'tool_executor'
@@ -955,7 +1167,7 @@ describe('ArchitectureRuntimeService', () => {
           label: 'Router 1',
           kind: 'router' as const,
           roleSlotId: 'router',
-          behavior: { mode: 'choose_one' as const, convergeToNodeId: 'agent-2' },
+          behavior: { mode: 'choose_one' as const },
         },
         { id: 'agent-2', label: 'Agent 2', kind: 'role' as const, roleSlotId: 'innovator' },
         {
@@ -963,7 +1175,7 @@ describe('ArchitectureRuntimeService', () => {
           label: 'Router 2',
           kind: 'router' as const,
           roleSlotId: 'router',
-          behavior: { mode: 'rank_then_merge' as const, convergeToNodeId: 'artifact' },
+          behavior: { mode: 'rank_then_merge' as const },
         },
         {
           id: 'artifact',
@@ -1045,7 +1257,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'pragmatist' ? { route_to: { targetNodeId: 'agent-2', response: 'Send this to Agent 2.' } } : {}),
+        ...(slot.id === 'pragmatist' ? routerData('agent-2', 'Send this to Agent 2.') : {}),
       },
     }));
 
@@ -1064,7 +1276,7 @@ describe('ArchitectureRuntimeService', () => {
             label: 'Fallback Router',
             kind: 'router' as const,
             roleSlotId: 'router',
-            behavior: { mode: 'choose_one' as const, convergeToNodeId: 'artifact' },
+            behavior: { mode: 'choose_one' as const },
           },
           { id: 'agent-2', label: 'Agent 2', kind: 'role' as const, roleSlotId: 'innovator' },
           {
@@ -1092,7 +1304,10 @@ describe('ArchitectureRuntimeService', () => {
     ]);
     expect(semanticEvents(service.getEvents(run.id)).find((event) => event.nodeId === 'agent-1')?.data).toMatchObject({
       selectedNodeIds: ['agent-2'],
-      route_to: { targetNodeId: 'agent-2', response: 'Send this to Agent 2.' },
+      routerOutput: expect.objectContaining({
+        targetNodeId: 'agent-2',
+        response: 'Send this to Agent 2.',
+      }),
     });
     expect(semanticEvents(service.getEvents(run.id)).find((event) => event.nodeId === 'agent-1')?.route).toMatchObject({
       source: 'agent',
@@ -1121,12 +1336,7 @@ describe('ArchitectureRuntimeService', () => {
     let router2Runs = 0;
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, node, personaId, run, slot }) => {
       const routeData = node?.id === 'router-2'
-        ? {
-            route_to: {
-              targetNodeId: router2Runs++ === 0 ? 'agent-1' : 'artifact',
-              response: 'Router 2 selected the next graph node.',
-            },
-          }
+        ? routerData(router2Runs++ === 0 ? 'agent-1' : 'artifact', 'Router 2 selected the next graph node.')
         : {};
       return {
         message: `${slot.label} response for ${node?.id ?? 'unknown'}`,
@@ -1157,7 +1367,7 @@ describe('ArchitectureRuntimeService', () => {
             label: 'Router 1',
             kind: 'router' as const,
             roleSlotId: 'router',
-            behavior: { mode: 'choose_one' as const, convergeToNodeId: 'agent-2' },
+            behavior: { mode: 'choose_one' as const },
           },
           { id: 'agent-2', label: 'Agent 2', kind: 'role' as const, roleSlotId: 'innovator' },
           {
@@ -1165,7 +1375,7 @@ describe('ArchitectureRuntimeService', () => {
             label: 'Router 2',
             kind: 'router' as const,
             roleSlotId: 'router',
-            behavior: { mode: 'choose_one' as const, convergeToNodeId: 'artifact' },
+            behavior: { mode: 'choose_one' as const },
           },
           {
             id: 'artifact',
@@ -1256,7 +1466,7 @@ describe('ArchitectureRuntimeService', () => {
             id: 'parallel',
             label: 'Parallel',
             kind: 'parallel' as const,
-            behavior: { mode: 'fan_out_all' as const, convergeToNodeId: 'router' },
+            behavior: { mode: 'fan_out_all' as const },
           },
           { id: 'agent-1', label: 'Agent 1', kind: 'role' as const, roleSlotId: 'pragmatist' },
           { id: 'agent-2', label: 'Agent 2', kind: 'role' as const, roleSlotId: 'innovator' },
@@ -1265,7 +1475,7 @@ describe('ArchitectureRuntimeService', () => {
             label: 'Router',
             kind: 'router' as const,
             roleSlotId: 'router',
-            behavior: { mode: 'rank_then_merge' as const, convergeToNodeId: 'artifact' },
+            behavior: { mode: 'rank_then_merge' as const },
           },
           {
             id: 'artifact',
@@ -1315,10 +1525,7 @@ describe('ArchitectureRuntimeService', () => {
             rootSessionId: run.rootSessionId,
             slotType: slot.slotType,
             executionMode: run.executionMode,
-            route_to: {
-              targetNodeId: 'researcher',
-              response: 'deep architecture analysis',
-            },
+            ...routerData('researcher', 'deep architecture analysis'),
           },
         };
       }
@@ -1381,7 +1588,7 @@ describe('ArchitectureRuntimeService', () => {
             id: 'parallel',
             label: 'Parallel',
             kind: 'parallel' as const,
-            behavior: { mode: 'fan_out_all' as const, convergeToNodeId: 'router' },
+            behavior: { mode: 'fan_out_all' as const },
           },
           { id: 'short-agent', label: 'Short Agent', kind: 'role' as const, roleSlotId: 'pragmatist' },
           { id: 'long-agent', label: 'Long Agent', kind: 'role' as const, roleSlotId: 'innovator' },
@@ -1391,7 +1598,7 @@ describe('ArchitectureRuntimeService', () => {
             label: 'Router',
             kind: 'router' as const,
             roleSlotId: 'router',
-            behavior: { mode: 'rank_then_merge' as const, convergeToNodeId: 'artifact' },
+            behavior: { mode: 'rank_then_merge' as const },
           },
           {
             id: 'artifact',
@@ -1441,7 +1648,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(node?.id === 'router-1'
-          ? { route_to: { targetNodeId: 'agent-1', response: 'Loop back.' } }
+          ? routerData('agent-1', 'Loop back.')
           : {}),
       },
     }));
@@ -1463,7 +1670,7 @@ describe('ArchitectureRuntimeService', () => {
             label: 'Router 1',
             kind: 'router' as const,
             roleSlotId: 'router',
-            behavior: { mode: 'choose_one' as const, convergeToNodeId: 'agent-1' },
+            behavior: { mode: 'choose_one' as const },
           },
         ],
         edges: [
@@ -1503,7 +1710,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(node?.id === 'router-1'
-          ? { route_to: { targetNodeId: 'agent-1', response: 'Loop back.' } }
+          ? routerData('agent-1', 'Loop back.')
           : {}),
       },
     }));
@@ -1525,7 +1732,7 @@ describe('ArchitectureRuntimeService', () => {
             label: 'Router 1',
             kind: 'router' as const,
             roleSlotId: 'router',
-            behavior: { mode: 'choose_one' as const, convergeToNodeId: 'agent-1' },
+            behavior: { mode: 'choose_one' as const },
           },
         ],
         edges: [
@@ -1594,7 +1801,7 @@ describe('ArchitectureRuntimeService', () => {
           executionMode: run.executionMode,
           ...(slot.id === 'goal_master'
             ? {
-                route_to: { targetNodeId: 'implementer', response: 'continue' },
+                ...routerData('implementer', 'continue'),
                 toolEvidence: {
                   toolResultCount: 1,
                   successfulToolNames: ['vfs_read'],
@@ -1748,7 +1955,7 @@ describe('ArchitectureRuntimeService', () => {
         executionMode: run.executionMode,
         ...(slot.id === 'goal_master'
           ? {
-              route_to: { targetNodeId: 'implementer', response: 'continue' },
+              ...routerData('implementer', 'continue'),
               toolEvidence: {
                 toolResultCount: 1,
                 successfulToolNames: ['vfs_read'],
@@ -1883,7 +2090,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'router' ? { routeToNodeId: 'agent-1' } : {}),
+        ...(slot.id === 'router' ? routerData('agent-1') : {}),
       },
     }));
 
@@ -1904,7 +2111,7 @@ describe('ArchitectureRuntimeService', () => {
             label: 'Router 1',
             kind: 'router' as const,
             roleSlotId: 'router',
-            behavior: { mode: 'choose_one' as const, convergeToNodeId: 'agent-1' },
+            behavior: { mode: 'choose_one' as const },
           },
         ],
         edges: [
@@ -2086,7 +2293,7 @@ describe('ArchitectureRuntimeService', () => {
             rootSessionId: run.rootSessionId,
             slotType: slot.slotType,
             executionMode: run.executionMode,
-            routeToNodeId: goalMasterVisits === 1 ? 'implementer' : 'final-artifact',
+            ...routerData(goalMasterVisits === 1 ? 'implementer' : 'final-artifact'),
           },
         };
       }
@@ -2144,8 +2351,8 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'orchestrator' ? { routeToNodeId: 'implementer', response: 'start implementation' } : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'orchestrator' ? routerData('implementer', 'start implementation') : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         ...(slot.slotType === 'tool_executor' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
       },
     }));
@@ -2208,8 +2415,8 @@ describe('ArchitectureRuntimeService', () => {
           rootSessionId: run.rootSessionId,
           slotType: slot.slotType,
           executionMode: run.executionMode,
-          ...(slot.id === 'orchestrator' ? { routeToNodeId: 'implementer' } : {}),
-          ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+          ...(slot.id === 'orchestrator' ? routerData('implementer') : {}),
+          ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
           ...(slot.slotType === 'tool_executor' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
         },
       };
@@ -2272,8 +2479,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.id === 'orchestrator' ? {
-          routeToNodeId: 'implementer',
-          response: 'cli implementation complete',
+          ...routerData('implementer', 'cli implementation complete'),
           toolEvidence: {
             toolCallCount: 2,
             toolResultCount: 2,
@@ -2282,7 +2488,7 @@ describe('ArchitectureRuntimeService', () => {
             targetPaths: ['C:\\Projekty\\TurboProject2\\package.json', 'C:\\Projekty\\TurboProject2\\src\\App.tsx'],
           },
         } : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         ...(slot.id === 'implementer' ? {
           toolEvidence: {
             toolCallCount: 1,
@@ -2327,7 +2533,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'implementer', response: 'cli child still running' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('implementer', 'cli child still running') : {}),
         ...(slot.id === 'implementer' ? {
           toolEvidence: {
             toolCallCount: 1,
@@ -2379,7 +2585,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-running-proof', 'running') }
           : slot.slotType === 'tool_executor'
@@ -2432,7 +2638,7 @@ describe('ArchitectureRuntimeService', () => {
         executionMode: run.executionMode,
         ...(slot.id === 'goal_master'
           ? {
-            routeToNodeId: 'final-artifact',
+            ...routerData('final-artifact'),
             toolEvidence: {
               toolCallCount: 3,
               toolResultCount: 3,
@@ -2450,6 +2656,7 @@ describe('ArchitectureRuntimeService', () => {
           ? { toolEvidence: cliChildToolEvidence('cli-child-stale-after-build', 'running') }
           : slot.id === 'verifier'
             ? {
+              evidence: [buildResultEvidence()],
               toolEvidence: {
                 toolCallCount: 4,
                 toolResultCount: 4,
@@ -2489,6 +2696,71 @@ describe('ArchitectureRuntimeService', () => {
     expect(semantic.at(-1)?.type).toBe('final_artifact');
   });
 
+  it('does not treat dist target paths as host build proof without typed build evidence', async () => {
+    const { service, executor } = createService();
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
+      message: slot.id === 'goal_master'
+        ? 'Goal Master accepts a path-only build claim. route_to(final-artifact, accepted)'
+        : slot.id === 'implementer'
+          ? 'Implementer delegated host writes to a CLI child that is still reported as running.'
+          : slot.id === 'verifier'
+            ? 'Verifier read dist paths and saw terminal tool names but did not emit typed build evidence.'
+            : `${slot.label} branch prepared for: ${run.prompt}`,
+      data: {
+        branchSessionId,
+        personaId,
+        sessionPersonaId: personaId,
+        rootSessionId: run.rootSessionId,
+        slotType: slot.slotType,
+        executionMode: run.executionMode,
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
+        ...(slot.id === 'implementer'
+          ? { toolEvidence: cliChildToolEvidence('cli-child-path-only-build', 'running') }
+          : slot.id === 'verifier'
+            ? {
+              toolEvidence: {
+                toolCallCount: 4,
+                toolResultCount: 4,
+                toolNames: ['fs_list', 'fs_read', 'terminal_spawn', 'terminal_output'],
+                successfulToolNames: ['fs_list', 'fs_read', 'terminal_spawn', 'terminal_output'],
+                targetPaths: [
+                  'C:\\Projekty\\TurboProject2',
+                  'C:\\Projekty\\TurboProject2\\dist',
+                  'C:\\Projekty\\TurboProject2\\dist\\index.html',
+                ],
+              },
+            }
+            : slot.slotType === 'tool_executor'
+              ? { toolEvidence: toolEvidenceForSlot(slot.id) }
+              : {}),
+      },
+    }));
+
+    const run = await service.createRun({
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Reject path-only dist build evidence.',
+      executionMode: 'subagent_execution',
+      context: {
+        requireGoalMasterLoopProof: true,
+        maxArchitectureNodeVisits: 1,
+        maxArchitectureSteps: 20,
+      },
+    });
+    const semantic = semanticEvents(service.getEvents(run.id));
+    const goalDecision = semantic.find((event) => event.nodeId === 'goal-master' && event.type === 'router_decision');
+
+    expect(run.status).toBe('failed');
+    expect(goalDecision?.route).toMatchObject({
+      source: 'runtime_fallback',
+      selectedNodeIds: ['implementer'],
+      rejectedNodeIds: ['final-artifact'],
+    });
+    expect(goalDecision?.data).toMatchObject({
+      runtimeGuard: expect.stringContaining('CLI child implementation is incomplete'),
+    });
+    expect(semantic.at(-1)?.type).not.toBe('final_artifact');
+  });
+
   it('does not crash a resumed implementer pass when prior verifier evidence already proves host build output', async () => {
     const { service, executor } = createService();
     let goalMasterVisits = 0;
@@ -2520,7 +2792,7 @@ describe('ArchitectureRuntimeService', () => {
           slotType: slot.slotType,
           executionMode: run.executionMode,
           ...(slot.id === 'goal_master'
-            ? { routeToNodeId: goalMasterVisits === 1 ? 'implementer' : 'final-artifact' }
+            ? routerData(goalMasterVisits === 1 ? 'implementer' : 'final-artifact')
             : {}),
           ...(slot.id === 'implementer'
             ? {
@@ -2536,6 +2808,7 @@ describe('ArchitectureRuntimeService', () => {
             }
             : slot.id === 'verifier'
               ? {
+                evidence: [buildResultEvidence()],
                 toolEvidence: {
                   toolCallCount: 4,
                   toolResultCount: 4,
@@ -2604,12 +2877,13 @@ describe('ArchitectureRuntimeService', () => {
           slotType: slot.slotType,
           executionMode: run.executionMode,
           ...(slot.id === 'goal_master'
-            ? { routeToNodeId: goalMasterVisits === 1 ? 'implementer' : 'final-artifact' }
+            ? routerData(goalMasterVisits === 1 ? 'implementer' : 'final-artifact')
             : {}),
           ...(slot.id === 'implementer' && implementerVisits === 1
             ? { toolEvidence: cliChildToolEvidence('cli-child-stale-after-noop', 'running') }
             : slot.id === 'verifier'
               ? {
+                evidence: [buildResultEvidence()],
                 toolEvidence: {
                   toolCallCount: 4,
                   toolResultCount: 4,
@@ -2661,7 +2935,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-unknown-proof', 'unknown') }
           : slot.slotType === 'tool_executor'
@@ -2710,7 +2984,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         ...(slot.id === 'implementer'
           ? {
               toolEvidence: {
@@ -2765,7 +3039,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         ...(slot.id === 'implementer'
           ? { toolEvidence: cliChildToolEvidence('cli-child-finalizer-block', 'running') }
           : slot.slotType === 'tool_executor'
@@ -2812,7 +3086,7 @@ describe('ArchitectureRuntimeService', () => {
           slotType: slot.slotType,
           executionMode: run.executionMode,
           ...(slot.id === 'goal_master'
-            ? { routeToNodeId: goalMasterVisits === 1 ? 'implementer' : 'final-artifact' }
+            ? routerData(goalMasterVisits === 1 ? 'implementer' : 'final-artifact')
             : {}),
           ...(slot.id === 'implementer'
             ? { toolEvidence: cliChildToolEvidence(`cli-child-${implementerVisits}`, 'completed') }
@@ -2866,7 +3140,7 @@ describe('ArchitectureRuntimeService', () => {
           rootSessionId: run.rootSessionId,
           slotType: slot.slotType,
           executionMode: run.executionMode,
-          ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+          ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
           ...(slot.id === 'implementer'
             ? { toolEvidence: cliChildToolEvidence(`cli-child-${status}`, status) }
             : slot.slotType === 'tool_executor'
@@ -2915,7 +3189,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         ...(slot.id === 'implementer'
           ? {
               toolEvidence: {
@@ -2977,7 +3251,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
       },
     }));
 
@@ -3033,7 +3307,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.slotType === 'tool_executor' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
-        ...(slot.id === 'goal_master' ? { reasonCode: 'max_steps', routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? { reasonCode: 'max_steps', ...routerData('final-artifact') } : {}),
       },
     }));
 
@@ -3078,7 +3352,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.slotType === 'tool_executor' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
       },
     }));
 
@@ -3127,7 +3401,7 @@ describe('ArchitectureRuntimeService', () => {
                 message: '429 Too Many Requests',
                 retryable: true,
               },
-              routeToNodeId: 'final-artifact',
+              ...routerData('final-artifact'),
             }
           : {}),
       },
@@ -3174,7 +3448,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.slotType === 'tool_executor' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
       },
     }));
 
@@ -3213,7 +3487,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.slotType === 'tool_executor' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
       },
     }));
 
@@ -3262,7 +3536,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.slotType === 'tool_executor' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'implementer' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('implementer') : {}),
       },
     }));
 
@@ -3310,7 +3584,7 @@ describe('ArchitectureRuntimeService', () => {
         slotType: slot.slotType,
         executionMode: run.executionMode,
         ...(slot.slotType === 'tool_executor' ? { toolEvidence: toolEvidenceForSlot(slot.id) } : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
       },
     }));
 
@@ -3369,7 +3643,7 @@ describe('ArchitectureRuntimeService', () => {
             },
           }
           : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
       },
     }));
 
@@ -3417,7 +3691,7 @@ describe('ArchitectureRuntimeService', () => {
               },
             }
             : {}),
-          ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+          ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         },
       };
     });
@@ -3495,7 +3769,7 @@ describe('ArchitectureRuntimeService', () => {
               },
             }
             : {}),
-          ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+          ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         },
       };
     });
@@ -3598,7 +3872,7 @@ describe('ArchitectureRuntimeService', () => {
               },
             }
             : {}),
-          ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+          ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
         },
       };
     });
@@ -3742,14 +4016,6 @@ describe('ArchitectureRuntimeService', () => {
     } as unknown as CreateArchitectureRunDto)).rejects.toThrow(BadRequestException);
     await expect(service.createRun({
       schemaId: 'strategic-decision-council',
-      prompt: 'Run with stale convergence target.',
-      schema: {
-        ...baseSchema,
-        nodes: [{ ...baseSchema.nodes[0], behavior: { mode: 'fan_out_all', convergeToNodeId: 'missing' } }],
-      },
-    } as unknown as CreateArchitectureRunDto)).rejects.toThrow(BadRequestException);
-    await expect(service.createRun({
-      schemaId: 'strategic-decision-council',
       prompt: 'Run with role node routing behavior.',
       schema: {
         ...baseSchema,
@@ -3766,17 +4032,16 @@ describe('ArchitectureRuntimeService', () => {
     } as unknown as CreateArchitectureRunDto)).rejects.toThrow(BadRequestException);
     await expect(service.createRun({
       schemaId: 'strategic-decision-council',
-      prompt: 'Run with router convergence outside outgoing edges.',
+      prompt: 'Run with invalid edge selection metadata.',
       schema: {
         ...baseSchema,
-        nodes: [
-          ...baseSchema.nodes.filter((node) => node.id !== 'router'),
+        edges: [
+          ...baseSchema.edges,
           {
-            id: 'router',
-            label: 'Router',
-            kind: 'router',
-            roleSlotId: 'router',
-            behavior: { mode: 'rank_then_merge', convergeToNodeId: 'analyst' },
+            id: 'bad-edge-selection',
+            fromNodeId: 'router',
+            toNodeId: 'final-artifact',
+            selection: 'legacy',
           },
         ],
       },
@@ -3804,7 +4069,7 @@ describe('ArchitectureRuntimeService', () => {
         rootSessionId: run.rootSessionId,
         slotType: slot.slotType,
         executionMode: run.executionMode,
-        ...(node?.id === 'agent-1' ? { route_to: { targetNodeId: 'router-1' } } : {}),
+        ...(node?.id === 'agent-1' ? routerData('router-1') : {}),
       },
     }));
     const schema: ArchitectureSchema = {
@@ -3820,7 +4085,7 @@ describe('ArchitectureRuntimeService', () => {
           label: 'Router 1',
           kind: 'router',
           roleSlotId: 'router',
-          behavior: { mode: 'rank_then_merge', convergeToNodeId: 'artifact' },
+          behavior: { mode: 'rank_then_merge' },
         },
         { id: 'artifact', label: 'Artifact', kind: 'artifact', roleSlotId: 'finalizer', behavior: { mode: 'finalize' } },
       ],
@@ -3920,7 +4185,7 @@ describe('ArchitectureRuntimeService', () => {
           id: 'router',
           label: 'Router',
           kind: 'router',
-          behavior: { mode: 'choose_one', convergeToNodeId: 'artifact' },
+          behavior: { mode: 'choose_one' },
         },
         { id: 'artifact', label: 'Final Artifact', kind: 'artifact', behavior: { mode: 'finalize' } },
       ],
@@ -4662,7 +4927,7 @@ describe('ArchitectureRuntimeService', () => {
           : (slot.id === 'verifier' || slot.id === 'tester')
             ? { toolEvidence: toolEvidenceForSlot(slot.id) }
             : {}),
-        ...(slot.id === 'goal_master' ? { routeToNodeId: 'final-artifact' } : {}),
+        ...(slot.id === 'goal_master' ? routerData('final-artifact') : {}),
       },
     }));
 
@@ -4941,6 +5206,23 @@ function semanticEvents(events: ArchitectureExecutionEvent[]): ArchitectureExecu
     || event.type === 'final_artifact');
 }
 
+function routerData(targetNodeId: string, response = targetNodeId): { routerOutput: ArchitectureRouterOutput } {
+  return {
+    routerOutput: {
+      selectedStrategy: targetNodeId,
+      mergedDecision: response,
+      acceptedInputs: [],
+      rejectedInputs: [],
+      unresolvedConflicts: [],
+      risks: [],
+      confidence: 1,
+      nextAction: 'route_to',
+      targetNodeId,
+      response,
+    },
+  };
+}
+
 function toolEvidenceForSlot(slotId: string): Record<string, unknown> {
   const successfulToolNames = slotId === 'implementer'
     ? ['vfs_write']
@@ -4950,6 +5232,15 @@ function toolEvidenceForSlot(slotId: string): Record<string, unknown> {
     toolResultCount: 1,
     toolNames: successfulToolNames,
     successfulToolNames,
+  };
+}
+
+function buildResultEvidence(): NonNullable<ArchitectureExecutionEvent['evidence']>[number] {
+  return {
+    kind: 'BUILD_RESULT',
+    source: 'terminal',
+    status: 'passed',
+    data: { exitCode: 0 },
   };
 }
 
@@ -5023,7 +5314,7 @@ function routerPolicySchema(policy: {
       { id: 'pragmatist-router', fromNodeId: 'pragmatist', toNodeId: 'router' },
       { id: 'shadow-router', fromNodeId: 'shadow', toNodeId: 'router' },
       { id: 'router-artifact', fromNodeId: 'router', toNodeId: 'artifact' },
-      { id: 'router-research', fromNodeId: 'router', toNodeId: 'research' },
+      { id: 'router-research', fromNodeId: 'router', toNodeId: 'research', selection: 'continuation' },
     ],
   };
 }

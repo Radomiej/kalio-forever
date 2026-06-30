@@ -7,6 +7,7 @@ import { escapeRegex, globToRegex } from './search.utils';
 @Injectable()
 @Tool({
   name: 'vfs_grep_search',
+  domain: 'vfs',
   description:
     'Search for text matches in files within the conversation virtual filesystem. ' +
     'Generated directories like node_modules, dist, coverage, and reports are skipped by the VFS listing. ' +
@@ -78,6 +79,7 @@ export class VFSGrepSearchTool {
 @Injectable()
 @Tool({
   name: 'vfs_file_search',
+  domain: 'vfs',
   description:
     'Find files matching a glob pattern in the conversation virtual filesystem. ' +
     'Generated directories like node_modules, dist, coverage, and reports are skipped by the VFS listing. ' +

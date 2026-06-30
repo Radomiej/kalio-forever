@@ -30,6 +30,7 @@ import { applyRaAppOutputPatches } from '../../raapp/raapp-output-patches.util';
 @Injectable()
 @ConfirmedTool({
   name: 'raapp_create_draft',
+  domain: 'raapp',
   description:
     'Create a draft RA-App from YAML/DSL source files and store it for user review. ' +
     'The draft is NOT executed immediately — the user must inspect and approve it first, ' +
@@ -148,6 +149,7 @@ export class RaAppCreateDraftTool {
 @Injectable()
 @Tool({
   name: 'raapp_execute_dsl',
+  domain: 'raapp',
   description:
     'Execute a previously approved RA-App draft. ' +
     'Call this ONLY after the user has reviewed and approved the draft produced by raapp_create_draft. ' +
@@ -301,6 +303,7 @@ export class RaAppExecuteDslTool {
 @Injectable()
 @ConfirmedTool({
   name: 'raapp_publish_draft',
+  domain: 'raapp',
   description:
     'Publish a raw VFS RA-App draft into the versioned release lifecycle. ' +
     'Reads files from drafts/<draft_id>, stores them as a versioned draft ZIP, then promotes them to a release. ' +

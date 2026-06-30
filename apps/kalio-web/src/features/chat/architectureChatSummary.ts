@@ -57,26 +57,37 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
   const streamByEventId = buildStreamByEventId(result);
   const routerOutputByEventId = buildRouterOutputByEventId(result);
   const incompleteReasonByEventId = buildIncompleteReasonByEventId(result);
+  const eventById = new Map(result.events.map((event) => [event.id, event]));
   const trace = chatMessages
     .filter((message): message is typeof message & { speaker: TraceSpeaker } => isTraceSpeaker(message.speaker))
-    .map((message) => ({
-      speaker: message.speaker,
-      content: compactArchitectureTraceContent(message.content, message.speaker),
-      actionSummary: message.actionSummary,
-      action: message.action,
-      detail: message.detail,
-      eventId: message.eventId,
-      sessionId: graphNodes.find((node) => (
-        node.id === message.route?.fromNodeId
-        || (message.eventId !== undefined && node.eventIds.includes(message.eventId))
-      ))?.sessionId,
-      nodeId: message.route?.fromNodeId,
-      nextNodeId: message.route?.nextNodeId,
-      visitIndex: visitIndexByEventId.get(message.eventId),
-      incompleteReason: message.incompleteReason ?? incompleteReasonByEventId.get(message.eventId),
-      routerOutput: sanitizeRouterOutput(routerOutputByEventId.get(message.eventId)),
-      stream: streamByEventId.get(message.eventId),
-    }));
+    .map((message) => {
+      const event = message.eventId ? eventById.get(message.eventId) : undefined;
+      return {
+        speaker: message.speaker,
+        content: compactArchitectureTraceContent(message.content, message.speaker),
+        actionSummary: message.actionSummary,
+        action: message.action,
+        detail: message.detail,
+        lifecycle: event?.lifecycle,
+        status: event?.status,
+        reasonCode: event?.reasonCode,
+        errorCode: event?.errorCode,
+        failure: event?.failure,
+        evidence: event?.evidence,
+        runtimeDecision: event?.runtimeDecision,
+        eventId: message.eventId,
+        sessionId: graphNodes.find((node) => (
+          node.id === message.route?.fromNodeId
+          || (message.eventId !== undefined && node.eventIds.includes(message.eventId))
+        ))?.sessionId,
+        nodeId: message.route?.fromNodeId,
+        nextNodeId: message.route?.nextNodeId,
+        visitIndex: visitIndexByEventId.get(message.eventId),
+        incompleteReason: message.incompleteReason ?? incompleteReasonByEventId.get(message.eventId),
+        routerOutput: sanitizeRouterOutput(routerOutputByEventId.get(message.eventId)),
+        stream: streamByEventId.get(message.eventId),
+      };
+    });
   const metadata: ArchitectureRunSummaryWithGraph = {
     runId: result.run.id,
     schemaId: schemaLabel,
@@ -162,47 +173,12 @@ export function findArchitectureRunInMessages(messages: ChatMessage[]): Architec
     };
   });
 
-  const textTrace = messages
-    .filter((message) => message.role === 'assistant' && message.content.trim().length > 0)
-    .map((message): ArchitectureChatRunSummary['trace'][number] | null => {
-      if (/^###\s+Router\b/im.test(message.content)) {
-        return {
-          speaker: 'router',
-          content: message.content,
-          actionSummary: architectureTraceActivitySummary('router'),
-          action: 'router_selected',
-          detail: 'Routing decision recorded.',
-          eventId: message.id,
-          sessionId: architectureSessionIdForRunSlot(runId, 'router'),
-          nodeId: 'router',
-          nextNodeId: 'final-artifact',
-          incompleteReason: incompleteReasonFromContent(message.content),
-        };
-      }
-      if (/^###\s+Finalizer\b/im.test(message.content)) {
-        return {
-          speaker: 'finalizer',
-          content: message.content,
-          actionSummary: architectureTraceActivitySummary('finalizer'),
-          action: 'finalizer_completed',
-          detail: 'Final answer ready.',
-          eventId: message.id,
-          sessionId: architectureSessionIdForRunSlot(runId, 'finalizer'),
-          nodeId: 'final-artifact',
-          incompleteReason: incompleteReasonFromContent(message.content),
-        };
-      }
-      return null;
-    })
-    .filter((step): step is ArchitectureChatRunSummary['trace'][number] => step !== null);
-
   return {
     runId,
     schemaId: schemaLabel,
-    status: 'completed',
+    status: 'running',
     hostProjectionKind: 'workflow-envelope',
-    finalArtifact: [...textTrace].reverse().find((step) => step.speaker === 'finalizer')?.content,
-    trace: [...participantTrace, ...textTrace].sort(compareTraceByArchitectureEvent),
+    trace: participantTrace.sort(compareTraceByArchitectureEvent),
     routeHops: [],
   };
 }
@@ -511,11 +487,6 @@ function routeLine(source: string | undefined, nextNodeId: string | undefined): 
 
 function incompleteLine(reason: string | undefined): string | null {
   return reason && reason.trim().length > 0 ? `Incomplete: ${reason.trim()}` : null;
-}
-
-function incompleteReasonFromContent(content: string): string | undefined {
-  const match = /^Incomplete:\s*(.+)$/im.exec(content);
-  return match?.[1]?.trim();
 }
 
 function streamLine(stream: ArchitectureBranchStreamSummary | undefined): string | null {

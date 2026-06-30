@@ -6,6 +6,7 @@ import { SkillsService } from '../../skills/skills.service';
 @Injectable()
 @Tool({
   name: 'skill_list',
+  domain: 'skill',
   description: 'List all skills. Optionally filter by source ("user" or "agent"). Returns id, name, description, and source for each skill.',
   parameters: {
     type: 'object',
@@ -35,6 +36,7 @@ export class SkillListTool {
 @Injectable()
 @Tool({
   name: 'skill_read',
+  domain: 'skill',
   description: 'Read the full details of a skill including its prompt text. Look up by ID or name. Use this to inspect what instructions a skill injects into the system prompt.',
   parameters: {
     type: 'object',
@@ -67,6 +69,7 @@ export class SkillReadTool {
 @Injectable()
 @Tool({
   name: 'skill_create',
+  domain: 'skill',
   description: 'Create a new skill. A skill is a named prompt snippet that gets injected into the system prompt when active. The source will be set to "agent" automatically.',
   parameters: {
     type: 'object',
@@ -94,6 +97,7 @@ export class SkillCreateTool {
 @Injectable()
 @Tool({
   name: 'skill_update',
+  domain: 'skill',
   description: 'Update an existing skill by its ID. All fields are optional â€” only provided fields will be changed.',
   parameters: {
     type: 'object',
@@ -124,6 +128,7 @@ export class SkillUpdateTool {
 @Injectable()
 @Tool({
   name: 'skill_delete',
+  domain: 'skill',
   description: 'Permanently delete a skill by its ID.',
   parameters: {
     type: 'object',

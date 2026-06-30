@@ -107,6 +107,7 @@ type SessionPanelSessionItemProps = {
   activeLoopSessionIds: Set<string>;
   queuedDepthBySession: Record<string, number>;
   sessionStatusSnapshots: Record<string, SocketEvents['session:status']>;
+  runtimeActivitySnapshots: Record<string, SocketEvents['session:runtime_snapshot']>;
   sessionAgentTurns: Record<string, AgentTurn[]>;
   sessionMessages: Record<string, ChatMessage[]>;
   sessionToolActivities: Record<string, ToolActivity[]>;
@@ -139,6 +140,7 @@ export function SessionPanelSessionItem({
   activeLoopSessionIds,
   queuedDepthBySession,
   sessionStatusSnapshots,
+  runtimeActivitySnapshots,
   sessionAgentTurns,
   sessionMessages,
   sessionToolActivities,
@@ -190,6 +192,7 @@ export function SessionPanelSessionItem({
     architectureSessionRuntimeStates,
   );
   const latestToolActivity = latestSessionToolActivity(sessionToolActivities, session.id);
+  const toolBudgetProgress = runtimeActivitySnapshots[session.id]?.toolBudgetProgress;
   const descendantState = descendantActivityState(descendantStates);
   const effectiveRuntimeState = descendantState && (
     runtimeState === null
@@ -296,6 +299,15 @@ export function SessionPanelSessionItem({
                   data-testid={`session-descendant-activity-${session.id}`}
                 >
                   {activeDescendantLabel}
+                </span>
+              )}
+              {toolBudgetProgress && (
+                <span
+                  className="max-w-full break-words rounded border border-base-300/60 bg-base-200/70 px-1 py-0.5 font-mono text-[9px] leading-none text-base-content/70"
+                  data-testid={`session-tool-budget-${session.id}`}
+                  title={`Tool budget ${toolBudgetProgress.usedIterations}/${toolBudgetProgress.currentLimit}`}
+                >
+                  {toolBudgetProgress.usedIterations}/{toolBudgetProgress.currentLimit}
                 </span>
               )}
               <span className="ml-auto shrink-0 text-[10px] leading-none text-base-content/60">

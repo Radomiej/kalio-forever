@@ -28,10 +28,6 @@ export function extractCodexAgentMessage(output: string): string | null {
   let lastMessage: string | null = null;
   for (const line of output.split(/\r?\n/)) {
     const trimmed = line.trim();
-    if (!trimmed.startsWith('{')) {
-      continue;
-    }
-
     const parsed = parseJsonLine(trimmed);
     if (!parsed || typeof parsed !== 'object') {
       continue;

@@ -14,9 +14,8 @@ import { SUBAGENT_RUNTIME, type SubagentEmit, type SubagentRuntimePort } from '.
 import { FINAL_ARTIFACT_CONTRACT_INSTRUCTION } from './architecture-final-artifact-contract';
 import { summarizeArchitectureIncomingEvent } from './architecture-incoming-event-summary';
 import {
-  finalArtifactContractFromLegacyText,
   finalArtifactContractFromStructuredOutput,
-  legacyTextRouteToCall,
+  routerOutputFromStructuredOutput,
   structuredRouteToCall,
 } from './architecture-structured-output';
 import { structuredOutputForArchitectureSlot } from './architecture-structured-output-contracts';
@@ -125,6 +124,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     });
     const slotPolicy = buildArchitectureSlotToolPolicy({
       slot: input.slot,
+      node: input.node,
       architectureContext: input.run.context,
       incomingEvents: input.incomingEvents,
     });
@@ -175,7 +175,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
           recoverableRuntimeError: failure.message,
           response: message,
           ...this.recoverableRouteData(input, 'recoverable branch error after partial tool evidence; inspect worktree and continue'),
-          ...this.finalArtifactData(input, message, undefined),
+          ...this.finalArtifactData(input, undefined),
           stream: compactStreamSnapshot(streamSnapshot),
           toolEvidence,
         },
@@ -198,7 +198,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         durationMs: result.durationMs,
         response: message,
         ...this.routeData(message, result.structuredOutput, input.outgoingNodeIds ?? [], input, boundedToolLoopExhausted),
-        ...this.finalArtifactData(input, message, result.structuredOutput),
+        ...this.finalArtifactData(input, result.structuredOutput),
         rawSubagentResult: boundedToolLoopExhausted ? result.result : undefined,
         stream: compactStreamSnapshot(streamSnapshot),
         toolEvidence,
@@ -359,24 +359,43 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     const canUseEvidenceTools = this.canUseEvidenceToolsForSlot(input.slot, input.run.context);
     const attachedFilePaths = canUseEvidenceTools ? this.attachedFilePaths(input.run.context) : [];
     if (attachedFilePaths.length > 0) {
-      lines.push(
-        '',
-        'Attached VFS project files:',
-        ...attachedFilePaths.map((path) => `- ${path}`),
-        '',
-        'If your answer depends on file content, call vfs_read or vfs_grep_search first. Do not write "I will read" unless you actually call the tool.',
-      );
+      if (this.isOrchestrationSlot(input.slot)) {
+        lines.push(
+          '',
+          'Attached VFS project files for delegation:',
+          ...attachedFilePaths.map((path) => `- ${path}`),
+          '',
+          'Use these paths in the task packet for the evidence owner. Do not read attached project files from this orchestrator slot by default unless the node editor explicitly configured this node to own direct evidence gathering.',
+        );
+      } else {
+        lines.push(
+          '',
+          'Attached VFS project files:',
+          ...attachedFilePaths.map((path) => `- ${path}`),
+          '',
+          'If your answer depends on file content, call vfs_read or vfs_grep_search first. Do not write "I will read" unless you actually call the tool.',
+        );
+      }
     }
     const localProjectPath = canUseEvidenceTools ? this.localProjectPath(input.run.context) : undefined;
     if (localProjectPath) {
-      lines.push(
-        '',
-        `Local host project path: ${localProjectPath}`,
-        'If your answer depends on host project files, call fs_list or fs_read first. Use fs_write only from tool-executor slots when an approved implementation write is required.',
-        'Use fs_list for directories and fs_read only for files.',
-        'If fs_read returns NOT_A_FILE, switch to fs_list for that path instead of retrying fs_read.',
-        'Inspect only the minimum high-signal paths needed for your role, then conclude instead of recursively traversing the whole repository.',
-      );
+      if (this.isOrchestrationSlot(input.slot)) {
+        lines.push(
+          '',
+          `Local host project path for delegation: ${localProjectPath}`,
+          'Use this path as delegation context in the task packet. Do not inspect host project files from this orchestrator slot by default; evidence gathering belongs to the routed researcher, implementer, verifier, or explicit child agent unless the node editor explicitly configured this node to own direct evidence gathering.',
+          'When repository evidence is needed, route to the evidence owner with expected paths, acceptance criteria, and the exact evidence to return.',
+        );
+      } else {
+        lines.push(
+          '',
+          `Local host project path: ${localProjectPath}`,
+          'If your answer depends on host project files, call fs_list or fs_read first. Use fs_write only from tool-executor slots when an approved implementation write is required.',
+          'Use fs_list for directories and fs_read only for files.',
+          'If fs_read returns NOT_A_FILE, switch to fs_list for that path instead of retrying fs_read.',
+          'Inspect only the minimum high-signal paths needed for your role, then conclude instead of recursively traversing the whole repository.',
+        );
+      }
     }
     const context = this.contextForObjective(input.run.context, policy);
     if (Object.keys(context).length > 0) {
@@ -634,11 +653,11 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         'You may delegate focused review checks with synchronous run_subagent and inspect CLI child-session status, but do not spawn background review agents from this judge slot. Final acceptance must cite visible evidence from incoming outputs or tool results.',
         'If you mention a previous rejection, loop, pass, test, or artifact, it must be visible in the incoming graph outputs.',
         routeHint,
-        'Also include a fenced JSON routerOutput object with selectedStrategy, mergedDecision, acceptedInputs, rejectedInputs, unresolvedConflicts, risks, confidence, and nextAction.',
+        'Return provider-native structured routerOutput with selectedStrategy, mergedDecision, acceptedInputs, rejectedInputs, unresolvedConflicts, risks, confidence, and nextAction.',
       ].join(' ');
     }
     if (slot.slotType === 'router') {
-      const contract = 'Also include a fenced JSON routerOutput object with selectedStrategy, mergedDecision, acceptedInputs, rejectedInputs, unresolvedConflicts, risks, confidence, and nextAction. When nextAction is "route_to", include targetNodeId and response.';
+      const contract = 'Return provider-native structured routerOutput with selectedStrategy, mergedDecision, acceptedInputs, rejectedInputs, unresolvedConflicts, risks, confidence, and nextAction. When nextAction is "route_to", include targetNodeId and response.';
       if (this.isOrchestrationSlot(slot)) {
         const llmSubagentRule = canUseOrchestratorSubagents
           ? 'LLM sub-agents may be used only for focused checks when a graph node is not the right execution target.'
@@ -652,8 +671,8 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
           ? 'When the next graph node is known, prefer a structured routerOutput route over spawning another child.'
           : 'This run keeps orchestration inside the architecture graph: do not call run_subagent, spawn_subagent, or message_subagent from the orchestrator. Choose the next architecture node with routerOutput.nextAction="route_to" and routerOutput.targetNodeId, then let that node execute the work.';
         return outgoingNodeIds.length > 0
-          ? `Act as the delivery orchestrator. Define acceptance criteria, decompose the goal into concrete steps, then route graph execution. ${agentMap} ${routingRule} Route to the next implementation node with structured routerOutput once the next step is clear. Do not claim files, tests, or completion unless visible tool output proves them. ${contract}`
-          : `Act as the delivery orchestrator. Define acceptance criteria, decompose the goal into concrete steps, then route graph execution. ${agentMap} ${routingRule} Do not claim files, tests, or completion unless visible tool output proves them. ${contract}`;
+          ? `Act as the delivery orchestrator. Define acceptance criteria, prepare a task packet with owner, expected evidence, verification command, and route graph execution. Do not perform project reconnaissance yourself by default; route evidence gathering to the responsible researcher, implementer, verifier, or explicit child agent unless this node has an explicit editor tool override for direct evidence gathering. ${agentMap} ${routingRule} Route to the next implementation node with structured routerOutput once the next step is clear. Do not claim files, tests, or completion unless visible tool output proves them. ${contract}`
+          : `Act as the delivery orchestrator. Define acceptance criteria, prepare a task packet with owner, expected evidence, verification command, and route graph execution. Do not perform project reconnaissance yourself by default; route evidence gathering to the responsible researcher, implementer, verifier, or explicit child agent unless this node has an explicit editor tool override for direct evidence gathering. ${agentMap} ${routingRule} Do not claim files, tests, or completion unless visible tool output proves them. ${contract}`;
       }
       return outgoingNodeIds.length > 0
         ? `Act as a graph router. Synthesize only the incoming outputs. Do not claim files, tools, or capabilities unless incoming outputs explicitly prove them. When choosing a specific next node, emit structured routerOutput with nextAction="route_to", targetNodeId, and response. ${contract}`
@@ -712,21 +731,23 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     input: ArchitectureRoleExecutionInput,
     boundedToolLoopExhausted: boolean,
   ): Record<string, unknown> {
-    const parsedRoute = structuredRouteToCall(structuredOutput)
-      // TODO: legacy fallback for older subagent runtimes that only persisted router JSON in assistant text.
-      ?? legacyTextRouteToCall(message);
-    if (!parsedRoute || !outgoingNodeIds.includes(parsedRoute.targetNodeId)) {
-      return boundedToolLoopExhausted
-        ? this.recoverableRouteData(input, 'bounded evidence pass completed; synthesize from collected tool evidence')
-        : {};
+    const typedRouterOutput = routerOutputFromStructuredOutput(structuredOutput);
+    const parsedRoute = structuredRouteToCall(structuredOutput);
+    if (parsedRoute && outgoingNodeIds.includes(parsedRoute.targetNodeId)) {
+      return {
+        routerOutput: parsedRoute.routerOutput,
+        route_to: {
+          targetNodeId: parsedRoute.targetNodeId,
+          response: parsedRoute.response && parsedRoute.response.length > 0 ? parsedRoute.response : message,
+        },
+      };
     }
-    return {
-      routerOutput: parsedRoute.routerOutput,
-      route_to: {
-        targetNodeId: parsedRoute.targetNodeId,
-        response: parsedRoute.response && parsedRoute.response.length > 0 ? parsedRoute.response : message,
-      },
-    };
+    if (typedRouterOutput && typedRouterOutput.nextAction !== 'route_to') {
+      return { routerOutput: typedRouterOutput };
+    }
+    return boundedToolLoopExhausted
+      ? this.recoverableRouteData(input, 'bounded evidence pass completed; synthesize from collected tool evidence')
+      : {};
   }
 
   private recoverableRouteData(input: ArchitectureRoleExecutionInput, response: string): Record<string, unknown> {
@@ -757,15 +778,12 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
 
   private finalArtifactData(
     input: ArchitectureRoleExecutionInput,
-    message: string,
     structuredOutput: unknown,
   ): Record<string, unknown> {
     if (input.slot.slotType !== 'finalizer') {
       return {};
     }
-    const parsed = finalArtifactContractFromStructuredOutput(structuredOutput)
-      // TODO: legacy fallback for older subagent runtimes that only persisted finalArtifact JSON in assistant text.
-      ?? finalArtifactContractFromLegacyText(message);
+    const parsed = finalArtifactContractFromStructuredOutput(structuredOutput);
     if (!parsed) {
       return {};
     }
@@ -774,6 +792,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       acceptanceStatus: parsed.status,
       ...(parsed.blockingReason ? { blockingReason: parsed.blockingReason } : {}),
       ...(parsed.evidence.length > 0 ? { evidence: parsed.evidence } : {}),
+      ...(parsed.answer ? { finalArtifactAnswer: parsed.answer } : {}),
     };
   }
 

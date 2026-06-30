@@ -8,6 +8,7 @@ import { apiClient } from '../../../services/apiClient';
 import { eventBus } from '../../../services/eventBus';
 import { backendHealth } from '../../../services/backendHealth';
 import { clearSessionWatchRegistry } from '../../../services/sessionWatchRegistry';
+import { createPendingHostSession } from '../pendingHostSession';
 
 const { reportBackendSuccess, reportBackendFailure } = vi.hoisted(() => ({
   reportBackendSuccess: vi.fn(),
@@ -84,8 +85,12 @@ describe('useChatSessionActivation', () => {
   });
 
   it('skips history hydration for pending host-session ids', async () => {
+    const pendingSession = createPendingHostSession({
+      personaId: 'default',
+      now: 1,
+    });
     renderHook(() => useChatSessionActivation({
-      activeSessionId: 'pending-host-session:temp-1',
+      activeSessionId: pendingSession.id,
       clearToolActivities: vi.fn(),
       handleSendRef: { current: vi.fn() },
       setAgentTurns: vi.fn(),

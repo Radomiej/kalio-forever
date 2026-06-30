@@ -108,6 +108,7 @@ function resultFromSnapshot(
   if (snapshot.result) {
     return {
       ...snapshot.result,
+      flowDefinitionId: snapshot.result.flowDefinitionId ?? snapshot.run.flowDefinitionId,
       parentSessionId,
       parentToolCallId,
       childSessionId: snapshot.run.childSessionId,
@@ -117,6 +118,7 @@ function resultFromSnapshot(
   }
   return {
     flowRunId: snapshot.run.id,
+    flowDefinitionId: snapshot.run.flowDefinitionId,
     parentSessionId,
     parentToolCallId,
     childSessionId: snapshot.run.childSessionId,
@@ -134,6 +136,7 @@ function resultFromSnapshot(
 @Injectable()
 @Tool({
   name: 'run_sub_agentflow',
+  domain: 'agent_workflow',
   description:
     'Launch a bounded child agent flow such as goal_guard_delivery_loop and return one compact summarized result.',
   parameters: {

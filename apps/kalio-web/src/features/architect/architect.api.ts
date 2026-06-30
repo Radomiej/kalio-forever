@@ -82,6 +82,8 @@ export async function startArchitectureRun(
         label: node.label,
         kind: node.kind,
         roleSlotId: node.roleSlotId,
+        maxToolAttempts: node.maxToolAttempts,
+        toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
         behavior: node.behavior ? { ...node.behavior } : undefined,
         x: node.x,
         y: node.y,

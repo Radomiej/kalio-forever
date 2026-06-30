@@ -27,7 +27,12 @@ describe('reconstructDurableArchitectureGraph', () => {
             schemaId: 'strategic-decision-council',
             status: 'completed',
             trace: [],
-            routeHops: [],
+            routeHops: [{
+              eventId: `architecture:${runId}:router`,
+              source: 'router',
+              fromNodeId: 'router',
+              toNodeId: 'final-artifact',
+            }],
           },
           createdAt: 101,
         },
@@ -58,6 +63,52 @@ describe('reconstructDurableArchitectureGraph', () => {
       }),
     ]));
     expect(graph?.nodes.map((node) => node.sessionId)).not.toContain(`arch-${runId}-router`);
+  });
+
+  it('does not infer router or finalizer completion from assistant markdown headers', async () => {
+    const runId = 'durable-no-prose-state-run';
+    const registry = new ArchitectureRegistryService();
+    const sessions = createPersistedSessions({
+      [`arch-${runId}-root`]: [
+        {
+          id: `architecture:${runId}:tool-calls`,
+          sessionId: `arch-${runId}-root`,
+          role: 'assistant',
+          content: '',
+          toolCalls: [{
+            id: `architecture:${runId}:tool-call:1`,
+            name: 'run_subagent',
+            args: {
+              architectureRunId: runId,
+              schemaName: 'Goal Master Delivery Loop',
+            },
+          }],
+          createdAt: 100,
+        },
+        {
+          id: `architecture:${runId}:router-prose`,
+          sessionId: `arch-${runId}-root`,
+          role: 'assistant',
+          content: '### Router\nRoute: router -> final-artifact',
+          createdAt: 101,
+        },
+        {
+          id: `architecture:${runId}:finalizer-prose`,
+          sessionId: `arch-${runId}-root`,
+          role: 'assistant',
+          content: '### Finalizer\nVerified completion report.',
+          createdAt: 102,
+        },
+      ],
+    });
+
+    const graph = await reconstructDurableArchitectureGraph(runId, sessions, registry);
+
+    expect(graph?.routeHops).toEqual([]);
+    expect(graph?.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'orchestrator', status: 'pending' }),
+      expect.objectContaining({ id: 'final-artifact', status: 'pending' }),
+    ]));
   });
 
   it('projects persisted CLI child evidence from expected files and keeps completed status over stale running snapshots', async () => {

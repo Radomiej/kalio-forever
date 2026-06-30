@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { HelpCircle, Settings2, UserRoundCog, X } from 'lucide-react';
 import type { ArchitectNode, ArchitectPersona, ArchitectSlot, NodeKindOverrideMap, PersonaOverrideMap } from './architect.types';
-import type { ArchitectureContextPolicyOverride, ArchitectureNodeKind, ArchitectureSchemaNode } from '@kalio/types';
+import type {
+  ArchitectureContextPolicyOverride,
+  ArchitectureNodeKind,
+  ArchitectureSchemaEdgeSelection,
+  ArchitectureSchemaNode,
+} from '@kalio/types';
 import type { ArchitectSchema } from './architect.types';
 import { ArchitectBehaviorControls } from './ArchitectBehaviorControls';
 
@@ -16,6 +21,8 @@ interface ArchitectInspectorProps {
   onNodeKindOverride: (nodeId: string, kind: ArchitectureNodeKind) => void;
   onNodeBehaviorOverride: (nodeId: string, behavior: NonNullable<ArchitectureSchemaNode['behavior']>) => void;
   onNodeMaxToolAttemptsOverride: (nodeId: string, maxToolAttempts?: number) => void;
+  onNodeToolOverride: (nodeId: string, toolOverride?: NonNullable<ArchitectureSchemaNode['toolOverride']>) => void;
+  onEdgeSelectionOverride: (fromNodeId: string, toNodeId: string, selection?: ArchitectureSchemaEdgeSelection) => void;
   onContextPolicyOverride: (slotId: string, override: ArchitectureContextPolicyOverride) => void;
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
@@ -27,6 +34,13 @@ const NODE_KIND_OPTIONS: ReadonlyArray<{ value: ArchitectureNodeKind; label: str
   { value: 'router', label: 'Router' },
   { value: 'artifact', label: 'Artifact' },
 ];
+
+function edgeSelectionFromValue(value: string): ArchitectureSchemaEdgeSelection | undefined {
+  if (value === 'default' || value === 'converge' || value === 'continuation') {
+    return value;
+  }
+  return undefined;
+}
 
 function HelpTip({ label, value }: { label: string; value: string | undefined }) {
   if (!value) return null;
@@ -53,6 +67,8 @@ export function ArchitectInspector({
   onNodeKindOverride,
   onNodeBehaviorOverride,
   onNodeMaxToolAttemptsOverride,
+  onNodeToolOverride,
+  onEdgeSelectionOverride,
   onContextPolicyOverride,
   collapsed = false,
   onCollapsedChange,
@@ -64,9 +80,25 @@ export function ArchitectInspector({
   const selectedNodeKind = node ? nodeKindOverrides[node.id] ?? node.kind : 'role';
   const roleSlotId = node?.roleSlotId;
   const contextOverride = roleSlotId ? schema?.contextPolicy.perSlotOverrides?.[roleSlotId] ?? {} : {};
+  const toolOverrideValue = node?.toolOverride?.allowedToolNames?.join(', ') ?? '';
+  const nodeById = new Map((schema?.nodes ?? []).map((candidate) => [candidate.id, candidate]));
+  const outgoingEdges = node && schema
+    ? schema.edges.filter((edge) => edge.fromNodeId === node.id)
+    : [];
   const updateContextOverride = (patch: ArchitectureContextPolicyOverride) => {
     if (!roleSlotId) return;
     onContextPolicyOverride(roleSlotId, { ...contextOverride, ...patch });
+  };
+  const updateToolOverride = (value: string) => {
+    if (!node) return;
+    const allowedToolNames = value
+      .split(/[\s,]+/u)
+      .map((name) => name.trim())
+      .filter(Boolean);
+    onNodeToolOverride(
+      node.id,
+      allowedToolNames.length > 0 ? { allowedToolNames } : undefined,
+    );
   };
   const routingSummary = node?.behavior?.mode
     ? NODE_ROUTING_LABELS[node.behavior.mode] ?? node.behavior.mode
@@ -238,9 +270,42 @@ export function ArchitectInspector({
               {(selectedNodeKind === 'parallel' || selectedNodeKind === 'router') && (
                 <ArchitectBehaviorControls
                   node={{ ...node, kind: selectedNodeKind }}
-                  schema={schema}
                   onChange={onNodeBehaviorOverride}
                 />
+              )}
+
+              {outgoingEdges.length > 0 && (
+                <section className="mt-4 rounded-md border border-base-300/80 bg-base-200/50 p-2.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-base-content/55">Outgoing edge roles</div>
+                  <div className="mt-2 space-y-2">
+                    {outgoingEdges.map((edge) => {
+                      const target = nodeById.get(edge.toNodeId);
+                      return (
+                        <label key={edge.id} className="form-control gap-1">
+                          <span className="label-text text-xs font-semibold text-base-content/70">
+                            {target?.label ?? edge.toNodeId}
+                          </span>
+                          <select
+                            aria-label={`Edge role for ${target?.label ?? edge.toNodeId}`}
+                            className="select select-bordered select-sm h-9 min-h-9 w-full"
+                            value={edge.selection ?? ''}
+                            onChange={(event) => onEdgeSelectionOverride(
+                              edge.fromNodeId,
+                              edge.toNodeId,
+                              edgeSelectionFromValue(event.target.value),
+                            )}
+                            data-testid={`architect-edge-selection-${edge.fromNodeId}-${edge.toNodeId}`}
+                          >
+                            <option value="">Normal transition</option>
+                            <option value="default">Default route</option>
+                            <option value="converge">Converge route</option>
+                            <option value="continuation">Continuation route</option>
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </section>
               )}
 
               <div className="mt-4 form-control gap-1">
@@ -261,6 +326,20 @@ export function ArchitectInspector({
                   }}
                   data-testid="architect-node-max-tool-attempts"
                 />
+              </div>
+
+              <div className="mt-4 form-control gap-1">
+                <label className="label-text text-xs font-semibold text-base-content/70">Node tool permission override</label>
+                <textarea
+                  className="textarea textarea-bordered min-h-20 w-full font-mono text-xs"
+                  placeholder="Inherit default policy"
+                  value={toolOverrideValue}
+                  onChange={(event) => updateToolOverride(event.target.value)}
+                  data-testid="architect-node-tool-override"
+                />
+                <p className="text-[11px] leading-4 text-base-content/55">
+                  Blank inherits the runtime, persona, and slot policy. Set this only to deliberately replace allowed tools for this node.
+                </p>
               </div>
 
               {roleSlotId && (

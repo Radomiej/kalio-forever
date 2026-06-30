@@ -29,6 +29,7 @@ function getLineArg(args: ToolCallRequest['args'], key: 'startLine' | 'endLine')
 @Injectable()
 @Tool({
   name: 'fs_read',
+  domain: 'file_system',
   description: 'Read the contents of a file from the local filesystem. Use this only for files; use fs_list for directories. Path must be inside an allowed directory.',
   parameters: {
     type: 'object',

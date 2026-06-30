@@ -6,6 +6,7 @@ import { RelayService } from '../../relay/relay.service';
 @Injectable()
 @Tool({
   name: 'escalate',
+  domain: 'security_audit',
   description:
     'Report a critical event to the user immediately. The event is logged in the audit trail and, if Telegram is connected, a message is sent to the user. Use this when something important requires human attention — unexpected errors, blocked progress, or decisions that need human input.',
   parameters: {

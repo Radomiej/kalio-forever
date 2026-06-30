@@ -15,9 +15,9 @@ import { ToolDispatchService } from './tool-dispatch.service';
 import { applyArchitectureCliToolPreferences } from './architecture-slot-tool-policy';
 import { resolveToolAlias } from './mcp-tool-allow-list';
 
-const HOST_FS_TOOL_NAMES = new Set(['fs_list', 'fs_read', 'fs_write', 'fs_grep', 'fs_delete']);
-const TERMINAL_TOOL_NAMES = new Set(['terminal_spawn', 'terminal_output', 'terminal_list']);
-const CLI_AGENT_TOOL_NAMES = new Set([
+const LEGACY_HOST_FS_TOOL_NAMES = new Set(['fs_list', 'fs_read', 'fs_write', 'fs_grep', 'fs_delete']);
+const LEGACY_TERMINAL_TOOL_NAMES = new Set(['terminal_spawn', 'terminal_output', 'terminal_list']);
+const LEGACY_CLI_AGENT_TOOL_NAMES = new Set([
   'spawn_cli_agent',
   'message_cli_agent',
   'get_cli_agent_status',
@@ -25,7 +25,7 @@ const CLI_AGENT_TOOL_NAMES = new Set([
   'run_cli_agent',
   'stop_cli_agent',
 ]);
-const SUBAGENT_TOOL_NAMES = new Set(['run_subagent', 'spawn_subagent', 'message_subagent']);
+const LEGACY_SUBAGENT_TOOL_NAMES = new Set(['run_subagent', 'spawn_subagent', 'message_subagent']);
 
 export interface ToolPolicyRequest {
   runtimeKind: SessionRuntimeKind;
@@ -102,10 +102,11 @@ export class ToolPolicyService {
         break;
       }
       case 'subagent': {
-        if (explicitNames && explicitNames.length > 0) {
+        if (explicitNames !== undefined) {
           const allowsAllNative = (personaConfig?.allowedTools ?? []).length === 0;
+          const aliasCatalog = [...toolByName.values()];
           const resolvedExplicit = explicitNames
-            .map((name) => resolveToolAlias(name, new Set(toolByName.keys())));
+            .map((name) => resolveToolAlias(name, aliasCatalog));
           candidateNames = new Set(
             resolvedExplicit
               .filter((name): name is string => name !== null)
@@ -184,6 +185,7 @@ export class ToolPolicyService {
         denied,
         architectureContext,
         warnings,
+        toolByName,
       });
     }
 
@@ -202,12 +204,13 @@ export class ToolPolicyService {
     denied: ToolPolicyDecision['denied'];
     architectureContext?: Record<string, unknown>;
     warnings: string[];
+    toolByName: Map<string, ToolMeta>;
   }): void {
     const hostFsDenied = input.denied.some((entry) => (
-      HOST_FS_TOOL_NAMES.has(entry.name) && entry.reason === 'missing_project_path'
+      isHostFsTool(input.toolByName.get(entry.name)) && entry.reason === 'missing_project_path'
     ));
     const terminalDenied = input.denied.some((entry) => (
-      TERMINAL_TOOL_NAMES.has(entry.name) && entry.reason === 'missing_execution_cwd'
+      isTerminalTool(input.toolByName.get(entry.name)) && entry.reason === 'missing_execution_cwd'
     ));
     if (!hostFsDenied && !terminalDenied) {
       return;
@@ -225,8 +228,8 @@ export class ToolPolicyService {
       return;
     }
 
-    const baselineAllowsHostFs = [...input.baselineNames].some((name) => HOST_FS_TOOL_NAMES.has(name));
-    const baselineAllowsTerminal = [...input.baselineNames].some((name) => TERMINAL_TOOL_NAMES.has(name));
+    const baselineAllowsHostFs = [...input.baselineNames].some((name) => isHostFsTool(input.toolByName.get(name)));
+    const baselineAllowsTerminal = [...input.baselineNames].some((name) => isTerminalTool(input.toolByName.get(name)));
     if (
       (hostFsDenied && baselineAllowsHostFs)
       || (terminalDenied && baselineAllowsTerminal)
@@ -257,7 +260,8 @@ export class ToolPolicyService {
       return;
     }
     for (const name of input.personaNames) {
-      if (!HOST_FS_TOOL_NAMES.has(name) || input.allowedNames.has(name) || !input.toolByName.has(name)) {
+      const tool = input.toolByName.get(name);
+      if (!isHostFsTool(tool) || input.allowedNames.has(name)) {
         continue;
       }
       if (!input.denied.some((entry) => entry.name === name)) {
@@ -292,7 +296,11 @@ export class ToolPolicyService {
     } else if (mcpPolicy === 'deny_all') {
       filteredMcp = [];
     } else {
-      const toolSet = new Set(allowedTools ?? []);
+      const toolSet = new Set(
+        (allowedTools ?? [])
+          .map((name) => resolveToolAlias(name, mcpTools))
+          .filter((name): name is string => name !== null),
+      );
       filteredMcp = mcpTools.filter((toolMeta) => toolSet.has(toolMeta.name));
     }
 
@@ -309,24 +317,24 @@ export class ToolPolicyService {
       autoApprove: Set<string>;
     },
   ): ToolDenyReason | null {
-    if (SUBAGENT_TOOL_NAMES.has(tool.name) && options.subagentDepth > 1) {
+    if (isSubagentTool(tool) && options.subagentDepth > 1) {
       return 'subagent_depth_limit';
     }
     if (
       options.runtimeKind !== 'chat'
-      && HOST_FS_TOOL_NAMES.has(tool.name)
+      && isHostFsTool(tool)
       && !hasLocalProjectPath(options.architectureContext)
     ) {
       return 'missing_project_path';
     }
     if (
       options.runtimeKind !== 'chat'
-      && TERMINAL_TOOL_NAMES.has(tool.name)
+      && isTerminalTool(tool)
       && !hasExecutionCwd(options.architectureContext)
     ) {
       return 'missing_execution_cwd';
     }
-    if (CLI_AGENT_TOOL_NAMES.has(tool.name) && !canUseCliAgents(options.architectureContext)) {
+    if (isCliAgentTool(tool) && !canUseCliAgents(options.architectureContext)) {
       return 'cli_unavailable';
     }
     if (
@@ -338,6 +346,32 @@ export class ToolPolicyService {
     }
     return null;
   }
+}
+
+function isHostFsTool(tool: ToolMeta | undefined): boolean {
+  if (!tool) return false;
+  if (tool.domain) return tool.domain === 'file_system';
+  // TODO: legacy fallback for tool metadata created before stable ToolMeta.domain.
+  return LEGACY_HOST_FS_TOOL_NAMES.has(tool.name);
+}
+
+function isTerminalTool(tool: ToolMeta | undefined): boolean {
+  if (!tool) return false;
+  if (tool.domain) return tool.domain === 'terminal';
+  // TODO: legacy fallback for tool metadata created before stable ToolMeta.domain.
+  return LEGACY_TERMINAL_TOOL_NAMES.has(tool.name);
+}
+
+function isCliAgentTool(tool: ToolMeta): boolean {
+  if (tool.domain) return tool.domain === 'cli_agent';
+  // TODO: legacy fallback for tool metadata created before stable ToolMeta.domain.
+  return LEGACY_CLI_AGENT_TOOL_NAMES.has(tool.name);
+}
+
+function isSubagentTool(tool: ToolMeta): boolean {
+  if (tool.domain) return tool.domain === 'subagent';
+  // TODO: legacy fallback for tool metadata created before stable ToolMeta.domain.
+  return LEGACY_SUBAGENT_TOOL_NAMES.has(tool.name);
 }
 
 function intersectSets(left: Set<string>, right: Set<string>): Set<string> {

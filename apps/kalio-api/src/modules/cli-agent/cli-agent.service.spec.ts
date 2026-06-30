@@ -136,7 +136,7 @@ describe('CLIAgentService', () => {
     });
   });
 
-  it('classifies non-zero auth-required CLI output as an auth failure', async () => {
+  it('keeps non-zero auth-looking CLI output as a generic failure without a typed failure code', async () => {
     const fakeProc = makeFakeProc();
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
 
@@ -157,7 +157,6 @@ describe('CLIAgentService', () => {
       exitCode: 1,
       rawExitCode: 1,
       outcome: 'failed',
-      failureCode: 'auth_required',
       output: expect.stringContaining('Authentication required'),
     });
   });

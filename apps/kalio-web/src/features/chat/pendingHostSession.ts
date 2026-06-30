@@ -1,6 +1,7 @@
 import type { ChatSession } from '@kalio/types';
 
 const PENDING_HOST_SESSION_PREFIX = 'pending-host-session:';
+const pendingHostSessionIds = new Set<string>();
 
 interface CreatePendingHostSessionParams {
   personaId: string;
@@ -10,8 +11,7 @@ interface CreatePendingHostSessionParams {
 }
 
 export function isPendingHostSessionId(sessionId: string | null | undefined): boolean {
-  // TODO: legacy fallback for local placeholder sessions created before runtimeContext.pendingHostSession.
-  return typeof sessionId === 'string' && sessionId.startsWith(PENDING_HOST_SESSION_PREFIX);
+  return typeof sessionId === 'string' && pendingHostSessionIds.has(sessionId);
 }
 
 export function isPendingHostSession(session: ChatSession | null | undefined): boolean {
@@ -30,8 +30,10 @@ export function createPendingHostSession({
   runtimeContext,
   now = Date.now(),
 }: CreatePendingHostSessionParams): ChatSession {
+  const id = `${PENDING_HOST_SESSION_PREFIX}${crypto.randomUUID()}`;
+  pendingHostSessionIds.add(id);
   return {
-    id: `${PENDING_HOST_SESSION_PREFIX}${crypto.randomUUID()}`,
+    id,
     personaId,
     title,
     runtimeContext: {

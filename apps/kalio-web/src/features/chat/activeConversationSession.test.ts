@@ -8,6 +8,7 @@ import {
   loadStoredActiveConversationSessionId,
   persistActiveConversationSessionId,
 } from './activeConversationSession';
+import { createPendingHostSession } from './pendingHostSession';
 
 const {
   mockApiGet,
@@ -230,8 +231,12 @@ describe('activeConversationSession', () => {
   it('does not persist pending host-session ids into session storage', () => {
     persistActiveConversationSessionId('session-1');
     expect(loadStoredActiveConversationSessionId()).toBe('session-1');
+    const pendingSession = createPendingHostSession({
+      personaId: 'default',
+      now: 1,
+    });
 
-    persistActiveConversationSessionId('pending-host-session:temp-1');
+    persistActiveConversationSessionId(pendingSession.id);
 
     expect(loadStoredActiveConversationSessionId()).toBe('session-1');
   });

@@ -76,6 +76,7 @@ function walkDir(
 @Injectable()
 @Tool({
   name: 'fs_list',
+  domain: 'file_system',
   description: 'List files and directories at a path inside an allowed directory. Recursive listings skip heavy generated folders like .git, node_modules, dist, output, reports, and cap results.',
   parameters: {
     type: 'object',

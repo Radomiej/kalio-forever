@@ -396,6 +396,7 @@ describe('ChatWelcomeScreen', () => {
           ...session(),
           id: 'pending-host-session:temp-1',
           title: 'New Chat',
+          runtimeContext: { runtimeKind: 'chat', pendingHostSession: true },
         }}
         activeSessionId="pending-host-session:temp-1"
         architectures={[schema()]}
@@ -428,6 +429,7 @@ describe('ChatSessionHeader', () => {
         activeSession={{
           ...session(),
           id: 'pending-host-session:temp-1',
+          runtimeContext: { runtimeKind: 'chat', pendingHostSession: true },
         }}
         activeSessionId="pending-host-session:temp-1"
         copied={false}

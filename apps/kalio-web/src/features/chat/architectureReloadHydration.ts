@@ -24,7 +24,7 @@ type SetMessages = (messages: ChatMessage[], sessionId?: string | null) => void;
 type SetAgentTurns = (turns: ReturnType<typeof buildTurnsFromHistory>, sessionId?: string | null) => void;
 type SetSessionHistoryMeta = (sessionId: string, meta: SessionHistoryMeta | null) => void;
 type FetchMessages = (sessionId: string) => Promise<SessionHistoryFetchResult>;
-type FetchArchitectureRunProjection = (
+export type FetchArchitectureRunProjection = (
   runId: string,
 ) => Promise<{
   chat: ArchitectureChatProjection;
@@ -87,6 +87,26 @@ function buildReloadedArchitectureSummaryMessage(
   };
 }
 
+function buildArchitectureRunSummaryFromProjection(
+  runId: string,
+  projection: {
+    chat: ArchitectureChatProjection;
+    events: ArchitectureExecutionEvent[];
+    graph: ArchitectureGraphProjection;
+  },
+): NonNullable<ReturnType<typeof findArchitectureRunInMessages>> {
+  return buildArchitectureRunMetadata({
+    run: {
+      id: runId,
+      status: projection.graph.status ?? 'running',
+      schemaId: projection.graph.schemaId ?? projection.graph.schemaName ?? runId,
+    } as never,
+    events: projection.events,
+    graph: projection.graph,
+    chat: projection.chat,
+  });
+}
+
 function persistedArchitectureRunInMessages(
   messages: ChatMessage[],
 ): NonNullable<ReturnType<typeof findArchitectureRunInMessages>> | null {
@@ -96,6 +116,10 @@ function persistedArchitectureRunInMessages(
 
 function architectureContextValue(session: ChatSession, key: string): string | null {
   const value = session.runtimeContext?.architectureContext?.[key];
+  return trimmedString(value);
+}
+
+function trimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
@@ -158,9 +182,10 @@ function buildSyntheticArchitectureChildMessage(
     ?? architectureContextValue(session, 'schemaName')
     ?? architectureContextValue(session, 'displayLabel')
     ?? 'Architecture workflow';
-  const latestAction = latestEvent?.message?.trim() || node?.incompleteReason?.trim() || null;
-  const content = latestChatMessage?.content?.trim().length
-    ? latestChatMessage.content.trim()
+  const latestAction = trimmedString(latestEvent?.message) ?? trimmedString(node?.incompleteReason);
+  const latestContent = trimmedString(latestChatMessage?.content);
+  const content = latestContent
+    ? latestContent
     : [
         `### ${label}`,
         `Architecture: ${architectureLabel}`,
@@ -217,7 +242,19 @@ export async function hydrateArchitectureProjectionFromDescendants(
 
   const inferredSummary = findArchitectureRunInMessages(mergedMessages);
   if (inferredSummary?.hostProjectionKind === 'workflow-envelope') {
-    const syntheticMessage = buildReloadedArchitectureSummaryMessage(activeSessionId, mergedMessages, inferredSummary);
+    let typedSummary = inferredSummary;
+    try {
+      const projection = await fetchArchitectureRunProjection(inferredSummary.runId);
+      typedSummary = buildArchitectureRunSummaryFromProjection(inferredSummary.runId, projection);
+    } catch (error) {
+      void error;
+      // TODO: legacy fallback - remove once persisted backend snapshots always include workflow-envelope summaries.
+    }
+    const currentActiveSessionId = getActiveSessionId();
+    if (currentActiveSessionId !== null && currentActiveSessionId !== activeSessionId) {
+      return mergedMessages;
+    }
+    const syntheticMessage = buildReloadedArchitectureSummaryMessage(activeSessionId, mergedMessages, typedSummary);
     const withoutPreviousSynthetic = mergedMessages.filter((message) => message.id !== syntheticMessage.id);
     return [...withoutPreviousSynthetic, syntheticMessage].sort((left, right) => left.createdAt - right.createdAt);
   }
@@ -255,20 +292,18 @@ export async function hydrateArchitectureProjectionFromDescendants(
         .filter((runId): runId is string => typeof runId === 'string' && runId.length > 0),
     )];
     for (const runId of candidateRunIds) {
-      const projection = await fetchArchitectureRunProjection(runId);
+      let projection: Awaited<ReturnType<FetchArchitectureRunProjection>>;
+      try {
+        projection = await fetchArchitectureRunProjection(runId);
+      } catch (error) {
+        void error;
+        // TODO: legacy fallback - projection fetch is best-effort during reconnect hydration.
+        continue;
+      }
       if (getActiveSessionId() !== activeSessionId) {
         return mergedMessages;
       }
-      derivedSummary = buildArchitectureRunMetadata({
-        run: {
-          id: runId,
-          status: projection.graph.status ?? 'running',
-          schemaId: projection.graph.schemaId ?? projection.graph.schemaName ?? runId,
-        } as never,
-        events: projection.events,
-        graph: projection.graph,
-        chat: projection.chat,
-      });
+      derivedSummary = buildArchitectureRunSummaryFromProjection(runId, projection);
       if (derivedSummary) {
         break;
       }

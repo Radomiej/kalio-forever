@@ -83,6 +83,17 @@ function makeAssistantMessage(sessionId: string, content: string): ChatMessage {
   };
 }
 
+function makeToolResultMessage(sessionId: string, content: Record<string, unknown>): ChatMessage {
+  return {
+    id: `${sessionId}-tool-result-1`,
+    sessionId,
+    role: 'tool_result',
+    toolCallId: `${sessionId}-tool-call-1`,
+    content: JSON.stringify(content),
+    createdAt: 10,
+  };
+}
+
 describe('agentRuntimeSelectors', () => {
   it('prefers runtime snapshots over stale legacy session status snapshots', () => {
     const merged = mergeRuntimeSessionStatusSnapshots(
@@ -185,6 +196,41 @@ describe('agentRuntimeSelectors', () => {
     expect(liveSessionIds.has('session-1')).toBe(false);
   });
 
+  it('surfaces recovered interrupted runs as typed runtime attention', () => {
+    const runtimeActivitySnapshots = {
+      'session-1': makeRuntimeSnapshot('session-1', {
+        active: false,
+        run: {
+          id: 'run-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          phase: 'llm_streaming',
+          status: 'interrupted_needs_retry',
+          retryCount: 0,
+          safeResume: true,
+          errorCode: 'BACKEND_RESTART',
+          startedAt: 1,
+          updatedAt: 2,
+          lastHeartbeatAt: 2,
+        },
+      }),
+    };
+
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots,
+      sessions: [makeSession('session-1', 'Architecture Debate: Orchestrator')],
+      sessionMessages: { 'session-1': [] },
+    })).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-1',
+        kind: 'runtime_error',
+        label: 'Architecture Debate: Orchestrator',
+        detail: 'Backend restarted during LLM work. Retry is safe from the current transcript.',
+        actionable: false,
+      }),
+    ]);
+  });
+
   it('builds running loop summaries from runtime snapshots when legacy loops are missing', () => {
     const runningLoops = selectRunningLoops({
       activeAgentLoops: {},
@@ -250,7 +296,7 @@ describe('agentRuntimeSelectors', () => {
     ]);
   });
 
-  it('surfaces timeout-derived runtime attention from the latest visible session evidence', () => {
+  it('falls back to runtime waiting when assistant timeout prose lacks typed failure state', () => {
     const runtimeActivitySnapshots = {
       'session-1': makeWaitingRuntimeSnapshot('session-1'),
     };
@@ -267,9 +313,9 @@ describe('agentRuntimeSelectors', () => {
     })).toEqual([
       expect.objectContaining({
         sessionId: 'session-1',
-        kind: 'runtime_timeout',
+        kind: 'runtime_waiting',
         label: 'Architecture Debate: Orchestrator',
-        detail: 'Sub-agent timed out after 300000ms.',
+        detail: 'Waiting on orchestrator',
         actionable: false,
       }),
     ]);
@@ -300,7 +346,92 @@ describe('agentRuntimeSelectors', () => {
     ]);
   });
 
-  it('keeps recent child-session timeout evidence visible after reload without a live runtime snapshot', () => {
+  it('does not classify assistant timeout prose as runtime timeout without typed runtime state', () => {
+    const runtimeActivitySnapshots = {
+      'session-1': makeWaitingRuntimeSnapshot('session-1'),
+    };
+
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots,
+      sessions: [makeSession('session-1', 'Architecture Debate: Orchestrator')],
+      sessionMessages: {
+        'session-1': [makeAssistantMessage(
+          'session-1',
+          'Sub-agent failed: Sub-agent timed out after 300000ms.',
+        )],
+      },
+    })).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-1',
+        kind: 'runtime_waiting',
+        label: 'Architecture Debate: Orchestrator',
+        detail: 'Waiting on orchestrator',
+        actionable: false,
+      }),
+    ]);
+  });
+
+  it('does not classify child last output text as runtime error when child status is running', () => {
+    const runtimeActivitySnapshots = {
+      'session-1': makeRuntimeSnapshot('session-1', {
+        childExecutions: [{
+          id: 'child-1',
+          kind: 'cli_agent',
+          parentSessionId: 'session-1',
+          childSessionId: 'child-session-1',
+          label: 'CLI child',
+          status: 'running',
+          lastOutput: 'This log says failed, blocked, and timed out but the typed status is still running.',
+          updatedAt: 10,
+        }],
+      }),
+    };
+
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots,
+      sessions: [makeSession('session-1', 'Parent chat')],
+      sessionMessages: {
+        'session-1': [],
+      },
+    })).toEqual([]);
+  });
+
+  it('classifies typed failed child execution status without parsing child output text', () => {
+    const runtimeActivitySnapshots = {
+      'session-1': makeRuntimeSnapshot('session-1', {
+        childExecutions: [{
+          id: 'child-1',
+          kind: 'agent_flow',
+          parentSessionId: 'session-1',
+          childSessionId: 'child-session-1',
+          label: 'Goal Guard',
+          status: 'failed',
+          lastOutput: 'All visible text is display-only.',
+          updatedAt: 10,
+        }],
+      }),
+    };
+
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots,
+      sessions: [
+        makeSession('session-1', 'Parent chat'),
+        makeSession('child-session-1', 'Goal Guard'),
+      ],
+      sessionMessages: {
+        'session-1': [],
+      },
+    })).toEqual([
+      expect.objectContaining({
+        sessionId: 'child-session-1',
+        kind: 'runtime_error',
+        label: 'Goal Guard',
+        detail: 'Child execution failed',
+      }),
+    ]);
+  });
+
+  it('does not keep child-session timeout assistant text after reload without typed runtime state', () => {
     expect(selectRuntimeAttentionItems({
       sessions: [{
         ...makeSession('session-1', 'Architecture Debate: Orchestrator'),
@@ -314,14 +445,7 @@ describe('agentRuntimeSelectors', () => {
           'Sub-agent failed: Sub-agent timed out after 300000ms.',
         )],
       },
-    })).toEqual([
-      expect.objectContaining({
-        sessionId: 'session-1',
-        kind: 'runtime_timeout',
-        label: 'Architecture Debate: Orchestrator',
-        detail: 'Sub-agent timed out after 300000ms.',
-      }),
-    ]);
+    })).toEqual([]);
   });
 
   it('does not surface persisted runtime attention from generic assistant prose after reload', () => {
@@ -342,7 +466,7 @@ describe('agentRuntimeSelectors', () => {
     })).toEqual([]);
   });
 
-  it('keeps recent agent-flow root timeout evidence visible after reload when runtime context marks the root as durable', () => {
+  it('does not keep agent-flow root timeout assistant text after reload when only runtime context is durable', () => {
     expect(selectRuntimeAttentionItems({
       sessions: [{
         ...makeSession('session-1', 'Goal Guard Root'),
@@ -357,14 +481,7 @@ describe('agentRuntimeSelectors', () => {
           'Sub-agent failed: Sub-agent timed out after 300000ms.',
         )],
       },
-    })).toEqual([
-      expect.objectContaining({
-        sessionId: 'session-1',
-        kind: 'runtime_timeout',
-        label: 'Goal Guard Root',
-        detail: 'Sub-agent timed out after 300000ms.',
-      }),
-    ]);
+    })).toEqual([]);
   });
 
   it('does not surface stale root-session timeout text without runtime context after reload', () => {
@@ -400,7 +517,7 @@ describe('agentRuntimeSelectors', () => {
     })).toEqual([]);
   });
 
-  it('maps tool budget exhaustion to a runtime error attention item before a final timeout', () => {
+  it('does not map assistant tool budget prose to runtime error without typed evidence', () => {
     expect(selectRuntimeAttentionItems({
       runtimeActivitySnapshots: {
         'session-1': makeWaitingRuntimeSnapshot('session-1'),
@@ -415,10 +532,78 @@ describe('agentRuntimeSelectors', () => {
     })).toEqual([
       expect.objectContaining({
         sessionId: 'session-1',
-        kind: 'runtime_error',
+        kind: 'runtime_waiting',
         label: 'Release Guard: QA',
-        detail: 'Tool budget reached before the branch could finish.',
+        detail: 'Waiting on orchestrator',
         actionable: false,
+      }),
+    ]);
+  });
+
+  it('does not classify tool result error message text without a typed error code', () => {
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots: {
+        'session-1': makeWaitingRuntimeSnapshot('session-1'),
+      },
+      sessions: [makeSession('session-1', 'Architecture Debate: Orchestrator')],
+      sessionMessages: {
+        'session-1': [makeToolResultMessage('session-1', {
+          errorMessage: 'Sub-agent timed out after 300000ms.',
+        })],
+      },
+    })).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-1',
+        kind: 'runtime_waiting',
+        detail: 'Waiting on orchestrator',
+      }),
+    ]);
+  });
+
+  it('ignores malformed tool result content while selecting runtime attention', () => {
+    const malformedToolResult = {
+      id: 'session-1-tool-result-malformed',
+      sessionId: 'session-1',
+      role: 'tool_result',
+      toolCallId: 'session-1-tool-call-1',
+      content: undefined as unknown as string,
+      createdAt: 10,
+    } as ChatMessage;
+
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots: {
+        'session-1': makeWaitingRuntimeSnapshot('session-1'),
+      },
+      sessions: [makeSession('session-1', 'Architecture Debate: Orchestrator')],
+      sessionMessages: {
+        'session-1': [malformedToolResult],
+      },
+    })).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-1',
+        kind: 'runtime_waiting',
+        detail: 'Waiting on orchestrator',
+      }),
+    ]);
+  });
+
+  it('classifies typed tool result timeout code without parsing error message text', () => {
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots: {
+        'session-1': makeWaitingRuntimeSnapshot('session-1'),
+      },
+      sessions: [makeSession('session-1', 'Architecture Debate: Orchestrator')],
+      sessionMessages: {
+        'session-1': [makeToolResultMessage('session-1', {
+          errorCode: 'TIMEOUT',
+          errorMessage: 'Provider stopped before returning a complete response.',
+        })],
+      },
+    })).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-1',
+        kind: 'runtime_timeout',
+        detail: 'Provider stopped before returning a complete response.',
       }),
     ]);
   });

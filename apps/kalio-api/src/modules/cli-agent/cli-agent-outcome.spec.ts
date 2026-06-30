@@ -32,4 +32,20 @@ describe('applySemanticCliOutcome', () => {
     });
     expect(result.failureCode).toBeUndefined();
   });
+
+  it('does not infer auth failure from non-zero output text without a typed failure code', () => {
+    const result = applySemanticCliOutcome({
+      agentId: 'codex',
+      output: 'Please run codex login before retrying.',
+      exitCode: 1,
+      durationMs: 10,
+    });
+
+    expect(result).toMatchObject({
+      rawExitCode: 1,
+      exitCode: 1,
+      outcome: 'failed',
+    });
+    expect(result.failureCode).toBeUndefined();
+  });
 });

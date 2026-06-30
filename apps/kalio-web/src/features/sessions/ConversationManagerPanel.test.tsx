@@ -233,6 +233,37 @@ describe('ConversationManagerPanel', () => {
     expect(stopTurn).toHaveBeenCalledWith('session-1');
   });
 
+  it('renders tool-loop budget progress from runtime snapshots', () => {
+    sessionState.sessions = [makeSession('session-budget', 'Goal Guard')];
+    agentState.runtimeActivitySnapshots = {
+      'session-budget': {
+        sessionId: 'session-budget',
+        active: true,
+        turnId: 'turn-1',
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [],
+        toolBudgetProgress: {
+          sessionId: 'session-budget',
+          turnId: 'turn-1',
+          usedIterations: 6,
+          currentLimit: 8,
+          status: 'running',
+          runtimeKind: 'subagent',
+          updatedAt: 10,
+        },
+        toolActivities: [],
+        childExecutions: [],
+        updatedAt: 10,
+      },
+    };
+
+    render(<ConversationManagerPanel />);
+
+    expect(screen.getByTestId('tool-budget-progress-session-budget')).toHaveTextContent('Goal Guard');
+    expect(screen.getByTestId('tool-budget-progress-session-budget')).toHaveTextContent('6/8');
+  });
+
   it('renders non-actionable runtime waiting rows and opens the owning conversation', () => {
     const onOpenSession = vi.fn();
     sessionState.sessions = [makeSession('session-1', 'Architecture Debate: Orchestrator')];

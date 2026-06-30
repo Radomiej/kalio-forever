@@ -22,6 +22,7 @@ function getValueArg(args: ToolCallRequest['args']): string {
 @Injectable()
 @Tool({
   name: 'kv_write',
+  domain: 'key_value',
   description: 'Write a key-value pair to the conversation persistent store.',
   parameters: {
     type: 'object',
@@ -47,6 +48,7 @@ export class KVWriteTool {
 @Injectable()
 @Tool({
   name: 'kv_read',
+  domain: 'key_value',
   description: 'Read a value from the conversation persistent store by key.',
   parameters: {
     type: 'object',
@@ -70,6 +72,7 @@ export class KVReadTool {
 @Injectable()
 @Tool({
   name: 'kv_list',
+  domain: 'key_value',
   description: 'List all key-value pairs in the conversation persistent store.',
   parameters: {
     type: 'object',
@@ -88,6 +91,7 @@ export class KVListTool {
 @Injectable()
 @Tool({
   name: 'kv_delete',
+  domain: 'key_value',
   description: 'Delete a key from the conversation persistent store.',
   parameters: {
     type: 'object',

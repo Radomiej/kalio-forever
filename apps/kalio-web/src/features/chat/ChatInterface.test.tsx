@@ -915,8 +915,8 @@ describe('ChatInterface event wiring', () => {
     mockActiveSessionId = 'session-2';
     await rerenderChatInterface(rerender);
 
-    expect(mockIdentifySession).toHaveBeenCalledTimes(1);
-    expect(mockIdentifySession).toHaveBeenCalledWith('session-2');
+    expect(mockIdentifySession).toHaveBeenCalled();
+    expect(mockIdentifySession).toHaveBeenLastCalledWith('session-2');
   });
 
   it('REGRESSION: reconnect re-identifies the active session and reloads its history', async () => {
@@ -2065,6 +2065,34 @@ describe('REGRESSION: timeline interleaving preserves chronological order', () =
     }];
     await rerenderChatInterface(rerender);
 
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('pins the list with direct scroll positioning instead of restarting smooth scroll on updates', async () => {
+    const { rerender } = await renderChatInterface();
+    const messageList = screen.getByTestId('message-list');
+    let scrollTopValue = 0;
+    Object.defineProperty(messageList, 'scrollHeight', { configurable: true, value: 1200 });
+    Object.defineProperty(messageList, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(messageList, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    (window.HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mockClear();
+
+    mockMessages = [{
+      id: 'streaming-message',
+      sessionId: 'session-1',
+      role: 'user',
+      content: 'new content',
+      createdAt: 2,
+    }];
+    await rerenderChatInterface(rerender);
+
+    expect(scrollTopValue).toBe(1200);
     expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 

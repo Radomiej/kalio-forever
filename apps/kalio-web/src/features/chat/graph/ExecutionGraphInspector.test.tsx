@@ -397,6 +397,48 @@ describe('ExecutionGraphInspector', () => {
     expect(setActiveSession).toHaveBeenCalledWith('api-pragmatist-session');
   });
 
+  it('renders architecture route fallback labels when route endpoints are missing', () => {
+    render(
+      <ExecutionGraphInspector
+        activeSessionId="arch-run-root"
+        inspectorWidth={360}
+        selectedConfirmation={null}
+        selectedNode={{
+          id: 'architecture-root:partial-route',
+          kind: 'architecture-run',
+          title: 'Partial route',
+          subtitle: 'router / completed',
+          status: 'success',
+          column: 1,
+          row: 0,
+          x: 0,
+          y: 0,
+          width: 220,
+          height: 140,
+          payload: {
+            kind: 'architecture-run',
+            summary: {
+              runId: 'run-partial-route',
+              schemaId: 'architecture-run',
+              status: 'completed',
+              trace: [],
+              routeHops: [],
+            },
+            route: {
+              eventId: 'event-1',
+              source: 'runtime_fallback',
+            },
+          },
+        } as unknown as ExecutionGraphNode}
+        setActiveSession={vi.fn()}
+        removePendingConfirmation={vi.fn()}
+        setPendingMessage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('unknown -> unknown')).toBeTruthy();
+  });
+
   it('shows incomplete architecture evidence without expanding raw payload', () => {
     render(
       <ExecutionGraphInspector

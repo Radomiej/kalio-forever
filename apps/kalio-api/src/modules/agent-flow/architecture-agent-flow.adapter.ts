@@ -17,10 +17,11 @@ import type {
 import { ArchitectureRuntimeService } from '../architecture/architecture-runtime.service';
 import { isCompletedCliChildStatus } from '../architecture/architecture-cli-child-status';
 import type { AgentFlowRuntimePort } from './agent-flow-runtime.port';
+import type { ArchitectureFinalArtifactStatus } from './architecture-final-artifact-status';
 import {
   finalArtifactStatusFromData,
 } from './architecture-final-artifact-status';
-import { normalizeFlowEventType, normalizeFlowLifecycle } from './agent-flow-trace-mapping';
+import { normalizeFlowEventType, normalizeFlowLifecycle, normalizeFlowStatus } from './agent-flow-trace-mapping';
 
 const FLOW_SCHEMA_ALIASES: Record<string, string> = {
   goal_guard_delivery_loop: 'goal-master-delivery-loop',
@@ -48,6 +49,11 @@ function normalizeAgentFlowStatus(status: ArchitectureRun['status']): AgentFlowR
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringField(record: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function stringArray(value: unknown): string[] {
@@ -190,7 +196,7 @@ function mapTraceEvents(events: ArchitectureExecutionEvent[]): AgentFlowTraceIte
       ...(isRecord(event.data) ? event.data : {}),
       sourceEventType: event.type,
     },
-    status: event.type === 'final_artifact' ? 'done' : undefined,
+    status: normalizeFlowStatus(event),
     createdAt: event.createdAt,
   }));
 }
@@ -228,11 +234,25 @@ function extractNextActions(
   return lastMessage ? [lastMessage] : ['Inspect the child AgentFlow trace before retrying.'];
 }
 
+function isLegacyEmptyOutputPlaceholder(message: string | undefined): boolean {
+  const normalized = message?.trim().toLowerCase();
+  return !normalized
+    || normalized === 'sub-agent completed with no output.'
+    || normalized === 'sub-agent completed with no output';
+}
+
+function finalArtifactSummary(event: ArchitectureExecutionEvent): string | undefined {
+  const structuredAnswer = stringField(event.data, 'finalArtifactAnswer');
+  if (structuredAnswer) return structuredAnswer;
+  // TODO: legacy fallback - older finalizer events sometimes persisted a display placeholder as message.
+  return isLegacyEmptyOutputPlaceholder(event.message) ? undefined : event.message;
+}
+
 function findFinalArtifact(events: ArchitectureExecutionEvent[]): string | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (event?.type === 'final_artifact') {
-      return event.message;
+      return finalArtifactSummary(event);
     }
   }
   return undefined;
@@ -267,8 +287,21 @@ function latestAttemptEvents(events: ArchitectureExecutionEvent[]): Architecture
 
 function hasBlockingFinalArtifact(events: ArchitectureExecutionEvent[]): boolean {
   const finalArtifact = findFinalArtifactEvent(events);
-  const status = finalArtifactStatusFromData(finalArtifact?.data);
+  const status = finalArtifactStatusFromData(finalArtifact?.data)
+    ?? finalArtifactStatusFromEvidence(finalArtifact);
   return status === 'blocked' || status === 'rejected' || status === 'incomplete';
+}
+
+function finalArtifactStatusFromEvidence(
+  event: ArchitectureExecutionEvent | undefined,
+): ArchitectureFinalArtifactStatus | undefined {
+  if (!event) return undefined;
+  const evidence = eventEvidence(event).find((item) => item.kind === 'FINAL_ARTIFACT');
+  if (!evidence) return undefined;
+  if (evidence.status === 'passed') return 'accepted';
+  if (evidence.status === 'blocked') return 'blocked';
+  if (evidence.status === 'failed') return 'rejected';
+  return 'incomplete';
 }
 
 function hasPassedExternalQualityGate(args: RunSubAgentFlowArgs | undefined): boolean {
@@ -307,6 +340,11 @@ function hasLaterIndependentHostVerification(events: ArchitectureExecutionEvent[
   let hasBuildEvidence = false;
 
   for (const event of events) {
+    hasHostWrite ||= hasTypedHostWriteEvidence(event);
+    hasBuildEvidence ||= hasTypedBuildEvidence(event);
+    if (hasTypedBuildAndGitEvidence(event)) return true;
+    if (hasHostWrite && hasBuildEvidence) return true;
+
     if (
       event.type !== 'participant_output'
       && event.type !== 'router_decision'
@@ -317,17 +355,14 @@ function hasLaterIndependentHostVerification(events: ArchitectureExecutionEvent[
       const eventToolName = typeof eventData?.['toolName'] === 'string' ? eventData['toolName'] : undefined;
       const eventStatus = typeof eventData?.['status'] === 'string' ? eventData['status'] : undefined;
       if (event.type === 'tool_call' && eventStatus === 'success') {
+        // TODO: legacy fallback - older events only persisted raw tool names, not WorkflowEvidence.
         hasHostWrite ||= eventToolName === 'fs_write'
           || eventToolName === 'vfs_write';
         hasBuildEvidence ||= eventToolName === 'terminal_spawn'
           || eventToolName === 'terminal_output';
       }
-      if (hasTypedBuildAndGitEvidence(event)) return true;
       if (hasHostWrite && hasBuildEvidence) return true;
       continue;
-    }
-    if (hasTypedBuildAndGitEvidence(event)) {
-      return true;
     }
     const toolEvidence = isRecord(event.data?.toolEvidence) ? event.data.toolEvidence : undefined;
     if (!toolEvidence) {
@@ -336,6 +371,7 @@ function hasLaterIndependentHostVerification(events: ArchitectureExecutionEvent[
     const successfulToolNames = Array.isArray(toolEvidence['successfulToolNames'])
       ? toolEvidence['successfulToolNames'].filter((value): value is string => typeof value === 'string')
       : [];
+    // TODO: legacy fallback - prefer WorkflowEvidence VFS_WRITE/BUILD_RESULT for new runtime events.
     hasHostWrite ||= successfulToolNames.some((name) => (
       name === 'fs_write'
       || name === 'vfs_write'
@@ -368,8 +404,11 @@ function eventRuntimeDecision(event: ArchitectureExecutionEvent): WorkflowRuntim
 }
 
 function hasTypedBuildAndGitEvidence(event: ArchitectureExecutionEvent): boolean {
-  const evidence = eventEvidence(event);
-  const hasBuildPass = evidence.some((item) => (
+  return hasTypedBuildEvidence(event) && hasTypedGitEvidence(event);
+}
+
+function hasTypedBuildEvidence(event: ArchitectureExecutionEvent): boolean {
+  return eventEvidence(event).some((item) => (
     item.kind === 'BUILD_RESULT'
     && item.status === 'passed'
     && (
@@ -378,8 +417,14 @@ function hasTypedBuildAndGitEvidence(event: ArchitectureExecutionEvent): boolean
       || item.data['exitCode'] === 0
     )
   ));
-  const hasGitStatus = evidence.some((item) => item.kind === 'GIT_STATUS' && item.status === 'passed');
-  return hasBuildPass && hasGitStatus;
+}
+
+function hasTypedGitEvidence(event: ArchitectureExecutionEvent): boolean {
+  return eventEvidence(event).some((item) => item.kind === 'GIT_STATUS' && item.status === 'passed');
+}
+
+function hasTypedHostWriteEvidence(event: ArchitectureExecutionEvent): boolean {
+  return eventEvidence(event).some((item) => item.kind === 'VFS_WRITE' && item.status === 'passed');
 }
 
 function hasTypedFinalizationAcceptance(event: ArchitectureExecutionEvent): boolean {
@@ -389,13 +434,9 @@ function hasTypedFinalizationAcceptance(event: ArchitectureExecutionEvent): bool
   ) {
     return false;
   }
-  if (event.roleSlotId !== 'goal_master' && event.nodeId !== 'goal-master') {
-    return false;
-  }
   const decision = eventRuntimeDecision(event);
   const acceptsFinalArtifact = decision?.accepted === true
-    && decision.reasonCode === 'final_artifact_accepted'
-    && (decision.nextNodeId === undefined || decision.nextNodeId === 'final-artifact');
+    && decision.reasonCode === 'final_artifact_accepted';
   return acceptsFinalArtifact && hasTypedBuildAndGitEvidence(event);
 }
 
@@ -441,7 +482,6 @@ function hasFinalizationMissingBlocker(
   }
   const lastRuntimeFallback = [...events].reverse().find((event) => (
     event.route?.source === 'runtime_fallback'
-    && event.route.nextNodeId !== 'final-artifact'
   ));
   if (!lastRuntimeFallback) return false;
   return events.some((event) => event.createdAt <= lastRuntimeFallback.createdAt && hasTypedFinalizationAcceptance(event));
@@ -483,21 +523,21 @@ function effectiveRunStatus(
   return status !== 'done' && continuation ? 'waiting_on_orchestrator' : status;
 }
 
-function isGenericEmptyOutput(message: string | undefined): boolean {
-  const normalized = message?.trim().toLowerCase();
-  return !normalized
-    || normalized === 'sub-agent completed with no output.'
-    || normalized === 'sub-agent completed with no output';
-}
-
 function findVerifiedAcceptance(events: ArchitectureExecutionEvent[]): string | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (
+      event
+      && hasTypedFinalizationAcceptance(event)
+    ) {
+      return eventRuntimeDecision(event)?.message ?? event.message;
+    }
+    if (
       event?.type === 'router_decision'
+      // TODO: legacy fallback - older Goal Master events had no runtimeDecision/evidence contract.
       && (event.roleSlotId === 'goal_master' || event.nodeId === 'goal-master')
       && event.route?.nextNodeId === 'final-artifact'
-      && !isGenericEmptyOutput(event.message)
+      && !isLegacyEmptyOutputPlaceholder(event.message)
     ) {
       return event.message;
     }
@@ -515,7 +555,7 @@ function summarizeCompletedFlow(args: RunSubAgentFlowArgs, status: SubAgentFlowR
     return `AgentFlow ${args.flowId} finished with status cancelled.`;
   }
   const finalArtifact = findFinalArtifact(events);
-  if (finalArtifact !== undefined && !isGenericEmptyOutput(finalArtifact)) {
+  if (finalArtifact !== undefined) {
     return finalArtifact;
   }
   const verifiedAcceptance = findVerifiedAcceptance(events);
@@ -565,7 +605,13 @@ function lastCompletedNodeId(events: ArchitectureExecutionEvent[]): string | und
 function maxStepContinuation(events: ArchitectureExecutionEvent[]): AgentFlowContinuationCursor | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
-    if (event?.type !== 'router_decision' || !isRecord(event.data)) {
+    if (
+      (
+        event?.type !== 'router_decision'
+        && event?.type !== 'run_stopped'
+      )
+      || !isRecord(event.data)
+    ) {
       continue;
     }
     const reasonCode = event.reasonCode ?? event.data.reasonCode;
@@ -611,6 +657,7 @@ function toResult(args: RunSubAgentFlowArgs, run: ArchitectureRun, events: Archi
     : summarizeCompletedFlow(args, status, statusEvents);
   return {
     flowRunId: run.id,
+    flowDefinitionId: args.flowId,
     parentSessionId: args.parentSessionId,
     parentToolCallId: args.parentToolCallId,
     childSessionId: run.rootSessionId ?? `arch-${run.id}-root`,

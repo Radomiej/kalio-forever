@@ -223,8 +223,9 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
       rootSessionId: activeSessionId,
       sessions,
       sessionMessages,
+      runtimeActivitySnapshots,
     });
-  }, [activeSessionId, architectureRootGraph, sessions, sessionMessages]);
+  }, [activeSessionId, architectureRootGraph, runtimeActivitySnapshots, sessions, sessionMessages]);
 
   useEffect(() => {
     if (!activeSessionId || !activeArchitectureRunId) {

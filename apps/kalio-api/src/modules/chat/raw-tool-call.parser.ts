@@ -6,7 +6,7 @@ const PARAMS_PATTERN = /<parameters\b[^>]*>([\s\S]*?)<\/parameters>/i;
 const PARAM_PATTERN = /<([A-Za-z_][\w:-]*)\b[^>]*>([\s\S]*?)<\/\1>/g;
 const FUNCTION_PATTERN = /<function=([A-Za-z_][\w:-]*)\b[^>]*>([\s\S]*?)<\/function>/i;
 const PARAMETER_ASSIGN_PATTERN = /<parameter=([A-Za-z_][\w:-]*)\b[^>]*>([\s\S]*?)<\/parameter>/g;
-const ALLOWED_RAW_XML_TOOL_NAME = 'run_cli_agent';
+export const RAW_XML_TOOL_CALL_COMPAT_TOOL_NAME = 'run_cli_agent';
 
 function decodeXmlText(value: string): string {
   return value
@@ -28,13 +28,14 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 
 function parseParameters(source: string): Record<string, unknown> {
   const decodedSource = decodeXmlText(source.trim());
-  if (decodedSource.startsWith('{')) {
-    try {
-      const parsed: unknown = JSON.parse(decodedSource);
-      return isJsonObject(parsed) ? parsed : {};
-    } catch {
-      return {};
+  try {
+    const parsed: unknown = JSON.parse(decodedSource);
+    if (isJsonObject(parsed)) {
+      return parsed;
     }
+  } catch (error) {
+    void error;
+    // Parameter XML is a legacy provider fallback, so invalid JSON falls through to tag parsing.
   }
 
   const args: Record<string, unknown> = {};
@@ -61,7 +62,7 @@ function parseParameters(source: string): Record<string, unknown> {
 }
 
 function allowedToolNamesSet(allowedToolNames?: Iterable<string>): ReadonlySet<string> {
-  return new Set(allowedToolNames ?? [ALLOWED_RAW_XML_TOOL_NAME]);
+  return new Set(allowedToolNames ?? []);
 }
 
 export function parseRawXmlToolCall(text: string, allowedToolNames?: Iterable<string>): LLMToolCall | null {
@@ -78,7 +79,11 @@ export function parseRawXmlToolCall(text: string, allowedToolNames?: Iterable<st
     return null;
   }
   const decodedName = decodeXmlText(name);
-  if (!allowedToolNamesSet(allowedToolNames).has(decodedName)) {
+  // TODO: legacy fallback - raw XML exists only for providers that emit textual tool markup instead of typed tool_call chunks.
+  if (
+    decodedName !== RAW_XML_TOOL_CALL_COMPAT_TOOL_NAME
+    || !allowedToolNamesSet(allowedToolNames).has(decodedName)
+  ) {
     return null;
   }
 

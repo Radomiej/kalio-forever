@@ -9,6 +9,7 @@ import { VFSService } from '../../vfs/vfs.service';
 @Injectable()
 @Tool({
   name: 'raapp_get',
+  domain: 'raapp',
   description:
     'Retrieve the source files of a stored RA-App by its ID. ' +
     'Returns the raw YAML/DSL content of meta.yml, systems.yml, ui.gui, ' +
@@ -56,6 +57,7 @@ export class RaAppGetTool {
 @Injectable()
 @ConfirmedTool({
   name: 'raapp_edit',
+  domain: 'raapp',
   description:
     'Create or update a VFS working copy for a stored user RA-App. ' +
     'Provide only the files you want to change; unchanged files are preserved in the working copy. ' +
@@ -193,6 +195,7 @@ export class RaAppEditTool {
 @Injectable()
 @ConfirmedTool({
   name: 'raapp_delete',
+  domain: 'raapp',
   description:
     'Permanently delete a user-uploaded RA-App by its ID. ' +
     'Core apps cannot be deleted. This action is irreversible. ' +

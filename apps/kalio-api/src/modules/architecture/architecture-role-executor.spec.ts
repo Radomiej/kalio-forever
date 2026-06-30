@@ -37,6 +37,19 @@ function routeOutput(targetNodeId: string, response: string): ArchitectureRouter
   };
 }
 
+function finalizeOutput(response: string): ArchitectureRouterOutput {
+  return {
+    selectedStrategy: 'final-artifact',
+    mergedDecision: response,
+    acceptedInputs: [],
+    rejectedInputs: [],
+    unresolvedConflicts: [],
+    risks: [],
+    confidence: 0.9,
+    nextAction: 'finalize',
+  };
+}
+
 describe('ArchitectureRoleExecutorService', () => {
   it('prepares branch sessions without invoking live subagents by default', async () => {
     const schema = getSchema();
@@ -1160,6 +1173,10 @@ describe('ArchitectureRoleExecutorService', () => {
       'message_cli_agent',
     ]);
     expect(call?.objective).toContain('Act as the delivery orchestrator.');
+    expect(call?.objective).toContain('prepare a task packet with owner, expected evidence, verification command');
+    expect(call?.objective).toContain('Local host project path for delegation: C:\\Projekty\\TurboProject2');
+    expect(call?.objective).toContain('Do not inspect host project files from this orchestrator slot by default');
+    expect(call?.objective).not.toContain('call fs_list or fs_read first');
     expect(call?.objective).toContain('Treat CLI agents as delegated sub-agents at the architecture level');
     expect(call?.objective).toContain('Use spawn_cli_agent only when the architecture policy exposes it');
     expect(call?.objective).toContain('Copilot CLI is the implementation sub-agent backend');
@@ -2261,7 +2278,40 @@ describe('ArchitectureRoleExecutorService', () => {
     });
   });
 
-  it('prefers structured routerOutput routes over conflicting prose route_to text', async () => {
+  it('keeps structured finalize routerOutput without inventing route_to control data', async () => {
+    const schema = getSchema();
+    const slot = schema.roleSlots[0];
+    if (!slot) throw new Error('Expected slot');
+    const structuredOutput = finalizeOutput('Merge the accepted evidence into the final artifact.');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'Finalizing from typed contract.',
+        structuredOutput,
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    const result = await service.execute({
+      schema,
+      run: createRun('subagent_execution'),
+      slot,
+      branchSessionId: 'branch-1',
+      personaId: slot.defaultPersonaId,
+      outgoingNodeIds: ['final-artifact'],
+    });
+
+    expect(result.data.routerOutput).toEqual(structuredOutput);
+    expect(result.data.route_to).toBeUndefined();
+  });
+
+  it('ignores routerOutput JSON embedded in assistant text when structuredOutput is absent', async () => {
     const schema = getSchema();
     const slot = schema.roleSlots[0];
     if (!slot) throw new Error('Expected slot');
@@ -2273,6 +2323,38 @@ describe('ArchitectureRoleExecutorService', () => {
           JSON.stringify(routeOutput('implementer', 'Use the structured route.')),
           '```',
         ].join('\n'),
+        taskId: 'task-1',
+        childSessionId: 'branch-1',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    const result = await service.execute({
+      schema,
+      run: createRun('subagent_execution'),
+      slot,
+      branchSessionId: 'branch-1',
+      personaId: slot.defaultPersonaId,
+      outgoingNodeIds: ['router', 'implementer'],
+    });
+
+    expect(result.data.route_to).toBeUndefined();
+    expect(result.data.routerOutput).toBeUndefined();
+  });
+
+  it('prefers provider structuredOutput routes over conflicting prose route_to text', async () => {
+    const schema = getSchema();
+    const slot = schema.roleSlots[0];
+    if (!slot) throw new Error('Expected slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'route_to(router, preserve explicit route)',
+        structuredOutput: routeOutput('implementer', 'Use the structured route.'),
         taskId: 'task-1',
         childSessionId: 'branch-1',
         parentSessionId: 'root-1',
@@ -2745,7 +2827,7 @@ describe('ArchitectureRoleExecutorService', () => {
     const objective = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].objective ?? '';
     expect(objective).toContain('Produce the final user-facing answer from the incoming graph outputs.');
     expect(objective).toContain('Do not claim files, tools, or capabilities unless incoming outputs explicitly prove them.');
-    expect(objective).toContain('fenced JSON finalArtifact object');
+    expect(objective).toContain('structured output schema');
   });
 
   it('projects finalizer JSON contract into structured artifact status data', async () => {
@@ -2759,6 +2841,7 @@ describe('ArchitectureRoleExecutorService', () => {
           status: 'blocked',
           blockingReason: 'Missing post-change build log.',
           evidence: ['src/runtimeProof.ts exists'],
+          answer: 'Build verification is incomplete.',
         },
         taskId: 'task-finalizer',
         childSessionId: 'branch-finalizer',
@@ -2787,7 +2870,54 @@ describe('ArchitectureRoleExecutorService', () => {
       acceptanceStatus: 'blocked',
       blockingReason: 'Missing post-change build log.',
       evidence: ['src/runtimeProof.ts exists'],
+      finalArtifactAnswer: 'Build verification is incomplete.',
     });
+  });
+
+  it('ignores finalizer JSON embedded in assistant text when structuredOutput is absent', async () => {
+    const schema = getGoalMasterSchema();
+    const finalizer = schema.roleSlots.find((slot) => slot.slotType === 'finalizer');
+    if (!finalizer) throw new Error('Expected finalizer slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: [
+          'Build verification is incomplete.',
+          '```json',
+          JSON.stringify({
+            finalArtifact: {
+              status: 'blocked',
+              blockingReason: 'Missing post-change build log.',
+              evidence: ['src/runtimeProof.ts exists'],
+            },
+          }),
+          '```',
+        ].join('\n'),
+        taskId: 'task-finalizer',
+        childSessionId: 'branch-finalizer',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    const result = await service.execute({
+      schema,
+      run: {
+        ...createRun('subagent_execution'),
+        branchSessionIds: { finalizer: 'branch-finalizer' },
+      },
+      slot: finalizer,
+      branchSessionId: 'branch-finalizer',
+      personaId: finalizer.defaultPersonaId,
+    });
+
+    expect(result.data.finalArtifactStatus).toBeUndefined();
+    expect(result.data.acceptanceStatus).toBeUndefined();
+    expect(result.data.blockingReason).toBeUndefined();
+    expect(result.data.evidence).toBeUndefined();
   });
 
   it('falls back to prepared branch output when subagent runtime is unavailable', async () => {

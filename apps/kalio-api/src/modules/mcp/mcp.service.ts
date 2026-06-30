@@ -6,7 +6,6 @@ import {
   Optional,
 } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -25,6 +24,7 @@ import type { KalioMcpServerConfig } from '../../config/kalio-config.types';
 import {
   buildMcpSignature,
   buildServerKey,
+  makeMcpServerId,
   parseServerKey,
   resolveRegistryEntries,
   type MCPResolvedRegistryEntry,
@@ -95,6 +95,11 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     return registry.resolved.map((entry) => this.toMCPServer(entry, registry.rowsByServerKey.get(entry.serverKey)));
   }
 
+  async findComparableSignatures(): Promise<Set<string>> {
+    const registry = await this.loadRegistryEntries();
+    return new Set(registry.resolved.map((entry) => entry.signature));
+  }
+
   getAllTools(): MCPTool[] {
     return [...this.handles.values()].filter((h) => h.status === 'connected').flatMap((h) => h.tools);
   }
@@ -123,7 +128,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   async addServer(dto: CreateMCPServerDto): Promise<MCPServer> {
-    const id = this.makeServerId(dto);
+    const id = makeMcpServerId(dto);
     const existing = (await this.drizzle.db
       .select({ id: mcpServers.id })
       .from(mcpServers)
@@ -152,39 +157,6 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     });
     await this.reconcileRuntime();
     return await this.findServerByKey(buildServerKey('sqlite', id));
-  }
-
-  private makeServerId(dto: CreateMCPServerDto): string {
-    const normalized = {
-      name: dto.name.trim(),
-      transport: dto.transport ?? 'http',
-      url: dto.url?.trim() ?? null,
-      command: dto.command?.trim() ?? null,
-      args: (dto.args ?? []).map((arg) => arg.trim()),
-      env: this.sortDictionary(dto.env),
-      headers: this.sortDictionary(dto.headers),
-      originSource: dto.originSource ?? 'manual',
-    };
-
-    const name = dto.name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-+|-+$)/g, '');
-    const suffix = createHash('sha256').update(JSON.stringify(normalized)).digest('base64url').slice(0, 10);
-    return `${name || 'mcp-server'}-${suffix}`;
-  }
-
-  private sortDictionary(input?: Record<string, string>): Record<string, string> | null {
-    if (!input || Object.keys(input).length === 0) {
-      return null;
-    }
-    return Object.keys(input)
-      .sort()
-      .reduce((acc, key) => {
-        acc[key] = input[key];
-        return acc;
-      }, {} as Record<string, string>);
   }
 
   async removeServer(serverKey: string): Promise<void> {
@@ -389,6 +361,8 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
 
   private configToHandle(id: string, server: KalioMcpServerConfig): ServerHandle {
     const serverKey = buildServerKey('toml', id);
+    const envVars = this.resolveEnv(server);
+    const headers = this.resolveHeaders(server);
     return {
       id,
       serverKey,
@@ -399,8 +373,8 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       url: server.url,
       command: server.command,
       args: server.args,
-      envVars: this.resolveEnv(server),
-      headers: this.resolveHeaders(server),
+      envVars,
+      headers,
       client: null as unknown as Client,
       rawTransport: null,
       status: 'disconnected',
@@ -414,6 +388,8 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
         url: server.url,
         command: server.command,
         args: server.args,
+        env: envVars,
+        headers,
       }),
     };
   }
@@ -480,6 +456,8 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
         url: row.url ?? undefined,
         command: row.command ?? undefined,
         args: row.args ?? undefined,
+        env: row.envVars ?? undefined,
+        headers: row.headers ?? undefined,
       }),
     };
   }
@@ -508,6 +486,8 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
         url: row.url ?? undefined,
         command: row.command ?? undefined,
         args: row.args ?? undefined,
+        env: row.envVars ?? undefined,
+        headers: row.headers ?? undefined,
       })),
       ...managedHandles.map((handle) => ({
         id: handle.id,
@@ -520,6 +500,8 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
         url: handle.url,
         command: handle.command,
         args: handle.args,
+        env: handle.envVars,
+        headers: handle.headers,
       })),
     ]);
 

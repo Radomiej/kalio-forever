@@ -7,7 +7,6 @@ import {
 } from '@kalio/types';
 import {
   architectureConversationVisibilityForSession,
-  architectureContextForSession,
   architectureContextStringField,
   architectureSessionSurfaceForSession,
 } from './architectureSessionContext';
@@ -199,7 +198,7 @@ export function isTechnicalArchitectureSession(session: ChatSession): boolean {
   if (typeof slotId === 'string' && TECHNICAL_ARCHITECTURE_SLOT_IDS.has(normalizeArchitectureNodeKey(slotId))) {
     return true;
   }
-  return isLegacyTechnicalArchitectureSession(session);
+  return false;
 }
 
 export function isPendingArchitecturePlaceholderSession(
@@ -226,8 +225,7 @@ export function isArchitectureEnvelopeSession(session: ChatSession): boolean {
   if (architectureSessionSurfaceForSession(session) === 'technical-node') {
     return !architectureSlotIdForSession(session);
   }
-  return Boolean(session.parentSessionId)
-    && Boolean(architectureRunIdForSession(session))
+  return Boolean(architectureRunIdForSession(session))
     && architectureSlotIdForSession(session) === undefined;
 }
 
@@ -249,7 +247,7 @@ export function isArchitectureWorkflowContainerSession(session: ChatSession): bo
   if (session.kind === 'agent-flow') {
     return true;
   }
-  return session.title.trim().toLowerCase().startsWith('architecture:');
+  return false;
 }
 
 function isWorkflowConversationSession(session: ChatSession): boolean {
@@ -350,11 +348,12 @@ function statusFromArchitectureGraphNode(
 }
 
 function statusFromArchitectureTraceStep(step: NonNullable<ChatMessage['architectureRun']>['trace'][number]): SessionRuntimeState {
+  const typedStatus = step.status ? statusFromTraceStatus(step.status) : null;
+  if (typedStatus) {
+    return typedStatus;
+  }
   if (step.stream?.status === 'failed') {
     return 'error';
-  }
-  if (step.incompleteReason) {
-    return 'waiting';
   }
   if (step.stream?.status === 'completed') {
     return 'done';
@@ -363,6 +362,18 @@ function statusFromArchitectureTraceStep(step: NonNullable<ChatMessage['architec
     return 'running';
   }
   return step.content.trim().length > 0 ? 'done' : 'pending';
+}
+
+function statusFromTraceStatus(
+  status: NonNullable<ChatMessage['architectureRun']>['trace'][number]['status'],
+): SessionRuntimeState | null {
+  if (status === 'queued') return 'pending';
+  if (status === 'running') return 'running';
+  if (status === 'waiting_on_orchestrator' || status === 'blocked') return 'waiting';
+  if (status === 'done') return 'done';
+  if (status === 'failed') return 'error';
+  if (status === 'cancelled') return 'stopped';
+  return null;
 }
 
 function fallbackArchitectureBranchState(
@@ -375,10 +386,7 @@ function fallbackArchitectureBranchState(
 }
 
 export function architectureRunIdForSession(session: ChatSession): string | undefined {
-  const runId = architectureContextStringField(session, 'architectureRunId');
-  if (runId) return runId;
-  return architectureRunIdFromParentToolCall(session.parentToolCallId)
-    ?? architectureRunIdFromParentToolCall(session.runtimeContext?.parentToolCallId);
+  return architectureContextStringField(session, 'architectureRunId');
 }
 
 export function sameArchitectureRunId(left: string | null | undefined, right: string | null | undefined): boolean {
@@ -401,53 +409,6 @@ function architectureSessionDisplayLabel(session: ChatSession): string | null {
   return architectureContextStringField(session, 'displayLabel')
     ?? architectureContextStringField(session, 'schemaName')
     ?? null;
-}
-
-function isLegacyTechnicalArchitectureSession(session: ChatSession): boolean {
-  if (!looksLikeArchitectureBranchSession(session)) {
-    return false;
-  }
-  return technicalArchitectureSessionHints(session).some((hint) => TECHNICAL_ARCHITECTURE_SLOT_IDS.has(hint));
-}
-
-function looksLikeArchitectureBranchSession(session: ChatSession): boolean {
-  return session.kind === 'subagent'
-    && session.runtimeContext?.runtimeKind === 'agent-flow-branch';
-}
-
-function technicalArchitectureSessionHints(session: ChatSession): string[] {
-  return [
-    stringHint(session.runtimeContext?.architectureSlotId),
-    stringHint(architectureContextForSession(session)?.displayLabel),
-    stringHint(architectureContextForSession(session)?.roleLabel),
-    titleSuffixHint(session.title),
-    idSuffixHint(session.id),
-  ].filter((hint): hint is string => hint !== null);
-}
-
-function stringHint(value: unknown): string | null {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    return null;
-  }
-  return normalizeArchitectureNodeKey(value);
-}
-
-function titleSuffixHint(title: string): string | null {
-  const suffix = title.split(':').at(-1)?.trim();
-  return suffix ? normalizeArchitectureNodeKey(suffix) : null;
-}
-
-function idSuffixHint(id: string): string | null {
-  const suffix = id.split('-').at(-1)?.trim();
-  return suffix ? normalizeArchitectureNodeKey(suffix) : null;
-}
-
-function architectureRunIdFromParentToolCall(parentToolCallId: string | undefined): string | undefined {
-  if (typeof parentToolCallId !== 'string' || parentToolCallId.trim().length === 0) {
-    return undefined;
-  }
-  const match = /^architecture:([^:]+):/.exec(parentToolCallId.trim());
-  return match?.[1];
 }
 
 function normalizeArchitectureNodeKey(value: string): string {

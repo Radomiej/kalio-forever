@@ -31,6 +31,10 @@ export function SubAgentFlowResultBlock({ result }: { result: SubAgentFlowResult
   return (
     <div className="space-y-2" data-testid="sub-agentflow-result">
       <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] font-mono text-base-content/60 bg-base-200/60 rounded px-2 py-1.5">
+        <span className="text-base-content/35">type</span>
+        <span className="truncate">
+          {result.flowDefinitionId ? `AgentFlow ${result.flowDefinitionId}` : 'AgentFlow'}
+        </span>
         <span className="text-base-content/35">flow</span>
         <span className="truncate">{result.flowRunId}</span>
         <span className="text-base-content/35">status</span>

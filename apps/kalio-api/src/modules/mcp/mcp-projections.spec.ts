@@ -16,6 +16,7 @@ describe('mcp-projections', () => {
       requiresConfirmation: false,
       serverKey: 'toml::docs',
       serverId: 'toml::docs',
+      aliases: ['mcp_search'],
     });
   });
 
