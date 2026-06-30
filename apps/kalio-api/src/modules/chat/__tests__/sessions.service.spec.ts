@@ -352,6 +352,22 @@ describe('SessionsService', () => {
       expect(result.title).toBe('Generated Title');
     });
 
+    it('ignores malformed assistant content while generating a title', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
+      (repo.loadHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: '1', sessionId: 's1', role: 'user', content: 'Hello world', createdAt: 1 },
+        {
+          id: '2',
+          sessionId: 's1',
+          role: 'assistant',
+          content: undefined as unknown as string,
+          createdAt: 2,
+        },
+      ]);
+
+      await expect(service.generateTitle('s1')).resolves.toEqual({ title: 'Generated Title' });
+    });
+
     it('falls back to a deterministic heuristic when the provider echoes the prompt', async () => {
       rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
       (llm.streamChat as ReturnType<typeof vi.fn>).mockImplementationOnce(async (_messages, _tools, options) => {
@@ -377,8 +393,20 @@ describe('SessionsService', () => {
       expect(result.title).toBe('Session Title Regression Verification');
     });
 
-    it('derives an architecture review fallback from workflow prompts when needed', async () => {
-      rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
+    it('derives an architecture review fallback from typed runtime project scope when needed', async () => {
+      rows.push({
+        id: 's1',
+        personaId: 'p1',
+        title: '',
+        createdAt: 0,
+        updatedAt: 0,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-root',
+          architectureContext: {
+            projectPath: 'C:\\Projekty\\FamilyQuest',
+          },
+        },
+      });
       (llm.streamChat as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('provider unavailable'));
       (repo.loadHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
         {
@@ -391,6 +419,23 @@ describe('SessionsService', () => {
       ]);
       const result = await service.generateTitle('s1');
       expect(result.title).toBe('Architecture Review FamilyQuest');
+    });
+
+    it('does not derive architecture review project names from prompt text without typed runtime scope', async () => {
+      rows.push({ id: 's1', personaId: 'p1', title: '', createdAt: 0, updatedAt: 0 });
+      (llm.streamChat as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('provider unavailable'));
+      (repo.loadHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: '1',
+          sessionId: 's1',
+          role: 'user',
+          content: '[Architecture: Strategic Decision Council]\nC:\\Projekty\\FamilyQuest ocen architekturÄ™ i co byĹ› w niej zmieniĹ‚?',
+          createdAt: 1,
+        },
+      ]);
+      const result = await service.generateTitle('s1');
+      expect(result.title).not.toBe('Architecture Review FamilyQuest');
+      expect(result.title).toBe('Architecture Review');
     });
 
     it('returns "New Chat" when no user messages in history', async () => {

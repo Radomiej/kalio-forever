@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App';
 import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
-import type { RuntimeActivitySnapshot } from '@kalio/types';
+import type { RuntimeActivitySnapshot, SessionRuntimeContext } from '@kalio/types';
 
 const CONFIG_WITH_API_KEY: LLMConfigWithSource = {
   provider: 'mock',
@@ -51,7 +51,7 @@ const {
     runtimeActivitySnapshots: {} as Record<string, unknown>,
   },
   sessionStoreState: {
-    sessions: [] as Array<{ id: string; updatedAt: number; title?: string; kind?: string; parentSessionId?: string }>,
+    sessions: [] as Array<{ id: string; updatedAt: number; title?: string; kind?: string; parentSessionId?: string; runtimeContext?: SessionRuntimeContext }>,
     activeSessionId: null as string | null,
     messages: [] as Array<{ id: string }>,
     agentTurns: [] as Array<{ id: string }>,
@@ -681,7 +681,7 @@ describe('App view state persistence', () => {
   });
 
   it('preserves pending host sessions when the bootstrap response arrives late', async () => {
-    let resolveSessions!: (value: Array<{ id: string; updatedAt: number; title?: string; kind?: string; parentSessionId?: string }>) => void;
+    let resolveSessions!: (value: Array<{ id: string; updatedAt: number; title?: string; kind?: string; parentSessionId?: string; runtimeContext?: SessionRuntimeContext }>) => void;
     loadConversationSessions.mockImplementation(() => new Promise((resolve) => {
       resolveSessions = resolve;
     }));
@@ -690,7 +690,12 @@ describe('App view state persistence', () => {
     render(<App />);
 
     sessionStoreState.sessions = [
-      { id: 'pending-host-session:temp-1', title: 'Local New', updatedAt: 10 },
+      {
+        id: 'pending-host-session:temp-1',
+        title: 'Local New',
+        updatedAt: 10,
+        runtimeContext: { runtimeKind: 'chat', pendingHostSession: true },
+      },
     ];
 
     const delayedSessions = [
@@ -703,7 +708,12 @@ describe('App view state persistence', () => {
 
     await waitFor(() => {
       expect(setSessions).toHaveBeenCalledWith([
-        { id: 'pending-host-session:temp-1', title: 'Local New', updatedAt: 10 },
+        {
+          id: 'pending-host-session:temp-1',
+          title: 'Local New',
+          updatedAt: 10,
+          runtimeContext: { runtimeKind: 'chat', pendingHostSession: true },
+        },
         ...delayedSessions,
       ]);
     });

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { MCPPolicy, ToolMeta } from '@kalio/types';
-import { getNativeToolGroupKey } from '../tools/tool.utils';
+import { getNativeToolGroupKey, getToolGroupKey } from '../tools/tool.utils';
 import { isMcpToolSelected, normalizeMcpAllowList } from './mcpToolAllowList';
 
 const GROUP_LABELS: Record<string, string> = {
@@ -24,13 +24,19 @@ const GROUP_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
-function deriveGroup(name: string): string {
-  const key = getNativeToolGroupKey(name);
-
+function displayGroupFromKey(key: string): string {
   if (key === 'search') return 'fs';
   if (key === 'web') return 'websearch';
 
   return key;
+}
+
+function deriveGroup(name: string): string {
+  return displayGroupFromKey(getNativeToolGroupKey(name));
+}
+
+function deriveToolGroup(tool: ToolMeta): string {
+  return displayGroupFromKey(getToolGroupKey(tool));
 }
 
 interface Props {
@@ -57,7 +63,9 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const normalizedSelected = normalizeMcpAllowList(selected, mcpTools);
+  const allNativeNames = groups.flatMap((g) => g.tools.map((t) => t.name));
+  const mcpToolNames = new Set(mcpTools.map((tool) => tool.name));
+  const normalizedSelected = normalizeMcpAllowList(selected, mcpTools, allNativeNames);
 
   useEffect(() => {
     if (mcpPolicy !== 'allow_list' || mcpTools.length === 0) {
@@ -81,12 +89,12 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
       const res = await fetch('/api/tools', { signal: controller.signal });
       if (!res.ok) throw new Error(`Tools request failed: ${res.status}`);
       const data: ToolMeta[] = await res.json() as ToolMeta[];
-      const nativeTools = data.filter(t => !t.name.startsWith('mcp_'));
-      const mcp = data.filter(t => t.name.startsWith('mcp_'));
+      const nativeTools = data.filter(t => !isMcpToolMeta(t));
+      const mcp = data.filter(t => isMcpToolMeta(t));
       setMcpTools(mcp);
       const map = new Map<string, ToolMeta[]>();
       for (const tool of nativeTools) {
-        const g = deriveGroup(tool.name);
+        const g = deriveToolGroup(tool);
         const arr = map.get(g) ?? [];
         arr.push(tool);
         map.set(g, arr);
@@ -113,8 +121,7 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
   useEffect(() => { void load(); }, [load]);
 
   const selectedSet = new Set(normalizedSelected);
-  const allNativeNames = groups.flatMap((g) => g.tools.map((t) => t.name));
-  const mcpAllowListNames = normalizedSelected.filter((n) => n.startsWith('mcp_'));
+  const mcpAllowListNames = normalizedSelected.filter((n) => mcpToolNames.has(n));
 
   const toggleTool = (name: string) => {
     const next = new Set(selectedSet);
@@ -150,13 +157,13 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
     onChange([...next], 'allow_list');
   };
 
-  const enableAll = () => onChange([...allNativeNames], mcpPolicy);
-  const disableAll = () => onChange([], mcpPolicy);
+  const preservedMcpAllowListNames = mcpPolicy === 'allow_list' ? mcpAllowListNames : [];
+  const enableAll = () => onChange([...allNativeNames, ...preservedMcpAllowListNames], mcpPolicy);
+  const disableAll = () => onChange(preservedMcpAllowListNames, mcpPolicy);
 
   const setPolicy = (policy: MCPPolicy) => {
     if (policy !== 'allow_list') {
-      // strip mcp_* entries from skills when not using allow_list
-      const withoutMcp = normalizedSelected.filter((n) => !n.startsWith('mcp_'));
+      const withoutMcp = normalizedSelected.filter((n) => !mcpToolNames.has(n));
       onChange(withoutMcp, policy);
     } else {
       onChange(normalizedSelected, policy);
@@ -195,7 +202,7 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
         <span className="text-xs font-medium text-base-content/70">
           Tools
           <span className="ml-1 text-base-content/40">
-            ({selected.filter(n => !n.startsWith('mcp_')).length}/{allNativeNames.length})
+            ({allNativeNames.filter((name) => selectedSet.has(name)).length}/{allNativeNames.length})
           </span>
         </span>
         <div className="flex gap-1">
@@ -351,15 +358,27 @@ export function PersonaToolPicker({ selected, mcpPolicy, onChange }: Props) {
   );
 }
 
+function isMcpToolMeta(tool: ToolMeta): boolean {
+  return typeof tool.serverKey === 'string' && tool.serverKey.trim().length > 0;
+}
+
 /** Compact read-only summary shown in the expanded persona view */
 export function PersonaToolBadges({ tools, mcpPolicy }: { tools: string[]; mcpPolicy?: MCPPolicy }) {
-  const nativeTools = tools.filter(n => !n.startsWith('mcp_'));
-  const mcpSelected = tools.filter(n => n.startsWith('mcp_'));
-  if (nativeTools.length === 0 && (!mcpPolicy || mcpPolicy === 'deny_all')) {
+  const mcpSelected: string[] = [];
+  const knownNativeTools: string[] = [];
+  for (const name of tools) {
+    const group = deriveGroup(name);
+    if (group === 'other' && mcpPolicy && mcpPolicy !== 'deny_all') {
+      mcpSelected.push(name);
+    } else {
+      knownNativeTools.push(name);
+    }
+  }
+  if (knownNativeTools.length === 0 && (!mcpPolicy || mcpPolicy === 'deny_all')) {
     return <span className="text-[10px] text-base-content/30">No tools enabled</span>;
   }
   const byGroup = new Map<string, string[]>();
-  for (const name of nativeTools) {
+  for (const name of knownNativeTools) {
     const g = deriveGroup(name);
     const arr = byGroup.get(g) ?? [];
     arr.push(name);

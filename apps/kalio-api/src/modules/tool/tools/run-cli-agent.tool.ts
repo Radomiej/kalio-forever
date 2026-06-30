@@ -102,6 +102,7 @@ function buildChildSessionTitle(agentLabel: string, prompt: string): string {
 @Injectable()
 @Tool({
   name: 'run_cli_agent',
+  domain: 'cli_agent',
   description:
     'Run a CLI coding agent (Copilot, Gemini, Claude Code, Codex) to autonomously complete a coding task in a ' +
     'real project directory. The agent can read, write, and edit files and run shell commands. ' +

@@ -10,6 +10,7 @@ const SUPPORTED_IMAGE_PROVIDERS = ['cometapi', 'openai', 'openrouter', 'replicat
 @Injectable()
 @Tool({
   name: 'image_generate',
+  domain: 'image',
   description: `Generate an image using AI (CometAPI, OpenAI, or OpenRouter-compatible).
 The image is saved to the session VFS under the images/ folder and returned inline.
 

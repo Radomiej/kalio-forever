@@ -32,6 +32,13 @@ function uniqueToolCallId(): string {
 
 const MAX_PROVIDER_ATTEMPTS = 3;
 const PROVIDER_TIMEOUT_MS = 120_000;
+const QUOTA_PROVIDER_ERROR_CODES = new Set(['insufficient_quota', 'quota_exceeded']);
+
+interface ProviderErrorPayload {
+  code?: string;
+  type?: string;
+  message?: string;
+}
 
 export class BaseOpenAICompatibleProvider implements ILLMProvider {
   protected readonly logger = new Logger(BaseOpenAICompatibleProvider.name);
@@ -306,13 +313,13 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
   }
 
   private buildHttpError(status: number, statusText: string, errorText: string): LLMProviderError {
-    const body = errorText.toLowerCase();
+    const providerError = parseProviderErrorPayload(errorText);
     const message = `[${this.providerName}] LLM request failed: ${status} ${statusText} - ${errorText}`;
 
     if (status === 401 || status === 403) {
       return new LLMProviderError('LLM_AUTH', message);
     }
-    if (body.includes('insufficient_quota') || body.includes('quota')) {
+    if (isQuotaProviderError(providerError)) {
       return new LLMProviderError('LLM_QUOTA', message);
     }
     if (status === 429) {
@@ -396,4 +403,40 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
   private normalizeAssistantContent(content: ContextManagedLLMMessage['content']): ContextManagedLLMMessage['content'] | null {
     return typeof content === 'string' && content.length === 0 ? null : content;
   }
+}
+
+function parseProviderErrorPayload(errorText: string): ProviderErrorPayload | null {
+  try {
+    const parsed = JSON.parse(errorText) as unknown;
+    if (!isPlainRecord(parsed)) {
+      return null;
+    }
+    const rawError = isPlainRecord(parsed['error']) ? parsed['error'] : parsed;
+    return {
+      code: stringValue(rawError['code']),
+      type: stringValue(rawError['type']),
+      message: stringValue(rawError['message']),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isQuotaProviderError(error: ProviderErrorPayload | null): boolean {
+  if (!error) {
+    return false;
+  }
+  return matchesQuotaCode(error.code) || matchesQuotaCode(error.type);
+}
+
+function matchesQuotaCode(value: string | undefined): boolean {
+  return value !== undefined && QUOTA_PROVIDER_ERROR_CODES.has(value.toLowerCase());
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }

@@ -214,7 +214,8 @@ describe('SessionPipelineService', () => {
     const { emit } = makeEmit();
     const first = svc.submit(basePayload('s1', 'first'), emit);
     await flush();
-    const second = svc.submit(basePayload('s1', 'second'), emit);
+    const queued = makeEmit();
+    const second = svc.submit(basePayload('s1', 'second'), queued.emit);
     await flush();
 
     let drained = false;
@@ -233,6 +234,14 @@ describe('SessionPipelineService', () => {
 
     expect(drained).toBe(true);
     expect(chatHarness.callsReceived.map((c) => c.content)).toEqual(['first']);
+    expect(queued.events).toContainEqual({
+      event: 'chat:error',
+      data: expect.objectContaining({
+        sessionId: 's1',
+        code: 'QUEUE_DROPPED',
+        hadContent: false,
+      }),
+    });
   });
 
   it('stopAndDrain clears seeded active turns without waiting indefinitely', async () => {
@@ -275,8 +284,10 @@ describe('SessionPipelineService', () => {
     const { emit } = makeEmit();
     svc.submit(basePayload('s1', 'a'), emit);
     await flush();
-    svc.submit(basePayload('s1', 'b'), emit);
-    svc.submit(basePayload('s1', 'c'), emit);
+    const queuedB = makeEmit();
+    const queuedC = makeEmit();
+    svc.submit(basePayload('s1', 'b'), queuedB.emit);
+    svc.submit(basePayload('s1', 'c'), queuedC.emit);
     await flush();
 
     svc.abortAll('s1');
@@ -286,6 +297,16 @@ describe('SessionPipelineService', () => {
 
     // After purge, the queued b/c never reach handleTurn
     expect(chatHarness.callsReceived.map((c) => c.content)).toEqual(['a']);
+    for (const queued of [queuedB, queuedC]) {
+      expect(queued.events).toContainEqual({
+        event: 'chat:error',
+        data: expect.objectContaining({
+          sessionId: 's1',
+          code: 'QUEUE_DROPPED',
+          hadContent: false,
+        }),
+      });
+    }
   });
 
   it('abortAll on idle session (no active turn) is a no-op and does not throw', () => {

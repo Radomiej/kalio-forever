@@ -4,7 +4,7 @@ import type { EmitFn } from './interfaces/stream-context.interface';
 export type LLMRuntimeKind = Extract<SessionRuntimeKind, 'chat' | 'subagent' | 'agent-flow-branch'>;
 
 export interface LLMAgentLoopCallbacks {
-  onBeforeIteration?: (iteration: number, messageId: string) => Promise<void>;
+  onBeforeIteration?: (iteration: number, messageId: string, currentLimit: number) => Promise<void>;
   onToolPending?: () => Promise<void>;
   onToolRunning?: () => Promise<void>;
   onEscalation?: (message: string) => void;

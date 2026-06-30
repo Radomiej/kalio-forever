@@ -63,6 +63,10 @@ export interface ArchitectureSlotToolPolicy {
   applyCliDescriptionPreferences?: boolean;
 }
 
+export interface ArchitectureNodeToolOverride {
+  allowedToolNames?: string[];
+}
+
 export type WorkflowSessionSurface = 'host-envelope' | 'conversation-branch' | 'technical-node';
 export type WorkflowConversationVisibility = 'visible' | 'hidden';
 
@@ -315,6 +319,13 @@ export interface ArchitectureChatTraceStep {
   actionSummary?: string;
   action?: ArchitectureEventAction;
   detail?: string;
+  lifecycle?: AgentFlowLifecycleEvent;
+  status?: AgentFlowRunStatus;
+  reasonCode?: WorkflowReasonCode;
+  errorCode?: WorkflowErrorCode;
+  failure?: WorkflowFailure;
+  evidence?: WorkflowEvidence[];
+  runtimeDecision?: WorkflowRuntimeDecision;
   eventId?: ID;
   sessionId?: ID;
   nodeId?: string;
@@ -341,6 +352,9 @@ export interface ArchitectureChatRunSummary {
   finalArtifact?: string;
   trace: ArchitectureChatTraceStep[];
   routeHops: ArchitectureRouteHop[];
+  graphNodes?: ArchitectureGraphProjection['nodes'];
+  graphEdges?: ArchitectureGraphProjection['edges'];
+  graphChildAgents?: ArchitectureGraphProjection['childAgents'];
 }
 
 export interface ChatMessage {
@@ -385,10 +399,35 @@ export interface CreateSessionDto {
 }
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
+export type ToolDomain =
+  | 'subagent'
+  | 'cli_agent'
+  | 'agent_workflow'
+  | 'security_audit'
+  | 'architecture'
+  | 'vfs'
+  | 'file_system'
+  | 'file_search'
+  | 'key_value'
+  | 'terminal'
+  | 'raapp'
+  | 'preview'
+  | 'memory'
+  | 'search'
+  | 'web'
+  | 'tool_registry'
+  | 'image'
+  | 'skill'
+  | 'persona'
+  | 'mcp'
+  | 'generic';
+
 export interface ToolMeta {
   name: string;
   description: string;
   serverKey?: ID;               // canonical MCP server key when this tool originates from MCP
+  aliases?: string[];           // explicit compatibility aliases accepted at policy read boundaries
+  domain?: ToolDomain;          // stable tool domain; display names must not drive routing/grouping
   parameters: Record<string, unknown>;  // JSON Schema
   requiresConfirmation: boolean;        // HITL gate flag
 }
@@ -426,6 +465,8 @@ export type WorkflowErrorCode =
   | 'PROVIDER_UNAUTHORIZED'
   | 'INVALID_ARGUMENT'
   | 'CONTRACT_VIOLATION'
+  | 'CLI_AGENT_AUTH_REQUIRED'
+  | 'CLI_AGENT_ERROR'
   | 'CLI_AGENT_SESSION_METADATA_MISSING'
   | 'CLI_AGENT_STOPPED'
   | 'SUBAGENT_TIMEOUT'
@@ -584,6 +625,7 @@ export type AgentFlowLifecycleEvent =
 
 export interface SubAgentFlowResult {
   flowRunId: ID;
+  flowDefinitionId?: ID;
   parentSessionId?: ID;
   parentToolCallId?: ID;
   childSessionId: ID;
@@ -856,6 +898,7 @@ export interface MCPTool {
   description: string;
   serverKey: ID;              // canonical origin-qualified runtime key, e.g. "toml::docs" or "sqlite::abc123"
   serverId?: ID;              // legacy alias kept for one release while clients migrate
+  aliases?: string[];         // explicit compatibility aliases, e.g. pre-serverKey MCP tool names
   requiresConfirmation: boolean;
   parameters: Record<string, unknown>;
 }
@@ -1029,6 +1072,23 @@ export interface ChatRunSnapshot {
   completedAt?: Timestamp;
 }
 
+export type ToolBudgetProgressStatus = 'running' | 'waiting' | 'exhausted';
+
+export interface ToolBudgetProgress {
+  sessionId: ID;
+  turnId?: ID;
+  messageId?: ID;
+  usedIterations: number;
+  currentLimit: number;
+  status: ToolBudgetProgressStatus;
+  runtimeKind?: SessionRuntimeKind;
+  personaId?: ID;
+  agentRun?: AgentRunContext;
+  nodeId?: ID;
+  roleSlotId?: ID;
+  updatedAt: Timestamp;
+}
+
 // ─── Socket.IO Event Map ──────────────────────────────────────────────────────
 export type RuntimeToolActivityStatus = 'pending_confirmation' | 'running' | 'success' | 'error' | 'cancelled';
 
@@ -1087,6 +1147,18 @@ export interface RAAppLaunchIntent {
   source: 'home_tile' | 'raapp_manager' | 'quick_chat' | 'composer' | 'execution_graph';
 }
 
+export type RuntimeWatchReason =
+  | 'active'
+  | 'pending_confirmation'
+  | 'pending_budget'
+  | 'agent_flow_live'
+  | 'run_recovery_required';
+
+export interface RuntimeWatchTarget {
+  sessionId: ID;
+  reasons: RuntimeWatchReason[];
+}
+
 export interface RuntimeActivitySnapshot {
   sessionId: ID;
   active: boolean;
@@ -1095,6 +1167,7 @@ export interface RuntimeActivitySnapshot {
   run?: ChatRunSnapshot;
   pendingConfirmations: ToolConfirmationRequest[];
   pendingBudgetApprovals: AgentBudgetApprovalRequest[];
+  toolBudgetProgress?: ToolBudgetProgress;
   toolActivities: RuntimeToolActivity[];
   childExecutions: RuntimeChildExecution[];
   raAppLaunchIntent?: RAAppLaunchIntent;
@@ -1136,6 +1209,7 @@ export interface SocketEvents {
       | 'TOOL_ERROR'
       | 'INTERRUPTED'
       | 'QUEUE_FULL'
+      | 'QUEUE_DROPPED'
       | 'MAX_ITERATIONS_REACHED';
     message: string;
     agentRun?: AgentRunContext;
@@ -1171,6 +1245,7 @@ export interface SocketEvents {
   // Agent loop lifecycle — server → client
   'agent:start': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
   'agent:done': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
+  'agent:budget_progress': ToolBudgetProgress;
   'agent:budget_required': AgentBudgetApprovalRequest;
   'agent:budget_invalidated': AgentBudgetApprovalInvalidated;
 
@@ -1221,6 +1296,7 @@ export interface CLIAgentSessionSnapshot {
   startedAt?: Timestamp;
   completedAt?: Timestamp;
   activeCallId?: ID;
+  errorCode?: WorkflowErrorCode;
   lastOutput?: string;
   lastExitCode?: number;
   recoveryAttempts?: number;
@@ -1612,10 +1688,10 @@ export interface ArchitectureSchemaNode {
   kind: ArchitectureNodeKind;
   roleSlotId?: string;
   maxToolAttempts?: number;
+  toolOverride?: ArchitectureNodeToolOverride;
   behavior?: {
     mode: ArchitectureNodeBehaviorMode;
     fanOut?: ArchitectureNodeFanOutMode;
-    convergeToNodeId?: string;
     maxBranches?: number;
     scoringPolicy?: ArchitectureNodeScoringPolicy;
     description?: string;
@@ -1629,8 +1705,11 @@ export interface ArchitectureSchemaEdge {
   fromNodeId: string;
   toNodeId: string;
   label?: string;
+  selection?: ArchitectureSchemaEdgeSelection;
   returnToOrchestrator?: boolean;
 }
+
+export type ArchitectureSchemaEdgeSelection = 'default' | 'converge' | 'continuation';
 
 export type ArchitectureContextCompression = 'none' | 'summary' | 'evidence_only';
 
@@ -1770,6 +1849,8 @@ export interface ArchitectureExecutionEvent {
   sequence: number;
   type: ArchitectureExecutionEventType;
   message: string;
+  lifecycle?: AgentFlowLifecycleEvent;
+  status?: AgentFlowRunStatus;
   actionSummary?: string;
   action?: ArchitectureEventAction;
   detail?: string;

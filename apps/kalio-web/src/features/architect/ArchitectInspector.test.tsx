@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ArchitectInspector } from './ArchitectInspector';
 import type { ArchitectNode, ArchitectPersona, ArchitectSchema, ArchitectSlot, PersonaOverrideMap } from './architect.types';
-import type { ArchitectureRoleSlot } from '@kalio/types';
+import type { ArchitectureRoleSlot, ArchitectureSchemaEdgeSelection } from '@kalio/types';
 
 describe('ArchitectInspector', () => {
   it('shows the selected persona model and updates the context policy controls for a slot node', async () => {
@@ -68,6 +68,34 @@ describe('ArchitectInspector', () => {
     expect(onNodeMaxToolAttemptsOverride).toHaveBeenLastCalledWith('pragmatist', undefined);
   });
 
+  it('emits explicit node tool permission overrides from the properties modal', async () => {
+    const user = userEvent.setup();
+    const onNodeToolOverride = vi.fn();
+    render(<InspectorHarness onNodeToolOverride={onNodeToolOverride} />);
+
+    await user.click(screen.getByTestId('architect-node-properties-open'));
+
+    fireEvent.change(screen.getByTestId('architect-node-tool-override'), { target: { value: 'run_subagent, fs_read fs_list' } });
+    expect(onNodeToolOverride).toHaveBeenLastCalledWith('pragmatist', {
+      allowedToolNames: ['run_subagent', 'fs_read', 'fs_list'],
+    });
+
+    fireEvent.change(screen.getByTestId('architect-node-tool-override'), { target: { value: '' } });
+    expect(onNodeToolOverride).toHaveBeenLastCalledWith('pragmatist', undefined);
+  });
+
+  it('edits outgoing edge selection metadata instead of node convergence behavior', async () => {
+    const user = userEvent.setup();
+    const onEdgeSelectionOverride = vi.fn();
+    render(<InspectorHarness onEdgeSelectionOverride={onEdgeSelectionOverride} />);
+
+    await user.click(screen.getByTestId('architect-node-properties-open'));
+    await user.selectOptions(screen.getByTestId('architect-edge-selection-pragmatist-review'), 'converge');
+
+    expect(onEdgeSelectionOverride).toHaveBeenLastCalledWith('pragmatist', 'review', 'converge');
+    expect(screen.queryByTestId('architect-node-converge-target')).toBeNull();
+  });
+
   it('collapses the inspector to a narrow restore control', () => {
     const onCollapsedChange = vi.fn();
     render(<InspectorHarness collapsed onCollapsedChange={onCollapsedChange} />);
@@ -94,10 +122,14 @@ function InspectorHarness({
   collapsed = false,
   onCollapsedChange,
   onNodeMaxToolAttemptsOverride = vi.fn(),
+  onNodeToolOverride = vi.fn(),
+  onEdgeSelectionOverride = vi.fn(),
 }: {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
   onNodeMaxToolAttemptsOverride?: (nodeId: string, maxToolAttempts?: number) => void;
+  onNodeToolOverride?: (nodeId: string, toolOverride?: NonNullable<ArchitectNode['toolOverride']>) => void;
+  onEdgeSelectionOverride?: (fromNodeId: string, toNodeId: string, selection?: ArchitectureSchemaEdgeSelection) => void;
 }) {
   const [nodeState, setNodeState] = useState<ArchitectNode>(baseNode);
   const [personaOverrides, setPersonaOverrides] = useState<PersonaOverrideMap>({});
@@ -132,6 +164,25 @@ function InspectorHarness({
             : current
         ));
         onNodeMaxToolAttemptsOverride(nodeId, maxToolAttempts);
+      }}
+      onNodeToolOverride={(nodeId, toolOverride) => {
+        setNodeState((current) => (
+          current.id === nodeId
+            ? { ...current, toolOverride }
+            : current
+        ));
+        onNodeToolOverride(nodeId, toolOverride);
+      }}
+      onEdgeSelectionOverride={(fromNodeId, toNodeId, selection) => {
+        setSchema((current) => ({
+          ...current,
+          edges: current.edges.map((edge) => (
+            edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId
+              ? { ...edge, selection }
+              : edge
+          )),
+        }));
+        onEdgeSelectionOverride(fromNodeId, toNodeId, selection);
       }}
       onCollapsedChange={onCollapsedChange}
       onContextPolicyOverride={(slotId, override) => {
@@ -204,8 +255,19 @@ const baseSchema: ArchitectSchema = {
   description: '',
   version: '1.0.0',
   roleSlots: [baseRoleSlot],
-  nodes: [baseNode],
-  edges: [],
+  nodes: [
+    baseNode,
+    {
+      id: 'review',
+      label: 'Review',
+      kind: 'router',
+      x: 320,
+      y: 120,
+      slots: [],
+      connections: [],
+    },
+  ],
+  edges: [{ id: 'pragmatist-review', fromNodeId: 'pragmatist', toNodeId: 'review' }],
   routerPolicy: {
     mode: 'rank_then_merge',
     mustAddressCriticFindings: false,

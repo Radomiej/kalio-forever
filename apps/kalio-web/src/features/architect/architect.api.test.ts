@@ -224,10 +224,13 @@ describe('startArchitectureRun', () => {
           label: 'Node 1',
           kind: 'role',
           roleSlotId: 'slot-1',
+          maxToolAttempts: 5,
+          toolOverride: {
+            allowedToolNames: ['run_subagent', 'fs_read'],
+          },
           behavior: {
             mode: 'rank_then_merge',
             fanOut: 'parallel',
-            convergeToNodeId: 'node-2',
             maxBranches: 2,
             scoringPolicy: 'risk',
             description: 'Prefer the safer branch.',
@@ -244,6 +247,7 @@ describe('startArchitectureRun', () => {
           fromNodeId: 'node-1',
           toNodeId: 'node-2',
           label: 'next',
+          selection: 'converge',
         },
       ],
       routerPolicy: {
@@ -293,6 +297,7 @@ describe('startArchitectureRun', () => {
     const posted = apiPost.mock.calls[0][1] as { schema?: ArchitectSchema };
     expect(posted.schema).toBeDefined();
     expect(posted.schema?.nodes[0]).not.toBe(schema.nodes[0]);
+    expect(posted.schema?.nodes[0].toolOverride).not.toBe(schema.nodes[0].toolOverride);
     expect(posted.schema?.nodes[0].behavior).not.toBe(schema.nodes[0].behavior);
     expect(posted.schema?.edges[0]).not.toBe(schema.edges[0]);
     expect(posted.schema).toMatchObject({
@@ -300,10 +305,13 @@ describe('startArchitectureRun', () => {
       nodes: [
         {
           id: 'node-1',
+          maxToolAttempts: 5,
+          toolOverride: {
+            allowedToolNames: ['run_subagent', 'fs_read'],
+          },
           behavior: {
             mode: 'rank_then_merge',
             fanOut: 'parallel',
-            convergeToNodeId: 'node-2',
             maxBranches: 2,
             scoringPolicy: 'risk',
             description: 'Prefer the safer branch.',
@@ -316,6 +324,7 @@ describe('startArchitectureRun', () => {
           fromNodeId: 'node-1',
           toNodeId: 'node-2',
           label: 'next',
+          selection: 'converge',
         },
       ],
     });

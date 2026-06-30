@@ -14,7 +14,7 @@ function createSession(overrides: Partial<ChatSession>): ChatSession {
 }
 
 describe('sessionRuntimeState', () => {
-  it('returns pending for a real non-technical architecture branch with no stronger live signal', () => {
+  it('does not infer pending for an architecture branch without typed runtime state', () => {
     const branch = createSession({
       id: 'arch-run-analyst',
       title: 'Strategic Decision Council: Analyst',
@@ -43,7 +43,7 @@ describe('sessionRuntimeState', () => {
       {},
       {},
       new Map(),
-    )).toBe('pending');
+    )).toBeNull();
   });
 
   it('prefers a live session snapshot over the pending architecture fallback', () => {

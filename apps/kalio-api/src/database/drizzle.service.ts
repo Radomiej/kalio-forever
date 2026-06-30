@@ -161,20 +161,27 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
 
     const mcpColumns = this.sqlite.prepare('PRAGMA table_info(mcp_servers)').all() as Array<{ name: string }>;
     const hasMcpOriginSource = mcpColumns.some((column) => column.name === 'origin_source');
-    if (!hasMcpOriginSource) {
-      return null;
-    }
-
-    if (!this.migrationJournalContainsTag(migrationsFolder, '0017_mcp_server_origin_source')) {
-      return null;
-    }
+    const journalHasOriginSourceMigration = this.migrationJournalContainsTag(migrationsFolder, '0017_mcp_server_origin_source');
 
     if (!this.migrationSqlContainsColumn(migrationsFolder, '0017_mcp_server_origin_source', 'origin_source')) {
       return null;
     }
 
-    return 'Detected migration drift: mcp_servers.origin_source is present in an existing schema while migration 0017_mcp_server_origin_source also wants to add it. '
-      + 'This is a schema-history mismatch and should be visible as a startup warning instead of a silent migration fallback.';
+    if (hasMcpOriginSource && journalHasOriginSourceMigration) {
+      return null;
+    }
+
+    if (hasMcpOriginSource && !journalHasOriginSourceMigration) {
+      return 'Detected migration drift: mcp_servers.origin_source exists before migration 0017_mcp_server_origin_source is recorded. '
+        + 'This can make Drizzle try to add a duplicate column; reset the local DB or repair the migration journal.';
+    }
+
+    if (!hasMcpOriginSource && journalHasOriginSourceMigration) {
+      return 'Detected migration drift: migration 0017_mcp_server_origin_source is recorded but mcp_servers.origin_source is missing. '
+        + 'The startup repair will backfill the column, but the schema history should be inspected.';
+    }
+
+    return null;
   }
 
   private migrationSqlContainsColumn(migrationsFolder: string, tag: string, columnName: string): boolean {

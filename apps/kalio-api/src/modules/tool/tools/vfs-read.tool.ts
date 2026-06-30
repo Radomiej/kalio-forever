@@ -14,6 +14,7 @@ function getFilePathArg(args: ToolCallRequest['args']): string {
 @Injectable()
 @Tool({
   name: 'vfs_read',
+  domain: 'vfs',
   description: 'Read the contents of a file from the conversation virtual filesystem.',
   parameters: {
     type: 'object',

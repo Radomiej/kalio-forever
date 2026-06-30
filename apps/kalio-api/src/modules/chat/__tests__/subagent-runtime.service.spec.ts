@@ -1246,7 +1246,7 @@ describe('SubagentRuntimeService nested subagents', () => {
     expect(result.result).toBe('CLI finished.');
   });
 
-  it('dispatches an allowed MiMo function-style raw XML tool call from a child subagent', async () => {
+  it('does not dispatch MiMo function-style raw XML for non-compat tools from a child subagent', async () => {
     const rawToolCall = [
       '<tool_call>',
       '<function=vfs_read>',
@@ -1306,18 +1306,12 @@ describe('SubagentRuntimeService nested subagents', () => {
       copyOutputs: false,
     });
 
-    expect(toolDispatch.dispatch).toHaveBeenCalledWith(
-      expect.any(String),
-      'vfs_read',
-      { filePath: 'README.md' },
-      expect.anything(),
-      [expect.objectContaining({ name: 'vfs_read' })],
-    );
+    expect(toolDispatch.dispatch).not.toHaveBeenCalled();
     expect(persistedAssistantSnapshots[0]).toEqual({
-      text: '',
-      toolCalls: [expect.objectContaining({ name: 'vfs_read', args: { filePath: 'README.md' } })],
+      text: rawToolCall,
+      toolCalls: [],
     });
-    expect(result.result).toBe('VFS read finished.');
+    expect(result.result).toBe(rawToolCall);
   });
 
   it('REGRESSION: raw XML run_cli_agent flows through real dispatch and run_cli_agent tool', async () => {

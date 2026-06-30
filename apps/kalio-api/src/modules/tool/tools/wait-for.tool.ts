@@ -90,6 +90,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 @Injectable()
 @Tool({
   name: 'wait_for',
+  domain: 'agent_workflow',
   description:
     'Wait for an asynchronous target to settle before judging completion. Supports cli_agent child sessions, conversation messages, and tool_result messages.',
   parameters: {

@@ -32,6 +32,7 @@ export interface ArchitectNode {
   role?: string;
   roleSlotId?: string;
   maxToolAttempts?: number;
+  toolOverride?: ArchitectureSchemaNode['toolOverride'];
   behavior?: ArchitectureSchemaNode['behavior'];
   personaId?: string;
   description?: string;
@@ -85,6 +86,7 @@ export interface ExternalQualityGateInput {
 export type PersonaOverrideMap = Record<string, string>;
 export type NodeKindOverrideMap = Record<string, ArchitectureNodeKind>;
 export type NodeBehaviorOverrideMap = Record<string, NonNullable<ArchitectureSchemaNode['behavior']>>;
+export type NodeToolOverrideMap = Record<string, NonNullable<ArchitectureSchemaNode['toolOverride']>>;
 
 export type ArchitectProjectionTab = 'editor' | 'events' | 'graph' | 'chat';
 

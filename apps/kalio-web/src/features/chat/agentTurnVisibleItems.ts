@@ -2,7 +2,11 @@ import type { ChatMessage } from '@kalio/types';
 import type { AgentTurnItem } from '../../store/sessionStore';
 import { isMessageLiveStreaming } from './agentTurnStreaming';
 
-function normalizeAssistantContent(content: string): string {
+function normalizeAssistantContent(content: unknown): string {
+  if (typeof content !== 'string') {
+    return '';
+  }
+
   return content.replace(/\r\n/g, '\n').trim();
 }
 

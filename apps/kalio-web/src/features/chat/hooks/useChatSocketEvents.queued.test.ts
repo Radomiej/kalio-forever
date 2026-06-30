@@ -201,6 +201,38 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
     expect(removeLastAgentTurn).toHaveBeenCalledWith('session-1');
   });
 
+  it('treats QUEUE_DROPPED as queued follow-up cleanup without removing the active turn', () => {
+    const removeLastAgentTurn = vi.fn();
+    useSessionStore.setState({
+      getSessionActiveTurnId: () => 'turn-1',
+      removeLastAgentTurn,
+    });
+    useAgentStore.getState().setQueuedDepth('session-1', 2);
+    mountHook();
+
+    act(() => {
+      fire('agent:start', {
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        agentRun: { kind: 'chat' },
+      });
+    });
+    useAgentStore.getState().setQueuedDepth('session-1', 2);
+
+    act(() => {
+      fire('chat:error', {
+        sessionId: 'session-1',
+        code: 'QUEUE_DROPPED',
+        message: 'Queued turn was dropped because the session was stopped.',
+        hadContent: false,
+      });
+    });
+
+    expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(0);
+    expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(true);
+    expect(removeLastAgentTurn).not.toHaveBeenCalled();
+  });
+
   it('stores replayed inactive descendant session status for sidebar recovery', () => {
     mountHook();
 
@@ -235,6 +267,7 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
   });
 
   it('clears a stale active loop when a terminal runtime snapshot arrives without agent:done', () => {
+    useAgentStore.getState().setQueuedDepth('session-1', 2);
     mountHook();
 
     act(() => {
@@ -264,6 +297,7 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
 
     expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(false);
     expect(useAgentStore.getState().isStreaming).toBe(false);
+    expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(0);
     expect(useAgentStore.getState().runtimeActivitySnapshots['session-1']).toMatchObject({
       sessionId: 'session-1',
       active: false,

@@ -10,12 +10,13 @@ describe('SessionRuntimeWatchlistService', () => {
     { id: 'root-budget', personaId: 'default', title: 'Root budget', createdAt: 4, updatedAt: 40 },
     { id: 'root-flow', personaId: 'default', title: 'Root flow', createdAt: 5, updatedAt: 50 },
     { id: 'flow-child', personaId: 'default', title: 'Flow child', parentSessionId: 'root-flow', createdAt: 6, updatedAt: 60 },
+    { id: 'root-retry', personaId: 'default', title: 'Root retry', createdAt: 7, updatedAt: 70 },
     { id: 'root-idle', personaId: 'default', title: 'Root idle', createdAt: 7, updatedAt: 70 },
   ];
 
   let service: SessionRuntimeWatchlistService;
   let sessionsService: { list: ReturnType<typeof vi.fn> };
-  let pipeline: { getActiveSessionIds: ReturnType<typeof vi.fn> };
+  let pipeline: { getActiveSessionIds: ReturnType<typeof vi.fn>; getSessionStatusWithRun: ReturnType<typeof vi.fn> };
   let toolDispatch: { getPendingConfirmations: ReturnType<typeof vi.fn> };
   let approvals: { getPendingApprovals: ReturnType<typeof vi.fn> };
   let agentFlowRuntime: { findAll: ReturnType<typeof vi.fn> };
@@ -26,6 +27,11 @@ describe('SessionRuntimeWatchlistService', () => {
     };
     pipeline = {
       getActiveSessionIds: vi.fn().mockReturnValue(new Set(['root-active'])),
+      getSessionStatusWithRun: vi.fn().mockImplementation((sessionId: string) => Promise.resolve({
+        sessionId,
+        active: false,
+        queueLength: 0,
+      })),
     };
     toolDispatch = {
       getPendingConfirmations: vi.fn().mockImplementation((sessionId: string) => (
@@ -84,6 +90,34 @@ describe('SessionRuntimeWatchlistService', () => {
     await expect(service.list()).resolves.toContainEqual({
       sessionId: 'root-pending',
       reasons: ['active', 'pending_confirmation'],
+    });
+  });
+
+  it('includes recovered interrupted runs after backend restart without requiring an active slot', async () => {
+    pipeline.getSessionStatusWithRun.mockImplementation((sessionId: string) => Promise.resolve({
+      sessionId,
+      active: false,
+      queueLength: 0,
+      ...(sessionId === 'root-retry' ? {
+        run: {
+          id: 'run-retry',
+          sessionId,
+          turnId: 'turn-retry',
+          phase: 'llm_streaming',
+          status: 'interrupted_needs_retry',
+          retryCount: 0,
+          safeResume: true,
+          errorCode: 'BACKEND_RESTART',
+          startedAt: 1,
+          updatedAt: 2,
+          lastHeartbeatAt: 2,
+        },
+      } : {}),
+    }));
+
+    await expect(service.list()).resolves.toContainEqual({
+      sessionId: 'root-retry',
+      reasons: ['run_recovery_required'],
     });
   });
 });

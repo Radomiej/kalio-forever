@@ -122,6 +122,7 @@ function normalizeLaunchScopePath(runtimeContext: SessionRuntimeContext | null |
 @Injectable()
 @Tool({
   name: 'grep_search',
+  domain: 'file_search',
   description: 'Search for text matches in files under configured allowed directories. Skips generated directories like node_modules, dist, coverage, and reports, then returns matching lines with file paths and line numbers.',
   parameters: {
     type: 'object',
@@ -200,6 +201,7 @@ export class GrepSearchTool {
 @Injectable()
 @Tool({
   name: 'file_search',
+  domain: 'file_search',
   description: 'Find files matching a glob pattern under configured allowed directories. Skips generated directories like node_modules, dist, coverage, and reports, then returns absolute file paths.',
   parameters: {
     type: 'object',

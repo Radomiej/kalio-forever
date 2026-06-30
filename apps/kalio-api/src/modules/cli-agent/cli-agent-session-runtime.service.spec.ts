@@ -194,6 +194,7 @@ describe('CLIAgentSessionRuntimeService', () => {
         status: 'completed',
         lastPrompt: 'Change files',
         updatedAt: 20,
+        errorCode: 'TIMEOUT',
         lastOutput: 'build passed',
         lastExitCode: 0,
       }),
@@ -208,6 +209,7 @@ describe('CLIAgentSessionRuntimeService', () => {
       childSessionId: 'cli-child-1',
       parentSessionId: 'arch-run-verifier',
       status: 'completed',
+      errorCode: 'TIMEOUT',
       lastOutput: 'build passed',
       lastExitCode: 0,
     });
@@ -356,6 +358,60 @@ describe('CLIAgentSessionRuntimeService', () => {
       .mocked(sessions.persistUserMessage)
       .mock.calls.filter(([, prompt]) => prompt === 'continue');
     expect(continuedPrompts).toHaveLength(3);
+  });
+
+  it('persists typed workflow error code for terminal CLI failures', async () => {
+    allowedPaths = {
+      isAllowed: vi.fn().mockResolvedValue(true),
+    } as unknown as AllowedPathsService;
+    vi.mocked(sessions.createChildSession).mockResolvedValue(makeChildSession());
+    vi.mocked(config.getConfig).mockResolvedValue({
+      enabled: true,
+      cliPath: '',
+      timeoutMs: 900_000,
+      hardTimeoutEnabled: false,
+      hardTimeoutMs: 3_600_000,
+      autoRecoveryEnabled: false,
+      autoRecoveryPrompt: 'continue',
+      maxOutputChars: 16_000,
+      model: '',
+      architecturePreference: '',
+      extraArgs: [],
+    });
+    vi.mocked(cliAgent.run).mockRejectedValue(createWorkflowError('TIMEOUT', 'wording can change', {
+      source: 'cli-agent-hard-timeout',
+      retryable: true,
+    }));
+    const emit = vi.fn();
+    const service = new CLIAgentSessionRuntimeService(cliAgent, sessions, allowedPaths, config);
+
+    await service.spawnSession({
+      parentSessionId: 'sess-parent',
+      parentToolCallId: 'call-cli-tools',
+      prompt: 'Build the site',
+      workdir: 'C:/repo',
+      agentId: 'copilot',
+      emit,
+    });
+
+    await vi.waitFor(() => expect(sessions.saveToolResult).toHaveBeenCalled());
+    const saved = JSON.parse(vi.mocked(sessions.saveToolResult).mock.calls[0]?.[2] ?? '{}') as {
+      status?: string;
+      errorCode?: string;
+      toolResultErrorCode?: string;
+      toolResultErrorMessage?: string;
+    };
+    expect(saved.status).toBe('failed');
+    expect(saved.errorCode).toBe('TIMEOUT');
+    expect(saved.toolResultErrorCode).toBe('TIMEOUT');
+    expect(saved.toolResultErrorMessage).toBe('wording can change');
+    await vi.waitFor(() => {
+      expect(emit).toHaveBeenCalledWith('tool:result', expect.objectContaining({
+        status: 'error',
+        errorCode: 'TIMEOUT',
+        errorMessage: 'wording can change',
+      }));
+    });
   });
 
   it('marks a zero-exit CLI turn failed when expected changed files are missing', async () => {

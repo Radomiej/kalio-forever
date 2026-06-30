@@ -150,6 +150,28 @@ describe('buildArchitectureRootGraphModel', () => {
           } as never,
         ],
       },
+      runtimeActivitySnapshots: {
+        'arch-run-42-goal_master': {
+          sessionId: 'arch-run-42-goal_master',
+          active: true,
+          turnId: 'turn-1',
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolBudgetProgress: {
+            sessionId: 'arch-run-42-goal_master',
+            turnId: 'turn-1',
+            usedIterations: 6,
+            currentLimit: 8,
+            status: 'running',
+            runtimeKind: 'subagent',
+            updatedAt: 3,
+          },
+          toolActivities: [],
+          childExecutions: [],
+          updatedAt: 3,
+        },
+      },
     });
 
     const routeNode = model.nodes.find((node) => node.id === 'architecture-root:goal_master');
@@ -157,7 +179,7 @@ describe('buildArchitectureRootGraphModel', () => {
 
     expect(routeNode).toMatchObject({
       sessionId: 'arch-run-42-goal_master',
-      subtitle: 'router / pending / branch session',
+      subtitle: 'router / pending / budget 6/8 / branch session',
       status: 'idle',
       payload: expect.objectContaining({
         kind: 'architecture-run',
@@ -172,6 +194,7 @@ describe('buildArchitectureRootGraphModel', () => {
         }),
       }),
     });
+    expect(routeNode?.detail).toContain('budget 6/8');
     expect(routeNode?.detail).toContain('1 branch messages loaded');
     expect(roleNode).toMatchObject({
       sessionId: 'arch-run-42-materializer',
@@ -186,6 +209,35 @@ describe('buildArchitectureRootGraphModel', () => {
       }),
     });
     expect(roleNode?.detail).toContain('1 branch messages loaded');
+  });
+
+  it('skips malformed graph nodes without ids instead of crashing architecture root projection', () => {
+    const graph = {
+      runId: 'run-malformed',
+      nodes: [
+        { label: 'Missing id', kind: 'router', status: 'completed', eventIds: [] },
+        { id: 'final-artifact', label: 'Final Artifact', kind: 'artifact', status: 'completed', eventIds: [] },
+      ],
+      edges: [
+        { id: 'bad-final', fromNodeId: undefined, toNodeId: 'final-artifact' },
+        { id: 'self-final', fromNodeId: 'final-artifact', toNodeId: 'final-artifact' },
+      ],
+      routeHops: [],
+    } as unknown as ArchitectureGraphProjection;
+
+    const model = buildArchitectureRootGraphModel({
+      graph,
+      rootSessionId: 'arch-run-malformed-root',
+      sessions: [],
+      sessionMessages: {},
+    });
+
+    expect(model.nodes.map((node) => node.id)).toEqual(['architecture-root:final-artifact']);
+    expect(model.edges).toEqual([expect.objectContaining({
+      id: 'architecture-root-edge:self-final',
+      sourceId: 'architecture-root:final-artifact',
+      targetId: 'architecture-root:final-artifact',
+    })]);
   });
 
   it('maps final artifact nodes to the durable finalizer child session', () => {

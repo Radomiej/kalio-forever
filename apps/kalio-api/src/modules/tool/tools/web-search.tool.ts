@@ -81,6 +81,7 @@ function formatOfflineAnswer(results: WebSearchResultView[]): string {
 @Injectable()
 @Tool({
   name: 'web_search',
+  domain: 'web',
   description:
     'Search for current information. By default this checks persona memory first and only calls external web search when no related memory exists. ' +
     'Set offline_search=false to force an external search. External results are saved silently for future memory retrieval.',

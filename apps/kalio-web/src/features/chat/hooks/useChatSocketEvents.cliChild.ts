@@ -1,8 +1,10 @@
-import type { ChatMessage, ChatSession, ToolResult } from '@kalio/types';
+import type { ChatMessage, ChatSession, RuntimeActivitySnapshot, ToolResult } from '@kalio/types';
 import type { CLIChildProjection } from '../cliChildProjection.model';
 import {
   isCliChildToolName,
+  mergeCLIChildProjectionSources,
   projectionFromSession,
+  projectionFromRuntimeChildExecution,
   projectionFromToolResult,
   rebuildCLIChildProjectionsFromMessages,
   terminalProjectionStatus,
@@ -22,6 +24,7 @@ export interface CliChildSocketDeps {
     toolActivities: Array<{ callId: string; toolName: string }>;
     cliChildProjections: Record<string, CLIChildProjection>;
     cliAgentOutput: Record<string, string>;
+    runtimeActivitySnapshots?: Record<string, RuntimeActivitySnapshot>;
   };
   getSessionState: () => {
     activeSessionId: string | null;
@@ -135,14 +138,39 @@ export function rebuildCliChildProjectionsFromHistory(
   parentSessionId: string,
   messages: ChatMessage[],
 ): CLIChildProjection[] {
-  const persistedCallIdToName = deps.getAgentState().callIdToName;
+  const agentState = deps.getAgentState();
+  const persistedCallIdToName = agentState.callIdToName;
   const callIdToName = buildCallIdToNameFromMessages(messages, persistedCallIdToName);
   for (const [callId, name] of Object.entries(callIdToName)) {
     if (!persistedCallIdToName[callId]) {
       deps.registerCallId(callId, name);
     }
   }
-  const projections = rebuildCLIChildProjectionsFromMessages(parentSessionId, messages, callIdToName);
+  const legacyProjections = rebuildCLIChildProjectionsFromMessages(parentSessionId, messages, callIdToName);
+  const projectionsByChildSessionId = new Map(
+    legacyProjections.map((projection) => [projection.childSessionId, projection]),
+  );
+
+  for (const snapshot of Object.values(agentState.runtimeActivitySnapshots ?? {})) {
+    for (const execution of snapshot.childExecutions) {
+      if (execution.parentSessionId !== parentSessionId) {
+        continue;
+      }
+      const runtimeProjection = projectionFromRuntimeChildExecution(execution);
+      if (!runtimeProjection) {
+        continue;
+      }
+      projectionsByChildSessionId.set(
+        runtimeProjection.childSessionId,
+        mergeCLIChildProjectionSources({
+          runtimeProjection,
+          storedProjection: projectionsByChildSessionId.get(runtimeProjection.childSessionId),
+        }) ?? runtimeProjection,
+      );
+    }
+  }
+
+  const projections = [...projectionsByChildSessionId.values()];
   deps.rebuildCLIChildProjections(
     parentSessionId,
     projections,

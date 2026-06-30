@@ -3,6 +3,7 @@ import {
   type ArchitectureRunStatus,
   type ChatMessage,
   type ChatSession,
+  type RuntimeActivitySnapshot,
 } from '@kalio/types';
 import { applyGraphNodeLayout, estimateGraphNodeHeight } from './executionGraphNodePresentation';
 import type { ExecutionGraphModel, ExecutionGraphNode } from './executionGraphModel.types';
@@ -24,17 +25,24 @@ export function buildArchitectureRootGraphModel(input: {
   rootSessionId: string;
   sessions: ChatSession[];
   sessionMessages: Record<string, ChatMessage[]>;
+  runtimeActivitySnapshots?: Record<string, RuntimeActivitySnapshot>;
 }): ExecutionGraphModel {
+  const graphNodes = input.graph.nodes.filter(isGraphNodeWithId);
+  const graph: ArchitectureGraphProjection = {
+    ...input.graph,
+    nodes: graphNodes,
+  };
   const branchSessionByNodeId = branchSessionMap(input.graph.runId, input.rootSessionId, input.sessions);
-  const layout = architectureNodeLayout(input.graph);
-  const nodes = input.graph.nodes.map((node, index) => toExecutionNode({
+  const layout = architectureNodeLayout(graph);
+  const nodes = graphNodes.map((node, index) => toExecutionNode({
     node,
     index,
-    graph: input.graph,
+    graph,
     layout: layout.get(node.id),
     // TODO: legacy fallback - older graph projections omitted node.sessionId and require session-name matching.
     branchSessionId: node.sessionId ?? branchSessionByNodeId.get(normalizeNodeId(node.id)),
     branchMessages: input.sessionMessages[node.sessionId ?? branchSessionByNodeId.get(normalizeNodeId(node.id)) ?? ''] ?? [],
+    branchRuntimeSnapshot: input.runtimeActivitySnapshots?.[node.sessionId ?? branchSessionByNodeId.get(normalizeNodeId(node.id)) ?? ''],
   }));
   const knownNodeIds = new Set(nodes.map((node) => node.id));
   const edges = input.graph.edges
@@ -55,6 +63,11 @@ export function buildArchitectureRootGraphModel(input: {
   };
 }
 
+function isGraphNodeWithId(node: ArchitectureGraphProjectionNode): boolean {
+  const id = (node as { id?: unknown }).id;
+  return typeof id === 'string' && id.trim().length > 0;
+}
+
 function toExecutionNode(input: {
   node: ArchitectureGraphProjectionNode;
   index: number;
@@ -62,9 +75,14 @@ function toExecutionNode(input: {
   layout?: { column: number; row: number };
   branchSessionId?: string;
   branchMessages: ChatMessage[];
+  branchRuntimeSnapshot?: RuntimeActivitySnapshot;
 }): ExecutionGraphNode {
-  const { node, graph, branchSessionId, branchMessages } = input;
+  const { node, graph, branchSessionId, branchMessages, branchRuntimeSnapshot } = input;
   const openableBranchSessionId = branchSessionId;
+  const budgetProgress = branchRuntimeSnapshot?.toolBudgetProgress;
+  const budgetLabel = budgetProgress
+    ? `budget ${budgetProgress.usedIterations}/${budgetProgress.currentLimit}`
+    : undefined;
   const toolEvidence = extractToolEvidence(node);
   const incompleteReason = extractIncompleteReason(node);
   const routeHops = graph.routeHops ?? [];
@@ -96,12 +114,14 @@ function toExecutionNode(input: {
     subtitle: [
       node.kind,
       node.status,
+      budgetLabel,
       openableBranchSessionId ? 'branch session' : undefined,
     ].filter(Boolean).join(' / '),
     detail: [
       node.actionSummary,
       node.behavior?.mode?.replaceAll('_', ' '),
       incompleteReason ? 'incomplete' : undefined,
+      budgetLabel,
       openableBranchSessionId && branchMessages.length > 0 ? `${branchMessages.length} branch messages loaded` : undefined,
       node.eventIds.length > 0 ? `${node.eventIds.length} events` : undefined,
     ].filter(Boolean).join(' - '),

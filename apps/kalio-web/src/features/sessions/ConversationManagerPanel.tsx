@@ -30,6 +30,9 @@ export function ConversationManagerPanel({
   const [resumeError, setResumeError] = useState<string | null>(null);
 
   const runningLoops = selectRunningLoops({ runtimeActivitySnapshots });
+  const toolBudgetProgresses = Object.values(runtimeActivitySnapshots)
+    .flatMap((snapshot) => (snapshot.toolBudgetProgress ? [snapshot.toolBudgetProgress] : []))
+    .sort((left, right) => right.updatedAt - left.updatedAt);
   const attentionItems = selectRuntimeAttentionItems({
     pendingConfirmations,
     pendingBudgetApprovals,
@@ -89,6 +92,7 @@ export function ConversationManagerPanel({
     && toolActivities.length === 0
     && llmActivities.length === 0
     && pendingConfirmationCount === 0
+    && toolBudgetProgresses.length === 0
     && runtimeAttentionItems.length === 0
     && continuationActions.length === 0;
 
@@ -212,6 +216,28 @@ export function ConversationManagerPanel({
           {(active.length > 0 || done.length > 0 || llmActivities.length > 0) && (
             <div className="border-t border-base-300/40 mt-1" />
           )}
+        </div>
+      )}
+
+      {toolBudgetProgresses.length > 0 && (
+        <div className="px-2 pt-2 pb-1 flex flex-col gap-1 shrink-0">
+          <p className="text-[10px] uppercase tracking-wider text-base-content/30 px-2 pb-0.5">Tool budget</p>
+          {toolBudgetProgresses.slice(0, 4).map((progress) => {
+            const session = sessions.find((candidate) => candidate.id === progress.sessionId);
+            return (
+              <div
+                key={`${progress.sessionId}:${progress.roleSlotId ?? progress.messageId ?? progress.updatedAt}`}
+                className="flex items-center gap-2 rounded-lg border border-base-300/60 bg-base-200/45 px-2 py-1.5 text-xs"
+                data-testid={`tool-budget-progress-${progress.sessionId}`}
+              >
+                <span className="min-w-0 flex-1 truncate text-base-content/70">
+                  {session?.title ?? progress.roleSlotId ?? progress.sessionId}
+                </span>
+                <span className="font-mono text-base-content/80">{progress.usedIterations}/{progress.currentLimit}</span>
+                <span className="badge badge-xs badge-ghost">{progress.status}</span>
+              </div>
+            );
+          })}
         </div>
       )}
 

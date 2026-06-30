@@ -213,6 +213,7 @@ function preserveResultIdentity(
 ): SubAgentFlowResult {
   return {
     ...result,
+    flowDefinitionId: result.flowDefinitionId ?? baseRun.flowDefinitionId,
     parentSessionId: baseRun.parentSessionId,
     parentToolCallId: baseRun.parentToolCallId,
     childSessionId: baseRun.childSessionId,

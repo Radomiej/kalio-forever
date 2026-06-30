@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { ToolMeta } from '@kalio/types';
 import { toAuditToolResultData } from './audit-tool-data';
+
+const typedTool = (domain: ToolMeta['domain']): Pick<ToolMeta, 'domain'> => ({ domain });
 
 describe('audit tool data normalization', () => {
   it('marks text VFS read results as file tool results', () => {
@@ -58,6 +61,38 @@ describe('audit tool data normalization', () => {
       fileTool: {
         toolName: 'fs_write',
         path: 'metadata.json',
+      },
+    });
+  });
+
+  it('does not infer file domains from tool name prefixes or substrings', () => {
+    expect(toAuditToolResultData('call-1', 'vfs_fake', { status: 'success' })).toMatchObject({
+      callId: 'call-1',
+      domain: 'generic',
+      status: 'success',
+    });
+    expect(toAuditToolResultData('call-2', 'debug_grep_notes', { status: 'success' })).toMatchObject({
+      callId: 'call-2',
+      domain: 'generic',
+      status: 'success',
+    });
+  });
+
+  it('uses typed tool metadata as the source of file-tool audit classification', () => {
+    const data = toAuditToolResultData('call-1', 'custom_reader', {
+      status: 'success',
+      data: { path: 'project/README.md' },
+    }, {
+      path: 'project/README.md',
+    }, typedTool('vfs'));
+
+    expect(data).toMatchObject({
+      callId: 'call-1',
+      domain: 'vfs',
+      kind: 'file_tool_result',
+      fileTool: {
+        toolName: 'custom_reader',
+        path: 'project/README.md',
       },
     });
   });

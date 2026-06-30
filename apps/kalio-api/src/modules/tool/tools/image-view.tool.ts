@@ -41,6 +41,7 @@ function getMimeType(filePath: string): string {
 @Injectable()
 @Tool({
   name: 'image_view',
+  domain: 'image',
   description: `View or inspect an image from the session VFS.
 Returns the image as a base64 data URL that vision-capable LLMs can analyze.
 Use this to review generated images, check quality, or analyze image content before further processing.`,

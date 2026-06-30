@@ -93,10 +93,22 @@ export class PersonaService implements OnApplicationBootstrap {
     }
 
     if (
+      personaId === 'orchestrator'
+      && (
+        existingPrompt.includes('For real project files under an allowed local directory, use fs_read, fs_list, and fs_write')
+        || !existingPrompt.includes('Produce a delegation packet before routing')
+      )
+    ) {
+      return true;
+    }
+
+    if (
       personaId === 'agent-orchestrator'
       && (
         !existingPrompt.includes('planning/prototyping, implementation, and refactor/QA')
         || !existingPrompt.includes('seeded/no live search')
+        || !existingPrompt.includes('project reconnaissance work yourself by default')
+        || !existingPrompt.includes('Produce a task packet before routing')
       )
     ) {
       return true;

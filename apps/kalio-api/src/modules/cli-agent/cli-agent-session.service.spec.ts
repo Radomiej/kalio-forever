@@ -120,7 +120,7 @@ describe('CLIAgentSessionService metadata contract', () => {
     expect(systemMessages).toEqual([]);
   });
 
-  it('loads legacy prefixed metadata only when typed runtimeContext is missing', async () => {
+  it('does not load legacy prefixed metadata from system message content on the runtime read path', async () => {
     await drizzleService.db.insert(schema.sessions).values({
       id: 'legacy-child',
       personaId: 'default',
@@ -139,9 +139,49 @@ describe('CLIAgentSessionService metadata contract', () => {
       createdAt: new Date(2),
     });
 
+    await expect(service.loadSessionMetadata('legacy-child')).resolves.toBeNull();
+  });
+
+  it('migrates legacy prefixed metadata into typed runtimeContext before runtime reads it', async () => {
+    await drizzleService.db.insert(schema.sessions).values({
+      id: 'legacy-child',
+      personaId: 'default',
+      title: 'Legacy CLI',
+      kind: 'cli-agent',
+      parentSessionId: 'parent',
+      parentToolCallId: 'call-cli',
+      createdAt: new Date(1),
+      updatedAt: new Date(1),
+    });
+    await drizzleService.db.insert(schema.messages).values({
+      id: 'legacy-meta',
+      sessionId: 'legacy-child',
+      role: 'system',
+      content: '__kalio_cli_agent_meta__:{"agentId":"codex","workdir":"C:/repo"}',
+      createdAt: new Date(2),
+    });
+
+    await expect(service.migrateLegacySessionMetadata('legacy-child')).resolves.toEqual({
+      agentId: 'codex',
+      workdir: 'C:/repo',
+    });
     await expect(service.loadSessionMetadata('legacy-child')).resolves.toEqual({
       agentId: 'codex',
       workdir: 'C:/repo',
+    });
+
+    const [sessionRow] = await drizzleService.db
+      .select({ runtimeContext: schema.sessions.runtimeContext })
+      .from(schema.sessions)
+      .where(eq(schema.sessions.id, 'legacy-child'))
+      .limit(1);
+
+    expect(sessionRow.runtimeContext).toMatchObject({
+      runtimeKind: 'cli-agent',
+      parentSessionId: 'parent',
+      parentToolCallId: 'call-cli',
+      toolPolicyProfile: 'cli-agent',
+      cliAgentContext: { agentId: 'codex', workdir: 'C:/repo' },
     });
   });
 });

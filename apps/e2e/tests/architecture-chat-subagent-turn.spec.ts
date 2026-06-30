@@ -81,7 +81,6 @@ test.describe('Architecture chat turn projection', () => {
             behavior: {
               mode: 'choose_one',
               fanOut: 'sequential',
-              convergeToNodeId: 'pragmatist',
             },
           },
           { id: 'pragmatist', label: 'Pragmatist', kind: 'role', roleSlotId: 'pragmatist' },
@@ -93,7 +92,6 @@ test.describe('Architecture chat turn projection', () => {
             behavior: {
               mode: 'choose_one',
               fanOut: 'sequential',
-              convergeToNodeId: 'innovator',
             },
           },
           { id: 'innovator', label: 'Innovator', kind: 'role', roleSlotId: 'innovator' },
@@ -105,7 +103,6 @@ test.describe('Architecture chat turn projection', () => {
             behavior: {
               mode: 'rank_then_merge',
               fanOut: 'sequential',
-              convergeToNodeId: 'final-artifact',
             },
           },
           {
@@ -121,7 +118,7 @@ test.describe('Architecture chat turn projection', () => {
           { id: 'pragmatist-router-check', fromNodeId: 'pragmatist', toNodeId: 'router-check' },
           { id: 'router-check-innovator', fromNodeId: 'router-check', toNodeId: 'innovator' },
           { id: 'innovator-router-final', fromNodeId: 'innovator', toNodeId: 'router-final' },
-          { id: 'router-final-final-artifact', fromNodeId: 'router-final', toNodeId: 'final-artifact' },
+          { id: 'router-final-final-artifact', fromNodeId: 'router-final', toNodeId: 'final-artifact', selection: 'converge' },
         ],
         contextPolicy: {
           includeUserTask: true,

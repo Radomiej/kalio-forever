@@ -209,6 +209,37 @@ describe('MockLLMProvider', () => {
     }));
   });
 
+  it('does not treat plain tool text as a prior AgentFlow result', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const onToolArgChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Start the two-agent delivery loop [[mock:tool:run_sub_agentflow]]',
+      },
+      {
+        role: 'tool',
+        toolCallId: 'mock-tool-1',
+        content: 'This diagnostic text mentions "flowRunId" and "childSessionId", but it is not a tool result object.',
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'run_sub_agentflow', description: 'Run child flow', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-2', onChunk, onToolArgChunk },
+    );
+
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onToolArgChunk).toHaveBeenCalledWith('run_sub_agentflow', expect.any(Number));
+    expect(toolCalls).toEqual([
+      expect.objectContaining({
+        name: 'run_sub_agentflow',
+      }),
+    ]);
+  });
+
   it('returns final text when prior AgentFlow result exists and history contains the embedded Goal Guard script', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();
@@ -312,6 +343,37 @@ describe('MockLLMProvider', () => {
       delta: expect.stringContaining('vfs_write completed'),
       done: false,
     }));
+  });
+
+  it('does not treat plain tool text as a prior vfs_write result', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const onToolArgChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Please trigger HITL tool intent [[mock:tool:vfs_write:no-arg-progress]]',
+      },
+      {
+        role: 'tool',
+        toolCallId: 'mock-tool-1',
+        content: 'Not JSON: {"name":"vfs_write"} mentioned e2e/mock-tool-trigger.txt in a diagnostic message.',
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'vfs_write', description: 'Write to VFS', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-2', onChunk, onToolArgChunk },
+    );
+
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onToolArgChunk).not.toHaveBeenCalled();
+    expect(toolCalls).toEqual([
+      expect.objectContaining({
+        name: 'vfs_write',
+      }),
+    ]);
   });
 
   it('returns a deterministic run_subagent tool call that will trigger child HITL', async () => {
@@ -533,6 +595,45 @@ describe('MockLLMProvider', () => {
     }));
   });
 
+  it('does not treat assistant tool-call content as the target vfs_write path', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const onToolArgChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Please trigger HITL tool intent [[mock:tool:vfs_write:no-arg-progress]]',
+      },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          {
+            id: 'call-vfs-write-other',
+            name: 'vfs_write',
+            args: {
+              content: 'mentions e2e/mock-tool-trigger.txt in text only',
+            },
+          },
+        ],
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'vfs_write', description: 'Write to VFS', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-2', onChunk, onToolArgChunk },
+    );
+
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onToolArgChunk).not.toHaveBeenCalled();
+    expect(toolCalls).toEqual([
+      expect.objectContaining({
+        name: 'vfs_write',
+      }),
+    ]);
+  });
+
   it('returns deterministic Goal Guard VFS tool calls before scripted text actions', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();
@@ -640,8 +741,12 @@ describe('MockLLMProvider', () => {
         role: 'tool',
         toolCallId: 'mock-tool-1',
         content: JSON.stringify({
+          name: 'vfs_write',
           status: 'success',
-          output: 'wrote e2e/goal-guard-proof.json',
+          result: {
+            path: 'e2e/goal-guard-proof.json',
+            bytesWritten: 75,
+          },
         }),
       },
     ];
@@ -674,8 +779,12 @@ describe('MockLLMProvider', () => {
           role: 'tool',
           toolCallId: 'mock-tool-2',
           content: JSON.stringify({
+            name: 'vfs_read',
             status: 'success',
-            output: '{"path":"e2e/goal-guard-proof.json","content":"{\\"status\\":\\"implemented\\"}"}',
+            result: {
+              filePath: 'e2e/goal-guard-proof.json',
+              content: '{"status":"implemented"}',
+            },
           }),
         },
       ],

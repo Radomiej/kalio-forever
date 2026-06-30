@@ -10,10 +10,6 @@ export function getToolTargetLabel(toolName: string, args: Record<string, unknow
     return 'session VFS root';
   }
 
-  if (toolName.startsWith('fs_')) {
-    return readStringArg(args, 'path');
-  }
-
   if (toolName === 'vfs_read' || toolName === 'vfs_write') {
     return readStringArg(args, 'filePath') ?? readStringArg(args, 'path');
   }

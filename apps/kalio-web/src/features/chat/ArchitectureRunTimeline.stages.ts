@@ -16,16 +16,21 @@ export function nodeLabel(step: TraceStep): string {
   if (step.plannedLabel) {
     return step.plannedLabel;
   }
-  const inferredRouterLabel = inferRouterActorLabel(step);
-  if (inferredRouterLabel) {
-    return inferredRouterLabel;
-  }
-  const raw = step.nodeId ?? step.nextNodeId ?? step.speaker;
+  const raw = firstNonEmptyString(step.nodeId, step.nextNodeId, step.speaker) ?? 'unknown';
   return raw
     .split(/[-_]/)
     .filter(Boolean)
     .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
     .join(' ');
+}
+
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
 }
 
 export function buildTimelineStages(run: ArchitectureChatRunSummary): TraceStage[] {
@@ -210,17 +215,4 @@ function routeSegmentTone(step: TraceStep): string {
   if (step.speaker === 'router') return 'text-amber-200 bg-amber-400/10 border-amber-400/20';
   if (step.speaker === 'finalizer') return 'text-emerald-200 bg-emerald-400/10 border-emerald-400/20';
   return 'text-base-content bg-base-100/50 border-base-content/20';
-}
-
-function inferRouterActorLabel(step: TraceStep): string | undefined {
-  if (step.speaker !== 'router') {
-    return undefined;
-  }
-  const normalizedNodeId = step.nodeId?.trim().toLowerCase();
-  if (normalizedNodeId && normalizedNodeId !== 'router') {
-    return undefined;
-  }
-  const match = /(?:^|\n\n)([A-Z][A-Za-z0-9 _-]{1,48})\s+(?:completed a bounded evidence pass|hit a recoverable branch error)\b/m.exec(step.content ?? '');
-  const candidate = match?.[1]?.trim();
-  return candidate && candidate.toLowerCase() !== 'router' ? candidate : undefined;
 }

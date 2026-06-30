@@ -975,6 +975,152 @@ describe('ArchitectureAgentFlowAdapter', () => {
     expect(snapshot?.events.some((event) => event.type === 'flow:finalization_missing')).toBe(false);
   });
 
+  it('blocks finalization-missing from typed acceptance without canonical node ids', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-renamed-finalization-missing',
+      schemaId: 'custom-release-loop',
+      prompt: 'Continue release workflow',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-renamed-finalization-missing-root',
+      status: 'running',
+      createdAt: 1,
+      updatedAt: 12,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-release-guard',
+        runId: run.id,
+        sequence: 1,
+        type: 'router_decision',
+        message: 'Release guard accepted typed finalization evidence.',
+        nodeId: 'release-gate',
+        roleSlotId: 'release_guard',
+        reasonCode: 'final_artifact_accepted',
+        runtimeDecision: {
+          status: 'done',
+          reasonCode: 'final_artifact_accepted',
+          accepted: true,
+          nextNodeId: 'release-report',
+        },
+        evidence: [
+          {
+            kind: 'BUILD_RESULT',
+            source: 'terminal_output',
+            status: 'passed',
+            data: { exitCode: 0 },
+          },
+          {
+            kind: 'GIT_STATUS',
+            source: 'git',
+            status: 'passed',
+            data: { clean: true },
+          },
+        ],
+        route: {
+          source: 'runtime_fallback',
+          fromNodeId: 'release-gate',
+          selectedNodeIds: ['builder'],
+          rejectedNodeIds: ['release-report'],
+          nextNodeId: 'builder',
+          response: 'CLI child implementation is incomplete: child status is failed.',
+        },
+        data: {
+          slotType: 'judge',
+        },
+        createdAt: 10,
+      },
+      {
+        id: 'event-return',
+        runId: run.id,
+        sequence: 2,
+        type: 'router_decision',
+        message: 'Release guard returned control to the orchestrator.',
+        reasonCode: 'return_to_orchestrator',
+        nodeId: 'release-gate',
+        roleSlotId: 'release_guard',
+        data: {
+          slotType: 'judge',
+          reasonCode: 'return_to_orchestrator',
+          returnToOrchestrator: true,
+          pendingNodeIds: ['builder'],
+          visitCounts: { builder: 3, 'release-gate': 3 },
+        },
+        createdAt: 12,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRun: vi.fn().mockReturnValue(run),
+      findRunDurable: vi.fn(),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-renamed-finalization-missing', {
+      flowId: 'custom-release-loop',
+      goal: 'Continue release workflow',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('blocked');
+    expect(snapshot?.result?.status).toBe('blocked');
+    expect(snapshot?.events.at(-1)).toMatchObject({
+      type: 'flow:finalization_missing',
+      status: 'blocked',
+      data: { reasonCode: 'finalization_missing' },
+    });
+  });
+
+  it('uses structured final artifact answer before placeholder display text', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-final-artifact-answer',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Produce structured final answer',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-final-artifact-answer-root',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 12,
+      completedAt: 12,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-final',
+        runId: run.id,
+        sequence: 1,
+        type: 'final_artifact',
+        message: 'Sub-agent finished without a printable artifact payload.',
+        nodeId: 'final-artifact',
+        roleSlotId: 'finalizer',
+        data: {
+          finalArtifactStatus: 'accepted',
+          finalArtifactAnswer: 'Structured final answer from the finalizer contract.',
+        },
+        createdAt: 12,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRun: vi.fn().mockReturnValue(run),
+      findRunDurable: vi.fn(),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-final-artifact-answer', {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Produce structured final answer',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('done');
+    expect(snapshot?.result?.summary).toBe('Structured final answer from the finalizer contract.');
+  });
+
   it('does not block a completed final artifact from blocker prose without typed status data', async () => {
     const run: ArchitectureRun = {
       id: 'run-final-artifact-text-blocker',
@@ -1010,6 +1156,55 @@ describe('ArchitectureAgentFlowAdapter', () => {
     const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
 
     const snapshot = await adapter.getSnapshot('run-final-artifact-text-blocker', {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Implement with build proof',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('done');
+    expect(snapshot?.result?.status).toBe('done');
+    expect(snapshot?.events.some((event) => event.type === 'flow:final_artifact_blocker')).toBe(false);
+  });
+
+  it('does not block a completed final artifact from display-only reason fields without typed status data', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-final-artifact-reason-only',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Implement with build proof',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-final-artifact-reason-only-root',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 12,
+      completedAt: 12,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-final',
+        runId: run.id,
+        sequence: 1,
+        type: 'final_artifact',
+        message: 'Final artifact included display-only notes.',
+        nodeId: 'final-artifact',
+        roleSlotId: 'finalizer',
+        data: {
+          blockingReason: 'Display-only note from structured output.',
+          incompleteReason: 'Display-only incomplete note from structured output.',
+        },
+        createdAt: 12,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRun: vi.fn().mockReturnValue(run),
+      findRunDurable: vi.fn().mockResolvedValue(run),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-final-artifact-reason-only', {
       flowId: 'goal_guard_delivery_loop',
       goal: 'Implement with build proof',
       parentSessionId: 'parent-1',
@@ -1076,6 +1271,70 @@ describe('ArchitectureAgentFlowAdapter', () => {
     expect(snapshot?.result?.nextActions).toEqual([
       'Resolve the blocker described in the final artifact before accepting the AgentFlow result.',
     ]);
+  });
+
+  it('does not finalize when final artifact evidence reports a typed blocker', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-final-artifact-evidence-blocked',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Implement with build proof',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-final-artifact-evidence-blocked-root',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 12,
+      completedAt: 12,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-final',
+        runId: run.id,
+        sequence: 1,
+        type: 'final_artifact',
+        message: 'Build verification is incomplete.',
+        nodeId: 'final-artifact',
+        roleSlotId: 'finalizer',
+        evidence: [
+          {
+            kind: 'FINAL_ARTIFACT',
+            status: 'blocked',
+            source: 'finalizer',
+            data: {
+              reasonCode: 'final_artifact_blocker',
+            },
+          },
+        ],
+        createdAt: 12,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRun: vi.fn().mockReturnValue(run),
+      findRunDurable: vi.fn().mockResolvedValue(run),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-final-artifact-evidence-blocked', {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Implement with build proof',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('blocked');
+    expect(snapshot?.result?.status).toBe('blocked');
+    expect(snapshot?.events.find((event) => event.type === 'flow:final_artifact')).toMatchObject({
+      lifecycle: 'blocked',
+      status: 'blocked',
+    });
+    expect(snapshot?.events.at(-1)).toMatchObject({
+      type: 'flow:final_artifact_blocker',
+      lifecycle: 'blocked',
+      data: { reasonCode: 'final_artifact_blocker' },
+      status: 'blocked',
+    });
   });
 
   it('does not reuse a stale final artifact from an earlier resumed attempt as current completion', async () => {
@@ -1427,6 +1686,120 @@ describe('ArchitectureAgentFlowAdapter', () => {
     const snapshot = await adapter.getSnapshot('run-final-with-stale-cli-and-host-proof', {
       flowId: 'goal_guard_delivery_loop',
       goal: 'Implement with CLI child and host verification',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('done');
+    expect(snapshot?.result?.status).toBe('done');
+    expect(snapshot?.events.some((event) => event.type === 'flow:unresolved_cli_children')).toBe(false);
+  });
+
+  it('allows finalization when later typed host evidence supersedes stale unresolved CLI child evidence', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-final-with-stale-cli-and-typed-host-proof',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Implement with CLI child and typed host verification',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-final-with-stale-cli-and-typed-host-proof-root',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 16,
+      completedAt: 16,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-cli-running',
+        runId: run.id,
+        sequence: 1,
+        type: 'participant_output',
+        message: 'Implementer spawned a CLI child and moved on after partial evidence.',
+        nodeId: 'implementer',
+        roleSlotId: 'implementer',
+        data: {
+          toolEvidence: {
+            successfulToolNames: ['spawn_cli_agent', 'wait_for', 'get_cli_agent_status'],
+            targetPaths: ['C:\\Projekty\\TurboProject2'],
+            childCliSessions: [
+              {
+                childSessionId: 'cli-child-typed-host-running',
+                agentId: 'codex',
+                status: 'running',
+                workdir: 'C:\\Projekty\\TurboProject2',
+              },
+            ],
+          },
+        },
+        createdAt: 8,
+      },
+      {
+        id: 'event-verifier',
+        runId: run.id,
+        sequence: 2,
+        type: 'participant_output',
+        message: 'Verifier produced typed host write and build evidence.',
+        nodeId: 'verifier',
+        roleSlotId: 'verifier',
+        evidence: [
+          {
+            kind: 'VFS_WRITE',
+            source: 'host_project',
+            status: 'passed',
+            data: {
+              path: 'C:\\Projekty\\TurboProject2\\src\\App.tsx',
+            },
+          },
+          {
+            kind: 'BUILD_RESULT',
+            source: 'terminal_output',
+            status: 'passed',
+            data: {
+              command: 'npm run build',
+              exitCode: 0,
+            },
+          },
+        ],
+        createdAt: 12,
+      },
+      {
+        id: 'event-goal-master',
+        runId: run.id,
+        sequence: 3,
+        type: 'router_decision',
+        message: 'Goal Master accepted the typed host verification.',
+        nodeId: 'goal-master',
+        roleSlotId: 'goal_master',
+        route: {
+          source: 'agent',
+          fromNodeId: 'goal-master',
+          selectedNodeIds: ['final-artifact'],
+          rejectedNodeIds: ['implementer'],
+          nextNodeId: 'final-artifact',
+        },
+        createdAt: 14,
+      },
+      {
+        id: 'event-final',
+        runId: run.id,
+        sequence: 4,
+        type: 'final_artifact',
+        message: 'Verified delivery accepted.',
+        nodeId: 'final-artifact',
+        roleSlotId: 'finalizer',
+        createdAt: 16,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRunDurable: vi.fn().mockResolvedValue(run),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-final-with-stale-cli-and-typed-host-proof', {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Implement with CLI child and typed host verification',
       parentSessionId: 'parent-1',
     });
 
@@ -2511,6 +2884,67 @@ describe('ArchitectureAgentFlowAdapter', () => {
 
     expect(snapshot?.run.status).toBe('waiting_on_orchestrator');
     expect(snapshot?.run.waitingForNodeId).toBe('implementer');
+    expect(snapshot?.result).toBeUndefined();
+  });
+
+  it('maps typed run-stopped max-step events to waiting AgentFlow continuation', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-stopped-waiting',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Implement with bounded steps',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-stopped-waiting-root',
+      status: 'failed',
+      createdAt: 1,
+      updatedAt: 4,
+      completedAt: 4,
+    };
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'event-stop',
+        runId: run.id,
+        sequence: 1,
+        type: 'run_stopped',
+        message: 'Runtime stopped after 2 graph steps.',
+        reasonCode: 'max_steps',
+        data: {
+          reasonCode: 'max_steps',
+          maxSteps: 2,
+          pendingNodeIds: ['implementer'],
+          visitCounts: { orchestrator: 1, 'goal-master': 1 },
+        },
+        createdAt: 4,
+      },
+    ];
+    const architectureRuntime = {
+      createRun: vi.fn(),
+      createRunAsync: vi.fn(),
+      getEvents: vi.fn(),
+      findRun: vi.fn().mockReturnValue(run),
+      findRunDurable: vi.fn(),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot('run-stopped-waiting', {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Implement with bounded steps',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('waiting_on_orchestrator');
+    expect(snapshot?.run.waitingForNodeId).toBe('implementer');
+    expect(snapshot?.run.checkpoint?.continuation).toMatchObject({
+      reason: 'max_steps',
+      waitingNodeId: 'implementer',
+      pendingNodeIds: ['implementer'],
+      visitCounts: { orchestrator: 1, 'goal-master': 1 },
+    });
+    expect(snapshot?.events.at(-1)).toMatchObject({
+      type: 'flow:stopped',
+      lifecycle: 'waiting_on_orchestrator',
+      status: 'waiting_on_orchestrator',
+    });
     expect(snapshot?.result).toBeUndefined();
   });
 

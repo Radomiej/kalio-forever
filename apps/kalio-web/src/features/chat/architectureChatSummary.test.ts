@@ -431,6 +431,99 @@ describe('buildArchitectureRunMetadata', () => {
     );
   });
 
+  it('carries typed workflow event fields into trace metadata', () => {
+    const metadata = buildArchitectureRunMetadata({
+      run: {
+        id: 'run-1',
+        schemaId: 'goal-master-delivery-loop',
+        prompt: 'Implement.',
+        status: 'running',
+        executionMode: 'subagent_execution',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events: [
+        {
+          id: 'event-router',
+          runId: 'run-1',
+          sequence: 1,
+          type: 'router_decision',
+          lifecycle: 'guard_result',
+          status: 'waiting_on_orchestrator',
+          message: 'Router returned control for QA.',
+          nodeId: 'goal-master',
+          roleSlotId: 'goal_master',
+          reasonCode: 'return_to_orchestrator',
+          errorCode: 'TIMEOUT',
+          failure: {
+            code: 'TIMEOUT',
+            source: 'subagent',
+            retryable: true,
+            message: 'Subagent exceeded typed timeout.',
+          },
+          evidence: [
+            {
+              kind: 'QUALITY_GATE',
+              status: 'blocked',
+              source: 'goal-master',
+            },
+          ],
+          runtimeDecision: {
+            status: 'waiting_on_orchestrator',
+            reasonCode: 'return_to_orchestrator',
+            accepted: false,
+            nextNodeId: 'orchestrator',
+          },
+          data: {
+            incompleteReason: 'Display-only explanation.',
+          },
+          createdAt: 1,
+        },
+      ],
+      graph: {
+        runId: 'run-1',
+        nodes: [],
+        edges: [],
+        routeHops: [],
+      },
+      chat: {
+        runId: 'run-1',
+        messages: [
+          {
+            id: 'm1',
+            eventId: 'event-router',
+            speaker: 'router',
+            roleSlotId: 'goal_master',
+            content: 'Router returned control for QA.',
+            createdAt: 1,
+          },
+        ],
+      },
+    });
+
+    expect(metadata.trace[0]).toMatchObject({
+      lifecycle: 'guard_result',
+      status: 'waiting_on_orchestrator',
+      reasonCode: 'return_to_orchestrator',
+      errorCode: 'TIMEOUT',
+      failure: {
+        code: 'TIMEOUT',
+        retryable: true,
+      },
+      evidence: [
+        {
+          kind: 'QUALITY_GATE',
+          status: 'blocked',
+        },
+      ],
+      runtimeDecision: {
+        status: 'waiting_on_orchestrator',
+        reasonCode: 'return_to_orchestrator',
+        nextNodeId: 'orchestrator',
+      },
+    });
+  });
+
   it('does not synthesize branch session metadata when events do not include stream snapshots', () => {
     const metadata = buildArchitectureRunMetadata({
       run: {
@@ -1264,7 +1357,70 @@ describe('buildArchitectureRunTurnProjection', () => {
 });
 
 describe('findArchitectureRunInMessages', () => {
-  it('reconstructs architecture run metadata from persisted tool calls after reload', () => {
+  it('does not infer router or finalizer state from assistant markdown without typed run metadata', () => {
+    const metadata = findArchitectureRunInMessages([
+      {
+        id: 'assistant-tools',
+        sessionId: 'parent-session',
+        role: 'assistant',
+        content: '',
+        createdAt: 1,
+        toolCalls: [
+          {
+            id: 'architecture:run-typed:event-pragmatist',
+            name: 'run_subagent',
+            args: {
+              architectureRunId: 'run-typed',
+              schemaName: 'Strategic Decision Council',
+              nodeId: 'pragmatist',
+              roleSlotId: 'pragmatist',
+              childSessionId: 'branch-pragmatist',
+            },
+          },
+        ],
+      },
+      {
+        id: 'tool-pragmatist',
+        sessionId: 'parent-session',
+        role: 'tool_result',
+        content: JSON.stringify({
+          result: 'Pragmatist branch answer',
+          taskId: 'event-pragmatist',
+          childSessionId: 'branch-pragmatist',
+          parentSessionId: 'parent-session',
+          vfsMode: 'shared',
+          vfsSessionId: 'parent-session',
+          copiedFiles: [],
+          durationMs: 0,
+        }),
+        toolCallId: 'architecture:run-typed:event-pragmatist',
+        createdAt: 2,
+      },
+      {
+        id: 'router-text',
+        sessionId: 'parent-session',
+        role: 'assistant',
+        content: '### Router\n\nThis markdown is display-only.',
+        createdAt: 3,
+      },
+      {
+        id: 'finalizer-text',
+        sessionId: 'parent-session',
+        role: 'assistant',
+        content: '### Finalizer\n\nThis markdown must not finalize the run.',
+        createdAt: 4,
+      },
+    ]);
+
+    expect(metadata).toMatchObject({
+      runId: 'run-typed',
+      status: 'running',
+    });
+    expect(metadata?.finalArtifact).toBeUndefined();
+    expect(metadata?.trace.map((step) => step.speaker)).toEqual(['participant']);
+  });
+
+  it('reconstructs architecture participant metadata from persisted tool calls after reload', () => {
     const metadata = findArchitectureRunInMessages([
       {
         id: 'user-1',
@@ -1329,9 +1485,10 @@ describe('findArchitectureRunInMessages', () => {
     expect(metadata).toMatchObject({
       runId: 'run-1',
       schemaId: 'Strategic Decision Council',
-      status: 'completed',
+      status: 'running',
     });
-    expect(metadata?.trace.map((step) => step.speaker)).toEqual(['participant', 'router', 'finalizer']);
+    expect(metadata?.finalArtifact).toBeUndefined();
+    expect(metadata?.trace.map((step) => step.speaker)).toEqual(['participant']);
     expect(metadata?.trace[0]).toMatchObject({
       content: 'Pragmatist branch answer',
       nodeId: 'pragmatist',
@@ -1341,17 +1498,9 @@ describe('findArchitectureRunInMessages', () => {
         status: 'completed',
       },
     });
-    expect(metadata?.trace[1]).toMatchObject({
-      speaker: 'router',
-      sessionId: 'arch-run-1-router',
-    });
-    expect(metadata?.trace[2]).toMatchObject({
-      speaker: 'finalizer',
-      sessionId: 'arch-run-1-finalizer',
-    });
   });
 
-  it('restores sequential router chains in architecture event order after reload', () => {
+  it('restores typed participant results in architecture event order after reload', () => {
     const metadata = findArchitectureRunInMessages([
       {
         id: 'user-message',
@@ -1453,21 +1602,14 @@ describe('findArchitectureRunInMessages', () => {
       },
     ]);
 
+    expect(metadata?.status).toBe('running');
     expect(metadata?.trace.map((step) => step.speaker)).toEqual([
-      'router',
       'participant',
-      'router',
       'participant',
-      'router',
-      'finalizer',
     ]);
     expect(metadata?.trace.map((step) => step.nodeId)).toEqual([
-      'router',
       'pragmatist',
-      'router',
       'innovator',
-      'router',
-      'final-artifact',
     ]);
   });
 });

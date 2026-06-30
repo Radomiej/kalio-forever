@@ -1,4 +1,9 @@
-import type { ArchitectureExecutionEvent, ArchitectureRoleSlot, ArchitectureSlotToolPolicy } from '@kalio/types';
+import type {
+  ArchitectureExecutionEvent,
+  ArchitectureRoleSlot,
+  ArchitectureSchemaNode,
+  ArchitectureSlotToolPolicy,
+} from '@kalio/types';
 
 const ARCHITECTURE_BRANCH_TOOL_NAMES = new Set([
   'vfs_list',
@@ -23,6 +28,7 @@ const ARCHITECTURE_CLI_AGENT_TOOL_NAMES = new Set([
 
 export interface BuildArchitectureSlotToolPolicyInput {
   slot: ArchitectureRoleSlot;
+  node?: Pick<ArchitectureSchemaNode, 'toolOverride'>;
   architectureContext?: Record<string, unknown>;
   incomingEvents?: ArchitectureExecutionEvent[];
 }
@@ -30,6 +36,11 @@ export interface BuildArchitectureSlotToolPolicyInput {
 export function buildArchitectureSlotToolPolicy(
   input: BuildArchitectureSlotToolPolicyInput,
 ): ArchitectureSlotToolPolicy | null {
+  const nodeOverride = explicitNodeToolOverride(input.node);
+  if (nodeOverride) {
+    return nodeOverride;
+  }
+
   if (input.slot.slotType === 'finalizer') {
     return { allowedToolNames: [] };
   }
@@ -225,6 +236,17 @@ function hasLocalProjectPath(context: Record<string, unknown> | undefined): bool
 
 function isOrchestrationSlot(slot: ArchitectureRoleSlot): boolean {
   return slot.slotType === 'router' && /\borchestrator\b/i.test(`${slot.id} ${slot.label}`);
+}
+
+function explicitNodeToolOverride(
+  node: Pick<ArchitectureSchemaNode, 'toolOverride'> | undefined,
+): ArchitectureSlotToolPolicy | null {
+  const names = node?.toolOverride?.allowedToolNames;
+  if (!Array.isArray(names)) {
+    return null;
+  }
+  const allowedToolNames = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+  return { allowedToolNames };
 }
 
 function isMergeOnlyRouterSlot(

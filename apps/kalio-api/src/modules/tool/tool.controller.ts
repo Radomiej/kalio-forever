@@ -29,6 +29,7 @@ export class ToolController implements OnModuleInit {
           name: t.name,
           description: t.description,
           serverKey: t.serverKey,
+          aliases: t.aliases,
           parameters: t.parameters,
           requiresConfirmation: t.requiresConfirmation,
         }))

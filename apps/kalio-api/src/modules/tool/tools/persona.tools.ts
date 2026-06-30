@@ -49,6 +49,7 @@ function getOptionalMcpPolicyArg(args: ToolCallRequest['args']): MCPPolicy | und
 @Injectable()
 @Tool({
   name: 'persona_list',
+  domain: 'persona',
   description: 'List all personas. Returns id, name, model, allowedTools (native tool names), skillIds, and mcpPolicy for each.',
   parameters: {
     type: 'object',
@@ -71,6 +72,7 @@ export class PersonaListTool {
 @Injectable()
 @Tool({
   name: 'persona_create',
+  domain: 'persona',
   description: 'Create a new persona. A persona defines an AI identity with its own system prompt, model, and set of available native tools.',
   parameters: {
     type: 'object',
@@ -116,6 +118,7 @@ export class PersonaCreateTool {
 @Injectable()
 @Tool({
   name: 'persona_update',
+  domain: 'persona',
   description: 'Update an existing persona by its ID. All fields are optional — only provided fields will be changed.',
   parameters: {
     type: 'object',
@@ -163,6 +166,7 @@ export class PersonaUpdateTool {
 @Injectable()
 @Tool({
   name: 'persona_delete',
+  domain: 'persona',
   description: 'Permanently delete a persona by its ID.',
   parameters: {
     type: 'object',

@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { ToolMeta } from '@kalio/types';
 import { groupToolsByPrefix } from './tool.utils';
 
-function makeTool(name: string): ToolMeta {
+function makeTool(name: string, domain?: ToolMeta['domain']): ToolMeta {
   return {
     name,
+    domain,
     description: `${name} description`,
     parameters: {},
     requiresConfirmation: false,
@@ -136,7 +137,7 @@ describe('groupToolsByPrefix', () => {
     const result = groupToolsByPrefix([
       makeTool('web_search'),
       {
-        ...makeTool('mcp_toml::docs_search'),
+        ...makeTool('mcp_toml::docs_search', 'mcp'),
         serverKey: 'toml::docs',
       },
       makeTool('custom_tool'),
@@ -144,5 +145,18 @@ describe('groupToolsByPrefix', () => {
 
     expect(result.map((group) => group.label)).toEqual(['Web', 'MCP', 'Other']);
     expect(result[1]?.tools.map((tool) => tool.name)).toEqual(['mcp_toml::docs_search']);
+  });
+
+  it('uses typed tool domains instead of native name prefixes for grouping', () => {
+    const result = groupToolsByPrefix([
+      makeTool('custom_virtual_reader', 'vfs'),
+      makeTool('vfs_fake'),
+      makeTool('fs_fake'),
+      makeTool('mcp_fake'),
+    ]);
+
+    expect(result.map((group) => group.label)).toEqual(['Virtual Filesystem', 'Other']);
+    expect(result[0]?.tools.map((tool) => tool.name)).toEqual(['custom_virtual_reader']);
+    expect(result[1]?.tools.map((tool) => tool.name)).toEqual(['vfs_fake', 'fs_fake', 'mcp_fake']);
   });
 });

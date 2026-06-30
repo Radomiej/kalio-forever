@@ -257,6 +257,13 @@ describe('buildRuntimeActivitySnapshot', () => {
     });
 
     expect(snapshot.pendingBudgetApprovals).toEqual([pendingBudgetApproval]);
+    expect(snapshot.toolBudgetProgress).toMatchObject({
+      sessionId: 'session-1',
+      usedIterations: 60,
+      currentLimit: 60,
+      status: 'waiting',
+      runtimeKind: 'chat',
+    });
     expect(snapshot.pendingConfirmations).toEqual([]);
     expect(snapshot.run?.status).toBe('failed');
   });

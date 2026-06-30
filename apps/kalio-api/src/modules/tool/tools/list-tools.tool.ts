@@ -5,6 +5,7 @@ import { Tool } from '../../../common/decorators/tool.decorator';
 @Injectable()
 @Tool({
   name: 'list_tools',
+  domain: 'tool_registry',
   description:
     'Returns a compact list of all available tools (name + one-line description). ' +
     'Call this at the start of complex tasks to review what you can do. ' +

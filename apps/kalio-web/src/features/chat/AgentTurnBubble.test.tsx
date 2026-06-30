@@ -13,15 +13,23 @@ const mockMessages: ChatMessage[] = [];
 let mockSessions: ChatSession[] = [{ id: 's1', personaId: 'default', title: 'Main session', createdAt: 1, updatedAt: 1 }];
 let mockStreamingChunks: Record<string, string> = {};
 let mockThinkingChunks: Record<string, string> = {};
+const markdownViewerSpy = vi.fn(({ content }: { content: string }) => <div data-testid="markdown-viewer">{content}</div>);
 
-vi.mock('../../store/sessionStore', () => ({
-  useSessionStore: () => ({
+function buildSessionStoreState() {
+  return {
     sessions: mockSessions,
     sessionMessages: { s1: mockMessages },
     streamingChunks: mockStreamingChunks,
     thinkingChunks: mockThinkingChunks,
     messages: mockMessages,
-  }),
+  };
+}
+
+vi.mock('../../store/sessionStore', () => ({
+  useSessionStore: <T,>(selector?: (state: ReturnType<typeof buildSessionStoreState>) => T) => {
+    const state = buildSessionStoreState();
+    return selector ? selector(state) : state;
+  },
 }));
 
 // Provide callIdToName with a known mapping for regression tests
@@ -56,20 +64,8 @@ const mockAgentStoreState = {
 };
 
 vi.mock('../../store/agentStore', () => ({
-  useAgentStore: () => ({
-    callIdToName: mockAgentStoreState.callIdToName,
-    toolArgProgress: mockAgentStoreState.toolArgProgress,
-    setCanvasOpen: mockAgentStoreState.setCanvasOpen,
-    setCanvasFocus: mockAgentStoreState.setCanvasFocus,
-    cliChildProjections: mockAgentStoreState.cliChildProjections,
-    pendingBudgetApprovals: mockAgentStoreState.pendingBudgetApprovals,
-    pendingConfirmations: mockAgentStoreState.pendingConfirmations,
-    activeAgentLoops: mockAgentStoreState.activeAgentLoops,
-    queuedDepthBySession: mockAgentStoreState.queuedDepthBySession,
-    sessionStatusSnapshots: mockAgentStoreState.sessionStatusSnapshots,
-    runtimeActivitySnapshots: mockAgentStoreState.runtimeActivitySnapshots,
-    removePendingBudgetApproval: mockAgentStoreState.removePendingBudgetApproval,
-  }),
+  useAgentStore: <T,>(selector?: (state: typeof mockAgentStoreState) => T) =>
+    selector ? selector(mockAgentStoreState) : mockAgentStoreState,
 }));
 
 vi.mock('../../services/eventBus', () => ({
@@ -90,7 +86,7 @@ vi.mock('../../services/apiClient', async () => {
 });
 
 vi.mock('../../components/markdown/MarkdownViewer', () => ({
-  MarkdownViewer: ({ content }: { content: string }) => <div data-testid="markdown-viewer">{content}</div>,
+  MarkdownViewer: (props: { content: string }) => markdownViewerSpy(props),
 }));
 
 // Mock child tool call bubbles so we can assert their presence
@@ -151,6 +147,7 @@ describe('AgentTurnBubble', () => {
     mockAgentStoreState.sessionStatusSnapshots = {};
     mockAgentStoreState.runtimeActivitySnapshots = {};
     mockAgentStoreState.removePendingBudgetApproval.mockClear();
+    markdownViewerSpy.mockClear();
     vi.mocked(apiClient.post).mockReset();
     vi.mocked(apiClient.post).mockRejectedValue(new Error('unexpected apiClient.post call'));
   });
@@ -171,16 +168,7 @@ describe('AgentTurnBubble', () => {
   });
 
   it('shows thinking block when thinkingChunks exist', () => {
-    // Override session store mock for this test
-    vi.doMock('../../store/sessionStore', () => ({
-      useSessionStore: () => ({
-        sessionMessages: { s1: mockMessages },
-        streamingChunks: {},
-        thinkingChunks: { 'msg-1': 'I need to think about this...' },
-        messages: mockMessages,
-      }),
-    }));
-
+    mockThinkingChunks = { 'msg-1': 'I need to think about this...' };
     mockMessages.push(makeMsg({ id: 'msg-1', role: 'assistant', content: 'Hello' }));
     render(
       <AgentTurnBubble turn={makeTurn([{ kind: 'thinking', messageId: 'msg-1' }, { kind: 'text', messageId: 'msg-1' }])} toolActivities={[]} />
@@ -193,6 +181,19 @@ describe('AgentTurnBubble', () => {
     mockMessages.push(makeMsg({ id: 'msg-1', content: '**bold** text' }));
     render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }])} toolActivities={[]} />);
     expect(screen.getByTestId('markdown-viewer')).toHaveTextContent('**bold** text');
+  });
+
+  it('does not rerender turn markdown for an unrelated streaming chunk', () => {
+    mockMessages.push(makeMsg({ id: 'msg-1', content: 'Hello' }));
+    const turn = makeTurn([{ kind: 'text', messageId: 'msg-1' }], false);
+    const { rerender } = render(<AgentTurnBubble turn={turn} toolActivities={[]} />);
+
+    expect(markdownViewerSpy).toHaveBeenCalledTimes(1);
+
+    mockStreamingChunks = { other: 'foreign update' };
+    rerender(<AgentTurnBubble turn={turn} toolActivities={[]} />);
+
+    expect(markdownViewerSpy).toHaveBeenCalledTimes(1);
   });
 
   it('renders a runtime-only AgentFlow continuation action for the active turn', async () => {
@@ -879,6 +880,54 @@ describe('AgentTurnBubble', () => {
 
     expect(screen.getByTestId('architecture-run-timeline')).toHaveTextContent('running / 1 graph steps');
     expect(screen.getByTestId('architecture-run-timeline')).not.toHaveTextContent('completed / 1 graph steps');
+  });
+
+  it('does not hide markdown router prose without typed architecture metadata', () => {
+    mockMessages.push(
+      makeMsg({
+        id: 'router-prose',
+        role: 'assistant',
+        content: '### Router\n\nThis is user-facing markdown, not typed runtime state.',
+      }),
+      makeMsg({
+        id: 'assistant-tools',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{
+          id: 'architecture:run-1:event-pragmatist',
+          name: 'run_subagent',
+          args: {
+            architectureRunId: 'run-1',
+            nodeId: 'pragmatist',
+            roleSlotId: 'pragmatist',
+            childSessionId: 'branch-pragmatist',
+          },
+        }],
+      }),
+      makeMsg({
+        id: 'tool-pragmatist',
+        role: 'tool_result',
+        content: JSON.stringify({
+          result: 'Pragmatist branch answer',
+          taskId: 'event-pragmatist',
+          childSessionId: 'branch-pragmatist',
+          parentSessionId: 's1',
+          vfsMode: 'shared',
+          vfsSessionId: 's1',
+          copiedFiles: [],
+          durationMs: 0,
+        }),
+        toolCallId: 'architecture:run-1:event-pragmatist',
+      }),
+    );
+
+    render(<AgentTurnBubble turn={makeTurn([
+      { kind: 'text', messageId: 'router-prose' },
+      { kind: 'tool', callId: 'architecture:run-1:event-pragmatist' },
+    ])} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-run-timeline')).toBeInTheDocument();
+    expect(screen.getByTestId('markdown-viewer')).toHaveTextContent('This is user-facing markdown, not typed runtime state.');
   });
 
   it('hides duplicate router and finalizer markdown when the route timeline is present', () => {

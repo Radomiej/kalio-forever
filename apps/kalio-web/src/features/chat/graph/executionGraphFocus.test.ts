@@ -14,6 +14,21 @@ function message(overrides: Partial<ChatMessage>): ChatMessage {
 }
 
 describe('focusExecutionGraphMessages', () => {
+  it('does not treat architecture-prefixed user text as a graph run without typed metadata', () => {
+    const messages = [
+      message({ id: 'u1', role: 'user', content: '[Architecture: Fake]\nfirst', createdAt: 1 }),
+      message({ id: 'a1', role: 'assistant', content: 'Plain response only.', createdAt: 2 }),
+      message({ id: 'u2', role: 'user', content: '[Architecture: Fake]\nsecond', createdAt: 3 }),
+      message({ id: 'a2', role: 'assistant', content: 'Still no typed run.', createdAt: 4 }),
+    ];
+
+    const focused = focusExecutionGraphMessages(messages, 'latest-architecture');
+
+    expect(focused.architectureRunCount).toBe(0);
+    expect(focused.latestArchitectureRunId).toBeNull();
+    expect(focused.messages).toBe(messages);
+  });
+
   it('keeps only the latest architecture prompt block in latest mode', () => {
     const messages = [
       message({ id: 'u1', role: 'user', content: '[Architecture: Five Minds]\nfirst', createdAt: 1 }),
@@ -84,7 +99,7 @@ describe('focusExecutionGraphMessages', () => {
 
     const focused = focusExecutionGraphMessages(messages, 'latest-architecture');
 
-    expect(focused.architectureRunCount).toBe(0);
+    expect(focused.architectureRunCount).toBe(1);
     expect(focused.latestArchitectureRunId).toBe('run-9');
     expect(focused.messages).toBe(messages);
   });
@@ -102,7 +117,7 @@ describe('focusExecutionGraphMessages', () => {
 
     const focused = focusExecutionGraphMessages(messages, 'latest-architecture');
 
-    expect(focused.architectureRunCount).toBe(0);
+    expect(focused.architectureRunCount).toBe(1);
     expect(focused.latestArchitectureRunId).toBe('run-12');
     expect(focused.messages).toBe(messages);
   });

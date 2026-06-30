@@ -296,6 +296,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
       result: {
         ...(snapshot.result ?? {
           flowRunId: run.id,
+          flowDefinitionId: run.flowDefinitionId,
           parentSessionId: run.parentSessionId,
           parentToolCallId: run.parentToolCallId,
           childSessionId: run.childSessionId,
@@ -316,6 +317,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
   private withResultIdentity(result: SubAgentFlowResult, args: RunSubAgentFlowArgs): SubAgentFlowResult {
     return {
       ...result,
+      flowDefinitionId: result.flowDefinitionId ?? args.flowId,
       parentSessionId: args.parentSessionId,
       parentToolCallId: args.parentToolCallId,
     };
@@ -327,6 +329,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
       ...snapshot,
       result: {
         ...snapshot.result,
+        flowDefinitionId: snapshot.result.flowDefinitionId ?? snapshot.run.flowDefinitionId,
         parentSessionId: snapshot.run.parentSessionId,
         parentToolCallId: snapshot.run.parentToolCallId,
         childSessionId: snapshot.run.childSessionId,

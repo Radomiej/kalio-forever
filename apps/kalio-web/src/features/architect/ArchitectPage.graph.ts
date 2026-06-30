@@ -1,9 +1,21 @@
-import type { ArchitectureContextPolicyOverride, ArchitectureNodeKind, ArchitectureSchemaNode } from '@kalio/types';
-import type { ArchitectNode, ArchitectSchema, NodeBehaviorOverrideMap, NodeKindOverrideMap } from './architect.types';
+import type {
+  ArchitectureContextPolicyOverride,
+  ArchitectureNodeKind,
+  ArchitectureSchemaEdgeSelection,
+  ArchitectureSchemaNode,
+} from '@kalio/types';
+import type {
+  ArchitectNode,
+  ArchitectSchema,
+  NodeBehaviorOverrideMap,
+  NodeKindOverrideMap,
+  NodeToolOverrideMap,
+} from './architect.types';
 
 export interface GraphDraft {
   nodePositions: Record<string, { x: number; y: number }>;
   nodeBehaviors: NodeBehaviorOverrideMap;
+  nodeToolOverrides: NodeToolOverrideMap;
   nodeMaxToolAttempts: Record<string, number | undefined>;
   addedNodes: ArchitectNode[];
   edges: ArchitectSchema['edges'] | null;
@@ -12,6 +24,7 @@ export interface GraphDraft {
 export const EMPTY_GRAPH_DRAFT: GraphDraft = {
   nodePositions: {},
   nodeBehaviors: {},
+  nodeToolOverrides: {},
   nodeMaxToolAttempts: {},
   addedNodes: [],
   edges: null,
@@ -66,12 +79,14 @@ export function applyGraphDraft(
       ...(graphDraft.nodePositions[node.id] ?? {}),
       kind: kindOverrides[node.id] ?? node.kind,
       maxToolAttempts: graphDraft.nodeMaxToolAttempts[node.id] ?? node.maxToolAttempts,
+      toolOverride: graphDraft.nodeToolOverrides[node.id] ?? node.toolOverride,
       behavior: graphDraft.nodeBehaviors[node.id] ?? node.behavior,
     })).concat(graphDraft.addedNodes.map((node) => ({
       ...node,
       ...(graphDraft.nodePositions[node.id] ?? {}),
       kind: kindOverrides[node.id] ?? node.kind,
       maxToolAttempts: graphDraft.nodeMaxToolAttempts[node.id] ?? node.maxToolAttempts,
+      toolOverride: graphDraft.nodeToolOverrides[node.id] ?? node.toolOverride,
       behavior: graphDraft.nodeBehaviors[node.id] ?? node.behavior,
     }))),
     edges: graphDraft.edges ?? schema.edges,
@@ -92,6 +107,7 @@ export function toSchemaNodes(schema: ArchitectSchema): ArchitectureSchemaNode[]
     kind: node.kind,
     roleSlotId: node.roleSlotId,
     maxToolAttempts: node.maxToolAttempts,
+    toolOverride: node.toolOverride,
     behavior: node.behavior ? { ...node.behavior } : undefined,
     x: node.x,
     y: node.y,
@@ -178,4 +194,39 @@ export function toggleEdge(
     suffix += 1;
   }
   return [...sourceEdges, { id, fromNodeId, toNodeId }];
+}
+
+export function setEdgeSelection(
+  schema: ArchitectSchema,
+  currentEdges: ArchitectSchema['edges'] | null,
+  fromNodeId: string,
+  toNodeId: string,
+  selection: ArchitectureSchemaEdgeSelection | undefined,
+): ArchitectSchema['edges'] {
+  const sourceEdges = currentEdges ?? schema.edges;
+  const existing = sourceEdges.find((edge) => edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId);
+  if (existing) {
+    return sourceEdges.map((edge) => (
+      edge.id === existing.id
+        ? {
+            ...edge,
+            selection,
+          }
+        : edge
+    ));
+  }
+  const baseId = `${fromNodeId}-${toNodeId}`;
+  const ids = new Set(sourceEdges.map((edge) => edge.id));
+  let id = baseId;
+  let suffix = 2;
+  while (ids.has(id)) {
+    id = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+  return [...sourceEdges, {
+    id,
+    fromNodeId,
+    toNodeId,
+    selection,
+  }];
 }

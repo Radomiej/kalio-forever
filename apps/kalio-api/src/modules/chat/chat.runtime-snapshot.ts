@@ -1,4 +1,5 @@
 import type {
+  AgentBudgetApprovalRequest,
   AgentFlowRunSnapshot,
   AgentFlowRunStatus,
   ChatMessage,
@@ -7,6 +8,7 @@ import type {
   CLIAgentSessionStatus,
   RuntimeChildExecutionStatus,
   SocketEvents,
+  ToolBudgetProgress,
 } from '@kalio/types';
 import type { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import type { SessionPipelineService } from './session-pipeline.service';
@@ -446,6 +448,7 @@ export async function buildRuntimeActivitySnapshotBatch({
     const pendingConfirmations = pendingConfirmationsBySessionId[sessionId] ?? [];
     const pendingBudgetApprovals = pendingBudgetApprovalsBySessionId[sessionId] ?? [];
     const updatedAt = Date.now();
+    const toolBudgetProgress = toolBudgetProgressFromPendingApproval(pendingBudgetApprovals[0], updatedAt);
     const unresolvedTool = runtimeStatus.run?.phase === 'tool_running'
       ? latestUnresolvedToolCall(messagesBySessionId[sessionId] ?? [])
       : null;
@@ -454,6 +457,7 @@ export async function buildRuntimeActivitySnapshotBatch({
       ...runtimeStatus,
       pendingConfirmations,
       pendingBudgetApprovals,
+      ...(toolBudgetProgress ? { toolBudgetProgress } : {}),
       toolActivities: buildToolActivitiesForSession({
         sessionId,
         runtimeStatus,
@@ -488,6 +492,27 @@ export async function buildRuntimeActivitySnapshotBatch({
     sessionTree: resolvedSessionTree,
     statusesBySessionId,
     snapshotsBySessionId,
+  };
+}
+
+function toolBudgetProgressFromPendingApproval(
+  approval: AgentBudgetApprovalRequest | undefined,
+  updatedAt: number,
+): ToolBudgetProgress | undefined {
+  if (!approval) {
+    return undefined;
+  }
+  return {
+    sessionId: approval.sessionId,
+    usedIterations: approval.usedIterations,
+    currentLimit: approval.currentLimit,
+    status: 'waiting',
+    runtimeKind: approval.scope,
+    personaId: approval.personaId,
+    agentRun: approval.agentRun,
+    nodeId: approval.nodeId,
+    roleSlotId: approval.roleSlotId,
+    updatedAt,
   };
 }
 

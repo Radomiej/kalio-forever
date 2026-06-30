@@ -75,6 +75,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
       const nodeKindOverrides = dto.nodeKindOverrides ?? {};
       const nodes = (dto.nodes ?? baseSchema.nodes).map((node) => ({
         ...node,
+        toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
         kind: nodeKindOverrides[node.id] ?? node.kind,
       }));
       const variant: ArchitectureSchema = {
@@ -241,7 +242,10 @@ export class ArchitectureRegistryService implements OnModuleInit {
     return {
       ...schema,
       roleSlots: schema.roleSlots.map((slot) => ({ ...slot })),
-      nodes: schema.nodes.map((node) => ({ ...node })),
+      nodes: schema.nodes.map((node) => ({
+        ...node,
+        toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
+      })),
       edges: schema.edges.map((edge) => ({ ...edge })),
       routerPolicy: { ...schema.routerPolicy },
       contextPolicy: cloneArchitectureContextPolicy(schema.contextPolicy),
@@ -325,7 +329,23 @@ export class ArchitectureRegistryService implements OnModuleInit {
       if ((node.x !== undefined && !Number.isFinite(node.x)) || (node.y !== undefined && !Number.isFinite(node.y))) {
         throw new BadRequestException(`Invalid coordinates for architecture node ${node.id}`);
       }
+      if (node.toolOverride !== undefined && !this.isNodeToolOverride(node.toolOverride)) {
+        throw new BadRequestException(`Invalid tool override for architecture node ${node.id}`);
+      }
     }
+  }
+
+  private isNodeToolOverride(value: unknown): boolean {
+    return this.isPlainRecord(value)
+      && (
+        (value as { allowedToolNames?: unknown }).allowedToolNames === undefined
+        || (
+          Array.isArray((value as { allowedToolNames?: unknown }).allowedToolNames)
+          && (value as { allowedToolNames: unknown[] }).allowedToolNames.every((name) => (
+            typeof name === 'string' && name.trim().length > 0
+          ))
+        )
+      );
   }
 
   private validateEdges(edges: ArchitectureSchema['edges'], nodeIds: Set<string>): void {

@@ -8,6 +8,10 @@ describe('mergeSessionsPreservingLocal', () => {
       id: 'pending-host-session:temp-1',
       personaId: 'p1',
       title: 'New Chat',
+      runtimeContext: {
+        runtimeKind: 'chat',
+        pendingHostSession: true,
+      },
       createdAt: 10,
       updatedAt: 10,
     };

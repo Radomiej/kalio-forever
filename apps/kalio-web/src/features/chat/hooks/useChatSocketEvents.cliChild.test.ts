@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import type { RuntimeActivitySnapshot } from '@kalio/types';
 import { useChatSocketEvents } from './useChatSocketEvents';
 import { rebuildCliChildProjectionsFromHistory } from './useChatSocketEvents.cliChild';
 import { useAgentStore } from '../../../store/agentStore';
@@ -93,6 +94,7 @@ describe('useChatSocketEvents CLI child projections', () => {
       cliAgentOutput: {},
       callIdToName: {},
       toolActivities: [],
+      runtimeActivitySnapshots: {},
     });
     useSessionStore.setState({
       activeSessionId: 'session-1',
@@ -335,6 +337,87 @@ describe('useChatSocketEvents CLI child projections', () => {
     expect(useAgentStore.getState().cliChildProjections['cli-child-1']).toMatchObject({
       status: 'failed',
       lastOutput: 'Authentication required.',
+    });
+  });
+
+  it('prefers typed runtime child execution over stale persisted tool-result history', () => {
+    const runtimeSnapshot: RuntimeActivitySnapshot = {
+      sessionId: 'session-1',
+      active: true,
+      queueLength: 0,
+      pendingConfirmations: [],
+      pendingBudgetApprovals: [],
+      toolActivities: [],
+      childExecutions: [{
+        id: 'child-exec-1',
+        kind: 'cli_agent',
+        parentSessionId: 'session-1',
+        childSessionId: 'cli-child-1',
+        parentToolCallId: 'call-cli-1',
+        label: 'codex',
+        status: 'running',
+        lastOutput: 'typed runtime tail',
+        updatedAt: 3,
+      }],
+      updatedAt: 3,
+    };
+    useAgentStore.setState({
+      callIdToName: {
+        'call-cli-1': 'spawn_cli_agent',
+      },
+      runtimeActivitySnapshots: {
+        'session-1': runtimeSnapshot,
+      },
+    });
+
+    const deps = {
+      upsertCLIChildProjection: vi.fn(),
+      updateCLIChildProjection: vi.fn(),
+      rebuildCLIChildProjections: (parentSessionId: string, projections: Array<unknown>) => {
+        void parentSessionId;
+        useAgentStore.getState().rebuildCLIChildProjections('session-1', projections as never);
+      },
+      appendCLIAgentChunk: vi.fn(),
+      registerCallId: vi.fn(),
+      getAgentState: () => useAgentStore.getState(),
+      getSessionState: () => useSessionStore.getState(),
+      identifySession: vi.fn(),
+    };
+
+    const projections = rebuildCliChildProjectionsFromHistory(deps, 'session-1', [
+      {
+        id: 'assistant-1',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'call-cli-1', name: 'spawn_cli_agent', args: { agentId: 'codex' } }],
+        createdAt: 1,
+      },
+      {
+        id: 'tool-1',
+        sessionId: 'session-1',
+        role: 'tool_result',
+        toolCallId: 'call-cli-1',
+        content: JSON.stringify({
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'session-1',
+          agentId: 'codex',
+          status: 'running',
+          toolResultStatus: 'error',
+          lastOutput: 'stale persisted error',
+        }),
+        createdAt: 2,
+      },
+    ]);
+
+    expect(projections[0]).toMatchObject({
+      childSessionId: 'cli-child-1',
+      status: 'running',
+      lastOutput: 'typed runtime tail',
+    });
+    expect(useAgentStore.getState().cliChildProjections['cli-child-1']).toMatchObject({
+      status: 'running',
+      lastOutput: 'typed runtime tail',
     });
   });
 

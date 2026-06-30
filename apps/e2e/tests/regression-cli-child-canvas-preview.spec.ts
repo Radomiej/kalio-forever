@@ -202,5 +202,26 @@ test.describe('REGRESSION: CLI child canvas preview', () => {
     await expect(canvasCliCard).toBeVisible();
     await expect(canvasCliCard.getByTestId('cli-child-status-' + fixture.cliChildSessionId)).toHaveText('stopped');
     await expect(canvasCliCard.getByTestId('cli-child-output-' + fixture.cliChildSessionId)).toContainText(fixture.cliOutput);
+
+    await page.reload();
+    await page.getByTestId('nav-talk').click();
+
+    const reloadedMasterSession = page.locator(`[data-testid="session-item"][data-session-id="${fixture.masterSessionId}"]`);
+    await expect(reloadedMasterSession).toBeVisible({ timeout: 10_000 });
+    await reloadedMasterSession.click();
+
+    await page.getByTestId('talk-sidebar-graph-entry').click();
+    await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
+
+    const cliGraphNode = page.getByTestId(`graph-node-cli-agent:${fixture.cliChildSessionId}`);
+    await expect(cliGraphNode).toBeVisible({ timeout: 10_000 });
+    await cliGraphNode.click();
+
+    const inspector = page.getByTestId('execution-graph-inspector');
+    await expect(inspector).toContainText('CLI child details');
+    await expect(inspector).toContainText(fixture.cliOutput);
+    await expect(inspector.getByRole('button', { name: 'Open child chat' })).toBeVisible();
+    await expect(inspector.getByRole('button', { name: 'Send follow-up' })).toHaveCount(0);
+    await expect(inspector.getByRole('button', { name: 'Stop run' })).toHaveCount(0);
   });
 });

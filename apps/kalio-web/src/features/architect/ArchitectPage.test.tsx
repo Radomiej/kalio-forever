@@ -48,7 +48,7 @@ const strategicCouncilSchema = {
       id: 'parallel-deliberation',
       label: 'Parallel Deliberation',
       kind: 'parallel',
-      behavior: { mode: 'fan_out_all', fanOut: 'parallel', convergeToNodeId: 'router' },
+      behavior: { mode: 'fan_out_all', fanOut: 'parallel' },
     },
     {
       id: 'pragmatist',
@@ -61,12 +61,12 @@ const strategicCouncilSchema = {
       label: 'Router',
       kind: 'router',
       roleSlotId: 'router',
-      behavior: { mode: 'rank_then_merge', fanOut: 'sequential', convergeToNodeId: 'final-artifact', scoringPolicy: 'risk' },
+      behavior: { mode: 'rank_then_merge', fanOut: 'sequential', scoringPolicy: 'risk' },
     },
   ],
   edges: [
     { id: 'parallel-pragmatist', fromNodeId: 'parallel-deliberation', toNodeId: 'pragmatist' },
-    { id: 'pragmatist-router', fromNodeId: 'pragmatist', toNodeId: 'router' },
+    { id: 'pragmatist-router', fromNodeId: 'pragmatist', toNodeId: 'router', selection: 'converge' },
   ],
 };
 

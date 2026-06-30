@@ -68,7 +68,11 @@ export function GraphInspectorActions({
     && node.sessionId
     && hasOpenableSession
     && node.sessionId !== activeSessionId;
-  const isCliChildNode = node.payload.kind === 'cli-agent' && isChildSessionNode;
+  const isRunningCliChildNode = (
+    node.payload.kind === 'cli-agent'
+    && isChildSessionNode
+    && node.payload.snapshot.status === 'running'
+  );
   const isAgentFlowChildNode = node.payload.kind === 'agent-flow' && isChildSessionNode;
   const shouldRender = isChildSessionNode || selectedConfirmation != null;
 
@@ -98,7 +102,7 @@ export function GraphInspectorActions({
           </span>
         </button>
       )}
-      {isCliChildNode && (
+      {isRunningCliChildNode && (
         <>
           <button
             type="button"

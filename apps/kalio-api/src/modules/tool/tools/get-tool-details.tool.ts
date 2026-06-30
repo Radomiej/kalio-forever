@@ -27,6 +27,7 @@ function getToolNamesArg(args: ToolCallRequest['args']): string[] {
 @Injectable()
 @Tool({
   name: 'get_tool_details',
+  domain: 'tool_registry',
   description:
     'Returns full parameter schemas for the specified tools. ' +
     'Use after list_tools when you need to know exact parameter names and types before calling a tool.',

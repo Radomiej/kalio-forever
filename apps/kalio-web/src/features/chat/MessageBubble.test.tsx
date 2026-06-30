@@ -1,17 +1,22 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@kalio/types';
 import { MessageBubble } from './MessageBubble';
 
+const sessionStoreState = {
+  streamingChunks: {} as Record<string, string>,
+  thinkingChunks: {} as Record<string, string>,
+};
+
 vi.mock('../../store/sessionStore', () => ({
-  useSessionStore: () => ({
-    streamingChunks: {},
-    thinkingChunks: {},
-  }),
+  useSessionStore: <T,>(selector?: (state: typeof sessionStoreState) => T) =>
+    selector ? selector(sessionStoreState) : sessionStoreState,
 }));
 
+const markdownViewerSpy = vi.fn(({ content }: { content: string }) => <div data-testid="markdown-viewer">{content}</div>);
+
 vi.mock('../../components/markdown/MarkdownViewer', () => ({
-  MarkdownViewer: ({ content }: { content: string }) => <div>{content}</div>,
+  MarkdownViewer: (props: { content: string }) => markdownViewerSpy(props),
 }));
 
 function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
@@ -26,6 +31,12 @@ function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
 }
 
 describe('MessageBubble layout', () => {
+  beforeEach(() => {
+    sessionStoreState.streamingChunks = {};
+    sessionStoreState.thinkingChunks = {};
+    markdownViewerSpy.mockClear();
+  });
+
   it('uses the wide conversation lane for assistant and user bubbles', () => {
     const { rerender } = render(
       <MessageBubble message={makeMessage({ role: 'assistant', content: 'assistant response' })} />,
@@ -44,5 +55,17 @@ describe('MessageBubble layout', () => {
     const bubble = screen.getByTestId('message-bubble').querySelector('.bg-base-300');
 
     expect(bubble).toHaveClass('px-2.5', 'py-1.5');
+  });
+
+  it('does not rerender markdown when an unrelated live chunk changes', () => {
+    const message = makeMessage({ id: 'message-1', role: 'assistant', content: 'assistant response' });
+    const { rerender } = render(<MessageBubble message={message} />);
+
+    expect(markdownViewerSpy).toHaveBeenCalledTimes(1);
+
+    sessionStoreState.streamingChunks = { other: 'foreign update' };
+    rerender(<MessageBubble message={message} />);
+
+    expect(markdownViewerSpy).toHaveBeenCalledTimes(1);
   });
 });

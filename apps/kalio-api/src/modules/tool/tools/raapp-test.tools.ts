@@ -21,6 +21,7 @@ import {
 @Injectable()
 @Tool({
   name: 'raapp_test',
+  domain: 'raapp',
   description:
     'Run the test suite defined in tests.yml of either a stored RA-App release or a raw VFS draft. ' +
     'Each test provides input data and expected output values. ' +

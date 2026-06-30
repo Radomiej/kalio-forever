@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { AgentTurn } from '../../../store/sessionStore';
+import type { FetchArchitectureRunProjection } from '../architectureReloadHydration';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import type { SessionHistoryFetchResult, SessionHistoryMeta } from '../sessionHistoryApi';
@@ -32,6 +33,7 @@ export interface SocketReconnectDeps {
   setAgentTurns: (turns: AgentTurn[], sessionId?: string | null) => void;
   hasActiveLoopForSession: (sessionId: string) => boolean;
   fetchMessages: (sessionId: string) => Promise<SessionHistoryFetchResult>;
+  fetchArchitectureRunProjection?: FetchArchitectureRunProjection;
   fetchSessions?: () => Promise<ChatSession[]>;
   onContextInvalidated?: () => void;
 }
@@ -100,6 +102,7 @@ export function handleSocketReconnect(deps: SocketReconnectDeps): void {
       getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
       hasActiveLoopForSession: deps.hasActiveLoopForSession,
       fetchMessages: deps.fetchMessages,
+      fetchArchitectureRunProjection: deps.fetchArchitectureRunProjection,
     });
     if (!hydratedMessages) return;
     const projections = rebuildCliChildProjectionsFromHistory(deps.cliChild, reconnectedSessionId, hydratedMessages);

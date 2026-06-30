@@ -2,6 +2,7 @@ import type {
   AgentBudgetApprovalRequest,
   RuntimeToolActivity,
   SocketEvents,
+  ToolBudgetProgress,
   ToolConfirmationRequest,
 } from '@kalio/types';
 import type { CLIChildProjection } from '../features/chat/cliChildProjection.model';
@@ -86,14 +87,69 @@ function applyPendingBudgetApprovalEntries(
     runtimeActivitySnapshots: updateRuntimeSnapshot(
       state.runtimeActivitySnapshots,
       sessionId,
-      (snapshot) => ({
-        ...snapshot,
-        pendingBudgetApprovals: nextEntries,
-        updatedAt: Date.now(),
-      }),
+      (snapshot) => {
+        const next = {
+          ...snapshot,
+          pendingBudgetApprovals: nextEntries,
+          updatedAt: Date.now(),
+        };
+        const progress = budgetProgressFromPendingApproval(nextEntries[0]);
+        if (progress) {
+          next.toolBudgetProgress = progress;
+        } else {
+          delete next.toolBudgetProgress;
+        }
+        return next;
+      },
       { createIfMissing },
     ),
   };
+}
+
+function budgetProgressFromPendingApproval(
+  approval: AgentBudgetApprovalRequest | undefined,
+): ToolBudgetProgress | undefined {
+  if (!approval) {
+    return undefined;
+  }
+  return {
+    sessionId: approval.sessionId,
+    usedIterations: approval.usedIterations,
+    currentLimit: approval.currentLimit,
+    status: 'waiting',
+    runtimeKind: approval.scope,
+    personaId: approval.personaId,
+    agentRun: approval.agentRun,
+    nodeId: approval.nodeId,
+    roleSlotId: approval.roleSlotId,
+    updatedAt: Date.now(),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function structurallyEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false;
+    }
+    return left.every((value, index) => structurallyEqual(value, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) {
+    return false;
+  }
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+  return leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key)
+    && structurallyEqual(left[key], right[key]));
 }
 
 export function applyPendingConfirmationUpsert(
@@ -208,6 +264,17 @@ export function applyRuntimeActivitySnapshotSync<TActivity extends { sessionId?:
     filteredSnapshot,
     mapRuntimeActivity,
   );
+
+  if (
+    structurallyEqual(state.runtimeActivitySnapshots[filteredSnapshot.sessionId], filteredSnapshot)
+    && structurallyEqual(state.pendingConfirmations, syncedPendingCollections.pendingConfirmations)
+    && structurallyEqual(state.pendingBudgetApprovals, syncedPendingCollections.pendingBudgetApprovals)
+    && state.queuedDepthBySession[filteredSnapshot.sessionId] === filteredSnapshot.queueLength
+    && structurallyEqual(state.toolActivities, syncedToolActivities.toolActivities)
+    && structurallyEqual(state.sessionToolActivities, syncedToolActivities.sessionToolActivities)
+  ) {
+    return state;
+  }
 
   return {
     ...state,

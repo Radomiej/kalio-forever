@@ -13,6 +13,7 @@ vi.mock('../../../services/apiClient', () => ({
 }));
 
 import { useContextPreview } from './useContextPreview';
+import { createPendingHostSession } from '../pendingHostSession';
 
 function makePreview(overrides: Partial<LLMContextPreview> = {}): LLMContextPreview {
   return {
@@ -159,9 +160,13 @@ describe('useContextPreview', () => {
 
   it('does not call the backend for pending host-session ids', () => {
     vi.useFakeTimers();
+    const pendingSession = createPendingHostSession({
+      personaId: 'persona-1',
+      now: 1,
+    });
 
     const { result } = renderHook(() => useContextPreview({
-      sessionId: 'pending-host-session:temp-1',
+      sessionId: pendingSession.id,
       personaId: 'persona-1',
       draftUserMessage: 'draft',
       refreshKey: 0,

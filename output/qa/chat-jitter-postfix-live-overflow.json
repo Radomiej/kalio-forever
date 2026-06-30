@@ -1,0 +1,137 @@
+{
+  "scrollIntoViewCalls": 0,
+  "recordCount": 710,
+  "negativeScrollTopDeltas": 1,
+  "maxBackwardDelta": -90,
+  "maxForwardDelta": 24,
+  "scrollHeightDrops": 2,
+  "maxScrollHeightDrop": -90,
+  "finalScrollTop": 1012,
+  "finalScrollHeight": 2002,
+  "finalClientHeight": 990,
+  "distanceFromBottom": 0,
+  "textLength": 5556,
+  "head": [
+    {
+      "kind": "init",
+      "at": 1782651489335,
+      "scrollTop": 0,
+      "scrollHeight": 1059,
+      "clientHeight": 1059
+    },
+    {
+      "kind": "resize",
+      "at": 1782651489350,
+      "scrollTop": 0,
+      "scrollHeight": 1059,
+      "clientHeight": 1059
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651489372,
+      "scrollTop": 0,
+      "scrollHeight": 1059,
+      "clientHeight": 1059
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651489475,
+      "scrollTop": 0,
+      "scrollHeight": 1059,
+      "clientHeight": 1059
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651489536,
+      "scrollTop": 0,
+      "scrollHeight": 990,
+      "clientHeight": 990
+    }
+  ],
+  "tail": [
+    {
+      "kind": "mutation",
+      "at": 1782651531016,
+      "scrollTop": 1078,
+      "scrollHeight": 2068,
+      "clientHeight": 990
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651531147,
+      "scrollTop": 1078,
+      "scrollHeight": 2068,
+      "clientHeight": 990
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651531290,
+      "scrollTop": 1102,
+      "scrollHeight": 2092,
+      "clientHeight": 990
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651531406,
+      "scrollTop": 1102,
+      "scrollHeight": 2092,
+      "clientHeight": 990
+    },
+    {
+      "kind": "scroll",
+      "at": 1782651531408,
+      "scrollTop": 1102,
+      "scrollHeight": 2092,
+      "clientHeight": 990
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651531512,
+      "scrollTop": 1102,
+      "scrollHeight": 2092,
+      "clientHeight": 990
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651531584,
+      "scrollTop": 1102,
+      "scrollHeight": 2092,
+      "clientHeight": 990
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651531648,
+      "scrollTop": 1102,
+      "scrollHeight": 2092,
+      "clientHeight": 990
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651531714,
+      "scrollTop": 1102,
+      "scrollHeight": 2092,
+      "clientHeight": 990
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651531789,
+      "scrollTop": 1102,
+      "scrollHeight": 2092,
+      "clientHeight": 990
+    },
+    {
+      "kind": "mutation",
+      "at": 1782651531916,
+      "scrollTop": 1012,
+      "scrollHeight": 2002,
+      "clientHeight": 990
+    },
+    {
+      "kind": "scroll",
+      "at": 1782651531919,
+      "scrollTop": 1012,
+      "scrollHeight": 2002,
+      "clientHeight": 990
+    }
+  ]
+}

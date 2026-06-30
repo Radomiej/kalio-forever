@@ -834,6 +834,7 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
         toolName="run_sub_agentflow"
         content={JSON.stringify({
           flowRunId: 'flow-1',
+          flowDefinitionId: 'goal_guard_delivery_loop',
           childSessionId: 'arch-flow-1-root',
           status: 'running',
           summary: 'AgentFlow goal_guard_delivery_loop started.',
@@ -858,6 +859,7 @@ describe('REGRESSION: run_subagent bubble renders child RAApp', () => {
     );
 
     expect(screen.getByTestId('sub-agentflow-result')).toBeInTheDocument();
+    expect(screen.getByText('AgentFlow goal_guard_delivery_loop')).toBeInTheDocument();
     expect(screen.getByText('AgentFlow goal_guard_delivery_loop started.')).toBeInTheDocument();
     expect(screen.getAllByText('flow-1').length).toBeGreaterThan(0);
     expect(screen.getByText('arch-flow-1-root')).toBeInTheDocument();

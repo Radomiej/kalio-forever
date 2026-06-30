@@ -12,13 +12,10 @@ export function focusExecutionGraphMessages(
   messages: ChatMessage[],
   mode: ExecutionGraphFocusMode,
 ): FocusedExecutionGraphMessages {
-  const architecturePromptIndexes = messages
-    .map((message, index) => isArchitecturePrompt(message) ? index : -1)
-    .filter((index) => index >= 0);
-  const architectureRunCount = architecturePromptIndexes.length;
+  const architectureRunCount = architectureRunIds(messages).length;
   const latestArchitectureRunId = findLatestArchitectureRunId(messages);
 
-  if (mode === 'all' || architecturePromptIndexes.length < 2) {
+  if (mode === 'all' || architectureRunCount < 2) {
     return { architectureRunCount, latestArchitectureRunId, messages };
   }
 
@@ -34,10 +31,6 @@ export function focusExecutionGraphMessages(
     latestArchitectureRunId,
     messages: messages.slice(startIndex, endIndex < 0 ? undefined : endIndex),
   };
-}
-
-function isArchitecturePrompt(message: ChatMessage): boolean {
-  return message.role === 'user' && /^\[Architecture:/i.test(message.content.trim());
 }
 
 function findLatestArchitectureMessageIndex(messages: ChatMessage[]): number {
@@ -71,11 +64,19 @@ function architectureRunIdForMessage(message: ChatMessage): string | null {
     }
   }
 
+  if (message.role === 'tool_result') {
+    const parsed = parseRecord(message.content);
+    const runId = parsed?.['architectureRunId'];
+    if (typeof runId === 'string') {
+      return runId;
+    }
+  }
+
   return null;
 }
 
 function messageReferencesArchitecture(message: ChatMessage): boolean {
-  return Boolean(architectureRunIdForMessage(message)) || isArchitecturePrompt(message);
+  return Boolean(architectureRunIdForMessage(message));
 }
 
 function findPromptStartIndex(messages: ChatMessage[], latestArchitectureIndex: number): number {
@@ -101,4 +102,26 @@ function findNextUserMessageIndex(messages: ChatMessage[], startIndex: number): 
     }
   }
   return -1;
+}
+
+function architectureRunIds(messages: ChatMessage[]): string[] {
+  const runIds = new Set<string>();
+  for (const message of messages) {
+    const runId = architectureRunIdForMessage(message);
+    if (runId) {
+      runIds.add(runId);
+    }
+  }
+  return [...runIds];
+}
+
+function parseRecord(content: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
 }

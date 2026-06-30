@@ -1,16 +1,11 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import type { AgentFlowRunSnapshot, ChatSession } from '@kalio/types';
+import type { AgentFlowRunSnapshot, ChatSession, RuntimeWatchReason, RuntimeWatchTarget } from '@kalio/types';
 import { AGENT_FLOW_RUNTIME, type AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port';
 import { isActiveAgentFlowSnapshot } from './chat.gateway.agentflow-stop';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import { ToolDispatchService } from './tool-dispatch.service';
-
-export interface RuntimeWatchTarget {
-  sessionId: string;
-  reasons: string[];
-}
 
 @Injectable()
 export class SessionRuntimeWatchlistService {
@@ -25,11 +20,18 @@ export class SessionRuntimeWatchlistService {
   async list(): Promise<RuntimeWatchTarget[]> {
     const sessions = await this.sessions.list();
     const sessionById = new Map(sessions.map((session) => [session.id, session]));
-    const reasonsByRoot = new Map<string, Set<string>>();
+    const reasonsByRoot = new Map<string, Set<RuntimeWatchReason>>();
 
     for (const sessionId of this.pipeline.getActiveSessionIds()) {
       this.addReasonForSession(sessionById, reasonsByRoot, sessionId, 'active');
     }
+
+    await Promise.all(sessions.map(async (session) => {
+      const runtimeStatus = await this.pipeline.getSessionStatusWithRun(session.id);
+      if (runtimeStatus.run?.status === 'interrupted_needs_retry') {
+        this.addReasonForSession(sessionById, reasonsByRoot, session.id, 'run_recovery_required');
+      }
+    }));
 
     for (const session of sessions) {
       if (this.toolDispatch.getPendingConfirmations(session.id).length > 0) {
@@ -72,15 +74,15 @@ export class SessionRuntimeWatchlistService {
 
   private addReasonForSession(
     sessionById: ReadonlyMap<string, ChatSession>,
-    reasonsByRoot: Map<string, Set<string>>,
+    reasonsByRoot: Map<string, Set<RuntimeWatchReason>>,
     sessionId: string,
-    reason: string,
+    reason: RuntimeWatchReason,
   ): void {
     const rootSessionId = resolveRootSessionId(sessionById, sessionId);
     if (!rootSessionId) {
       return;
     }
-    const reasons = reasonsByRoot.get(rootSessionId) ?? new Set<string>();
+    const reasons = reasonsByRoot.get(rootSessionId) ?? new Set<RuntimeWatchReason>();
     reasons.add(reason);
     reasonsByRoot.set(rootSessionId, reasons);
   }

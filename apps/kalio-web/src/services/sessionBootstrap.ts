@@ -1,10 +1,7 @@
-import type { ChatSession } from '@kalio/types';
+import type { ChatSession, RuntimeWatchTarget } from '@kalio/types';
 import { apiClient } from './apiClient';
 
-export interface RuntimeWatchTarget {
-  sessionId: string;
-  reasons: string[];
-}
+export type { RuntimeWatchTarget } from '@kalio/types';
 
 let sessionsRequest: Promise<ChatSession[]> | null = null;
 let runtimeWatchlistRequest: Promise<RuntimeWatchTarget[]> | null = null;

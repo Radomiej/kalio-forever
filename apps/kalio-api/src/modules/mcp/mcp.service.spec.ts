@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { CreateMCPServerDto, MCPTool } from '@kalio/types';
 import { MCPService } from './mcp.service';
+import { buildMcpSignatureFromDto } from './mcp-registry.utils';
 import { DrizzleService } from '../../database/drizzle.service';
 import type { KalioConfigService } from '../../config/kalio-config.service';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -45,6 +46,13 @@ function makeKalioConfigMock(mcpServers: Record<string, unknown>): KalioConfigMo
       layers: [],
     })),
   } as unknown as KalioConfigMock;
+}
+
+function stubRuntimeConnect(service: MCPService) {
+  return vi.spyOn(
+    service as unknown as { connectHandle(handle: unknown): Promise<void> },
+    'connectHandle',
+  ).mockResolvedValue(undefined);
 }
 
 describe('MCPService — pure logic (no real MCP connections)', () => {
@@ -104,6 +112,36 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
         command: 'npx',
         status: 'disconnected',
       });
+    });
+  });
+
+  describe('findComparableSignatures()', () => {
+    it('uses private registry auth context without exposing it through public server models', async () => {
+      const db = (drizzleSvc as unknown as { db: ReturnType<typeof drizzle> }).db;
+      await db.insert(schema.mcpServers).values({
+        id: 'docs',
+        name: 'Docs',
+        transport: 'http',
+        url: 'https://mcp.example.com',
+        headers: { Authorization: 'Bearer local-token' },
+        enabled: true,
+        status: 'disconnected',
+        createdAt: new Date(),
+      });
+
+      const publicServers = await service.findAll();
+      const signatures = await service.findComparableSignatures();
+
+      expect(publicServers[0]).not.toHaveProperty('headers');
+      expect(signatures.has(buildMcpSignatureFromDto({
+        transport: 'http',
+        url: 'https://mcp.example.com',
+        headers: { Authorization: 'Bearer local-token' },
+      }))).toBe(true);
+      expect(signatures.has(buildMcpSignatureFromDto({
+        transport: 'http',
+        url: 'https://mcp.example.com',
+      }))).toBe(false);
     });
   });
 
@@ -415,6 +453,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
   describe('addServer() – transport validation', () => {
     it('reuses deterministic id for duplicate server config', async () => {
+      const connectHandle = stubRuntimeConnect(service);
       const dto: CreateMCPServerDto = {
         name: 'Test HTTP Server',
         transport: 'http',
@@ -428,9 +467,11 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       expect(first.id).toBe(second.id);
       expect(first.id).toMatch(/^test-http-server-/);
       expect(all.filter((server) => server.id === first.id)).toHaveLength(1);
+      expect(connectHandle).toHaveBeenCalled();
     });
 
     it('normalizes server config for deterministic ids regardless of object key order', async () => {
+      const connectHandle = stubRuntimeConnect(service);
       const first = await service.addServer({
         name: '  Demo MCP Server ',
         transport: 'stdio',
@@ -448,6 +489,7 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
       expect(second.id).toBe(first.id);
       expect(second.id).toMatch(/^demo-mcp-server-/);
+      expect(connectHandle).toHaveBeenCalled();
     }, 60_000);
 
     it('toMCPServer shape: reflects handle status when present', async () => {

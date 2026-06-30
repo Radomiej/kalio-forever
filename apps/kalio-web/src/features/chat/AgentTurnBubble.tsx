@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BrainCircuit, ChevronDown } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
@@ -28,6 +29,13 @@ import {
   selectRuntimeContinuationActions,
 } from '../../store/agentRuntimeSelectors';
 import { AgentFlowResumeAction } from '../agent-flow/AgentFlowResumeAction';
+import {
+  areAgentTurnBubblePropsEqual,
+  collectTurnMessageIds,
+  pickChunkSubset,
+  pickRelevantTurnMessages,
+  pickSessionMessagesSubset,
+} from './AgentTurnBubble.selectors';
 
 interface Props {
   turn: AgentTurn;
@@ -73,9 +81,19 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
 
 // ─── AgentTurnBubble ──────────────────────────────────────────────────────────
 
-export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, renderedMessages }: Props) {
-  const { messages, sessions, sessionMessages, streamingChunks, thinkingChunks } = useSessionStore();
-  const turnMessages = renderedMessages ?? messages;
+export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivities, answeredCallIds, renderedMessages }: Props) {
+  const sessions = useSessionStore((state) => state.sessions);
+  const turnMessageIds = useMemo(() => collectTurnMessageIds(turn.items), [turn.items]);
+  const fallbackTurnMessages = useSessionStore(
+    useShallow(useCallback((state) => pickRelevantTurnMessages(state.messages, turn), [turn])),
+  );
+  const streamingChunks = useSessionStore(
+    useShallow(useCallback((state) => pickChunkSubset(state.streamingChunks, turnMessageIds), [turnMessageIds])),
+  );
+  const thinkingChunks = useSessionStore(
+    useShallow(useCallback((state) => pickChunkSubset(state.thinkingChunks, turnMessageIds), [turnMessageIds])),
+  );
+  const turnMessages = renderedMessages ?? fallbackTurnMessages;
   const [submittedBudgetRequestId, setSubmittedBudgetRequestId] = useState<string | null>(null);
   const {
     callIdToName: persistentCallIdToName,
@@ -142,7 +160,6 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
   const turnContinuationActions = selectRuntimeContinuationActions({
     runtimeActivitySnapshots,
     sessions,
-    sessionMessages,
   }).filter((action) => (
     !toolResultAgentFlowRunIds.has(action.flowRunId)
     && (action.parentSessionId === turn.sessionId || action.sessionId === turn.sessionId)
@@ -152,7 +169,7 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
   const architectureRun = workflowTurnProjection.architectureRun;
   const turnArchitectureRun = architectureRun && turn.items.some((item) => {
     if (item.kind === 'text') {
-      return turnMessages.some((message) => message.id === item.messageId && (message.architectureRun || /^###\s+(Router|Finalizer)\b/im.test(message.content)));
+      return turnMessages.some((message) => message.id === item.messageId && message.architectureRun);
     }
     if (item.kind === 'tool') {
       return toolCallIdToName.get(item.callId) === 'run_subagent';
@@ -168,6 +185,21 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
     : null;
   const visibleItems = deriveVisibleTurnItems(turn.items, turnMessages, streamingChunks, turn.done);
   const turnBranchSessionIds = workflowTurnProjection.branchSessionIds;
+  const relevantSessionIds = useMemo(() => {
+    if (!turnArchitectureRun) {
+      return [];
+    }
+
+    return sessions
+      .filter((session) => (
+        turnBranchSessionIds.has(session.id)
+        || sameArchitectureRunId(architectureRunIdForSession(session), turnArchitectureRun.runId)
+      ))
+      .map((session) => session.id);
+  }, [sessions, turnArchitectureRun, turnBranchSessionIds]);
+  const sessionMessages = useSessionStore(
+    useShallow(useCallback((state) => pickSessionMessagesSubset(state.sessionMessages, relevantSessionIds), [relevantSessionIds])),
+  );
   const knownBranchSessionIds = useMemo(() => {
     const effectiveQueuedDepthBySession = mergeRuntimeQueuedDepthBySession(
       queuedDepthBySession,
@@ -457,16 +489,10 @@ export function AgentTurnBubble({ turn, toolActivities, answeredCallIds, rendere
       </div>
     </div>
   );
-}
+}, areAgentTurnBubblePropsEqual);
 
-function isArchitectureTextOutput(content: string, hasRunMetadata: boolean): boolean {
-  if (hasRunMetadata) {
-    return true;
-  }
-  return /^###\s+(Router|Finalizer)\b/im.test(content)
-    || /^Architecture run\s+(running|completed|failed):/im.test(content)
-    || /^Execution trace:/im.test(content)
-    || /^Executed route:/im.test(content);
+function isArchitectureTextOutput(_content: string, hasRunMetadata: boolean): boolean {
+  return hasRunMetadata;
 }
 
 function finalAnswerForArchitectureRun(

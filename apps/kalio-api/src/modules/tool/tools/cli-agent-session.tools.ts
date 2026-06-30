@@ -72,6 +72,7 @@ function getAgentIdArg(args: ToolCallRequest['args']): string {
 @Injectable()
 @Tool({
   name: 'spawn_cli_agent',
+  domain: 'cli_agent',
   description:
     'Start a durable CLI child session in the background and return immediately with a childSessionId and live runtime state. ' +
     'Prefer this over run_cli_agent when an orchestrator needs to monitor, redirect, or stop the CLI session later.',
@@ -164,6 +165,7 @@ export class SpawnCliAgentTool {
 @Injectable()
 @Tool({
   name: 'message_cli_agent',
+  domain: 'cli_agent',
   description:
     'Continue an existing durable CLI child session with a new instruction. ' +
     'Use this to redirect or refine an existing CLI session instead of spawning a new one.',
@@ -226,6 +228,7 @@ export class MessageCliAgentTool {
 @Injectable()
 @Tool({
   name: 'get_cli_agent_status',
+  domain: 'cli_agent',
   description:
     'Inspect the current runtime state of a durable CLI child session, including whether it is still running and the latest output tail.',
   parameters: {
@@ -250,6 +253,7 @@ export class GetCliAgentStatusTool {
 @Injectable()
 @Tool({
   name: 'stop_cli_agent',
+  domain: 'cli_agent',
   description:
     'Stop the current turn of a durable CLI child session and keep the child session available for later follow-up guidance.',
   parameters: {

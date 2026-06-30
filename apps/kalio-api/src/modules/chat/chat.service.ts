@@ -150,7 +150,18 @@ export class ChatService {
             }
           : undefined,
         callbacks: {
-          onBeforeIteration: async () => {
+          onBeforeIteration: async (iteration, messageId, currentLimit) => {
+            trackingEmit('agent:budget_progress', {
+              sessionId,
+              turnId,
+              messageId,
+              usedIterations: iteration,
+              currentLimit,
+              status: 'running',
+              runtimeKind: 'chat',
+              personaId,
+              updatedAt: Date.now(),
+            });
             await checkpointRun('llm_streaming');
           },
           onToolPending: async () => {
@@ -168,6 +179,17 @@ export class ChatService {
             });
           },
           onIterationLimitReached: async ({ iterationCount, currentLimit }) => {
+            trackingEmit('agent:budget_progress', {
+              sessionId,
+              turnId,
+              messageId: firstMessageId,
+              usedIterations: iterationCount,
+              currentLimit,
+              status: 'exhausted',
+              runtimeKind: 'chat',
+              personaId,
+              updatedAt: Date.now(),
+            });
             await checkpointRun('tool_pending');
             return this.agentBudgetApprovals.requestAdditionalBudget(
               {

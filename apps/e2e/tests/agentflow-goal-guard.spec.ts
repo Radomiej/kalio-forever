@@ -337,6 +337,27 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Guard');
       await expect(page.getByTestId('execution-graph-view')).toContainText('waiting_on_orchestrator');
+
+      await page.reload();
+      await page.getByTestId('nav-talk').click();
+      await selectSession(page, fixture.sessionId, fixture.title);
+
+      const reloadedAgentFlowCall = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]');
+      await expect(reloadedAgentFlowCall).toBeVisible({ timeout: 10_000 });
+      await expect(reloadedAgentFlowCall.getByTestId('sub-agentflow-result')).toContainText('waiting_on_orchestrator');
+      await expect(reloadedAgentFlowCall.getByTestId('sub-agentflow-result')).toContainText('Waiting on orchestrator');
+      await expect(reloadedAgentFlowCall.getByTestId('sub-agentflow-result')).toContainText('Goal Guard is waiting for external QA evidence');
+      await expect(reloadedAgentFlowCall.getByTestId(`resume-agentflow-${fixture.runId}`)).toContainText('Resume AgentFlow');
+
+      await reloadedAgentFlowCall.getByTestId('open-agentflow-canvas').click();
+      await expect(page.getByTestId('agentflow-canvas-section')).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByTestId('agentflow-canvas-section')).toContainText('waiting_on_orchestrator');
+      await expect(page.getByTestId('agentflow-canvas-section').getByText('Resume AgentFlow')).toBeVisible();
+
+      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Guard');
+      await expect(page.getByTestId('execution-graph-view')).toContainText('waiting_on_orchestrator');
     } finally {
       await deleteSessionIfExists(request, fixture.sessionId);
       await deleteSessionIfExists(request, fixture.childSessionId);
@@ -793,7 +814,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     expect(completed.result?.status).toBe('done');
     expect(completed.events.some((event) => event.type === 'flow:waiting_on_orchestrator')).toBeTruthy();
     expect(completed.events.some((event) => event.type === 'flow:resume_input')).toBeTruthy();
-    expect(completed.result?.summary).toContain('Goal Guard');
+    expect(completed.result?.flowDefinitionId).toBe('goal_guard_delivery_loop');
   });
 
   test('resumes a bounded waiting AgentFlow from the FE and records passing QA evidence', async ({ page, request }) => {

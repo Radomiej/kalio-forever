@@ -79,4 +79,59 @@ describe('normalizeArchitectureSchema', () => {
       },
     });
   });
+
+  it('preserves explicit node tool permission overrides from registry schemas', () => {
+    const schema = normalizeArchitectureSchema({
+      id: 'tool-policy-schema',
+      name: 'Tool Policy Schema',
+      roleSlots: [],
+      nodes: [{
+        id: 'orchestrator',
+        label: 'Orchestrator',
+        kind: 'router',
+        toolOverride: {
+          allowedToolNames: ['run_subagent', 'fs_read', 42, ''],
+        },
+      }],
+      edges: [],
+    });
+
+    expect(schema.nodes[0]?.toolOverride).toEqual({
+      allowedToolNames: ['run_subagent', 'fs_read'],
+    });
+  });
+
+  it('ignores legacy node-level convergeToNodeId and preserves edge selection metadata', () => {
+    const schema = normalizeArchitectureSchema({
+      id: 'edge-selection-schema',
+      name: 'Edge Selection Schema',
+      roleSlots: [],
+      nodes: [{
+        id: 'router',
+        label: 'Router',
+        kind: 'router',
+        behavior: {
+          mode: 'rank_then_merge',
+          convergeToNodeId: 'legacy-artifact',
+        },
+      }, {
+        id: 'artifact',
+        label: 'Artifact',
+        kind: 'artifact',
+      }],
+      edges: [{
+        id: 'router-artifact',
+        fromNodeId: 'router',
+        toNodeId: 'artifact',
+        selection: 'converge',
+      }],
+    });
+
+    expect(schema.nodes[0]?.behavior).toEqual({
+      mode: 'rank_then_merge',
+    });
+    expect(schema.edges[0]).toMatchObject({
+      selection: 'converge',
+    });
+  });
 });

@@ -23,6 +23,7 @@ function getModeArg(args: ToolCallRequest['args']): 'display' {
 @Injectable()
 @Tool({
   name: 'design_preview',
+  domain: 'preview',
   description: 'Preview an HTML file from the conversation virtual filesystem as an inline RA-App.',
   parameters: {
     type: 'object',

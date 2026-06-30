@@ -103,7 +103,12 @@ function vfsReadState(messages: ChatMessage[]): 'success' | 'failure' | 'unknown
 }
 
 function isMissingFileResult(content: string): boolean {
-  return /\b(ENOENT|VFS_FILE_NOT_FOUND|no such file or directory)\b/i.test(content);
+  const parsed = parseRecord(content);
+  if (!parsed) {
+    return false;
+  }
+  const errorCode = firstStringField(parsed, ['errorCode', 'toolResultErrorCode', 'code']);
+  return errorCode === 'ENOENT' || errorCode === 'VFS_FILE_NOT_FOUND';
 }
 
 function parseRecord(content: string): Record<string, unknown> | null {
@@ -115,4 +120,14 @@ function parseRecord(content: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function firstStringField(record: Record<string, unknown>, fields: string[]): string | null {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === 'string' && value.length > 0) {
+      return value;
+    }
+  }
+  return null;
 }

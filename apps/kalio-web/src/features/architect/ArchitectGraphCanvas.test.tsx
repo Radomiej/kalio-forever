@@ -722,7 +722,7 @@ const baseSchema: ArchitectSchema = {
       id: 'end',
       label: 'End',
       kind: 'router',
-      behavior: { mode: 'rank_then_merge', fanOut: 'sequential', convergeToNodeId: 'start' },
+      behavior: { mode: 'rank_then_merge', fanOut: 'sequential' },
       x: 360,
       y: 160,
       slots: [],

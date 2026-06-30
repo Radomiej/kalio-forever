@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { CreateMCPServerDto, MCPServer } from '@kalio/types';
 import { MCPService } from './mcp.service';
-import { buildMcpSignatureFromDto, buildMcpSignatureFromServer } from './mcp-registry.utils';
+import { buildMcpSignatureFromDto } from './mcp-registry.utils';
 
 export interface ExternalMCPServerEntry {
   id: string;
@@ -38,8 +38,7 @@ export class MCPExternalImportService {
   constructor(private readonly mcpService: MCPService) {}
 
   async discover(): Promise<ExternalMCPServerEntry[]> {
-    const existing = await this.mcpService.findAll();
-    const existingSignatures = new Set(existing.map((server) => buildMcpSignatureFromServer(server)));
+    const existingSignatures = await this.mcpService.findComparableSignatures();
     const discovered: ExternalMCPServerEntry[] = [];
 
     for (const sourceConfig of this.getSourceConfigs()) {

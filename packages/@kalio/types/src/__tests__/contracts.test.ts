@@ -18,9 +18,12 @@ import type {
   ChatSession,
   CreateSessionDto,
   ToolMeta,
+  ToolDomain,
   ToolCallRequest,
   ToolResult,
   ToolConfirmationRequest,
+  RuntimeWatchReason,
+  RuntimeWatchTarget,
   VFSWriteRequest,
   Credential,
   CreateCredentialDto,
@@ -34,6 +37,7 @@ import type {
   ArchitectureNodeScoringPolicy,
   ArchitectureContextCompression,
   ArchitectureSchema,
+  ArchitectureSchemaEdgeSelection,
   CreateArchitectureSchemaVariantDto,
   CreateArchitectureRunDto,
   ArchitectureRun,
@@ -58,6 +62,7 @@ import type {
   CreateAgentFlowRunDto,
   CLIAgentConfig,
   CLIAgentSessionSnapshot,
+  WorkflowErrorCode,
   RunSubAgentFlowArgs,
   ResumeAgentFlowRunDto,
   SubAgentFlowResult,
@@ -123,9 +128,35 @@ describe('@kalio/types contract shape', () => {
     expectTypeOf<ToolMeta>().toEqualTypeOf<{
       name: string;
       description: string;
+      serverKey?: ID;
+      aliases?: string[];
+      domain?: ToolDomain;
       parameters: Record<string, unknown>;
       requiresConfirmation: boolean;
     }>();
+    expectTypeOf<ToolDomain>().toEqualTypeOf<
+      | 'subagent'
+      | 'cli_agent'
+      | 'agent_workflow'
+      | 'security_audit'
+      | 'architecture'
+      | 'vfs'
+      | 'file_system'
+      | 'file_search'
+      | 'key_value'
+      | 'terminal'
+      | 'raapp'
+      | 'preview'
+      | 'memory'
+      | 'search'
+      | 'web'
+      | 'tool_registry'
+      | 'image'
+      | 'skill'
+      | 'persona'
+      | 'mcp'
+      | 'generic'
+    >();
     expectTypeOf<Pick<ToolCallRequest, 'sessionId' | 'toolName' | 'args' | 'callId'>>().toEqualTypeOf<{
       sessionId: ID;
       toolName: string;
@@ -150,6 +181,20 @@ describe('@kalio/types contract shape', () => {
       requestId: string;
       sessionId: ID;
       message?: string;
+    }>();
+  });
+
+  it('keeps runtime watchlist reasons as typed replay causes', () => {
+    expectTypeOf<RuntimeWatchReason>().toEqualTypeOf<
+      | 'active'
+      | 'pending_confirmation'
+      | 'pending_budget'
+      | 'agent_flow_live'
+      | 'run_recovery_required'
+    >();
+    expectTypeOf<RuntimeWatchTarget>().toEqualTypeOf<{
+      sessionId: ID;
+      reasons: RuntimeWatchReason[];
     }>();
   });
 
@@ -459,8 +504,9 @@ describe('@kalio/types contract shape', () => {
       model: string;
       architecturePreference: string;
     }>();
-    expectTypeOf<Pick<CLIAgentSessionSnapshot, 'status' | 'lastOutput' | 'recoveryAttempts'>>().toEqualTypeOf<{
+    expectTypeOf<Pick<CLIAgentSessionSnapshot, 'status' | 'errorCode' | 'lastOutput' | 'recoveryAttempts'>>().toEqualTypeOf<{
       status: 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
+      errorCode?: WorkflowErrorCode;
       lastOutput?: string;
       recoveryAttempts?: number;
     }>();
@@ -507,10 +553,12 @@ describe('@kalio/types contract shape', () => {
         kind: 'parallel' | 'role' | 'router' | 'artifact';
         roleSlotId?: string;
         maxToolAttempts?: number;
+        toolOverride?: {
+          allowedToolNames?: string[];
+        };
         behavior?: {
           mode: ArchitectureNodeBehaviorMode;
           fanOut?: ArchitectureNodeFanOutMode;
-          convergeToNodeId?: string;
           maxBranches?: number;
           scoringPolicy?: ArchitectureNodeScoringPolicy;
           description?: string;
@@ -523,6 +571,7 @@ describe('@kalio/types contract shape', () => {
         fromNodeId: string;
         toNodeId: string;
         label?: string;
+        selection?: ArchitectureSchemaEdgeSelection;
         returnToOrchestrator?: boolean;
       }>;
       routerPolicy: {
@@ -574,10 +623,12 @@ describe('@kalio/types contract shape', () => {
         kind: 'parallel' | 'role' | 'router' | 'artifact';
         roleSlotId?: string;
         maxToolAttempts?: number;
+        toolOverride?: {
+          allowedToolNames?: string[];
+        };
         behavior?: {
           mode: ArchitectureNodeBehaviorMode;
           fanOut?: ArchitectureNodeFanOutMode;
-          convergeToNodeId?: string;
           maxBranches?: number;
           scoringPolicy?: ArchitectureNodeScoringPolicy;
           description?: string;
@@ -590,9 +641,11 @@ describe('@kalio/types contract shape', () => {
         fromNodeId: string;
         toNodeId: string;
         label?: string;
+        selection?: ArchitectureSchemaEdgeSelection;
         returnToOrchestrator?: boolean;
       }>;
     }>();
+    expectTypeOf<ArchitectureSchemaEdgeSelection>().toEqualTypeOf<'default' | 'converge' | 'continuation'>();
     expectTypeOf<ArchitectureRun['executionMode']>().toEqualTypeOf<'session_branches' | 'subagent_execution'>();
     expectTypeOf<ArchitectureRun['status']>().toEqualTypeOf<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>();
     expectTypeOf<ArchitectureRun['slotOverrides']>().toEqualTypeOf<Record<string, ID> | undefined>();
@@ -670,11 +723,23 @@ describe('@kalio/types contract shape', () => {
         sourceSlot: string;
       }>;
       confidence: number;
-      nextAction: 'finalize' | 'ask_human' | 'run_more_research' | 'rerun_with_different_personas';
+      nextAction: 'finalize' | 'ask_human' | 'route_to' | 'run_more_research' | 'rerun_with_different_personas';
+      targetNodeId?: ID;
+      response?: string;
     }>();
     expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['action']>().toEqualTypeOf<ArchitectureExecutionEvent['action']>();
     expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['detail']>().toEqualTypeOf<string | undefined>();
     expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['routerOutput']>().toEqualTypeOf<ArchitectureRouterOutput | undefined>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['lifecycle']>().toEqualTypeOf<ArchitectureExecutionEvent['lifecycle']>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['status']>().toEqualTypeOf<ArchitectureExecutionEvent['status']>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['reasonCode']>().toEqualTypeOf<ArchitectureExecutionEvent['reasonCode']>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['errorCode']>().toEqualTypeOf<ArchitectureExecutionEvent['errorCode']>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['failure']>().toEqualTypeOf<ArchitectureExecutionEvent['failure']>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['evidence']>().toEqualTypeOf<ArchitectureExecutionEvent['evidence']>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['trace'][number]['runtimeDecision']>().toEqualTypeOf<ArchitectureExecutionEvent['runtimeDecision']>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['graphNodes']>().toEqualTypeOf<ArchitectureGraphProjection['nodes'] | undefined>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['graphEdges']>().toEqualTypeOf<ArchitectureGraphProjection['edges'] | undefined>();
+    expectTypeOf<NonNullable<ChatMessage['architectureRun']>['graphChildAgents']>().toEqualTypeOf<ArchitectureGraphProjection['childAgents'] | undefined>();
     expectTypeOf<Pick<ArchitectureGraphProjection, 'runId' | 'nodes' | 'edges' | 'routeHops' | 'childAgents'>>().toEqualTypeOf<{
       runId: ID;
       nodes: Array<{

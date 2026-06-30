@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionsController } from './sessions.controller';
-import type { ChatSession, ChatMessage } from '@kalio/types';
-import type { RuntimeWatchTarget } from './session-runtime-watchlist.service';
+import type { ChatSession, ChatMessage, RuntimeWatchTarget } from '@kalio/types';
 
 const mockSession: ChatSession = {
   id: 'sess-1',

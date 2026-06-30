@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { buildSpawnCommand, extractSilentCatchHits } from './run-audit.mjs';
 import { collectKnipRows } from './aggregate.mjs';
@@ -32,6 +33,24 @@ test('buildSpawnCommand avoids shell true with args on Windows', () => {
   assert.deepEqual(spawnCommand.args.slice(0, 3), ['/d', '/s', '/c']);
   assert.match(spawnCommand.args[3], /--extensions ts,tsx --json/);
   assert.equal(spawnCommand.shell, false);
+});
+
+test('CLI child projection model stays decoupled from Zustand agent store', () => {
+  const source = readFileSync(
+    new URL('../../apps/kalio-web/src/features/chat/cliChildProjection.model.ts', import.meta.url),
+    'utf8',
+  );
+
+  assert.doesNotMatch(source, /from\s+['"][^'"]*store\/agentStore['"]/);
+});
+
+test('AgentFlow launch context stays decoupled from ArchitectureRuntimeService implementation', () => {
+  const source = readFileSync(
+    new URL('../../apps/kalio-api/src/modules/agent-flow/agent-flow-launch-context.ts', import.meta.url),
+    'utf8',
+  );
+
+  assert.doesNotMatch(source, /from\s+['"][^'"]*architecture-runtime\.service['"]/);
 });
 
 test('collectKnipRows includes unused files nested under issues', () => {

@@ -70,6 +70,7 @@ async function buildGeneratedArchive(input: SaveGeneratedAppInput): Promise<{ ap
 @Injectable()
 @ConfirmedTool({
   name: 'raapp_create',
+  domain: 'raapp',
   description:
     'Create an RA-App block from HTML or GUI DSL content and validate it. ' +
     'Returns a ready block descriptor that can be rendered in the chat UI. ' +
@@ -162,6 +163,7 @@ export class RaAppCreateTool {
 @Injectable()
 @Tool({
   name: 'run_raapp',
+  domain: 'raapp',
   description:
     'Run a stored RA-App by its ID. The app is rendered in the chat UI as an interactive or display block. ' +
     'Call list_raapps first to discover available app IDs and their descriptions. ' +
@@ -316,6 +318,7 @@ export class RunRaAppTool {
 @Injectable()
 @Tool({
   name: 'list_raapps',
+  domain: 'raapp',
   description: 'List all stored RA-Apps with their IDs, names, and descriptions. Use this before run_raapp to find the right ID.',
   parameters: { type: 'object', properties: {} },
   requiresConfirmation: false,
@@ -342,6 +345,7 @@ export class ListRaAppsTool {
 @Injectable()
 @Tool({
   name: 'raapp_compile',
+  domain: 'raapp',
   description:
     'Validate and compile GUI DSL code in a sandboxed VM. ' +
     'Returns the result of executing the DSL or an error with details. ' +

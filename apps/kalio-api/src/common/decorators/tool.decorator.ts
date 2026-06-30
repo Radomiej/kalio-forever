@@ -1,10 +1,12 @@
 import { SetMetadata } from '@nestjs/common';
+import type { ToolDomain } from '@kalio/types';
 
 export const TOOL_METADATA = 'tool:metadata';
 
 export interface ToolOptions {
   name: string;
   description: string;
+  domain?: ToolDomain;
   parameters: Record<string, unknown>;  // JSON Schema
   requiresConfirmation?: boolean;
 }

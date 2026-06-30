@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CreateMCPServerDto, MCPServer } from '@kalio/types';
 import { MCPExternalImportService } from './mcp-external-import.service';
 import type { MCPService } from './mcp.service';
+import { buildMcpSignatureFromDto } from './mcp-registry.utils';
 
 vi.mock('node:fs/promises', () => ({
   access: vi.fn(),
@@ -31,6 +32,16 @@ describe('MCPExternalImportService', () => {
 
   const mcpService = {
     findAll: vi.fn(async () => [existingServer]),
+    findComparableSignatures: vi.fn(async () => new Set([
+      buildMcpSignatureFromDto({
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-github'],
+        env: {
+          GITHUB_TOKEN: '${GITHUB_TOKEN}',
+        },
+      }),
+    ])),
     addServer: vi.fn(async (dto: CreateMCPServerDto) => ({
       id: `new-${dto.name}`,
       serverKey: `sqlite::new-${dto.name}`,
@@ -96,6 +107,24 @@ describe('MCPExternalImportService', () => {
     expect(github?.details.envKeys).toEqual(['GITHUB_TOKEN']);
     expect(filesystem?.equivalentToExisting).toBe(false);
     expect(filesystem?.dto.transport).toBe('stdio');
+  });
+
+  it('does not mark same command as equivalent when the stored auth context differs', async () => {
+    mcpService.findComparableSignatures.mockResolvedValueOnce(new Set([
+      buildMcpSignatureFromDto({
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-github'],
+        env: {
+          GITHUB_TOKEN: '${OTHER_GITHUB_TOKEN}',
+        },
+      }),
+    ]));
+
+    const entries = await service.discover();
+
+    const github = entries.find((entry) => entry.sourceKey === 'github');
+    expect(github?.equivalentToExisting).toBe(false);
   });
 
   it('parses external MCP configs with a UTF-8 BOM', async () => {

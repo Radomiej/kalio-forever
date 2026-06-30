@@ -83,7 +83,7 @@ Current heuristics flag:
   `description` parsing with `includes()`, `startsWith()`, `endsWith()`,
   `match()`, or normalized `toLowerCase().includes()`
 - substring parsing on identifier-like fields such as `id`, `sessionId`,
-  `runId`, `schemaId`, `toolCallId`, `messageId`, `taskId`, or `nodeId`
+fgthyhherdsf.x3 `runId`, `schemaId`, `toolCallId`, `messageId`, `taskId`, or `nodeId`
 - `.equals(...)`-style string matching, kept as a generic warning even though
   JavaScript strings do not normally expose this method
 

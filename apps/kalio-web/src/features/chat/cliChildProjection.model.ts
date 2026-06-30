@@ -6,7 +6,7 @@ import type {
   RuntimeActivitySnapshot,
   RuntimeChildExecution,
 } from '@kalio/types';
-import type { ToolActivityStatus } from '../../store/agentStore';
+import type { ToolActivityStatus } from '../../store/agentRuntimeTypes';
 import { extractCLIAgentResult, extractCLIAgentSessionSnapshot, extractPersistedToolResultMeta } from './ToolCallBubble.parsers';
 
 export const CLI_CHILD_DELEGATION_TOOLS = new Set([
@@ -42,6 +42,14 @@ export function isCliChildDelegationTool(toolName: string): boolean {
 
 export function isCliChildToolName(toolName: string): boolean {
   return isCliChildDelegationTool(toolName) || CLI_SESSION_TOOLS.has(toolName);
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function stringOrEmpty(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }
 
 export function terminalProjectionStatus(
@@ -217,7 +225,7 @@ export function projectionFromRuntimeChildExecution(
     parentCallId: execution.parentToolCallId,
     agentId: execution.label ?? 'copilot',
     status: mapRuntimeChildExecutionStatus(execution.status),
-    lastOutput: execution.lastOutput ?? '',
+    lastOutput: stringOrEmpty(execution.lastOutput),
     toolName: fallbackToolName,
   };
 }
@@ -286,7 +294,7 @@ export function mergeCLIChildProjectionSources(params: {
       ? runtimeProjection.agentId
       : storedProjection.agentId || runtimeProjection.agentId,
     status: runtimeProjection.status,
-    lastOutput: runtimeProjection.lastOutput.trim().length > 0
+    lastOutput: nonEmptyString(runtimeProjection.lastOutput)
       ? runtimeProjection.lastOutput
       : storedProjection.lastOutput,
     childTitle: storedProjection.childTitle ?? runtimeProjection.childTitle,
@@ -321,6 +329,7 @@ export function rebuildCLIChildProjectionsFromMessages(
       continue;
     }
 
+    // TODO: legacy fallback for persisted histories created before runtime childExecutions were projected.
     let parsed: unknown;
     try {
       parsed = JSON.parse(message.content);

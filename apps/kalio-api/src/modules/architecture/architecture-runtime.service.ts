@@ -1373,16 +1373,27 @@ export class ArchitectureRuntimeService {
       && this.isNodeKind(value.kind)
       && (value.roleSlotId === undefined || typeof value.roleSlotId === 'string')
       && (value.maxToolAttempts === undefined || (typeof value.maxToolAttempts === 'number' && Number.isInteger(value.maxToolAttempts) && value.maxToolAttempts >= 1 && value.maxToolAttempts <= 100))
+      && (value.toolOverride === undefined || this.isNodeToolOverride(value.toolOverride))
       && (value.behavior === undefined || this.isNodeBehavior(value.behavior))
       && (value.x === undefined || typeof value.x === 'number')
       && (value.y === undefined || typeof value.y === 'number');
+  }
+
+  private isNodeToolOverride(value: unknown): value is NonNullable<ArchitectureSchemaNode['toolOverride']> {
+    return this.isPlainRecord(value)
+      && (
+        value.allowedToolNames === undefined
+        || (
+          Array.isArray(value.allowedToolNames)
+          && value.allowedToolNames.every((name) => typeof name === 'string' && name.trim().length > 0)
+        )
+      );
   }
 
   private isNodeBehavior(value: unknown): value is NonNullable<ArchitectureSchemaNode['behavior']> {
     return this.isPlainRecord(value)
       && this.isNodeBehaviorMode(value.mode)
       && (value.fanOut === undefined || value.fanOut === 'parallel' || value.fanOut === 'sequential')
-      && (value.convergeToNodeId === undefined || typeof value.convergeToNodeId === 'string')
       && (value.maxBranches === undefined || (typeof value.maxBranches === 'number' && Number.isInteger(value.maxBranches) && value.maxBranches > 0))
       && (
         value.scoringPolicy === undefined
@@ -1401,9 +1412,6 @@ export class ArchitectureRuntimeService {
         return node.kind !== 'role' || Boolean(node.roleSlotId);
       }
       if (node.kind === 'role' && !node.roleSlotId) {
-        return false;
-      }
-      if (node.behavior.convergeToNodeId && !ids.has(node.behavior.convergeToNodeId)) {
         return false;
       }
       if (node.kind === 'role') {
@@ -1435,16 +1443,6 @@ export class ArchitectureRuntimeService {
         return false;
       }
     }
-    const edgeKeys = new Set(edges.map((edge) => `${edge.fromNodeId}->${edge.toNodeId}`));
-    for (const node of nodes) {
-      if (
-        node.kind === 'router'
-        && node.behavior?.convergeToNodeId
-        && !edgeKeys.has(`${node.id}->${node.behavior.convergeToNodeId}`)
-      ) {
-        return false;
-      }
-    }
     return true;
   }
 
@@ -1454,6 +1452,12 @@ export class ArchitectureRuntimeService {
       && this.isNonEmptyString(value.fromNodeId)
       && this.isNonEmptyString(value.toNodeId)
       && (value.label === undefined || typeof value.label === 'string')
+      && (
+        value.selection === undefined
+        || value.selection === 'default'
+        || value.selection === 'converge'
+        || value.selection === 'continuation'
+      )
       && (value.returnToOrchestrator === undefined || typeof value.returnToOrchestrator === 'boolean');
   }
 

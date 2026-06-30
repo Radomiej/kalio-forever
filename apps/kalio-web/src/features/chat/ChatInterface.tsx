@@ -36,6 +36,7 @@ import { resolveLiveTurnState } from './liveTurnState';
 import { resolveRenderableConversationProjection } from './conversationTranscriptProjection';
 import { selectQueuedDepth } from '../../store/agentRuntimeSelectors';
 import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
+import { useChatAutoScroll } from './useChatAutoScroll';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
@@ -116,6 +117,11 @@ export function ChatInterface() {
   const activeToolActivities = getToolActivitiesForSession(activeSessionId);
   const activeContext = getContextForSession(activeSessionId);
   const activeSessionHistoryMeta = getSessionHistoryMeta(activeSessionId);
+  const { messageListRef, handleMessageListScroll } = useChatAutoScroll({
+    activeSessionId,
+    messages,
+    activeToolActivities,
+  });
   const [error, setError] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<ChatConnectionState>(
@@ -151,9 +157,6 @@ export function ChatInterface() {
 
   const [showContextStats, setShowContextStats] = useState(false);
   const [vfsRefreshSignal, setVfsRefreshSignal] = useState(0);
-  const messageListRef = useRef<HTMLDivElement>(null);
-  const shouldAutoScrollRef = useRef(true);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const {
     personas,
     selectedPersonaId,
@@ -276,7 +279,6 @@ export function ChatInterface() {
     setToolArgProgress(null);
     setDraftUserMessage('');
     invalidateContextPreview();
-    shouldAutoScrollRef.current = true;
   }, [activeSessionId, invalidateContextPreview, setToolArgProgress]);
 
   useEffect(() => {
@@ -284,21 +286,6 @@ export function ChatInterface() {
       identifyWatchedSession(activeSessionId, 'chat-interface-active', { sticky: true });
     }
   }, [activeSessionId, connectionState]);
-
-  useEffect(() => {
-    if (shouldAutoScrollRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, activeToolActivities]);
-
-  const handleMessageListScroll = () => {
-    const list = messageListRef.current;
-    if (!list) {
-      return;
-    }
-    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
-    shouldAutoScrollRef.current = distanceFromBottom < 96;
-  };
 
   // Flush queued RA-App user actions when agent finishes streaming
   const prevStreamingRef = useRef(isStreamingForActiveSession);
@@ -491,6 +478,7 @@ export function ChatInterface() {
         ref={messageListRef}
         data-testid="message-list"
         className="flex-1 overflow-y-auto px-1.5 py-3 sm:px-2 lg:px-2"
+        style={{ overflowAnchor: 'none' }}
         onScroll={handleMessageListScroll}
       >
         <div className="flex w-full flex-col gap-1">
@@ -548,7 +536,7 @@ export function ChatInterface() {
             <PendingAssistantBubble liveTurnState={liveTurnState} />
           )}
 
-          <div ref={bottomRef} />
+          <div />
         </div>
       </div>
 

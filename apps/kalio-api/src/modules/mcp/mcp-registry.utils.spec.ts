@@ -72,6 +72,28 @@ describe('mcp-registry.utils', () => {
     ]);
   });
 
+  it('shadows duplicate servers only when endpoint and auth context match', () => {
+    const resolved = resolveRegistryEntries([
+      registryEntry({
+        serverKey: 'toml::docs',
+        store: 'toml',
+        originSource: 'toml',
+        headers: { Authorization: 'Bearer same' },
+      }),
+      registryEntry({
+        serverKey: 'sqlite::docs',
+        store: 'sqlite',
+        headers: { Authorization: 'Bearer same' },
+      }),
+    ]);
+
+    expect(resolved.map((entry) => [entry.serverKey, entry.effectiveState])).toEqual([
+      ['toml::docs', 'active'],
+      ['sqlite::docs', 'shadowed'],
+    ]);
+    expect(resolved[0]?.conflictGroup).toBe(resolved[1]?.conflictGroup);
+  });
+
   it('normalizes header and env key order in signatures', () => {
     const left = buildMcpSignature({
       transport: 'stdio',

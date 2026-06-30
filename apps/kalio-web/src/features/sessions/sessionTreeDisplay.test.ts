@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatSession } from '@kalio/types';
+import type { ChatMessage, ChatSession } from '@kalio/types';
 import {
+  architectureRunIdForSession,
+  buildArchitectureSessionRuntimeStates,
   displayTitleForSession,
   isPendingArchitecturePlaceholderSession,
   normalizeConversationSessionId,
@@ -219,6 +221,10 @@ describe('displayTitleForSession', () => {
         runtimeKind: 'agent-flow-branch',
         parentToolCallId: 'architecture:run-live:innovator',
         architectureSlotId: 'innovator',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'innovator',
+        },
       },
       createdAt: 10,
       updatedAt: 10,
@@ -237,6 +243,10 @@ describe('displayTitleForSession', () => {
         runtimeKind: 'agent-flow-branch',
         parentToolCallId: 'architecture:run-live:pragmatist',
         architectureSlotId: 'pragmatist',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'pragmatist',
+        },
       },
       createdAt: 10,
       updatedAt: 10,
@@ -246,6 +256,94 @@ describe('displayTitleForSession', () => {
     expect(isPendingArchitecturePlaceholderSession(branch, new Map([[branch.id, 'pending']]), {
       [branch.id]: [{ id: 'm1', sessionId: branch.id, role: 'assistant', content: 'Started', createdAt: 11 }],
     })).toBe(false);
+  });
+});
+
+describe('buildArchitectureSessionRuntimeStates', () => {
+  it('does not let display-only incompleteReason override typed branch stream status', () => {
+    const messages: Record<string, ChatMessage[]> = {
+      host: [{
+        id: 'message-1',
+        sessionId: 'host',
+        role: 'assistant',
+        content: 'Architecture summary',
+        architectureRun: {
+          runId: 'run-live',
+          schemaId: 'goal-master-delivery-loop',
+          status: 'completed',
+          trace: [{
+            speaker: 'participant',
+            content: 'Branch produced a completed response.',
+            incompleteReason: 'Display-only note mentioning missing proof.',
+            stream: {
+              streamGroupId: 'stream-1',
+              branchSessionId: 'branch-session',
+              status: 'completed',
+              chunkCount: 1,
+              text: 'Branch produced a completed response.',
+            },
+          }],
+          routeHops: [],
+        },
+        createdAt: 10,
+      }],
+    };
+
+    expect(buildArchitectureSessionRuntimeStates([], messages).get('branch-session')).toBe('done');
+  });
+
+  it('uses typed trace status for branch runtime state when graph nodes are unavailable', () => {
+    const messages: Record<string, ChatMessage[]> = {
+      host: [{
+        id: 'message-1',
+        sessionId: 'host',
+        role: 'assistant',
+        content: 'Architecture summary',
+        architectureRun: {
+          runId: 'run-live',
+          schemaId: 'goal-master-delivery-loop',
+          status: 'running',
+          trace: [{
+            speaker: 'participant',
+            content: 'Branch returned to the orchestrator.',
+            status: 'waiting_on_orchestrator',
+            reasonCode: 'return_to_orchestrator',
+            stream: {
+              streamGroupId: 'stream-1',
+              branchSessionId: 'branch-session',
+              status: 'completed',
+              chunkCount: 1,
+              text: 'Branch returned to the orchestrator.',
+            },
+          }],
+          routeHops: [],
+        },
+        createdAt: 10,
+      }],
+    };
+
+    expect(buildArchitectureSessionRuntimeStates([], messages).get('branch-session')).toBe('waiting');
+  });
+});
+
+describe('architectureRunIdForSession', () => {
+  it('uses typed architecture runtime context instead of encoded parent tool call ids', () => {
+    expect(architectureRunIdForSession(createSession({
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureContext: {
+          architectureRunId: 'typed-run',
+        },
+        parentToolCallId: 'architecture:encoded-run:router',
+      },
+    }))).toBe('typed-run');
+
+    expect(architectureRunIdForSession(createSession({
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        parentToolCallId: 'architecture:encoded-run:router',
+      },
+    }))).toBeUndefined();
   });
 });
 

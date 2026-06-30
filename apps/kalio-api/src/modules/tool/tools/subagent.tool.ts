@@ -35,6 +35,7 @@ function normalizeToolNameList(value: unknown): string[] | undefined {
 @Injectable()
 @Tool({
   name: 'run_subagent',
+  domain: 'subagent',
   description:
     'Spawn a focused sub-agent to complete a specific task using LLM reasoning. ' +
     'Best for self-contained tasks: summarisation, analysis, drafting content, answering questions. ' +
@@ -200,6 +201,7 @@ export class SubagentTool {
 @Injectable()
 @Tool({
   name: 'spawn_subagent',
+  domain: 'subagent',
   description:
     'Spawn a new focused sub-agent chat for a specific task. ' +
     'Use this when you want an explicit new child session rather than continuing an existing one.',
@@ -258,6 +260,7 @@ export class SpawnSubagentTool {
 @Injectable()
 @Tool({
   name: 'message_subagent',
+  domain: 'subagent',
   description:
     'Send the next message into an existing focused sub-agent chat. ' +
     'Use this when you already have a childSessionId and want that same child to continue.',

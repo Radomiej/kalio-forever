@@ -129,6 +129,43 @@ describe('buildArchitectureParentChatMessages', () => {
     expect(finalText).toContain('Final answer produced from the routed graph outputs.');
   });
 
+  it('falls back to typed router/finalizer summaries when legacy event text is missing', () => {
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'e-router-typed-only',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'router_decision',
+        nodeId: 'router',
+        createdAt: 12,
+        route: {
+          source: 'router',
+          fromNodeId: 'router',
+          selectedNodeIds: ['final-artifact'],
+          nextNodeId: 'final-artifact',
+        },
+      } as unknown as ArchitectureExecutionEvent,
+      {
+        id: 'e-final-typed-only',
+        runId: 'run-1',
+        sequence: 2,
+        type: 'final_artifact',
+        nodeId: 'final-artifact',
+        createdAt: 13,
+      } as unknown as ArchitectureExecutionEvent,
+    ];
+
+    const messages = buildArchitectureParentChatMessages(makeSchema(), makeRun(), 'parent-1', events, 200);
+    const routerText = messages.find((message) => message.id.includes('e-router-typed-only'))?.content;
+    const finalText = messages.find((message) => message.id.includes('e-final-typed-only'))?.content;
+
+    expect(routerText).toContain('### Router');
+    expect(routerText).toContain('Route: router -> final-artifact');
+    expect(routerText).toContain('Router completed synthesis for the next graph node.');
+    expect(finalText).toContain('### Finalizer');
+    expect(finalText).toContain('Final answer produced from the routed graph outputs.');
+  });
+
   it('skips synthetic router fan-out text in parent chat projection', () => {
     const events: ArchitectureExecutionEvent[] = [
       {
@@ -171,6 +208,34 @@ describe('buildArchitectureParentChatMessages', () => {
 
     expect(failureText).toContain('### Router');
     expect(failureText).toContain('Architecture run failed.');
+    expect(failureText).toContain('Reason: [XiaomiMiMo] LLM request failed: 401 Unauthorized');
+    expect(failureText).not.toContain('Invalid API Key');
+  });
+
+  it('projects typed router failures without depending on the display message wording', () => {
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'e-failed-typed',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'router_decision',
+        message: 'Provider failed while routing.',
+        createdAt: 12,
+        errorCode: 'PROVIDER_UNAUTHORIZED',
+        failure: {
+          code: 'PROVIDER_UNAUTHORIZED',
+          source: 'llm-provider',
+          retryable: false,
+          message: '[XiaomiMiMo] LLM request failed: 401 Unauthorized\n{"error":{"message":"Invalid API Key"}}',
+        },
+      },
+    ];
+
+    const messages = buildArchitectureParentChatMessages(makeSchema(), makeRun(), 'parent-1', events, 200);
+    const failureText = messages.find((message) => message.id.includes('e-failed-typed'))?.content;
+
+    expect(failureText).toContain('### Router');
+    expect(failureText).toContain('Provider failed while routing.');
     expect(failureText).toContain('Reason: [XiaomiMiMo] LLM request failed: 401 Unauthorized');
     expect(failureText).not.toContain('Invalid API Key');
   });
@@ -234,5 +299,35 @@ describe('buildArchitectureParentChatMessages', () => {
     expect(stoppedText).toContain('Status: cancelled');
     expect(stoppedText).toContain('Reason: Architecture run stopped by user.');
     expect(stoppedText).toContain('Reason code: user_stop');
+  });
+
+  it('projects typed run_stopped events without requiring a display message', () => {
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'e-stopped-typed-only',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'run_stopped',
+        createdAt: 12,
+        reasonCode: 'system_stop',
+        data: {
+          reason: 'System stopped the run after max node visits.',
+          reasonCode: 'system_stop',
+          source: 'runtime',
+        },
+      } as unknown as ArchitectureExecutionEvent,
+    ];
+    const stoppedRun = {
+      ...makeRun(),
+      status: 'cancelled' as const,
+    };
+
+    const messages = buildArchitectureParentChatMessages(makeSchema(), stoppedRun, 'parent-1', events, 200);
+    const stoppedText = messages.find((message) => message.id.includes('e-stopped-typed-only'))?.content;
+
+    expect(stoppedText).toContain('### Run stopped');
+    expect(stoppedText).toContain('Status: cancelled');
+    expect(stoppedText).toContain('Reason: System stopped the run after max node visits.');
+    expect(stoppedText).toContain('Reason code: system_stop');
   });
 });

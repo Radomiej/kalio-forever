@@ -11,11 +11,5 @@ export function finalArtifactStatusFromData(data: Record<string, unknown> | unde
   if (status === 'accepted' || status === 'blocked' || status === 'rejected' || status === 'incomplete') {
     return status;
   }
-  if (typeof data['blockingReason'] === 'string' && data['blockingReason'].trim().length > 0) {
-    return 'blocked';
-  }
-  if (typeof data['incompleteReason'] === 'string' && data['incompleteReason'].trim().length > 0) {
-    return 'incomplete';
-  }
   return undefined;
 }

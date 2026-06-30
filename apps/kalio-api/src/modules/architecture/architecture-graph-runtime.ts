@@ -3,6 +3,7 @@ import type { ArchitectureRoleExecutionInput, ArchitectureRoleExecutor } from '.
 import { architectureActionFieldsForEvent, architectureActionSummaryForEvent } from './architecture-action-summary';
 import { isCompletedCliChildStatus } from './architecture-cli-child-status';
 import { createArchitectureRouterOutput } from './architecture-router-output';
+import { structuredRouteToCall } from './architecture-structured-output';
 import { isWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
 
 type GraphRuntimeOptions = {
@@ -19,6 +20,8 @@ type GraphRuntimeOptions = {
 
 type EventOptions = {
   actionSummary?: string;
+  lifecycle?: ArchitectureExecutionEvent['lifecycle'];
+  status?: ArchitectureExecutionEvent['status'];
   nodeId?: string;
   roleSlotId?: string;
   route?: ArchitectureRouteDecision;
@@ -55,6 +58,8 @@ class ArchitectureGraphRuntime {
     if (!this.options.resumeFrom) {
       this.push('run_created', `Architecture run created for: ${this.options.run.prompt}`, {
         actionSummary: architectureActionSummaryForEvent('run_created'),
+        lifecycle: 'started',
+        status: 'running',
         data: { rootSessionId: this.options.run.rootSessionId },
       });
     }
@@ -83,6 +88,8 @@ class ArchitectureGraphRuntime {
       const batchResults = await Promise.all(executableBatch.map(async (node) => {
         this.push('node_started', `${node.label} started.`, {
           actionSummary: architectureActionSummaryForEvent('node_started', node.kind),
+          lifecycle: 'node_started',
+          status: 'running',
           nodeId: node.id,
           roleSlotId: node.roleSlotId,
           data: { kind: node.kind, behavior: node.behavior ? { ...node.behavior } : undefined },
@@ -103,6 +110,8 @@ class ArchitectureGraphRuntime {
           selectedNodeIds = this.handleRecoverableNodeError(node, outgoingNodeIds, error);
         }
         this.push('node_completed', `${node.label} completed.`, {
+          lifecycle: 'node_completed',
+          status: 'done',
           nodeId: node.id,
           roleSlotId: node.roleSlotId,
           data: { selectedNodeIds },
@@ -270,7 +279,11 @@ class ArchitectureGraphRuntime {
   ): string[] {
     const failure = workflowFailureFromError(error);
     const message = `${node.label} degraded after recoverable runtime error: ${this.errorMessage(error)}`;
-    const selectedNodeIds = this.incompleteContinuationNodeIds(outgoingNodeIds, node.behavior?.convergeToNodeId);
+    const selectedNodeIds = this.incompleteContinuationNodeIds(
+      outgoingNodeIds,
+      node.id,
+      this.defaultOutgoingNodeId(node.id, outgoingNodeIds),
+    );
     const data = {
       runtimeGuard: 'recoverable_node_error',
       errorCode: failure.code,
@@ -354,9 +367,33 @@ class ArchitectureGraphRuntime {
       }
       this.push('final_artifact', this.synthesizedArtifactMessage(node, incomingNodeIds), {
         actionSummary: architectureActionSummaryForEvent('final_artifact', 'artifact'),
+        lifecycle: 'done',
+        status: 'done',
         nodeId: node.id,
         roleSlotId: node.roleSlotId,
+        reasonCode: 'final_artifact_accepted',
+        evidence: [{
+          kind: 'FINAL_ARTIFACT',
+          source: node.roleSlotId ?? node.id,
+          status: 'passed',
+          data: {
+            nodeId: node.id,
+            roleSlotId: node.roleSlotId,
+            rootSessionId: this.options.run.rootSessionId,
+          },
+        }],
+        runtimeDecision: {
+          status: 'done',
+          accepted: true,
+          reasonCode: 'final_artifact_accepted',
+        },
         data: {
+          reasonCode: 'final_artifact_accepted',
+          runtimeDecision: {
+            status: 'done',
+            accepted: true,
+            reasonCode: 'final_artifact_accepted',
+          },
           rootSessionId: this.options.run.rootSessionId,
           personaId: node.roleSlotId ? this.personaForRoleSlotId(node.roleSlotId) : undefined,
           incomingNodeIds,
@@ -425,7 +462,7 @@ class ArchitectureGraphRuntime {
     const incompleteReason = this.incompleteResultReason(result.data)
       ?? this.incompleteToolExecutorReason(slot, result.data, this.events);
     const selectedNodeIds = incompleteReason
-      ? this.incompleteContinuationNodeIds(outgoingNodeIds)
+      ? this.incompleteContinuationNodeIds(outgoingNodeIds, node.id, this.defaultOutgoingNodeId(node.id, outgoingNodeIds))
       : this.selectedRoleOutgoingNodeIds(result.data, outgoingNodeIds);
     const routeRequest = this.routeRequest(result.data);
     const hasAgentRoute = !incompleteReason && routeRequest !== undefined && outgoingNodeIds.includes(routeRequest.targetNodeId);
@@ -441,6 +478,7 @@ class ArchitectureGraphRuntime {
         nextNodeId: selectedNodeIds[0],
         response: incompleteReason ?? (hasAgentRoute ? routeRequest.response : undefined),
       },
+      evidence: this.workflowEvidenceArray(result.data),
       data: {
         ...result.data,
         incompleteReason,
@@ -492,11 +530,7 @@ class ArchitectureGraphRuntime {
       outgoingNodeIds,
       emit: this.branchEventEmit(node, slot),
     });
-    const fallbackNodeIds = this.selectedOutgoingNodeIds(
-      node.behavior?.mode,
-      node.behavior?.convergeToNodeId,
-      outgoingNodeIds,
-    );
+    const fallbackNodeIds = this.selectedOutgoingNodeIds(node, outgoingNodeIds);
     const incompleteReason = this.incompleteResultReason(result.data);
     const routeRequest = this.routeRequest(result.data);
     const canAgentRouteOverride = node.behavior?.mode !== 'fan_out_all';
@@ -504,36 +538,52 @@ class ArchitectureGraphRuntime {
       && !incompleteReason
       && routeRequest !== undefined
       && outgoingNodeIds.includes(routeRequest.targetNodeId);
+    const defaultNodeId = this.defaultOutgoingNodeId(node.id, outgoingNodeIds);
     const requestedSelectedNodeIds = incompleteReason
-      ? this.incompleteContinuationNodeIds(outgoingNodeIds, node.behavior?.convergeToNodeId)
+      ? this.incompleteContinuationNodeIds(outgoingNodeIds, node.id, defaultNodeId)
       : hasAgentRoute
       ? [routeRequest.targetNodeId]
       : fallbackNodeIds;
     const guard = this.judgeContinuationGuard(slot, node, incomingNodeIds, requestedSelectedNodeIds, outgoingNodeIds);
-    const finalSelectedNodeIds = guard.selectedNodeIds;
-    const route: ArchitectureRouteDecision = {
+    let finalSelectedNodeIds = guard.selectedNodeIds;
+    let rejectedNodeIds = outgoingNodeIds.filter((nodeId) => !finalSelectedNodeIds.includes(nodeId));
+    let route: ArchitectureRouteDecision = {
       source: incompleteReason || guard.applied ? 'runtime_fallback' : hasAgentRoute ? 'agent' : 'router',
       fromNodeId: node.id,
       selectedNodeIds: finalSelectedNodeIds,
-      rejectedNodeIds: outgoingNodeIds.filter((nodeId) => !finalSelectedNodeIds.includes(nodeId)),
+      rejectedNodeIds,
       nextNodeId: finalSelectedNodeIds[0],
-      convergeToNodeId: node.behavior?.convergeToNodeId,
+      convergeToNodeId: this.routeConvergeNodeId(node, outgoingNodeIds),
       mode: node.behavior?.mode,
       response: incompleteReason ?? guard.reason ?? routeRequest?.response,
     };
-    const routerOutput = this.toRouterOutput(
+    let routerOutput = this.toRouterOutput(
       node,
       incomingNodeIds,
       route,
       result.message,
       result.data,
     );
+    const actionTargetNodeId = this.routerOutputActionTargetNodeId(routerOutput, node.id, outgoingNodeIds);
+    if (actionTargetNodeId) {
+      finalSelectedNodeIds = [actionTargetNodeId];
+      rejectedNodeIds = outgoingNodeIds.filter((nodeId) => nodeId !== actionTargetNodeId);
+      route = {
+        ...route,
+        selectedNodeIds: finalSelectedNodeIds,
+        rejectedNodeIds,
+        nextNodeId: actionTargetNodeId,
+        response: routerOutput.response ?? route.response ?? routerOutput.mergedDecision,
+      };
+      routerOutput = this.withRouterActionTarget(routerOutput, actionTargetNodeId);
+    }
     this.push('router_decision', result.message, {
       actionSummary: architectureActionSummaryForEvent('router_decision', 'router'),
       nodeId: node.id,
       roleSlotId: slot.id,
       route,
       routerOutput,
+      evidence: this.workflowEvidenceArray(result.data),
       data: {
         ...result.data,
         behavior: node.behavior ? { ...node.behavior } : undefined,
@@ -542,7 +592,7 @@ class ArchitectureGraphRuntime {
         outgoingNodeIds,
         incompleteReason,
         runtimeGuard: incompleteReason ?? (guard.applied ? guard.reason : undefined),
-        rejectedNodeIds: outgoingNodeIds.filter((nodeId) => !finalSelectedNodeIds.includes(nodeId)),
+        rejectedNodeIds,
         selectedNodeIds: finalSelectedNodeIds,
       },
     });
@@ -553,6 +603,10 @@ class ArchitectureGraphRuntime {
       route,
       routerOutput,
     });
+    if (this.isRouterPauseAction(routerOutput.nextAction)) {
+      this.pushRouterRuntimePause(node, route, routerOutput, slot.id);
+      return [];
+    }
     return finalSelectedNodeIds;
   }
 
@@ -572,23 +626,44 @@ class ArchitectureGraphRuntime {
     nodesById: Map<string, ArchitectureSchemaNode>,
   ): string[] {
     const behavior = node.behavior;
-    const selectedNodeIds = this.selectedOutgoingNodeIds(behavior?.mode, behavior?.convergeToNodeId, outgoingNodeIds);
-    const rejectedNodeIds = outgoingNodeIds.filter((nodeId) => !selectedNodeIds.includes(nodeId));
-    const nextNodeId = selectedNodeIds[0];
-    const nextLabel = nextNodeId ? nodesById.get(nextNodeId)?.label ?? nextNodeId : 'end';
-    const message = this.routingMessage(node, nextLabel, selectedNodeIds.length);
-    const route: ArchitectureRouteDecision = {
+    let selectedNodeIds = this.selectedOutgoingNodeIds(node, outgoingNodeIds);
+    let rejectedNodeIds = outgoingNodeIds.filter((nodeId) => !selectedNodeIds.includes(nodeId));
+    let nextNodeId = selectedNodeIds[0];
+    let nextLabel = nextNodeId ? nodesById.get(nextNodeId)?.label ?? nextNodeId : 'end';
+    let message = this.routingMessage(node, nextLabel, selectedNodeIds.length);
+    let route: ArchitectureRouteDecision = {
       source: node.kind === 'parallel' ? 'parallel' : 'router',
       fromNodeId: node.id,
       selectedNodeIds,
       rejectedNodeIds,
       nextNodeId,
-      convergeToNodeId: behavior?.convergeToNodeId,
+      convergeToNodeId: this.routeConvergeNodeId(node, outgoingNodeIds),
       mode: behavior?.mode,
     };
-    const routerOutput = node.kind === 'router'
+    let routerOutput = node.kind === 'router'
       ? this.toRouterOutput(node, incomingNodeIds, route, message, {})
       : undefined;
+    const actionTargetNodeId = routerOutput
+      ? this.routerOutputActionTargetNodeId(routerOutput, node.id, outgoingNodeIds)
+      : undefined;
+    if (routerOutput && actionTargetNodeId) {
+      selectedNodeIds = [actionTargetNodeId];
+      rejectedNodeIds = outgoingNodeIds.filter((nodeId) => nodeId !== actionTargetNodeId);
+      nextNodeId = actionTargetNodeId;
+      nextLabel = nodesById.get(nextNodeId)?.label ?? nextNodeId;
+      message = this.routingMessage(node, nextLabel, selectedNodeIds.length);
+      route = {
+        ...route,
+        selectedNodeIds,
+        rejectedNodeIds,
+        nextNodeId,
+        response: routerOutput.response ?? routerOutput.mergedDecision,
+      };
+      routerOutput = {
+        ...this.toRouterOutput(node, incomingNodeIds, route, message, {}),
+        targetNodeId: actionTargetNodeId,
+      };
+    }
     this.push('router_decision', message, {
       actionSummary: architectureActionSummaryForEvent('router_decision', node.kind),
       nodeId: node.id,
@@ -598,7 +673,7 @@ class ArchitectureGraphRuntime {
       data: {
         behavior: behavior ? { ...behavior } : undefined,
         branchSessionIds: this.options.run.branchSessionIds,
-        convergeToNodeId: behavior?.convergeToNodeId,
+        convergeToNodeId: route.convergeToNodeId,
         incomingNodeIds,
         nextNodeId,
         outgoingNodeIds,
@@ -615,8 +690,76 @@ class ArchitectureGraphRuntime {
         route,
         routerOutput,
       });
+      if (this.isRouterPauseAction(routerOutput.nextAction)) {
+        this.pushRouterRuntimePause(node, route, routerOutput);
+        return [];
+      }
     }
     return selectedNodeIds;
+  }
+
+  private isRouterPauseAction(nextAction: ArchitectureRouterOutput['nextAction']): boolean {
+    return nextAction === 'ask_human' || nextAction === 'rerun_with_different_personas';
+  }
+
+  private routerOutputActionTargetNodeId(
+    routerOutput: ArchitectureRouterOutput,
+    sourceNodeId: string,
+    outgoingNodeIds: string[],
+  ): string | undefined {
+    if (routerOutput.nextAction !== 'run_more_research') {
+      return undefined;
+    }
+    if (routerOutput.targetNodeId && outgoingNodeIds.includes(routerOutput.targetNodeId)) {
+      return routerOutput.targetNodeId;
+    }
+    return this.outgoingNodeIdForSelection(sourceNodeId, outgoingNodeIds, 'continuation');
+  }
+
+  private withRouterActionTarget(
+    routerOutput: ArchitectureRouterOutput,
+    targetNodeId: string,
+  ): ArchitectureRouterOutput {
+    return {
+      ...routerOutput,
+      selectedStrategy: targetNodeId,
+      targetNodeId,
+    };
+  }
+
+  private pushRouterRuntimePause(
+    node: ArchitectureSchemaNode,
+    route: ArchitectureRouteDecision,
+    routerOutput: ArchitectureRouterOutput,
+    roleSlotId?: string,
+  ): void {
+    const runtimeDecision = {
+      status: 'waiting_on_orchestrator' as const,
+      reasonCode: 'runtime_pause' as const,
+      message: routerOutput.mergedDecision,
+    };
+    this.push('human_gate', routerOutput.mergedDecision || `${node.label} requested human input.`, {
+      actionSummary: this.routerPauseActionSummary(routerOutput.nextAction),
+      nodeId: node.id,
+      roleSlotId: roleSlotId ?? node.roleSlotId,
+      route,
+      routerOutput,
+      reasonCode: 'runtime_pause',
+      runtimeDecision,
+      data: {
+        reasonCode: 'runtime_pause',
+        runtimeDecision,
+        nextAction: routerOutput.nextAction,
+        routerOutput,
+        unresolvedConflicts: routerOutput.unresolvedConflicts,
+      },
+    });
+  }
+
+  private routerPauseActionSummary(nextAction: ArchitectureRouterOutput['nextAction']): string {
+    return nextAction === 'rerun_with_different_personas'
+      ? 'Waiting for orchestrator persona rerun decision.'
+      : 'Waiting for human routing decision.';
   }
 
   private async executeFinalizerNode(
@@ -649,10 +792,35 @@ class ArchitectureGraphRuntime {
     });
     this.push('final_artifact', result.message, {
       actionSummary: architectureActionSummaryForEvent('final_artifact', 'artifact'),
+      lifecycle: 'done',
+      status: 'done',
       nodeId: node.id,
       roleSlotId: slot.id,
+      reasonCode: 'final_artifact_accepted',
+      evidence: [{
+        kind: 'FINAL_ARTIFACT',
+        source: slot.id,
+        status: 'passed',
+        data: {
+          ...result.data,
+          nodeId: node.id,
+          roleSlotId: slot.id,
+          branchSessionId,
+        },
+      }],
+      runtimeDecision: {
+        status: 'done',
+        accepted: true,
+        reasonCode: 'final_artifact_accepted',
+      },
       data: {
         ...result.data,
+        reasonCode: 'final_artifact_accepted',
+        runtimeDecision: {
+          status: 'done',
+          accepted: true,
+          reasonCode: 'final_artifact_accepted',
+        },
         incomingNodeIds,
         outgoingNodeIds,
       },
@@ -672,24 +840,97 @@ class ArchitectureGraphRuntime {
     ));
   }
 
-  private selectedOutgoingNodeIds(
-    mode: ArchitectureNodeBehaviorMode | undefined,
-    convergeToNodeId: string | undefined,
-    outgoingNodeIds: string[],
-  ): string[] {
+  private selectedOutgoingNodeIds(node: ArchitectureSchemaNode, outgoingNodeIds: string[]): string[] {
     if (outgoingNodeIds.length === 0) {
       return [];
     }
-    if (mode === 'choose_one') {
-      return [convergeToNodeId && outgoingNodeIds.includes(convergeToNodeId) ? convergeToNodeId : outgoingNodeIds[0]];
+    const mode = node.behavior?.mode;
+    const explicitSelection = this.selectedOutgoingNodeIdsFromEdges(node.id, mode, outgoingNodeIds);
+    if (explicitSelection) {
+      return explicitSelection;
     }
-    if ((mode === 'rank_then_merge' || mode === 'merge_inputs') && convergeToNodeId && outgoingNodeIds.includes(convergeToNodeId)) {
-      return [convergeToNodeId];
+    if (mode === 'choose_one') {
+      return [outgoingNodeIds[0]];
     }
     if (mode === 'rank_then_merge' || mode === 'merge_inputs') {
       return outgoingNodeIds.slice(0, 1);
     }
     return outgoingNodeIds;
+  }
+
+  private selectedOutgoingNodeIdsFromEdges(
+    sourceNodeId: string,
+    mode: ArchitectureNodeBehaviorMode | undefined,
+    outgoingNodeIds: string[],
+  ): string[] | undefined {
+    const outgoingEdges = this.options.schema.edges.filter((edge) =>
+      edge.fromNodeId === sourceNodeId && outgoingNodeIds.includes(edge.toNodeId));
+    if (mode === 'rank_then_merge' || mode === 'merge_inputs') {
+      const convergeEdge = outgoingEdges.find((edge) => edge.selection === 'converge');
+      return convergeEdge ? [convergeEdge.toNodeId] : undefined;
+    }
+    if (mode === 'choose_one') {
+      const defaultEdge = outgoingEdges.find((edge) => edge.selection === 'default');
+      return defaultEdge ? [defaultEdge.toNodeId] : undefined;
+    }
+    return undefined;
+  }
+
+  private outgoingNodeIdForSelection(
+    sourceNodeId: string,
+    outgoingNodeIds: string[],
+    selection: NonNullable<ArchitectureSchemaEdge['selection']>,
+  ): string | undefined {
+    return this.options.schema.edges.find((edge) =>
+      edge.fromNodeId === sourceNodeId
+      && outgoingNodeIds.includes(edge.toNodeId)
+      && edge.selection === selection)?.toNodeId;
+  }
+
+  private defaultOutgoingNodeId(sourceNodeId: string, outgoingNodeIds: string[]): string | undefined {
+    const defaultEdge = this.options.schema.edges.find((edge) =>
+      edge.fromNodeId === sourceNodeId
+      && edge.selection === 'default'
+      && outgoingNodeIds.includes(edge.toNodeId));
+    return defaultEdge?.toNodeId;
+  }
+
+  private routeConvergeNodeId(node: ArchitectureSchemaNode, outgoingNodeIds: string[]): string | undefined {
+    const convergeEdge = this.options.schema.edges.find((edge) =>
+      edge.fromNodeId === node.id
+      && edge.selection === 'converge'
+      && outgoingNodeIds.includes(edge.toNodeId));
+    if (convergeEdge) {
+      return convergeEdge.toNodeId;
+    }
+    if (node.kind !== 'parallel' && node.behavior?.mode !== 'fan_out_all') {
+      return undefined;
+    }
+    const branchConvergeTargets = new Set(
+      this.options.schema.edges
+        .filter((edge) => outgoingNodeIds.includes(edge.fromNodeId) && edge.selection === 'converge')
+        .map((edge) => edge.toNodeId),
+    );
+    return branchConvergeTargets.size === 1
+      ? [...branchConvergeTargets][0]
+      : undefined;
+  }
+
+  private continuationOutgoingNodeId(
+    sourceNodeId: string,
+    incomingNodeIds: string[],
+    outgoingNodeIds: string[],
+    defaultNodeId: string | undefined,
+  ): string | undefined {
+    const continuationEdge = this.options.schema.edges.find((edge) =>
+      edge.fromNodeId === sourceNodeId
+      && edge.selection === 'continuation'
+      && outgoingNodeIds.includes(edge.toNodeId));
+    if (continuationEdge) {
+      return continuationEdge.toNodeId;
+    }
+    const nonDefaultNodeIds = outgoingNodeIds.filter((nodeId) => nodeId !== defaultNodeId);
+    return nonDefaultNodeIds.find((nodeId) => incomingNodeIds.includes(nodeId)) ?? nonDefaultNodeIds[0];
   }
 
   private selectedRoleOutgoingNodeIds(data: Record<string, unknown>, outgoingNodeIds: string[]): string[] {
@@ -702,21 +943,26 @@ class ArchitectureGraphRuntime {
 
   private incompleteResultReason(data: Record<string, unknown> | undefined): string | undefined {
     if (!this.isRecord(data)) return undefined;
-    if (typeof data['incompleteReason'] === 'string' && data['incompleteReason'].trim().length > 0) {
-      return data['incompleteReason'];
-    }
+    const displayReason = typeof data['incompleteReason'] === 'string' && data['incompleteReason'].trim().length > 0
+      ? data['incompleteReason']
+      : undefined;
     const failure = this.isRecord(data['failure']) ? data['failure'] : undefined;
     if (failure?.['retryable'] === true || this.isRecoverableWorkflowErrorCode(data['errorCode'])) {
-      return 'Recoverable runtime error prevented this node from producing a final answer.';
+      return displayReason ?? 'Recoverable runtime error prevented this node from producing a final answer.';
     }
     if (data['boundedToolLoopExhausted'] === true || data['reasonCode'] === 'max_steps') {
-      return 'Subagent exhausted its tool loop without producing a final answer.';
+      return displayReason ?? 'Subagent exhausted its tool loop without producing a final answer.';
     }
     return undefined;
   }
 
-  private incompleteContinuationNodeIds(outgoingNodeIds: string[], avoidNodeId?: string): string[] {
-    const nextNodeId = outgoingNodeIds.find((nodeId) => nodeId !== avoidNodeId) ?? outgoingNodeIds[0];
+  private incompleteContinuationNodeIds(
+    outgoingNodeIds: string[],
+    sourceNodeId: string,
+    defaultNodeId: string | undefined,
+  ): string[] {
+    const nextNodeId = this.continuationOutgoingNodeId(sourceNodeId, [], outgoingNodeIds, defaultNodeId)
+      ?? outgoingNodeIds[0];
     return nextNodeId ? [nextNodeId] : [];
   }
 
@@ -731,28 +977,10 @@ class ArchitectureGraphRuntime {
   }
 
   private routeRequest(data: Record<string, unknown>): AgentRouteRequest | undefined {
-    const directRoute = data['routeToNodeId'] ?? data['targetNodeId'];
-    if (typeof directRoute === 'string' && directRoute.length > 0) {
-      return { targetNodeId: directRoute, response: this.routeResponse(data) };
-    }
-
-    const snakeRoute = data['route_to'];
-    if (typeof snakeRoute === 'string' && snakeRoute.length > 0) {
-      return { targetNodeId: snakeRoute, response: this.routeResponse(data) };
-    }
-    if (this.isRecord(snakeRoute)) {
-      const target = snakeRoute['targetNodeId'] ?? snakeRoute['nodeId'];
-      const response = snakeRoute['response'];
-      return typeof target === 'string' && target.length > 0
-        ? { targetNodeId: target, response: typeof response === 'string' ? response : this.routeResponse(data) }
-        : undefined;
-    }
-    return undefined;
-  }
-
-  private routeResponse(data: Record<string, unknown>): string | undefined {
-    const response = data['response'];
-    return typeof response === 'string' && response.length > 0 ? response : undefined;
+    const structuredRoute = structuredRouteToCall(data['routerOutput']);
+    return structuredRoute
+      ? { targetNodeId: structuredRoute.targetNodeId, response: structuredRoute.response }
+      : undefined;
   }
 
   private toRouterOutput(
@@ -782,14 +1010,13 @@ class ArchitectureGraphRuntime {
     if (slot.slotType !== 'judge' || this.options.run.context?.['requireGoalMasterLoopProof'] !== true) {
       return { selectedNodeIds, applied: false };
     }
-    const finalNodeId = node.behavior?.convergeToNodeId;
+    const finalNodeId = this.defaultOutgoingNodeId(node.id, outgoingNodeIds);
     if (!finalNodeId) {
       return { selectedNodeIds, applied: false };
     }
     const blockingReason = this.blockingFinalizationReason();
     if (blockingReason) {
-      const continuationNodeId = outgoingNodeIds.find((id) => id !== finalNodeId && incomingNodeIds.includes(id))
-        ?? outgoingNodeIds.find((id) => id !== finalNodeId);
+      const continuationNodeId = this.continuationOutgoingNodeId(node.id, incomingNodeIds, outgoingNodeIds, finalNodeId);
       if (!continuationNodeId) {
         return { selectedNodeIds, applied: false };
       }
@@ -820,8 +1047,7 @@ class ArchitectureGraphRuntime {
     if (previousContinuation) {
       return { selectedNodeIds, applied: false };
     }
-    const continuationNodeId = outgoingNodeIds.find((id) => id !== finalNodeId && incomingNodeIds.includes(id))
-      ?? outgoingNodeIds.find((id) => id !== finalNodeId);
+    const continuationNodeId = this.continuationOutgoingNodeId(node.id, incomingNodeIds, outgoingNodeIds, finalNodeId);
     if (!continuationNodeId) {
       return { selectedNodeIds, applied: false };
     }
@@ -983,17 +1209,64 @@ class ArchitectureGraphRuntime {
         || name === 'vfs_list'
         || name === 'vfs_read'
       ));
-      const hasBuildEvidence = evidence.successfulToolNames.some((name) => (
-        name === 'terminal_output'
-        || name === 'terminal_spawn'
-      ));
-      const hasArtifactPath = evidence.targetPaths.some((path) => (
-        path.includes('\\dist')
-        || path.includes('/dist')
-        || path.endsWith('dist')
-      ));
-      return hasReadEvidence && (hasBuildEvidence || hasArtifactPath);
+      return hasReadEvidence && this.hasPassedBuildResultEvidence(event);
     });
+  }
+
+  private hasPassedBuildResultEvidence(event: ArchitectureExecutionEvent): boolean {
+    return this.workflowEvidenceForEvent(event).some((evidence) => {
+      if (evidence.kind !== 'BUILD_RESULT' || evidence.status !== 'passed' || !this.isRecord(evidence.data)) {
+        return false;
+      }
+      return this.numberField(evidence.data, 'exitCode') === 0;
+    });
+  }
+
+  private workflowEvidenceForEvent(event: ArchitectureExecutionEvent): NonNullable<ArchitectureExecutionEvent['evidence']> {
+    if (event.evidence && event.evidence.length > 0) {
+      return event.evidence;
+    }
+    return this.isRecord(event.data) ? this.workflowEvidenceArray(event.data) ?? [] : [];
+  }
+
+  private workflowEvidenceArray(data: Record<string, unknown>): ArchitectureExecutionEvent['evidence'] {
+    const value = data['evidence'];
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    const evidence = value
+      .filter((item): item is NonNullable<ArchitectureExecutionEvent['evidence']>[number] => {
+        if (!this.isRecord(item)) {
+          return false;
+        }
+        return this.isWorkflowEvidenceKind(item['kind'])
+          && this.isWorkflowEvidenceStatus(item['status']);
+      })
+      .map((item) => ({
+        kind: item.kind,
+        status: item.status,
+        ...(typeof item.source === 'string' ? { source: item.source } : {}),
+        ...(this.isRecord(item.data) ? { data: item.data } : {}),
+      }));
+    return evidence.length > 0 ? evidence : undefined;
+  }
+
+  private isWorkflowEvidenceKind(value: unknown): value is NonNullable<ArchitectureExecutionEvent['evidence']>[number]['kind'] {
+    return value === 'BUILD_RESULT'
+      || value === 'GIT_STATUS'
+      || value === 'FINAL_ARTIFACT'
+      || value === 'QUALITY_GATE'
+      || value === 'TOOL_RESULT'
+      || value === 'CLI_CHILD'
+      || value === 'VFS_WRITE'
+      || value === 'VFS_READ';
+  }
+
+  private isWorkflowEvidenceStatus(value: unknown): value is NonNullable<ArchitectureExecutionEvent['evidence']>[number]['status'] {
+    return value === 'passed'
+      || value === 'failed'
+      || value === 'blocked'
+      || value === 'unknown';
   }
 
   private unresolvedCliChildReason(evidence: {
@@ -1234,6 +1507,8 @@ class ArchitectureGraphRuntime {
       roleSlotId: options.roleSlotId,
       route: options.route,
       routerOutput: options.routerOutput,
+      lifecycle: options.lifecycle,
+      status: options.status,
       reasonCode: options.reasonCode,
       errorCode: options.errorCode,
       failure: options.failure,

@@ -8,6 +8,7 @@ import { HitlNotificationService } from '../../hitl/hitl-notification.service';
 import { HitlPolicyService } from '../../hitl/hitl-policy.service';
 import type { StreamContext } from '../interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from '../interfaces/tool-registry-entry.interface';
+import type { ToolDomain } from '@kalio/types';
 import type { DrizzleService } from '../../../database/drizzle.service';
 import type { MemoryService } from '../../memory/memory.service';
 import type { WebSearchService } from '../../search/web-search.service';
@@ -24,9 +25,9 @@ function makeCtx(): StreamContext & { emit: ReturnType<typeof vi.fn> } {
   };
 }
 
-function makeEntry(name: string, requiresConfirmation: boolean, result: unknown): ToolRegistryEntry {
+function makeEntry(name: string, requiresConfirmation: boolean, result: unknown, domain?: ToolDomain): ToolRegistryEntry {
   return {
-    meta: { name, description: 'test', parameters: {}, requiresConfirmation },
+    meta: { name, description: 'test', domain, parameters: {}, requiresConfirmation },
     execute: vi.fn().mockResolvedValue(result),
   };
 }
@@ -865,7 +866,7 @@ describe('ToolDispatchService', () => {
   describe('getToolMetas', () => {
     it('returns metas for all registered tools', async () => {
       const entries = [
-        makeEntry('tool_a', false, null),
+        makeEntry('tool_a', false, null, 'vfs'),
         makeEntry('tool_b', true, null),
       ];
       const moduleRef = await Test.createTestingModule({
@@ -879,6 +880,7 @@ describe('ToolDispatchService', () => {
       const metas = service.getToolMetas();
       expect(metas).toHaveLength(2);
       expect(metas.map(m => m.name)).toEqual(['tool_a', 'tool_b']);
+      expect(metas[0]?.domain).toBe('vfs');
     });
 
     it('preserves canonical serverKey on MCP tool metas', async () => {
@@ -908,6 +910,7 @@ describe('ToolDispatchService', () => {
         expect.objectContaining({
           name: 'mcp_toml::docs_search',
           serverKey: 'toml::docs',
+          domain: 'mcp',
         }),
       ]);
     });

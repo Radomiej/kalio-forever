@@ -530,6 +530,11 @@ describe('CanvasPanel subagent grouping', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-1:pragmatist',
           architectureSlotId: 'pragmatist',
+          architectureContext: {
+            architectureRunId: 'run-1',
+            roleSlotId: 'pragmatist',
+            displayLabel: 'Pragmatist',
+          },
         },
         createdAt: 2,
         updatedAt: 2,

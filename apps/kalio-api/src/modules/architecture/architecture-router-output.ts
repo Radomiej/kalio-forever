@@ -17,10 +17,6 @@ export function createArchitectureRouterOutput(params: {
   if (isRouterOutput(supplied)) {
     return supplied;
   }
-  const parsed = parseRouterOutputFromText(params.message);
-  if (parsed) {
-    return parsed;
-  }
 
   const selectedStrategy = params.route.nextNodeId ?? params.route.selectedNodeIds[0] ?? 'end';
   const policy = params.schema.routerPolicy;
@@ -66,75 +62,6 @@ export function createArchitectureRouterOutput(params: {
     confidence,
     nextAction,
   };
-}
-
-export function parseRouterOutputFromText(text: string): ArchitectureRouterOutput | null {
-  const candidates = [
-    ...extractFencedJsonBlocks(text),
-    ...extractTaggedJsonBlocks(text, 'routerOutput'),
-    ...extractTaggedJsonBlocks(text, 'router_output'),
-  ];
-  for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(candidate) as unknown;
-      if (isRouterOutput(parsed)) {
-        return parsed;
-      }
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
-function extractFencedJsonBlocks(text: string): string[] {
-  return [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1]?.trim() ?? '');
-}
-
-function extractTaggedJsonBlocks(text: string, tag: string): string[] {
-  const tagIndex = text.indexOf(tag);
-  if (tagIndex < 0) {
-    return [];
-  }
-  const braceIndex = text.indexOf('{', tagIndex);
-  if (braceIndex < 0) {
-    return [];
-  }
-  const block = balancedJsonObject(text, braceIndex);
-  return block ? [block] : [];
-}
-
-function balancedJsonObject(text: string, startIndex: number): string | null {
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = startIndex; index < text.length; index += 1) {
-    const char = text[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char === '\\') {
-      escaped = true;
-      continue;
-    }
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-    if (char === '{') {
-      depth += 1;
-    } else if (char === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        return text.slice(startIndex, index + 1);
-      }
-    }
-  }
-  return null;
 }
 
 function nodeLabel(schema: ArchitectureSchema, nodeId: string): string {

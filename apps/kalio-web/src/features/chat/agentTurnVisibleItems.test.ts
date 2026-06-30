@@ -46,6 +46,19 @@ describe('deriveVisibleTurnItems', () => {
     expect(deriveVisibleTurnItems(items, messages, {}, true)).toEqual(items);
   });
 
+  it('keeps malformed assistant text items visible instead of throwing', () => {
+    const items: AgentTurnItem[] = [{ kind: 'text', messageId: 'msg-malformed' }];
+    const messages: ChatMessage[] = [
+      makeAssistantMessage({
+        id: 'msg-malformed',
+        content: undefined as unknown as string,
+      }),
+    ];
+
+    expect(() => deriveVisibleTurnItems(items, messages, {}, true)).not.toThrow();
+    expect(deriveVisibleTurnItems(items, messages, {}, true)).toEqual(items);
+  });
+
   it('keeps later streaming assistant text visible even when content currently matches', () => {
     const items: AgentTurnItem[] = [
       { kind: 'text', messageId: 'msg-before-tool' },

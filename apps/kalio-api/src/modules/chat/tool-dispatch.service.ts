@@ -40,6 +40,8 @@ export class ToolDispatchService {
           name: t.name,
           description: t.description,
           serverKey: t.serverKey,
+          aliases: t.aliases,
+          domain: 'mcp' as const,
           parameters: t.parameters,
           requiresConfirmation: t.requiresConfirmation,
         }))

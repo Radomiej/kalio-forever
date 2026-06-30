@@ -693,8 +693,35 @@ describe('ExecutionGraphView empty-session state', () => {
       ],
     };
     sessionState.sessions = [
-      { id: 'arch-run-1-root', personaId: 'default', title: 'Architecture root', kind: 'chat', createdAt: 1, updatedAt: 1 },
-      { id: 'arch-run-1-pragmatist', personaId: 'dev', title: 'Five Minds Council: Pragmatist', kind: 'subagent', parentSessionId: 'arch-run-1-root', createdAt: 2, updatedAt: 2 },
+      {
+        id: 'arch-run-1-root',
+        personaId: 'default',
+        title: 'Architecture root',
+        kind: 'chat',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-root',
+          architectureContext: { architectureRunId: 'run-1' },
+        },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'arch-run-1-pragmatist',
+        personaId: 'dev',
+        title: 'Five Minds Council: Pragmatist',
+        kind: 'subagent',
+        parentSessionId: 'arch-run-1-root',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'pragmatist',
+          architectureContext: {
+            architectureRunId: 'run-1',
+            roleSlotId: 'pragmatist',
+          },
+        },
+        createdAt: 2,
+        updatedAt: 2,
+      },
     ];
     apiGetMock.mockImplementation((url: string) => {
       if (url === '/api/personas') {
@@ -759,7 +786,18 @@ describe('ExecutionGraphView empty-session state', () => {
     sessionState.agentTurns = buildTurnsFromHistory(messages, 'arch-run-2-root');
     sessionState.sessionAgentTurns = { 'arch-run-2-root': sessionState.agentTurns };
     sessionState.sessions = [
-      { id: 'arch-run-2-root', personaId: 'default', title: 'Architecture root', kind: 'chat', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'arch-run-2-root',
+        personaId: 'default',
+        title: 'Architecture root',
+        kind: 'chat',
+        runtimeContext: {
+          runtimeKind: 'agent-flow-root',
+          architectureContext: { architectureRunId: 'run-2' },
+        },
+        createdAt: 1,
+        updatedAt: 1,
+      },
       { id: 'arch-run-2-pragmatist', personaId: 'dev', title: 'Architecture Debate: Pragmatist', kind: 'subagent', parentSessionId: 'arch-run-2-root', createdAt: 2, updatedAt: 2 },
     ];
     apiGetMock.mockImplementation((url: string) => {
@@ -1633,6 +1671,8 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(inspector).toHaveTextContent('C:/Projekty/kalio-forever');
     expect(inspector).toHaveTextContent('kalio-forever');
     expect(inspector).toHaveTextContent('Transcript tail');
+    expect(screen.queryByRole('button', { name: 'Send follow-up' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop run' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open child chat' }));
 
