@@ -122,11 +122,11 @@ describe('ArchitectureRoleExecutorService', () => {
       parentToolCallId: 'architecture:run-1:pragmatist',
       childSessionId: 'branch-1',
       personaId: 'dev',
-      maxIterations: 8,
+      maxIterations: 30,
       slotPolicy: expect.objectContaining({
         allowedToolNames: expect.arrayContaining(['vfs_list', 'vfs_read']),
       }),
-      timeoutMs: 120_000,
+      timeoutMs: 300_000,
       vfsMode: 'shared',
       copyOutputs: false,
     }));
@@ -617,7 +617,7 @@ describe('ArchitectureRoleExecutorService', () => {
       personaId: slot.defaultPersonaId,
     });
 
-    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].maxIterations).toBe(8);
+    expect(vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].maxIterations).toBe(30);
   });
 
   it('returns partial tool evidence when a subagent errors after CLI work starts', async () => {
@@ -776,7 +776,7 @@ describe('ArchitectureRoleExecutorService', () => {
     const call = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0];
     expectSlotPolicy(call, implementer);
     expect(call?.autoApproveTools).toEqual(['vfs_write', 'spawn_cli_agent', 'message_cli_agent']);
-    expect(call?.maxIterations).toBe(2);
+    expect(call?.maxIterations).toBe(30);
     expect(call?.objective).toContain('Slot: Implementer (tool_executor)');
     expect(call?.objective).toContain('Act as an execution slot, not a planner.');
     expect(call?.objective).toContain('create or update the required artifacts first with vfs_write, fs_write, or a durable CLI child agent');

@@ -242,8 +242,8 @@ describe('CredentialsService', () => {
   });
 
   describe('max tool attempts settings', () => {
-    it('returns 8 as default', async () => {
-      expect(await svc.getMaxToolAttempts()).toBe(8);
+    it('returns 30 as default', async () => {
+      expect(await svc.getMaxToolAttempts()).toBe(30);
     });
 
     it('sets and retrieves max tool attempts', async () => {

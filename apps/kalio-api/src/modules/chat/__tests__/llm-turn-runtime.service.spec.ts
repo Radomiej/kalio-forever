@@ -13,6 +13,15 @@ async function* streamFrom(chunks: InternalLLMChunk[]): AsyncIterable<InternalLL
   for (const chunk of chunks) yield chunk;
 }
 
+async function* throwingStream(error: Error): AsyncIterable<InternalLLMChunk> {
+  throw error;
+}
+
+async function* partialThenThrow(error: Error): AsyncIterable<InternalLLMChunk> {
+  yield { type: 'text_delta', delta: 'stale partial output' };
+  throw error;
+}
+
 describe('LLMTurnRuntimeService', () => {
   it('returns provider structured output without routing it through display chunk handlers', async () => {
     const structuredOutput = {
@@ -62,6 +71,137 @@ describe('LLMTurnRuntimeService', () => {
       expect.objectContaining({ type: 'structured_output' }),
       expect.any(Object),
     );
+  });
+
+  it('retries malformed structured output once with a non-persisted repair instruction', async () => {
+    const structuredOutput = {
+      name: 'architecture_router_output',
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          nextAction: { const: 'route_to' },
+          targetNodeId: { type: 'string' },
+        },
+        required: ['nextAction', 'targetNodeId'],
+      },
+      strict: true,
+    };
+    const repairedOutput = { nextAction: 'route_to', targetNodeId: 'researcher' };
+    const malformedError = Object.assign(new Error('Structured output response failed invalid_json'), {
+      code: 'LLM_BAD_STRUCTURED_OUTPUT',
+    });
+    const llmSource: ILLMSource = {
+      stream: vi.fn()
+        .mockImplementationOnce(() => throwingStream(malformedError))
+        .mockImplementationOnce(() => streamFrom([
+          { type: 'structured_output', value: repairedOutput } as unknown as InternalLLMChunk,
+          { type: 'done' },
+        ])),
+    };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }, { role: 'user', content: 'route this' }],
+        unboundedHistoryCount: 2,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const processor = {
+      process: vi.fn(async () => undefined),
+    } satisfies Pick<StreamProcessorService, 'process'>;
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      processor as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      { dispatch: vi.fn() } as unknown as ToolDispatchService,
+    );
+
+    const result = await runtime.runAgentLoop({
+      runtimeKind: 'agent-flow-branch',
+      sessionId: 'sid',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [],
+      structuredOutput,
+      abortSignal: new AbortController().signal,
+      emit: vi.fn() as EmitFn,
+      maxIterations: 1,
+    });
+
+    expect(result.structuredOutput).toEqual(repairedOutput);
+    expect(llmSource.stream).toHaveBeenCalledTimes(2);
+    const retryParams = (llmSource.stream as ReturnType<typeof vi.fn>).mock.calls[1]?.[0] as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(retryParams.messages).toHaveLength(3);
+    expect(retryParams.messages[2]).toMatchObject({
+      role: 'user',
+      content: expect.stringContaining('Return only valid JSON'),
+    });
+    expect(sessionManager.loadHistoryForLLM).toHaveBeenCalledTimes(1);
+    expect(sessionManager.saveToolResult).not.toHaveBeenCalled();
+  });
+
+  it('drops partial first-attempt state before a structured output repair retry', async () => {
+    const structuredOutput = {
+      name: 'architecture_router_output',
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          nextAction: { const: 'route_to' },
+          targetNodeId: { type: 'string' },
+        },
+        required: ['nextAction', 'targetNodeId'],
+      },
+      strict: true,
+    };
+    const repairedOutput = { nextAction: 'route_to', targetNodeId: 'researcher' };
+    const malformedError = Object.assign(new Error('Structured output response failed invalid_json'), {
+      code: 'LLM_BAD_STRUCTURED_OUTPUT',
+    });
+    const llmSource: ILLMSource = {
+      stream: vi.fn()
+        .mockImplementationOnce(() => partialThenThrow(malformedError))
+        .mockImplementationOnce(() => streamFrom([
+          { type: 'structured_output', value: repairedOutput } as unknown as InternalLLMChunk,
+          { type: 'done' },
+        ])),
+    };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }],
+        unboundedHistoryCount: 1,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const processor = {
+      process: vi.fn(async (chunk: InternalLLMChunk, ctx: { state: { appendText: (delta: string) => void } }) => {
+        if (chunk.type === 'text_delta') ctx.state.appendText(chunk.delta);
+      }),
+    } satisfies Pick<StreamProcessorService, 'process'>;
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      processor as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      { dispatch: vi.fn() } as unknown as ToolDispatchService,
+    );
+
+    const result = await runtime.runAgentLoop({
+      runtimeKind: 'agent-flow-branch',
+      sessionId: 'sid',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [],
+      structuredOutput,
+      abortSignal: new AbortController().signal,
+      emit: vi.fn() as EmitFn,
+      maxIterations: 1,
+    });
+
+    expect(result.finalText).toBe('');
+    expect(result.structuredOutput).toEqual(repairedOutput);
+    expect(llmSource.stream).toHaveBeenCalledTimes(2);
   });
 
   it('passes the current tool-loop limit to before-iteration callbacks', async () => {

@@ -5,6 +5,8 @@ import type {
   CLIAgentSessionSnapshot,
   RuntimeActivitySnapshot,
   RuntimeChildExecution,
+  WorkflowErrorCode,
+  WorkflowFailure,
 } from '@kalio/types';
 import type { ToolActivityStatus } from '../../store/agentRuntimeTypes';
 import { extractCLIAgentResult, extractCLIAgentSessionSnapshot, extractPersistedToolResultMeta } from './ToolCallBubble.parsers';
@@ -30,6 +32,8 @@ export interface CLIChildProjection {
   turnId?: string;
   agentId: string;
   status: CLIChildProjectionStatus;
+  errorCode?: WorkflowErrorCode;
+  failure?: WorkflowFailure;
   lastOutput: string;
   childTitle?: string;
   toolName: string;
@@ -190,6 +194,8 @@ export function projectionFromToolResult(
         snapshotStatus: snapshot.status,
         resultStatus,
       }),
+      errorCode: snapshot.errorCode,
+      failure: snapshot.failure,
       lastOutput: snapshot.lastOutput ?? '',
       toolName,
     };
@@ -225,6 +231,8 @@ export function projectionFromRuntimeChildExecution(
     parentCallId: execution.parentToolCallId,
     agentId: execution.label ?? 'copilot',
     status: mapRuntimeChildExecutionStatus(execution.status),
+    errorCode: execution.errorCode,
+    failure: execution.failure,
     lastOutput: stringOrEmpty(execution.lastOutput),
     toolName: fallbackToolName,
   };
@@ -294,6 +302,8 @@ export function mergeCLIChildProjectionSources(params: {
       ? runtimeProjection.agentId
       : storedProjection.agentId || runtimeProjection.agentId,
     status: runtimeProjection.status,
+    errorCode: runtimeProjection.errorCode ?? storedProjection.errorCode,
+    failure: runtimeProjection.failure ?? storedProjection.failure,
     lastOutput: nonEmptyString(runtimeProjection.lastOutput)
       ? runtimeProjection.lastOutput
       : storedProjection.lastOutput,

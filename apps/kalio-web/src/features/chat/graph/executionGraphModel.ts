@@ -428,9 +428,11 @@ export function buildExecutionGraphModel({
           ? statusFromRuntimeChildExecution(runtimeAgentFlowExecution.status)
           : subAgentFlowResult.status === 'failed' || subAgentFlowResult.status === 'blocked' || subAgentFlowResult.status === 'cancelled'
             ? 'error'
-            : subAgentFlowResult.status === 'done'
-              ? 'success'
-              : 'running';
+            : subAgentFlowResult.status === 'waiting_on_orchestrator'
+              ? 'waiting'
+              : subAgentFlowResult.status === 'done'
+                ? 'success'
+                : 'running';
         const flowNode = addNode({
           id: `agent-flow:${subAgentFlowResult.flowRunId}`,
           kind: 'agent-flow',
@@ -676,6 +678,8 @@ export function buildExecutionGraphModel({
 
       const groupStatus: ExecutionGraphNodeStatus = groupedTools.some((tool) => tool.status === 'error')
         ? 'error'
+        : groupedTools.some((tool) => tool.status === 'waiting')
+          ? 'waiting'
         : groupedTools.some((tool) => tool.status === 'running')
           ? 'running'
           : groupedTools.some((tool) => tool.status === 'success')

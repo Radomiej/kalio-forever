@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BaseOpenAICompatibleProvider } from './base-openai-compatible.provider';
+import { OpenRouterProvider } from './openrouter.provider';
 import { XiaomiMiMoProvider } from './xiaomimimo.provider';
 import type { LLMMessage, LLMStreamChunk } from '@kalio/types';
 
@@ -150,6 +151,178 @@ describe('BaseOpenAICompatibleProvider', () => {
         nextAction: 'route_to',
         targetNodeId: 'implementer',
       });
+    });
+
+    it('extracts fenced structured JSON from model prose when it matches the requested schema', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'route this' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const structuredOutput = {
+        name: 'architecture_router_output',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            nextAction: { const: 'route_to' },
+            targetNodeId: { type: 'string' },
+          },
+          required: ['nextAction', 'targetNodeId'],
+        },
+        strict: true,
+      };
+      const onStructuredOutput = vi.fn();
+      const mockStream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"I will return JSON now.\\n```json\\n"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"{\\"nextAction\\":\\"route_to\\",\\"targetNodeId\\":\\"researcher\\"}\\n```"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await provider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+        structuredOutput,
+        onStructuredOutput,
+      });
+
+      expect(onStructuredOutput).toHaveBeenCalledWith({
+        nextAction: 'route_to',
+        targetNodeId: 'researcher',
+      });
+    });
+
+    it('rejects structured JSON that does not match the requested schema', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'route this' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const structuredOutput = {
+        name: 'architecture_router_output',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            nextAction: { const: 'route_to' },
+            targetNodeId: { type: 'string' },
+          },
+          required: ['nextAction', 'targetNodeId'],
+        },
+        strict: true,
+      };
+      const mockStream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"{\\"nextAction\\":\\"route_to\\"}"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await expect(provider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+        structuredOutput,
+        onStructuredOutput: vi.fn(),
+      })).rejects.toMatchObject({ code: 'LLM_BAD_STRUCTURED_OUTPUT' });
+    });
+
+    it('unwraps a known structured-output root only when the nested value matches the requested schema', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'route this' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const structuredOutput = {
+        name: 'architecture_router_output',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            nextAction: { const: 'route_to' },
+            targetNodeId: { type: 'string' },
+          },
+          required: ['nextAction', 'targetNodeId'],
+        },
+        strict: true,
+      };
+      const onStructuredOutput = vi.fn();
+      const mockStream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"{\\"routerOutput\\":{\\"nextAction\\":\\"route_to\\",\\"targetNodeId\\":\\"implementer\\"}}"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await provider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+        structuredOutput,
+        onStructuredOutput,
+      });
+
+      expect(onStructuredOutput).toHaveBeenCalledWith({
+        nextAction: 'route_to',
+        targetNodeId: 'implementer',
+      });
+    });
+
+    it('asks OpenRouter to require providers that honor structured output parameters', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'route this' }];
+      const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];
+      const structuredOutput = {
+        name: 'architecture_router_output',
+        schema: {
+          type: 'object',
+          properties: { nextAction: { const: 'finalize' } },
+          required: ['nextAction'],
+        },
+        strict: true,
+      };
+      const openRouterProvider = new OpenRouterProvider('test-key', 'xiaomi/mimo-v2.5', 'https://api.test.com');
+      (openRouterProvider as unknown as { logger: typeof mockLogger }).logger = mockLogger;
+      const mockStream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"{\\"nextAction\\":\\"finalize\\"}"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        body: mockStream,
+      });
+
+      await openRouterProvider.streamChat(messages, tools, {
+        sessionId: 'sess-123',
+        messageId: 'msg-456',
+        onChunk: vi.fn(),
+        structuredOutput,
+        onStructuredOutput: vi.fn(),
+      });
+
+      const requestInit = mockFetch.mock.calls[0]?.[1] as RequestInit | undefined;
+      const body = JSON.parse(String(requestInit?.body)) as Record<string, unknown>;
+
+      expect(body['provider']).toEqual({ require_parameters: true });
     });
 
     it('REGRESSION: omits Authorization when the API key is empty', async () => {

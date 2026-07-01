@@ -66,9 +66,35 @@ describe('useContextPreview', () => {
       personaId: 'persona-1',
       draftUserMessage: 'draft',
       attachments: undefined,
-    });
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(result.current.tokenCount?.total).toBe(120);
     expect(result.current.preview?.messages.at(-1)?.source).toBe('draft');
+  });
+
+  it('aborts an in-flight preview request when the draft changes', async () => {
+    const signals: AbortSignal[] = [];
+    apiPostMock.mockImplementation((_url: string, _body: unknown, config?: { signal?: AbortSignal }) => {
+      if (config?.signal) {
+        signals.push(config.signal);
+      }
+      return new Promise(() => undefined);
+    });
+
+    const { rerender } = renderHook(
+      ({ draft }) => useContextPreview({
+        sessionId: 'session-1',
+        personaId: 'persona-1',
+        draftUserMessage: draft,
+        refreshKey: 0,
+      }),
+      { initialProps: { draft: 'old draft' } },
+    );
+
+    await waitFor(() => expect(apiPostMock).toHaveBeenCalledTimes(1));
+
+    rerender({ draft: 'new draft' });
+
+    expect(signals[0]?.aborted).toBe(true);
   });
 
   it('marks existing preview stale while a manual invalidation refresh is pending', async () => {

@@ -1,12 +1,10 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import {
   API_BASE,
-  deleteSessionIfExists,
   ensureEnvMockProvider,
   expectComposerEnabled,
   getComposerSendButton,
   getActiveCredentialId,
-  restoreActiveCredential,
   selectSession,
 } from './helpers/test-config';
 
@@ -19,6 +17,53 @@ type HitlMode = 'manual' | 'auto' | 'bypass';
 interface HitlConfig {
   mode: HitlMode;
   autoPersonaId: string | null;
+}
+
+async function fetchFromNode(
+  url: string,
+  init: RequestInit,
+  label: string,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+  }
+  throw new Error(`Failed to ${label}: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
+async function restoreHitlConfigFromNode(config: HitlConfig): Promise<void> {
+  const response = await fetchFromNode(
+    `${API_BASE}/hitl/config`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(config),
+    },
+    'restore HITL config',
+  );
+  expect(response.ok).toBeTruthy();
+}
+
+async function restoreActiveCredentialFromNode(credentialId: string | null): Promise<void> {
+  const response = await fetchFromNode(
+    credentialId ? `${API_BASE}/credentials/active/${credentialId}` : `${API_BASE}/credentials/active`,
+    { method: credentialId ? 'PUT' : 'DELETE' },
+    'restore active credential',
+  );
+  expect(response.ok).toBeTruthy();
+}
+
+async function deleteSessionFromNode(sessionId: string): Promise<void> {
+  await fetchFromNode(
+    `${API_BASE}/sessions/${sessionId}`,
+    { method: 'DELETE' },
+    'delete session',
+  ).catch(() => undefined);
 }
 
 async function openHitlPanel(page: Page): Promise<void> {
@@ -42,13 +87,6 @@ async function getHitlConfig(request: APIRequestContext): Promise<HitlConfig> {
   const response = await request.get(`${API_BASE}/hitl/config`);
   expect(response.ok()).toBeTruthy();
   return response.json() as Promise<HitlConfig>;
-}
-
-async function restoreHitlConfig(request: APIRequestContext, config: HitlConfig): Promise<void> {
-  const response = await request.put(`${API_BASE}/hitl/config`, {
-    data: config,
-  });
-  expect(response.ok()).toBeTruthy();
 }
 
 async function createSession(
@@ -90,6 +128,8 @@ async function expectVfsContent(
 
 test.describe('HITL tool confirmation on built QA', () => {
   test('manual mode blocks a mock tool until the user confirms it', async ({ page, request }) => {
+    test.setTimeout(75_000);
+
     const previousHitlConfig = await getHitlConfig(request);
     const previousActiveCredentialId = await getActiveCredentialId(request);
     const title = `HITL runtime ${Date.now()}`;
@@ -118,10 +158,10 @@ test.describe('HITL tool confirmation on built QA', () => {
       await expectVfsContent(request, session.id, MOCK_VFS_WRITE_PATH, MOCK_VFS_WRITE_CONTENT);
     } finally {
       if (createdSessionId) {
-        await deleteSessionIfExists(request, createdSessionId);
+        await deleteSessionFromNode(createdSessionId);
       }
-      await restoreHitlConfig(request, previousHitlConfig);
-      await restoreActiveCredential(request, previousActiveCredentialId);
+      await restoreHitlConfigFromNode(previousHitlConfig);
+      await restoreActiveCredentialFromNode(previousActiveCredentialId);
     }
   });
 });

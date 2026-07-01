@@ -86,7 +86,7 @@ function defaultMap(opts: {
       model: opts.llmModel ?? 'gpt-4o-mini',
       baseUrl: opts.llmBaseUrl ?? 'https://api.openai.com/v1',
       contextWindowSize: 32000,
-      maxToolAttempts: opts.maxToolAttempts ?? 8,
+      maxToolAttempts: opts.maxToolAttempts ?? 30,
       source: runtimeSource,
     },
   };
@@ -1047,6 +1047,43 @@ describe('LLMPanel', () => {
     fireEvent.mouseUp(slider);
     await waitFor(() =>
       expect(screen.getByTestId('max-tool-attempts-value')).toHaveTextContent('25'),
+    );
+  });
+
+  it('persists max tool attempts on slider input and shows save feedback', async () => {
+    const map = {
+      ...defaultMap(),
+      'PUT /api/credentials/settings/max-tool-attempts': 204 as const,
+    };
+    mockFetch(map);
+    render(<LLMPanel />);
+    await waitFor(() => screen.getByTestId('max-tool-attempts-slider'));
+    const slider = screen.getByTestId('max-tool-attempts-slider') as HTMLInputElement;
+
+    fireEvent.input(slider, { target: { value: '25' } });
+
+    await waitFor(() => expect(getRequestBody<{ size: number }>(
+      'PUT',
+      '/api/credentials/settings/max-tool-attempts',
+    ).size).toBe(25));
+    await waitFor(() =>
+      expect(screen.getByTestId('max-tool-attempts-save-status')).toHaveTextContent('Saved'),
+    );
+  });
+
+  it('uses 30 as the local max tool attempts fallback when backend omits the setting', async () => {
+    const map = defaultMap();
+    const config = map['GET /api/llm/config'];
+    if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+      throw new Error('Expected object LLM config fixture');
+    }
+    delete (config as { maxToolAttempts?: number }).maxToolAttempts;
+    mockFetch(map);
+
+    render(<LLMPanel />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('max-tool-attempts-value')).toHaveTextContent('30'),
     );
   });
 

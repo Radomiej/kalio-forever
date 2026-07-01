@@ -67,6 +67,37 @@ interface LaunchWorkflowPromptParams {
   onComplete?: (sessionId: string) => void;
 }
 
+const WORKFLOW_SOURCE_FILE_DISCOVERY_TIMEOUT_MS = 1000;
+
+function persistArchitectureSessionRuntimeContextInBackground({
+  session,
+  projectPath,
+  schema,
+  nextRuntimeContext,
+  updateSession,
+}: {
+  session: ChatSession;
+  projectPath: string;
+  schema: ArchitectSchema;
+  nextRuntimeContext: ChatSession['runtimeContext'];
+  updateSession: (id: string, patch: Partial<ChatSession>) => void;
+}): void {
+  updateSession(session.id, { runtimeContext: nextRuntimeContext });
+  void persistArchitectureSessionRuntimeContext(
+    session.id,
+    projectPath,
+    session.runtimeContext,
+    {
+      schemaId: schema.id,
+      schemaName: schema.name,
+      displayLabel: schema.name,
+    },
+    updateSession,
+  ).catch((err: unknown) => {
+    console.error('[sessionLaunchShared] architecture session runtime context persistence failed after launch continued', err);
+  });
+}
+
 function buildOptimisticSessionTitle(content: string): string {
   const preview = content.slice(0, 50).trim();
   return preview + (content.length > 50 ? '...' : '');
@@ -75,14 +106,12 @@ function buildOptimisticSessionTitle(content: string): string {
 function seedOptimisticWorkflowEnvelope({
   sessionId,
   userMessageId,
-  schemaId,
   addMessage,
   currentTurns,
   setAgentTurns,
 }: {
   sessionId: string;
   userMessageId: string;
-  schemaId: string;
   addMessage: (message: ChatMessage) => void;
   currentTurns: AgentTurn[];
   setAgentTurns: (turns: AgentTurn[], sessionId?: string | null) => void;
@@ -93,14 +122,6 @@ function seedOptimisticWorkflowEnvelope({
     sessionId,
     role: 'assistant',
     content: 'Architecture run is starting.',
-    architectureRun: {
-      runId: pendingAssistantMessageId,
-      schemaId,
-      status: 'running',
-      hostProjectionKind: 'workflow-envelope',
-      trace: [],
-      routeHops: [],
-    },
     createdAt: Date.now(),
   });
   setAgentTurns([
@@ -118,11 +139,33 @@ function seedOptimisticWorkflowEnvelope({
 }
 
 async function resolveWorkflowSourceFiles(sessionId: string): Promise<VFSFile[]> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   try {
-    return (await getSessionVfsFiles(sessionId)).files;
+    const filesPromise = getSessionVfsFiles(sessionId)
+      .then((result) => result.files)
+      .catch((err: unknown) => {
+        if (!timedOut) {
+          throw err;
+        }
+        console.error('[sessionLaunchShared] workflow VFS context check failed after launch continued', err);
+        return [];
+      });
+    const timeoutPromise = new Promise<VFSFile[]>((resolve) => {
+      timeoutId = setTimeout(() => {
+        timedOut = true;
+        console.warn('[sessionLaunchShared] workflow VFS context check timed out; launching without attached source files');
+        resolve([]);
+      }, WORKFLOW_SOURCE_FILE_DISCOVERY_TIMEOUT_MS);
+    });
+    return await Promise.race([filesPromise, timeoutPromise]);
   } catch (err: unknown) {
     console.error('[sessionLaunchShared] workflow VFS context check failed', err);
     return [];
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
 }
 
@@ -257,17 +300,13 @@ export async function launchWorkflowPrompt({
     ? { ...session, runtimeContext: nextRuntimeContext }
     : session;
   if (nextRuntimeContext && JSON.stringify(session.runtimeContext ?? null) !== JSON.stringify(nextRuntimeContext)) {
-    await persistArchitectureSessionRuntimeContext(
-      session.id,
+    persistArchitectureSessionRuntimeContextInBackground({
+      session,
       projectPath,
-      session.runtimeContext,
-      {
-        schemaId: schema.id,
-        schemaName: schema.name,
-        displayLabel: schema.name,
-      },
+      schema,
+      nextRuntimeContext,
       updateSession,
-    );
+    });
   }
 
   const userMessageId = nanoid();
@@ -281,7 +320,6 @@ export async function launchWorkflowPrompt({
   const pendingAssistantMessageId = seedOptimisticWorkflowEnvelope({
     sessionId: sessionWithScope.id,
     userMessageId,
-    schemaId,
     addMessage,
     currentTurns: getSessionAgentTurns(sessionWithScope.id),
     setAgentTurns,

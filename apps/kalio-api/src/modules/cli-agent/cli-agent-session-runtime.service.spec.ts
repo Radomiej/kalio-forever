@@ -398,17 +398,34 @@ describe('CLIAgentSessionRuntimeService', () => {
     const saved = JSON.parse(vi.mocked(sessions.saveToolResult).mock.calls[0]?.[2] ?? '{}') as {
       status?: string;
       errorCode?: string;
+      failure?: {
+        code?: string;
+        retryable?: boolean;
+        message?: string;
+        source?: string;
+      };
       toolResultErrorCode?: string;
       toolResultErrorMessage?: string;
     };
     expect(saved.status).toBe('failed');
     expect(saved.errorCode).toBe('TIMEOUT');
+    expect(saved.failure).toMatchObject({
+      code: 'TIMEOUT',
+      retryable: true,
+      message: 'wording can change',
+      source: 'cli-agent-hard-timeout',
+    });
     expect(saved.toolResultErrorCode).toBe('TIMEOUT');
     expect(saved.toolResultErrorMessage).toBe('wording can change');
     await vi.waitFor(() => {
       expect(emit).toHaveBeenCalledWith('tool:result', expect.objectContaining({
         status: 'error',
         errorCode: 'TIMEOUT',
+        failure: expect.objectContaining({
+          code: 'TIMEOUT',
+          retryable: true,
+          source: 'cli-agent-hard-timeout',
+        }),
         errorMessage: 'wording can change',
       }));
     });

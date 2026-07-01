@@ -97,6 +97,66 @@ describe('sessionRuntimeState', () => {
     )).toBe('running');
   });
 
+  it('lets pending tool confirmation override active tool-running session snapshots', () => {
+    const branch = createSession({
+      id: 'arch-run-analyst',
+      title: 'Strategic Decision Council: Analyst',
+      kind: 'subagent',
+      parentSessionId: 'arch-run-root',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'analyst',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'analyst',
+          displayLabel: 'Analyst',
+          sessionSurface: 'conversation-branch',
+        },
+      },
+    });
+
+    expect(sessionRuntimeState(
+      branch,
+      branch.id,
+      {},
+      {},
+      new Set(),
+      {},
+      {
+        [branch.id]: {
+          sessionId: branch.id,
+          active: true,
+          turnId: 'turn-1',
+          queueLength: 0,
+          run: {
+            id: 'run-1',
+            sessionId: branch.id,
+            turnId: 'turn-1',
+            phase: 'tool_running',
+            status: 'active',
+            retryCount: 0,
+            safeResume: true,
+            startedAt: 1,
+            updatedAt: 1,
+            lastHeartbeatAt: 1,
+          },
+          toolActivities: [{
+            callId: 'call-delete-1',
+            requestId: 'request-delete-1',
+            sessionId: branch.id,
+            toolName: 'vfs_delete',
+            args: { path: 'draft.txt' },
+            status: 'pending_confirmation',
+            startedAt: 1,
+          }],
+        },
+      },
+      {},
+      {},
+      new Map(),
+    )).toBe('waiting');
+  });
+
   it('lets a terminal architecture state override a stale active session snapshot after reconnect', () => {
     const branch = createSession({
       id: 'arch-run-analyst',

@@ -4,7 +4,7 @@ import { architectureActionFieldsForEvent, architectureActionSummaryForEvent } f
 import { isCompletedCliChildStatus } from './architecture-cli-child-status';
 import { createArchitectureRouterOutput } from './architecture-router-output';
 import { structuredRouteToCall } from './architecture-structured-output';
-import { isWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
+import { createWorkflowError, isWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
 
 type GraphRuntimeOptions = {
   schema: ArchitectureSchema;
@@ -105,6 +105,20 @@ class ArchitectureGraphRuntime {
           );
         } catch (error) {
           if (!this.isRecoverableNodeError(error)) {
+            const failure = workflowFailureFromError(error);
+            this.push('node_failed', `${node.label} failed.`, {
+              actionSummary: architectureActionSummaryForEvent('node_failed', node.kind),
+              lifecycle: 'failed',
+              status: 'failed',
+              nodeId: node.id,
+              roleSlotId: node.roleSlotId,
+              errorCode: failure.code,
+              failure,
+              data: {
+                errorCode: failure.code,
+                failure,
+              },
+            });
             throw error;
           }
           selectedNodeIds = this.handleRecoverableNodeError(node, outgoingNodeIds, error);
@@ -457,7 +471,11 @@ class ArchitectureGraphRuntime {
       this.events,
     );
     if (!toolContract.ok) {
-      throw new Error(`Architecture tool executor ${slot.id} completed without required tool evidence: ${toolContract.reason}`);
+      throw createWorkflowError(
+        'CONTRACT_VIOLATION',
+        `Architecture tool executor ${slot.id} completed without required tool evidence: ${toolContract.reason}`,
+        { source: 'architecture-graph-runtime' },
+      );
     }
     const incompleteReason = this.incompleteResultReason(result.data)
       ?? this.incompleteToolExecutorReason(slot, result.data, this.events);

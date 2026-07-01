@@ -64,6 +64,7 @@ export function nodeIcon(kind: ExecutionGraphNodeKind) {
 
 export function statusTone(status: ExecutionGraphNode['status']): string {
   if (status === 'error') return 'text-rose-200';
+  if (status === 'waiting') return 'text-amber-100';
   if (status === 'running') return 'text-amber-100';
   if (status === 'success') return 'text-emerald-100';
   return 'text-slate-200';
@@ -71,6 +72,7 @@ export function statusTone(status: ExecutionGraphNode['status']): string {
 
 export function statusLabel(status: ExecutionGraphNode['status']): string {
   if (status === 'error') return 'error';
+  if (status === 'waiting') return 'waiting';
   if (status === 'running') return 'running';
   if (status === 'success') return 'ready';
   return 'idle';

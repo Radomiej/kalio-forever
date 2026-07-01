@@ -4,6 +4,170 @@ import { describe, expect, it, vi } from 'vitest';
 import { createArchitectureGraphEvents } from './architecture-graph-runtime';
 
 describe('createArchitectureGraphEvents max visit guards', () => {
+  it('emits typed contract failure when a tool executor finishes without required tool evidence', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'tool-evidence-contract-runtime',
+      name: 'Tool Evidence Contract Runtime',
+      description: 'Tool executor nodes must produce structured tool evidence.',
+      version: '0.1.0',
+      roleSlots: [{
+        id: 'implementer',
+        label: 'Implementer',
+        description: 'Must use tools and return evidence.',
+        slotType: 'tool_executor',
+        defaultPersonaId: 'agent-implementer',
+        allowedPersonaTags: ['implementation'],
+        required: true,
+        canOverrideAtRunStart: true,
+      }],
+      nodes: [
+        { id: 'implementer', label: 'Implementer', kind: 'role', roleSlotId: 'implementer' },
+      ],
+      edges: [],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-tool-evidence-contract',
+      schemaId: schema.id,
+      prompt: 'Do implementation work.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 10 },
+      rootSessionId: 'root-tool-evidence-contract',
+      branchSessionIds: { implementer: 'branch-implementer' },
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(async () => ({
+        message: 'Implementation complete.',
+        data: { response: 'Implementation complete.' },
+      })),
+    };
+    const liveEvents: Array<Awaited<ReturnType<typeof createArchitectureGraphEvents>>[number]> = [];
+
+    await expect(createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'agent-implementer',
+      onEvent: (event) => liveEvents.push(event),
+    })).rejects.toThrow('completed without required tool evidence');
+
+    expect(liveEvents).toContainEqual(expect.objectContaining({
+      type: 'node_failed',
+      nodeId: 'implementer',
+      roleSlotId: 'implementer',
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        source: 'architecture-graph-runtime',
+        retryable: false,
+      }),
+    }));
+  });
+
+  it('emits typed node_failed before unrecoverable branch errors reject the graph run', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'typed-branch-failure-runtime',
+      name: 'Typed Branch Failure Runtime',
+      description: 'Schema where provider branch failures must become typed node failures.',
+      version: '0.1.0',
+      roleSlots: [{
+        id: 'orchestrator',
+        label: 'Orchestrator',
+        description: 'Fails with provider structured output code.',
+        slotType: 'router',
+        defaultPersonaId: 'orchestrator',
+        allowedPersonaTags: ['routing'],
+        required: true,
+        canOverrideAtRunStart: true,
+      }],
+      nodes: [
+        { id: 'orchestrator', label: 'Orchestrator', kind: 'router', roleSlotId: 'orchestrator' },
+      ],
+      edges: [],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-typed-branch-failure',
+      schemaId: schema.id,
+      prompt: 'Provider wording must not drive graph status.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 10 },
+      rootSessionId: 'root-typed-branch-failure',
+      branchSessionIds: { orchestrator: 'arch-run-typed-branch-failure-orchestrator' },
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const providerError = Object.assign(new Error('provider wording changed'), {
+      code: 'LLM_BAD_STRUCTURED_OUTPUT',
+    });
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(async ({ emit }) => {
+        emit?.('agent:start', { sessionId: 'arch-run-typed-branch-failure-orchestrator' });
+        throw providerError;
+      }),
+    };
+    const liveEvents: Array<Awaited<ReturnType<typeof createArchitectureGraphEvents>>[number]> = [];
+
+    await expect(createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'orchestrator',
+      onEvent: (event) => liveEvents.push(event),
+    })).rejects.toThrow('provider wording changed');
+
+    expect(liveEvents).toContainEqual(expect.objectContaining({
+      type: 'node_failed',
+      nodeId: 'orchestrator',
+      roleSlotId: 'orchestrator',
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        source: 'llm-provider',
+        retryable: false,
+        message: 'provider wording changed',
+      }),
+    }));
+  });
+
   it('ignores legacy routeToNodeId data without typed routerOutput', async () => {
     const schema: ArchitectureSchema = {
       id: 'legacy-route-data-runtime',

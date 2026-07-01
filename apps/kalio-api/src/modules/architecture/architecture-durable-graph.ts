@@ -1,9 +1,15 @@
-import type { ArchitectureGraphProjection, ArchitectureSchema, ChatMessage, ChatSession } from '@kalio/types';
+import type { ArchitectureGraphProjection, ArchitectureSchema, ChatMessage } from '@kalio/types';
 import type { SessionsService } from '../chat/sessions.service';
 import type { ArchitectureRegistryService } from './architecture-registry.service';
 import { architectureActionFieldsForEvent } from './architecture-action-summary';
 import { isCompletedCliChildStatus } from './architecture-cli-child-status';
 import { architectureSessionIdForRunSlot } from './architecture-session-ids';
+import {
+  inferParentsBySessionId,
+  messageReferencesArchitectureRun,
+  schemaForPersistedRun,
+  sessionReferencesArchitectureRun,
+} from './architecture-durable-graph.legacy';
 import {
   isCliAgentToolName,
   normalizeCliStatus,
@@ -39,18 +45,6 @@ async function findPersistedArchitectureMessages(runId: string, sessions: Sessio
   return messages;
 }
 
-function sessionReferencesArchitectureRun(session: ChatSession, runId: string): boolean {
-  return session.runtimeContext?.architectureContext?.architectureRunId === runId;
-}
-
-function messageReferencesArchitectureRun(message: ChatMessage, runId: string): boolean {
-  if (message.architectureRun?.runId === runId) {
-    return true;
-  }
-
-  return message.toolCalls?.some((toolCall) => toolCall.args['architectureRunId'] === runId) ?? false;
-}
-
 function reconstructGraphFromMessages(
   runId: string,
   messages: ChatMessage[],
@@ -76,7 +70,7 @@ function reconstructGraphFromMessages(
       return;
     }
     completedNodeIds.add(nodeId);
-    eventIdsByNodeId.set(nodeId, [...(eventIdsByNodeId.get(nodeId) ?? []), eventIdFromToolCall(toolCall)]);
+    eventIdsByNodeId.set(nodeId, [...(eventIdsByNodeId.get(nodeId) ?? []), eventIdFromToolCall(runId, toolCall)]);
   });
 
   if (persistedSummary?.status === 'completed' && persistedSummaryMessage) {
@@ -87,7 +81,7 @@ function reconstructGraphFromMessages(
 
   const routeHops = persistedSummary?.routeHops.length
     ? persistedSummary.routeHops
-    : reconstructRouteHops(schema, branchToolCalls);
+    : reconstructRouteHops(runId, schema, branchToolCalls);
 
   routeHops.forEach((hop) => {
     completedNodeIds.add(hop.fromNodeId);
@@ -120,7 +114,11 @@ function reconstructGraphFromMessages(
   };
 }
 
-function eventIdFromToolCall(toolCall: NonNullable<ChatMessage['toolCalls']>[number]): string {
+function eventIdFromToolCall(runId: string, toolCall: NonNullable<ChatMessage['toolCalls']>[number]): string {
+  const legacyPrefix = `architecture:${runId}:`;
+  if (toolCall.id.startsWith(legacyPrefix)) {
+    return toolCall.id.slice(legacyPrefix.length);
+  }
   return stringField(toolCall.args, 'architectureEventId')
     ?? stringField(toolCall.args, 'eventId')
     ?? toolCall.id;
@@ -159,6 +157,7 @@ function reconstructChildAgents(
   schema: ArchitectureSchema,
   messages: ChatMessage[],
 ): NonNullable<ArchitectureGraphProjection['childAgents']> {
+  const parentBySessionId = inferParentsBySessionId(schema, messages);
   const toolResults = new Map<string, Record<string, unknown>>();
   messages
     .filter((message) => message.role === 'tool_result' && typeof message.toolCallId === 'string')
@@ -182,11 +181,12 @@ function reconstructChildAgents(
       }
       const previous = childAgents.get(childSessionId);
       const parent = inferParentFromToolCall(schema, toolCall.args);
+      const sessionParent = parentBySessionId.get(message.sessionId);
       childAgents.set(childSessionId, {
         id: childSessionId,
-        parentNodeId: parent.nodeId ?? previous?.parentNodeId,
-        parentRoleSlotId: parent.roleSlotId ?? previous?.parentRoleSlotId,
-        parentEventId: eventIdFromToolCall(toolCall),
+        parentNodeId: parent.nodeId ?? sessionParent?.nodeId ?? previous?.parentNodeId,
+        parentRoleSlotId: parent.roleSlotId ?? sessionParent?.roleSlotId ?? previous?.parentRoleSlotId,
+        parentEventId: eventIdFromToolCall(runId, toolCall),
         kind: 'cli-agent',
         backend: stringField(result, 'agentId') ?? stringField(toolCall.args, 'agentId') ?? previous?.backend,
         status: latestCliStatus(previous, normalizeCliStatus(stringField(result, 'status')), message.createdAt),
@@ -211,18 +211,20 @@ function reconstructChildAgents(
     }
     const previous = childAgents.get(childSessionId);
     const parent = inferParentFromToolCall(schema, snapshot);
+    const incomingStatus = normalizeCliStatus(stringField(snapshot, 'status'));
+    const sessionParent = parentBySessionId.get(stringField(snapshot, 'parentSessionId') ?? message.sessionId);
     childAgents.set(childSessionId, {
       id: childSessionId,
-      parentNodeId: previous?.parentNodeId ?? parent.nodeId,
-      parentRoleSlotId: previous?.parentRoleSlotId ?? parent.roleSlotId,
+      parentNodeId: previous?.parentNodeId ?? parent.nodeId ?? sessionParent?.nodeId,
+      parentRoleSlotId: previous?.parentRoleSlotId ?? parent.roleSlotId ?? sessionParent?.roleSlotId,
       parentEventId: previous?.parentEventId ?? message.id,
       kind: 'cli-agent',
       backend: previous?.backend ?? stringField(snapshot, 'agentId'),
-      status: latestCliStatus(previous, normalizeCliStatus(stringField(snapshot, 'status')), message.createdAt),
+      status: latestCliStatus(previous, incomingStatus, message.createdAt),
       toolName: previous?.toolName ?? 'run_cli_agent',
       workdir: previous?.workdir ?? stringField(snapshot, 'workdir'),
       targetPaths: previous?.targetPaths ?? targetPathsFrom('run_cli_agent', {}, snapshot),
-      updatedAt: message.createdAt,
+      updatedAt: latestCliUpdatedAt(previous, incomingStatus, message.createdAt),
     });
   }
   return [...childAgents.values()];
@@ -252,6 +254,17 @@ function latestCliStatus(
   return previous.status;
 }
 
+function latestCliUpdatedAt(
+  previous: NonNullable<ArchitectureGraphProjection['childAgents']>[number] | undefined,
+  incoming: NonNullable<ArchitectureGraphProjection['childAgents']>[number]['status'] | undefined,
+  incomingUpdatedAt: number,
+): number {
+  if (!previous?.updatedAt || (incoming && incoming !== previous.status)) {
+    return incomingUpdatedAt;
+  }
+  return previous.updatedAt;
+}
+
 function inferParentFromToolCall(
   schema: ArchitectureSchema,
   args: Record<string, unknown>,
@@ -272,41 +285,8 @@ function inferParentFromToolCall(
   };
 }
 
-function schemaForPersistedRun(
-  schemaId: string | undefined,
-  messages: ChatMessage[],
-  registry: ArchitectureRegistryService,
-): ArchitectureSchema | null {
-  if (schemaId) {
-    const schema = registry.findOne(schemaId);
-    if (schema) {
-      return schema;
-    }
-  }
-
-  const toolCallSchemaId = messages
-    .flatMap((message) => message.toolCalls ?? [])
-    .map((toolCall) => toolCall.args['schemaId'])
-    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    ?.trim();
-  if (toolCallSchemaId) {
-    const schema = registry.findOne(toolCallSchemaId);
-    if (schema) {
-      return schema;
-    }
-  }
-
-  const toolCallSchemaName = messages
-    .flatMap((message) => message.toolCalls ?? [])
-    .map((toolCall) => toolCall.args['schemaName'])
-    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    ?.trim();
-  return toolCallSchemaName
-    ? registry.findAll().find((schema) => schema.id === toolCallSchemaName || schema.name === toolCallSchemaName) ?? null
-    : null;
-}
-
 function reconstructRouteHops(
+  runId: string,
   schema: ArchitectureSchema,
   branchToolCalls: NonNullable<ChatMessage['toolCalls']>,
 ): NonNullable<ArchitectureGraphProjection['routeHops']> {
@@ -319,7 +299,7 @@ function reconstructRouteHops(
       return;
     }
     hops.push({
-      eventId: eventIdFromToolCall(toolCall),
+      eventId: eventIdFromToolCall(runId, toolCall),
       source: 'agent',
       fromNodeId: nodeId,
       toNodeId: routerNodeId,

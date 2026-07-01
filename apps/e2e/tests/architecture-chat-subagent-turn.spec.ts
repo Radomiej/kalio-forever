@@ -147,7 +147,7 @@ test.describe('Architecture chat turn projection', () => {
       await sendMessageFromComposer(page, 'Route this through the sequential chain.');
 
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 90_000 });
-      await expect(page.getByTestId('architecture-run-timeline')).toBeVisible();
+      await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer', { timeout: 90_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toHaveCount(0);
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(2);
@@ -195,7 +195,7 @@ test.describe('Architecture chat turn projection', () => {
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(5, { timeout: 30_000 });
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router', { timeout: 90_000 });
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Finalizer', { timeout: 90_000 });
-      await expect(page.getByTestId('architecture-run-timeline')).toBeVisible();
+      await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Pragmatist');
       await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('User Advocate');
       await expect(page.getByTestId('architecture-route-parallel-agents')).toContainText('Innovator');

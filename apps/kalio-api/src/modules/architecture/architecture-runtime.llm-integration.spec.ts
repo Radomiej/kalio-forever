@@ -640,9 +640,10 @@ class EvidenceProducingSubagentRuntime implements SubagentRuntimePort {
   async runSubagent(request: RunSubagentRequest): Promise<RunSubagentResult> {
     const slot = slotIdFromObjective(request.objective);
     this.calls.push({ slot, objective: request.objective });
-    const result = this.resultForSlot(slot, request);
+    const response = this.resultForSlot(slot, request);
     return {
-      result,
+      result: response.text,
+      structuredOutput: response.structuredOutput,
       taskId: `task-${slot}`,
       childSessionId: request.childSessionId ?? `child-${slot}`,
       parentSessionId: request.parentSessionId,
@@ -653,30 +654,30 @@ class EvidenceProducingSubagentRuntime implements SubagentRuntimePort {
     };
   }
 
-  private resultForSlot(slot: string, request: RunSubagentRequest): string {
+  private resultForSlot(slot: string, request: RunSubagentRequest): ScriptedLLMResponse {
     if (slot === 'orchestrator') {
-      return routerRouteMessage('implementer', 'start deterministic evidence path', 'Orchestrator routes to implementation.');
+      return routerRouteResponse('implementer', 'start deterministic evidence path', 'Orchestrator routes to implementation.');
     }
     if (slot === 'implementer') {
       emitToolResult(request, 'vfs_write', { filePath: 'evidence/proof.json', bytesWritten: 42 });
-      return 'Implementer wrote evidence/proof.json with vfs_write evidence.';
+      return { text: 'Implementer wrote evidence/proof.json with vfs_write evidence.' };
     }
     if (slot === 'verifier') {
       emitToolResult(request, 'vfs_read', { filePath: 'evidence/proof.json', content: '{"ok":true}' });
-      return 'Verifier read evidence/proof.json and confirmed content.';
+      return { text: 'Verifier read evidence/proof.json and confirmed content.' };
     }
     if (slot === 'tester') {
       emitToolResult(request, 'vfs_read', { filePath: 'evidence/proof.json', content: '{"ok":true}' });
-      return 'Tester independently read evidence/proof.json.';
+      return { text: 'Tester independently read evidence/proof.json.' };
     }
     if (slot === 'goal_master') {
       emitToolResult(request, 'vfs_read', { filePath: 'evidence/proof.json', content: '{"ok":true}' });
-      return routerRouteMessage('final-artifact', 'accepted', 'Goal Master accepts visible write/read evidence.');
+      return routerRouteResponse('final-artifact', 'accepted', 'Goal Master accepts visible write/read evidence.');
     }
     if (slot === 'finalizer') {
-      return 'Production evidence path accepted with vfs_write and vfs_read proof.';
+      return { text: 'Production evidence path accepted with vfs_write and vfs_read proof.' };
     }
-    return `Unhandled slot ${slot}.`;
+    return { text: `Unhandled slot ${slot}.` };
   }
 }
 

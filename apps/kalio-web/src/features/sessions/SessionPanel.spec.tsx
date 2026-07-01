@@ -28,6 +28,7 @@ type MockSessionRow = {
   updatedAt: number;
   parentSessionId?: string;
   kind?: string;
+  runtimeContext?: Record<string, unknown>;
 };
 
 vi.mock('../../store/agentStore', () => ({
@@ -95,6 +96,7 @@ beforeEach(() => {
     { id: 'session-1', title: 'Chat One', personaId: 'default', createdAt: 0, updatedAt: 0 },
     { id: 'session-2', title: 'Chat Two', personaId: 'default', createdAt: 0, updatedAt: 0 },
   ];
+  mockSessionStoreState.activeSessionId = 'session-1';
   mockSessionStoreState.sessionAgentTurns = {};
   mockSessionStoreState.sessionMessages = {};
   vi.clearAllMocks();
@@ -225,5 +227,78 @@ describe('SessionPanel — pending confirmation indicator', () => {
     await renderSessionPanel();
 
     expect(screen.getByTestId('session-descendant-activity-session-1')).toHaveTextContent('1 waiting');
+  });
+
+  it('does not show stale active descendants for terminal failed workflow hosts', async () => {
+    mockSessionStoreState.activeSessionId = 'host';
+    mockSessionStoreState.sessions = [
+      {
+        id: 'host',
+        title: 'Architecture failed host',
+        personaId: 'default',
+        createdAt: 0,
+        updatedAt: 2,
+        runtimeContext: {
+          architectureContext: {
+            schemaName: 'Architecture Debate',
+          },
+        },
+      },
+      {
+        id: 'child-finalizer',
+        title: 'Architecture Debate: Finalizer',
+        personaId: 'default',
+        parentSessionId: 'host',
+        kind: 'subagent',
+        createdAt: 0,
+        updatedAt: 1,
+        runtimeContext: {
+          architectureSlotId: 'final-artifact',
+          architectureContext: {
+            architectureRunId: 'run-failed',
+            roleSlotId: 'final-artifact',
+            displayLabel: 'Finalizer',
+            sessionSurface: 'conversation-branch',
+          },
+        },
+      },
+    ];
+    mockActiveAgentLoops = {
+      'child-finalizer': {
+        sessionId: 'child-finalizer',
+        turnId: 'stale-turn',
+        startedAt: 1,
+      },
+    };
+    mockSessionStoreState.sessionMessages = {
+      host: [{
+        id: 'architecture-summary',
+        sessionId: 'host',
+        role: 'assistant',
+        content: 'Architecture run failed.',
+        createdAt: 2,
+        architectureRun: {
+          runId: 'run-failed',
+          schemaId: 'architecture_debate',
+          status: 'failed',
+          hostProjectionKind: 'workflow-envelope',
+          trace: [],
+          routeHops: [],
+          graphNodes: [{
+            id: 'final-artifact',
+            label: 'Final Artifact',
+            kind: 'artifact',
+            status: 'pending',
+            eventIds: [],
+            incompleteReason: 'Legacy snapshot did not cancel this downstream node.',
+          }],
+        },
+      }],
+    };
+
+    await renderSessionPanel();
+
+    expect(screen.getByTestId('session-error-host')).toBeDefined();
+    expect(screen.queryByTestId('session-descendant-activity-host')).toBeNull();
   });
 });

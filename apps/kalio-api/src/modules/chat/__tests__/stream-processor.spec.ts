@@ -116,7 +116,10 @@ describe('StreamProcessorService', () => {
 
   it('REGRESSION: converts subagent raw XML tool-call text before persisting the assistant iteration', async () => {
     const ctx = makeCtx();
-    Object.assign(ctx, { agentRun: { agentRunId: 'sub-1', agentType: 'subagent' as const } });
+    Object.assign(ctx, {
+      agentRun: { agentRunId: 'sub-1', agentType: 'subagent' as const },
+      rawXmlToolNames: ['run_cli_agent'],
+    });
     ctx.state.appendText([
       '<tool_call>',
       '<name>run_cli_agent</name>',

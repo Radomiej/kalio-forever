@@ -149,7 +149,7 @@ describe('ExecutionGraphBoard', () => {
           kind: 'tool',
           title: 'run_subagent',
           subtitle: 'Awaiting confirmation',
-          status: 'running',
+          status: 'waiting',
           column: 2,
           row: 2,
           x: 404,
@@ -228,6 +228,7 @@ describe('ExecutionGraphBoard', () => {
 
     expect(screen.getByTestId('graph-node-prompt:prompt-1')).toHaveTextContent('Prompt');
     expect(screen.getByTestId('graph-node-status-turn:turn-1')).toHaveAttribute('aria-label', 'Status: running');
+    expect(screen.getByTestId('graph-node-status-tool:call-1')).toHaveAttribute('aria-label', 'Status: waiting');
     expect(screen.getByTestId('graph-node-status-final:turn-1')).toHaveAttribute('aria-label', 'Status: ready');
     expect(screen.getByTestId('graph-edge-tool:call-1->tool-result:call-1:dashed')).toHaveAttribute('stroke-dasharray', '7 8');
 

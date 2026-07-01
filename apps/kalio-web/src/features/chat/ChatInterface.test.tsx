@@ -629,7 +629,7 @@ describe('ChatInterface event wiring', () => {
     expect(buildArchitectureRunContext('session-1', files, ['vfs_read', 'fs_read'])).toEqual({
       maxArchitectureSteps: 64,
       maxArchitectureNodeVisits: 4,
-      maxArchitectureSubagentIterations: 8,
+      maxArchitectureSubagentIterations: 30,
       parentSessionId: 'session-1',
       hostSessionId: 'session-1',
       historySessionId: 'session-1',
@@ -645,7 +645,7 @@ describe('ChatInterface event wiring', () => {
     expect(buildArchitectureRunContext('session-1', [], ['vfs_read'])).toEqual({
       maxArchitectureSteps: 64,
       maxArchitectureNodeVisits: 4,
-      maxArchitectureSubagentIterations: 8,
+      maxArchitectureSubagentIterations: 30,
       parentSessionId: 'session-1',
       hostSessionId: 'session-1',
       historySessionId: 'session-1',
@@ -658,7 +658,7 @@ describe('ChatInterface event wiring', () => {
     expect(buildArchitectureRunContext('session-1', [], ['vfs_read'], 'C:\\Projekty\\kalio-forever')).toEqual({
       maxArchitectureSteps: 64,
       maxArchitectureNodeVisits: 4,
-      maxArchitectureSubagentIterations: 8,
+      maxArchitectureSubagentIterations: 30,
       parentSessionId: 'session-1',
       hostSessionId: 'session-1',
       historySessionId: 'session-1',
@@ -794,6 +794,11 @@ describe('ChatInterface event wiring', () => {
       ]),
       'session-1',
     );
+    const optimisticWorkflowMessage = addMessage.mock.calls
+      .map(([message]) => message as ChatMessage)
+      .find((message) => message.content === 'Architecture run is starting.');
+    expect(optimisticWorkflowMessage).toBeDefined();
+    expect(optimisticWorkflowMessage?.architectureRun).toBeUndefined();
   });
 
   it('fail-first: does not start architecture run while streaming and keeps composer draft', async () => {

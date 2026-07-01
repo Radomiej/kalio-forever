@@ -507,7 +507,7 @@ describe('ArchitectPage', () => {
         context: {
           maxArchitectureSteps: 64,
           maxArchitectureNodeVisits: 4,
-          maxArchitectureSubagentIterations: 8,
+          maxArchitectureSubagentIterations: 30,
         },
       });
     });
@@ -1018,7 +1018,7 @@ describe('ArchitectPage', () => {
         context: {
           maxArchitectureSteps: 64,
           maxArchitectureNodeVisits: 4,
-          maxArchitectureSubagentIterations: 8,
+          maxArchitectureSubagentIterations: 30,
         },
         schema: expect.objectContaining({
           roleSlots: expect.arrayContaining([

@@ -209,6 +209,7 @@ export function ChatInterface() {
       : activeSession?.personaId ?? null,
     draftUserMessage,
     refreshKey: contextPreviewRefreshKey,
+    enabled: !composerBusy && !awaitingFirstChunk,
   });
   const tokenCount = contextPreview.tokenCount ?? fallbackTokenCount;
   const needsCompact = tokenCount.total > tokenCount.contextLimit;

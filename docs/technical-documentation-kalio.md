@@ -347,7 +347,7 @@ Konfiguracja runtime zapisywana jest w SQLite (`app_settings`, `credentials`, ta
 Precedence `maxToolAttempts` jest zależna od trybu runtime:
 
 - zwykły chat: `persona.maxToolAttempts` -> globalne ustawienie runtime,
-- wykonanie slotu workflow/architecture: `node.maxToolAttempts` -> `persona.maxToolAttempts` -> `run.context.maxArchitectureSubagentIterationsBySlot[slotId]` / `run.context.maxArchitectureSubagentIterations` -> globalne ustawienie runtime -> domyślny limit wykonawczy (`2` dla `tool_executor`, `8` dla pozostałych slotów).
+- wykonanie slotu workflow/architecture: `node.maxToolAttempts` -> `persona.maxToolAttempts` -> `run.context.maxArchitectureSubagentIterationsBySlot[slotId]` / `run.context.maxArchitectureSubagentIterations` -> globalne ustawienie runtime -> domyślny limit wykonawczy `30` dla wszystkich slotów, w tym `tool_executor`.
 
 ### 3.12. Observability i audyt
 

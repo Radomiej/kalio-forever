@@ -3,6 +3,7 @@ import {
   type ArchitectureGraphProjection,
   type ChatMessage,
   type ChatSession,
+  type RuntimeActivitySnapshot,
   type SocketEvents,
 } from '@kalio/types';
 import {
@@ -12,6 +13,9 @@ import {
 } from './architectureSessionContext';
 
 export type SessionRuntimeState = 'pending' | 'waiting' | 'running' | 'error' | 'done' | 'stopped';
+export type RuntimeSessionStatusSnapshot = SocketEvents['session:status'] & {
+  toolActivities?: RuntimeActivitySnapshot['toolActivities'];
+};
 type ArchitectureRunWithGraph = NonNullable<ChatMessage['architectureRun']> & {
   graphNodes?: ArchitectureGraphProjection['nodes'];
 };
@@ -146,9 +150,13 @@ export function buildArchitectureSessionRuntimeStates(
     .filter((run): run is ArchitectureRunWithGraph => Boolean(run));
 
   for (const run of runs) {
-    const graphNodeById = new Map(
-      (run.graphNodes ?? []).map((node) => [normalizeArchitectureNodeKey(node.id), node]),
-    );
+    const graphNodeById = new Map<string, ArchitectureGraphProjection['nodes'][number]>();
+    for (const node of run.graphNodes ?? []) {
+      graphNodeById.set(normalizeArchitectureNodeKey(node.id), node);
+      if (node.roleSlotId) {
+        graphNodeById.set(normalizeArchitectureNodeKey(node.roleSlotId), node);
+      }
+    }
 
     for (const session of architectureSessions) {
       if (!sameArchitectureRunId(architectureRunIdForSession(session), run.runId)) {
@@ -161,7 +169,7 @@ export function buildArchitectureSessionRuntimeStates(
       }
       const node = graphNodeById.get(normalizeArchitectureNodeKey(slotId));
       if (node) {
-        statusBySession.set(session.id, statusFromArchitectureGraphNode(node.status));
+        statusBySession.set(session.id, statusFromArchitectureGraphNode(node.status, run.status));
         continue;
       }
       const fallbackState = fallbackArchitectureBranchState(run.status);
@@ -173,6 +181,9 @@ export function buildArchitectureSessionRuntimeStates(
     for (const step of run.trace) {
       const branchSessionId = step.stream?.branchSessionId;
       if (!branchSessionId) {
+        continue;
+      }
+      if (statusBySession.has(branchSessionId)) {
         continue;
       }
       statusBySession.set(branchSessionId, statusFromArchitectureTraceStep(step));
@@ -293,12 +304,15 @@ export function normalizeConversationSessionId(
 }
 
 export function sessionStatusSnapshotToRuntimeState(
-  snapshot: SocketEvents['session:status'] | undefined,
+  snapshot: RuntimeSessionStatusSnapshot | undefined,
 ): SessionRuntimeState | null {
   if (!snapshot) {
     return null;
   }
   const runStatus = snapshot.run?.status as string | undefined;
+  if (snapshot.toolActivities?.some((activity) => activity.status === 'pending_confirmation')) {
+    return 'waiting';
+  }
   if (snapshot.run?.status === 'completed' || snapshot.run?.phase === 'completed') {
     return 'done';
   }
@@ -339,7 +353,11 @@ function statusFromArchitectureRun(status: NonNullable<ChatMessage['architecture
 
 function statusFromArchitectureGraphNode(
   status: ArchitectureGraphProjection['nodes'][number]['status'],
+  runStatus?: NonNullable<ChatMessage['architectureRun']>['status'],
 ): SessionRuntimeState {
+  if ((runStatus === 'failed' || runStatus === 'cancelled') && (status === 'pending' || status === 'running')) {
+    return 'stopped';
+  }
   if (status === 'pending') return 'pending';
   if (status === 'running') return 'running';
   if (status === 'completed') return 'done';

@@ -20,7 +20,7 @@ type TraceSpeaker = ArchitectureChatRunSummary['trace'][number]['speaker'];
 type ArchitectureRunChatMessage = ArchitectRunResult['chat']['messages'][number] & { speaker: TraceSpeaker };
 export type ArchitectureGraphNodeSummary = Pick<
   ArchitectureGraphProjection['nodes'][number],
-  'id' | 'sessionId' | 'label' | 'kind' | 'behavior' | 'status' | 'eventIds' | 'incompleteReason'
+  'id' | 'sessionId' | 'roleSlotId' | 'label' | 'kind' | 'behavior' | 'status' | 'eventIds' | 'incompleteReason'
 >;
 export type ArchitectureRunSummaryWithGraph = ArchitectureChatRunSummary & {
   graphNodes?: ArchitectureGraphNodeSummary[];
@@ -106,6 +106,7 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
     graphNodes: graphNodes.map((node) => ({
       id: node.id,
       sessionId: node.sessionId,
+      roleSlotId: node.roleSlotId,
       label: node.label,
       kind: node.kind,
       behavior: node.behavior,

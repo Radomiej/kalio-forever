@@ -333,6 +333,8 @@ function buildChildExecutionsForSession(params: {
         cliRunId: cliSnapshot.activeCallId,
         label: cliSnapshot.agentId,
         status: mapCliStatus(cliSnapshot.status),
+        errorCode: cliSnapshot.errorCode,
+        failure: cliSnapshot.failure,
         lastOutput: cliSnapshot.lastOutput,
         updatedAt: cliSnapshot.updatedAt,
       });

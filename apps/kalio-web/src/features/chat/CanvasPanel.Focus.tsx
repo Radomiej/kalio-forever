@@ -4,6 +4,10 @@ import type { CanvasFocusTarget } from '../../store/agentStore';
 
 type BranchCanvasFocus = Extract<CanvasFocusTarget, { kind: 'architecture-branch' }>;
 
+export function hasVisibleBranchTranscript(messages: ChatMessage[] | undefined): boolean {
+  return messages?.some((message) => message.role === 'user' || message.role === 'assistant') ?? false;
+}
+
 function visibleTranscript(messages: ChatMessage[]): ChatMessage[] {
   return messages
     .filter((message) => message.role === 'user' || message.role === 'assistant')

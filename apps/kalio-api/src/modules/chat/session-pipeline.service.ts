@@ -296,7 +296,6 @@ export class SessionPipelineService {
   private async runOne(payload: ChatSendPayload, emit: EmitFn, turnId: string): Promise<void> {
     const sid = payload.sessionId;
     const slot = this.active.get(sid) ?? this.createActiveSlot(turnId);
-    const startedAt = slot.startedAt;
     const run = await this.runJournal?.startRun({
       sessionId: sid,
       turnId,

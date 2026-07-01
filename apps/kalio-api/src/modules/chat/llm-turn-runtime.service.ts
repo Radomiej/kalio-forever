@@ -7,8 +7,9 @@ import { SessionManagerService } from './session-manager.service';
 import { AuditService } from './audit.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
-import type { SocketEvents, ToolResult } from '@kalio/types';
-import type { EmitFn, StreamContext } from './interfaces/stream-context.interface';
+import type { LLMStructuredOutputRequest, SocketEvents, ToolResult } from '@kalio/types';
+import type { StreamContext } from './interfaces/stream-context.interface';
+import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { toAuditToolCallData, toAuditToolResultData } from './audit-tool-data';
 import {
   estimateContentTokens,
@@ -75,8 +76,8 @@ export class LLMTurnRuntimeService {
       lastMessageId = messageId;
       await request.callbacks?.onBeforeIteration?.(iteration, messageId, currentLimit);
 
-      const state = new TurnState();
-      const ctx: StreamContext = {
+      let state = new TurnState();
+      let ctx: StreamContext = {
         sessionId: request.sessionId,
         turnId: request.turnId,
         promptMessageId: request.promptMessageId,
@@ -120,35 +121,71 @@ export class LLMTurnRuntimeService {
       let chunkCount = 0;
       let usage: LLMUsage | undefined;
       let lastAuditUpdate = performance.now();
+      let structuredOutputRepairRetried = false;
+      const structuredOutputBeforeAttempt: {
+        hasStructuredOutput: boolean;
+        latestStructuredOutput: unknown;
+      } = { hasStructuredOutput, latestStructuredOutput };
 
-      for await (const chunk of this.llmSource.stream({
-        messages: history,
-        tools: request.toolMetas,
-        sessionId: request.sessionId,
-        messageId,
-        model: request.model,
-        abortSignal: request.abortSignal,
-        structuredOutput: request.structuredOutput,
-      })) {
-        if (request.abortSignal.aborted) break;
-        if (chunk.type === 'structured_output') {
-          latestStructuredOutput = chunk.value;
-          hasStructuredOutput = true;
-          continue;
+      const streamModel = async (messagesForAttempt: ContextManagedLLMMessage[]): Promise<void> => {
+        for await (const chunk of this.llmSource.stream({
+          messages: messagesForAttempt,
+          tools: request.toolMetas,
+          sessionId: request.sessionId,
+          messageId,
+          model: request.model,
+          abortSignal: request.abortSignal,
+          structuredOutput: request.structuredOutput,
+        })) {
+          if (request.abortSignal.aborted) break;
+          if (chunk.type === 'structured_output') {
+            latestStructuredOutput = chunk.value;
+            hasStructuredOutput = true;
+            continue;
+          }
+          if (chunk.type === 'usage') {
+            usage = {
+              promptTokens: chunk.promptTokens,
+              completionTokens: chunk.completionTokens,
+              totalTokens: chunk.totalTokens,
+            };
+            continue;
+          }
+          chunkCount++;
+          await this.streamProcessor.process(chunk, ctx);
+          if (auditResponseId && this.audit?.update && performance.now() - lastAuditUpdate >= 500) {
+            void this.audit.update(auditResponseId, { chunkCount });
+            lastAuditUpdate = performance.now();
+          }
         }
-        if (chunk.type === 'usage') {
-          usage = {
-            promptTokens: chunk.promptTokens,
-            completionTokens: chunk.completionTokens,
-            totalTokens: chunk.totalTokens,
-          };
-          continue;
-        }
-        chunkCount++;
-        await this.streamProcessor.process(chunk, ctx);
-        if (auditResponseId && this.audit?.update && performance.now() - lastAuditUpdate >= 500) {
-          void this.audit.update(auditResponseId, { chunkCount });
+      };
+
+      try {
+        await streamModel(history);
+      } catch (error) {
+        if (
+          request.structuredOutput
+          && !structuredOutputRepairRetried
+          && !request.abortSignal.aborted
+          && isStructuredOutputError(error)
+        ) {
+          structuredOutputRepairRetried = true;
+          state = new TurnState();
+          ctx = { ...ctx, state };
+          chunkCount = 0;
+          usage = undefined;
           lastAuditUpdate = performance.now();
+          hasStructuredOutput = structuredOutputBeforeAttempt.hasStructuredOutput;
+          latestStructuredOutput = structuredOutputBeforeAttempt.latestStructuredOutput;
+          this.logger.warn(
+            `Structured output failed for session ${request.sessionId} iteration ${iteration}; retrying once with repair instruction`,
+          );
+          await streamModel([
+            ...history,
+            this.structuredOutputRepairMessage(request.structuredOutput, error),
+          ]);
+        } else {
+          throw error;
         }
       }
 
@@ -166,6 +203,7 @@ export class LLMTurnRuntimeService {
           toolCallCount: state.toolCalls.length,
           usage,
           estimatedOutputTokens: estimateTextTokens(state.text) + estimateTextTokens(state.thinking),
+          ...(structuredOutputRepairRetried ? { structuredOutputRepairRetry: true } : {}),
         },
       });
 
@@ -390,6 +428,33 @@ export class LLMTurnRuntimeService {
     if (!auditResponseId || !this.audit?.update) return;
     await this.audit.update(auditResponseId, patch);
   }
+
+  private structuredOutputRepairMessage(
+    structuredOutput: LLMStructuredOutputRequest,
+    error: unknown,
+  ): ContextManagedLLMMessage {
+    return {
+      role: 'user',
+      content: [
+        'Return only valid JSON for the requested structured output schema.',
+        'Do not include prose, markdown fences, explanations, or a wrapper object.',
+        `Schema name: ${structuredOutput.name}`,
+        `Schema: ${JSON.stringify(structuredOutput.schema)}`,
+        `Rejected previous output: ${errorMessage(error)}`,
+      ].join('\n'),
+    };
+  }
+}
+
+function isStructuredOutputError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 'LLM_BAD_STRUCTURED_OUTPUT';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function serializeToolResultContent(toolName: string, result: ToolResult): string {

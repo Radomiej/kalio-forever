@@ -212,7 +212,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     if (configured !== undefined) {
       return configured;
     }
-    return input.slot.slotType === 'router' || input.slot.slotType === 'finalizer' ? 300_000 : 120_000;
+    return 300_000;
   }
 
   private modelForSlot(input: ArchitectureRoleExecutionInput): string | undefined {
@@ -276,7 +276,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     if (typeof global === 'number' && Number.isFinite(global)) {
       return Math.max(1, Math.min(100, Math.round(global)));
     }
-    return input.slot.slotType === 'tool_executor' ? 2 : 8;
+    return 30;
   }
 
   private maxIterationsFromContext(context: Record<string, unknown> | undefined, slotId: string): number | undefined {

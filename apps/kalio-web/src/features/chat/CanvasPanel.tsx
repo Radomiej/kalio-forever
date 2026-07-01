@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   Loader2, ArrowLeftFromLine, ArrowRightToLine, Info,
 } from 'lucide-react';
@@ -7,9 +7,9 @@ import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
 import type { ChatSession } from '@kalio/types';
 import { findArchitectureRunInMessages } from './architectureChatSummary';
-import { mergeFetchedMessages } from './chatUtils';
 import { ArchitectureRunCanvasSection } from './CanvasPanel.ArchitectureRun';
-import { CanvasFocusSection } from './CanvasPanel.Focus';
+import { CanvasFocusSection, hasVisibleBranchTranscript } from './CanvasPanel.Focus';
+import { useHydrateChildSessionTranscripts } from './CanvasPanel.hydration';
 import { findFocusedSubAgentFlowResult, SessionStats, ThinkingPreview, ToolCard } from './CanvasPanel.Parts';
 import { AgentFlowConversationCard, buildAgentFlowPreviews } from './CanvasPanel.AgentFlows';
 import { buildSubagentPreviews, SubagentConversationCard } from './CanvasPanel.Subagents';
@@ -26,7 +26,6 @@ import {
   selectLiveSessionIds,
   selectQueuedDepth,
 } from '../../store/agentRuntimeSelectors';
-import { DEFAULT_CHILD_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
 
 function isArchitectureTechnicalConversation(session: ChatSession): boolean {
   const architectureContext = session.runtimeContext?.architectureContext;
@@ -71,7 +70,6 @@ export function CanvasPanel() {
     thinkingChunks,
     chunkSessionIds,
   } = useSessionStore();
-  const [hydratedSubagentSessions, setHydratedSubagentSessions] = useState<Record<string, true>>({});
   const open = canvasOpen;
   const knownSessionIds = useMemo(
     () => new Set(sessions.map((session) => session.id)),
@@ -258,42 +256,21 @@ export function CanvasPanel() {
     setCanvasFocus(null);
   }, [canvasFocus, knownSessionIds, setCanvasFocus]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const missingSessionIds = childPreviewSessionIds
-      .filter((sessionId) => !hydratedSubagentSessions[sessionId] && sessionId !== activeSessionId && (sessionMessages[sessionId]?.length ?? 0) === 0);
-
-    if (missingSessionIds.length === 0) return;
-
-    void Promise.all(
-      missingSessionIds.map(async (sessionId) => {
-        const response = await fetchSessionHistoryWindow(sessionId, { limit: DEFAULT_CHILD_SESSION_HISTORY_LIMIT });
-        return [sessionId, response] as const;
-      }),
-    )
-      .then((results) => {
-        if (cancelled) return;
-        results.forEach(([sessionId, loadedWindow]) => {
-          const currentMessages = getSessionMessages(sessionId);
-          useSessionStore.getState().setSessionHistoryMeta(sessionId, loadedWindow.meta);
-          setMessages(mergeFetchedMessages(currentMessages, loadedWindow.messages), sessionId);
-        });
-        setHydratedSubagentSessions((current) => {
-          const next = { ...current };
-          results.forEach(([sessionId]) => {
-            next[sessionId] = true;
-          });
-          return next;
-        });
-      })
-      .catch((err: unknown) => {
-        console.error('[CanvasPanel] failed to load subagent transcript', err instanceof Error ? err : new Error(String(err)));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSessionId, childPreviewSessionIds, getSessionMessages, hydratedSubagentSessions, sessionMessages, setMessages]);
+  const focusedTranscriptOverride = useHydrateChildSessionTranscripts({
+    activeSessionId,
+    childPreviewSessionIds,
+    focusedCanvasSessionId,
+    getSessionMessages,
+    sessionMessages,
+    setMessages,
+  });
+  const focusedCanvasTranscript = canvasFocus?.kind === 'architecture-branch'
+    ? getSessionMessages(canvasFocus.sessionId)
+    : [];
+  const focusedTranscriptOverrideMatches = focusedTranscriptOverride?.some((message) => message.sessionId === focusedCanvasSessionId) ?? false;
+  const focusedCanvasDisplayTranscript = hasVisibleBranchTranscript(focusedCanvasTranscript)
+    ? focusedCanvasTranscript
+    : focusedTranscriptOverrideMatches && focusedTranscriptOverride ? focusedTranscriptOverride : focusedCanvasTranscript;
 
   return (
     <>
@@ -333,7 +310,7 @@ export function CanvasPanel() {
                 <CanvasFocusSection
                   focus={canvasFocus}
                   sessions={sessions}
-                  transcript={getSessionMessages(canvasFocus.sessionId)}
+                  transcript={focusedCanvasDisplayTranscript}
                   onClear={() => setCanvasFocus(null)}
                   onOpenSession={(sessionId) => {
                     void activateConversationSession({

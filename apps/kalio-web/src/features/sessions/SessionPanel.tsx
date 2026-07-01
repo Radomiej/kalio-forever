@@ -10,6 +10,10 @@ import {
   loadStoredActiveConversationSessionId,
   persistActiveConversationSessionId,
 } from '../chat/activeConversationSession';
+import {
+  hasUsableArchitectureRunSummary,
+  hydrateArchitectureProjectionFromDescendants,
+} from '../chat/architectureReloadHydration';
 import { needsWorkflowEnvelopeRecovery } from '../chat/workflowEnvelopeRecovery';
 import {
   SESSION_ORIGIN_FILTERS,
@@ -31,6 +35,29 @@ import {
 import { loadConversationSessions } from '../../services/sessionBootstrap';
 import { mergeSessionsPreservingLocal } from './mergeSessionsPreservingLocal';
 import { startPendingSessionFromPanel } from './sessionPanelCreateSession';
+
+function hasTypedArchitectureRunDescendant(
+  sessionId: string,
+  childSessionsByParent: Map<string, ChatSession[]>,
+): boolean {
+  const stack = [...(childSessionsByParent.get(sessionId) ?? [])];
+  while (stack.length > 0) {
+    const child = stack.pop();
+    if (!child) {
+      continue;
+    }
+    const architectureContext = child.runtimeContext?.architectureContext;
+    if (
+      architectureContext?.hostSessionId === sessionId
+      && typeof architectureContext.architectureRunId === 'string'
+      && architectureContext.architectureRunId.trim().length > 0
+    ) {
+      return true;
+    }
+    stack.push(...(childSessionsByParent.get(child.id) ?? []));
+  }
+  return false;
+}
 
 export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void; viewSwitcher?: ReactNode } = {}) {
   const {
@@ -65,6 +92,7 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [expandedRoots, setExpandedRoots] = useState<Set<string>>(() => new Set());
   const architectureSessionRefreshRef = useRef<{ key: string; requestedAt: number } | null>(null);
+  const workflowHostHydrationRef = useRef(new Map<string, number>());
   const collapsedWorkflowCountsRef = useRef(new Map<string, number>());
   const renameRef = useRef<HTMLInputElement>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -141,6 +169,29 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       return null;
     }
   }, [getSessionActiveTurnId, getSessionAgentTurns, getSessionMessages, sessions, setAgentTurns, setMessages, setSessionHistoryMeta]);
+
+  const hydrateWorkflowHostProjection = useCallback(async (sessionId: string) => {
+    try {
+      const currentMessages = getSessionMessages(sessionId);
+      const hydratedMessages = await hydrateArchitectureProjectionFromDescendants(
+        sessionId,
+        currentMessages,
+        setMessages,
+        setAgentTurns,
+        setSessionHistoryMeta,
+        undefined,
+        undefined,
+        () => sessionId,
+        () => sessions,
+        getSessionMessages,
+      );
+      if (hydratedMessages !== currentMessages) {
+        setMessages(hydratedMessages, sessionId);
+      }
+    } catch (error) {
+      console.warn('[SessionPanel] workflow projection hydration failed', error);
+    }
+  }, [getSessionMessages, sessions, setAgentTurns, setMessages, setSessionHistoryMeta]);
 
   const createSession = async () => {
     if (creatingSession) {
@@ -305,6 +356,59 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   }, [activeSessionId, allSessionById, originFilter, visibleSessionById]);
 
   useEffect(() => {
+    if (originFilter !== 'all' && originFilter !== 'user') {
+      return;
+    }
+
+    const now = Date.now();
+    let requested = 0;
+    for (const entry of sessionListEntries) {
+      if (requested >= 3 || entry.type !== 'session') {
+        continue;
+      }
+      const session = entry.session;
+      if (session.parentSessionId || !hasVisibleWorkflowConversationDescendant(session.id, childSessionsByParent)) {
+        continue;
+      }
+      if (session.id !== activeWorkflowHostSessionId && !expandedRoots.has(session.id)) {
+        continue;
+      }
+      const messages = sessionMessages[session.id] ?? [];
+      if (hasUsableArchitectureRunSummary(messages)) {
+        continue;
+      }
+      const hasPersistedArchitectureRunMetadata = messages.some((message) => message.architectureRun);
+      const hasHostArchitectureContext = Boolean(session.runtimeContext?.architectureContext);
+      const hasTypedRunDescendant = hasTypedArchitectureRunDescendant(session.id, childSessionsByParent);
+      const lastTurn = (sessionAgentTurns[session.id] ?? []).at(-1);
+      if (
+        (lastTurn?.done || lastTurn?.error)
+        && !hasHostArchitectureContext
+        && !hasPersistedArchitectureRunMetadata
+        && !hasTypedRunDescendant
+      ) {
+        continue;
+      }
+      const lastRequestedAt = workflowHostHydrationRef.current.get(session.id) ?? 0;
+      if (now - lastRequestedAt < 15_000) {
+        continue;
+      }
+      workflowHostHydrationRef.current.set(session.id, now);
+      requested += 1;
+      void hydrateWorkflowHostProjection(session.id);
+    }
+  }, [
+    childSessionsByParent,
+    activeWorkflowHostSessionId,
+    expandedRoots,
+    hydrateWorkflowHostProjection,
+    originFilter,
+    sessionAgentTurns,
+    sessionListEntries,
+    sessionMessages,
+  ]);
+
+  useEffect(() => {
     const recoverySessionId = activeWorkflowHostSessionId ?? activeSessionId;
     if (!recoverySessionId || !activeWorkflowRecoveryNeeded) {
       architectureSessionRefreshRef.current = null;
@@ -418,6 +522,12 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
 
   const toggleRootExpansion = (event: React.MouseEvent, id: string) => {
     event.stopPropagation();
+    const hasArchitectureRunMetadata = hasUsableArchitectureRunSummary(sessionMessages[id] ?? []);
+    const shouldHydrateExpandedRoot = (
+      !expandedRoots.has(id)
+      && hasVisibleWorkflowConversationDescendant(id, childSessionsByParent)
+      && !hasArchitectureRunMetadata
+    );
     setExpandedRoots((current) => {
       const next = new Set(current);
       if (next.has(id)) {
@@ -429,6 +539,9 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
       }
       return next;
     });
+    if (shouldHydrateExpandedRoot) {
+      void reloadSessionHistory(id, id);
+    }
   };
 
   const itemProps = {

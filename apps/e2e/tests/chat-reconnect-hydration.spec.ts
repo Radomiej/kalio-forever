@@ -1,6 +1,23 @@
 import { expect, test } from '@playwright/test';
 import { API_BASE, deleteSessionIfExists, selectSession } from './helpers/test-config';
 
+async function postJsonFromNode(url: string, data: Record<string, unknown>): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+  }
+  throw lastError;
+}
+
 test.describe('chat reconnect hydration on built QA', () => {
   test('reconnect clears a stale pending confirmation without reloading the page', async ({ page, request }) => {
     const suffix = Date.now();
@@ -59,13 +76,11 @@ test.describe('chat reconnect hydration on built QA', () => {
         })
         .toMatch(/Connecting to backend|Reconnecting\. Current session will be resynced\.|Backend connection is offline|Connection dropped\. Reconnecting and preserving this session\./);
 
-      const dropResponse = await request.post(`${API_BASE}/test-support/tool-confirmations/drop`, {
-        data: {
-          requestId,
-          sessionId: session.id,
-        },
+      const dropResponse = await postJsonFromNode(`${API_BASE}/test-support/tool-confirmations/drop`, {
+        requestId,
+        sessionId: session.id,
       });
-      expect(dropResponse.ok()).toBeTruthy();
+      expect(dropResponse.ok).toBeTruthy();
 
       await page.context().setOffline(false);
 

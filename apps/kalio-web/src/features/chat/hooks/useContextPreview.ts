@@ -17,6 +17,7 @@ interface UseContextPreviewOptions {
   draftUserMessage?: string;
   attachments?: ChatAttachment[];
   refreshKey: number;
+  enabled?: boolean;
 }
 
 interface ContextPreviewResult {
@@ -53,6 +54,7 @@ export function useContextPreview({
   draftUserMessage,
   attachments,
   refreshKey,
+  enabled = true,
 }: UseContextPreviewOptions): ContextPreviewResult {
   const [preview, setPreview] = useState<LLMContextPreview | null>(null);
   const [tokenCount, setTokenCount] = useState<TokenCount | null>(null);
@@ -73,7 +75,7 @@ export function useContextPreview({
   }, []);
 
   useEffect(() => {
-    if (!sessionId || !personaId || isPendingHostSession(session) || isPendingHostSessionId(sessionId)) {
+    if (!enabled || !sessionId || !personaId || isPendingHostSession(session) || isPendingHostSessionId(sessionId)) {
       requestSeqRef.current += 1;
       setPreview(null);
       setTokenCount(null);
@@ -88,6 +90,7 @@ export function useContextPreview({
     setLoading(true);
     setStale(previewRef.current !== null);
     setError(null);
+    const controller = new AbortController();
 
     const timeout = window.setTimeout(() => {
       apiClient
@@ -95,6 +98,8 @@ export function useContextPreview({
           personaId,
           draftUserMessage,
           attachments,
+        }, {
+          signal: controller.signal,
         })
         .then((response) => {
           if (requestSeqRef.current !== requestSeq) return;
@@ -104,6 +109,7 @@ export function useContextPreview({
           setStale(false);
         })
         .catch((err: unknown) => {
+          if (controller.signal.aborted) return;
           if (requestSeqRef.current !== requestSeq) return;
           setError(err instanceof Error ? err.message : 'Context preview failed');
           setLoading(false);
@@ -111,8 +117,11 @@ export function useContextPreview({
         });
     }, 150);
 
-    return () => window.clearTimeout(timeout);
-  }, [attachments, attachmentsSignature, draftUserMessage, manualRefreshKey, personaId, refreshKey, session, sessionId]);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [attachments, attachmentsSignature, draftUserMessage, enabled, manualRefreshKey, personaId, refreshKey, session, sessionId]);
 
   return {
     preview,

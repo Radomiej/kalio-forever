@@ -61,6 +61,7 @@ interface MockSessionState {
   setActiveSession: ReturnType<typeof vi.fn>;
   getSessionMessages: (sessionId: string | null) => ChatMessage[];
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
+  setSessionHistoryMeta: ReturnType<typeof vi.fn>;
 }
 
 const agentState: MockAgentState = {
@@ -192,6 +193,7 @@ const sessionState: MockSessionState = {
       sessionState.messages = messages;
     }
   },
+  setSessionHistoryMeta: vi.fn(),
 };
 
 const { mockApiGet, mockApiPost } = vi.hoisted(() => ({
@@ -218,9 +220,13 @@ vi.mock('../../store/agentStore', () => ({
   useAgentStore: (selector?: (state: MockAgentState) => unknown) => selector ? selector(agentState) : agentState,
 }));
 
-vi.mock('../../store/sessionStore', () => ({
-  useSessionStore: (selector?: (state: MockSessionState) => unknown) => selector ? selector(sessionState) : sessionState,
-}));
+vi.mock('../../store/sessionStore', () => {
+  const useSessionStore = Object.assign(
+    (selector?: (state: MockSessionState) => unknown) => selector ? selector(sessionState) : sessionState,
+    { getState: () => sessionState },
+  );
+  return { useSessionStore };
+});
 
 describe('CanvasPanel subagent grouping', () => {
   beforeEach(() => {
@@ -943,6 +949,62 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.getByTestId('canvas-focus-empty')).toHaveTextContent('Waiting for branch transcript.');
     expect(screen.getByTestId('canvas-focus-open-session-sub-session-waiting')).toBeInTheDocument();
     expect(sessionState.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it('retries focused architecture branch hydration after an early empty history window', async () => {
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-branch', sessionId: 'sub-session-race', label: 'Pragmatist' };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      { id: 'sub-session-race', personaId: 'default', title: 'Pragmatist', kind: 'subagent', parentSessionId: 'session-1', createdAt: 2, updatedAt: 2 },
+    ];
+    sessionState.sessionMessages = {
+      'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'parent task', createdAt: 1 }],
+      'sub-session-race': [{
+        id: 'scaffold-result',
+        sessionId: 'sub-session-race',
+        role: 'tool_result',
+        toolCallId: 'branch-scaffold',
+        content: '{}',
+        createdAt: 2,
+      }],
+    };
+    sessionState.messages = sessionState.sessionMessages['session-1'];
+    mockApiGet
+      .mockResolvedValueOnce({ data: [sessionState.sessionMessages['sub-session-race'][0]], headers: {} })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 'branch-user',
+            sessionId: 'sub-session-race',
+            role: 'user',
+            content: 'Architecture: Strategic Decision Council v0.1.0\nSlot: Pragmatist',
+            createdAt: 3,
+          },
+          {
+            id: 'branch-assistant',
+            sessionId: 'sub-session-race',
+            role: 'assistant',
+            content: 'Recommendation: keep the workflow envelope typed.',
+            createdAt: 4,
+          },
+        ],
+        headers: {},
+      });
+
+    const view = render(<CanvasPanel />);
+
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('canvas-focus-empty')).toHaveTextContent('Waiting for branch transcript.');
+
+    view.rerender(<CanvasPanel />);
+
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(sessionState.sessionMessages['sub-session-race']?.some((message) => message.id === 'branch-assistant')).toBe(true));
+    view.rerender(<CanvasPanel />);
+    await waitFor(() => expect(screen.getByTestId('canvas-focus-transcript')).toHaveTextContent('Architecture: Strategic Decision Council v0.1.0'));
+    expect(screen.getByTestId('canvas-focus-transcript')).toHaveTextContent('Recommendation: keep the workflow envelope typed.');
   });
 
   it('clears focused architecture branch state when the branch session does not exist', async () => {

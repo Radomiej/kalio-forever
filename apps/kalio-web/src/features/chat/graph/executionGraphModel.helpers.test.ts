@@ -12,6 +12,7 @@ import {
   getFinalAnswerMessage,
   getTurnStatus,
   statusFromActivity,
+  statusFromRuntimeChildExecution,
 } from './executionGraphModel.helpers';
 
 function makeTurn(overrides: Partial<AgentTurn> = {}): AgentTurn {
@@ -100,6 +101,35 @@ describe('executionGraphModel.helpers', () => {
 
     expect(statusFromActivity(cancelled, false)).toBe('error');
     expect(statusFromActivity(expired, false)).toBe('error');
+  });
+
+  it('keeps waiting child executions distinct from active running work', () => {
+    expect(statusFromRuntimeChildExecution('waiting')).toBe('waiting');
+  });
+
+  it('keeps awaiting-confirmation tools distinct from active running work', () => {
+    const awaitingConfirmation = { status: 'awaiting_confirmation' } as ToolActivity;
+
+    expect(statusFromActivity(awaitingConfirmation, false)).toBe('waiting');
+  });
+
+  it('marks a completed turn as waiting when a tool still needs human confirmation', () => {
+    const turn = makeTurn({
+      done: true,
+      items: [{ kind: 'tool', callId: 'call-delete-1' }],
+    });
+    const toolSnapshots = new Map([[
+      'call-delete-1',
+      {
+        callId: 'call-delete-1',
+        toolName: 'vfs_delete',
+        args: { path: 'draft.txt' },
+        activity: { status: 'awaiting_confirmation' } as ToolActivity,
+        result: null,
+      },
+    ]]);
+
+    expect(getTurnStatus(turn, toolSnapshots)).toBe('waiting');
   });
 
   it('normalizes stale running CLI activities to terminal success when the snapshot is completed', () => {

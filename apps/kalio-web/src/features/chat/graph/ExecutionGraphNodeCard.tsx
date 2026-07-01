@@ -22,6 +22,7 @@ function isRouterRouteNode(node: ExecutionGraphNode): boolean {
 
 function statusDotClass(status: ExecutionGraphNode['status']): string {
   if (status === 'error') return 'bg-rose-300 shadow-[0_0_8px_rgba(251,113,133,0.55)]';
+  if (status === 'waiting') return 'bg-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.58)]';
   if (status === 'running') return 'bg-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.55)]';
   if (status === 'success') return 'bg-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.45)]';
   return 'bg-base-content/35';

@@ -8,6 +8,11 @@ import { DEFAULT_CHILD_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from '
 
 const RECENT_RUNTIME_HISTORY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_RECENT_RUNTIME_HISTORY_SESSIONS = 24;
+const RUNTIME_WATCH_HISTORY_PRELOAD_CONCURRENCY = 4;
+
+async function skipBackgroundArchitectureProjectionFetch(): Promise<never> {
+  throw new Error('Background history preload skips architecture projection fetch');
+}
 
 function collectDescendantSessionIds(
   rootSessionId: string,
@@ -85,32 +90,36 @@ export async function preloadRuntimeWatchSessionHistory(params: {
     return;
   }
 
-  await Promise.all(sessionIds.map(async (sessionId) => {
-    const sessionStore = useSessionStore.getState();
-    if (!params.force && sessionStore.isSessionHydrated(sessionId)) {
-      return;
-    }
+  for (let index = 0; index < sessionIds.length; index += RUNTIME_WATCH_HISTORY_PRELOAD_CONCURRENCY) {
+    const batch = sessionIds.slice(index, index + RUNTIME_WATCH_HISTORY_PRELOAD_CONCURRENCY);
+    await Promise.all(batch.map(async (sessionId) => {
+      const sessionStore = useSessionStore.getState();
+      if (!params.force && sessionStore.isSessionHydrated(sessionId)) {
+        return;
+      }
 
-    try {
-      await hydrateSessionHistoryIntoStore({
+      try {
+        await hydrateSessionHistoryIntoStore({
         sessionId,
-        getSessions: () => useSessionStore.getState().sessions,
+        getSessions: () => [],
         getSessionMessages: (targetSessionId) => useSessionStore.getState().getSessionMessages(targetSessionId),
         setMessages: useSessionStore.getState().setMessages,
         setSessionHistoryMeta: useSessionStore.getState().setSessionHistoryMeta,
-        setAgentTurns: useSessionStore.getState().setAgentTurns,
-        getSessionAgentTurns: (targetSessionId) => useSessionStore.getState().getSessionAgentTurns(targetSessionId),
-        getSessionActiveTurnId: (targetSessionId) => useSessionStore.getState().getSessionActiveTurnId(targetSessionId),
-        hasActiveLoopForSession: (targetSessionId) => useAgentStore.getState().hasActiveLoopForSession(targetSessionId),
+          setAgentTurns: useSessionStore.getState().setAgentTurns,
+          getSessionAgentTurns: (targetSessionId) => useSessionStore.getState().getSessionAgentTurns(targetSessionId),
+          getSessionActiveTurnId: (targetSessionId) => useSessionStore.getState().getSessionActiveTurnId(targetSessionId),
+          hasActiveLoopForSession: (targetSessionId) => useAgentStore.getState().hasActiveLoopForSession(targetSessionId),
         fetchMessages: (targetSessionId) => fetchSessionHistoryWindow(targetSessionId, {
           limit: DEFAULT_CHILD_SESSION_HISTORY_LIMIT,
         }),
+        fetchArchitectureRunProjection: skipBackgroundArchitectureProjectionFetch,
       });
-    } catch (err: unknown) {
-      console.warn('[runtimeWatchHistoryBootstrap] failed to preload watch session history', {
-        sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }));
+      } catch (err: unknown) {
+        console.warn('[runtimeWatchHistoryBootstrap] failed to preload watch session history', {
+          sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }));
+  }
 }

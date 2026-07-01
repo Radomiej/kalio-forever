@@ -48,6 +48,8 @@ export function architectureActionSummaryForEvent(
     case 'tool_call':
     case 'human_gate':
       return architectureRunningActionSummaryForNodeKind(nodeKind ?? 'role');
+    case 'node_failed':
+      return architectureFailedActionSummaryForNodeKind(nodeKind ?? 'role');
     case 'run_stopped':
       return 'Workflow run stopped.';
     case 'run_created':
@@ -59,7 +61,7 @@ export function architectureActionSummaryForEvent(
 
 type ArchitectureActionFields = Pick<ArchitectureExecutionEvent, 'actionSummary' | 'action' | 'detail'>;
 
-type ArchitectureEventLike = Pick<ArchitectureExecutionEvent, 'type' | 'route' | 'routerOutput' | 'data'>
+type ArchitectureEventLike = Pick<ArchitectureExecutionEvent, 'type' | 'route' | 'routerOutput' | 'data' | 'failure' | 'errorCode'>
   & Partial<Pick<ArchitectureExecutionEvent, 'actionSummary' | 'action' | 'detail'>>;
 
 export function architectureActionFieldsForEvent(
@@ -86,6 +88,8 @@ function computedActionFieldsForEvent(
       return { actionSummary, action: 'run_created', detail: 'Run created.' };
     case 'run_stopped':
       return { actionSummary, action: 'run_stopped', detail: runStoppedDetail(event.data) };
+    case 'node_failed':
+      return { actionSummary, action: 'node_failed', detail: nodeFailedDetail(event) };
     case 'participant_output':
       if (incompleteReason) {
         return { actionSummary, action: 'participant_incomplete', detail: incompleteReason };
@@ -156,6 +160,23 @@ function runStoppedDetail(data: Record<string, unknown> | undefined): string {
   return 'Run stopped.';
 }
 
+function nodeFailedDetail(event: ArchitectureEventLike): string {
+  const message = event.failure?.message ?? failureMessageFromData(event.data);
+  if (message) {
+    return message;
+  }
+  const errorCode = event.errorCode ?? nonEmptyString(event.data?.['errorCode']);
+  return errorCode ? `Failed: ${errorCode}.` : 'Node failed.';
+}
+
+function failureMessageFromData(data: Record<string, unknown> | undefined): string | undefined {
+  const failure = data?.['failure'];
+  if (typeof failure === 'object' && failure !== null && !Array.isArray(failure)) {
+    return nonEmptyString((failure as Record<string, unknown>)['message']);
+  }
+  return undefined;
+}
+
 function incompleteReasonFrom(data: Record<string, unknown> | undefined): string | undefined {
   return nonEmptyString(data?.['incompleteReason']);
 }
@@ -167,6 +188,7 @@ function nonEmptyString(value: unknown): string | undefined {
 function isArchitectureEventAction(value: unknown): value is ArchitectureEventAction {
   return value === 'run_created'
     || value === 'run_stopped'
+    || value === 'node_failed'
     || value === 'participant_completed'
     || value === 'participant_incomplete'
     || value === 'router_selected'

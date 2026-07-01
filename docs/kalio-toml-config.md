@@ -44,7 +44,7 @@ project root are **ignored**.
 # ── Runtime ─────────────────────────────────────────────────────────────────
 [runtime]
 context_window_size = 32000   # tokens sent to the LLM in each turn
-max_tool_attempts   = 8       # how many tool calls the agent loop allows per turn
+max_tool_attempts   = 30      # how many tool calls the agent loop allows per turn
 temperature         = 0.7
 max_tokens          = 4096
 

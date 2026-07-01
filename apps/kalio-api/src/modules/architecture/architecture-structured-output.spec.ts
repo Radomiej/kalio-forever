@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { routerOutputFromStructuredOutput, structuredRouteToCall } from './architecture-structured-output';
+import {
+  finalArtifactContractFromStructuredOutput,
+  routerOutputFromStructuredOutput,
+  structuredRouteToCall,
+} from './architecture-structured-output';
 
 describe('architecture structured output', () => {
   it('preserves typed non-routing router decisions from provider structured output', () => {
@@ -60,5 +64,31 @@ describe('architecture structured output', () => {
       response: 'Finalize the typed evidence.',
     });
     expect(structuredRouteToCall(output)).toBeNull();
+  });
+
+  it('rejects malformed router and finalizer control objects', () => {
+    expect(routerOutputFromStructuredOutput({
+      nextAction: 'route_to',
+      targetNodeId: 123,
+      response: 'bad route root',
+    })).toEqual({
+      selectedStrategy: 'route_to',
+      mergedDecision: 'bad route root',
+      acceptedInputs: [],
+      rejectedInputs: [],
+      unresolvedConflicts: [],
+      risks: [],
+      confidence: 1,
+      nextAction: 'route_to',
+      response: 'bad route root',
+    });
+    expect(structuredRouteToCall({
+      nextAction: 'route_to',
+      targetNodeId: 123,
+      response: 'bad route root',
+    })).toBeNull();
+    expect(finalArtifactContractFromStructuredOutput({
+      answer: 'missing status',
+    })).toBeNull();
   });
 });
